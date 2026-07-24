@@ -103,24 +103,29 @@ actor LiveKitGridRTCDriver: GridRTCDriver {
     initiallyMuted: Bool
   ) async throws {
     let context = try context(for: room)
+    try beginLocalMediaMutation(in: context)
+    defer { endLocalMediaMutation(in: room, context: context) }
     let track: LocalAudioTrack
     if let cachedTrack = context.microphoneTrack,
        isPublished(cachedTrack, in: context) {
+      await cachedTrack.set(reportStatistics: true)
+      try applyAndVerifyAudioProcessing(to: cachedTrack, context: context)
       if initiallyMuted {
         try await cachedTrack.mute()
         stopLocalFlowMonitoring(in: room, context: context)
       } else {
-        let baseline = context.microphoneFlowProbe?.snapshot()
+        let baseline = GridLocalAudioTransportSnapshot(
+          statistics: cachedTrack.statistics
+        )
         try await cachedTrack.unmute()
-        if let probe = context.microphoneFlowProbe, let baseline {
-          scheduleLocalFlowCheck(
-            in: room,
-            probe: probe,
-            baseline: baseline,
-            reason: "republish_unmute",
-            delay: context.configuration.connection.localAudioFlowStartupTimeout
-          )
-        }
+        try applyAndVerifyAudioProcessing(to: cachedTrack, context: context)
+        scheduleLocalFlowCheck(
+          in: room,
+          track: cachedTrack,
+          baseline: baseline,
+          reason: "republish_unmute",
+          delay: context.configuration.connection.localAudioFlowStartupTimeout
+        )
       }
       return
     } else if let cachedTrack = context.microphoneTrack {
@@ -130,16 +135,21 @@ actor LiveKitGridRTCDriver: GridRTCDriver {
       )
     } else {
       track = LocalAudioTrack.createTrack(
-        options: context.configuration.makeRoomOptions().defaultAudioCaptureOptions
+        options: context.configuration.makeRoomOptions().defaultAudioCaptureOptions,
+        reportStatistics: true
       )
-      let flowProbe = GridAudioFlowProbe()
-      track.add(audioRenderer: flowProbe)
-      context.microphoneFlowProbe = flowProbe
       context.microphoneTrack = track
       log.debug(
         "GRID_ENGINE phase=livekit_microphone_created handle=\(room.id) initially_muted=\(initiallyMuted)"
       )
     }
+    await track.set(reportStatistics: true)
+
+    // Track-scoped APM intent must be stored before publication, then applied
+    // and verified again once a real sender exists. The AudioEngine ADM
+    // can prewarm capture without a sender, but it cannot apply media-engine
+    // AEC/NS options by itself.
+    try storeAudioProcessingIntent(on: track, context: context)
 
     // Establish the muted state before capture starts or signaling can publish
     // the track. No enabled pre-publication frame can reach another participant.
@@ -150,18 +160,22 @@ actor LiveKitGridRTCDriver: GridRTCDriver {
     log.debug(
       "GRID_ENGINE phase=livekit_microphone_publish_started handle=\(room.id) muted=\(track.isMuted)"
     )
+    let transportBaseline = GridLocalAudioTransportSnapshot(
+      statistics: track.statistics
+    )
     _ = try await context.room.localParticipant.publish(
       audioTrack: track,
       options: context.configuration.makeRoomOptions().defaultAudioPublishOptions
     )
+    try applyAndVerifyAudioProcessing(to: track, context: context)
     log.debug(
       "GRID_ENGINE phase=livekit_microphone_publish_finished handle=\(room.id) elapsed_ms=\(Self.elapsedMilliseconds(since: startedAt)) muted=\(track.isMuted)"
     )
-    if !track.isMuted, let flowProbe = context.microphoneFlowProbe {
+    if !track.isMuted {
       scheduleLocalFlowCheck(
         in: room,
-        probe: flowProbe,
-        baseline: .init(frameCount: 0, sampleFormat: 0),
+        track: track,
+        baseline: transportBaseline,
         reason: "publish",
         delay: context.configuration.connection.localAudioFlowStartupTimeout
       )
@@ -170,28 +184,126 @@ actor LiveKitGridRTCDriver: GridRTCDriver {
 
   func setMicrophoneMuted(_ muted: Bool, in room: GridRTCRoomHandle) async throws {
     let context = try context(for: room)
+    try beginLocalMediaMutation(in: context)
+    defer { endLocalMediaMutation(in: room, context: context) }
     guard let track = context.microphoneTrack else {
       throw LiveKitGridRTCDriverError.microphoneNotPublished
     }
-    let baseline = context.microphoneFlowProbe?.snapshot()
+    let baseline = GridLocalAudioTransportSnapshot(statistics: track.statistics)
     if muted {
       try await track.mute()
       stopLocalFlowMonitoring(in: room, context: context)
     } else {
       try await track.unmute()
+      try applyAndVerifyAudioProcessing(to: track, context: context)
     }
     log.debug(
       "GRID_ENGINE phase=livekit_microphone_mute_applied handle=\(room.id) muted=\(muted)"
     )
-    if !muted, let probe = context.microphoneFlowProbe, let baseline {
+    if !muted {
       scheduleLocalFlowCheck(
         in: room,
-        probe: probe,
+        track: track,
         baseline: baseline,
         reason: "unmute",
         delay: context.configuration.connection.localAudioFlowStartupTimeout
       )
     }
+  }
+
+  func screenCaptureSources() async throws -> [InlineRTCScreenCaptureSource] {
+    #if os(macOS)
+    guard #available(macOS 12.3, *) else {
+      throw LiveKitGridRTCDriverError.screenSharingUnavailable
+    }
+    let displays = try await MacOSScreenCapturer.displaySources()
+    return displays.enumerated().map { index, display in
+      InlineRTCScreenCaptureSource(display: display, index: index)
+    }
+    #else
+    throw LiveKitGridRTCDriverError.screenSharingUnavailable
+    #endif
+  }
+
+  func setScreenShare(
+    _ source: InlineRTCScreenCaptureSource?,
+    in room: GridRTCRoomHandle
+  ) async throws {
+    #if os(macOS)
+    guard #available(macOS 12.3, *) else {
+      throw LiveKitGridRTCDriverError.screenSharingUnavailable
+    }
+    let context = try context(for: room)
+    try beginLocalMediaMutation(in: context)
+    defer { endLocalMediaMutation(in: room, context: context) }
+    if context.screenCaptureSourceID == source?.id,
+       context.room.localParticipant.firstScreenSharePublication != nil {
+      return
+    }
+
+    guard let source else {
+      if let publication = context.room.localParticipant
+        .firstScreenSharePublication as? LocalTrackPublication {
+        try await unpublishScreenShare(publication, context: context)
+      }
+      context.screenShareTrack = nil
+      context.screenCaptureSourceID = nil
+      context.delegate.setLocalScreenCaptureSourceID(nil)
+      log.debug("GRID_ENGINE phase=livekit_screen_share_stopped handle=\(room.id)")
+      return
+    }
+    guard let liveKitSource = source.liveKitSource else {
+      throw LiveKitGridRTCDriverError.invalidScreenCaptureSource
+    }
+
+    if let publication = context.room.localParticipant
+      .firstScreenSharePublication as? LocalTrackPublication {
+      guard let track = publication.track as? LocalVideoTrack,
+            let capturer = track.capturer as? MacOSScreenCapturer
+      else {
+        throw LiveKitGridRTCDriverError.screenSharePublicationTransitioning
+      }
+      try await capturer.updateCaptureSource(liveKitSource)
+      context.screenShareTrack = track
+      context.screenCaptureSourceID = source.id
+      context.delegate.setLocalScreenCaptureSourceID(source.id)
+      context.delegate.refreshScreenShares(in: context.room)
+      log.debug(
+        "GRID_ENGINE phase=livekit_screen_share_source_updated handle=\(room.id) source=\(source.id) publication=\(publication.sid)"
+      )
+      return
+    }
+    guard context.screenShareTrack == nil else {
+      // A full reconnect retains the track while LiveKit serially replaces its
+      // publication. The engine waits for that replacement; never publish a
+      // second track if a demand update happens during the turnover gap.
+      throw LiveKitGridRTCDriverError.screenSharePublicationTransitioning
+    }
+
+    let roomOptions = context.configuration.makeRoomOptions()
+    let track = LocalVideoTrack.createMacOSScreenShareTrack(
+      source: liveKitSource,
+      options: roomOptions.defaultScreenShareCaptureOptions
+    )
+    context.screenCaptureSourceID = source.id
+    context.delegate.setLocalScreenCaptureSourceID(source.id)
+    do {
+      _ = try await context.room.localParticipant.publish(
+        videoTrack: track,
+        options: roomOptions.defaultVideoPublishOptions
+      )
+      context.screenShareTrack = track
+    } catch {
+      context.screenCaptureSourceID = nil
+      context.delegate.setLocalScreenCaptureSourceID(nil)
+      throw error
+    }
+    log.debug(
+      "GRID_ENGINE phase=livekit_screen_share_published handle=\(room.id) source=\(source.id)"
+    )
+    #else
+    throw LiveKitGridRTCDriverError.screenSharingUnavailable
+    #endif
   }
 
   func setOutputVolume(_ volume: Float, in room: GridRTCRoomHandle) async {
@@ -209,6 +321,13 @@ actor LiveKitGridRTCDriver: GridRTCDriver {
     guard let context = rooms[room] else { return }
     stopLocalFlowMonitoring(in: room, context: context)
     try? await context.microphoneTrack?.mute()
+    if let publication = context.room.localParticipant
+      .firstScreenSharePublication as? LocalTrackPublication {
+      try? await unpublishScreenShare(publication, context: context)
+    }
+    context.screenShareTrack = nil
+    context.screenCaptureSourceID = nil
+    context.delegate.setLocalScreenCaptureSourceID(nil)
     for participant in context.room.remoteParticipants.values {
       for publication in participant.audioTracks {
         (publication.track as? RemoteAudioTrack)?.volume = 0
@@ -224,11 +343,80 @@ actor LiveKitGridRTCDriver: GridRTCDriver {
     context.localFlowCheckTask = nil
     try? await context.microphoneTrack?.mute()
     await context.room.disconnect()
-    if let track = context.microphoneTrack, let probe = context.microphoneFlowProbe {
-      track.remove(audioRenderer: probe)
-    }
     log.debug(
       "GRID_ENGINE phase=livekit_disconnect_finished handle=\(room.id) elapsed_ms=\(Self.elapsedMilliseconds(since: startedAt))"
+    )
+  }
+
+  func quiesceLocally(_ room: GridRTCRoomHandle) async -> GridLocalRoomQuiescenceReceipt {
+    guard let context = rooms[room] else {
+      return GridLocalRoomQuiescenceReceipt(
+        room: room,
+        localResourcesReleased: true,
+        failures: []
+      )
+    }
+    let startedAt = Date()
+    context.isLocallyRetired = true
+    context.localFlowCheckTask?.cancel()
+    context.localFlowCheckTask = nil
+    await context.room.disconnectLocally()
+    let microphonePublicationCount = context.room.localParticipant.localAudioTracks
+      .filter { $0.source == .microphone }
+      .count
+    let screenSharePublicationCount = context.room.localParticipant.localVideoTracks
+      .filter { $0.source == .screenShareVideo }
+      .count
+      + context.room.localParticipant.localAudioTracks
+      .filter { $0.source == .screenShareAudio }
+      .count
+    let microphoneCaptureStopped = context.microphoneTrack?.trackState != .started
+    let screenCaptureStopped = context.screenShareTrack?.trackState != .started
+    let localMediaMutationCount = context.localMediaMutationCount
+    let released = context.room.connectionState == .disconnected
+      && localMediaMutationCount == 0
+      && microphonePublicationCount == 0
+      && screenSharePublicationCount == 0
+      && microphoneCaptureStopped
+      && screenCaptureStopped
+    if released {
+      rooms[room] = nil
+    }
+    var failures: [String] = []
+    if context.room.connectionState != .disconnected {
+      failures.append("LiveKit room remained locally active after local disconnect.")
+    }
+    if localMediaMutationCount > 0 {
+      failures.append(
+        "LiveKit retained \(localMediaMutationCount) local media mutation(s) after local disconnect."
+      )
+    }
+    if microphonePublicationCount > 0 {
+      failures.append(
+        "LiveKit retained \(microphonePublicationCount) microphone publication(s) after local disconnect."
+      )
+    }
+    if screenSharePublicationCount > 0 {
+      failures.append(
+        "LiveKit retained \(screenSharePublicationCount) screen-share publication(s) after local disconnect."
+      )
+    }
+    if !microphoneCaptureStopped {
+      failures.append("LiveKit microphone capture remained started after local disconnect.")
+    }
+    if !screenCaptureStopped {
+      failures.append("LiveKit screen capture remained started after local disconnect.")
+    }
+    log.debug(
+      "GRID_ENGINE phase=livekit_local_quiescence_finished handle=\(room.id) released=\(released) local_media_mutations=\(localMediaMutationCount) microphone_publications=\(microphonePublicationCount) screen_publications=\(screenSharePublicationCount) microphone_capture_stopped=\(microphoneCaptureStopped) screen_capture_stopped=\(screenCaptureStopped) elapsed_ms=\(Self.elapsedMilliseconds(since: startedAt))"
+    )
+    return GridLocalRoomQuiescenceReceipt(
+      room: room,
+      localResourcesReleased: released,
+      localMediaMutationCount: localMediaMutationCount,
+      microphonePublicationCount: microphonePublicationCount,
+      screenSharePublicationCount: screenSharePublicationCount,
+      failures: failures
     )
   }
 
@@ -239,63 +427,150 @@ actor LiveKitGridRTCDriver: GridRTCDriver {
     return context
   }
 
+  private func beginLocalMediaMutation(in context: RoomContext) throws {
+    guard !context.isLocallyRetired else {
+      throw LiveKitGridRTCDriverError.roomLocallyRetired
+    }
+    context.localMediaMutationCount += 1
+  }
+
+  private func endLocalMediaMutation(
+    in room: GridRTCRoomHandle,
+    context: RoomContext
+  ) {
+    context.localMediaMutationCount = max(context.localMediaMutationCount - 1, 0)
+    guard context.isLocallyRetired, context.localMediaMutationCount == 0 else { return }
+    lifecycleContinuation.yield(
+      GridRTCLifecycleEventEnvelope(
+        room: room,
+        event: .retiredLocalMediaMutationReleased
+      )
+    )
+  }
+
+  private func unpublishScreenShare(
+    _ publication: LocalTrackPublication,
+    context: RoomContext
+  ) async throws {
+    try await context.room.localParticipant.unpublish(publication: publication)
+  }
+
   private func isPublished(_ track: LocalAudioTrack, in context: RoomContext) -> Bool {
     context.room.localParticipant.localAudioTracks.contains { publication in
       publication.track === track
     }
   }
 
+  private func storeAudioProcessingIntent(
+    on track: LocalAudioTrack,
+    context: RoomContext
+  ) throws {
+    _ = try track.setAudioProcessingOptions(
+      context.configuration.makeAudioProcessingOptions()
+    )
+  }
+
+  private func applyAndVerifyAudioProcessing(
+    to track: LocalAudioTrack,
+    context: RoomContext
+  ) throws {
+    let result = try track.setAudioProcessingOptions(
+      context.configuration.makeAudioProcessingOptions()
+    )
+    #if os(macOS)
+    // A muted or not-yet-negotiated track has no active audio sender. WebRTC
+    // accepts and stores the policy on the source, then reapplies it when the
+    // sender becomes active. Treating that documented success as an immediate
+    // effective-state failure prevents the later unmute that activates both
+    // the sender and the native audio-device recording gate.
+    if case .stored = result {
+      log.info(
+        "GRID_ENGINE phase=livekit_audio_processing_deferred reason=sender_not_active"
+      )
+      return
+    }
+    let processing = MacGridLiveKitAudioProcessingPolicy.snapshot()
+    guard processing.isGridPolicyEffective else {
+      throw LiveKitGridRTCDriverError.audioProcessingPolicyNotEffective(
+        processing.logDescription
+      )
+    }
+    log.info(
+      "GRID_ENGINE phase=livekit_audio_processing_verified \(processing.logDescription)"
+    )
+    #endif
+  }
+
   private func scheduleLocalFlowCheck(
     in room: GridRTCRoomHandle,
-    probe: GridAudioFlowProbe,
-    baseline: GridAudioFlowProbe.Snapshot,
+    track: LocalAudioTrack,
+    baseline: GridLocalAudioTransportSnapshot,
     reason: String,
-    delay: TimeInterval
+    delay: TimeInterval,
+    resetProof: Bool = true
   ) {
     guard let context = rooms[room], context.microphoneTrack?.isMuted == false else { return }
     context.localFlowCheckTask?.cancel()
+    if resetProof {
+      context.localFlowGeneration &+= 1
+      context.localFlowProof.reset()
+    }
+    let generation = context.localFlowGeneration
     context.localFlowCheckTask = Task { [weak self] in
       try? await Task.sleep(for: .milliseconds(Int(max(delay, 0) * 1_000)))
       guard !Task.isCancelled else { return }
       await self?.reportLocalFlow(
         in: room,
-        probe: probe,
+        track: track,
         baseline: baseline,
-        reason: reason
+        reason: reason,
+        generation: generation
       )
     }
   }
 
   private func reportLocalFlow(
     in room: GridRTCRoomHandle,
-    probe: GridAudioFlowProbe,
-    baseline: GridAudioFlowProbe.Snapshot,
-    reason: String
+    track: LocalAudioTrack,
+    baseline: GridLocalAudioTransportSnapshot,
+    reason: String,
+    generation: UInt64
   ) {
     guard let context = rooms[room],
-          context.microphoneFlowProbe === probe,
-          context.microphoneTrack?.isMuted == false
+          context.microphoneTrack === track,
+          !track.isMuted,
+          context.localFlowGeneration == generation
     else { return }
     context.localFlowCheckTask = nil
-    let snapshot = probe.snapshot()
-    let frameDelta = snapshot.frameCount &- baseline.frameCount
-    if frameDelta == 0 {
+    let snapshot = GridLocalAudioTransportSnapshot(statistics: track.statistics)
+    let observation = context.localFlowProof.observe(
+      hasProgress: snapshot.hasProgress(since: baseline)
+    )
+    switch observation {
+    case let .suspect(consecutiveMisses):
       log.warning(
-        "GRID_ENGINE phase=livekit_local_audio_flow_missing handle=\(room.id) reason=\(reason) format=\(snapshot.sampleFormat)"
+        "GRID_ENGINE phase=livekit_local_audio_flow_suspect handle=\(room.id) reason=\(reason) proof=outbound_rtp consecutive_misses=\(consecutiveMisses) packets=\(snapshot.packetCount) bytes=\(snapshot.byteCount) baseline_packets=\(baseline.packetCount) baseline_bytes=\(baseline.byteCount) action=confirm"
+      )
+    case let .missing(consecutiveMisses):
+      log.warning(
+        "GRID_ENGINE phase=livekit_local_audio_flow_missing handle=\(room.id) reason=\(reason) proof=outbound_rtp consecutive_misses=\(consecutiveMisses) streams=\(snapshot.streams.count) packets=\(snapshot.packetCount) bytes=\(snapshot.byteCount) baseline_packets=\(baseline.packetCount) baseline_bytes=\(baseline.byteCount)"
       )
       emitLocalFlow(.missing, in: room)
-    } else {
+    case .flowing:
       log.debug(
-        "GRID_ENGINE phase=livekit_local_audio_flow_confirmed handle=\(room.id) reason=\(reason) frames=\(frameDelta) format=\(snapshot.sampleFormat)"
+        "GRID_ENGINE phase=livekit_local_audio_flow_confirmed handle=\(room.id) reason=\(reason) proof=outbound_rtp streams=\(snapshot.streams.count) packets=\(snapshot.packetCount) bytes=\(snapshot.byteCount) baseline_packets=\(baseline.packetCount) baseline_bytes=\(baseline.byteCount)"
       )
       emitLocalFlow(.flowing, in: room)
     }
     scheduleLocalFlowCheck(
       in: room,
-      probe: probe,
+      track: track,
       baseline: snapshot,
-      reason: "lifetime",
-      delay: context.configuration.connection.localAudioFlowCheckInterval
+      reason: observation == .flowing ? "lifetime" : "confirmation",
+      delay: observation == .flowing
+        ? context.configuration.connection.localAudioFlowCheckInterval
+        : context.configuration.connection.localAudioFlowStartupTimeout,
+      resetProof: false
     )
   }
 
@@ -305,6 +580,8 @@ actor LiveKitGridRTCDriver: GridRTCDriver {
   ) {
     context.localFlowCheckTask?.cancel()
     context.localFlowCheckTask = nil
+    context.localFlowGeneration &+= 1
+    context.localFlowProof.reset()
     emitLocalFlow(.unknown, in: room)
   }
 
@@ -327,8 +604,13 @@ private final class RoomContext: @unchecked Sendable {
   let delegate: LiveKitGridRoomDelegate
   let configuration: InlineRTCConfiguration
   var microphoneTrack: LocalAudioTrack?
-  var microphoneFlowProbe: GridAudioFlowProbe?
+  var screenShareTrack: LocalVideoTrack?
+  var screenCaptureSourceID: String?
   var localFlowCheckTask: Task<Void, Never>?
+  var localFlowGeneration: UInt64 = 0
+  var localFlowProof: GridLocalAudioTransportProof
+  var isLocallyRetired = false
+  var localMediaMutationCount = 0
 
   init(
     room: Room,
@@ -338,6 +620,9 @@ private final class RoomContext: @unchecked Sendable {
     self.room = room
     self.delegate = delegate
     self.configuration = configuration
+    localFlowProof = GridLocalAudioTransportProof(
+      missThreshold: configuration.connection.localAudioFlowMissThreshold
+    )
   }
 }
 
@@ -348,6 +633,9 @@ private final class LiveKitGridRoomDelegate: NSObject, RoomDelegate, @unchecked 
   private let remoteFlowCheckInterval: TimeInterval
   private let remoteFlowMissThreshold: Int
   private let log = Log.scoped("LiveKitGridRoomDelegate")
+  private let localScreenShareLock = NSLock()
+  private var localScreenCaptureSourceID: String?
+  private var screenShareSnapshotRevision: UInt64 = 0
   private let remoteFlowLock = NSLock()
   private var remoteFlowProbes: [String: RemoteFlowContext] = [:]
   private var outputVolume: Double = 1
@@ -378,6 +666,16 @@ private final class LiveKitGridRoomDelegate: NSObject, RoomDelegate, @unchecked 
     }
   }
 
+  func setLocalScreenCaptureSourceID(_ sourceID: String?) {
+    localScreenShareLock.withLock {
+      localScreenCaptureSourceID = sourceID
+    }
+  }
+
+  func refreshScreenShares(in room: Room) {
+    emitScreenShares(in: room)
+  }
+
   func room(_ room: Room, didUpdateSpeakingParticipants _: [Participant]) {
     emitParticipants(in: room)
     updateRemoteFlowMonitoring()
@@ -395,24 +693,39 @@ private final class LiveKitGridRoomDelegate: NSObject, RoomDelegate, @unchecked 
 
   func room(_ room: Room, participantDidConnect _: RemoteParticipant) {
     emitParticipants(in: room)
+    emitScreenShares(in: room)
   }
 
   func room(_ room: Room, participantDidDisconnect _: RemoteParticipant) {
     emitParticipants(in: room)
+    emitScreenShares(in: room)
   }
 
   func room(
-    _: Room,
+    _ room: Room,
     participant: RemoteParticipant,
     didPublishTrack publication: RemoteTrackPublication
   ) {
     log.debug(
       "GRID_ENGINE phase=livekit_remote_track_announced handle=\(handle.id) participant=\(identity(of: participant)) track=\(publication.sid) kind=\(publication.kind) source=\(publication.source)"
     )
+    if publication.source == .screenShareVideo {
+      emitScreenShares(in: room)
+    }
   }
 
   func room(
-    _: Room,
+    _ room: Room,
+    participant _: RemoteParticipant,
+    didUnpublishTrack publication: RemoteTrackPublication
+  ) {
+    if publication.source == .screenShareVideo {
+      emitScreenShares(in: room)
+    }
+  }
+
+  func room(
+    _ room: Room,
     participant: RemoteParticipant,
     didSubscribeTrack publication: RemoteTrackPublication
   ) {
@@ -442,10 +755,13 @@ private final class LiveKitGridRoomDelegate: NSObject, RoomDelegate, @unchecked 
     log.debug(
       "GRID_ENGINE phase=livekit_remote_track_subscribed handle=\(handle.id) participant=\(identity(of: participant)) track=\(publication.sid) kind=\(publication.kind) source=\(publication.source)"
     )
+    if publication.source == .screenShareVideo {
+      emitScreenShares(in: room)
+    }
   }
 
   func room(
-    _: Room,
+    _ room: Room,
     participant: Participant,
     trackPublication: TrackPublication,
     didUpdateIsMuted isMuted: Bool
@@ -453,6 +769,10 @@ private final class LiveKitGridRoomDelegate: NSObject, RoomDelegate, @unchecked 
     guard let remoteParticipant = participant as? RemoteParticipant,
           let publication = trackPublication as? RemoteTrackPublication
     else { return }
+    if publication.source == .screenShareVideo {
+      emitScreenShares(in: room)
+      return
+    }
     let key = String(describing: publication.sid)
     guard let context = remoteFlowLock.withLock({ remoteFlowProbes[key] }) else { return }
     if isMuted {
@@ -469,7 +789,7 @@ private final class LiveKitGridRoomDelegate: NSObject, RoomDelegate, @unchecked 
   }
 
   func room(
-    _: Room,
+    _ room: Room,
     participant: RemoteParticipant,
     didUnsubscribeTrack publication: RemoteTrackPublication
   ) {
@@ -484,6 +804,9 @@ private final class LiveKitGridRoomDelegate: NSObject, RoomDelegate, @unchecked 
     log.debug(
       "GRID_ENGINE phase=livekit_remote_track_unsubscribed handle=\(handle.id) participant=\(identity(of: participant)) track=\(publication.sid)"
     )
+    if publication.source == .screenShareVideo {
+      emitScreenShares(in: room)
+    }
   }
 
   func room(
@@ -515,26 +838,47 @@ private final class LiveKitGridRoomDelegate: NSObject, RoomDelegate, @unchecked 
     emitLifecycle(.reconnecting(mode: gridReconnectMode(mode)))
   }
 
-  func room(_: Room, didCompleteReconnectWithMode mode: ReconnectMode) {
+  func room(_: Room, didUpdateReconnectMode mode: ReconnectMode) {
+    // LiveKit can begin with a quick reconnect and escalate to full before it
+    // starts its detached local-track republish transaction. Forward the mode
+    // update so the engine can install publication ownership fences in time.
+    emitLifecycle(.reconnecting(mode: gridReconnectMode(mode)))
+  }
+
+  func room(_ room: Room, didCompleteReconnectWithMode mode: ReconnectMode) {
     emitLifecycle(.reconnected(mode: gridReconnectMode(mode)))
+    emitParticipants(in: room)
+    emitScreenShares(in: room)
   }
 
   func room(
-    _: Room,
+    _ room: Room,
     participant _: LocalParticipant,
     didPublishTrack publication: LocalTrackPublication
   ) {
-    guard publication.source == .microphone else { return }
-    emitLifecycle(.localMicrophonePublished(muted: publication.isMuted))
+    switch publication.source {
+    case .microphone:
+      emitLifecycle(.localMicrophonePublished(muted: publication.isMuted))
+    case .screenShareVideo:
+      emitScreenShares(in: room)
+    default:
+      break
+    }
   }
 
   func room(
-    _: Room,
+    _ room: Room,
     participant _: LocalParticipant,
     didUnpublishTrack publication: LocalTrackPublication
   ) {
-    guard publication.source == .microphone else { return }
-    emitLifecycle(.localMicrophoneUnpublished)
+    switch publication.source {
+    case .microphone:
+      emitLifecycle(.localMicrophoneUnpublished)
+    case .screenShareVideo:
+      emitScreenShares(in: room)
+    default:
+      break
+    }
   }
 
   private func emitParticipants(in room: Room) {
@@ -562,6 +906,64 @@ private final class LiveKitGridRoomDelegate: NSObject, RoomDelegate, @unchecked 
     participantContinuation.yield(
       GridRTCParticipantSnapshotEnvelope(room: handle, participants: participants)
     )
+  }
+
+  private func emitScreenShares(in room: Room) {
+    let snapshotMetadata = localScreenShareLock.withLock {
+      screenShareSnapshotRevision &+= 1
+      return (
+        revision: screenShareSnapshotRevision,
+        localCaptureSourceID: localScreenCaptureSourceID
+      )
+    }
+    var shares: [InlineRTCScreenShare] = []
+    if let identity = room.localParticipant.identity?.stringValue {
+      shares.append(contentsOf: screenShares(
+        for: room.localParticipant,
+        identity: identity,
+        isLocal: true,
+        captureSourceID: snapshotMetadata.localCaptureSourceID
+      ))
+    }
+    for participant in room.remoteParticipants.values {
+      guard let identity = participant.identity?.stringValue else { continue }
+      shares.append(contentsOf: screenShares(
+        for: participant,
+        identity: identity,
+        isLocal: false,
+        captureSourceID: nil
+      ))
+    }
+    shares.sort { lhs, rhs in
+      if lhs.participantIdentity != rhs.participantIdentity {
+        return lhs.participantIdentity < rhs.participantIdentity
+      }
+      return lhs.publicationID < rhs.publicationID
+    }
+    emitLifecycle(
+      .screenSharesChanged(
+        revision: snapshotMetadata.revision,
+        shares: shares
+      )
+    )
+  }
+
+  private func screenShares(
+    for participant: Participant,
+    identity: String,
+    isLocal: Bool,
+    captureSourceID: String?
+  ) -> [InlineRTCScreenShare] {
+    participant.videoTracks.compactMap { publication in
+      guard publication.source == .screenShareVideo, !publication.isMuted else { return nil }
+      return InlineRTCScreenShare(
+        participantIdentity: identity,
+        publicationID: String(describing: publication.sid),
+        captureSourceID: captureSourceID,
+        isLocal: isLocal,
+        videoTrack: publication.track as? VideoTrack
+      )
+    }
   }
 
   func setOutputVolume(_ volume: Double) {
@@ -643,23 +1045,29 @@ private final class LiveKitGridRoomDelegate: NSObject, RoomDelegate, @unchecked 
     }
     let snapshot = context.probe.snapshot()
     let frameDelta = snapshot.frameCount &- baseline.frameCount
-    let nextState = remoteFlowLock.withLock { () -> InlineRTCAudioFlowState? in
-      guard remoteFlowProbes[key] === context, context.checkID == checkID else { return nil }
+    let result = remoteFlowLock.withLock { () -> (InlineRTCAudioFlowState?, Bool) in
+      guard remoteFlowProbes[key] === context, context.checkID == checkID else {
+        return (nil, false)
+      }
       context.checkTask = nil
       context.checkID = nil
       if frameDelta > 0 {
         context.consecutiveMisses = 0
-        guard context.state != .flowing else { return nil }
+        guard context.state != .flowing else { return (nil, true) }
         context.state = .flowing
-        return .flowing
+        return (.flowing, true)
       }
       context.consecutiveMisses += 1
       guard context.consecutiveMisses >= remoteFlowMissThreshold,
             context.state != .missing
-      else { return nil }
+      else { return (nil, false) }
       context.state = .missing
-      return .missing
+      return (.missing, false)
     }
+    if result.1 {
+      emitLifecycle(.remoteAudioFramesObserved(identity: context.identity))
+    }
+    let nextState = result.0
     if let nextState {
       emitLifecycle(.remoteAudioFlow(identity: context.identity, state: nextState))
       if nextState == .missing {
@@ -729,7 +1137,31 @@ private final class RemoteFlowContext: @unchecked Sendable {
   }
 }
 
-private enum LiveKitGridRTCDriverError: Error {
+private enum LiveKitGridRTCDriverError: LocalizedError {
   case roomNotFound
+  case roomLocallyRetired
   case microphoneNotPublished
+  case audioProcessingPolicyNotEffective(String)
+  case screenSharingUnavailable
+  case invalidScreenCaptureSource
+  case screenSharePublicationTransitioning
+
+  var errorDescription: String? {
+    switch self {
+    case .roomNotFound:
+      "The Grid room is no longer available."
+    case .roomLocallyRetired:
+      "The Grid room is already releasing local media."
+    case .microphoneNotPublished:
+      "The microphone is not published."
+    case let .audioProcessingPolicyNotEffective(details):
+      "WebRTC did not make Grid's software audio processing effective. \(details)"
+    case .screenSharingUnavailable:
+      "Screen sharing is unavailable on this Mac."
+    case .invalidScreenCaptureSource:
+      "The selected display is no longer available."
+    case .screenSharePublicationTransitioning:
+      "Screen sharing is reconnecting. Try again in a moment."
+    }
+  }
 }

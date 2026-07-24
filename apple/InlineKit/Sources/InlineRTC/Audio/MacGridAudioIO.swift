@@ -6,9 +6,11 @@ import Foundation
 import LiveKit
 import Logger
 
-/// The sole macOS physical-audio owner for Grid. LiveKit runs in manual
-/// rendering mode and therefore never enumerates, selects, or restarts these
-/// devices.
+/// Archived manual-rendering backend. Grid's macOS production path is the
+/// patched AVAudioEngine WebRTC ADM; keeping this implementation unavailable makes
+/// a second physical-audio owner a compile-time error while preserving the
+/// previous work for reference.
+@available(*, unavailable, message: "Grid uses WebRTC's patched AudioEngine ADM on macOS.")
 actor MacGridAudioIOController {
   private var catalog: MacGridAudioCatalogSnapshot?
   private var desiredInput: AudioInputRouteTarget = .automatic
@@ -135,9 +137,13 @@ actor MacGridAudioIOController {
     input = replacement
     inputProgress.reset()
     replacement.setForwarding(true)
-    log.info(
-      "GRID_ENGINE phase=mac_audio_input_committed uid=\(device.uid) name=\(device.name)"
-    )
+    let inputFields = [
+      "sample_rate=\(device.inputStreamFormat?.sampleRate ?? device.sampleRate)",
+      "channels=\(device.inputStreamFormat?.channelCount ?? 0)",
+      "buffer_frames=\(device.bufferFrameSize)",
+      "bluetooth=\(device.isBluetooth)",
+    ].joined(separator: " ")
+    log.info("GRID_ENGINE phase=mac_audio_input_committed \(inputFields)")
   }
 
   private func replaceOutputIfNeeded(force: Bool) throws {
@@ -159,9 +165,13 @@ actor MacGridAudioIOController {
     outputProgress.reset()
     lastOutputDiagnostics = replacement.diagnostics
     previous?.stop()
-    log.info(
-      "GRID_ENGINE phase=mac_audio_output_committed uid=\(device.uid) name=\(device.name)"
-    )
+    let outputFields = [
+      "sample_rate=\(device.outputStreamFormat?.sampleRate ?? device.sampleRate)",
+      "channels=\(device.outputStreamFormat?.channelCount ?? 0)",
+      "buffer_frames=\(device.bufferFrameSize)",
+      "bluetooth=\(device.isBluetooth)",
+    ].joined(separator: " ")
+    log.info("GRID_ENGINE phase=mac_audio_output_committed \(outputFields)")
   }
 
   private func resolvedInput() throws -> MacGridAudioDevice {

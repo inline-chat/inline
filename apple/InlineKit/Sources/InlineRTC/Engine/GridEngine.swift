@@ -17,16 +17,17 @@ public actor InlineRTCSession {
   private var snapshotRevision: UInt64 = 0
   private var latestAudioSnapshot: InlineRTCAudioSnapshot?
   private var latestDeviceSnapshot: AudioInputDeviceSnapshot?
+  private var latestOutputDeviceSnapshot: AudioOutputDeviceSnapshot?
   private var latestRTCSnapshot: InlineRTCConnectionSnapshot?
   private var eventTasks: [Task<Void, Never>] = []
   private var commandTask: Task<Void, Never>?
   private var permissionRequestTask: Task<Void, Never>?
-  private var shutdownWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
+  private var shutdownWaiters: [UUID: CheckedContinuation<GridMediaShutdownReceipt, Never>] = [:]
 
   public init(captureCooldown: Duration = .seconds(2)) {
     self.init(
       configuration: .voice,
-      audioDriver: LiveKitGridAudioDriver(),
+      audioDriver: LiveKitGridAUHALAudioDriver(),
       permissionDriver: SystemGridMicrophonePermissionDriver(),
       rtcDriver: LiveKitGridRTCDriver(),
       captureCooldown: captureCooldown
@@ -56,7 +57,19 @@ public actor InlineRTCSession {
     commandTask?.cancel()
     permissionRequestTask?.cancel()
     eventTasks.forEach { $0.cancel() }
-    shutdownWaiters.values.forEach { $0.resume() }
+    let receipt = GridMediaShutdownReceipt(
+      audio: GridAudioShutdownReceipt(
+        recordingStopped: false,
+        playoutStopped: false,
+        mutationReleased: false,
+        failures: ["InlineRTCSession deinitialized before shutdown completed."]
+      ),
+      rtc: GridRTCShutdownReceipt(
+        locallyActiveRoomCount: 1,
+        failures: []
+      )
+    )
+    shutdownWaiters.values.forEach { $0.resume(returning: receipt) }
     subscribers.values.forEach { $0.finish() }
     commandMailbox.finish()
   }
@@ -75,12 +88,20 @@ public actor InlineRTCSession {
     enqueue(.retryInput(selection))
   }
 
+  public nonisolated func retryOutput(_ selection: AudioOutputSelection) {
+    enqueue(.retryOutput(selection))
+  }
+
   public nonisolated func requestMicrophonePermission() {
     enqueue(.requestMicrophonePermission)
   }
 
   public nonisolated func retryAudio() {
     enqueue(.retryAudio)
+  }
+
+  public func screenCaptureSources() async throws -> [InlineRTCScreenCaptureSource] {
+    try await rtc.screenCaptureSources()
   }
 
   public nonisolated func networkBecameAvailable() {
@@ -133,6 +154,7 @@ public actor InlineRTCSession {
     eventTasks = [
       forward(audio.snapshots, transform: GridModuleEvent.audio),
       forward(audio.deviceSnapshots, transform: GridModuleEvent.devices),
+      forward(audio.outputDeviceSnapshots, transform: GridModuleEvent.outputDevices),
       forward(rtc.snapshots, transform: GridModuleEvent.rtc),
     ]
     commandTask = Task { [weak self, commandMailbox] in
@@ -152,10 +174,10 @@ public actor InlineRTCSession {
   /// followed by an explicit empty demand before media is disconnected. The
   /// mailbox remains alive so the same authenticated-process runtime can be
   /// reused if application dependencies survive a logout/login transition.
-  public func shutdown() async {
+  public func shutdown() async -> GridMediaShutdownReceipt {
     await start()
     let requestID = UUID()
-    await withCheckedContinuation { continuation in
+    return await withCheckedContinuation { continuation in
       shutdownWaiters[requestID] = continuation
       enqueue(.shutdown(requestID: requestID))
     }
@@ -167,8 +189,11 @@ public actor InlineRTCSession {
       await rtc.setDemand(demand)
     case .refreshDevices:
       _ = await audio.deviceSnapshot()
+      _ = await audio.outputDeviceSnapshot()
     case let .retryInput(selection):
       await audio.retryInput(selection)
+    case let .retryOutput(selection):
+      await audio.retryOutput(selection)
     case .requestMicrophonePermission:
       startMicrophonePermissionRequest()
     case .retryAudio:
@@ -181,9 +206,17 @@ public actor InlineRTCSession {
       await audio.checkRuntimeHealthAfterInterruption()
       await rtc.applicationDidWake()
     case let .shutdown(requestID):
-      await rtc.shutdown()
-      await audio.shutdown()
-      shutdownWaiters.removeValue(forKey: requestID)?.resume()
+      let rtcReceipt = await rtc.shutdown()
+      let audioReceipt = await audio.shutdown()
+      let receipt = GridMediaShutdownReceipt(audio: audioReceipt, rtc: rtcReceipt)
+      if receipt.isLocallyQuiescent {
+        log.info("GRID_ENGINE phase=engine_shutdown_finished locally_quiescent=true")
+      } else {
+        log.error(
+          "GRID_ENGINE phase=engine_shutdown_incomplete locally_quiescent=false active_rooms=\(receipt.locallyActiveRoomCount) rtc_media_mutations=\(receipt.rtcLocalMediaMutationCount) microphone_publications=\(receipt.microphonePublicationCount) screen_publications=\(receipt.screenSharePublicationCount) audio_mutation_released=\(receipt.audioMutationReleased) failures=\(receipt.failures.joined(separator: ","))"
+        )
+      }
+      shutdownWaiters.removeValue(forKey: requestID)?.resume(returning: receipt)
     }
   }
 
@@ -231,6 +264,8 @@ public actor InlineRTCSession {
       }
     case let .devices(snapshot):
       latestDeviceSnapshot = snapshot
+    case let .outputDevices(snapshot):
+      latestOutputDeviceSnapshot = snapshot
     case let .rtc(snapshot):
       latestRTCSnapshot = snapshot
     }
@@ -247,6 +282,7 @@ public actor InlineRTCSession {
       revision: snapshotRevision,
       audio: audio,
       devices: latestDeviceSnapshot,
+      outputDevices: latestOutputDeviceSnapshot,
       rtc: rtc
     )
   }
@@ -259,5 +295,6 @@ public actor InlineRTCSession {
 private enum GridModuleEvent: Sendable {
   case audio(InlineRTCAudioSnapshot)
   case devices(AudioInputDeviceSnapshot)
+  case outputDevices(AudioOutputDeviceSnapshot)
   case rtc(InlineRTCConnectionSnapshot)
 }

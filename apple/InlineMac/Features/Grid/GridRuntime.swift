@@ -25,8 +25,9 @@ final class GridRuntime {
     )
   }
 
-  func prepareForLogout() async {
+  func prepareForLogout() async -> GridMediaShutdownReceipt {
     await rooms.prepareForLogout()
+    return await engine.shutdown()
   }
 
   func applicationDidWake() async {

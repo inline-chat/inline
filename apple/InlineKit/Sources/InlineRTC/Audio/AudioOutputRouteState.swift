@@ -1,8 +1,8 @@
 import Foundation
 
-/// Physical fields whose change requires rebuilding an AUHAL input even when
-/// the durable device UID remains stable, such as a Bluetooth profile switch.
-struct AudioInputRouteFingerprint: Equatable, Sendable {
+/// Physical fields whose change requires rebuilding an AUHAL output even when
+/// the durable device UID is unchanged (notably Bluetooth profile changes).
+struct AudioOutputRouteFingerprint: Equatable, Sendable {
   let sampleRate: Double
   let channelCount: UInt32
   let bytesPerPacket: UInt32
@@ -16,34 +16,17 @@ struct AudioInputRouteFingerprint: Equatable, Sendable {
   let isAlive: Bool
 }
 
-/// A backend-independent inventory. The default route is described by the
-/// physical device currently behind it, while selection keeps `automatic` as
-/// policy rather than turning it into a writable device identifier.
-struct AudioInputDeviceInventory: Equatable, Sendable {
+struct AudioOutputDeviceInventory: Equatable, Sendable {
   let automaticDeviceID: String?
   let automaticDeviceName: String
-  let devices: [AudioInputDeviceDescriptor]
-  let routeFingerprints: [String: AudioInputRouteFingerprint]
+  let devices: [AudioOutputDeviceDescriptor]
+  let routeFingerprints: [String: AudioOutputRouteFingerprint]
   let routeEpoch: UInt64
 
-  init(
-    automaticDeviceID: String?,
-    automaticDeviceName: String,
-    devices: [AudioInputDeviceDescriptor],
-    routeFingerprints: [String: AudioInputRouteFingerprint] = [:],
-    routeEpoch: UInt64
-  ) {
-    self.automaticDeviceID = automaticDeviceID
-    self.automaticDeviceName = automaticDeviceName
-    self.devices = devices
-    self.routeFingerprints = routeFingerprints
-    self.routeEpoch = routeEpoch
-  }
-
-  func resolve(_ selection: AudioInputSelection) -> AudioInputRouteResolution {
+  func resolve(_ selection: AudioOutputSelection) -> AudioOutputRouteResolution {
     switch selection {
     case .automatic:
-      return AudioInputRouteResolution(
+      return AudioOutputRouteResolution(
         selection: selection,
         target: .automatic,
         activeDeviceID: automaticDeviceID,
@@ -51,11 +34,10 @@ struct AudioInputDeviceInventory: Equatable, Sendable {
         isFallingBackToAutomatic: false,
         routeFingerprint: automaticDeviceID.flatMap { routeFingerprints[$0] }
       )
-
     case .device:
       if let id = selection.resolvedDeviceID(in: devices),
          let device = devices.first(where: { $0.id == id }) {
-        return AudioInputRouteResolution(
+        return AudioOutputRouteResolution(
           selection: selection,
           target: .device(id: device.id, name: device.name),
           activeDeviceID: device.id,
@@ -64,7 +46,7 @@ struct AudioInputDeviceInventory: Equatable, Sendable {
           routeFingerprint: routeFingerprints[device.id]
         )
       }
-      return AudioInputRouteResolution(
+      return AudioOutputRouteResolution(
         selection: selection,
         target: .automatic,
         activeDeviceID: automaticDeviceID,
@@ -75,21 +57,18 @@ struct AudioInputDeviceInventory: Equatable, Sendable {
     }
   }
 
-  func snapshot(resolving selection: AudioInputSelection) -> AudioInputDeviceSnapshot {
-    let resolution = resolve(selection)
-    return AudioInputDeviceSnapshot(
+  func snapshot(resolving selection: AudioOutputSelection) -> AudioOutputDeviceSnapshot {
+    AudioOutputDeviceSnapshot(
       automaticDeviceID: automaticDeviceID,
       automaticDeviceName: automaticDeviceName,
       devices: devices,
-      resolvedInput: resolution.publicValue,
+      resolvedOutput: resolve(selection).publicValue,
       routeEpoch: routeEpoch
     )
   }
 }
 
-/// The only route values a backend can receive. `automatic` is deliberately a
-/// separate operation; a synthetic `default` ID can never escape as a device.
-enum AudioInputRouteTarget: Equatable, Sendable {
+enum AudioOutputRouteTarget: Equatable, Sendable {
   case automatic
   case device(id: String, name: String)
 
@@ -109,16 +88,16 @@ enum AudioInputRouteTarget: Equatable, Sendable {
   }
 }
 
-struct AudioInputRouteResolution: Equatable, Sendable {
-  let selection: AudioInputSelection
-  let target: AudioInputRouteTarget
+struct AudioOutputRouteResolution: Equatable, Sendable {
+  let selection: AudioOutputSelection
+  let target: AudioOutputRouteTarget
   let activeDeviceID: String?
   let activeDeviceName: String
   let isFallingBackToAutomatic: Bool
-  let routeFingerprint: AudioInputRouteFingerprint?
+  let routeFingerprint: AudioOutputRouteFingerprint?
 
-  var publicValue: ResolvedAudioInput {
-    ResolvedAudioInput(
+  var publicValue: ResolvedAudioOutput {
+    ResolvedAudioOutput(
       selection: selection,
       activeDeviceID: activeDeviceID,
       activeDeviceName: activeDeviceName,
@@ -127,23 +106,16 @@ struct AudioInputRouteResolution: Equatable, Sendable {
   }
 }
 
-/// Pure state machine for input preference and applied route ownership.
-/// Core Audio callbacks only replace inventory. They can request a route
-/// transaction when the resolved target actually changes, but they cannot
-/// directly mutate the audio engine or erase the user's preference.
-struct AudioInputRouteState: Equatable, Sendable {
-  private(set) var desiredSelection: AudioInputSelection = .automatic
-  private(set) var inventory: AudioInputDeviceInventory?
-  private(set) var appliedTarget: AudioInputRouteTarget?
-  private(set) var appliedResolution: AudioInputRouteResolution?
-  /// Keep the rejected explicit device independent from a rejected Auto
-  /// fallback. A single `failedTarget` loses the explicit quarantine when the
-  /// fallback also fails and makes resolution oscillate forever.
-  private(set) var failedExplicitTarget: AudioInputRouteTarget?
+struct AudioOutputRouteState: Equatable, Sendable {
+  private(set) var desiredSelection: AudioOutputSelection = .automatic
+  private(set) var inventory: AudioOutputDeviceInventory?
+  private(set) var appliedTarget: AudioOutputRouteTarget?
+  private(set) var appliedResolution: AudioOutputRouteResolution?
+  private(set) var failedExplicitTarget: AudioOutputRouteTarget?
   private(set) var automaticRouteFailed = false
   private(set) var revision: UInt64 = 0
 
-  mutating func setSelection(_ selection: AudioInputSelection) {
+  mutating func setSelection(_ selection: AudioOutputSelection) {
     guard desiredSelection != selection else { return }
     desiredSelection = selection
     failedExplicitTarget = nil
@@ -151,17 +123,8 @@ struct AudioInputRouteState: Equatable, Sendable {
     revision &+= 1
   }
 
-  mutating func observe(_ inventory: AudioInputDeviceInventory) {
+  mutating func observe(_ inventory: AudioOutputDeviceInventory) {
     guard self.inventory != inventory else { return }
-    if automaticRouteFailed {
-      let previousID = self.inventory?.automaticDeviceID
-      let currentID = inventory.automaticDeviceID
-      let previousFingerprint = previousID.flatMap { self.inventory?.routeFingerprints[$0] }
-      let currentFingerprint = currentID.flatMap { inventory.routeFingerprints[$0] }
-      if previousID != currentID || previousFingerprint != currentFingerprint {
-        automaticRouteFailed = false
-      }
-    }
     if case let .device(id, _)? = failedExplicitTarget {
       let wasAvailable = self.inventory?.devices.contains(where: { $0.id == id }) == true
       let isAvailable = inventory.devices.contains(where: { $0.id == id })
@@ -176,15 +139,13 @@ struct AudioInputRouteState: Equatable, Sendable {
     revision &+= 1
   }
 
-  var isAutomaticRouteQuarantined: Bool { automaticRouteFailed }
-
-  var desiredResolution: AudioInputRouteResolution? {
+  var desiredResolution: AudioOutputRouteResolution? {
     guard let inventory else { return nil }
     let resolved = inventory.resolve(desiredSelection)
     guard case .device = resolved.target, resolved.target == failedExplicitTarget else {
       return resolved
     }
-    return AudioInputRouteResolution(
+    return AudioOutputRouteResolution(
       selection: desiredSelection,
       target: .automatic,
       activeDeviceID: inventory.automaticDeviceID,
@@ -203,8 +164,6 @@ struct AudioInputRouteState: Equatable, Sendable {
       || appliedResolution?.routeFingerprint != desiredResolution.routeFingerprint
   }
 
-  /// Commits metadata when policy changes but the concrete route does not—for
-  /// example choosing Auto while already using the physical system default.
   mutating func commitResolvedMetadataIfRouteMatches() {
     guard let desiredResolution,
           desiredResolution.target == appliedTarget,
@@ -213,10 +172,7 @@ struct AudioInputRouteState: Equatable, Sendable {
     appliedResolution = desiredResolution
   }
 
-  /// Records what the backend actually applied even if newer user intent
-  /// arrived while the transaction was running. The caller can immediately
-  /// reconcile again from the new revision without lying about active route.
-  mutating func routeTransactionSucceeded(_ resolution: AudioInputRouteResolution) {
+  mutating func routeTransactionSucceeded(_ resolution: AudioOutputRouteResolution) {
     appliedTarget = resolution.target
     appliedResolution = resolution
     if case .automatic = resolution.target {
@@ -226,43 +182,27 @@ struct AudioInputRouteState: Equatable, Sendable {
     }
   }
 
-  /// Quarantines only the concrete route that failed. An explicit preference
-  /// then resolves to Auto without being erased; an Auto failure has no hidden
-  /// alternative and is retried only after explicit user/lifecycle intent.
-  mutating func routeTransactionFailed(_ resolution: AudioInputRouteResolution) {
-    quarantine(resolution)
-    appliedTarget = nil
-    appliedResolution = nil
-    revision &+= 1
-  }
-
-  /// The requested route failed, but the driver verified that its previous
-  /// physical input, callbacks, bridge delivery, and sender demand were
-  /// restored. Quarantine the rejected target without erasing applied truth.
-  mutating func routeTransactionRestoredAfterFailure(
-    _ resolution: AudioInputRouteResolution
-  ) {
-    quarantine(resolution)
-    revision &+= 1
-  }
-
-  /// The requested route is still available and failed only during a
-  /// retryable hardware transition. Retain the verified previous route without
-  /// quarantining the user's preference; the supervisor will retry it after a
-  /// bounded backoff instead of silently resolving an explicit choice to Auto.
-  mutating func routeTransactionDeferredAfterTransientFailure(
-    _: AudioInputRouteResolution
-  ) {
-    revision &+= 1
-  }
-
-  private mutating func quarantine(_ resolution: AudioInputRouteResolution) {
+  mutating func routeTransactionFailed(_ resolution: AudioOutputRouteResolution) {
     switch resolution.target {
     case .automatic:
       automaticRouteFailed = true
     case .device:
       failedExplicitTarget = resolution.target
     }
+    // AUHAL owns rollback and retains the previous direction whenever that is
+    // possible. Keep the last verified commit until another transaction is
+    // verified; projecting the failed desired route would be less truthful.
+    // Runtime health separately exposes an incomplete rollback as unhealthy.
+    revision &+= 1
+  }
+
+  /// AUHAL verified that the previous output remains healthy after a
+  /// transition-class failure. Preserve both that applied truth and the
+  /// original preference so a capped retry can honor the selected route.
+  mutating func routeTransactionDeferredAfterTransientFailure(
+    _: AudioOutputRouteResolution
+  ) {
+    revision &+= 1
   }
 
   mutating func clearRouteFailure() {
@@ -277,12 +217,12 @@ struct AudioInputRouteState: Equatable, Sendable {
     appliedResolution = nil
   }
 
-  var snapshot: AudioInputDeviceSnapshot? {
+  var snapshot: AudioOutputDeviceSnapshot? {
     guard let inventory else { return nil }
     let resolved = appliedResolution ?? desiredResolution ?? inventory.resolve(desiredSelection)
-    let publicResolution: ResolvedAudioInput
+    let publicResolution: ResolvedAudioOutput
     if resolved.selection != desiredSelection {
-      publicResolution = ResolvedAudioInput(
+      publicResolution = ResolvedAudioOutput(
         selection: desiredSelection,
         activeDeviceID: resolved.activeDeviceID,
         activeDeviceName: resolved.activeDeviceName,
@@ -294,11 +234,11 @@ struct AudioInputRouteState: Equatable, Sendable {
     } else {
       publicResolution = resolved.publicValue
     }
-    return AudioInputDeviceSnapshot(
+    return AudioOutputDeviceSnapshot(
       automaticDeviceID: inventory.automaticDeviceID,
       automaticDeviceName: inventory.automaticDeviceName,
       devices: inventory.devices,
-      resolvedInput: publicResolution,
+      resolvedOutput: publicResolution,
       routeEpoch: inventory.routeEpoch
     )
   }

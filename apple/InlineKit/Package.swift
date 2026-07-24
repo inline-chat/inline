@@ -73,11 +73,11 @@ let package = Package(
       .upToNextMajor(from: "1.2.0")
     ),
     .package(url: "https://github.com/apple/swift-async-algorithms", from: "1.1.5"),
-    // LiveKit 2.15.2 plus Inline's muted-track fixes and standard-ADM health
-    // readback. The fork consumes LiveKit's official M144 WebRTC binary.
+    // LiveKit 2.15.2 plus Inline's custom RTCAudioDevice injection seam. This
+    // commit consumes LiveKit's official, unchanged M144 WebRTC binary.
     .package(
       url: "https://github.com/inline-chat/client-sdk-swift.git",
-      revision: "296e52d6d2b80730f221be8c085ebfdb1616ae58"
+      revision: "a09dbeb2171463ccf1f4fb7c50f7ca04100ab93b"
     ),
     .package(
       url: "https://github.com/apple/swift-collections.git",
@@ -124,6 +124,16 @@ let package = Package(
         .product(name: "Atomics", package: "swift-atomics"),
         .product(name: "LiveKit", package: "client-sdk-swift"),
         "Logger",
+      ],
+      // Retain failed and superseded audio backends as source-only archives.
+      // The compiled macOS path is the directional AUHAL RTCAudioDevice.
+      exclude: [
+        "Audio/MacGridAudioIO.swift",
+        "Audio/MacGridAudioSampleBuffer.swift",
+        "Audio/MacGridPlatformAudioCaptureState.swift",
+        "Audio/MacGridWebRTCAudioLifecycleController.swift",
+        "Audio/MacGridWebRTCInputDeviceController.swift",
+        "Engine/LiveKitGridAudioDriver.swift",
       ],
       swiftSettings: swiftSettings
     ),
@@ -204,6 +214,15 @@ let package = Package(
     .testTarget(
       name: "InlineRTCTests",
       dependencies: ["InlineRTC"],
+      // Superseded backend tests remain beside their source as investigation
+      // evidence; the directional AUHAL path owns a new focused test graph.
+      exclude: [
+        "Audio/MacGridPlatformAudioCaptureStateTests.swift",
+        "Audio/MacGridWebRTCAudioLifecycleControllerTests.swift",
+        "Audio/MacGridWebRTCInputDeviceControllerTests.swift",
+        "Engine/LiveKitGridAudioDriverTests.swift",
+        "MacGridAudioSampleBufferTests.swift",
+      ],
       swiftSettings: swiftSettings
     ),
 

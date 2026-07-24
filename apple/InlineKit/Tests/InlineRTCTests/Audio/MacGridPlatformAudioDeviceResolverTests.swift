@@ -4,7 +4,7 @@ import Testing
 
 @testable import InlineRTC
 
-@Suite("Platform-default audio device identity")
+@Suite("WebRTC audio device identity")
 struct MacGridPlatformAudioDeviceResolverTests {
   @Test("automatic input uses WebRTC's policy identifier")
   func automaticInputUsesDefaultPolicyIdentifier() throws {
@@ -105,7 +105,20 @@ struct MacGridPlatformAudioDeviceResolverTests {
     input: Bool = false,
     output: Bool = false
   ) -> MacGridAudioDevice {
-    MacGridAudioDevice(
+    let format = MacGridAudioStreamFormat(
+      AudioStreamBasicDescription(
+        mSampleRate: 48_000,
+        mFormatID: kAudioFormatLinearPCM,
+        mFormatFlags: kAudioFormatFlagIsFloat,
+        mBytesPerPacket: 4,
+        mFramesPerPacket: 1,
+        mBytesPerFrame: 4,
+        mChannelsPerFrame: 1,
+        mBitsPerChannel: 32,
+        mReserved: 0
+      )
+    )
+    return MacGridAudioDevice(
       id: id,
       uid: uid,
       name: name,
@@ -113,7 +126,9 @@ struct MacGridPlatformAudioDeviceResolverTests {
       hasOutput: output,
       sampleRate: 48_000,
       bufferFrameSize: 512,
-      transport: 0
+      transport: 0,
+      inputStreamFormat: input ? format : nil,
+      outputStreamFormat: output ? format : nil
     )
   }
 }

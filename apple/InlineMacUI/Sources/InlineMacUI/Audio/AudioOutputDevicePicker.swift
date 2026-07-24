@@ -2,21 +2,19 @@ import AppKit
 import InlineRTC
 import SwiftUI
 
-/// A reusable native microphone menu.
-///
-/// The picker owns presentation of automatic routing, explicit preferences,
-/// unavailable preferred devices, SF Symbols, and native checked state. It has
-/// no dependency on Grid, rooms, or RTC state.
-public struct AudioInputDevicePicker: NSViewRepresentable {
-  @Binding private var selection: AudioInputSelection
+/// Native output-device menu backed by durable Core Audio UIDs. The selected
+/// preference stays checked while unavailable even though the runtime is
+/// temporarily applying the system-default route.
+public struct AudioOutputDevicePicker: NSViewRepresentable {
+  @Binding private var selection: AudioOutputSelection
   private let automaticDeviceName: String
-  private let devices: [AudioInputDeviceDescriptor]
+  private let devices: [AudioOutputDeviceDescriptor]
   private let refresh: () -> Void
 
   public init(
-    selection: Binding<AudioInputSelection>,
+    selection: Binding<AudioOutputSelection>,
     automaticDeviceName: String,
-    devices: [AudioInputDeviceDescriptor],
+    devices: [AudioOutputDeviceDescriptor],
     refresh: @escaping () -> Void
   ) {
     _selection = selection
@@ -38,8 +36,8 @@ public struct AudioInputDevicePicker: NSViewRepresentable {
     button.isBordered = false
     button.imagePosition = .imageOnly
     button.imageScaling = .scaleProportionallyDown
-    button.toolTip = "Choose microphone"
-    button.setAccessibilityLabel("Choose microphone")
+    button.toolTip = "Choose speakers"
+    button.setAccessibilityLabel("Choose speakers")
     update(button, coordinator: context.coordinator)
     context.coordinator.perform(#selector(Coordinator.refreshDevices), with: nil, afterDelay: 0)
     return button
@@ -56,7 +54,7 @@ public struct AudioInputDevicePicker: NSViewRepresentable {
     menu.showsStateColumn = true
     menu.delegate = coordinator
 
-    var choices: [AudioInputSelection] = []
+    var choices: [AudioOutputSelection] = []
     addChoice(
       .automatic,
       title: "Auto (\(automaticDeviceName))",
@@ -86,7 +84,7 @@ public struct AudioInputDevicePicker: NSViewRepresentable {
       addChoice(
         selection,
         title: "\(rememberedName) (Unavailable — Using Auto)",
-        symbol: "mic.slash",
+        symbol: "speaker.slash",
         to: menu,
         choices: &choices,
         coordinator: coordinator
@@ -98,11 +96,11 @@ public struct AudioInputDevicePicker: NSViewRepresentable {
   }
 
   private func addChoice(
-    _ choice: AudioInputSelection,
+    _ choice: AudioOutputSelection,
     title: String,
     symbol: String,
     to menu: NSMenu,
-    choices: inout [AudioInputSelection],
+    choices: inout [AudioOutputSelection],
     coordinator: Coordinator
   ) {
     let item = NSMenuItem(title: title, action: #selector(Coordinator.selectChoice(_:)), keyEquivalent: "")
@@ -115,32 +113,28 @@ public struct AudioInputDevicePicker: NSViewRepresentable {
     menu.addItem(item)
   }
 
-  private func isSelected(_ choice: AudioInputSelection) -> Bool {
+  private func isSelected(_ choice: AudioOutputSelection) -> Bool {
     switch (selection, choice) {
     case (.automatic, .automatic):
       return true
     case let (.device(selectedID, selectedName), .device(choiceID, choiceName)):
       if let resolvedSelectedDeviceID { return resolvedSelectedDeviceID == choiceID }
-      // Keep the remembered unavailable choice visibly checked.
       return selectedID == choiceID && selectedName == choiceName
     default:
       return false
     }
   }
 
-  /// Device IDs are authoritative. Name matching repairs a reconnected device
-  /// only when the result is unambiguous; duplicate AirPods/headset names must
-  /// fall back rather than silently check and route to the wrong microphone.
   private var resolvedSelectedDeviceID: String? {
     selection.resolvedDeviceID(in: devices)
   }
 
   @MainActor
   public final class Coordinator: NSObject, NSMenuDelegate {
-    fileprivate var parent: AudioInputDevicePicker
-    fileprivate var choices: [AudioInputSelection] = []
+    fileprivate var parent: AudioOutputDevicePicker
+    fileprivate var choices: [AudioOutputSelection] = []
 
-    fileprivate init(_ parent: AudioInputDevicePicker) {
+    fileprivate init(_ parent: AudioOutputDevicePicker) {
       self.parent = parent
     }
 

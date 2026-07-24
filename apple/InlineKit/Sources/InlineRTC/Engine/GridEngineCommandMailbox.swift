@@ -66,7 +66,7 @@ final class GridEngineCommandMailbox: @unchecked Sendable {
   private func currentSegmentContains(_ key: GridEngineCommand.CoalescingKey) -> Bool {
     for command in queue.reversed() {
       switch command {
-      case .setDemand, .retryInput, .shutdown:
+      case .setDemand, .retryInput, .retryOutput, .shutdown:
         return false
       default:
         break
@@ -93,7 +93,7 @@ private extension GridEngineCommand {
     case .retryAudio: .retryAudio
     case .networkBecameAvailable: .networkBecameAvailable
     case .applicationDidWake: .applicationDidWake
-    case .setDemand, .retryInput, .shutdown: nil
+    case .setDemand, .retryInput, .retryOutput, .shutdown: nil
     }
   }
 }

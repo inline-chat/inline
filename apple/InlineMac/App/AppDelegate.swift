@@ -665,7 +665,20 @@ extension AppDelegate {
 
   @MainActor
   func performLogOut(notifyServer: Bool = true) async {
-    await dependencies.gridRuntime.prepareForLogout()
+    let mediaShutdown = await dependencies.gridRuntime.prepareForLogout()
+    guard mediaShutdown.isLocallyQuiescent else {
+      log.error(
+        "Logout stopped because Grid local media shutdown could not be proven: active_rooms=\(mediaShutdown.locallyActiveRoomCount) rtc_media_mutations=\(mediaShutdown.rtcLocalMediaMutationCount) microphone_publications=\(mediaShutdown.microphonePublicationCount) screen_publications=\(mediaShutdown.screenSharePublicationCount) failures=\(mediaShutdown.failures.joined(separator: ", "))"
+      )
+      let alert = NSAlert()
+      alert.alertStyle = .critical
+      alert.messageText = "Inline could not safely stop Grid audio"
+      alert.informativeText =
+        "Logout was cancelled because microphone or playback shutdown could not be verified. Please leave Grid and try again."
+      alert.addButton(withTitle: "OK")
+      alert.runModal()
+      return
+    }
 
     // Navigate outside of the app
     dependencies.viewModel.navigate(.onboarding)

@@ -26,8 +26,7 @@ struct InlineRTCConfiguration: Equatable, Sendable {
     self.voiceProcessing = voiceProcessing
   }
 
-  /// Voice-first defaults. Video-specific adaptive stream and dynacast remain
-  /// disabled until Grid gains camera or screen sharing.
+  /// Voice-first defaults with video transport policy ready for screen sharing.
   public static let voice = InlineRTCConfiguration()
 
   public struct Connection: Equatable, Sendable {
@@ -39,6 +38,12 @@ struct InlineRTCConfiguration: Equatable, Sendable {
     public var prepareCloudConnection = false
     /// Subscribe to remote tracks automatically. Grid needs this for voice.
     public var autoSubscribe = true
+    /// Pause remote video when it has no visible renderer and request only the
+    /// dimensions needed by the largest attached viewer.
+    public var adaptiveStream = true
+    /// Let LiveKit stop sending unused local video layers when no subscriber is
+    /// consuming them.
+    public var dynacast = true
     /// Total LiveKit reconnect attempts after an established connection drops.
     /// At the default maximum delay, 180 attempts cover roughly 20 minutes.
     /// Inline also has an indefinite recovery loop after the SDK gives up.
@@ -68,6 +73,9 @@ struct InlineRTCConfiguration: Equatable, Sendable {
     public var audioPreparationConnectWaitTimeout: TimeInterval = 1.5
     /// Rebuild the room if a microphone publication call never completes.
     public var microphonePublishWatchdogTimeout: TimeInterval = 8
+    /// Bound LiveKit's SDK-owned screen publication replacement after a full
+    /// reconnect. Inline waits rather than racing the SDK's serial republish.
+    public var screenShareRepublishTimeout: TimeInterval = 8
     /// Rebuild the room if an SDK mute reconciliation never completes.
     public var microphoneMuteWatchdogTimeout: TimeInterval = 3
     /// Give a retiring room a brief chance to finish before a replacement
@@ -93,6 +101,10 @@ struct InlineRTCConfiguration: Equatable, Sendable {
     /// graph to deliver its first buffer while still surfacing a dead capture
     /// path promptly.
     public var localAudioFlowStartupTimeout: TimeInterval = 1
+    /// Consecutive sender-statistics windows required before rebuilding a room.
+    /// One stalled sample is only suspect because sender negotiation, native
+    /// recording, or a directional route transition may still be settling.
+    public var localAudioFlowMissThreshold = 2
     /// Recheck PCM throughout a long-running unmuted call. The check compares
     /// frame counters off the real-time thread and remains silent while healthy.
     public var localAudioFlowCheckInterval: TimeInterval = 5
@@ -235,6 +247,8 @@ struct InlineRTCConfiguration: Equatable, Sendable {
         dtx: publishing.discontinuousTransmission,
         red: publishing.redundantEncoding
       ),
+      adaptiveStream: connection.adaptiveStream,
+      dynacast: connection.dynacast,
       singlePeerConnection: connection.singlePeerConnection
     )
   }

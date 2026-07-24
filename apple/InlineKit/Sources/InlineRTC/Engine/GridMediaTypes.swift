@@ -48,20 +48,26 @@ public struct InlineRTCDemand: Equatable, Sendable {
   public var target: InlineRTCSessionID?
   public var credentials: InlineRTCCredentials?
   public var microphoneEnabled: Bool
+  public var screenCaptureSource: InlineRTCScreenCaptureSource?
   public var input: AudioInputSelection
+  public var output: AudioOutputSelection
   public var outputVolume: Float
 
   public init(
     target: InlineRTCSessionID? = nil,
     credentials: InlineRTCCredentials? = nil,
     microphoneEnabled: Bool = false,
+    screenCaptureSource: InlineRTCScreenCaptureSource? = nil,
     input: AudioInputSelection = .automatic,
+    output: AudioOutputSelection = .automatic,
     outputVolume: Float = 1
   ) {
     self.target = target
     self.credentials = credentials
     self.microphoneEnabled = microphoneEnabled
+    self.screenCaptureSource = screenCaptureSource
     self.input = input
+    self.output = output
     self.outputVolume = min(max(outputVolume, 0), 1)
   }
 }
@@ -102,6 +108,12 @@ public struct InlineRTCAudioRoute: Equatable, Sendable {
   public let isInputRouteValid: Bool
   public let isOutputRouteValid: Bool
   public let routeEpoch: UInt64
+  public let inputCallbackCount: UInt64?
+  public let outputCallbackCount: UInt64?
+  public let inputCallbackAgeMilliseconds: UInt64?
+  public let outputCallbackAgeMilliseconds: UInt64?
+  public let measuredInputDelayMilliseconds: UInt16?
+  public let measuredOutputDelayMilliseconds: UInt16?
 
   public init(
     currentInputID: String?,
@@ -112,7 +124,13 @@ public struct InlineRTCAudioRoute: Equatable, Sendable {
     outputDeviceCount: Int,
     isInputRouteValid: Bool,
     isOutputRouteValid: Bool,
-    routeEpoch: UInt64 = 0
+    routeEpoch: UInt64 = 0,
+    inputCallbackCount: UInt64? = nil,
+    outputCallbackCount: UInt64? = nil,
+    inputCallbackAgeMilliseconds: UInt64? = nil,
+    outputCallbackAgeMilliseconds: UInt64? = nil,
+    measuredInputDelayMilliseconds: UInt16? = nil,
+    measuredOutputDelayMilliseconds: UInt16? = nil
   ) {
     self.currentInputID = currentInputID
     self.defaultInputID = defaultInputID
@@ -123,66 +141,327 @@ public struct InlineRTCAudioRoute: Equatable, Sendable {
     self.isInputRouteValid = isInputRouteValid
     self.isOutputRouteValid = isOutputRouteValid
     self.routeEpoch = routeEpoch
+    self.inputCallbackCount = inputCallbackCount
+    self.outputCallbackCount = outputCallbackCount
+    self.inputCallbackAgeMilliseconds = inputCallbackAgeMilliseconds
+    self.outputCallbackAgeMilliseconds = outputCallbackAgeMilliseconds
+    self.measuredInputDelayMilliseconds = measuredInputDelayMilliseconds
+    self.measuredOutputDelayMilliseconds = measuredOutputDelayMilliseconds
+  }
+}
+
+public enum InlineRTCAudioProcessingImplementation: String, Equatable, Sendable {
+  case unknown
+  case disabled
+  case software
+  case platform
+  case softwareAndPlatform
+}
+
+public struct InlineRTCAudioProcessingState: Equatable, Sendable {
+  public let echoCancellationRequested: Bool?
+  public let echoCancellationEffective: InlineRTCAudioProcessingImplementation
+  public let noiseSuppressionRequested: Bool?
+  public let noiseSuppressionEffective: InlineRTCAudioProcessingImplementation
+  public let automaticGainControlRequested: Bool?
+  public let automaticGainControlEffective: InlineRTCAudioProcessingImplementation
+  public let platformVoiceProcessingAllowed: Bool
+  public let platformVoiceProcessingRequested: Bool
+  public let platformVoiceProcessingActive: Bool
+
+  public init(
+    echoCancellationRequested: Bool?,
+    echoCancellationEffective: InlineRTCAudioProcessingImplementation,
+    noiseSuppressionRequested: Bool?,
+    noiseSuppressionEffective: InlineRTCAudioProcessingImplementation,
+    automaticGainControlRequested: Bool?,
+    automaticGainControlEffective: InlineRTCAudioProcessingImplementation,
+    platformVoiceProcessingAllowed: Bool,
+    platformVoiceProcessingRequested: Bool,
+    platformVoiceProcessingActive: Bool
+  ) {
+    self.echoCancellationRequested = echoCancellationRequested
+    self.echoCancellationEffective = echoCancellationEffective
+    self.noiseSuppressionRequested = noiseSuppressionRequested
+    self.noiseSuppressionEffective = noiseSuppressionEffective
+    self.automaticGainControlRequested = automaticGainControlRequested
+    self.automaticGainControlEffective = automaticGainControlEffective
+    self.platformVoiceProcessingAllowed = platformVoiceProcessingAllowed
+    self.platformVoiceProcessingRequested = platformVoiceProcessingRequested
+    self.platformVoiceProcessingActive = platformVoiceProcessingActive
+  }
+
+  public var isGridPolicyEffective: Bool {
+    echoCancellationRequested == true
+      && echoCancellationEffective == .software
+      && noiseSuppressionRequested == true
+      && noiseSuppressionEffective == .software
+      && !platformVoiceProcessingAllowed
+      && !platformVoiceProcessingRequested
+      && !platformVoiceProcessingActive
+  }
+
+  /// The APM request is track-scoped. Before the first microphone track is
+  /// attached to a sender, WebRTC truthfully reports no request even though the
+  /// AudioEngine ADM is already recording. Treat that bootstrap state as
+  /// pending rather than failed so audio preparation can reach publication;
+  /// once either Grid component has a request, the complete software-only
+  /// policy must be effective.
+  var isCompatibleWithCaptureBootstrap: Bool {
+    let hasObservedGridRequest = echoCancellationRequested != nil
+      || noiseSuppressionRequested != nil
+    return !hasObservedGridRequest || isGridPolicyEffective
+  }
+
+  var logDescription: String {
+    let aecRequested = echoCancellationRequested.map(String.init) ?? "none"
+    let nsRequested = noiseSuppressionRequested.map(String.init) ?? "none"
+    let agcRequested = automaticGainControlRequested.map(String.init) ?? "none"
+    return [
+      "aec_requested=\(aecRequested)",
+      "aec_effective=\(echoCancellationEffective.rawValue)",
+      "ns_requested=\(nsRequested)",
+      "ns_effective=\(noiseSuppressionEffective.rawValue)",
+      "agc_requested=\(agcRequested)",
+      "agc_effective=\(automaticGainControlEffective.rawValue)",
+      "vpio_allowed=\(platformVoiceProcessingAllowed)",
+      "vpio_requested=\(platformVoiceProcessingRequested)",
+      "vpio_active=\(platformVoiceProcessingActive)",
+    ].joined(separator: " ")
   }
 }
 
 struct GridAudioRuntimeHealth: Equatable, Sendable {
   let isEngineRunning: Bool
   let isRecording: Bool
+  /// `nil` for aggregate/legacy drivers. The custom ADM reports WebRTC's
+  /// native microphone-sender demand so an intentionally muted sender can be
+  /// distinguished from a lost recording direction.
+  let isRecordingExpected: Bool?
   let isPlaying: Bool
   let route: InlineRTCAudioRoute?
+  let processing: InlineRTCAudioProcessingState?
 
   init(
     isEngineRunning: Bool,
     isRecording: Bool? = nil,
+    isRecordingExpected: Bool? = nil,
     isPlaying: Bool? = nil,
-    route: InlineRTCAudioRoute?
+    route: InlineRTCAudioRoute?,
+    processing: InlineRTCAudioProcessingState? = nil
   ) {
     self.isEngineRunning = isEngineRunning
     // Test and alternate drivers that only expose the legacy aggregate fact
     // retain their previous semantics. LiveKit supplies the concrete ADM facts.
     self.isRecording = isRecording ?? isEngineRunning
+    self.isRecordingExpected = isRecordingExpected
     self.isPlaying = isPlaying ?? isEngineRunning
     self.route = route
+    self.processing = processing
   }
 
-  var isHealthy: Bool {
+  /// Capture-device health is the full-ADM recovery boundary owned by
+  /// `GridAudioEngine`. Output failure is repaired directionally and APM policy
+  /// is track/sender scoped; neither should restart a healthy microphone.
+  var isAudioDeviceHealthy: Bool {
     isEngineRunning
       && isRecording
       && route?.isInputRouteValid != false
+  }
+
+  var isCaptureHealthy: Bool {
+    isEngineRunning
+      && isRecording
+      && route?.isInputRouteValid != false
+      && processing?.isCompatibleWithCaptureBootstrap != false
+  }
+
+  var isPlayoutHealthy: Bool {
+    isEngineRunning
+      && isPlaying
       && route?.isOutputRouteValid != false
   }
 }
 
+struct GridAudioDriverShutdownReceipt: Equatable, Sendable {
+  let recordingStopped: Bool
+  let playoutStopped: Bool
+  let failures: [String]
+
+  var isQuiescent: Bool {
+    recordingStopped && playoutStopped && failures.isEmpty
+  }
+}
+
+struct GridAudioShutdownReceipt: Equatable, Sendable {
+  let recordingStopped: Bool
+  let playoutStopped: Bool
+  let mutationReleased: Bool
+  let failures: [String]
+
+  var isQuiescent: Bool {
+    recordingStopped && playoutStopped && mutationReleased && failures.isEmpty
+  }
+}
+
+struct GridLocalRoomQuiescenceReceipt: Equatable, Sendable {
+  let room: GridRTCRoomHandle
+  let localResourcesReleased: Bool
+  let localMediaMutationCount: Int
+  let microphonePublicationCount: Int
+  let screenSharePublicationCount: Int
+  let failures: [String]
+
+  init(
+    room: GridRTCRoomHandle,
+    localResourcesReleased: Bool,
+    localMediaMutationCount: Int = 0,
+    microphonePublicationCount: Int = 0,
+    screenSharePublicationCount: Int = 0,
+    failures: [String]
+  ) {
+    self.room = room
+    self.localResourcesReleased = localResourcesReleased
+    self.localMediaMutationCount = localMediaMutationCount
+    self.microphonePublicationCount = microphonePublicationCount
+    self.screenSharePublicationCount = screenSharePublicationCount
+    self.failures = failures
+  }
+
+  var isQuiescent: Bool {
+    localResourcesReleased
+      && localMediaMutationCount == 0
+      && microphonePublicationCount == 0
+      && screenSharePublicationCount == 0
+      && failures.isEmpty
+  }
+}
+
+struct GridRTCShutdownReceipt: Equatable, Sendable {
+  let locallyActiveRoomCount: Int
+  let localMediaMutationCount: Int
+  let microphonePublicationCount: Int
+  let screenSharePublicationCount: Int
+  let failures: [String]
+
+  init(
+    locallyActiveRoomCount: Int,
+    localMediaMutationCount: Int = 0,
+    microphonePublicationCount: Int = 0,
+    screenSharePublicationCount: Int = 0,
+    failures: [String]
+  ) {
+    self.locallyActiveRoomCount = locallyActiveRoomCount
+    self.localMediaMutationCount = localMediaMutationCount
+    self.microphonePublicationCount = microphonePublicationCount
+    self.screenSharePublicationCount = screenSharePublicationCount
+    self.failures = failures
+  }
+
+  var isQuiescent: Bool {
+    locallyActiveRoomCount == 0
+      && localMediaMutationCount == 0
+      && microphonePublicationCount == 0
+      && screenSharePublicationCount == 0
+      && failures.isEmpty
+  }
+}
+
+public struct GridMediaShutdownReceipt: Equatable, Sendable {
+  public let recordingStopped: Bool
+  public let playoutStopped: Bool
+  public let audioMutationReleased: Bool
+  public let locallyActiveRoomCount: Int
+  public let rtcLocalMediaMutationCount: Int
+  public let microphonePublicationCount: Int
+  public let screenSharePublicationCount: Int
+  public let failures: [String]
+
+  public var isLocallyQuiescent: Bool {
+    recordingStopped
+      && playoutStopped
+      && audioMutationReleased
+      && locallyActiveRoomCount == 0
+      && rtcLocalMediaMutationCount == 0
+      && microphonePublicationCount == 0
+      && screenSharePublicationCount == 0
+      && failures.isEmpty
+  }
+
+  init(audio: GridAudioShutdownReceipt, rtc: GridRTCShutdownReceipt) {
+    recordingStopped = audio.recordingStopped
+    playoutStopped = audio.playoutStopped
+    audioMutationReleased = audio.mutationReleased
+    locallyActiveRoomCount = rtc.locallyActiveRoomCount
+    rtcLocalMediaMutationCount = rtc.localMediaMutationCount
+    microphonePublicationCount = rtc.microphonePublicationCount
+    screenSharePublicationCount = rtc.screenSharePublicationCount
+    failures = rtc.failures + audio.failures
+  }
+}
+
 enum GridAudioPlayoutFailureDisposition: Equatable, Sendable {
+  case recoveredPhysicalPlayout
+  case reconstructRTCSession
+}
+
+enum GridAudioCaptureFailureDisposition: Equatable, Sendable {
+  case recoveredPhysicalCapture
   case reconstructRTCSession
 }
 
 public struct InlineRTCAudioSnapshot: Equatable, Sendable {
   public let state: InlineRTCAudioState
+  public let isConfigured: Bool
   public let isPrepared: Bool
   public let captureLeaseCount: Int
   public let input: ResolvedAudioInput?
+  public let output: ResolvedAudioOutput?
   public let route: InlineRTCAudioRoute?
+  public let processing: InlineRTCAudioProcessingState?
+  public let isRecording: Bool
+  public let isPlaying: Bool
+  public let isCaptureHealthy: Bool
+  public let isPlayoutHealthy: Bool
+  public let currentMutationKind: String?
+  public let currentMutationMilliseconds: Int?
   public let outputVolume: Float
   public let lastTransitionMilliseconds: Int?
   public let microphonePermission: InlineRTCMicrophonePermission
 
   public init(
     state: InlineRTCAudioState,
+    isConfigured: Bool = false,
     isPrepared: Bool,
     captureLeaseCount: Int,
     input: ResolvedAudioInput?,
+    output: ResolvedAudioOutput? = nil,
     route: InlineRTCAudioRoute? = nil,
+    processing: InlineRTCAudioProcessingState? = nil,
+    isRecording: Bool = false,
+    isPlaying: Bool = false,
+    isCaptureHealthy: Bool = false,
+    isPlayoutHealthy: Bool = false,
+    currentMutationKind: String? = nil,
+    currentMutationMilliseconds: Int? = nil,
     outputVolume: Float,
     lastTransitionMilliseconds: Int?,
     microphonePermission: InlineRTCMicrophonePermission
   ) {
     self.state = state
+    self.isConfigured = isConfigured
     self.isPrepared = isPrepared
     self.captureLeaseCount = captureLeaseCount
     self.input = input
+    self.output = output
     self.route = route
+    self.processing = processing
+    self.isRecording = isRecording
+    self.isPlaying = isPlaying
+    self.isCaptureHealthy = isCaptureHealthy
+    self.isPlayoutHealthy = isPlayoutHealthy
+    self.currentMutationKind = currentMutationKind
+    self.currentMutationMilliseconds = currentMutationMilliseconds
     self.outputVolume = outputVolume
     self.lastTransitionMilliseconds = lastTransitionMilliseconds
     self.microphonePermission = microphonePermission
@@ -219,8 +498,11 @@ enum GridRTCLifecycleEvent: Equatable, Sendable {
   case reconnected(mode: GridRTCReconnectMode)
   case localMicrophonePublished(muted: Bool)
   case localMicrophoneUnpublished
+  case screenSharesChanged(revision: UInt64, shares: [InlineRTCScreenShare])
   case localAudioFlow(InlineRTCAudioFlowState)
   case remoteAudioFlow(identity: String, state: InlineRTCAudioFlowState)
+  case remoteAudioFramesObserved(identity: String)
+  case retiredLocalMediaMutationReleased
   case disconnected(error: String?)
 }
 
@@ -274,6 +556,8 @@ public struct InlineRTCConnectionSnapshot: Equatable, Sendable {
   public let microphonePublicationState: InlineRTCMicrophoneState
   public let microphonePublished: Bool
   public let microphoneMuted: Bool
+  public let screenShareState: InlineRTCScreenShareState
+  public let screenShares: [InlineRTCScreenShare]
   public let localAudioFlowState: InlineRTCAudioFlowState
   public let remoteAudioFlowStates: [String: InlineRTCAudioFlowState]
   public let participants: [InlineRTCParticipant]
@@ -284,6 +568,10 @@ public struct InlineRTCConnectionSnapshot: Equatable, Sendable {
   public let lastError: String?
   public let abandonedProviderOperationCount: Int
   public let providerCircuitOpen: Bool
+  public let activeRoomCount: Int
+  public let retiringRoomCount: Int
+  public let failedLocalQuiescenceCount: Int
+  public let pendingRemoteLeaveCount: Int
 
   public init(
     state: InlineRTCConnectionState,
@@ -291,6 +579,8 @@ public struct InlineRTCConnectionSnapshot: Equatable, Sendable {
     microphonePublicationState: InlineRTCMicrophoneState,
     microphonePublished: Bool,
     microphoneMuted: Bool,
+    screenShareState: InlineRTCScreenShareState,
+    screenShares: [InlineRTCScreenShare],
     localAudioFlowState: InlineRTCAudioFlowState = .unknown,
     remoteAudioFlowStates: [String: InlineRTCAudioFlowState] = [:],
     participants: [InlineRTCParticipant],
@@ -300,13 +590,19 @@ public struct InlineRTCConnectionSnapshot: Equatable, Sendable {
     lastDisconnectMilliseconds: Int?,
     lastError: String?,
     abandonedProviderOperationCount: Int = 0,
-    providerCircuitOpen: Bool = false
+    providerCircuitOpen: Bool = false,
+    activeRoomCount: Int = 0,
+    retiringRoomCount: Int = 0,
+    failedLocalQuiescenceCount: Int = 0,
+    pendingRemoteLeaveCount: Int = 0
   ) {
     self.state = state
     self.target = target
     self.microphonePublicationState = microphonePublicationState
     self.microphonePublished = microphonePublished
     self.microphoneMuted = microphoneMuted
+    self.screenShareState = screenShareState
+    self.screenShares = screenShares
     self.localAudioFlowState = localAudioFlowState
     self.remoteAudioFlowStates = remoteAudioFlowStates
     self.participants = participants
@@ -317,6 +613,10 @@ public struct InlineRTCConnectionSnapshot: Equatable, Sendable {
     self.lastError = lastError
     self.abandonedProviderOperationCount = abandonedProviderOperationCount
     self.providerCircuitOpen = providerCircuitOpen
+    self.activeRoomCount = activeRoomCount
+    self.retiringRoomCount = retiringRoomCount
+    self.failedLocalQuiescenceCount = failedLocalQuiescenceCount
+    self.pendingRemoteLeaveCount = pendingRemoteLeaveCount
   }
 }
 
@@ -329,6 +629,7 @@ enum GridEngineCommand: Equatable, Sendable {
   case setDemand(InlineRTCDemand)
   case refreshDevices
   case retryInput(AudioInputSelection)
+  case retryOutput(AudioOutputSelection)
   case requestMicrophonePermission
   case retryAudio
   case networkBecameAvailable
@@ -345,17 +646,20 @@ public struct InlineRTCState: Equatable, Sendable {
   public let revision: UInt64
   public let audio: InlineRTCAudioSnapshot
   public let devices: AudioInputDeviceSnapshot?
+  public let outputDevices: AudioOutputDeviceSnapshot?
   public let rtc: InlineRTCConnectionSnapshot
 
   public init(
     revision: UInt64,
     audio: InlineRTCAudioSnapshot,
     devices: AudioInputDeviceSnapshot?,
+    outputDevices: AudioOutputDeviceSnapshot? = nil,
     rtc: InlineRTCConnectionSnapshot
   ) {
     self.revision = revision
     self.audio = audio
     self.devices = devices
+    self.outputDevices = outputDevices
     self.rtc = rtc
   }
 }

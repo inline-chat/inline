@@ -16,15 +16,67 @@ enum MacGridPlatformAudioDeviceResolver {
   ) throws -> String {
     switch target {
     case .automatic:
-      guard snapshot.defaultInput != nil else {
+      _ = try inputDevice(for: target, in: snapshot)
+      return defaultDeviceID
+    case .device:
+      let device = try inputDevice(for: target, in: snapshot)
+      return String(device.id)
+    }
+  }
+
+  static func inputDevice(
+    for target: AudioInputRouteTarget,
+    in snapshot: MacGridAudioCatalogSnapshot
+  ) throws -> MacGridAudioDevice {
+    switch target {
+    case .automatic:
+      guard let device = snapshot.defaultInput else {
         throw MacGridCoreAudioError.unavailable("No default microphone is available.")
       }
-      return defaultDeviceID
+      guard MacGridAudioRouteTransitionPolicy.inputIsUsable(device) else {
+        throw MacGridCoreAudioError.unavailable(
+          "The default microphone has no readable live input format."
+        )
+      }
+      return device
     case let .device(uid, _):
       guard let device = snapshot.inputs.first(where: { $0.uid == uid }) else {
         throw MacGridCoreAudioError.unavailable("The selected microphone is no longer connected.")
       }
-      return String(device.id)
+      guard MacGridAudioRouteTransitionPolicy.inputIsUsable(device) else {
+        throw MacGridCoreAudioError.unavailable(
+          "The selected microphone has no readable live input format."
+        )
+      }
+      return device
+    }
+  }
+
+  static func outputDevice(
+    for target: AudioOutputRouteTarget,
+    in snapshot: MacGridAudioCatalogSnapshot
+  ) throws -> MacGridAudioDevice {
+    switch target {
+    case .automatic:
+      guard let device = snapshot.defaultOutput else {
+        throw MacGridCoreAudioError.unavailable("No default output device is available.")
+      }
+      guard MacGridAudioRouteTransitionPolicy.outputIsUsable(device) else {
+        throw MacGridCoreAudioError.unavailable(
+          "The default output device has no readable live format."
+        )
+      }
+      return device
+    case let .device(uid, _):
+      guard let device = snapshot.outputs.first(where: { $0.uid == uid }) else {
+        throw MacGridCoreAudioError.unavailable("The selected output device is no longer connected.")
+      }
+      guard MacGridAudioRouteTransitionPolicy.outputIsUsable(device) else {
+        throw MacGridCoreAudioError.unavailable(
+          "The selected output device has no readable live format."
+        )
+      }
+      return device
     }
   }
 

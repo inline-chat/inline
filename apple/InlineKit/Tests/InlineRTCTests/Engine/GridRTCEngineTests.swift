@@ -98,6 +98,1100 @@ struct GridRTCEngineTests {
     }
   }
 
+  @Test("RTC room creation is fenced until audio bootstrap succeeds")
+  func audioBootstrapFailureFencesRoomCreation() async throws {
+    let audioDriver = RTCFakeAudioDriver(configureFailures: 1)
+    let audio = GridAudioEngine(
+      driver: audioDriver,
+      permissionDriver: TestGridMicrophonePermissionDriver()
+    )
+    let driver = FakeGridRTCDriver()
+    let rtc = GridRTCEngine(audio: audio, driver: driver)
+    let target = InlineRTCSessionID("grid-test:1:52:1")
+
+    await rtc.setDemand(demand(target: target, microphoneEnabled: false))
+    try await eventuallyRTC {
+      guard case .failed = await audio.currentSnapshot().state,
+            case .failed = await rtc.currentSnapshot().state
+      else { return false }
+      return true
+    }
+    #expect(await driver.operations().contains("make") == false)
+
+    await audio.retry()
+    await rtc.audioAvailabilityChanged()
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().state == .connected(target)
+    }
+    #expect(await driver.operations().contains("make"))
+  }
+
+  @Test("screen sharing follows demand without microphone permission")
+  func screenSharingFollowsDemandWithoutMicrophonePermission() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver(current: .denied)
+    )
+    let driver = FakeGridRTCDriver()
+    let rtc = GridRTCEngine(audio: audio, driver: driver)
+    let target = InlineRTCSessionID("grid-test:1:13:1")
+    let source = InlineRTCScreenCaptureSource(
+      id: "display:7",
+      name: "Main Display",
+      displayID: 7
+    )
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false,
+      screenCaptureSource: source
+    ))
+    try await eventuallyRTC {
+      await driver.operations().contains("screen:13:display:7")
+    }
+    #expect(await rtc.currentSnapshot().screenShareState == .published)
+    #expect(await driver.operations().contains("publish:13:muted=true") == false)
+
+    await rtc.setDemand(demand(target: target, microphoneEnabled: false))
+    try await eventuallyRTC {
+      await driver.operations().contains("screen:13:off")
+    }
+    #expect(await rtc.currentSnapshot().screenShareState == .off)
+  }
+
+  @Test("screen sharing fails when its local publication projection never arrives")
+  func screenSharePublishProjectionTimeout() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver(current: .denied)
+    )
+    let driver = FakeGridRTCDriver()
+    var configuration = InlineRTCConfiguration.voice
+    configuration.connection.screenShareRepublishTimeout = 0.05
+    let rtc = GridRTCEngine(audio: audio, driver: driver, configuration: configuration)
+    let target = InlineRTCSessionID("grid-test:1:57:1")
+    let source = InlineRTCScreenCaptureSource(
+      id: "display:57",
+      name: "Main Display",
+      displayID: 57
+    )
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false,
+      screenCaptureSource: source
+    ))
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShareState
+        == .failed("Screen sharing could not be confirmed")
+    }
+
+    await rtc.setDemand(demand(target: target, microphoneEnabled: false))
+    try await eventuallyRTC {
+      let snapshot = await rtc.currentSnapshot()
+      let isActive = await driver.isScreenShareActive(roomID: 57)
+      return snapshot.screenShareState == .off && !isActive
+    }
+  }
+
+  @Test("a timely local publication projection cancels the publish timeout")
+  func screenSharePublishProjectionConfirmation() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver(current: .denied)
+    )
+    let driver = FakeGridRTCDriver()
+    var configuration = InlineRTCConfiguration.voice
+    configuration.connection.screenShareRepublishTimeout = 0.2
+    let rtc = GridRTCEngine(audio: audio, driver: driver, configuration: configuration)
+    let target = InlineRTCSessionID("grid-test:1:58:1")
+    let source = InlineRTCScreenCaptureSource(
+      id: "display:58",
+      name: "Main Display",
+      displayID: 58
+    )
+    let localShare = InlineRTCScreenShare(
+      participantIdentity: "local",
+      publicationID: "TR_publish_confirmation",
+      captureSourceID: source.id,
+      isLocal: true,
+      videoTrack: nil
+    )
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false,
+      screenCaptureSource: source
+    ))
+    try await eventuallyRTC { await driver.isScreenShareActive(roomID: 58) }
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 1, shares: [localShare])
+    )
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShares == [localShare]
+    }
+    try await Task.sleep(for: .milliseconds(250))
+
+    #expect(await rtc.currentSnapshot().screenShareState == .published)
+  }
+
+  @Test("failed screen publication is explicitly cleaned up")
+  func failedScreenPublicationIsCleanedUp() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver(current: .denied)
+    )
+    let driver = FakeGridRTCDriver(screenShareFailures: 1)
+    let rtc = GridRTCEngine(audio: audio, driver: driver)
+    let target = InlineRTCSessionID("grid-test:1:14:1")
+    let source = InlineRTCScreenCaptureSource(
+      id: "display:8",
+      name: "Second Display",
+      displayID: 8
+    )
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false,
+      screenCaptureSource: source
+    ))
+    try await eventuallyRTC {
+      if case .failed = await rtc.currentSnapshot().screenShareState { return true }
+      return false
+    }
+
+    await rtc.setDemand(demand(target: target, microphoneEnabled: false))
+    try await eventuallyRTC {
+      await driver.operations().contains("screen:14:off")
+    }
+    #expect(await rtc.currentSnapshot().screenShareState == .off)
+  }
+
+  @Test("stop intent arriving during screen publication is reconciled")
+  func stopIntentDuringScreenPublication() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver(current: .denied)
+    )
+    let driver = FakeGridRTCDriver(blockedScreenShareRoomID: 15)
+    let rtc = GridRTCEngine(audio: audio, driver: driver)
+    let target = InlineRTCSessionID("grid-test:1:15:1")
+    let source = InlineRTCScreenCaptureSource(
+      id: "display:9",
+      name: "Main Display",
+      displayID: 9
+    )
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false,
+      screenCaptureSource: source
+    ))
+    try await eventuallyRTC {
+      await driver.operations().contains("screen:15:display:9")
+    }
+
+    await rtc.setDemand(demand(target: target, microphoneEnabled: false))
+    await driver.releaseBlockedScreenShare()
+
+    try await eventuallyRTC {
+      await driver.operations().contains("screen:15:off")
+    }
+    #expect(await rtc.currentSnapshot().screenShareState == .off)
+    #expect(await driver.operations().filter { $0 == "screen:15:display:9" }.count == 1)
+  }
+
+  @Test("failed screen-share Stop reconstructs the room and releases local capture")
+  func failedScreenShareStopReconstructsRoom() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver(current: .denied)
+    )
+    let driver = FakeGridRTCDriver(failScreenShareStopRoomID: 45)
+    let rtc = GridRTCEngine(audio: audio, driver: driver)
+    let target = InlineRTCSessionID("grid-test:1:45:1")
+    let source = InlineRTCScreenCaptureSource(
+      id: "display:45",
+      name: "Main Display",
+      displayID: 45
+    )
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false,
+      screenCaptureSource: source
+    ))
+    try await eventuallyRTC { await driver.isScreenShareActive(roomID: 45) }
+
+    await rtc.setDemand(demand(target: target, microphoneEnabled: false))
+
+    try await eventuallyRTC {
+      let operations = await driver.operations()
+      let isActive = await driver.isScreenShareActive(roomID: 45)
+      return operations.contains("quiesce-done:45") && !isActive
+    }
+    try await eventuallyRTC {
+      await driver.operations().filter { $0 == "connect:45" }.count >= 2
+    }
+  }
+
+  @Test("hung screen-share Stop is fenced and local capture is released")
+  func hungScreenShareStopIsFenced() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver(current: .denied)
+    )
+    let driver = FakeGridRTCDriver(blockedScreenShareStopRoomID: 46)
+    defer { Task { await driver.releaseBlockedScreenShare() } }
+    var configuration = InlineRTCConfiguration.voice
+    configuration.connection.screenShareRepublishTimeout = 5
+    configuration.connection.providerTeardownTimeout = 0.05
+    let rtc = GridRTCEngine(audio: audio, driver: driver, configuration: configuration)
+    let target = InlineRTCSessionID("grid-test:1:46:1")
+    let source = InlineRTCScreenCaptureSource(
+      id: "display:46",
+      name: "Main Display",
+      displayID: 46
+    )
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false,
+      screenCaptureSource: source
+    ))
+    try await eventuallyRTC { await driver.isScreenShareActive(roomID: 46) }
+
+    await rtc.setDemand(demand(target: target, microphoneEnabled: false))
+    try await eventuallyRTC {
+      await driver.operations().contains("screen:46:off")
+    }
+    try await eventuallyRTC {
+      let operations = await driver.operations()
+      let isActive = await driver.isScreenShareActive(roomID: 46)
+      return operations.contains("quiesce-done:46") && !isActive
+    }
+  }
+
+  @Test("stop during a hung source switch fences its late completion")
+  func stopDuringHungScreenShareSwitchIsFenced() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver(current: .denied)
+    )
+    let driver = FakeGridRTCDriver(
+      blockedScreenShareRoomID: 48,
+      blockedScreenShareSourceID: "display:48:replacement"
+    )
+    defer { Task { await driver.releaseBlockedScreenShare() } }
+    var configuration = InlineRTCConfiguration.voice
+    configuration.connection.screenShareRepublishTimeout = 0.05
+    let rtc = GridRTCEngine(audio: audio, driver: driver, configuration: configuration)
+    let target = InlineRTCSessionID("grid-test:1:48:1")
+    let initialSource = InlineRTCScreenCaptureSource(
+      id: "display:48:initial",
+      name: "Main Display",
+      displayID: 48
+    )
+    let replacementSource = InlineRTCScreenCaptureSource(
+      id: "display:48:replacement",
+      name: "Second Display",
+      displayID: 49
+    )
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false,
+      screenCaptureSource: initialSource
+    ))
+    try await eventuallyRTC { await driver.isScreenShareActive(roomID: 48) }
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false,
+      screenCaptureSource: replacementSource
+    ))
+    try await eventuallyRTC {
+      await driver.operations().contains("screen:48:display:48:replacement")
+    }
+    await rtc.setDemand(demand(target: target, microphoneEnabled: false))
+
+    try await eventuallyRTC {
+      let operations = await driver.operations()
+      let isActive = await driver.isScreenShareActive(roomID: 48)
+      return operations.contains("quiesce-done:48") && !isActive
+    }
+    await driver.releaseBlockedScreenShare()
+    try await Task.sleep(for: .milliseconds(20))
+    #expect(await driver.isScreenShareActive(roomID: 48) == false)
+  }
+
+  @Test("successful Stop waits for an empty publication projection")
+  func successfulStopRequiresEmptyPublicationProjection() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver(current: .denied)
+    )
+    let driver = FakeGridRTCDriver()
+    var configuration = InlineRTCConfiguration.voice
+    configuration.connection.screenShareRepublishTimeout = 0.05
+    let rtc = GridRTCEngine(audio: audio, driver: driver, configuration: configuration)
+    let target = InlineRTCSessionID("grid-test:1:47:1")
+    let source = InlineRTCScreenCaptureSource(
+      id: "display:47",
+      name: "Main Display",
+      displayID: 47
+    )
+    let localShare = InlineRTCScreenShare(
+      participantIdentity: "local",
+      publicationID: "TR_stop_confirmation",
+      captureSourceID: source.id,
+      isLocal: true,
+      videoTrack: nil
+    )
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false,
+      screenCaptureSource: source
+    ))
+    try await eventuallyRTC { await driver.isScreenShareActive(roomID: 47) }
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 1, shares: [localShare])
+    )
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShares == [localShare]
+    }
+
+    await rtc.setDemand(demand(target: target, microphoneEnabled: false))
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShareState == .stopping
+    }
+    try await eventuallyRTC {
+      await driver.operations().contains("quiesce-done:47")
+    }
+  }
+
+  @Test("system-ended screen capture is not automatically restarted")
+  func systemEndedScreenCapture() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver(current: .denied)
+    )
+    let driver = FakeGridRTCDriver()
+    let rtc = GridRTCEngine(audio: audio, driver: driver)
+    let target = InlineRTCSessionID("grid-test:1:16:1")
+    let source = InlineRTCScreenCaptureSource(
+      id: "display:10",
+      name: "Main Display",
+      displayID: 10
+    )
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false,
+      screenCaptureSource: source
+    ))
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShareState == .published
+    }
+
+    let localShare = InlineRTCScreenShare(
+      participantIdentity: "local",
+      publicationID: "TR_local_system_stop",
+      captureSourceID: source.id,
+      isLocal: true,
+      videoTrack: nil
+    )
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 1, shares: [localShare])
+    )
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShares == [localShare]
+    }
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 2, shares: [])
+    )
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShareState == .failed("Screen sharing stopped")
+    }
+    try await Task.sleep(for: .milliseconds(20))
+    #expect(await driver.operations().filter { $0 == "screen:16:display:10" }.count == 1)
+
+    await rtc.setDemand(demand(target: target, microphoneEnabled: false))
+    try await eventuallyRTC {
+      await driver.operations().contains("screen:16:off")
+    }
+    #expect(await rtc.currentSnapshot().screenShareState == .off)
+  }
+
+  @Test("a delayed publish callback cannot confirm newer screen-share intent")
+  func delayedScreenPublishCannotConfirmNewerIntent() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver(current: .denied)
+    )
+    let driver = FakeGridRTCDriver(blockedScreenShareRoomID: 17)
+    let rtc = GridRTCEngine(audio: audio, driver: driver)
+    let target = InlineRTCSessionID("grid-test:1:17:1")
+    let firstSource = InlineRTCScreenCaptureSource(
+      id: "display:11",
+      name: "First Display",
+      displayID: 11
+    )
+    let latestSource = InlineRTCScreenCaptureSource(
+      id: "display:12",
+      name: "Second Display",
+      displayID: 12
+    )
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false,
+      screenCaptureSource: firstSource
+    ))
+    try await eventuallyRTC {
+      await driver.operations().contains("screen:17:display:11")
+    }
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false,
+      screenCaptureSource: latestSource
+    ))
+    let delayedOldPublication = InlineRTCScreenShare(
+      participantIdentity: "local",
+      publicationID: "TR_delayed_old",
+      captureSourceID: firstSource.id,
+      isLocal: true,
+      videoTrack: nil
+    )
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 1, shares: [delayedOldPublication])
+    )
+    try await Task.sleep(for: .milliseconds(20))
+    #expect(await rtc.currentSnapshot().screenShareState == .publishing)
+
+    await driver.releaseBlockedScreenShare()
+    try await eventuallyRTC {
+      await driver.operations().contains("screen:17:display:12")
+    }
+    #expect(await rtc.currentSnapshot().screenShareState == .published)
+  }
+
+  @Test("complete screen-share snapshots preserve simultaneous sharers")
+  func simultaneousScreenShareSnapshots() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver(current: .denied)
+    )
+    let driver = FakeGridRTCDriver()
+    let rtc = GridRTCEngine(audio: audio, driver: driver)
+    let target = InlineRTCSessionID("grid-test:1:18:1")
+
+    await rtc.setDemand(demand(target: target, microphoneEnabled: false))
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().state == .connected(target)
+    }
+
+    let local = InlineRTCScreenShare(
+      participantIdentity: "local",
+      publicationID: "TR_local",
+      captureSourceID: "display:1",
+      isLocal: true,
+      videoTrack: nil
+    )
+    let firstRemote = InlineRTCScreenShare(
+      participantIdentity: "remote-1",
+      publicationID: "TR_remote_1",
+      isLocal: false,
+      videoTrack: nil
+    )
+    let secondRemote = InlineRTCScreenShare(
+      participantIdentity: "remote-2",
+      publicationID: "TR_remote_2",
+      isLocal: false,
+      videoTrack: nil
+    )
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(
+        revision: 1,
+        shares: [local, firstRemote, secondRemote]
+      )
+    )
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShares.map(\.publicationID)
+        == ["TR_local", "TR_remote_1", "TR_remote_2"]
+    }
+
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 3, shares: [local, secondRemote])
+    )
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShares.map(\.publicationID)
+        == ["TR_local", "TR_remote_2"]
+    }
+
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(
+        revision: 2,
+        shares: [local, firstRemote, secondRemote]
+      )
+    )
+    try await Task.sleep(for: .milliseconds(20))
+    #expect(
+      await rtc.currentSnapshot().screenShares.map(\.publicationID)
+        == ["TR_local", "TR_remote_2"]
+    )
+  }
+
+  @Test("full reconnect waits for LiveKit to replace the screen publication")
+  func fullReconnectWaitsForScreenRepublish() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver(current: .denied)
+    )
+    let driver = FakeGridRTCDriver()
+    let rtc = GridRTCEngine(audio: audio, driver: driver)
+    let target = InlineRTCSessionID("grid-test:1:19:1")
+    let source = InlineRTCScreenCaptureSource(
+      id: "display:19",
+      name: "Main Display",
+      displayID: 19
+    )
+    let oldPublication = InlineRTCScreenShare(
+      participantIdentity: "local",
+      publicationID: "TR_screen_old",
+      captureSourceID: source.id,
+      isLocal: true,
+      videoTrack: nil
+    )
+    let replacementPublication = InlineRTCScreenShare(
+      participantIdentity: "local",
+      publicationID: "TR_screen_replacement",
+      captureSourceID: source.id,
+      isLocal: true,
+      videoTrack: nil
+    )
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false,
+      screenCaptureSource: source
+    ))
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShareState == .published
+    }
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 1, shares: [oldPublication])
+    )
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShares == [oldPublication]
+    }
+
+    await driver.emitToCurrentRoom(.reconnecting(mode: .full))
+    await driver.emitToCurrentRoom(.reconnected(mode: .full))
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 2, shares: [oldPublication])
+    )
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 3, shares: [])
+    )
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShareState == .publishing
+    }
+    #expect(
+      await driver.operations().filter { $0 == "screen:19:display:19" }.count == 1
+    )
+
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 4, shares: [replacementPublication])
+    )
+    try await eventuallyRTC {
+      let snapshot = await rtc.currentSnapshot()
+      return snapshot.screenShareState == .published
+        && snapshot.screenShares == [replacementPublication]
+    }
+    #expect(
+      await driver.operations().filter { $0 == "screen:19:display:19" }.count == 1
+    )
+  }
+
+  @Test("full reconnect screen republish timeout reconstructs the provider room")
+  func fullReconnectScreenRepublishTimeout() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver(current: .denied)
+    )
+    var configuration = InlineRTCConfiguration.voice
+    configuration.connection.screenShareRepublishTimeout = 0.05
+    let driver = FakeGridRTCDriver()
+    let rtc = GridRTCEngine(
+      audio: audio,
+      driver: driver,
+      configuration: configuration
+    )
+    let target = InlineRTCSessionID("grid-test:1:29:1")
+    let source = InlineRTCScreenCaptureSource(
+      id: "display:29",
+      name: "Main Display",
+      displayID: 29
+    )
+    let oldPublication = InlineRTCScreenShare(
+      participantIdentity: "local",
+      publicationID: "TR_screen_timeout_old",
+      captureSourceID: source.id,
+      isLocal: true,
+      videoTrack: nil
+    )
+    let latePublication = InlineRTCScreenShare(
+      participantIdentity: "local",
+      publicationID: "TR_screen_timeout_late",
+      captureSourceID: source.id,
+      isLocal: true,
+      videoTrack: nil
+    )
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false,
+      screenCaptureSource: source
+    ))
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShareState == .published
+    }
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 1, shares: [oldPublication])
+    )
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShares == [oldPublication]
+    }
+    let oldRoom = try #require(await driver.currentRoom())
+    await driver.emitToCurrentRoom(.reconnecting(mode: .full))
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().state == .reconnecting(target)
+    }
+    await driver.emitToCurrentRoom(.reconnected(mode: .full))
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().state == .connected(target)
+    }
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 2, shares: [])
+    )
+
+    try await eventuallyRTC {
+      let operations = await driver.operations()
+      return operations.filter { $0 == "connect:29" }.count == 2
+        && operations.filter { $0 == "screen:29:display:29" }.count == 2
+    }
+    try await eventuallyRTC {
+      let snapshot = await rtc.currentSnapshot()
+      return snapshot.state == .connected(target)
+        && snapshot.screenShareState == .published
+    }
+
+    await driver.emit(
+      .screenSharesChanged(revision: 3, shares: [latePublication]),
+      to: oldRoom
+    )
+    try await Task.sleep(for: .milliseconds(20))
+    #expect(await rtc.currentSnapshot().screenShares.isEmpty)
+  }
+
+  @Test("quick reconnect escalation fences full replacement before Stop")
+  func stopDuringFullReconnectScreenRepublish() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver(current: .denied)
+    )
+    let driver = FakeGridRTCDriver()
+    let rtc = GridRTCEngine(audio: audio, driver: driver)
+    let target = InlineRTCSessionID("grid-test:1:30:1")
+    let source = InlineRTCScreenCaptureSource(
+      id: "display:30",
+      name: "Main Display",
+      displayID: 30
+    )
+    let oldPublication = InlineRTCScreenShare(
+      participantIdentity: "local",
+      publicationID: "TR_screen_stop_old",
+      captureSourceID: source.id,
+      isLocal: true,
+      videoTrack: nil
+    )
+    let replacementPublication = InlineRTCScreenShare(
+      participantIdentity: "local",
+      publicationID: "TR_screen_stop_replacement",
+      captureSourceID: source.id,
+      isLocal: true,
+      videoTrack: nil
+    )
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false,
+      screenCaptureSource: source
+    ))
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShareState == .published
+    }
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 1, shares: [oldPublication])
+    )
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShares == [oldPublication]
+    }
+    await driver.emitToCurrentRoom(.reconnecting(mode: .quick))
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().state == .reconnecting(target)
+    }
+    // Mirrors LiveKit's didUpdateReconnectMode callback when a quick recovery
+    // escalates to full before didCompleteReconnectWithMode(.full).
+    await driver.emitToCurrentRoom(.reconnecting(mode: .full))
+    try await Task.sleep(for: .milliseconds(20))
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false
+    ))
+    await driver.emitToCurrentRoom(.reconnected(mode: .full))
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().state == .connected(target)
+    }
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 2, shares: [oldPublication])
+    )
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 3, shares: [])
+    )
+    try await Task.sleep(for: .milliseconds(20))
+    #expect(
+      await driver.operations().filter { $0 == "screen:30:off" }.isEmpty
+    )
+
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 4, shares: [replacementPublication])
+    )
+    try await eventuallyRTC {
+      await driver.operations().filter { $0 == "screen:30:off" }.count == 1
+    }
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 5, shares: [])
+    )
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShareState == .off
+    }
+    #expect(
+      await driver.operations().filter { $0 == "screen:30:display:30" }.count == 1
+    )
+  }
+
+  @Test("stop before full reconnect cleans up a late replacement")
+  func stopBeforeFullReconnectCleansUpLateReplacement() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver(current: .denied)
+    )
+    let driver = FakeGridRTCDriver()
+    let rtc = GridRTCEngine(audio: audio, driver: driver)
+    let target = InlineRTCSessionID("grid-test:1:32:1")
+    let source = InlineRTCScreenCaptureSource(
+      id: "display:32",
+      name: "Main Display",
+      displayID: 32
+    )
+    let oldPublication = InlineRTCScreenShare(
+      participantIdentity: "local",
+      publicationID: "TR_screen_pre_stop_old",
+      captureSourceID: source.id,
+      isLocal: true,
+      videoTrack: nil
+    )
+    let latePublication = InlineRTCScreenShare(
+      participantIdentity: "local",
+      publicationID: "TR_screen_pre_stop_late",
+      captureSourceID: source.id,
+      isLocal: true,
+      videoTrack: nil
+    )
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false,
+      screenCaptureSource: source
+    ))
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShareState == .published
+    }
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 1, shares: [oldPublication])
+    )
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShares == [oldPublication]
+    }
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false
+    ))
+    try await eventuallyRTC {
+      await driver.operations().filter { $0 == "screen:32:off" }.count == 1
+    }
+    await driver.emitToCurrentRoom(.reconnecting(mode: .full))
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().state == .reconnecting(target)
+    }
+    await driver.emitToCurrentRoom(.reconnected(mode: .full))
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 2, shares: [])
+    )
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 3, shares: [latePublication])
+    )
+
+    try await eventuallyRTC {
+      await driver.operations().filter { $0 == "screen:32:off" }.count == 2
+    }
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 4, shares: [])
+    )
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShareState == .off
+    }
+  }
+
+  @Test("full reconnect watchdog starts before completion with a lagging publication snapshot")
+  func fullReconnectWatchdogStartsBeforeCompletion() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver(current: .denied)
+    )
+    var configuration = InlineRTCConfiguration.voice
+    configuration.connection.screenShareRepublishTimeout = 0.05
+    let driver = FakeGridRTCDriver()
+    let rtc = GridRTCEngine(
+      audio: audio,
+      driver: driver,
+      configuration: configuration
+    )
+    let target = InlineRTCSessionID("grid-test:1:33:1")
+    let source = InlineRTCScreenCaptureSource(
+      id: "display:33",
+      name: "Main Display",
+      displayID: 33
+    )
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false,
+      screenCaptureSource: source
+    ))
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShareState == .published
+    }
+    let oldRoom = try #require(await driver.currentRoom())
+    await driver.emitToCurrentRoom(.reconnecting(mode: .full))
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().state == .reconnecting(target)
+    }
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false
+    ))
+
+    // No reconnected event or local publication snapshot arrives. The bound
+    // still fences the old room because applied provider state proves a local
+    // track was in flight when reconnecting began.
+    try await eventuallyRTC {
+      await driver.operations().filter { $0 == "connect:33" }.count == 2
+    }
+    try await eventuallyRTC {
+      let snapshot = await rtc.currentSnapshot()
+      return snapshot.state == .connected(target)
+        && snapshot.screenShareState == .off
+    }
+    await driver.emit(
+      .screenSharesChanged(revision: 1, shares: []),
+      to: oldRoom
+    )
+    try await Task.sleep(for: .milliseconds(20))
+    #expect(await rtc.currentSnapshot().screenShares.isEmpty)
+  }
+
+  @Test("full reconnect fences an initial screen publication still in flight")
+  func fullReconnectFencesInitialScreenPublication() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver(current: .denied)
+    )
+    let driver = FakeGridRTCDriver(blockedScreenShareRoomID: 34)
+    let rtc = GridRTCEngine(audio: audio, driver: driver)
+    let target = InlineRTCSessionID("grid-test:1:34:1")
+    let source = InlineRTCScreenCaptureSource(
+      id: "display:34",
+      name: "Main Display",
+      displayID: 34
+    )
+    let initialPublication = InlineRTCScreenShare(
+      participantIdentity: "local",
+      publicationID: "TR_screen_inflight_initial",
+      captureSourceID: source.id,
+      isLocal: true,
+      videoTrack: nil
+    )
+    let latePublication = InlineRTCScreenShare(
+      participantIdentity: "local",
+      publicationID: "TR_screen_inflight_late",
+      captureSourceID: source.id,
+      isLocal: true,
+      videoTrack: nil
+    )
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false,
+      screenCaptureSource: source
+    ))
+    try await eventuallyRTC {
+      let snapshot = await rtc.currentSnapshot()
+      guard snapshot.screenShareState == .publishing else { return false }
+      return await driver.operations().contains("screen:34:display:34")
+    }
+
+    await driver.emitToCurrentRoom(.reconnecting(mode: .full))
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().state == .reconnecting(target)
+    }
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false
+    ))
+    await driver.emitToCurrentRoom(.reconnected(mode: .full))
+    await driver.releaseBlockedScreenShare()
+
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 1, shares: [initialPublication])
+    )
+    try await eventuallyRTC {
+      await driver.operations().filter { $0 == "screen:34:off" }.count == 1
+    }
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 2, shares: [])
+    )
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 3, shares: [latePublication])
+    )
+    try await eventuallyRTC {
+      await driver.operations().filter { $0 == "screen:34:off" }.count == 2
+    }
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 4, shares: [])
+    )
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShareState == .off
+    }
+  }
+
+  @Test("stop during full reconnect timeout fences a late replacement")
+  func stopDuringFullReconnectScreenRepublishTimeout() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver(current: .denied)
+    )
+    var configuration = InlineRTCConfiguration.voice
+    configuration.connection.screenShareRepublishTimeout = 0.05
+    let driver = FakeGridRTCDriver()
+    let rtc = GridRTCEngine(
+      audio: audio,
+      driver: driver,
+      configuration: configuration
+    )
+    let target = InlineRTCSessionID("grid-test:1:31:1")
+    let source = InlineRTCScreenCaptureSource(
+      id: "display:31",
+      name: "Main Display",
+      displayID: 31
+    )
+    let oldPublication = InlineRTCScreenShare(
+      participantIdentity: "local",
+      publicationID: "TR_screen_stop_timeout_old",
+      captureSourceID: source.id,
+      isLocal: true,
+      videoTrack: nil
+    )
+    let latePublication = InlineRTCScreenShare(
+      participantIdentity: "local",
+      publicationID: "TR_screen_stop_timeout_late",
+      captureSourceID: source.id,
+      isLocal: true,
+      videoTrack: nil
+    )
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false,
+      screenCaptureSource: source
+    ))
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShareState == .published
+    }
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 1, shares: [oldPublication])
+    )
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShares == [oldPublication]
+    }
+    let oldRoom = try #require(await driver.currentRoom())
+    await driver.emitToCurrentRoom(.reconnecting(mode: .full))
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().state == .reconnecting(target)
+    }
+    await driver.emitToCurrentRoom(.reconnected(mode: .full))
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().state == .connected(target)
+    }
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false
+    ))
+
+    try await eventuallyRTC {
+      await driver.operations().filter { $0 == "connect:31" }.count == 2
+    }
+    try await eventuallyRTC {
+      let snapshot = await rtc.currentSnapshot()
+      return snapshot.state == .connected(target)
+        && snapshot.screenShareState == .off
+    }
+    #expect(
+      await driver.operations().filter { $0 == "screen:31:display:31" }.count == 1
+    )
+    #expect(await driver.operations().filter { $0 == "screen:31:off" }.isEmpty)
+
+    await driver.emit(
+      .screenSharesChanged(revision: 2, shares: [latePublication]),
+      to: oldRoom
+    )
+    try await Task.sleep(for: .milliseconds(20))
+    #expect(await rtc.currentSnapshot().screenShares.isEmpty)
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false,
+      screenCaptureSource: source
+    ))
+    try await eventuallyRTC {
+      await driver.operations().filter { $0 == "screen:31:display:31" }.count == 2
+    }
+    await driver.emit(
+      .screenSharesChanged(revision: 3, shares: [latePublication]),
+      to: oldRoom
+    )
+    try await Task.sleep(for: .milliseconds(20))
+    #expect(
+      await driver.operations().filter { $0 == "screen:31:display:31" }.count == 2
+    )
+  }
+
   @Test("microphone intent coalesces to the latest value")
   func microphoneIntentCoalesces() async throws {
     let audio = GridAudioEngine(
@@ -145,6 +1239,33 @@ struct GridRTCEngineTests {
     #expect(operations.contains("connect:21"))
   }
 
+  @Test("a retired connect completion cannot release the audio transport fence")
+  func retiredConnectCannotReleaseAudioTransportFence() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(preparationRequiresRTCTransport: true),
+      permissionDriver: TestGridMicrophonePermissionDriver()
+    )
+    let driver = FakeGridRTCDriver(blockedRoomID: 53)
+    let rtc = GridRTCEngine(audio: audio, driver: driver)
+    let target = InlineRTCSessionID("grid-test:1:53:1")
+
+    await rtc.setDemand(demand(target: target, microphoneEnabled: true))
+    try await eventuallyRTC {
+      await driver.operations().contains("connect:53")
+    }
+    #expect(await audio.isWaitingForRTCTransport())
+
+    await rtc.setDemand(InlineRTCDemand())
+    try await eventuallyRTC {
+      await driver.operations().contains("quiesce-done:53")
+    }
+    await driver.releaseBlockedConnect()
+    try await Task.sleep(for: .milliseconds(20))
+
+    #expect(await audio.isWaitingForRTCTransport())
+    #expect(await driver.operations().contains("publish:53:muted=true") == false)
+  }
+
   @Test("initial connect watchdog starts a replacement while the old provider remains stuck")
   func initialConnectWatchdog() async throws {
     let audio = GridAudioEngine(
@@ -171,7 +1292,7 @@ struct GridRTCEngineTests {
     }
 
     let operations = await driver.operations()
-    #expect(operations.contains("silence:22"))
+    #expect(operations.contains("quiesce:22"))
     #expect(operations.contains("disconnect:22"))
     #expect(operations.contains("publish:22:muted=true") == false)
 
@@ -228,7 +1349,41 @@ struct GridRTCEngineTests {
     #expect(await driver.operations().filter { $0 == "connect:25" }.count == 3)
   }
 
-  @Test("a hung microphone publication is retired and replaced")
+  @Test("circuit-open retirement still releases every room's local media")
+  func circuitOpenRetirementQuiescesLocally() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver()
+    )
+    let driver = FakeGridRTCDriver(blockedRoomID: 26, blockedConnectCalls: 2)
+    var configuration = InlineRTCConfiguration.voice
+    configuration.connection.initialConnectSlowWarningDelay = 0.01
+    configuration.connection.initialConnectWatchdogTimeout = 0.03
+    configuration.connection.providerTeardownTimeout = 0.1
+    configuration.connection.maxAbandonedProviderOperations = 2
+    let rtc = GridRTCEngine(audio: audio, driver: driver, configuration: configuration)
+    let target = InlineRTCSessionID("grid-test:1:26:1")
+
+    await rtc.setDemand(demand(target: target, microphoneEnabled: true))
+    try await eventuallyRTC(timeout: .seconds(3)) {
+      let snapshot = await rtc.currentSnapshot()
+      return snapshot.providerCircuitOpen
+        && snapshot.abandonedProviderOperationCount == 2
+    }
+
+    await rtc.setDemand(InlineRTCDemand())
+    let receipt = await rtc.shutdown()
+
+    #expect(receipt.isQuiescent)
+    #expect(receipt.microphonePublicationCount == 0)
+    #expect(receipt.screenSharePublicationCount == 0)
+    #expect(await audio.currentSnapshot().captureLeaseCount == 0)
+    #expect(await driver.operations().filter { $0 == "quiesce-done:26" }.count >= 2)
+
+    await driver.releaseBlockedConnect()
+  }
+
+  @Test("a hung microphone publication fences replacement until mutation ownership returns")
   func microphonePublicationWatchdog() async throws {
     let audio = GridAudioEngine(
       driver: RTCFakeAudioDriver(),
@@ -245,6 +1400,12 @@ struct GridRTCEngineTests {
     await rtc.setDemand(demand(target: target, microphoneEnabled: true))
     try await eventuallyRTC { await driver.operations().contains("publish:23:muted=true") }
     try await eventuallyRTC(timeout: .seconds(2)) {
+      await rtc.currentSnapshot().failedLocalQuiescenceCount == 1
+    }
+    #expect(await driver.operations().filter { $0 == "connect:23" }.count == 1)
+
+    await driver.releaseBlockedPublish()
+    try await eventuallyRTC(timeout: .seconds(2)) {
       let snapshot = await rtc.currentSnapshot()
       let connectCount = await driver.operations().filter { $0 == "connect:23" }.count
       return connectCount >= 2
@@ -252,14 +1413,11 @@ struct GridRTCEngineTests {
         && snapshot.microphonePublicationState == .published
         && !snapshot.microphoneMuted
     }
-
-    await driver.releaseBlockedPublish()
-    try await Task.sleep(for: .milliseconds(20))
     #expect(await driver.operations().filter { $0 == "publish:23:muted=true" }.count == 2)
     #expect(await rtc.currentSnapshot().state == .connected(target))
   }
 
-  @Test("a hung microphone mute is retired and replaced")
+  @Test("a hung microphone mute fences replacement until mutation ownership returns")
   func microphoneMuteWatchdog() async throws {
     let audio = GridAudioEngine(
       driver: RTCFakeAudioDriver(),
@@ -278,21 +1436,53 @@ struct GridRTCEngineTests {
     await rtc.setDemand(demand(target: target, microphoneEnabled: true))
     try await eventuallyRTC { await driver.operations().contains("mute:24:false") }
     try await eventuallyRTC(timeout: .seconds(2)) {
+      await rtc.currentSnapshot().failedLocalQuiescenceCount == 1
+    }
+    #expect(await driver.operations().filter { $0 == "connect:24" }.count == 1)
+
+    await driver.releaseBlockedMute()
+    try await eventuallyRTC(timeout: .seconds(2)) {
       let snapshot = await rtc.currentSnapshot()
-      let connectCount = await driver.operations().filter { $0 == "connect:24" }.count
-      return connectCount >= 2
+      return await driver.operations().filter { $0 == "connect:24" }.count >= 2
         && snapshot.state == .connected(target)
         && snapshot.microphonePublicationState == .published
         && !snapshot.microphoneMuted
     }
-
-    await driver.releaseBlockedMute()
-    try await Task.sleep(for: .milliseconds(20))
-    #expect(await rtc.currentSnapshot().state == .connected(target))
   }
 
-  @Test("leave silences before asynchronous disconnect")
-  func leaveSilencesFirst() async throws {
+  @Test("shutdown rejects a retained provider media mutation until it returns")
+  func shutdownRetainsProviderMediaMutationOwnership() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver()
+    )
+    let driver = FakeGridRTCDriver(blockedPublishRoomID: 53)
+    var configuration = InlineRTCConfiguration.voice
+    configuration.connection.microphonePublishWatchdogTimeout = 0.03
+    configuration.connection.providerTeardownTimeout = 0.05
+    let rtc = GridRTCEngine(audio: audio, driver: driver, configuration: configuration)
+    let target = InlineRTCSessionID("grid-test:1:53:1")
+
+    await rtc.setDemand(demand(target: target, microphoneEnabled: true))
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().failedLocalQuiescenceCount == 1
+    }
+
+    let unsafeReceipt = await rtc.shutdown()
+    #expect(!unsafeReceipt.isQuiescent)
+    #expect(unsafeReceipt.localMediaMutationCount == 1)
+    #expect(unsafeReceipt.locallyActiveRoomCount == 1)
+
+    await driver.releaseBlockedPublish()
+    try await eventuallyRTC(timeout: .seconds(2)) {
+      await rtc.currentSnapshot().failedLocalQuiescenceCount == 0
+    }
+    let safeReceipt = await rtc.shutdown()
+    #expect(safeReceipt.isQuiescent)
+  }
+
+  @Test("leave proves local quiescence before becoming idle")
+  func leaveQuiescesLocallyFirst() async throws {
     let audio = GridAudioEngine(
       driver: RTCFakeAudioDriver(),
       permissionDriver: TestGridMicrophonePermissionDriver()
@@ -303,21 +1493,27 @@ struct GridRTCEngineTests {
 
     await rtc.setDemand(demand(target: target, microphoneEnabled: true))
     try await eventuallyRTC { await rtc.currentSnapshot().microphonePublicationState == .published }
+    #expect(await rtc.currentSnapshot().activeRoomCount == 1)
     await rtc.setDemand(InlineRTCDemand())
-    try await eventuallyRTC { await driver.operations().contains("silence:30") }
+    try await eventuallyRTC { await driver.operations().contains("quiesce:30") }
 
-    let operationsDuringDisconnect = await driver.operations()
-    #expect(operationsDuringDisconnect.contains("disconnect-done:30") == false)
+    let operationsDuringQuiescence = await driver.operations()
+    #expect(operationsDuringQuiescence.contains("quiesce-done:30") == false)
+    let retiringSnapshot = await rtc.currentSnapshot()
+    #expect(retiringSnapshot.activeRoomCount == 0)
+    #expect(retiringSnapshot.retiringRoomCount == 1)
+    #expect(retiringSnapshot.pendingRemoteLeaveCount == 0)
     try await eventuallyRTC { await rtc.currentSnapshot().state == .idle }
-    try await eventuallyRTC { await driver.operations().contains("disconnect-done:30") }
+    try await eventuallyRTC { await driver.operations().contains("quiesce-done:30") }
+    try await eventuallyRTC { await rtc.currentSnapshot().retiringRoomCount == 0 }
     let operations = await driver.operations()
-    let silenceIndex = try #require(operations.firstIndex(of: "silence:30"))
-    let disconnectIndex = try #require(operations.firstIndex(of: "disconnect:30"))
-    #expect(silenceIndex < disconnectIndex)
+    let startIndex = try #require(operations.firstIndex(of: "quiesce:30"))
+    let finishIndex = try #require(operations.firstIndex(of: "quiesce-done:30"))
+    #expect(startIndex < finishIndex)
   }
 
-  @Test("a hung silence operation cannot block disconnect or shutdown")
-  func hungSilenceIsBounded() async throws {
+  @Test("local quiescence does not depend on the provider silence path")
+  func localQuiescenceBypassesProviderSilence() async throws {
     let audio = GridAudioEngine(
       driver: RTCFakeAudioDriver(),
       permissionDriver: TestGridMicrophonePermissionDriver(),
@@ -333,15 +1529,13 @@ struct GridRTCEngineTests {
     await rtc.setDemand(demand(target: target, microphoneEnabled: true))
     try await eventuallyRTC { await rtc.currentSnapshot().microphonePublicationState == .published }
     await rtc.setDemand(InlineRTCDemand())
-    try await eventuallyRTC { await driver.operations().contains("silence:36") }
-    try await eventuallyRTC(timeout: .milliseconds(250)) {
-      await driver.operations().contains("disconnect:36")
-    }
+    try await eventuallyRTC { await driver.operations().contains("quiesce-done:36") }
 
     let shutdownStartedAt = ContinuousClock.now
-    await rtc.shutdown()
+    let receipt = await rtc.shutdown()
     #expect(shutdownStartedAt.duration(to: .now) < .milliseconds(250))
-    await driver.releaseBlockedSilence()
+    #expect(receipt.isQuiescent)
+    #expect(await driver.operations().contains("silence:36") == false)
   }
 
   @Test("room switch retires the previous provider before starting the replacement")
@@ -363,13 +1557,52 @@ struct GridRTCEngineTests {
     try await eventuallyRTC { await driver.operations().contains("connect:34") }
 
     let operations = await driver.operations()
-    let retiredIndex = try #require(operations.firstIndex(of: "disconnect-done:33"))
+    let retiredIndex = try #require(operations.firstIndex(of: "quiesce-done:33"))
     let replacementIndex = try #require(operations.firstIndex(of: "connect:34"))
     #expect(retiredIndex < replacementIndex)
   }
 
-  @Test("hung provider teardown releases Grid leases and cannot block shutdown")
-  func hungProviderTeardownIsBounded() async throws {
+  @Test("room replacement rearms the custom ADM transport fence")
+  func roomReplacementRearmsAudioTransportFence() async throws {
+    let audioDriver = RTCFakeAudioDriver(
+      preparationRequiresRTCTransport: true,
+      initiallyRecordingActive: false
+    )
+    let audio = GridAudioEngine(
+      driver: audioDriver,
+      permissionDriver: TestGridMicrophonePermissionDriver(),
+      captureCooldown: .milliseconds(5)
+    )
+    let driver = FakeGridRTCDriver()
+    let rtc = GridRTCEngine(audio: audio, driver: driver)
+    let first = InlineRTCSessionID("grid-test:1:54:1")
+    let second = InlineRTCSessionID("grid-test:1:55:1")
+
+    await rtc.setDemand(demand(target: first, microphoneEnabled: false))
+    try await eventuallyRTC(timeout: .seconds(2)) {
+      await rtc.currentSnapshot().microphonePublicationState == .published
+    }
+    await rtc.setDemand(demand(target: second, microphoneEnabled: false))
+    try await eventuallyRTC(timeout: .seconds(2)) {
+      let snapshot = await rtc.currentSnapshot()
+      return snapshot.state == .connected(second)
+        && snapshot.microphonePublicationState == .published
+    }
+
+    let operations = await audioDriver.operations()
+    let firstStart = try #require(operations.firstIndex(of: "prepared:true"))
+    let stop = try #require(
+      operations[firstStart...].firstIndex(of: "prepared:false")
+    )
+    let replacementStart = try #require(
+      operations[operations.index(after: stop)...].firstIndex(of: "prepared:true")
+    )
+    #expect(firstStart < stop)
+    #expect(stop < replacementStart)
+  }
+
+  @Test("local quiescence is independent from a hung provider disconnect")
+  func localQuiescenceBypassesProviderDisconnect() async throws {
     let audio = GridAudioEngine(
       driver: RTCFakeAudioDriver(),
       permissionDriver: TestGridMicrophonePermissionDriver(),
@@ -385,28 +1618,75 @@ struct GridRTCEngineTests {
     await rtc.setDemand(demand(target: target, microphoneEnabled: true))
     try await eventuallyRTC { await rtc.currentSnapshot().microphonePublicationState == .published }
     await rtc.setDemand(InlineRTCDemand())
-    try await eventuallyRTC { await driver.operations().contains("disconnect:35") }
+    try await eventuallyRTC { await driver.operations().contains("quiesce-done:35") }
 
     let shutdownStartedAt = ContinuousClock.now
-    await rtc.shutdown()
+    let receipt = await rtc.shutdown()
     let shutdownDuration = shutdownStartedAt.duration(to: .now)
     #expect(shutdownDuration < .milliseconds(200))
+    #expect(receipt.isQuiescent)
     #expect(await rtc.currentSnapshot().state == .idle)
     try await eventuallyRTC {
       await audio.currentSnapshot().captureLeaseCount == 0
     }
 
-    await driver.releaseBlockedDisconnect(roomID: 35)
   }
 
-  @Test("repeated stuck disconnects cannot accumulate beyond the provider circuit")
-  func disconnectCircuitBreaker() async throws {
+  @Test("failed local quiescence is retained and shutdown cannot report success")
+  func failedLocalQuiescenceIsNotReaped() async throws {
     let audio = GridAudioEngine(
       driver: RTCFakeAudioDriver(),
       permissionDriver: TestGridMicrophonePermissionDriver(),
       captureCooldown: .milliseconds(10)
     )
-    let driver = FakeGridRTCDriver(blockDisconnectRoomID: 39)
+    let driver = FakeGridRTCDriver(localQuiescenceFailureRoomID: 37)
+    var configuration = InlineRTCConfiguration.voice
+    configuration.connection.providerTeardownTimeout = 0.05
+    let rtc = GridRTCEngine(audio: audio, driver: driver, configuration: configuration)
+    let target = InlineRTCSessionID("grid-test:1:37:1")
+
+    await rtc.setDemand(demand(target: target, microphoneEnabled: true))
+    try await eventuallyRTC { await rtc.currentSnapshot().microphonePublicationState == .published }
+    let receipt = await rtc.shutdown()
+
+    #expect(!receipt.isQuiescent)
+    #expect(receipt.locallyActiveRoomCount == 1)
+    #expect(receipt.microphonePublicationCount > 0)
+    #expect(!receipt.failures.isEmpty)
+    #expect(await audio.currentSnapshot().captureLeaseCount == 1)
+  }
+
+  @Test("failed local quiescence fences a replacement room")
+  func failedLocalQuiescenceFencesReplacement() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver()
+    )
+    let driver = FakeGridRTCDriver(localQuiescenceFailureRoomID: 40)
+    var configuration = InlineRTCConfiguration.voice
+    configuration.connection.retirementBarrierTimeout = 0.02
+    let rtc = GridRTCEngine(audio: audio, driver: driver, configuration: configuration)
+    let first = InlineRTCSessionID("grid-test:1:40:1")
+    let replacement = InlineRTCSessionID("grid-test:1:41:1")
+
+    await rtc.setDemand(demand(target: first, microphoneEnabled: false))
+    try await eventuallyRTC { await rtc.currentSnapshot().microphonePublicationState == .published }
+    await rtc.setDemand(demand(target: replacement, microphoneEnabled: false))
+    try await eventuallyRTC { await rtc.currentSnapshot().failedLocalQuiescenceCount == 1 }
+    try await Task.sleep(for: .milliseconds(100))
+
+    #expect(await driver.operations().contains("connect:41") == false)
+    #expect(await rtc.currentSnapshot().failedLocalQuiescenceCount == 1)
+  }
+
+  @Test("repeated room retirement does not accumulate local cleanup obligations")
+  func repeatedLocalRetirementIsReaped() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver(),
+      captureCooldown: .milliseconds(10)
+    )
+    let driver = FakeGridRTCDriver()
     var configuration = InlineRTCConfiguration.voice
     configuration.connection.retirementBarrierTimeout = 0.01
     configuration.connection.providerTeardownTimeout = 0.03
@@ -414,29 +1694,17 @@ struct GridRTCEngineTests {
     let rtc = GridRTCEngine(audio: audio, driver: driver, configuration: configuration)
     let target = InlineRTCSessionID("grid-test:1:39:1")
 
-    for expectedCount in 1 ... 2 {
+    for expectedCount in 1 ... 3 {
       await rtc.setDemand(demand(target: target, microphoneEnabled: false))
       try await eventuallyRTC { await rtc.currentSnapshot().microphonePublicationState == .published }
       await rtc.setDemand(InlineRTCDemand())
       try await eventuallyRTC {
-        await rtc.currentSnapshot().abandonedProviderOperationCount == expectedCount
+        await driver.operations().filter { $0 == "quiesce-done:39" }.count == expectedCount
       }
     }
-    #expect(await rtc.currentSnapshot().providerCircuitOpen)
-
-    await rtc.setDemand(demand(target: target, microphoneEnabled: false))
-    try await Task.sleep(for: .milliseconds(100))
-    #expect(await driver.operations().filter { $0 == "connect:39" }.count == 2)
-    #expect(await driver.operations().filter { $0 == "disconnect:39" }.count == 2)
-
-    await driver.releaseBlockedDisconnect(roomID: 39)
-    try await eventuallyRTC(timeout: .seconds(2)) {
-      let snapshot = await rtc.currentSnapshot()
-      return !snapshot.providerCircuitOpen
-        && snapshot.abandonedProviderOperationCount == 0
-        && snapshot.state == .connected(target)
-    }
     #expect(await driver.operations().filter { $0 == "connect:39" }.count == 3)
+    #expect(await driver.operations().filter { $0 == "quiesce:39" }.count == 3)
+    #expect(await rtc.currentSnapshot().providerCircuitOpen == false)
   }
 
   @Test("microphone publication failure preserves the connected room")
@@ -538,6 +1806,40 @@ struct GridRTCEngineTests {
     #expect(await driver.operations().filter { $0 == "connect:37" }.count == 1)
   }
 
+  @Test("sender-owned healthy AUHAL rebuilds RTC when outbound audio stops")
+  func senderOwnedLocalAudioFailureRebuildsRTC() async throws {
+    let audioDriver = RTCFakeAudioDriver(
+      preparationRequiresRTCTransport: true,
+      initiallyRecordingActive: true,
+      recordingStartsWithMicrophoneSender: true
+    )
+    let audio = GridAudioEngine(
+      driver: audioDriver,
+      permissionDriver: TestGridMicrophonePermissionDriver()
+    )
+    let driver = FakeGridRTCDriver()
+    let rtc = GridRTCEngine(audio: audio, driver: driver)
+    let target = InlineRTCSessionID("grid-test:1:47:1")
+
+    await rtc.setDemand(demand(target: target, microphoneEnabled: true))
+    try await eventuallyRTC {
+      let snapshot = await rtc.currentSnapshot()
+      return snapshot.microphonePublicationState == .published && !snapshot.microphoneMuted
+    }
+    await driver.emitToCurrentRoom(.localAudioFlow(.missing))
+
+    try await eventuallyRTC {
+      let snapshot = await rtc.currentSnapshot()
+      return await driver.operations().filter { $0 == "connect:47" }.count == 2
+        && snapshot.state == .connected(target)
+        && snapshot.microphonePublicationState == .published
+        && !snapshot.microphoneMuted
+    }
+    #expect(await driver.operations().filter { $0 == "disconnect:47" }.count == 1)
+    #expect(await audioDriver.operations().contains("recover") == false)
+    #expect(await rtc.currentSnapshot().state == .connected(target))
+  }
+
   @Test("missing remote PCM reconstructs the RTC room without restarting capture")
   func remoteAudioFlowHealth() async throws {
     let audioDriver = RTCFakeAudioDriver()
@@ -557,6 +1859,27 @@ struct GridRTCEngineTests {
     }
     #expect(await audioDriver.operations().contains("recover") == false)
     #expect(await driver.operations().filter { $0 == "disconnect:38" }.count == 1)
+    #expect(await rtc.currentSnapshot().state == .connected(target))
+  }
+
+  @Test("decoded remote PCM repairs stopped physical playout without replacing the room")
+  func decodedPCMRepairsPhysicalPlayout() async throws {
+    let audioDriver = RTCFakeAudioDriver()
+    let audio = GridAudioEngine(
+      driver: audioDriver,
+      permissionDriver: TestGridMicrophonePermissionDriver()
+    )
+    let driver = FakeGridRTCDriver()
+    let rtc = GridRTCEngine(audio: audio, driver: driver)
+    let target = InlineRTCSessionID("grid-test:1:42:1")
+
+    await rtc.setDemand(demand(target: target, microphoneEnabled: false))
+    try await eventuallyRTC { await rtc.currentSnapshot().microphonePublicationState == .published }
+    await audioDriver.setPlayingActive(false)
+    await driver.emitToCurrentRoom(.remoteAudioFramesObserved(identity: "remote"))
+    try await eventuallyRTC { await audioDriver.operations().contains("recover-playout") }
+
+    #expect(await driver.operations().filter { $0 == "connect:42" }.count == 1)
     #expect(await rtc.currentSnapshot().state == .connected(target))
   }
 
@@ -661,14 +1984,18 @@ struct GridRTCEngineTests {
     }
 
     engine.setDemand(InlineRTCDemand())
-    await engine.shutdown()
+    _ = await engine.shutdown()
     #expect(await rtcDriver.operations().contains("disconnect-done:40"))
   }
 
-  @Test("process engine connects before preparing a transport-gated ADM")
+  @Test("process engine opens a transport-gated ADM route only after connect")
   func processEngineInitializesTransportBeforeAudio() async throws {
-    let audioDriver = RTCFakeAudioDriver(preparationRequiresRTCTransport: true)
-    let rtcDriver = FakeGridRTCDriver()
+    let audioDriver = RTCFakeAudioDriver(
+      preparationRequiresRTCTransport: true,
+      initiallyRecordingActive: false,
+      inputRouteStartsRecording: true
+    )
+    let rtcDriver = FakeGridRTCDriver(blockedRoomID: 44)
     let engine = InlineRTCSession(
       audioDriver: audioDriver,
       permissionDriver: TestGridMicrophonePermissionDriver(),
@@ -680,14 +2007,20 @@ struct GridRTCEngineTests {
     await engine.start()
     engine.setDemand(demand(target: target, microphoneEnabled: true))
 
+    try await eventuallyRTC { await rtcDriver.operations().contains("connect:44") }
+    let blockedAudioOperations = await audioDriver.operations()
+    #expect(blockedAudioOperations.contains("input:automatic") == false)
+    #expect(blockedAudioOperations.contains("prepared:true") == false)
+
+    await rtcDriver.releaseBlockedConnect()
     try await eventuallyRTC {
       let connected = await rtcDriver.operations().contains("connect:44")
-      let prepared = await audioDriver.operations().contains("prepared:true")
-      return connected && prepared
+      let routed = await audioDriver.operations().contains("input:automatic")
+      return connected && routed
     }
     let audioOperations = await audioDriver.operations()
     #expect(audioOperations.contains("input:automatic"))
-    #expect(audioOperations.contains("prepared:true"))
+    #expect(audioOperations.contains("prepared:true") == false)
   }
 
   @Test("duplicate LiveKit reconnect events count one completed recovery")
@@ -762,7 +2095,7 @@ struct GridRTCEngineTests {
       captureCooldown: .milliseconds(20)
     )
 
-    await engine.shutdown()
+    _ = await engine.shutdown()
   }
 
   @Test("permission prompt never blocks room demand or listen-only connection")
@@ -806,6 +2139,7 @@ struct GridRTCEngineTests {
   private func demand(
     target: InlineRTCSessionID,
     microphoneEnabled: Bool,
+    screenCaptureSource: InlineRTCScreenCaptureSource? = nil,
     outputVolume: Float = 1
   ) -> InlineRTCDemand {
     InlineRTCDemand(
@@ -818,6 +2152,7 @@ struct GridRTCEngineTests {
         expiresAt: Date().addingTimeInterval(60)
       ),
       microphoneEnabled: microphoneEnabled,
+      screenCaptureSource: screenCaptureSource,
       outputVolume: outputVolume
     )
   }
@@ -825,29 +2160,78 @@ struct GridRTCEngineTests {
 
 private actor RTCFakeAudioDriver: GridAudioDriver {
   nonisolated let preparationRequiresRTCTransport: Bool
+  nonisolated let recordingStartsWithMicrophoneSender: Bool
   private var log: [String] = []
+  private var playingActive = true
+  private var recordingActive: Bool?
+  private let inputRouteStartsRecording: Bool
+  private var configureFailuresRemaining: Int
 
-  init(preparationRequiresRTCTransport: Bool = false) {
+  init(
+    preparationRequiresRTCTransport: Bool = false,
+    initiallyRecordingActive: Bool? = nil,
+    inputRouteStartsRecording: Bool = false,
+    configureFailures: Int = 0,
+    recordingStartsWithMicrophoneSender: Bool = false
+  ) {
     self.preparationRequiresRTCTransport = preparationRequiresRTCTransport
+    recordingActive = initiallyRecordingActive
+    self.inputRouteStartsRecording = inputRouteStartsRecording
+    configureFailuresRemaining = max(configureFailures, 0)
+    self.recordingStartsWithMicrophoneSender = recordingStartsWithMicrophoneSender
   }
 
   func configure(_: InlineRTCConfiguration) async throws {
     log.append("configure")
+    if configureFailuresRemaining > 0 {
+      configureFailuresRemaining -= 1
+      throw FakeGridRTCDriverError.audioConfigureFailed
+    }
   }
 
   func setPrepared(_ prepared: Bool) async throws {
     log.append("prepared:\(prepared)")
+    if recordingActive != nil {
+      recordingActive = prepared
+    }
   }
 
   func recoverPreparedAudio(preserving _: AudioInputRouteTarget?) async throws {
     log.append("recover")
   }
 
+  func recoverPlayout(preserving _: AudioOutputRouteTarget?) async throws {
+    log.append("recover-playout")
+    playingActive = true
+  }
+
+  func runtimeHealth() async -> GridAudioRuntimeHealth {
+    GridAudioRuntimeHealth(
+      isEngineRunning: true,
+      isRecording: recordingActive ?? true,
+      isPlaying: playingActive,
+      route: InlineRTCAudioRoute(
+        currentInputID: "default",
+        defaultInputID: "default",
+        currentOutputID: "default",
+        defaultOutputID: "default",
+        inputDeviceCount: 1,
+        outputDeviceCount: 1,
+        isInputRouteValid: true,
+        isOutputRouteValid: true
+      )
+    )
+  }
+
   func applyInputRoute(
     _ target: AudioInputRouteTarget,
     restartPreparedAudio _: Bool
-  ) async throws {
+  ) async throws -> GridAudioInputRouteApplication {
     log.append("input:\(target.logDescription)")
+    if inputRouteStartsRecording {
+      recordingActive = true
+    }
+    return .committed
   }
 
   func inputDeviceInventory() async -> AudioInputDeviceInventory {
@@ -862,6 +2246,10 @@ private actor RTCFakeAudioDriver: GridAudioDriver {
   func operations() -> [String] {
     log
   }
+
+  func setPlayingActive(_ active: Bool) {
+    playingActive = active
+  }
 }
 
 private actor FakeGridRTCDriver: GridRTCDriver {
@@ -874,27 +2262,45 @@ private actor FakeGridRTCDriver: GridRTCDriver {
   private let blockedRoomID: Int64?
   private let blockedPublishRoomID: Int64?
   private let blockedMuteRoomID: Int64?
+  private let blockedScreenShareRoomID: Int64?
+  private let blockedScreenShareSourceID: String?
+  private let blockedScreenShareStopRoomID: Int64?
+  private let failScreenShareStopRoomID: Int64?
   private let blockSilenceRoomID: Int64?
   private let blockDisconnectRoomID: Int64?
+  private let localQuiescenceFailureRoomID: Int64?
   private let disconnectDelay: Duration
   private var blockedConnectContinuations: [CheckedContinuation<Void, Never>] = []
   private var blockedConnectCallsRemaining: Int
   private var blockedPublishCallsRemaining: Int
   private var blockedMuteCallsRemaining: Int
+  private var blockedScreenShareCallsRemaining: Int
+  private var blockedScreenShareStopCallsRemaining: Int
   private var blockedPublishContinuations: [CheckedContinuation<Void, Never>] = []
   private var blockedMuteContinuations: [CheckedContinuation<Void, Never>] = []
+  private var blockedScreenShareContinuations: [CheckedContinuation<Void, Never>] = []
   private var blockedSilenceContinuations: [CheckedContinuation<Void, Never>] = []
   private var blockedDisconnectContinuations: [Int64: [CheckedContinuation<Void, Never>]] = [:]
   private var publishFailuresRemaining: Int
+  private var screenShareFailuresRemaining: Int
+  private var activeScreenShareRoomIDs = Set<Int64>()
+  private var locallyRetiringRooms = Set<GridRTCRoomHandle>()
+  private var locallyQuiescedRooms = Set<GridRTCRoomHandle>()
 
   init(
     blockedRoomID: Int64? = nil,
     blockedConnectCalls: Int = .max,
     blockedPublishRoomID: Int64? = nil,
     blockedMuteRoomID: Int64? = nil,
+    blockedScreenShareRoomID: Int64? = nil,
+    blockedScreenShareSourceID: String? = nil,
+    blockedScreenShareStopRoomID: Int64? = nil,
+    failScreenShareStopRoomID: Int64? = nil,
     blockSilenceRoomID: Int64? = nil,
     blockDisconnectRoomID: Int64? = nil,
+    localQuiescenceFailureRoomID: Int64? = nil,
     publishFailures: Int = 0,
+    screenShareFailures: Int = 0,
     disconnectDelay: Duration = .zero
   ) {
     let stream = AsyncStream.makeStream(
@@ -907,12 +2313,20 @@ private actor FakeGridRTCDriver: GridRTCDriver {
     self.blockedRoomID = blockedRoomID
     self.blockedPublishRoomID = blockedPublishRoomID
     self.blockedMuteRoomID = blockedMuteRoomID
+    self.blockedScreenShareRoomID = blockedScreenShareRoomID
+    self.blockedScreenShareSourceID = blockedScreenShareSourceID
+    self.blockedScreenShareStopRoomID = blockedScreenShareStopRoomID
+    self.failScreenShareStopRoomID = failScreenShareStopRoomID
     self.blockSilenceRoomID = blockSilenceRoomID
     self.blockDisconnectRoomID = blockDisconnectRoomID
+    self.localQuiescenceFailureRoomID = localQuiescenceFailureRoomID
     blockedConnectCallsRemaining = blockedRoomID == nil ? 0 : max(blockedConnectCalls, 0)
     blockedPublishCallsRemaining = blockedPublishRoomID == nil ? 0 : 1
     blockedMuteCallsRemaining = blockedMuteRoomID == nil ? 0 : 1
+    blockedScreenShareCallsRemaining = blockedScreenShareRoomID == nil ? 0 : 1
+    blockedScreenShareStopCallsRemaining = blockedScreenShareStopRoomID == nil ? 0 : 1
     publishFailuresRemaining = publishFailures
+    screenShareFailuresRemaining = screenShareFailures
     self.disconnectDelay = disconnectDelay
   }
 
@@ -948,6 +2362,11 @@ private actor FakeGridRTCDriver: GridRTCDriver {
         blockedPublishContinuations.append(continuation)
       }
     }
+    if locallyRetiringRooms.contains(room) {
+      lifecycleContinuation.yield(
+        GridRTCLifecycleEventEnvelope(room: room, event: .retiredLocalMediaMutationReleased)
+      )
+    }
   }
 
   func setMicrophoneMuted(_ muted: Bool, in room: GridRTCRoomHandle) async throws {
@@ -959,6 +2378,52 @@ private actor FakeGridRTCDriver: GridRTCDriver {
       await withCheckedContinuation { continuation in
         blockedMuteContinuations.append(continuation)
       }
+    }
+    if locallyRetiringRooms.contains(room) {
+      lifecycleContinuation.yield(
+        GridRTCLifecycleEventEnvelope(room: room, event: .retiredLocalMediaMutationReleased)
+      )
+    }
+  }
+
+  func screenCaptureSources() async throws -> [InlineRTCScreenCaptureSource] {
+    []
+  }
+
+  func setScreenShare(
+    _ source: InlineRTCScreenCaptureSource?,
+    in room: GridRTCRoomHandle
+  ) async throws {
+    let roomID = roomIDs[room] ?? -1
+    log.append("screen:\(roomID):\(source?.id ?? "off")")
+    if screenShareFailuresRemaining > 0 {
+      screenShareFailuresRemaining -= 1
+      throw FakeGridRTCDriverError.screenShareFailed
+    }
+    if source == nil, failScreenShareStopRoomID == roomID {
+      throw FakeGridRTCDriverError.screenShareFailed
+    }
+    if source != nil,
+       blockedScreenShareRoomID == roomID,
+       blockedScreenShareSourceID == nil || blockedScreenShareSourceID == source?.id,
+       blockedScreenShareCallsRemaining > 0 {
+      blockedScreenShareCallsRemaining -= 1
+      await withCheckedContinuation { continuation in
+        blockedScreenShareContinuations.append(continuation)
+      }
+    }
+    if source == nil,
+       blockedScreenShareStopRoomID == roomID,
+       blockedScreenShareStopCallsRemaining > 0 {
+      blockedScreenShareStopCallsRemaining -= 1
+      await withCheckedContinuation { continuation in
+        blockedScreenShareContinuations.append(continuation)
+      }
+    }
+    if source == nil {
+      activeScreenShareRoomIDs.remove(roomID)
+    } else if !locallyQuiescedRooms.contains(room) {
+      activeScreenShareRoomIDs.insert(roomID)
     }
   }
 
@@ -990,6 +2455,44 @@ private actor FakeGridRTCDriver: GridRTCDriver {
     log.append("disconnect-done:\(roomID)")
   }
 
+  func quiesceLocally(_ room: GridRTCRoomHandle) async -> GridLocalRoomQuiescenceReceipt {
+    let roomID = roomIDs[room] ?? -1
+    locallyRetiringRooms.insert(room)
+    log.append("quiesce:\(roomID)")
+    // Keep disconnect vocabulary for ordering assertions while avoiding the
+    // provider-facing silence path that local quiescence intentionally bypasses.
+    log.append("disconnect:\(roomID)")
+    try? await Task.sleep(for: disconnectDelay)
+    if localQuiescenceFailureRoomID == roomID {
+      return GridLocalRoomQuiescenceReceipt(
+        room: room,
+        localResourcesReleased: false,
+        microphonePublicationCount: 1,
+        failures: ["injected local quiescence failure"]
+      )
+    }
+    let localMediaMutationCount =
+      (blockedPublishRoomID == roomID ? blockedPublishContinuations.count : 0)
+      + (blockedMuteRoomID == roomID ? blockedMuteContinuations.count : 0)
+    if localMediaMutationCount > 0 {
+      return GridLocalRoomQuiescenceReceipt(
+        room: room,
+        localResourcesReleased: false,
+        localMediaMutationCount: localMediaMutationCount,
+        failures: ["injected retained local media mutation"]
+      )
+    }
+    locallyQuiescedRooms.insert(room)
+    activeScreenShareRoomIDs.remove(roomID)
+    log.append("disconnect-done:\(roomID)")
+    log.append("quiesce-done:\(roomID)")
+    return GridLocalRoomQuiescenceReceipt(
+      room: room,
+      localResourcesReleased: true,
+      failures: []
+    )
+  }
+
   func releaseBlockedConnect() {
     let continuations = blockedConnectContinuations
     blockedConnectContinuations.removeAll()
@@ -1005,6 +2508,12 @@ private actor FakeGridRTCDriver: GridRTCDriver {
   func releaseBlockedMute() {
     let continuations = blockedMuteContinuations
     blockedMuteContinuations.removeAll()
+    continuations.forEach { $0.resume() }
+  }
+
+  func releaseBlockedScreenShare() {
+    let continuations = blockedScreenShareContinuations
+    blockedScreenShareContinuations.removeAll()
     continuations.forEach { $0.resume() }
   }
 
@@ -1027,14 +2536,28 @@ private actor FakeGridRTCDriver: GridRTCDriver {
     mutedStates[roomID]
   }
 
+  func isScreenShareActive(roomID: Int64) -> Bool {
+    activeScreenShareRoomIDs.contains(roomID)
+  }
+
   func emitToCurrentRoom(_ event: GridRTCLifecycleEvent) {
     guard let room = roomIDs.keys.first else { return }
+    lifecycleContinuation.yield(GridRTCLifecycleEventEnvelope(room: room, event: event))
+  }
+
+  func currentRoom() -> GridRTCRoomHandle? {
+    roomIDs.keys.first
+  }
+
+  func emit(_ event: GridRTCLifecycleEvent, to room: GridRTCRoomHandle) {
     lifecycleContinuation.yield(GridRTCLifecycleEventEnvelope(room: room, event: event))
   }
 }
 
 private enum FakeGridRTCDriverError: Error {
+  case audioConfigureFailed
   case publishFailed
+  case screenShareFailed
 }
 
 private extension InlineRTCSessionID {
