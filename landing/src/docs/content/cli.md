@@ -5,18 +5,28 @@ In this version, it is primarily optimized for AI and agent workflows. A more po
 
 ## Install
 
-### Homebrew (recommended)
+### macOS
+
+#### Homebrew
 
 ```bash
 brew tap inline-chat/homebrew-inline
 brew install --cask inline
 ```
 
-### Script
+#### Manual
 
 ```bash
 curl -fsSL https://inline.chat/cli/install.sh | sh
 ```
+
+### Linux
+
+```bash
+curl -fsSL https://inline.chat/cli/install.sh | sh
+```
+
+The installer supports x86_64 and ARM64 Linux systems using glibc or musl.
 
 ## Login
 
