@@ -16,7 +16,7 @@ import { randomUUID } from "node:crypto"
 const CONNECTION_CLEANUP_GRACE_MS = 30_000
 const DEFAULT_POLL_INTERVAL_MS = 2_000
 const DEFAULT_CLAIM_LEASE_MS = 30_000
-const DEFAULT_PROVIDER_TIMEOUT_MS = (GRID_PROVIDER_HTTP_POLICY.requestTimeoutSeconds + 2) * 1_000
+const DEFAULT_PROVIDER_TIMEOUT_MS = GRID_PROVIDER_HTTP_POLICY.workerTimeoutSeconds * 1_000
 const DEFAULT_BATCH_SIZE = 8
 const MAX_RETRY_DELAY_MS = 5 * 60_000
 const log = new Log("grid.providerEffects")

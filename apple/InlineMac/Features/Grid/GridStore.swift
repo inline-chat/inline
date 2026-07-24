@@ -1,4 +1,6 @@
+import AppKit
 import Auth
+import CoreGraphics
 import Foundation
 import InlineKit
 import InlineRTC
@@ -48,8 +50,12 @@ final class GridRoomService {
   @ObservationIgnored private var credentialRetryAttempt = 0
   @ObservationIgnored private var aloneAutoMuteTask: Task<Void, Never>?
   @ObservationIgnored private var aloneAutoMuteTarget: GridAloneAutoMuteTarget?
+  @ObservationIgnored private var screenShareAloneTask: Task<Void, Never>?
+  @ObservationIgnored private var screenShareAloneTarget: GridScreenShareAloneTarget?
+  @ObservationIgnored private var screenShareAloneGrace = GridScreenShareAloneGraceState()
   @ObservationIgnored private var mediaInteractionStartedAt: Date?
   @ObservationIgnored private let log = Log.scoped("GridRoomService")
+  private static let aloneMediaGraceSeconds = 5
 
   init(
     realtime: RealtimeV2 = Api.realtime,
@@ -68,11 +74,17 @@ final class GridRoomService {
       deviceIDKey: "grid.preferredInputDeviceID",
       deviceNameKey: "grid.preferredInputDeviceName"
     )
+    let outputPreferences = AudioOutputPreferenceStore(
+      defaults: userDefaults,
+      deviceIDKey: "grid.preferredOutputDeviceID",
+      deviceNameKey: "grid.preferredOutputDeviceName"
+    )
     homePreferences = GridHomePreferences(defaults: userDefaults)
     let mediaCoordinator = GridMediaCoordinator(
       engine: engine,
       defaults: userDefaults,
-      inputPreferences: inputPreferences
+      inputPreferences: inputPreferences,
+      outputPreferences: outputPreferences
     )
     self.mediaCoordinator = mediaCoordinator
     media = mediaCoordinator.presentation
@@ -102,6 +114,7 @@ final class GridRoomService {
     membershipEventsTask?.cancel()
     credentialRetryTask?.cancel()
     aloneAutoMuteTask?.cancel()
+    screenShareAloneTask?.cancel()
   }
 
   func isEnabled(spaceID: Int64) -> Bool {
@@ -117,6 +130,7 @@ final class GridRoomService {
     pendingCredentialTarget = nil
     resetCredentialRetry()
     cancelAloneAutoMute()
+    resetScreenShareAloneGrace()
     grids.removeAll()
     homeSpaces.removeAll()
     enabledSpaceIDs.removeAll()
@@ -187,11 +201,41 @@ final class GridRoomService {
   }
 
   func audioLevel(userID: Int64) -> Float {
-    let legacyIdentity = "inline-grid-user-\(userID)"
+    let legacyIdentity = Self.liveKitIdentityPrefix(userID: userID)
     return media.participantAudioLevels
       .filter { $0.key == legacyIdentity || $0.key.hasPrefix("\(legacyIdentity)-") }
       .map(\.value)
       .max() ?? 0
+  }
+
+  func isScreenSharing(userID: Int64) -> Bool {
+    let shares = screenShares(userID: userID)
+    if isOwnedUser(userID) {
+      return shares.contains(where: \.isLocal)
+    }
+    return !shares.isEmpty
+  }
+
+  func screenShare(userID: Int64) -> InlineRTCScreenShare? {
+    let shares = screenShares(userID: userID)
+    if isOwnedUser(userID) {
+      return shares.first(where: \.isLocal)
+    }
+    return shares.first
+  }
+
+  func screenShares(userID: Int64) -> [InlineRTCScreenShare] {
+    media.screenShares.filter {
+      Self.identity($0.participantIdentity, matchesUserID: userID)
+    }
+  }
+
+  func screenShares(participantIdentity: String) -> [InlineRTCScreenShare] {
+    media.screenShares.filter { $0.participantIdentity == participantIdentity }
+  }
+
+  func screenShare(publicationID: String) -> InlineRTCScreenShare? {
+    media.screenShares.first { $0.publicationID == publicationID }
   }
 
   func load(spaceID: Int64) async {
@@ -330,6 +374,47 @@ final class GridRoomService {
     toggleMicrophone(spaceID: grid.spaceID)
   }
 
+  func toggleScreenShare() {
+    guard currentMediaTarget() != nil else { return }
+    if media.isScreenShareRequested || media.isScreenSharing {
+      mediaCoordinator.stopScreenSharing()
+      resetScreenShareAloneGrace()
+      return
+    }
+    let displayID = Self.displayIDUnderPointer()
+    Task { [weak self] in
+      guard let self else { return }
+      await mediaCoordinator.startScreenSharing(displayID: displayID)
+      reconcileScreenShareAloneGrace()
+    }
+  }
+
+  func startScreenSharing(_ source: InlineRTCScreenCaptureSource) {
+    guard currentMediaTarget() != nil else { return }
+    mediaCoordinator.startScreenSharing(source)
+    reconcileScreenShareAloneGrace()
+  }
+
+  func stopScreenSharing() {
+    mediaCoordinator.stopScreenSharing()
+    resetScreenShareAloneGrace()
+  }
+
+  func refreshScreenCaptureSources() {
+    Task { [weak self] in
+      await self?.mediaCoordinator.refreshScreenCaptureSources()
+    }
+  }
+
+  func openScreenShare(for user: InlineProtocol.User) {
+    guard let share = screenShare(userID: user.id) else { return }
+    GridScreenShareWindowCoordinator.shared.open(
+      user: user,
+      share: share,
+      store: self
+    )
+  }
+
   func toggleRoomLock(roomID: Int64, locked: Bool) async {
     guard let mutation = optimisticallyUpdateRoom(
       roomID: roomID,
@@ -435,6 +520,7 @@ final class GridRoomService {
     if credentialRetryTarget != target { resetCredentialRetry() }
     mediaCoordinator.setTarget(target)
     reconcileAloneAutoMute()
+    reconcileScreenShareAloneGrace()
   }
 
   private func reconcileAloneAutoMute() {
@@ -460,7 +546,7 @@ final class GridRoomService {
 
     aloneAutoMuteTarget = target
     aloneAutoMuteTask = Task { [weak self] in
-      try? await Task.sleep(for: .seconds(5))
+      try? await Task.sleep(for: .seconds(Self.aloneMediaGraceSeconds))
       guard !Task.isCancelled else { return }
       self?.autoMuteIfStillAlone(target)
     }
@@ -491,6 +577,78 @@ final class GridRoomService {
     aloneAutoMuteTask?.cancel()
     aloneAutoMuteTask = nil
     aloneAutoMuteTarget = nil
+  }
+
+  private func reconcileScreenShareAloneGrace() {
+    let context = screenShareAloneContext()
+    let action = screenShareAloneGrace.reconcile(context)
+
+    guard case let .scheduleStop(publicationIDs) = action,
+          let mediaTarget = currentMediaTarget()
+    else {
+      cancelScreenShareAloneTask()
+      return
+    }
+
+    let target = GridScreenShareAloneTarget(
+      mediaTarget: mediaTarget,
+      episodeID: context.episodeID,
+      publicationIDs: publicationIDs
+    )
+    guard target != screenShareAloneTarget else { return }
+    cancelScreenShareAloneTask()
+    screenShareAloneTarget = target
+    screenShareAloneTask = Task { [weak self] in
+      try? await Task.sleep(for: GridScreenShareAloneGraceState.graceDuration)
+      guard !Task.isCancelled else { return }
+      self?.stopScreenShareIfStillAlone(target)
+    }
+  }
+
+  private func screenShareAloneContext() -> GridScreenShareAloneGraceState.Context {
+    let localShares = media.screenShares.filter(\.isLocal)
+    let localPublicationIDs = Set(localShares.map(\.publicationID))
+    let localParticipantIdentities = Set(localShares.map(\.participantIdentity))
+    let hasRemoteParticipant = media.connectedParticipantIdentities.contains {
+      !localParticipantIdentities.contains($0)
+    }
+    return .init(
+      episodeID: media.screenShareEpisodeID,
+      isConnected: media.connectionState == .connected,
+      isShareRequested: media.isScreenShareRequested,
+      localPublicationIDs: localPublicationIDs,
+      hasRemoteParticipant: hasRemoteParticipant
+    )
+  }
+
+  private func stopScreenShareIfStillAlone(_ target: GridScreenShareAloneTarget) {
+    guard screenShareAloneTarget == target else { return }
+    screenShareAloneTask = nil
+    screenShareAloneTarget = nil
+    guard currentMediaTarget() == target.mediaTarget,
+          GridScreenShareAloneGraceState.shouldCommitScheduledStop(
+            screenShareAloneContext(),
+            expectedEpisodeID: target.episodeID,
+            expectedPublicationIDs: target.publicationIDs
+          )
+    else { return }
+
+    log.debug(
+      "GRID_TRACE phase=alone_auto_stop_screen_share room=\(target.mediaTarget.roomID)"
+    )
+    mediaCoordinator.stopScreenSharing()
+    resetScreenShareAloneGrace()
+  }
+
+  private func cancelScreenShareAloneTask() {
+    screenShareAloneTask?.cancel()
+    screenShareAloneTask = nil
+    screenShareAloneTarget = nil
+  }
+
+  private func resetScreenShareAloneGrace() {
+    cancelScreenShareAloneTask()
+    screenShareAloneGrace.reset()
   }
 
   private func optimisticallyUpdateRoom(
@@ -666,6 +824,8 @@ final class GridRoomService {
       log.debug(
         "GRID_TRACE phase=click_to_connected elapsed_ms=\(totalMilliseconds) rtc_ms=\(rtcConnectMilliseconds ?? -1)"
       )
+    case .screenShareContextChanged:
+      reconcileScreenShareAloneGrace()
     }
   }
 
@@ -1081,8 +1241,40 @@ final class GridRoomService {
     return nil
   }
 
+  private func isOwnedUser(_ userID: Int64) -> Bool {
+    grids.values.lazy
+      .flatMap(\.rooms)
+      .flatMap(\.avatars)
+      .contains { $0.ownedByCurrentSession && $0.user.id == userID }
+  }
+
+  private static func liveKitIdentityPrefix(userID: Int64) -> String {
+    "inline-grid-user-\(userID)"
+  }
+
+  private static func identity(_ identity: String, matchesUserID userID: Int64) -> Bool {
+    let prefix = liveKitIdentityPrefix(userID: userID)
+    return identity == prefix || identity.hasPrefix("\(prefix)-")
+  }
+
+  private static func displayIDUnderPointer() -> UInt32? {
+    let mouseLocation = NSEvent.mouseLocation
+    guard let screen = NSScreen.screens.first(where: {
+      NSMouseInRect(mouseLocation, $0.frame, false)
+    }),
+      let screenNumber = screen.deviceDescription[
+        NSDeviceDescriptionKey("NSScreenNumber")
+      ] as? NSNumber
+    else { return CGMainDisplayID() }
+    return screenNumber.uint32Value
+  }
+
   func setInputSelection(_ selection: AudioInputSelection) {
     mediaCoordinator.setInput(selection)
+  }
+
+  func setOutputSelection(_ selection: AudioOutputSelection) {
+    mediaCoordinator.setOutput(selection)
   }
 
   func setOutputVolume(_ volume: Float) {
@@ -1091,6 +1283,10 @@ final class GridRoomService {
 
   func refreshInputDevices() {
     mediaCoordinator.refreshInputDevices()
+  }
+
+  func refreshOutputDevices() {
+    mediaCoordinator.refreshOutputDevices()
   }
 
   func retryAudio() {
@@ -1161,6 +1357,12 @@ private struct GridAloneAutoMuteTarget: Equatable {
   let spaceID: Int64
   let roomID: Int64
   let userID: Int64
+}
+
+private struct GridScreenShareAloneTarget: Equatable {
+  let mediaTarget: GridMediaTarget
+  let episodeID: UInt64
+  let publicationIDs: Set<String>
 }
 
 private struct OptimisticRoomMutation {

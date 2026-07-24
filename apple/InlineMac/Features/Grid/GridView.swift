@@ -17,12 +17,15 @@ struct GridView: View {
       isLoading: store.loadingSpaceIDs.contains(spaceID),
       didFailLoading: store.failedLoadSpaceIDs.contains(spaceID),
       audioLevel: store.audioLevel,
+      isScreenSharing: store.isScreenSharing,
       connectionState: store.connectionRecoveryAttempt > 0 ? .connecting : store.media.connectionState,
       onCreate: { store.createAndJoin(spaceID: spaceID) },
       onRetry: { Task { await store.load(spaceID: spaceID) } },
       onJoin: { roomID in store.join(roomID: roomID) },
       onLeave: { store.leaveCurrentRoom(spaceID: spaceID) },
       onToggleMicrophone: { store.toggleMicrophone(spaceID: spaceID) },
+      onOpenScreenShare: store.openScreenShare,
+      onStopScreenShare: store.stopScreenSharing,
       onSetTitle: { roomID, title in Task { await store.setRoomTitle(roomID: roomID, title: title) } },
       onSetLocked: { roomID, locked in Task { await store.toggleRoomLock(roomID: roomID, locked: locked) } },
       onDelete: { roomID in Task { await store.deleteRoom(roomID: roomID) } }
@@ -62,6 +65,12 @@ struct GridView: View {
           onLeave: { store.leaveCurrentRoom(spaceID: spaceID) },
           onSelectInput: store.setInputSelection,
           onRefreshInputDevices: store.refreshInputDevices,
+          onSelectOutput: store.setOutputSelection,
+          onRefreshOutputDevices: store.refreshOutputDevices,
+          onToggleScreenShare: store.toggleScreenShare,
+          onSelectScreenCaptureSource: store.startScreenSharing,
+          onRefreshScreenCaptureSources: store.refreshScreenCaptureSources,
+          onStopScreenShare: store.stopScreenSharing,
           onSetOutputVolume: store.setOutputVolume,
           onRetryAudio: store.retryAudio
         )

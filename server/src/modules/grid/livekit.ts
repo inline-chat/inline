@@ -1,20 +1,21 @@
 import type { GridConnection, GridConnectionCredentials } from "@inline-chat/protocol/core"
 import { LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL } from "@in/server/env"
 import { Log } from "@in/server/utils/log"
-import { AccessToken, RoomServiceClient, TrackSource } from "livekit-server-sdk"
+import { AccessToken, RoomServiceClient } from "livekit-server-sdk"
 
 const TOKEN_TTL_SECONDS = 5 * 60
 const log = new Log("grid.livekit")
 
 /**
- * Provider cleanup retries belong to the durable Grid outbox, not to an
- * opaque SDK failover loop. Each control-plane request therefore has one
- * transport-level AbortSignal deadline. The worker keeps a slightly wider
- * logical deadline as a final guard around injected or buggy executors.
+ * LiveKit Cloud's bounded region failover handles a transient edge or region
+ * transport failure inside one logical provider operation. The durable Grid
+ * outbox remains the owner of retries that must survive the process. The
+ * worker deadline covers all three SDK attempts plus discovery and backoff.
  */
 export const GRID_PROVIDER_HTTP_POLICY = {
-  requestTimeoutSeconds: 10,
-  failover: false,
+  requestTimeoutSeconds: 6,
+  failover: true,
+  workerTimeoutSeconds: 25,
 } as const
 
 export type GridConnectionIdentity = Pick<GridConnection, "roomId" | "generation">
@@ -58,7 +59,6 @@ export async function createGridConnectionCredentials(
     roomJoin: true,
     room: providerRoomName(input.connection),
     canPublish: true,
-    canPublishSources: [TrackSource.MICROPHONE],
     canSubscribe: true,
     canPublishData: false,
     canUpdateOwnMetadata: false,

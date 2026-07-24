@@ -69,12 +69,15 @@ struct GridContent: View {
   let isLoading: Bool
   let didFailLoading: Bool
   let audioLevel: (Int64) -> Float
+  let isScreenSharing: (Int64) -> Bool
   let connectionState: GridMediaConnectionStatus
   let onCreate: () -> Void
   let onRetry: () -> Void
   let onJoin: (Int64) -> Void
   let onLeave: () -> Void
   let onToggleMicrophone: () -> Void
+  let onOpenScreenShare: (InlineProtocol.User) -> Void
+  let onStopScreenShare: () -> Void
   let onSetTitle: (Int64, String) -> Void
   let onSetLocked: (Int64, Bool) -> Void
   let onDelete: (Int64) -> Void
@@ -88,10 +91,13 @@ struct GridContent: View {
               room: room,
               isCurrent: grid.hasCurrentRoomID && grid.currentRoomID == room.id,
               audioLevel: audioLevel,
+              isScreenSharing: isScreenSharing,
               connectionState: connectionState,
               onJoin: { onJoin(room.id) },
               onLeave: onLeave,
               onToggleMicrophone: onToggleMicrophone,
+              onOpenScreenShare: onOpenScreenShare,
+              onStopScreenShare: onStopScreenShare,
               onSetTitle: { onSetTitle(room.id, $0) },
               onSetLocked: { onSetLocked(room.id, $0) },
               onDelete: { onDelete(room.id) }
@@ -159,10 +165,13 @@ private struct GridRoomCard: View {
   let room: GridRoom
   let isCurrent: Bool
   let audioLevel: (Int64) -> Float
+  let isScreenSharing: (Int64) -> Bool
   let connectionState: GridMediaConnectionStatus
   let onJoin: () -> Void
   let onLeave: () -> Void
   let onToggleMicrophone: () -> Void
+  let onOpenScreenShare: (InlineProtocol.User) -> Void
+  let onStopScreenShare: () -> Void
   let onSetTitle: (String) -> Void
   let onSetLocked: (Bool) -> Void
   let onDelete: () -> Void
@@ -178,9 +187,12 @@ private struct GridRoomCard: View {
           room: room,
           isCurrent: true,
           audioLevel: audioLevel,
+          isScreenSharing: isScreenSharing,
           connectionState: connectionState,
           onLeave: onLeave,
-          onToggleMicrophone: onToggleMicrophone
+          onToggleMicrophone: onToggleMicrophone,
+          onOpenScreenShare: onOpenScreenShare,
+          onStopScreenShare: onStopScreenShare
         )
       } else {
         Button(action: onJoin) {
@@ -188,9 +200,12 @@ private struct GridRoomCard: View {
             room: room,
             isCurrent: false,
             audioLevel: audioLevel,
+            isScreenSharing: isScreenSharing,
             connectionState: .disconnected,
             onLeave: onLeave,
-            onToggleMicrophone: onToggleMicrophone
+            onToggleMicrophone: onToggleMicrophone,
+            onOpenScreenShare: onOpenScreenShare,
+            onStopScreenShare: onStopScreenShare
           )
         }
         .buttonStyle(.plain)
@@ -259,9 +274,12 @@ private struct GridRoomSurface: View {
   let room: GridRoom
   let isCurrent: Bool
   let audioLevel: (Int64) -> Float
+  let isScreenSharing: (Int64) -> Bool
   let connectionState: GridMediaConnectionStatus
   let onLeave: () -> Void
   let onToggleMicrophone: () -> Void
+  let onOpenScreenShare: (InlineProtocol.User) -> Void
+  let onStopScreenShare: () -> Void
 
   var body: some View {
     RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -270,9 +288,12 @@ private struct GridRoomSurface: View {
         GridRoomAvatars(
           avatars: room.avatars,
           audioLevel: audioLevel,
+          isScreenSharing: isScreenSharing,
           showsLocalConnectingIndicator: isCurrent && connectionState == .connecting,
           onLeave: onLeave,
-          onToggleMicrophone: onToggleMicrophone
+          onToggleMicrophone: onToggleMicrophone,
+          onOpenScreenShare: onOpenScreenShare,
+          onStopScreenShare: onStopScreenShare
         )
       }
       .overlay(alignment: .bottomTrailing) {
@@ -339,9 +360,12 @@ private struct GridRoomAvatars: View {
 
   let avatars: [GridAvatar]
   let audioLevel: (Int64) -> Float
+  let isScreenSharing: (Int64) -> Bool
   let showsLocalConnectingIndicator: Bool
   let onLeave: () -> Void
   let onToggleMicrophone: () -> Void
+  let onOpenScreenShare: (InlineProtocol.User) -> Void
+  let onStopScreenShare: () -> Void
 
   var body: some View {
     HStack(spacing: 4) {
@@ -349,18 +373,47 @@ private struct GridRoomAvatars: View {
         GridSpeakingAvatar(
           avatar: avatar,
           audioLevel: audioLevel(avatar.user.id),
+          isScreenSharing: isScreenSharing(avatar.user.id),
           showsConnectingIndicator: showsLocalConnectingIndicator && avatar.ownedByCurrentSession,
           onLeave: onLeave,
-          onToggleMicrophone: onToggleMicrophone
+          onToggleMicrophone: onToggleMicrophone,
+          onOpenScreenShare: { onOpenScreenShare(avatar.user) },
+          onStopScreenShare: onStopScreenShare
         )
         .transition(.scale(scale: 0.76).combined(with: .opacity))
       }
       if hiddenAvatarCount > 0 {
-        Text("+\(hiddenAvatarCount)")
-          .font(.system(size: 9, weight: .semibold).monospacedDigit())
-          .frame(width: 28, height: 28)
-          .background(.regularMaterial, in: Circle())
-          .transition(.scale(scale: 0.76).combined(with: .opacity))
+        if hiddenScreenSharingAvatars.isEmpty {
+          overflowLabel
+        } else {
+          Menu {
+            Section("Sharing screens") {
+              ForEach(hiddenScreenSharingAvatars, id: \.user.id) { avatar in
+                if avatar.ownedByCurrentSession {
+                  Button("You are sharing screen") {}
+                    .disabled(true)
+                  Button("Stop Sharing", role: .destructive, action: onStopScreenShare)
+                } else {
+                  Button {
+                    onOpenScreenShare(avatar.user)
+                  } label: {
+                    Label(
+                      "View \(InlineKit.User(from: avatar.user).displayName)’s Screen",
+                      systemImage: "rectangle.on.rectangle"
+                    )
+                  }
+                }
+              }
+            }
+          } label: {
+            overflowLabel
+          }
+          .menuStyle(.borderlessButton)
+          .menuIndicator(.hidden)
+          .fixedSize()
+          .help("View a shared screen")
+          .accessibilityLabel("\(hiddenAvatarCount) more people, including screen sharing")
+        }
       }
     }
   }
@@ -372,14 +425,30 @@ private struct GridRoomAvatars: View {
   private var hiddenAvatarCount: Int {
     max(avatars.count - visibleAvatars.count, 0)
   }
+
+  private var hiddenScreenSharingAvatars: [GridAvatar] {
+    Array(avatars.dropFirst(Self.maximumVisibleAvatarCount))
+      .filter { isScreenSharing($0.user.id) }
+  }
+
+  private var overflowLabel: some View {
+    Text("+\(hiddenAvatarCount)")
+      .font(.system(size: 9, weight: .semibold).monospacedDigit())
+      .frame(width: 28, height: 28)
+      .background(.regularMaterial, in: Circle())
+      .transition(.scale(scale: 0.76).combined(with: .opacity))
+  }
 }
 
 private struct GridSpeakingAvatar: View {
   let avatar: GridAvatar
   let audioLevel: Float
+  let isScreenSharing: Bool
   let showsConnectingIndicator: Bool
   let onLeave: () -> Void
   let onToggleMicrophone: () -> Void
+  let onOpenScreenShare: () -> Void
+  let onStopScreenShare: () -> Void
 
   @State private var isHovered = false
 
@@ -408,6 +477,16 @@ private struct GridSpeakingAvatar: View {
         .help(helpText)
       }
 
+      if isScreenSharing {
+        GridAvatarScreenShareControl(
+          isLocal: avatar.ownedByCurrentSession,
+          displayName: InlineKit.User(from: avatar.user).displayName,
+          onOpen: onOpenScreenShare,
+          onStop: onStopScreenShare
+        )
+        .offset(x: 23, y: 23)
+      }
+
       if avatar.ownedByCurrentSession, isHovered {
         GridAvatarLeaveButton(action: onLeave)
           .offset(x: -3, y: -3)
@@ -419,7 +498,10 @@ private struct GridSpeakingAvatar: View {
   }
 
   private var helpText: String {
-    if avatar.ownedByCurrentSession { return "Mute or unmute" }
+    if avatar.ownedByCurrentSession {
+      return isScreenSharing ? "You’re sharing · mute or unmute" : "Mute or unmute"
+    }
+    if isScreenSharing { return "Open screen" }
     return InlineKit.User(from: avatar.user).displayName
   }
 }
@@ -490,6 +572,68 @@ private struct GridAvatarImage: View {
   private var ringOpacity: Double {
     let level = min(max(Double(audioLevel), 0), 1)
     return microphoneEnabled ? 0.65 + level * 0.25 : 0.55 + level * 0.35
+  }
+}
+
+private struct GridAvatarScreenShareControl: View {
+  let isLocal: Bool
+  let displayName: String
+  let onOpen: () -> Void
+  let onStop: () -> Void
+
+  @State private var isHovered = false
+
+  var body: some View {
+    ZStack {
+      indicator
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+
+      if isLocal {
+        Menu {
+          Button("You are sharing screen") {}
+            .disabled(true)
+          Divider()
+          Button("Stop Sharing", role: .destructive, action: onStop)
+        } label: {
+          hitTarget
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .help("Screen sharing options")
+        .accessibilityLabel("Screen sharing options")
+      } else {
+        Button(action: onOpen) {
+          hitTarget
+        }
+        .buttonStyle(.plain)
+        .help("Open \(displayName)’s screen")
+        .accessibilityLabel("Open \(displayName)’s screen")
+      }
+    }
+    .frame(width: 32, height: 32)
+    .onHover { isHovered = $0 }
+    .animation(.smoothSnappy, value: isHovered)
+    .transition(.opacity)
+  }
+
+  private var hitTarget: some View {
+    Color.clear
+      .frame(width: 32, height: 32)
+      .contentShape(Circle())
+  }
+
+  private var indicator: some View {
+    Image(systemName: "rectangle.on.rectangle.fill")
+      .font(.system(size: 8, weight: .bold))
+      .foregroundStyle(.white)
+      .frame(width: 22, height: 22)
+      .background(Color.green.opacity(isHovered ? 1 : 0.9), in: Circle())
+      .overlay {
+        Circle().stroke(.white.opacity(isHovered ? 1 : 0.85), lineWidth: 1)
+      }
+      .scaleEffect(isHovered ? 1.06 : 1)
+      .frame(width: 32, height: 32)
   }
 }
 

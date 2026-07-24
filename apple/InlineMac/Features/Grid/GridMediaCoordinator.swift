@@ -5,6 +5,7 @@ import InlineRTC
 enum GridMediaCoordinatorEvent: Sendable {
   case credentialsNeeded(GridMediaTarget)
   case connected(GridMediaTarget, rtcConnectMilliseconds: Int?)
+  case screenShareContextChanged
 }
 
 /// Main-actor bridge between room product state and the process-wide media
@@ -17,10 +18,14 @@ final class GridMediaCoordinator {
   private let engine: InlineRTCSession
   private let presentationController: GridMediaPresentationController
   private let inputPreferences: AudioInputPreferenceStore
+  private let outputPreferences: AudioOutputPreferenceStore
   private let defaults: UserDefaults
   private var microphoneEnabled: Bool
   private var inputSelection: AudioInputSelection
+  private var outputSelection: AudioOutputSelection
   private var outputVolume: Float = 1
+  private var screenCaptureSource: InlineRTCScreenCaptureSource?
+  private var screenCaptureSourceRefresh: GridScreenCaptureSourceRefresh?
   private var target: GridMediaTarget?
   private var connectedTarget: GridMediaTarget?
   private var credentials: InlineRTCCredentials?
@@ -34,16 +39,20 @@ final class GridMediaCoordinator {
   init(
     engine: InlineRTCSession,
     defaults: UserDefaults,
-    inputPreferences: AudioInputPreferenceStore
+    inputPreferences: AudioInputPreferenceStore,
+    outputPreferences: AudioOutputPreferenceStore
   ) {
     self.engine = engine
     self.defaults = defaults
     self.inputPreferences = inputPreferences
+    self.outputPreferences = outputPreferences
     inputSelection = inputPreferences.selection
+    outputSelection = outputPreferences.selection
     microphoneEnabled = defaults.bool(forKey: Self.microphoneEnabledKey)
     let controller = GridMediaPresentationController(
       microphoneEnabled: microphoneEnabled,
-      inputSelection: inputSelection
+      inputSelection: inputSelection,
+      outputSelection: outputSelection
     )
     presentationController = controller
     presentation = controller.presentation
@@ -87,6 +96,11 @@ final class GridMediaCoordinator {
       submitDemand()
       return
     }
+    screenCaptureSource = nil
+    presentationController.setSelectedScreenCaptureSource(nil)
+    presentationController.clearScreenCaptureError()
+    GridScreenShareOutlineCoordinator.shared.hide()
+    GridScreenShareWindowCoordinator.shared.closeAll()
     self.target = target
     if credentials?.target != target?.rtcSessionID {
       credentials = nil
@@ -151,6 +165,19 @@ final class GridMediaCoordinator {
     submitDemand()
   }
 
+  func setOutput(_ selection: AudioOutputSelection) {
+    if outputSelection == selection {
+      if presentation.isFallingBackToAutomaticOutput || presentation.audioState.isFailed {
+        engine.retryOutput(selection)
+      }
+      return
+    }
+    outputSelection = selection
+    outputPreferences.setSelection(selection)
+    presentationController.setDesiredOutputSelection(selection)
+    submitDemand()
+  }
+
   func setOutputVolume(_ volume: Float) {
     outputVolume = min(max(volume, 0), 1)
     presentationController.setDesiredOutputVolume(outputVolume)
@@ -159,6 +186,68 @@ final class GridMediaCoordinator {
 
   func refreshInputDevices() {
     engine.refreshDevices()
+  }
+
+  func refreshOutputDevices() {
+    engine.refreshDevices()
+  }
+
+  @discardableResult
+  func refreshScreenCaptureSources() async -> [InlineRTCScreenCaptureSource] {
+    if let refresh = screenCaptureSourceRefresh {
+      return finishScreenCaptureSourceRefresh(
+        await refresh.task.value,
+        id: refresh.id
+      )
+    }
+
+    let refresh = GridScreenCaptureSourceRefresh(
+      id: UUID(),
+      task: Task { [engine] in
+        do {
+          let sources = try await engine.screenCaptureSources()
+          guard !sources.isEmpty else {
+            return .failure("No displays are available")
+          }
+          return .success(sources)
+        } catch {
+          return .failure(error.localizedDescription)
+        }
+      }
+    )
+    screenCaptureSourceRefresh = refresh
+    presentationController.setRefreshingScreenCaptureSources(true)
+    return finishScreenCaptureSourceRefresh(
+      await refresh.task.value,
+      id: refresh.id
+    )
+  }
+
+  func startScreenSharing(displayID: UInt32?) async {
+    guard let expectedTarget = target else { return }
+    let sources = await refreshScreenCaptureSources()
+    guard target == expectedTarget else { return }
+    let source = displayID.flatMap { displayID in
+      sources.first { $0.displayID == displayID }
+    } ?? sources.first
+    guard let source else { return }
+    startScreenSharing(source)
+  }
+
+  func startScreenSharing(_ source: InlineRTCScreenCaptureSource) {
+    guard target != nil else { return }
+    screenCaptureSource = source
+    presentationController.setSelectedScreenCaptureSource(source)
+    presentationController.clearScreenCaptureError()
+    submitDemand()
+  }
+
+  func stopScreenSharing() {
+    screenCaptureSource = nil
+    presentationController.setSelectedScreenCaptureSource(nil)
+    presentationController.clearScreenCaptureError()
+    GridScreenShareOutlineCoordinator.shared.hide()
+    submitDemand()
   }
 
   func retryAudio() {
@@ -177,9 +266,17 @@ final class GridMediaCoordinator {
     target = nil
     connectedTarget = nil
     credentials = nil
+    screenCaptureSource = nil
+    screenCaptureSourceRefresh?.task.cancel()
+    screenCaptureSourceRefresh = nil
+    presentationController.setRefreshingScreenCaptureSources(false)
+    presentationController.setSelectedScreenCaptureSource(nil)
+    presentationController.clearScreenCaptureError()
+    GridScreenShareOutlineCoordinator.shared.hide()
+    GridScreenShareWindowCoordinator.shared.closeAll()
     lastDemand = nil
     engine.setDemand(InlineRTCDemand())
-    await engine.shutdown()
+    _ = await engine.shutdown()
   }
 
   var isMicrophoneEnabled: Bool { microphoneEnabled }
@@ -193,7 +290,9 @@ final class GridMediaCoordinator {
       target: rtcTarget,
       credentials: credentials,
       microphoneEnabled: microphoneEnabled,
+      screenCaptureSource: screenCaptureSource,
       input: inputSelection,
+      output: outputSelection,
       outputVolume: outputVolume
     )
     guard demand != lastDemand else { return }
@@ -201,14 +300,44 @@ final class GridMediaCoordinator {
     engine.setDemand(demand)
   }
 
+  private func finishScreenCaptureSourceRefresh(
+    _ result: GridScreenCaptureSourceRefreshResult,
+    id: UUID
+  ) -> [InlineRTCScreenCaptureSource] {
+    let sources = result.sources
+    guard screenCaptureSourceRefresh?.id == id else { return sources }
+    screenCaptureSourceRefresh = nil
+    presentationController.setRefreshingScreenCaptureSources(false)
+    switch result {
+    case let .success(sources):
+      presentationController.applyScreenCaptureSources(.success(sources))
+    case let .failure(message):
+      presentationController.applyScreenCaptureSources(
+        .failure(GridScreenCaptureSourceRefreshError(message: message))
+      )
+    }
+    reconcileScreenShareOutline()
+    return sources
+  }
+
   private func apply(_ snapshot: InlineRTCState) {
     presentationController.apply(audio: snapshot.audio)
     if let devices = snapshot.devices {
       presentationController.apply(devices: devices)
     }
+    if let outputDevices = snapshot.outputDevices {
+      presentationController.apply(outputDevices: outputDevices)
+    }
 
     let wasConnected = presentation.connectionState == .connected
     presentationController.apply(rtc: snapshot.rtc)
+    reconcileScreenShareOutline()
+    broadcast(.screenShareContextChanged)
+    if case .failed = snapshot.rtc.screenShareState, screenCaptureSource != nil {
+      screenCaptureSource = nil
+      presentationController.setSelectedScreenCaptureSource(nil)
+      submitDemand()
+    }
     if case let .connected(sessionID) = snapshot.rtc.state,
        let target,
        target.rtcSessionID == sessionID {
@@ -240,6 +369,45 @@ final class GridMediaCoordinator {
   private func broadcast(_ event: GridMediaCoordinatorEvent) {
     subscribers.values.forEach { $0.yield(event) }
   }
+
+  private func reconcileScreenShareOutline() {
+    guard let localShare = presentation.screenShares.first(where: \.isLocal),
+          let sourceID = localShare.captureSourceID
+    else {
+      GridScreenShareOutlineCoordinator.shared.hide()
+      return
+    }
+    let sources = presentation.screenCaptureSources
+      + [presentation.selectedScreenCaptureSource].compactMap { $0 }
+    guard let source = sources.first(where: { $0.id == sourceID }) else {
+      GridScreenShareOutlineCoordinator.shared.hide()
+      return
+    }
+    GridScreenShareOutlineCoordinator.shared.show(for: source)
+  }
+}
+
+private struct GridScreenCaptureSourceRefresh {
+  let id: UUID
+  let task: Task<GridScreenCaptureSourceRefreshResult, Never>
+}
+
+private enum GridScreenCaptureSourceRefreshResult: Sendable {
+  case success([InlineRTCScreenCaptureSource])
+  case failure(String)
+
+  var sources: [InlineRTCScreenCaptureSource] {
+    switch self {
+    case let .success(sources): sources
+    case .failure: []
+    }
+  }
+}
+
+private struct GridScreenCaptureSourceRefreshError: LocalizedError, Sendable {
+  let message: String
+
+  var errorDescription: String? { message }
 }
 
 private extension InlineRTCAudioState {

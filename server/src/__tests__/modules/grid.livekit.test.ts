@@ -8,14 +8,15 @@ import {
 import { TokenVerifier } from "livekit-server-sdk"
 
 describe("Grid LiveKit credentials", () => {
-  test("gives each provider request one transport abort deadline and leaves retries to the outbox", () => {
+  test("uses bounded LiveKit Cloud failover inside the durable outbox deadline", () => {
     expect(GRID_PROVIDER_HTTP_POLICY).toEqual({
-      requestTimeoutSeconds: 10,
-      failover: false,
+      requestTimeoutSeconds: 6,
+      failover: true,
+      workerTimeoutSeconds: 25,
     })
   })
 
-  test("issues a short-lived microphone-only token scoped to one connection generation", async () => {
+  test("issues a short-lived unrestricted-media token scoped to one connection generation", async () => {
     const config = {
       serverUrl: "wss://grid.example.test",
       apiKey: "test-key",
@@ -43,11 +44,11 @@ describe("Grid LiveKit credentials", () => {
       roomJoin: true,
       room: "inline-grid-42-3",
       canPublish: true,
-      canPublishSources: ["microphone"],
       canSubscribe: true,
       canPublishData: false,
       canUpdateOwnMetadata: false,
     })
+    expect(claims.video?.canPublishSources).toBeUndefined()
   })
 
   test("returns unavailable when the provider is not configured", async () => {

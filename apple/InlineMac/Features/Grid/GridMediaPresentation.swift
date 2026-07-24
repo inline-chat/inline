@@ -10,6 +10,11 @@ enum GridMediaConnectionStatus: Equatable, Sendable {
   case failed
 }
 
+enum GridScreenCaptureIssue: Equatable, Sendable {
+  case sourceDiscovery
+  case sharing
+}
+
 @MainActor
 @Observable
 final class GridMediaPresentation {
@@ -21,6 +26,11 @@ final class GridMediaPresentation {
   fileprivate(set) var activeInputDeviceID: String?
   fileprivate(set) var inputSelection: AudioInputSelection
   fileprivate(set) var isFallingBackToAutomaticInput = false
+  fileprivate(set) var outputDevices: [AudioOutputDeviceDescriptor] = []
+  fileprivate(set) var automaticOutputDeviceName = "System Default"
+  fileprivate(set) var activeOutputDeviceID: String?
+  fileprivate(set) var outputSelection: AudioOutputSelection
+  fileprivate(set) var isFallingBackToAutomaticOutput = false
   fileprivate(set) var participantAudioLevels: [String: Float] = [:]
   fileprivate(set) var connectedParticipantIdentities = Set<String>()
   fileprivate(set) var reconnectCount = 0
@@ -36,14 +46,24 @@ final class GridMediaPresentation {
   fileprivate(set) var abandonedProviderOperationCount = 0
   fileprivate(set) var providerCircuitOpen = false
   fileprivate(set) var outputVolume: Float
+  fileprivate(set) var screenCaptureSources: [InlineRTCScreenCaptureSource] = []
+  fileprivate(set) var selectedScreenCaptureSource: InlineRTCScreenCaptureSource?
+  fileprivate(set) var screenShareEpisodeID: UInt64 = 0
+  fileprivate(set) var screenShareState: InlineRTCScreenShareState = .off
+  fileprivate(set) var screenShares: [InlineRTCScreenShare] = []
+  fileprivate(set) var isRefreshingScreenCaptureSources = false
+  fileprivate(set) var screenCaptureError: String?
+  fileprivate(set) var screenCaptureIssue: GridScreenCaptureIssue?
 
   fileprivate init(
     microphoneEnabled: Bool,
     inputSelection: AudioInputSelection,
+    outputSelection: AudioOutputSelection = .automatic,
     outputVolume: Float = 1
   ) {
     isMicrophoneEnabled = microphoneEnabled
     self.inputSelection = inputSelection
+    self.outputSelection = outputSelection
     self.outputVolume = min(max(outputVolume, 0), 1)
   }
 
@@ -55,8 +75,20 @@ final class GridMediaPresentation {
     remoteAudioFlowStates.values.contains(.missing)
   }
 
+  var isScreenSharing: Bool {
+    screenShares.contains(where: \.isLocal)
+  }
+
+  var isScreenShareRequested: Bool {
+    selectedScreenCaptureSource != nil
+  }
+
   func prefersInputDevice(_ device: AudioInputDeviceDescriptor) -> Bool {
     inputSelection.matches(device, among: inputDevices)
+  }
+
+  func prefersOutputDevice(_ device: AudioOutputDeviceDescriptor) -> Bool {
+    outputSelection.matches(device, among: outputDevices)
   }
 
 }
@@ -70,11 +102,13 @@ final class GridMediaPresentationController {
   init(
     microphoneEnabled: Bool,
     inputSelection: AudioInputSelection,
+    outputSelection: AudioOutputSelection = .automatic,
     outputVolume: Float = 1
   ) {
     presentation = GridMediaPresentation(
       microphoneEnabled: microphoneEnabled,
       inputSelection: inputSelection,
+      outputSelection: outputSelection,
       outputVolume: outputVolume
     )
   }
@@ -87,8 +121,43 @@ final class GridMediaPresentationController {
     presentation.inputSelection = selection
   }
 
+  func setDesiredOutputSelection(_ selection: AudioOutputSelection) {
+    presentation.outputSelection = selection
+  }
+
   func setDesiredOutputVolume(_ volume: Float) {
     presentation.outputVolume = min(max(volume, 0), 1)
+  }
+
+  func setSelectedScreenCaptureSource(_ source: InlineRTCScreenCaptureSource?) {
+    if presentation.selectedScreenCaptureSource == nil, source != nil {
+      presentation.screenShareEpisodeID &+= 1
+    }
+    presentation.selectedScreenCaptureSource = source
+  }
+
+  func clearScreenCaptureError() {
+    presentation.screenCaptureError = nil
+    presentation.screenCaptureIssue = nil
+  }
+
+  func setRefreshingScreenCaptureSources(_ isRefreshing: Bool) {
+    presentation.isRefreshingScreenCaptureSources = isRefreshing
+  }
+
+  func applyScreenCaptureSources(
+    _ result: Result<[InlineRTCScreenCaptureSource], Error>
+  ) {
+    switch result {
+    case let .success(sources):
+      presentation.screenCaptureSources = sources
+      presentation.screenCaptureError = nil
+      presentation.screenCaptureIssue = nil
+    case let .failure(error):
+      presentation.screenCaptureSources = []
+      presentation.screenCaptureError = error.localizedDescription
+      presentation.screenCaptureIssue = .sourceDiscovery
+    }
   }
 
   func apply(audio snapshot: InlineRTCAudioSnapshot) {
@@ -98,6 +167,10 @@ final class GridMediaPresentationController {
     if let resolvedInput = snapshot.input {
       presentation.activeInputDeviceID = resolvedInput.activeDeviceID
       presentation.isFallingBackToAutomaticInput = resolvedInput.isFallingBackToAutomatic
+    }
+    if let resolvedOutput = snapshot.output {
+      presentation.activeOutputDeviceID = resolvedOutput.activeDeviceID
+      presentation.isFallingBackToAutomaticOutput = resolvedOutput.isFallingBackToAutomatic
     }
   }
 
@@ -122,6 +195,20 @@ final class GridMediaPresentationController {
     presentation.microphonePublicationState = snapshot.microphonePublicationState
     presentation.localAudioFlowState = snapshot.localAudioFlowState
     presentation.remoteAudioFlowStates = snapshot.remoteAudioFlowStates
+    presentation.screenShareState = snapshot.screenShareState
+    presentation.screenShares = snapshot.screenShares
+    if case let .failed(message) = snapshot.screenShareState {
+      presentation.screenCaptureError = message
+      presentation.screenCaptureIssue = .sharing
+    } else if snapshot.screenShareState == .off,
+              presentation.connectionState == .connected,
+              presentation.screenCaptureError == "Screen sharing did not stop" {
+      // A failed Stop is recoverable through room reconstruction. Keep the
+      // warning visible until the fresh connected projection proves that no
+      // local publication remains, then retire the transient recovery notice.
+      presentation.screenCaptureError = nil
+      presentation.screenCaptureIssue = nil
+    }
     presentation.abandonedProviderOperationCount = snapshot.abandonedProviderOperationCount
     presentation.providerCircuitOpen = snapshot.providerCircuitOpen
   }
@@ -131,5 +218,13 @@ final class GridMediaPresentationController {
     presentation.inputDevices = snapshot.devices
     presentation.activeInputDeviceID = snapshot.resolvedInput.activeDeviceID
     presentation.isFallingBackToAutomaticInput = snapshot.resolvedInput.isFallingBackToAutomatic
+  }
+
+  func apply(outputDevices snapshot: AudioOutputDeviceSnapshot) {
+    presentation.automaticOutputDeviceName = snapshot.automaticDeviceName
+    presentation.outputDevices = snapshot.devices
+    presentation.activeOutputDeviceID = snapshot.resolvedOutput.activeDeviceID
+    presentation.isFallingBackToAutomaticOutput =
+      snapshot.resolvedOutput.isFallingBackToAutomatic
   }
 }
