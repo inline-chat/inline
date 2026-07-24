@@ -2111,13 +2111,13 @@ async def assert_transport_helpers():
     adapter._sidecar_call = fake_sidecar_call
     metadata = {"thread_id": "chat:99"}
 
-    edited = await adapter.edit_message("chat:10", "777", "updated", metadata=metadata)
+    edited = await adapter.edit_message("chat:10", "777", "\x60\x60\x60\ncommand\n\x60\x60\x60", metadata=metadata)
     assert edited.success
     assert calls[-1] == ("/edit", {
         "target": {"chatId": "99"},
         "messageId": "777",
-        "text": "updated",
-        "parseMarkdown": False,
+        "text": "\x60\x60\x60\ncommand\n\x60\x60\x60",
+        "parseMarkdown": True,
     })
 
     final_edit = await adapter.edit_message("chat:10", "777", "**final**", finalize=True, metadata=metadata)
@@ -2129,10 +2129,10 @@ async def assert_transport_helpers():
         "parseMarkdown": True,
     })
 
-    sent_preview = await adapter.send("chat:10", "**streaming**", metadata={**metadata, "expect_edits": True})
+    sent_preview = await adapter.send("chat:10", "**streaming", metadata={**metadata, "expect_edits": True})
     assert sent_preview.success
     assert calls[-1][0] == "/send"
-    assert calls[-1][1]["parseMarkdown"] is False
+    assert calls[-1][1]["parseMarkdown"] is True
 
     preview_overflow = await adapter.edit_message(
         "chat:10",
@@ -2143,7 +2143,7 @@ async def assert_transport_helpers():
     assert preview_overflow.success
     assert calls[-1][0] == "/edit"
     assert len(calls[-1][1]["text"]) <= adapter.MAX_MESSAGE_LENGTH
-    assert calls[-1][1]["parseMarkdown"] is False
+    assert calls[-1][1]["parseMarkdown"] is True
 
     calls.clear()
     final_overflow = await adapter.edit_message(

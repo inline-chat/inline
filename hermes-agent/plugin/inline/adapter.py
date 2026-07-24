@@ -3001,7 +3001,6 @@ class InlineAdapter(BasePlatformAdapter):
     ) -> SendResult:
         target = self._target_for(chat_id, metadata)
         reply_to = self._reply_to_for_target(reply_to, target)
-        parse_markdown = self._parse_markdown and not self._expects_edits(metadata)
         chunks = self.truncate_message(self.format_message(content), self.MAX_MESSAGE_LENGTH)
         message_ids: List[str] = []
         raw_responses: List[Any] = []
@@ -3011,7 +3010,7 @@ class InlineAdapter(BasePlatformAdapter):
             body: Dict[str, Any] = {
                 "target": target,
                 "text": chunk,
-                "parseMarkdown": parse_markdown,
+                "parseMarkdown": self._parse_markdown,
             }
             if reply_to and index == 0:
                 body["replyToMsgId"] = str(reply_to)
@@ -3052,7 +3051,6 @@ class InlineAdapter(BasePlatformAdapter):
         metadata: Optional[Dict[str, Any]] = None,
     ) -> SendResult:
         text = self.format_message(content)
-        parse_markdown = self._parse_markdown if finalize else False
         if len(text) > self.MAX_MESSAGE_LENGTH:
             if finalize:
                 return await self._edit_overflow_split(chat_id, message_id, content, metadata=metadata)
@@ -3062,7 +3060,7 @@ class InlineAdapter(BasePlatformAdapter):
             "target": target,
             "messageId": str(message_id),
             "text": text,
-            "parseMarkdown": parse_markdown,
+            "parseMarkdown": self._parse_markdown,
         }
         result = await self._send_sidecar("/edit", body)
         if result.success:
@@ -3479,10 +3477,6 @@ class InlineAdapter(BasePlatformAdapter):
 
     def format_message(self, content: str) -> str:
         return content if self._parse_markdown else strip_markdown(content)
-
-    @staticmethod
-    def _expects_edits(metadata: Optional[Dict[str, Any]]) -> bool:
-        return bool((metadata or {}).get("expect_edits"))
 
     def _target_for(self, chat_id: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
         thread_id = (metadata or {}).get("thread_id")
