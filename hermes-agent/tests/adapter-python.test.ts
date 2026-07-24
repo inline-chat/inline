@@ -42,11 +42,18 @@ setup_cli = types.ModuleType("hermes_cli.setup")
 hermes_constants = types.ModuleType("hermes_constants")
 
 setup_saved_env = {}
+setup_config_writes = []
+setup_platform_enabled = {"inline": False}
 setup_prompt_values = []
 setup_yes_no_values = []
 
 gateway_cli.get_env_value = lambda key: setup_saved_env.get(key, "")
 gateway_cli.save_env_value = lambda key, value: setup_saved_env.__setitem__(key, value)
+def write_platform_config_field(platform, field, value, raw=False):
+    setup_config_writes.append((platform, field, value, raw))
+    if field == "enabled":
+        setup_platform_enabled[platform] = value
+gateway_cli.write_platform_config_field = write_platform_config_field
 setup_cli.print_header = lambda value: print(value)
 setup_cli.print_info = lambda value: print(value)
 setup_cli.print_success = lambda value: print(value)
@@ -645,8 +652,12 @@ assert setup_saved_env["INLINE_ALLOWED_USERS"] == "101,202"
 assert setup_saved_env["INLINE_GROUP_ALLOW_FROM"] == "101,202"
 assert setup_saved_env["INLINE_DM_POLICY"] == "allowlist"
 assert setup_saved_env["INLINE_GROUP_POLICY"] == "allowlist"
+assert setup_config_writes == [("inline", "enabled", True, True)]
+assert setup_platform_enabled["inline"] is True
 
 setup_saved_env.clear()
+setup_config_writes.clear()
+setup_platform_enabled["inline"] = False
 setup_prompt_values.extend(["2", "Hermes", "myhermesbot", ""])
 setup_yes_no_values.extend([True])
 real_run_inline_json = inline_cli._run_inline_json
@@ -667,6 +678,19 @@ assert "Created Hermes in Inline" in automatic_output.getvalue()
 assert setup_saved_env["INLINE_TOKEN"] == "created-bot-token"
 assert setup_saved_env["INLINE_ALLOWED_USERS"] == "77"
 assert setup_saved_env["INLINE_GROUP_ALLOW_FROM"] == "77"
+assert setup_config_writes == [("inline", "enabled", True, True)]
+assert setup_platform_enabled["inline"] is True
+
+setup_saved_env.clear()
+setup_config_writes.clear()
+setup_platform_enabled["inline"] = False
+setup_prompt_values.extend(["1", ""])
+cancelled_setup_output = io.StringIO()
+with contextlib.redirect_stdout(cancelled_setup_output):
+    assert inline_cli.dispatch(setup_args) == 0
+assert "setup was cancelled" in cancelled_setup_output.getvalue()
+assert setup_config_writes == []
+assert setup_platform_enabled["inline"] is False
 
 real_find_inline_cli = inline_cli._find_inline_cli
 real_subprocess_run = inline_cli.subprocess.run

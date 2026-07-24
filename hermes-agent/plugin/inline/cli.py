@@ -73,6 +73,7 @@ def gateway_setup() -> None:
     if not owner_user_id:
         owner_user_id = _inline_cli_user_id(shutil.which("inline"))
     _configure_access(hermes_gateway, hermes_setup, owner_user_id)
+    hermes_gateway.write_platform_config_field("inline", "enabled", True, raw=True)
 
     print()
     hermes_setup.print_success("💬 Inline is configured!")
