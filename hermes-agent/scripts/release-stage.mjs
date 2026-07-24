@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp } from "node:fs/promises"
+import { cp, mkdir, mkdtemp, readFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { execFileSync } from "node:child_process"
@@ -9,6 +9,8 @@ const repoRoot = path.resolve(packageRoot, "..")
 const stageRoot = await mkdtemp(path.join(os.tmpdir(), "inline-hermes-release-"))
 const stagePackageRoot = path.join(stageRoot, "hermes-agent")
 const mode = process.argv[2] ?? "--dry-run"
+const packageJson = JSON.parse(await readFile(path.join(packageRoot, "package.json"), "utf8"))
+const prereleaseTag = String(packageJson.version || "").split("-", 2)[1]?.split(".", 1)[0]
 
 if (mode !== "--dry-run" && mode !== "--prepare-only") {
   throw new Error("Usage: node scripts/release-stage.mjs [--dry-run|--prepare-only]")
@@ -53,7 +55,9 @@ execFileSync("bun", ["run", "build"], {
 })
 
 if (mode === "--dry-run") {
-  execFileSync("npm", ["publish", "--dry-run", "--access", "public"], {
+  const publishArgs = ["publish", "--dry-run", "--access", "public"]
+  if (prereleaseTag) publishArgs.push("--tag", prereleaseTag)
+  execFileSync("npm", publishArgs, {
     cwd: stagePackageRoot,
     stdio: "inherit",
   })

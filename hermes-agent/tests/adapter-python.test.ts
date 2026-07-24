@@ -37,7 +37,26 @@ clarify_gateway = types.ModuleType("tools.clarify_gateway")
 hermes_cli = types.ModuleType("hermes_cli")
 commands = types.ModuleType("hermes_cli.commands")
 model_cost_guard = types.ModuleType("hermes_cli.model_cost_guard")
+gateway_cli = types.ModuleType("hermes_cli.gateway")
+setup_cli = types.ModuleType("hermes_cli.setup")
 hermes_constants = types.ModuleType("hermes_constants")
+
+setup_saved_env = {}
+setup_prompt_values = []
+setup_yes_no_values = []
+
+gateway_cli.get_env_value = lambda key: setup_saved_env.get(key, "")
+gateway_cli.save_env_value = lambda key, value: setup_saved_env.__setitem__(key, value)
+setup_cli.print_header = lambda value: print(value)
+setup_cli.print_info = lambda value: print(value)
+setup_cli.print_success = lambda value: print(value)
+setup_cli.print_warning = lambda value: print(value)
+setup_cli.prompt = lambda message, default="", password=False: (
+    setup_prompt_values.pop(0) if setup_prompt_values else default
+)
+setup_cli.prompt_yes_no = lambda message, default=False: (
+    setup_yes_no_values.pop(0) if setup_yes_no_values else default
+)
 
 class Platform(str):
     def __new__(cls, value):
@@ -219,6 +238,8 @@ sys.modules["tools.clarify_gateway"] = clarify_gateway
 sys.modules["hermes_cli"] = hermes_cli
 sys.modules["hermes_cli.commands"] = commands
 sys.modules["hermes_cli.model_cost_guard"] = model_cost_guard
+sys.modules["hermes_cli.gateway"] = gateway_cli
+sys.modules["hermes_cli.setup"] = setup_cli
 sys.modules["hermes_constants"] = hermes_constants
 gateway.display_config = display_config
 tools.approval = approval
@@ -226,6 +247,8 @@ tools.slash_confirm = slash_confirm
 tools.clarify_gateway = clarify_gateway
 hermes_cli.commands = commands
 hermes_cli.model_cost_guard = model_cost_guard
+hermes_cli.gateway = gateway_cli
+hermes_cli.setup = setup_cli
 test_settings_dir = Path(tempfile.mkdtemp(prefix="inline-hermes-settings-"))
 os.environ["INLINE_SETTINGS_PATH"] = str(test_settings_dir / "adapter-settings.json")
 sys.path.insert(0, "plugin")
@@ -595,21 +618,53 @@ status_output = io.StringIO()
 with contextlib.redirect_stdout(status_output):
     assert inline_cli.dispatch(status_args) == 0
 status_text = status_output.getvalue()
-assert "Inline env token configured:" in status_text
-assert "Hermes config token support: platforms.inline.token or inline.token" in status_text
-assert "platforms.inline.token/inline.token" in status_text
+assert "Inline configured:" in status_text
 assert "Node available: yes (" in status_text
-assert "Install diagnostics: inline-hermes doctor --json" in status_text
+assert "hermes inline setup" in status_text
+assert "Advanced diagnostics: inline-hermes doctor --json" in status_text
 setup_args = parser.parse_args(["setup"])
 assert setup_args.inline_command == "setup"
+setup_prompt_values.extend(["2", "existing-bot-token", "101, 202"])
+real_which = inline_cli.shutil.which
+inline_cli.shutil.which = lambda command: None
 setup_output = io.StringIO()
-with contextlib.redirect_stdout(setup_output):
-    assert inline_cli.dispatch(setup_args) == 0
+try:
+    with contextlib.redirect_stdout(setup_output):
+        assert inline_cli.dispatch(setup_args) == 0
+finally:
+    inline_cli.shutil.which = real_which
 setup_text = setup_output.getvalue()
-assert "INLINE_TOKEN or INLINE_BOT_TOKEN" in setup_text
-assert "platforms.inline.token" in setup_text
-assert "inline.token" in setup_text
-assert "inline-hermes doctor --json" in setup_text
+assert "Create a dedicated Hermes bot" in setup_text
+assert "Inline bot token saved securely" in setup_text
+assert "Inline is configured" in setup_text
+assert "inline-hermes doctor" not in setup_text
+assert setup_saved_env["INLINE_TOKEN"] == "existing-bot-token"
+assert setup_saved_env["INLINE_ALLOWED_USERS"] == "101,202"
+assert setup_saved_env["INLINE_GROUP_ALLOW_FROM"] == "101,202"
+assert setup_saved_env["INLINE_DM_POLICY"] == "allowlist"
+assert setup_saved_env["INLINE_GROUP_POLICY"] == "allowlist"
+
+setup_saved_env.clear()
+setup_prompt_values.extend(["1", "Hermes", "myhermesbot", ""])
+setup_yes_no_values.extend([True])
+real_run_inline_json = inline_cli._run_inline_json
+inline_cli.shutil.which = lambda command: "/usr/local/bin/inline"
+inline_cli._run_inline_json = lambda executable, args: (
+    ({"id": "77"}, None)
+    if args == ["auth", "me"]
+    else ({"token": "created-bot-token", "bot": {"name": "Hermes"}}, None)
+)
+automatic_output = io.StringIO()
+try:
+    with contextlib.redirect_stdout(automatic_output):
+        assert inline_cli.dispatch(setup_args) == 0
+finally:
+    inline_cli.shutil.which = real_which
+    inline_cli._run_inline_json = real_run_inline_json
+assert "Created Hermes in Inline" in automatic_output.getvalue()
+assert setup_saved_env["INLINE_TOKEN"] == "created-bot-token"
+assert setup_saved_env["INLINE_ALLOWED_USERS"] == "77"
+assert setup_saved_env["INLINE_GROUP_ALLOW_FROM"] == "77"
 
 seeded = _apply_yaml_config(
     {"token": "wrong-global", "home_channel": {"chat_id": "global"}},

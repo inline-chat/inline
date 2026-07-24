@@ -99,9 +99,13 @@ npm whoami
 bun run release:preflight
 bun run release:stage
 cd <printed-hermes-release-stage>
-npm publish --access public --otp="<otp>"
+npm publish --access public --tag alpha --otp="<otp>"
 npm view @inline-chat/hermes-agent-adapter version
+npm view @inline-chat/hermes-agent-adapter dist-tags --json
 ```
+
+For stable releases, omit `--tag alpha`. Never publish a prerelease without an
+explicit dist-tag; npm must not move `latest` to an alpha build.
 
 Never publish directly from the monorepo package directory. Bun links matching
 workspace package names by default, which can make the generated sidecar consume

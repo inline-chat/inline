@@ -968,8 +968,8 @@ function printInstallResult(result: InstallResult) {
   printStatus(result)
   if (result.installed || result.dryRun) {
     console.log("")
-    console.log(`Enable the Hermes plugin with \`hermes plugins enable ${pluginEnableKey}\`, then enable platform id \`inline\`.`)
-    console.log("Set INLINE_TOKEN/INLINE_BOT_TOKEN in the gateway environment, or set platforms.inline.token/inline.token in Hermes config.")
+    console.log(`Enable the Hermes plugin with \`hermes plugins enable ${pluginEnableKey}\`.`)
+    console.log("Then run `hermes gateway setup`, select Inline, and follow the guided bot setup.")
   }
 }
 

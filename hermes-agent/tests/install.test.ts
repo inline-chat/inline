@@ -52,9 +52,9 @@ describe("inline-hermes installer", () => {
 
     const versions = log.mock.calls.map((call) => String(call[0]))
     expect(versions).toEqual([
-      "@inline-chat/hermes-agent-adapter@0.0.5",
-      "@inline-chat/hermes-agent-adapter@0.0.5",
-      "@inline-chat/hermes-agent-adapter@0.0.5",
+      "@inline-chat/hermes-agent-adapter@0.0.5-alpha.0",
+      "@inline-chat/hermes-agent-adapter@0.0.5-alpha.0",
+      "@inline-chat/hermes-agent-adapter@0.0.5-alpha.0",
     ])
   })
 
@@ -94,7 +94,7 @@ describe("inline-hermes installer", () => {
     await expect(readFile(path.join(installed, "sidecar", "index.mjs"), "utf8")).resolves.toContain("inline-sidecar")
   })
 
-  it("prints install guidance for env and config-token setup paths", async () => {
+  it("routes new installs into the guided Hermes setup", async () => {
     const home = await tempDir()
     const log = vi.spyOn(console, "log").mockImplementation(() => {})
 
@@ -103,9 +103,9 @@ describe("inline-hermes installer", () => {
     expect(code).toBe(0)
     const text = log.mock.calls.map((call) => String(call[0])).join("\n")
     expect(text).toContain("hermes plugins enable inline-platform")
-    expect(text).toContain("Set INLINE_TOKEN/INLINE_BOT_TOKEN in the gateway environment")
-    expect(text).toContain("platforms.inline.token")
-    expect(text).toContain("inline.token")
+    expect(text).toContain("hermes gateway setup")
+    expect(text).toContain("select Inline")
+    expect(text).not.toContain("platforms.inline.token")
   })
 
   it("can symlink the plugin for local development", async () => {

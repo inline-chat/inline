@@ -1,7 +1,7 @@
 name: inline-platform
 label: Inline
 kind: platform
-version: 0.0.5
+version: 0.0.5-alpha.0
 description: >
   Inline platform adapter for Hermes Agent. The adapter runs as a native
   Hermes Python platform plugin and supervises a local Node sidecar that uses

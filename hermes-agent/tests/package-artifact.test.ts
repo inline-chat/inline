@@ -99,7 +99,7 @@ describe("packed artifact", () => {
     expect(release).toContain("VERSION=\"$(node -p \"require('./package.json').version\")\"")
     expect(release).toContain("mkdir -p .tmp/manual-pack")
     expect(release).toContain("inline-chat-hermes-agent-adapter-${VERSION}.tgz")
-    expect(release).toContain("npm publish --access public")
+    expect(release).toContain("npm publish --access public --tag alpha")
 
     const sidecar = await readFile(path.join(packageRoot, "plugin/inline/sidecar/index.mjs"), "utf8")
     expect(sidecar).toContain("inline-sidecar")
@@ -153,7 +153,7 @@ describe("packed artifact", () => {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       }).trim()
-      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.5")
+      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.5-alpha.0")
 
       const install = execFileSync(bin, ["install", "--hermes-home", hermesHome, "--force", "--json"], {
         cwd: packageRoot,

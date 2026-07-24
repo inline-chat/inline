@@ -55,9 +55,14 @@ Unsupported or intentionally limited:
 npm install -g @inline-chat/hermes-agent-adapter
 inline-hermes install
 hermes plugins enable inline-platform
+hermes gateway setup
 ```
 
-Need a bot token first? Use the [Inline bot creation guide](https://inline.chat/docs/creating-a-bot).
+Select Inline in the messaging-platform picker. The guided setup can sign you
+in with the Inline CLI, create a dedicated Hermes bot, securely save its token,
+and restrict access to your Inline account. You can also paste an existing bot
+token. Manual setup remains documented in the
+[Inline bot creation guide](https://inline.chat/docs/creating-a-bot).
 
 ## Coding Agent Setup Prompt
 
@@ -76,7 +81,7 @@ Tasks:
 1. Verify Node.js is version 20 or newer and Hermes Agent is installed.
 2. Install or upgrade @inline-chat/hermes-agent-adapter globally.
 3. Run inline-hermes install and hermes plugins enable inline-platform.
-4. Ensure ~/.hermes/config.yaml enables platforms.inline, using token: ${INLINE_TOKEN} if config needs an env reference.
+4. Run hermes gateway setup and select Inline. Prefer its guided bot-creation path; if no Inline token is available, let this interactive wizard ask the user to sign in or paste one.
 5. Run inline-hermes doctor --json and inline-hermes test-send --dry-run --to chat:123 --text "Inline Hermes dry-run" --json.
 6. Report the exact commands run and any remaining manual steps, without revealing secrets.
 ```
