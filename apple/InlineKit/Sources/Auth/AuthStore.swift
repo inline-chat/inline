@@ -1,37 +1,58 @@
-import AsyncAlgorithms
 import Foundation
 import InlineConfig
 import Logger
-
-private struct AuthSnapshotPipe: Sendable {
-  let stream: @Sendable () -> AsyncStream<AuthSnapshot>
-  let yield: @Sendable (AuthSnapshot) -> Void
-}
 
 private struct VersionedAuthSnapshot: Sendable {
   let revision: UInt64
   let snapshot: AuthSnapshot
 }
 
-private final class AuthSnapshotRevisionState: @unchecked Sendable {
+/// A current-value broadcast stream whose subscription boundary is `stream()` itself.
+/// Registration and replay share the publication lock so a subscriber cannot miss or reorder
+/// a snapshot while its observer task is still waiting to run.
+private final class AuthSnapshotPipe: @unchecked Sendable {
   private let lock = NSLock()
   private var latest: VersionedAuthSnapshot?
+  private var continuations: [UUID: AsyncStream<AuthSnapshot>.Continuation] = [:]
 
-  func publish(_ snapshot: AuthSnapshot) -> VersionedAuthSnapshot? {
+  func stream() -> AsyncStream<AuthSnapshot> {
+    let id = UUID()
+    let (stream, continuation) = AsyncStream.makeStream(
+      of: AuthSnapshot.self,
+      bufferingPolicy: .unbounded
+    )
+    continuation.onTermination = { [weak self] _ in
+      self?.removeContinuation(id: id)
+    }
+
     lock.withLock {
-      guard latest?.snapshot != snapshot else { return nil }
+      continuations[id] = continuation
+      if let latest {
+        continuation.yield(latest.snapshot)
+      }
+    }
+    return stream
+  }
+
+  func yield(_ snapshot: AuthSnapshot) {
+    lock.withLock {
+      guard latest?.snapshot != snapshot else { return }
 
       let versionedSnapshot = VersionedAuthSnapshot(
         revision: (latest?.revision ?? 0) &+ 1,
         snapshot: snapshot
       )
       latest = versionedSnapshot
-      return versionedSnapshot
+      for continuation in continuations.values {
+        continuation.yield(versionedSnapshot.snapshot)
+      }
     }
   }
 
-  func current() -> VersionedAuthSnapshot? {
-    lock.withLock { latest }
+  private func removeContinuation(id: UUID) {
+    _ = lock.withLock {
+      continuations.removeValue(forKey: id)
+    }
   }
 }
 
@@ -92,47 +113,7 @@ private final class BufferedAsyncStreamBroadcaster<Element: Sendable>: @unchecke
   }
 }
 
-private func makeAuthSnapshotPipe() -> AuthSnapshotPipe {
-  let (source, continuation) = AsyncStream.makeStream(
-    of: VersionedAuthSnapshot.self,
-    bufferingPolicy: .unbounded
-  )
-  let sharedSnapshots = source.share(bufferingPolicy: .unbounded)
-  let revisionState = AuthSnapshotRevisionState()
-
-  return AuthSnapshotPipe(
-    stream: {
-      AsyncStream(bufferingPolicy: .unbounded) { continuation in
-        let task = Task {
-          var iterator = sharedSnapshots.makeAsyncIterator()
-          guard let initial = revisionState.current() else {
-            continuation.finish()
-            return
-          }
-          var lastRevision = initial.revision
-          continuation.yield(initial.snapshot)
-
-          while !Task.isCancelled, let versionedSnapshot = try? await iterator.next() {
-            guard versionedSnapshot.revision > lastRevision else { continue }
-            lastRevision = versionedSnapshot.revision
-            continuation.yield(versionedSnapshot.snapshot)
-          }
-          continuation.finish()
-        }
-
-        continuation.onTermination = { _ in
-          task.cancel()
-        }
-      }
-    },
-    yield: { snapshot in
-      guard let versionedSnapshot = revisionState.publish(snapshot) else { return }
-      continuation.yield(versionedSnapshot)
-    }
-  )
-}
-
-actor AuthStore: Sendable {
+actor AuthStore {
   private let log = Log.scoped("AuthStore")
 
   private static let legacyTokenKey = "token"
@@ -147,7 +128,7 @@ actor AuthStore: Sendable {
 
   private let cache: AuthSnapshotCache
 
-  private nonisolated let snapshotPipe = makeAuthSnapshotPipe()
+  private nonisolated let snapshotPipe = AuthSnapshotPipe()
   private nonisolated let eventBroadcaster = BufferedAsyncStreamBroadcaster<AuthEvent>(
     bufferingPolicy: .unbounded,
     idleReplayLimit: 8
@@ -202,8 +183,8 @@ actor AuthStore: Sendable {
 
   // MARK: - Public API
 
-  /// Current auth state followed by future changes. Every subscriber receives an independent
-  /// sequence and starts with the latest cached snapshot.
+  /// Current auth state followed by future changes. Calling this method synchronously registers
+  /// an independent subscriber and buffers changes until that stream begins iteration.
   nonisolated func snapshots() -> AsyncStream<AuthSnapshot> {
     snapshotPipe.stream()
   }

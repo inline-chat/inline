@@ -292,6 +292,26 @@ final class Auth2StoreTests {
     #expect(reloggedSnapshot?.didHydrate == true)
   }
 
+  @Test("snapshot stream buffers transitions before iteration begins")
+  func snapshotStreamBuffersTransitionsBeforeIteration() async {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+
+    let (_, store) = h.makeStore()
+    await store.saveCredentials(token: "1:firstToken", userId: 1)
+
+    // Creating the stream is the subscription boundary used by task-based observers.
+    let snapshots = store.snapshots()
+    await store.logOut()
+    await store.saveCredentials(token: "2:secondToken", userId: 2)
+
+    var iterator = snapshots.makeAsyncIterator()
+    #expect((await iterator.next())?.token == "1:firstToken")
+    #expect(await iterator.next() == AuthSnapshot(status: .unauthenticated, didHydrate: true))
+    #expect((await iterator.next())?.token == "2:secondToken")
+  }
+
   @Test("event subscribers receive transitions buffered while no subscriber was active")
   func eventSubscribersReceiveIdleTransitions() async {
     let h = Harness()

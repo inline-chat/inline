@@ -24,10 +24,14 @@ final class AuthConnectionAdapter {
     task?.cancel()
     let auth = self.auth
     let manager = self.manager
+    // Subscribe before sampling the baseline or scheduling observation. The stream buffers any
+    // logout/login transitions that occur before the task gets an opportunity to run.
+    let snapshots = auth.snapshots
+    let initialAuthAvailable = auth.token() != nil
     task = Task {
-      var authAvailable = auth.token() != nil
+      var authAvailable = initialAuthAvailable
 
-      for await snapshot in auth.snapshots {
+      for await snapshot in snapshots {
         guard !Task.isCancelled else { return }
         let nextAuthAvailable = snapshot.token != nil
         guard nextAuthAvailable != authAvailable else { continue }

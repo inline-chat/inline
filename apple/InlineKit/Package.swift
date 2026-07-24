@@ -156,7 +156,6 @@ let package = Package(
     .target(
       name: "Auth",
       dependencies: [
-        .product(name: "AsyncAlgorithms", package: "swift-async-algorithms"),
         "InlineConfig",
         "Logger",
       ],
