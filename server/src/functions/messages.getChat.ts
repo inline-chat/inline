@@ -8,7 +8,7 @@ import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { db } from "@in/server/db"
 import { and, desc, eq, isNull, not } from "drizzle-orm"
-import { dialogs, messages, type DbChat, type DbDialog } from "@in/server/db/schema"
+import { dialogs, messages, type DbChat, type DbDialog, type DbNewDialog } from "@in/server/db/schema"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { ensureLinkedSubthreadDialogs, getAnchorMessageForChat, isLinkedSubthread } from "@in/server/modules/subthreads"
 import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
@@ -25,6 +25,31 @@ type Output = {
 }
 
 const log = new Log("functions.getChat")
+
+const createDialogOrLoadConcurrentWinner = async (
+  values: DbNewDialog,
+): Promise<DbDialog> => {
+  const [created] = await db
+    .insert(dialogs)
+    .values(values)
+    .onConflictDoNothing({
+      target: [dialogs.chatId, dialogs.userId],
+    })
+    .returning()
+
+  if (created) return created
+
+  const concurrentWinner = await db.query.dialogs.findFirst({
+    where: {
+      chatId: values.chatId,
+      userId: values.userId,
+    },
+  })
+  if (!concurrentWinner) {
+    throw RealtimeRpcError.InternalError()
+  }
+  return concurrentWinner
+}
 
 async function getChatAndDialogForDM(
   peerUserId: number,
@@ -57,19 +82,12 @@ async function getChatAndDialogForDM(
 
     log.info("Creating dialog for existing DM chat", { chatId: existingChat.id, currentUserId })
 
-    const [newDialog] = await db
-      .insert(dialogs)
-      .values({
-        chatId: existingChat.id,
-        userId: currentUserId,
-        peerUserId,
-        ...dialogOpenDefaultsForChat(existingChat),
-      })
-      .returning()
-
-    if (!newDialog) {
-      throw RealtimeRpcError.InternalError()
-    }
+    const newDialog = await createDialogOrLoadConcurrentWinner({
+      chatId: existingChat.id,
+      userId: currentUserId,
+      peerUserId,
+      ...dialogOpenDefaultsForChat(existingChat),
+    })
 
     return { chat: existingChat, dialog: newDialog }
   }
@@ -144,19 +162,12 @@ async function getChatAndDialogForThread(
       throw RealtimeRpcError.InternalError()
     }
 
-    const [newDialog] = await db
-      .insert(dialogs)
-      .values({
-        chatId,
-        userId: currentUserId,
-        peerUserId,
-        ...dialogOpenDefaultsForChat(chat),
-      })
-      .returning()
-
-    if (!newDialog) {
-      throw RealtimeRpcError.InternalError()
-    }
+    const newDialog = await createDialogOrLoadConcurrentWinner({
+      chatId,
+      userId: currentUserId,
+      peerUserId,
+      ...dialogOpenDefaultsForChat(chat),
+    })
 
     return { chat, dialog: newDialog }
   }
@@ -182,18 +193,11 @@ async function getChatAndDialogForThread(
 
   log.info("Creating dialog for thread", { chatId, currentUserId, spaceId: chat.spaceId })
 
-  const [newDialog] = await db
-    .insert(dialogs)
-    .values({
-      chatId,
-      userId: currentUserId,
-      spaceId: chat.spaceId,
-    })
-    .returning()
-
-  if (!newDialog) {
-    throw RealtimeRpcError.InternalError()
-  }
+  const newDialog = await createDialogOrLoadConcurrentWinner({
+    chatId,
+    userId: currentUserId,
+    spaceId: chat.spaceId,
+  })
 
   return { chat, dialog: newDialog }
 }
