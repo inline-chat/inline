@@ -20,6 +20,7 @@ public actor RealtimeV2 {
   // MARK: - Core Components
 
   private var auth: AuthHandle
+  private let authDiagnosticSnapshots: AsyncStream<AuthSnapshot>
   private var session: ProtocolSession
   private var connectionManager: ConnectionManager
   private var sync: Sync
@@ -46,6 +47,10 @@ public actor RealtimeV2 {
   private var syncActivityInProgress = false
   private var lastSnapshotState: ConnectionState = .stopped
   private var didNotifyConnectionInitFailure = false
+  private let authRecoveryDiagnostics = RealtimeAuthRecoveryDiagnostics()
+  private let authObservationProbe = AuthObservationProbe()
+  private var authRecoverySequence: UInt64 = 0
+  private var authRecoveryTask: Task<Void, Never>?
 
   // Transaction execution
   private var transactionContinuations: [TransactionId: CheckedContinuation<
@@ -65,6 +70,7 @@ public actor RealtimeV2 {
     blockerResolver: (any TransactionBlockerResolver)? = nil,
   ) {
     self.auth = auth
+    authDiagnosticSnapshots = auth.snapshots
     session = ProtocolSession(transport: transport, auth: auth)
     let initialConstraints = ConnectionConstraints(
       // Realtime handshake requires a token; userId alone is not enough.
@@ -78,7 +84,11 @@ public actor RealtimeV2 {
     sync = Sync(applyUpdates: applyUpdates, syncStorage: syncStorage, client: session, config: syncConfig)
     transactions = Transactions(persistenceHandler: persistenceHandler, blockerResolver: blockerResolver)
     stateObject = RealtimeState()
-    authAdapter = AuthConnectionAdapter(auth: auth, manager: connectionManager)
+    authAdapter = AuthConnectionAdapter(
+      auth: auth,
+      manager: connectionManager,
+      observationProbe: authObservationProbe
+    )
     lifecycleAdapter = LifecycleConnectionAdapter(manager: connectionManager)
     networkAdapter = NetworkConnectionAdapter(manager: connectionManager)
 
@@ -96,6 +106,8 @@ public actor RealtimeV2 {
       task.cancel()
     }
     tasks.removeAll()
+    authRecoveryTask?.cancel()
+    authRecoveryTask = nil
     // Stop core components
     Task { [self] in
       await connectionManager.stop()
@@ -130,6 +142,14 @@ public actor RealtimeV2 {
 
   /// Listen for auth events, transport events, sync events, etc.
   private func startListeners() async {
+    let authDiagnosticSnapshots = authDiagnosticSnapshots
+    Task {
+      for await snapshot in authDiagnosticSnapshots {
+        guard !Task.isCancelled else { return }
+        self.authDiagnosticSnapshotReceived(snapshot)
+      }
+    }.store(in: &tasks)
+
     // Connection snapshots
     Task {
       self.log.trace("Starting connection snapshot listener")
@@ -212,6 +232,66 @@ public actor RealtimeV2 {
         }
       }
     }.store(in: &tasks)
+  }
+
+  private func authDiagnosticSnapshotReceived(_ snapshot: AuthSnapshot) {
+    authRecoverySequence = authRecoverySequence &+ 1
+    let sequence = authRecoverySequence
+    authRecoveryDiagnostics.recordSnapshot(sequence: sequence, snapshot: snapshot)
+
+    authRecoveryTask?.cancel()
+    authRecoveryTask = nil
+
+    guard snapshot.isLoggedIn else { return }
+
+    authRecoveryTask = Task { [weak self] in
+      do {
+        try await Task.sleep(for: .seconds(2))
+      } catch {
+        return
+      }
+      await self?.runAuthRecoveryCheck(sequence: sequence, expectedSnapshot: snapshot)
+    }
+  }
+
+  private func runAuthRecoveryCheck(sequence: UInt64, expectedSnapshot: AuthSnapshot) async {
+    guard sequence == authRecoverySequence, !Task.isCancelled else { return }
+
+    var connection = await connectionManager.currentSnapshot()
+    let propagationOutcome = authRecoveryDiagnostics.check(
+      sequence: sequence,
+      authAvailable: auth.snapshot().isLoggedIn,
+      observerObserved: authObservationProbe.hasObserved(expectedSnapshot),
+      observerApplied: authObservationProbe.hasApplied(expectedSnapshot),
+      connection: connection,
+      stage: .propagation
+    )
+    guard propagationOutcome == .pending || propagationOutcome == .deferred else {
+      if sequence == authRecoverySequence {
+        authRecoveryTask = nil
+      }
+      return
+    }
+
+    do {
+      try await Task.sleep(for: .seconds(12))
+    } catch {
+      return
+    }
+    guard sequence == authRecoverySequence, !Task.isCancelled else { return }
+
+    connection = await connectionManager.currentSnapshot()
+    _ = authRecoveryDiagnostics.check(
+      sequence: sequence,
+      authAvailable: auth.snapshot().isLoggedIn,
+      observerObserved: authObservationProbe.hasObserved(expectedSnapshot),
+      observerApplied: authObservationProbe.hasApplied(expectedSnapshot),
+      connection: connection,
+      stage: .deadline
+    )
+    if sequence == authRecoverySequence {
+      authRecoveryTask = nil
+    }
   }
 
   private func startTransport() async {

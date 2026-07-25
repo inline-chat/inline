@@ -157,12 +157,14 @@ actor ConnectionManager {
 
     case .authAvailable:
       constraints.authAvailable = true
+      log.info("Realtime auth constraint applied available=1 state=\(state) session=\(sessionID)")
       attempt = 0
       cancelBackoff()
       await evaluateConstraints(resetBackoff: true)
 
     case .authLost:
       constraints.authAvailable = false
+      log.info("Realtime auth constraint applied available=0 state=\(state) session=\(sessionID)")
       await handleConstraintLoss(reason: .authLost)
 
     case .networkAvailable:
@@ -217,6 +219,7 @@ actor ConnectionManager {
       guard state == .connectingTransport || state == .authenticating else { return }
       await transition(to: .authenticating, reason: .none)
       startAuthTimeout(sessionID: sessionID)
+      log.info("Realtime authenticated handshake started session=\(sessionID)")
       await session.startHandshake()
 
     case let .transportDisconnected(errorDescription):
@@ -229,9 +232,11 @@ actor ConnectionManager {
       lastErrorDescription = nil
       guard state == .authenticating || state == .connectingTransport else { return }
       await transition(to: .open, reason: .none)
+      log.info("Realtime authenticated handshake opened session=\(sessionID)")
       startPingLoop(sessionID: sessionID)
 
     case .protocolAuthFailed:
+      log.error("Realtime authenticated handshake timed out")
       lastErrorDescription = "auth_failed"
       await session.stopTransport()
       await handleTransportDisconnect(reason: .authFailed)

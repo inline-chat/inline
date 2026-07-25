@@ -34,9 +34,10 @@ private final class AuthSnapshotPipe: @unchecked Sendable {
     return stream
   }
 
-  func yield(_ snapshot: AuthSnapshot) {
+  @discardableResult
+  func yield(_ snapshot: AuthSnapshot) -> UInt64? {
     lock.withLock {
-      guard latest?.snapshot != snapshot else { return }
+      guard latest?.snapshot != snapshot else { return nil }
 
       let versionedSnapshot = VersionedAuthSnapshot(
         revision: (latest?.revision ?? 0) &+ 1,
@@ -46,6 +47,7 @@ private final class AuthSnapshotPipe: @unchecked Sendable {
       for continuation in continuations.values {
         continuation.yield(versionedSnapshot.snapshot)
       }
+      return versionedSnapshot.revision
     }
   }
 
@@ -388,7 +390,15 @@ actor AuthStore {
     let previousStatus = lastStatus
     lastStatus = snapshot.status
     cache.update(snapshot)
-    snapshotPipe.yield(snapshot)
+    let revision = snapshotPipe.yield(snapshot)
+    if let revision {
+      log.info(
+        "AUTH2_STATE_CHANGE revision=\(revision)" +
+          " from=\(Self.diagnosticName(for: previousStatus))" +
+          " to=\(Self.diagnosticName(for: snapshot.status))" +
+          " hydrated=\(snapshot.didHydrate ? 1 : 0)"
+      )
+    }
     updateLockedRetryLoop(for: snapshot.status)
 
     switch (previousStatus.isAuthenticated, snapshot.status.isAuthenticated) {
@@ -566,5 +576,15 @@ actor AuthStore {
     // Treat this as best-effort recovery; do not rely on it for security decisions.
     guard let prefix = token.split(separator: ":", maxSplits: 1).first else { return nil }
     return Int64(prefix)
+  }
+
+  private static func diagnosticName(for status: AuthStatus) -> String {
+    switch status {
+    case .hydrating: "hydrating"
+    case .unauthenticated: "unauthenticated"
+    case .locked: "locked"
+    case .reauthRequired: "reauth_required"
+    case .authenticated: "authenticated"
+    }
   }
 }
