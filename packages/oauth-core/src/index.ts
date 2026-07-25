@@ -3,6 +3,8 @@ const LOCAL_DEV_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"])
 export const MCP_SUPPORTED_SCOPES = ["offline_access", "messages:read", "messages:write", "spaces:read"] as const
 export type McpSupportedScope = (typeof MCP_SUPPORTED_SCOPES)[number]
 
+export const MCP_RESOURCE_SCOPES = ["messages:read", "messages:write", "spaces:read"] as const
+
 const MCP_SUPPORTED_SCOPE_SET = new Set<string>(MCP_SUPPORTED_SCOPES)
 
 export const MCP_DEFAULT_SCOPE = "messages:read spaces:read"
@@ -50,6 +52,10 @@ export function isAllowedRedirectUri(uri: string): boolean {
   try {
     parsed = new URL(uri)
   } catch {
+    return false
+  }
+
+  if (parsed.hash || parsed.username || parsed.password) {
     return false
   }
 

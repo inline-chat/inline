@@ -14,6 +14,7 @@ type IntrospectionSuccess = {
   grant_id: string
   client_id: string
   scope: string
+  aud: string
   exp: number
   inline_user_id: string
   space_ids: string[]
@@ -55,6 +56,7 @@ function parseIntrospectionPayload(raw: unknown): IntrospectionSuccess | null {
   if (typeof data["grant_id"] !== "string") return null
   if (typeof data["client_id"] !== "string") return null
   if (typeof data["scope"] !== "string") return null
+  if (typeof data["aud"] !== "string") return null
   if (typeof data["exp"] !== "number") return null
   if (typeof data["inline_user_id"] !== "string") return null
   if (
@@ -72,6 +74,7 @@ function parseIntrospectionPayload(raw: unknown): IntrospectionSuccess | null {
     grant_id: data["grant_id"],
     client_id: data["client_id"],
     scope: data["scope"],
+    aud: data["aud"],
     exp: data["exp"],
     inline_user_id: data["inline_user_id"],
     space_ids: data["space_ids"],
@@ -158,7 +161,7 @@ async function introspectAccessToken(
   }
 
   const introspection = parseIntrospectionPayload(payload)
-  if (!introspection) {
+  if (!introspection || introspection.aud !== config.issuer) {
     return {
       ok: false,
       status: 401,

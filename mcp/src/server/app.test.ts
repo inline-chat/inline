@@ -34,6 +34,7 @@ describe("mcp app", () => {
     const body = await res.json()
     expect(body.resource).toBe("https://mcp.inline.chat")
     expect(body.authorization_servers).toEqual(["https://api.inline.chat"])
+    expect(body.scopes_supported).toEqual(["messages:read", "messages:write", "spaces:read"])
     expect(body.resource_name).toBe("Inline MCP")
     expect(body.resource_documentation).toBe("https://inline.chat")
   })

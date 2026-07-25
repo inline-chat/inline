@@ -17,6 +17,7 @@ function activeIntrospection(input: {
   clientId?: string
   inlineUserId?: string
   scope?: string
+  aud?: string
   spaceIds?: string[]
   allowDms?: boolean
   allowHomeThreads?: boolean
@@ -27,6 +28,7 @@ function activeIntrospection(input: {
     grant_id: input.grantId,
     client_id: input.clientId ?? "client-1",
     scope: input.scope ?? "messages:read spaces:read messages:write",
+    aud: input.aud ?? "http://localhost:8791",
     exp: Math.floor(Date.now() / 1000) + 3600,
     inline_user_id: input.inlineUserId ?? "1",
     space_ids: input.spaceIds ?? ["10"],
@@ -197,6 +199,28 @@ describe("/mcp", () => {
       new Request("http://localhost/mcp", {
         method: "POST",
         headers: { authorization: "Bearer mcp_at_nope" },
+      }),
+    )
+
+    expect(res.status).toBe(401)
+    expect(await res.json()).toEqual({ error: "invalid_token" })
+  })
+
+  it("rejects a token issued for a different MCP resource", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(activeIntrospection({ grantId: "g1", aud: "https://other.example" })), { status: 200 }),
+    )
+
+    const app = createApp({
+      issuer: "http://localhost:8791",
+      oauthIntrospectionUrl: "https://api.inline.chat/oauth/introspect",
+      oauthInternalSharedSecret: "secret",
+    })
+
+    const res = await app.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: { authorization: "Bearer mcp_at_wrong_audience" },
       }),
     )
 

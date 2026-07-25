@@ -1,6 +1,6 @@
 import type { McpConfig } from "../config"
 import { withJson } from "../http/response"
-import { MCP_SUPPORTED_SCOPES } from "@inline-chat/oauth-core"
+import { MCP_RESOURCE_SCOPES, MCP_SUPPORTED_SCOPES } from "@inline-chat/oauth-core"
 
 const PROXIED_OAUTH_PATHS = new Set([
   "/oauth/register",
@@ -76,7 +76,7 @@ export const OAuth = {
       return withJson({
         resource: config.issuer,
         authorization_servers: [config.oauthIssuer],
-        scopes_supported: [...MCP_SUPPORTED_SCOPES],
+        scopes_supported: [...MCP_RESOURCE_SCOPES],
         bearer_methods_supported: ["header"],
         resource_name: "Inline MCP",
         resource_documentation: "https://inline.chat",

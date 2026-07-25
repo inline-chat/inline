@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import {
   MCP_DEFAULT_SCOPE,
+  MCP_RESOURCE_SCOPES,
   base64UrlDecode,
   base64UrlEncode,
   constantTimeEqual,
@@ -36,6 +37,12 @@ describe("oauth-core", () => {
     expect(isAllowedRedirectUri("http://localhost:3000/callback")).toBe(true)
     expect(isAllowedRedirectUri("http://evil.example/callback")).toBe(false)
     expect(isAllowedRedirectUri("inline://callback")).toBe(false)
+    expect(isAllowedRedirectUri("https://example.com/callback#fragment")).toBe(false)
+    expect(isAllowedRedirectUri("https://user@example.com/callback")).toBe(false)
+  })
+
+  it("keeps offline access out of protected-resource scopes", () => {
+    expect(MCP_RESOURCE_SCOPES).toEqual(["messages:read", "messages:write", "spaces:read"])
   })
 
   it("encodes and decodes base64url", () => {
