@@ -1,9 +1,5 @@
 import Foundation
-import InlineKit
-#if canImport(Playgrounds)
-import Playgrounds
-#endif
-import SwiftUI
+import Observation
 
 /// A generic navigation model that provides tab-based navigation with persistent state.
 ///
@@ -17,6 +13,11 @@ import SwiftUI
 @Observable
 @MainActor
 public final class NavigationModel<Tab: TabType, Destination: DestinationType, Sheet: SheetType> {
+  private struct PersistentState: Codable {
+    let paths: [Tab: [Destination]]
+    let selectedTab: Tab
+  }
+
   private var paths: [Tab: [Destination]] = [:] {
     didSet {
       savePersistentState()
@@ -32,24 +33,43 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
   public var presentedSheet: Sheet?
 
   // Store the initial tab for proper reset behavior
-  private let initialTab: Tab
+  @ObservationIgnored private let initialTab: Tab
 
   // Persistence keys
-  private let pathsKey: String
-  private let selectedTabKey: String
-  private let presentedSheetKey: String
+  @ObservationIgnored private let defaults: UserDefaults
+  @ObservationIgnored private let stateKey: String
+  @ObservationIgnored private let pathsKey: String
+  @ObservationIgnored private let selectedTabKey: String
+  @ObservationIgnored private let presentedSheetKey: String
+  @ObservationIgnored private let encoder = JSONEncoder()
+  @ObservationIgnored private let decoder = JSONDecoder()
 
   /// Initialize the navigation model with persistence support
   /// - Parameters:
   ///   - initialTab: The default tab to select if no persisted state exists
-  public init(initialTab: Tab) {
-    self.initialTab = initialTab
-    selectedTab = initialTab
-    pathsKey = "AppRouter_paths"
-    selectedTabKey = "AppRouter_selectedTab"
-    presentedSheetKey = "AppRouter_presentedSheet"
+  public convenience init(initialTab: Tab) {
+    self.init(initialTab: initialTab, defaults: .standard, keyPrefix: "AppRouter")
+  }
 
-    loadPersistentState()
+  init(initialTab: Tab, defaults: UserDefaults, keyPrefix: String) {
+    self.initialTab = initialTab
+    self.defaults = defaults
+    stateKey = "\(keyPrefix)_state_v1"
+    pathsKey = "\(keyPrefix)_paths"
+    selectedTabKey = "\(keyPrefix)_selectedTab"
+    presentedSheetKey = "\(keyPrefix)_presentedSheet"
+    selectedTab = initialTab
+
+    if let stateData = defaults.data(forKey: stateKey),
+       let state = try? decoder.decode(PersistentState.self, from: stateData) {
+      paths = state.paths
+      selectedTab = state.selectedTab
+    } else {
+      loadLegacyPersistentState()
+      savePersistentState()
+    }
+
+    clearPersistedSheet()
   }
 
   public subscript(tab: Tab) -> [Destination] {
@@ -95,55 +115,21 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
   // MARK: - Persistence
 
   private func savePersistentState() {
-    savePaths()
-    saveSelectedTab()
-    clearPersistedSheet()
-  }
-
-  private func loadPersistentState() {
-    loadPaths()
-    loadSelectedTab()
-    clearPersistedSheet()
-  }
-
-  // MARK: - Paths Persistence
-
-  private func savePaths() {
-    let currentPaths = paths
-    let pathsKey = pathsKey
-
-    Task.detached(priority: .background) {
-      if let pathsData = try? JSONEncoder().encode(currentPaths) {
-        UserDefaults.standard.set(pathsData, forKey: pathsKey)
-      }
+    let state = PersistentState(paths: paths, selectedTab: selectedTab)
+    if let data = try? encoder.encode(state) {
+      defaults.set(data, forKey: stateKey)
     }
+    clearPersistedSheet()
   }
 
-  private func loadPaths() {
-    if let pathsData = UserDefaults.standard.data(forKey: pathsKey),
-       let decodedPaths = try? JSONDecoder().decode([Tab: [Destination]].self, from: pathsData)
-    {
+  private func loadLegacyPersistentState() {
+    if let pathsData = defaults.data(forKey: pathsKey),
+       let decodedPaths = try? decoder.decode([Tab: [Destination]].self, from: pathsData) {
       paths = decodedPaths
     }
-  }
 
-  // MARK: - Selected Tab Persistence
-
-  private func saveSelectedTab() {
-    let currentSelectedTab = selectedTab
-    let selectedTabKey = selectedTabKey
-
-    Task.detached(priority: .background) {
-      if let selectedTabData = try? JSONEncoder().encode(currentSelectedTab) {
-        UserDefaults.standard.set(selectedTabData, forKey: selectedTabKey)
-      }
-    }
-  }
-
-  private func loadSelectedTab() {
-    if let selectedTabData = UserDefaults.standard.data(forKey: selectedTabKey),
-       let decodedSelectedTab = try? JSONDecoder().decode(Tab.self, from: selectedTabData)
-    {
+    if let selectedTabData = defaults.data(forKey: selectedTabKey),
+       let decodedSelectedTab = try? decoder.decode(Tab.self, from: selectedTabData) {
       selectedTab = decodedSelectedTab
     }
   }
@@ -151,7 +137,7 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
   // MARK: - Presented Sheet Persistence
 
   private func clearPersistedSheet() {
-    UserDefaults.standard.removeObject(forKey: presentedSheetKey)
+    defaults.removeObject(forKey: presentedSheetKey)
   }
 
   /// Reset all navigation state and clear persistence
@@ -161,8 +147,9 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
     presentedSheet = nil
 
     // Clear persisted data
-    UserDefaults.standard.removeObject(forKey: pathsKey)
-    UserDefaults.standard.removeObject(forKey: selectedTabKey)
-    UserDefaults.standard.removeObject(forKey: presentedSheetKey)
+    defaults.removeObject(forKey: stateKey)
+    defaults.removeObject(forKey: pathsKey)
+    defaults.removeObject(forKey: selectedTabKey)
+    defaults.removeObject(forKey: presentedSheetKey)
   }
 }
