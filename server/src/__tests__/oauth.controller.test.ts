@@ -4,6 +4,9 @@ import { setupTestLifecycle, testUtils } from "./setup"
 import { OauthModel } from "@in/server/db/models/oauth"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
 import { sha256Base64Url, sha256Hex } from "@inline-chat/oauth-core"
+import { db } from "@in/server/db"
+import { oauthAuthRequests } from "@in/server/db/schema"
+import { inArray } from "drizzle-orm"
 
 function extractSetCookieValue(setCookie: string | null): string {
   if (!setCookie) throw new Error("missing set-cookie")
@@ -19,6 +22,44 @@ function extractHidden(html: string, name: string): string {
 
 describe("OAuth controller", () => {
   setupTestLifecycle()
+
+  it("cleans expired OAuth rows with typed timestamp predicates", async () => {
+    const nowMs = Date.now()
+    const client = await OauthModel.createClient({
+      clientId: crypto.randomUUID(),
+      redirectUris: ["https://example.com/callback"],
+      clientName: "cleanup-client",
+      nowMs,
+    })
+    const expiredId = crypto.randomUUID()
+    const liveId = crypto.randomUUID()
+
+    for (const [id, expiresAtMs] of [
+      [expiredId, nowMs - 1_000],
+      [liveId, nowMs + 60_000],
+    ] as const) {
+      await OauthModel.createAuthRequest({
+        id,
+        clientId: client.clientId,
+        redirectUri: "https://example.com/callback",
+        state: `state-${id}`,
+        scope: "messages:read",
+        codeChallenge: `challenge-${id}`,
+        csrfToken: `csrf-${id}`,
+        deviceId: `device-${id}`,
+        nowMs,
+        expiresAtMs,
+      })
+    }
+
+    await expect(OauthModel.cleanupExpired(nowMs)).resolves.toBeUndefined()
+
+    const remaining = await db
+      .select({ id: oauthAuthRequests.id })
+      .from(oauthAuthRequests)
+      .where(inArray(oauthAuthRequests.id, [expiredId, liveId]))
+    expect(remaining).toEqual([{ id: liveId }])
+  })
 
   it("stores challenge token on send-email-code", async () => {
     const registerRes = await app.handle(

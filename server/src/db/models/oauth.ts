@@ -7,7 +7,7 @@ import {
   oauthGrants,
   oauthRefreshTokens,
 } from "@in/server/db/schema/oauth"
-import { and, eq, gt, isNull, or, sql } from "drizzle-orm"
+import { and, eq, gt, isNull, lte, or } from "drizzle-orm"
 
 export type OauthRegisteredClient = {
   clientId: string
@@ -169,10 +169,10 @@ export const OauthModel = {
   async cleanupExpired(nowMs: number): Promise<void> {
     const now = toDate(nowMs)
     await Promise.all([
-      db.delete(oauthAuthRequests).where(sql`${oauthAuthRequests.expiresAt} <= ${now}`),
-      db.delete(oauthAuthCodes).where(sql`${oauthAuthCodes.expiresAt} <= ${now}`),
-      db.delete(oauthAccessTokens).where(sql`${oauthAccessTokens.expiresAt} <= ${now}`),
-      db.delete(oauthRefreshTokens).where(sql`${oauthRefreshTokens.expiresAt} <= ${now}`),
+      db.delete(oauthAuthRequests).where(lte(oauthAuthRequests.expiresAt, now)),
+      db.delete(oauthAuthCodes).where(lte(oauthAuthCodes.expiresAt, now)),
+      db.delete(oauthAccessTokens).where(lte(oauthAccessTokens.expiresAt, now)),
+      db.delete(oauthRefreshTokens).where(lte(oauthRefreshTokens.expiresAt, now)),
     ])
   },
 
@@ -502,7 +502,7 @@ export const OauthModel = {
       .where(
         and(
           eq(oauthAuthRequests.inlineUserId, userId),
-          or(isNull(oauthAuthRequests.expiresAt), sql`${oauthAuthRequests.expiresAt} <= ${toDate(nowMs)}`),
+          or(isNull(oauthAuthRequests.expiresAt), lte(oauthAuthRequests.expiresAt, toDate(nowMs))),
         ),
       )
   },
