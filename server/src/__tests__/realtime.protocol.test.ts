@@ -19,8 +19,9 @@ import {
 import { db } from "@in/server/db"
 import { sessions, users } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
-import { afterAll, beforeAll, describe, expect, it, mock } from "bun:test"
+import { afterAll, beforeAll, describe, expect, it, mock, spyOn } from "bun:test"
 import Elysia from "elysia"
+import { Log } from "@in/server/utils/log"
 
 const handleConnectionOpen = mock().mockResolvedValue(undefined)
 const handleConnectionClose = mock().mockResolvedValue(undefined)
@@ -340,6 +341,73 @@ describe("realtime protocol safety", () => {
 
   it("returns connectionOpen for valid connectionInit token", async () => {
     const { ws } = await authenticateSocket()
+    await wsClosed(ws)
+  })
+
+  it("accepts client acknowledgements without reporting an error", async () => {
+    const errorSpy = spyOn(Log.prototype, "error")
+    const { ws } = await authenticateSocket()
+    const callCountBeforeAck = errorSpy.mock.calls.length
+
+    wsSendClientProtocolMessage(ws, {
+      id: 13n,
+      seq: 2,
+      body: {
+        oneofKind: "ack",
+        ack: { msgId: 12n },
+      },
+    })
+    wsSendClientProtocolMessage(ws, {
+      id: 14n,
+      seq: 3,
+      body: {
+        oneofKind: "ping",
+        ping: { nonce: 99n },
+      },
+    })
+
+    const pong = await wsServerProtocolMessage(ws)
+    expect(pong.body.oneofKind).toBe("pong")
+    expect(
+      errorSpy.mock.calls
+        .slice(callCountBeforeAck)
+        .some(([message]) => message === "unhandled message"),
+    ).toBe(false)
+
+    errorSpy.mockRestore()
+    await wsClosed(ws)
+  })
+
+  it("downgrades repeated authentication rejections within the warning window", async () => {
+    const warnSpy = spyOn(Log.prototype, "warn")
+    const debugSpy = spyOn(Log.prototype, "debug")
+    const ws = await openRealtimeSocket()
+    const token = `invalid-${crypto.randomUUID()}`
+
+    for (const id of [15n, 16n]) {
+      wsSendClientProtocolMessage(ws, {
+        id,
+        seq: Number(id),
+        body: {
+          oneofKind: "connectionInit",
+          connectionInit: { token },
+        },
+      })
+      const response = await wsServerProtocolMessage(ws)
+      expect(response.body.oneofKind).toBe("connectionError")
+    }
+
+    const rejectionWarnings = warnSpy.mock.calls.filter(
+      ([message]) => message === "realtime connectionInit rejected",
+    )
+    const rejectionDebugs = debugSpy.mock.calls.filter(
+      ([message]) => message === "realtime connectionInit rejected",
+    )
+    expect(rejectionWarnings).toHaveLength(1)
+    expect(rejectionDebugs).toHaveLength(1)
+
+    warnSpy.mockRestore()
+    debugSpy.mockRestore()
     await wsClosed(ws)
   })
 

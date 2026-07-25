@@ -15,6 +15,7 @@ import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { InlineError } from "@in/server/types/errors"
 import {
+  type AuthTokenErrorDetails,
   getAuthTokenErrorDetails,
   getConnectionReasonFromAuthError,
 } from "@in/server/modules/auth/sessionAuthentication"
@@ -43,6 +44,12 @@ const getMethodName = (method: number): string => {
 
 const unsupportedRpcMethodLogKeys = new Set<string>()
 const MAX_UNSUPPORTED_RPC_METHOD_LOG_KEYS = 512
+const AUTH_REJECTION_WARNING_WINDOW_MS = 15 * 60 * 1000
+const MAX_AUTH_REJECTION_WARNING_KEYS = 1_024
+const authRejectionWarnings = new Map<
+  string,
+  { lastWarnedAt: number; suppressedCount: number }
+>()
 
 const isUnsupportedRpcMethodError = (error: unknown): error is RealtimeRpcError => {
   return (
@@ -59,6 +66,36 @@ const shouldLogUnsupportedRpcMethodWarning = (key: string): boolean => {
   }
   unsupportedRpcMethodLogKeys.add(key)
   return true
+}
+
+const authRejectionLogDecision = (
+  details: AuthTokenErrorDetails,
+  now = Date.now(),
+): { warn: boolean; suppressedCount: number } => {
+  const key = `${details.failure}:${details.credentialFingerprint ?? "unknown"}`
+  const existing = authRejectionWarnings.get(key)
+
+  if (
+    existing &&
+    now - existing.lastWarnedAt < AUTH_REJECTION_WARNING_WINDOW_MS
+  ) {
+    existing.suppressedCount += 1
+    return { warn: false, suppressedCount: existing.suppressedCount }
+  }
+
+  if (
+    !existing &&
+    authRejectionWarnings.size >= MAX_AUTH_REJECTION_WARNING_KEYS
+  ) {
+    authRejectionWarnings.clear()
+  }
+
+  const suppressedCount = existing?.suppressedCount ?? 0
+  authRejectionWarnings.set(key, {
+    lastWarnedAt: now,
+    suppressedCount: 0,
+  })
+  return { warn: true, suppressedCount }
 }
 
 const connectionReasonName = (reason: ConnectionError_Reason): string => {
@@ -173,7 +210,15 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
           const authDetails = getAuthTokenErrorDetails(e)
           const metadata = connectionInitRejectionMetadata(message, rootContext, e, reason)
           if (authDetails) {
-            log.warn("realtime connectionInit rejected", metadata)
+            const decision = authRejectionLogDecision(authDetails)
+            const rejectionMetadata = decision.suppressedCount > 0
+              ? { ...metadata, suppressedCount: decision.suppressedCount }
+              : metadata
+            if (decision.warn) {
+              log.warn("realtime connectionInit rejected", rejectionMetadata)
+            } else {
+              log.debug("realtime connectionInit rejected", rejectionMetadata)
+            }
           } else {
             log.error("error handling message in connectionInit", e, metadata)
           }
@@ -196,8 +241,17 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
         sendPong(message, message.body.ping.nonce)
         break
 
+      case "ack":
+        break
+
       default:
-        log.error("unhandled message")
+        log.warn("realtime unsupported client message", {
+          connectionId,
+          messageId: message.id.toString(),
+          seq: message.seq,
+          messageKind: message.body.oneofKind ?? "unknown",
+          layer: conn?.layer,
+        })
         break
     }
   } catch (e) {
