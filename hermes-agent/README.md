@@ -31,7 +31,7 @@ Supported:
 - Per-turn Inline sender/chat/thread IDs, selective reply/thread/observed context, and parent-thread context, with prompt guidance for sender mentions and current chat/thread Markdown links.
 - OpenClaw-style entity summaries for live turns and tool-fetched history, including mentions, text links, thread links, thread-title links, code/pre blocks, bot commands, and group mentions as untrusted Hermes context.
 - DM and group policies, user allowlists, group sender allowlists, mention requirements, strict mention mode, allowed chats, and free-response chats.
-- Native Inline `/` command-menu sync for Hermes slash commands, including `/threads` and `/update`; typed slash commands continue to work even if menu sync is disabled or rejected.
+- Native Inline `/` command-menu sync for Hermes slash commands, including `/threads`, `/inline_update`, and `/update`; typed slash commands continue to work even if menu sync is disabled or rejected.
 - Inline-native buttons for clarify prompts, command approvals, slash confirmations, and model selection.
 - Outbound local photo, video, voice, and document uploads with configurable size caps.
 - Inbound photo, video, voice, and document summaries, with URL-backed media cached locally for Hermes when available.
@@ -324,6 +324,15 @@ central slash-command registry, normalizes names to Inline Bot API constraints
 rejects the full list with `BOT_COMMANDS_TOO_MUCH`, the adapter retries with a
 smaller prefix. Menu sync failures are logged as warnings and do not prevent
 message transport; `/commands` remains the full fallback list.
+
+Run `/inline_update` to install the newest adapter from the plugin's current
+npm release channel. Stable installs continue following `latest`, while
+prerelease installs continue following their existing channel such as `alpha`
+or `beta`. Before changing files, the command checks the selected release's
+minimum Hermes version against the running agent and refuses incompatible or
+unverifiable updates. The update runs in the background without exposing the
+Inline token to npm, then asks you to run `/restart` so Hermes loads the
+installed version. Development symlink installs are left untouched.
 
 The plugin id is `inline`, which is intentionally the same id an eventual
 bundled Hermes adapter should use.

@@ -20,6 +20,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from collections import OrderedDict
 from datetime import datetime, timezone
@@ -81,10 +82,16 @@ _INLINE_COMMAND_RETRY_RATIO = 0.8
 _INLINE_COMMAND_RE = re.compile(r"^[a-z0-9_]{1,32}$")
 _INLINE_THREADS_COMMAND_DESCRIPTION = "Configure Inline reply-thread routing"
 _INLINE_THREADS_COMMAND_ARGS = "[status|on|off|auto|reset]"
+_INLINE_UPDATE_COMMAND_DESCRIPTION = "Update the Inline Hermes plugin"
+_INLINE_UPDATE_PACKAGE_NAME = "@inline-chat/hermes-agent-adapter"
+_INLINE_UPDATE_PRECHECK_TIMEOUT_SECONDS = 30
+_INLINE_UPDATE_TIMEOUT_SECONDS = 5 * 60
+_INLINE_UPDATE_LOCK = threading.Lock()
 _INLINE_THREADS_ACTION_PREFIX = "th:"
 _INLINE_THREADS_ACTION_TTL_SECONDS = 15 * 60
 _INLINE_LOCAL_COMMANDS = (
     ("threads", _INLINE_THREADS_COMMAND_DESCRIPTION),
+    ("inline_update", _INLINE_UPDATE_COMMAND_DESCRIPTION),
 )
 _INLINE_THREAD_COMMAND_RE = re.compile(r"^/(?:thread|threads)(?:@[A-Za-z0-9_]+)?(?:\s+(.*))?$", re.IGNORECASE)
 _INLINE_REPLY_THREAD_NEGATION_RE = re.compile(
@@ -383,6 +390,22 @@ def _normalize_inline_command_name(raw: str) -> str:
     name = re.sub(r"[^a-z0-9_]", "", name)
     name = re.sub(r"_{2,}", "_", name)
     return name.strip("_")
+
+
+def _normalize_inline_plugin_command_text(text: str) -> str:
+    match = re.match(r"^/([a-z0-9_]+)(@[A-Za-z0-9_]+)?(\s.*)?$", str(text or ""), re.IGNORECASE | re.DOTALL)
+    if not match or "_" not in match.group(1):
+        return text
+    command = match.group(1).lower().replace("_", "-")
+    try:
+        from hermes_cli.plugins import get_plugin_commands
+        if command not in (get_plugin_commands() or {}):
+            return text
+    except Exception:
+        return text
+    # Inline menus require underscores, while Hermes registers plugin commands
+    # with hyphens. Normalize before gateway access checks as well as dispatch.
+    return f"/{command}{match.group(2) or ''}{match.group(3) or ''}"
 
 
 def _normalize_inline_command_description(raw: str) -> str:
@@ -1481,6 +1504,7 @@ class InlineAdapter(BasePlatformAdapter):
             parent_chat_id=parent_chat_id,
         ):
             return
+        text = _normalize_inline_plugin_command_text(text)
         reply_to_is_own = False
         reply_to_text = None
         reply_to_author = None
@@ -3667,6 +3691,173 @@ def _inline_threads_command_handler(raw_args: str) -> str:
     )
 
 
+def _inline_update_environment() -> Dict[str, str]:
+    try:
+        from tools.environments.local import _sanitize_subprocess_env
+        env = _sanitize_subprocess_env(os.environ.copy())
+    except Exception:
+        env = os.environ.copy()
+    # Hermes cannot know the secret names introduced by every external plugin.
+    sensitive_names = ("TOKEN", "SECRET", "PASSWORD", "API_KEY", "AUTHORIZATION")
+    for key in list(env):
+        if any(name in key.upper() for name in sensitive_names):
+            env.pop(key, None)
+    return env
+
+
+def _installed_inline_plugin_version(hermes_home: Path) -> Optional[str]:
+    manifest = hermes_home / "plugins" / "inline" / "plugin.yaml"
+    try:
+        text = manifest.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    match = re.search(r"(?m)^version:\s*['\"]?([^\s'\"]+)", text)
+    return match.group(1) if match else None
+
+
+def _inline_update_lane(version: Optional[str]) -> Optional[str]:
+    if not version:
+        return None
+    match = re.fullmatch(r"\d+\.\d+\.\d+(?:-([A-Za-z][A-Za-z0-9-]*)(?:\.[0-9A-Za-z-]+)*)?", version)
+    if not match:
+        return None
+    return match.group(1) or "latest"
+
+
+def _semver_core(version: Any) -> Optional[tuple[int, int, int]]:
+    match = re.match(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$", str(version or "").strip())
+    if not match:
+        return None
+    return tuple(int(part) for part in match.groups())
+
+
+def _run_inline_update() -> str:
+    if not _INLINE_UPDATE_LOCK.acquire(blocking=False):
+        return "An Inline plugin update is already running."
+    try:
+        return _run_inline_update_locked()
+    finally:
+        _INLINE_UPDATE_LOCK.release()
+
+
+def _run_inline_update_locked() -> str:
+    npm_bin = shutil.which("npm")
+    if not npm_bin:
+        return "Inline plugin update is unavailable because npm was not found on PATH."
+
+    hermes_home = Path(os.getenv("HERMES_HOME") or Path.home() / ".hermes").expanduser()
+    target = hermes_home / "plugins" / "inline"
+    if target.is_symlink():
+        return (
+            "Inline is installed as a development symlink, so automatic update was skipped. "
+            "Update the linked source checkout and restart Hermes instead."
+        )
+
+    installed_version = _installed_inline_plugin_version(hermes_home)
+    lane = _inline_update_lane(installed_version)
+    if not lane:
+        return (
+            "Inline plugin update could not determine the installed release channel. "
+            "Update it manually with the package version or npm dist-tag you want to follow."
+        )
+    package_spec = f"{_INLINE_UPDATE_PACKAGE_NAME}@{lane}"
+    precheck_command = [npm_bin, "view", package_spec, "--json"]
+    try:
+        precheck = subprocess.run(
+            precheck_command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=_INLINE_UPDATE_PRECHECK_TIMEOUT_SECONDS,
+            check=False,
+            env=_inline_update_environment(),
+        )
+    except subprocess.TimeoutExpired:
+        return "Inline plugin compatibility precheck timed out; no update was applied."
+    except OSError as exc:
+        logger.warning("[inline] plugin compatibility precheck failed to start: %s", exc)
+        return "Inline plugin compatibility precheck could not start; no update was applied."
+    if precheck.returncode != 0:
+        logger.warning("[inline] plugin compatibility precheck exited with code %s", precheck.returncode)
+        return (
+            f"Inline plugin compatibility precheck failed with exit code {precheck.returncode}; "
+            "no update was applied."
+        )
+    try:
+        package_metadata = json.loads(precheck.stdout or "{}")
+    except (TypeError, json.JSONDecodeError):
+        package_metadata = None
+    inline_metadata = package_metadata.get("inlineHermes") if isinstance(package_metadata, dict) else None
+    candidate_version = package_metadata.get("version") if isinstance(package_metadata, dict) else None
+    minimum_hermes = inline_metadata.get("minHermesVersion") if isinstance(inline_metadata, dict) else None
+    try:
+        from hermes_cli import __version__ as current_hermes
+    except Exception:
+        current_hermes = None
+    current_core = _semver_core(current_hermes)
+    minimum_core = _semver_core(minimum_hermes)
+    if not candidate_version or not current_core or not minimum_core:
+        return (
+            "Inline plugin compatibility metadata could not be verified; "
+            "no update was applied."
+        )
+    if current_core < minimum_core:
+        return (
+            f"Inline plugin `{candidate_version}` requires Hermes `{minimum_hermes}` or newer, "
+            f"but this agent is running `{current_hermes}`. Update Hermes first; no plugin update was applied."
+        )
+
+    command = [
+        npm_bin,
+        "exec",
+        "--yes",
+        f"--package={package_spec}",
+        "--",
+        "inline-hermes",
+        "install",
+        "--force",
+        "--hermes-home",
+        str(hermes_home),
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=_INLINE_UPDATE_TIMEOUT_SECONDS,
+            check=False,
+            env=_inline_update_environment(),
+        )
+    except subprocess.TimeoutExpired:
+        return (
+            "Inline plugin update timed out. Run "
+            f"`npm exec --yes --package={package_spec} -- "
+            "inline-hermes install --force` on the Hermes host."
+        )
+    except OSError as exc:
+        logger.warning("[inline] plugin update failed to start: %s", exc)
+        return "Inline plugin update could not start. Check that npm is installed and usable on the Hermes host."
+
+    if result.returncode != 0:
+        logger.warning("[inline] plugin update exited with code %s", result.returncode)
+        return (
+            f"Inline plugin update failed with exit code {result.returncode}. Run "
+            f"`npm exec --yes --package={package_spec} -- "
+            "inline-hermes install --force` on the Hermes host."
+        )
+
+    version = _installed_inline_plugin_version(hermes_home)
+    version_text = f" to `{version}`" if version else ""
+    return f"Inline plugin updated{version_text} from the `{lane}` channel. Run `/restart` to load the new version."
+
+
+async def _inline_update_command_handler(raw_args: str = "") -> str:
+    if str(raw_args or "").strip():
+        return "Usage: `/inline_update`"
+    return await asyncio.to_thread(_run_inline_update)
+
+
 def register(ctx) -> None:
     from . import cli as _cli
     from . import tools as _tools
@@ -3709,6 +3900,11 @@ def register(ctx) -> None:
             handler=_inline_threads_command_handler,
             description=_INLINE_THREADS_COMMAND_DESCRIPTION,
             args_hint=_INLINE_THREADS_COMMAND_ARGS,
+        )
+        register_command(
+            "inline-update",
+            handler=_inline_update_command_handler,
+            description=_INLINE_UPDATE_COMMAND_DESCRIPTION,
         )
     ctx.register_cli_command(
         name="inline",

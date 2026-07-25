@@ -36,7 +36,9 @@ approval = types.ModuleType("tools.approval")
 slash_confirm = types.ModuleType("tools.slash_confirm")
 clarify_gateway = types.ModuleType("tools.clarify_gateway")
 hermes_cli = types.ModuleType("hermes_cli")
+hermes_cli.__version__ = "0.18.2"
 commands = types.ModuleType("hermes_cli.commands")
+hermes_plugins = types.ModuleType("hermes_cli.plugins")
 model_cost_guard = types.ModuleType("hermes_cli.model_cost_guard")
 gateway_cli = types.ModuleType("hermes_cli.gateway")
 setup_cli = types.ModuleType("hermes_cli.setup")
@@ -167,6 +169,7 @@ commands.telegram_menu_commands = lambda max_commands=100: ([
     ("update", "Update Hermes"),
     ("bad-name", "Hyphenated command"),
 ][:max_commands], max(0, 5 - max_commands))
+hermes_plugins.get_plugin_commands = lambda: {"inline-update": {}}
 
 class HttpxResponse:
     def __init__(self, status_code, text):
@@ -245,6 +248,7 @@ sys.modules["tools.slash_confirm"] = slash_confirm
 sys.modules["tools.clarify_gateway"] = clarify_gateway
 sys.modules["hermes_cli"] = hermes_cli
 sys.modules["hermes_cli.commands"] = commands
+sys.modules["hermes_cli.plugins"] = hermes_plugins
 sys.modules["hermes_cli.model_cost_guard"] = model_cost_guard
 sys.modules["hermes_cli.gateway"] = gateway_cli
 sys.modules["hermes_cli.setup"] = setup_cli
@@ -254,6 +258,7 @@ tools.approval = approval
 tools.slash_confirm = slash_confirm
 tools.clarify_gateway = clarify_gateway
 hermes_cli.commands = commands
+hermes_cli.plugins = hermes_plugins
 hermes_cli.model_cost_guard = model_cost_guard
 hermes_cli.gateway = gateway_cli
 hermes_cli.setup = setup_cli
@@ -261,7 +266,8 @@ test_settings_dir = Path(tempfile.mkdtemp(prefix="inline-hermes-settings-"))
 os.environ["INLINE_SETTINGS_PATH"] = str(test_settings_dir / "adapter-settings.json")
 sys.path.insert(0, "plugin")
 
-from inline.adapter import InlineAdapter, _apply_yaml_config, _env_enablement, _inline_menu_commands, _install_inline_display_defaults, _standalone_send, _target_from_chat_id
+import inline.adapter as inline_adapter_module
+from inline.adapter import InlineAdapter, _apply_yaml_config, _env_enablement, _inline_menu_commands, _inline_update_lane, _install_inline_display_defaults, _normalize_inline_plugin_command_text, _standalone_send, _target_from_chat_id
 from inline.adapter import register, validate_config
 from inline import cli as inline_cli
 from inline import tools as inline_tools
@@ -274,10 +280,18 @@ assert token_only._token == "top-level-token"
 menu_commands, hidden_commands = _inline_menu_commands(100)
 assert hidden_commands == 0
 menu_names = [entry["command"] for entry in menu_commands]
-assert menu_names == ["threads", "help", "model", "update", "bad_name"]
+assert menu_names == ["threads", "inline_update", "help", "model", "update", "bad_name"]
 assert menu_commands[0]["description"] == "Configure Inline reply-thread routing"
-assert menu_commands[3]["description"] == "Update Hermes"
+assert menu_commands[1]["description"] == "Update the Inline Hermes plugin"
+assert menu_commands[4]["description"] == "Update Hermes"
 assert all("/" not in name and "-" not in name for name in menu_names)
+assert _normalize_inline_plugin_command_text("/inline_update") == "/inline-update"
+assert _normalize_inline_plugin_command_text("/inline_update now") == "/inline-update now"
+assert _normalize_inline_plugin_command_text("/not_a_plugin") == "/not_a_plugin"
+assert _inline_update_lane("1.2.3") == "latest"
+assert _inline_update_lane("1.2.3-beta.4") == "beta"
+assert _inline_update_lane("1.2.3-canary-edge.2") == "canary-edge"
+assert _inline_update_lane("not-semver") is None
 
 os.environ["INLINE_CUSTOM_TOKEN"] = "custom-token"
 env_ref_token = "$" + "{INLINE_CUSTOM_TOKEN}"
@@ -352,7 +366,7 @@ assert "inline-hermes install" in ctx.platform["install_hint"]
 assert "INLINE_TOKEN/INLINE_BOT_TOKEN" in ctx.platform["install_hint"]
 assert "platforms.inline.token" in ctx.platform["install_hint"]
 assert "inline.token" in ctx.platform["install_hint"]
-assert len(ctx.commands) == 1
+assert len(ctx.commands) == 2
 assert ctx.commands[0]["name"] == "threads"
 assert ctx.commands[0]["description"] == "Configure Inline reply-thread routing"
 assert ctx.commands[0]["args_hint"] == "[status|on|off|auto|reset]"
@@ -360,6 +374,110 @@ thread_fallback = ctx.commands[0]["handler"]("off")
 assert "/threads off" in thread_fallback
 assert "inside the target Inline DM or group chat" in thread_fallback
 assert "restart the Hermes gateway" in thread_fallback
+assert ctx.commands[1]["name"] == "inline-update"
+assert ctx.commands[1]["description"] == "Update the Inline Hermes plugin"
+assert ctx.commands[1]["args_hint"] == ""
+
+async def assert_inline_update_command():
+    with tempfile.TemporaryDirectory(prefix="inline-hermes-update-") as tmp:
+        hermes_home = Path(tmp)
+        plugin_dir = hermes_home / "plugins" / "inline"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "plugin.yaml").write_text("version: 0.0.5-alpha.4\n", encoding="utf-8")
+
+        saved_home = os.environ.get("HERMES_HOME")
+        saved_token = os.environ.get("INLINE_TOKEN")
+        saved_hermes_version = hermes_cli.__version__
+        original_which = inline_adapter_module.shutil.which
+        original_run = inline_adapter_module.subprocess.run
+        calls = []
+        try:
+            os.environ["HERMES_HOME"] = str(hermes_home)
+            os.environ["INLINE_TOKEN"] = "must-not-reach-npm"
+            inline_adapter_module.shutil.which = lambda name: "/usr/bin/npm" if name == "npm" else None
+
+            def fake_run(command, **kwargs):
+                calls.append((command, kwargs))
+                if command[1] == "view":
+                    stable = command[2].endswith("@latest")
+                    metadata = {
+                        "version": "0.0.5" if stable else "0.0.5-alpha.5",
+                        "inlineHermes": {"minHermesVersion": "0.17.0"},
+                    }
+                    return types.SimpleNamespace(returncode=0, stdout=json.dumps(metadata))
+                return types.SimpleNamespace(returncode=0, stdout="installed")
+
+            inline_adapter_module.subprocess.run = fake_run
+            response = await ctx.commands[1]["handler"]("")
+            assert response.startswith("Inline plugin updated to ")
+            assert "0.0.5-alpha.4" in response
+            assert "alpha" in response
+            assert "/restart" in response
+            assert len(calls) == 2
+            precheck_command, precheck_kwargs = calls[0]
+            assert precheck_command == [
+                "/usr/bin/npm",
+                "view",
+                "@inline-chat/hermes-agent-adapter@alpha",
+                "--json",
+            ]
+            assert precheck_kwargs["timeout"] == 30
+            assert precheck_kwargs["stderr"] is inline_adapter_module.subprocess.PIPE
+            assert "INLINE_TOKEN" not in precheck_kwargs["env"]
+            command, kwargs = calls[1]
+            assert command == [
+                "/usr/bin/npm",
+                "exec",
+                "--yes",
+                "--package=@inline-chat/hermes-agent-adapter@alpha",
+                "--",
+                "inline-hermes",
+                "install",
+                "--force",
+                "--hermes-home",
+                str(hermes_home),
+            ]
+            assert kwargs["timeout"] == 300
+            assert kwargs["check"] is False
+            assert "INLINE_TOKEN" not in kwargs["env"]
+
+            calls.clear()
+            (plugin_dir / "plugin.yaml").write_text("version: 0.0.4\n", encoding="utf-8")
+            stable_response = await ctx.commands[1]["handler"]("")
+            assert "latest" in stable_response
+            assert calls[0][0][2] == "@inline-chat/hermes-agent-adapter@latest"
+            assert calls[1][0][3] == "--package=@inline-chat/hermes-agent-adapter@latest"
+
+            calls.clear()
+            hermes_cli.__version__ = "0.16.0"
+            incompatible = await ctx.commands[1]["handler"]("")
+            assert "requires Hermes" in incompatible
+            assert "Update Hermes first" in incompatible
+            assert len(calls) == 1
+            assert calls[0][0][1] == "view"
+            hermes_cli.__version__ = "0.18.2"
+
+            usage = await ctx.commands[1]["handler"]("unexpected")
+            assert "/inline_update" in usage
+            inline_adapter_module._INLINE_UPDATE_LOCK.acquire()
+            try:
+                assert await ctx.commands[1]["handler"]("") == "An Inline plugin update is already running."
+            finally:
+                inline_adapter_module._INLINE_UPDATE_LOCK.release()
+        finally:
+            inline_adapter_module.shutil.which = original_which
+            inline_adapter_module.subprocess.run = original_run
+            if saved_home is None:
+                os.environ.pop("HERMES_HOME", None)
+            else:
+                os.environ["HERMES_HOME"] = saved_home
+            if saved_token is None:
+                os.environ.pop("INLINE_TOKEN", None)
+            else:
+                os.environ["INLINE_TOKEN"] = saved_token
+            hermes_cli.__version__ = saved_hermes_version
+
+asyncio.run(assert_inline_update_command())
 assert ctx.cli["name"] == "inline"
 assert ctx.tool["name"] == "inline"
 assert ctx.tool["toolset"] == "inline"
@@ -972,9 +1090,10 @@ async def assert_bot_command_sync():
     assert calls[0][2]["Content-Type"] == "application/json"
     assert calls[0][3] == 10.0
     names = [entry["command"] for entry in calls[0][1]["commands"]]
-    assert names == ["threads", "help", "model", "update", "bad_name"]
+    assert names == ["threads", "inline_update", "help", "model", "update", "bad_name"]
     assert calls[0][1]["commands"][0]["description"] == "Configure Inline reply-thread routing"
-    assert calls[0][1]["commands"][3]["description"] == "Update Hermes"
+    assert calls[0][1]["commands"][1]["description"] == "Update the Inline Hermes plugin"
+    assert calls[0][1]["commands"][4]["description"] == "Update Hermes"
 
     fallback = InlineAdapter(PlatformConfig(extra={**base_extra, "token": "path token"}))
     fallback_calls = []
