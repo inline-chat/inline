@@ -25,7 +25,7 @@ import time
 from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, NamedTuple, Optional
 from urllib.parse import quote, urlparse
 
 try:
@@ -82,18 +82,19 @@ _INLINE_COMMAND_RETRY_RATIO = 0.8
 _INLINE_COMMAND_RE = re.compile(r"^[a-z0-9_]{1,32}$")
 _INLINE_THREADS_COMMAND_DESCRIPTION = "Configure Inline reply-thread routing"
 _INLINE_THREADS_COMMAND_ARGS = "[status|on|off|auto|reset]"
+_INLINE_FOLLOW_COMMAND_DESCRIPTION = "Explicitly follow this Inline chat or thread"
+_INLINE_UNFOLLOW_COMMAND_DESCRIPTION = "Explicitly unfollow this Inline chat or thread"
 _INLINE_UPDATE_COMMAND_DESCRIPTION = "Update the Inline Hermes plugin"
 _INLINE_UPDATE_PACKAGE_NAME = "@inline-chat/hermes-agent-adapter"
 _INLINE_UPDATE_PRECHECK_TIMEOUT_SECONDS = 30
 _INLINE_UPDATE_TIMEOUT_SECONDS = 5 * 60
+_INLINE_UPDATE_LOG_MAX_LINES = 80
+_INLINE_UPDATE_LOG_MAX_CHARS = 8_000
 _INLINE_UPDATE_LOCK = threading.Lock()
 _INLINE_THREADS_ACTION_PREFIX = "th:"
 _INLINE_THREADS_ACTION_TTL_SECONDS = 15 * 60
-_INLINE_LOCAL_COMMANDS = (
-    ("threads", _INLINE_THREADS_COMMAND_DESCRIPTION),
-    ("inline_update", _INLINE_UPDATE_COMMAND_DESCRIPTION),
-)
 _INLINE_THREAD_COMMAND_RE = re.compile(r"^/(?:thread|threads)(?:@[A-Za-z0-9_]+)?(?:\s+(.*))?$", re.IGNORECASE)
+_INLINE_FOLLOW_COMMAND_RE = re.compile(r"^/(follow|unfollow)(?:@[A-Za-z0-9_]+)?(?:\s+(.*))?$", re.IGNORECASE)
 _INLINE_REPLY_THREAD_NEGATION_RE = re.compile(
     r"\b(?:do\s+not|don't|dont|please\s+don't|please\s+dont|no\s+need\s+to)\s+"
     r"(?:create|start|open|make|use|move|take|reply|respond|answer|send|thread)\b[^.!?\n]*\bthread\b|"
@@ -116,6 +117,15 @@ _INLINE_REPLY_THREAD_INTENT_RE = re.compile(
 _INLINE_SETTINGS_VERSION = 1
 _INLINE_ENTITY_LIMIT = 12
 _INLINE_ENTITY_TEXT_LIMIT = 120
+
+
+class _InlineCommandSpec(NamedTuple):
+    name: str
+    handler: Callable[[str], Any]
+    description: str
+    args_hint: str = ""
+
+
 _INLINE_ENTITY_TYPE_NAMES = {
     1: "mention",
     2: "url",
@@ -419,7 +429,11 @@ def _normalize_inline_command_description(raw: str) -> str:
 def _inline_menu_commands(max_commands: int = _INLINE_COMMAND_LIMIT) -> tuple[List[Dict[str, Any]], int]:
     from hermes_cli.commands import telegram_menu_commands
 
-    local_commands = list(_INLINE_LOCAL_COMMANDS[:max(0, max_commands)])
+    command_specs = _inline_command_specs()
+    local_commands = [
+        (spec.name, spec.description)
+        for spec in command_specs[:max(0, max_commands)]
+    ]
     remaining = max(0, max_commands - len(local_commands))
     menu_commands, hidden_count = telegram_menu_commands(max_commands=remaining)
     commands: List[Dict[str, Any]] = []
@@ -441,7 +455,7 @@ def _inline_menu_commands(max_commands: int = _INLINE_COMMAND_LIMIT) -> tuple[Li
             "sort_order": index,
         })
 
-    hidden_local = max(0, len(_INLINE_LOCAL_COMMANDS) - len(local_commands))
+    hidden_local = max(0, len(command_specs) - len(local_commands))
     return commands, hidden_count + hidden_local + skipped
 
 
@@ -1104,6 +1118,54 @@ class InlineAdapter(BasePlatformAdapter):
             )
         return True
 
+    async def _handle_follow_command(
+        self,
+        *,
+        chat_id: str,
+        msg_id: str,
+        from_id: str,
+        text: str,
+        chat_type: str,
+        thread_id: Optional[str],
+    ) -> bool:
+        match = _INLINE_FOLLOW_COMMAND_RE.match(str(text or "").strip())
+        if not match:
+            return False
+        command = match.group(1).lower()
+        args = (match.group(2) or "").strip()
+        metadata = {"thread_id": thread_id} if thread_id else None
+        if args:
+            await self.send(chat_id, f"Usage: `/{command}`", reply_to=msg_id, metadata=metadata)
+            return True
+
+        mode = "following" if command == "follow" else "unfollowed"
+        target = {"userId": from_id} if chat_type == "dm" else {"chatId": chat_id}
+        try:
+            await self._sidecar_call("/follow-mode", {"target": target, "mode": mode})
+        except Exception as exc:
+            logger.warning("[inline] /%s failed for chat %s: %s", command, chat_id, exc)
+            await self.send(
+                chat_id,
+                f"Could not update Inline follow mode. Try `/{command}` again.",
+                reply_to=msg_id,
+                metadata=metadata,
+            )
+            return True
+
+        self._chat_info_cache.pop(self._chat_key(chat_id), None)
+        if command == "follow":
+            body = (
+                "Now explicitly following this Inline chat or thread. "
+                "Eligible activity can wake Hermes without an @mention."
+            )
+        else:
+            body = (
+                "Explicitly unfollowed this Inline chat or thread. Automatic follow heuristics "
+                "will not turn following back on; mentions and replies can still wake Hermes."
+            )
+        await self.send(chat_id, body, reply_to=msg_id, metadata=metadata)
+        return True
+
     @property
     def enforces_own_access_policy(self) -> bool:
         """Inline gates DM/group access at intake via dm_policy/group_policy."""
@@ -1502,6 +1564,15 @@ class InlineAdapter(BasePlatformAdapter):
             chat_type=chat_type,
             thread_id=thread_id,
             parent_chat_id=parent_chat_id,
+        ):
+            return
+        if await self._handle_follow_command(
+            chat_id=chat_id,
+            msg_id=msg_id,
+            from_id=from_id,
+            text=text,
+            chat_type=chat_type,
+            thread_id=thread_id,
         ):
             return
         text = _normalize_inline_plugin_command_text(text)
@@ -3691,6 +3762,23 @@ def _inline_threads_command_handler(raw_args: str) -> str:
     )
 
 
+def _inline_follow_command_fallback(command: str, raw_args: str) -> str:
+    if str(raw_args or "").strip():
+        return f"Usage: `/{command}`"
+    return (
+        f"Inline follow mode is chat-scoped. Use `/{command}` inside the target "
+        "Inline DM, group chat, or reply thread."
+    )
+
+
+def _inline_follow_command_handler(raw_args: str = "") -> str:
+    return _inline_follow_command_fallback("follow", raw_args)
+
+
+def _inline_unfollow_command_handler(raw_args: str = "") -> str:
+    return _inline_follow_command_fallback("unfollow", raw_args)
+
+
 def _inline_update_environment() -> Dict[str, str]:
     try:
         from tools.environments.local import _sanitize_subprocess_env
@@ -3703,6 +3791,51 @@ def _inline_update_environment() -> Dict[str, str]:
         if any(name in key.upper() for name in sensitive_names):
             env.pop(key, None)
     return env
+
+
+def _inline_update_log_text(raw: Any, hermes_home: Optional[Path] = None) -> str:
+    text = str(raw or "")
+    text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
+    text = re.sub(r"(?i)\b(Bearer\s+)[^\s]+", r"\1[REDACTED]", text)
+    text = re.sub(r"(?i)(https?://)[^/\s:@]+:[^@\s/]+@", r"\1[REDACTED]@", text)
+    text = re.sub(r"([?&][^=\s&]+)=([^&\s]+)", r"\1=[REDACTED]", text)
+    text = re.sub(
+        r"(?i)\b([A-Za-z0-9_-]*(?:token|secret|password|api[_-]?key|authorization)[A-Za-z0-9_-]*)\s*([=:])\s*[^\s]+",
+        r"\1\2[REDACTED]",
+        text,
+    )
+    sensitive_names = ("TOKEN", "SECRET", "PASSWORD", "API_KEY", "AUTHORIZATION")
+    for key, value in os.environ.items():
+        if len(value) >= 8 and any(name in key.upper() for name in sensitive_names):
+            text = text.replace(value, "[REDACTED]")
+    private_paths = []
+    if hermes_home:
+        private_paths.append((str(hermes_home), "$HERMES_HOME"))
+    private_paths.append((str(Path.home()), "~"))
+    for path_text, replacement in private_paths:
+        if len(path_text) > 1:
+            text = text.replace(path_text, replacement)
+    text = "".join(char if char in "\n\t" or ord(char) >= 32 else "?" for char in text)
+    lines = [line.rstrip() for line in text.splitlines() if line.strip()]
+    text = "\n".join(lines[-_INLINE_UPDATE_LOG_MAX_LINES:])
+    if len(text) > _INLINE_UPDATE_LOG_MAX_CHARS:
+        text = "[earlier output truncated]\n" + text[-_INLINE_UPDATE_LOG_MAX_CHARS:]
+    return text or "(no subprocess output)"
+
+
+def _log_inline_update_failure(
+    stage: str,
+    detail: str,
+    *,
+    output: Any = None,
+    hermes_home: Optional[Path] = None,
+) -> None:
+    diagnostic = f"{detail}\n{output or ''}".strip()
+    logger.error(
+        "[inline-update] stage=%s failed\n%s",
+        stage,
+        _inline_update_log_text(diagnostic, hermes_home),
+    )
 
 
 def _installed_inline_plugin_version(hermes_home: Path) -> Optional[str]:
@@ -3741,11 +3874,12 @@ def _run_inline_update() -> str:
 
 
 def _run_inline_update_locked() -> str:
+    hermes_home = Path(os.getenv("HERMES_HOME") or Path.home() / ".hermes").expanduser()
     npm_bin = shutil.which("npm")
     if not npm_bin:
-        return "Inline plugin update is unavailable because npm was not found on PATH."
+        _log_inline_update_failure("precheck", "npm was not found on PATH", hermes_home=hermes_home)
+        return "Inline plugin update is unavailable because npm was not found on PATH. Details were written to Hermes logs under `[inline-update]`."
 
-    hermes_home = Path(os.getenv("HERMES_HOME") or Path.home() / ".hermes").expanduser()
     target = hermes_home / "plugins" / "inline"
     if target.is_symlink():
         return (
@@ -3772,16 +3906,27 @@ def _run_inline_update_locked() -> str:
             check=False,
             env=_inline_update_environment(),
         )
-    except subprocess.TimeoutExpired:
-        return "Inline plugin compatibility precheck timed out; no update was applied."
+    except subprocess.TimeoutExpired as exc:
+        _log_inline_update_failure(
+            "precheck",
+            "npm view timed out",
+            output=f"{exc.stdout or ''}\n{exc.stderr or ''}",
+            hermes_home=hermes_home,
+        )
+        return "Inline plugin compatibility precheck timed out; no update was applied. Details were written to Hermes logs under `[inline-update]`."
     except OSError as exc:
-        logger.warning("[inline] plugin compatibility precheck failed to start: %s", exc)
-        return "Inline plugin compatibility precheck could not start; no update was applied."
+        _log_inline_update_failure("precheck", f"npm view could not start: {exc}", hermes_home=hermes_home)
+        return "Inline plugin compatibility precheck could not start; no update was applied. Details were written to Hermes logs under `[inline-update]`."
     if precheck.returncode != 0:
-        logger.warning("[inline] plugin compatibility precheck exited with code %s", precheck.returncode)
+        _log_inline_update_failure(
+            "precheck",
+            f"npm view exited with code {precheck.returncode} for {package_spec}",
+            output=f"{precheck.stdout or ''}\n{precheck.stderr or ''}",
+            hermes_home=hermes_home,
+        )
         return (
             f"Inline plugin compatibility precheck failed with exit code {precheck.returncode}; "
-            "no update was applied."
+            "no update was applied. Details were written to Hermes logs under `[inline-update]`."
         )
     try:
         package_metadata = json.loads(precheck.stdout or "{}")
@@ -3797,9 +3942,15 @@ def _run_inline_update_locked() -> str:
     current_core = _semver_core(current_hermes)
     minimum_core = _semver_core(minimum_hermes)
     if not candidate_version or not current_core or not minimum_core:
+        _log_inline_update_failure(
+            "precheck",
+            f"invalid compatibility metadata for {package_spec}; current Hermes version={current_hermes!r}",
+            output=precheck.stdout,
+            hermes_home=hermes_home,
+        )
         return (
             "Inline plugin compatibility metadata could not be verified; "
-            "no update was applied."
+            "no update was applied. Details were written to Hermes logs under `[inline-update]`."
         )
     if current_core < minimum_core:
         return (
@@ -3829,22 +3980,33 @@ def _run_inline_update_locked() -> str:
             check=False,
             env=_inline_update_environment(),
         )
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
+        _log_inline_update_failure(
+            "install",
+            f"npm exec timed out for {package_spec}",
+            output=exc.stdout,
+            hermes_home=hermes_home,
+        )
         return (
             "Inline plugin update timed out. Run "
             f"`npm exec --yes --package={package_spec} -- "
-            "inline-hermes install --force` on the Hermes host."
+            "inline-hermes install --force` on the Hermes host. Details were written to Hermes logs under `[inline-update]`."
         )
     except OSError as exc:
-        logger.warning("[inline] plugin update failed to start: %s", exc)
-        return "Inline plugin update could not start. Check that npm is installed and usable on the Hermes host."
+        _log_inline_update_failure("install", f"npm exec could not start: {exc}", hermes_home=hermes_home)
+        return "Inline plugin update could not start. Check that npm is installed and usable on the Hermes host. Details were written to Hermes logs under `[inline-update]`."
 
     if result.returncode != 0:
-        logger.warning("[inline] plugin update exited with code %s", result.returncode)
+        _log_inline_update_failure(
+            "install",
+            f"npm exec exited with code {result.returncode} for {package_spec}",
+            output=result.stdout,
+            hermes_home=hermes_home,
+        )
         return (
             f"Inline plugin update failed with exit code {result.returncode}. Run "
             f"`npm exec --yes --package={package_spec} -- "
-            "inline-hermes install --force` on the Hermes host."
+            "inline-hermes install --force` on the Hermes host. Details were written to Hermes logs under `[inline-update]`."
         )
 
     version = _installed_inline_plugin_version(hermes_home)
@@ -3856,6 +4018,32 @@ async def _inline_update_command_handler(raw_args: str = "") -> str:
     if str(raw_args or "").strip():
         return "Usage: `/inline_update`"
     return await asyncio.to_thread(_run_inline_update)
+
+
+def _inline_command_specs() -> tuple[_InlineCommandSpec, ...]:
+    return (
+        _InlineCommandSpec(
+            name="threads",
+            handler=_inline_threads_command_handler,
+            description=_INLINE_THREADS_COMMAND_DESCRIPTION,
+            args_hint=_INLINE_THREADS_COMMAND_ARGS,
+        ),
+        _InlineCommandSpec(
+            name="follow",
+            handler=_inline_follow_command_handler,
+            description=_INLINE_FOLLOW_COMMAND_DESCRIPTION,
+        ),
+        _InlineCommandSpec(
+            name="unfollow",
+            handler=_inline_unfollow_command_handler,
+            description=_INLINE_UNFOLLOW_COMMAND_DESCRIPTION,
+        ),
+        _InlineCommandSpec(
+            name="inline-update",
+            handler=_inline_update_command_handler,
+            description=_INLINE_UPDATE_COMMAND_DESCRIPTION,
+        ),
+    )
 
 
 def register(ctx) -> None:
@@ -3895,17 +4083,13 @@ def register(ctx) -> None:
     )
     register_command = getattr(ctx, "register_command", None)
     if callable(register_command):
-        register_command(
-            "threads",
-            handler=_inline_threads_command_handler,
-            description=_INLINE_THREADS_COMMAND_DESCRIPTION,
-            args_hint=_INLINE_THREADS_COMMAND_ARGS,
-        )
-        register_command(
-            "inline-update",
-            handler=_inline_update_command_handler,
-            description=_INLINE_UPDATE_COMMAND_DESCRIPTION,
-        )
+        for spec in _inline_command_specs():
+            register_command(
+                spec.name,
+                handler=spec.handler,
+                description=spec.description,
+                args_hint=spec.args_hint,
+            )
     ctx.register_cli_command(
         name="inline",
         help="Set up and inspect the Inline integration",

@@ -24163,6 +24163,7 @@ function defaultErrorText(error) {
 }
 
 // src/sidecar/index.ts
+var DIALOG_FOLLOW_MODE_UNFOLLOWED = 2;
 var token = process.env.INLINE_TOKEN || process.env.INLINE_BOT_TOKEN || "";
 var baseUrl = process.env.INLINE_BASE_URL || "https://api.inline.chat";
 var sidecarToken = process.env.INLINE_SIDECAR_TOKEN || "";
@@ -24309,6 +24310,9 @@ async function handleRequest(req, res) {
       return;
     case "/chat":
       await endpointChat(res, body);
+      return;
+    case "/follow-mode":
+      await endpointFollowMode(res, body);
       return;
     case "/messages":
       await endpointMessages(res, body);
@@ -24525,6 +24529,23 @@ async function endpointChat(res, body) {
       chat: safeJson(chat)
     }
   });
+}
+async function endpointFollowMode(res, body) {
+  const record = asRecord(body);
+  const target = parseTarget(record);
+  const mode = readRequiredString(record, "mode");
+  const followMode = mode === "following" ? DialogFollowMode.FOLLOWING : mode === "unfollowed" ? DIALOG_FOLLOW_MODE_UNFOLLOWED : null;
+  if (followMode == null) {
+    throw new SidecarError("mode must be following or unfollowed", "bad_format");
+  }
+  await client.invokeUncheckedRaw(Method.UPDATE_DIALOG_FOLLOW_MODE, {
+    oneofKind: "updateDialogFollowMode",
+    updateDialogFollowMode: {
+      peerId: inputPeerFromTarget(target),
+      followMode
+    }
+  });
+  writeJson(res, 200, { ok: true, result: { mode } });
 }
 async function endpointMessages(res, body) {
   const record = asRecord(body);

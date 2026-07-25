@@ -262,6 +262,27 @@ describe("sidecar runtime", () => {
         pinnedMessageIds: ["8801"],
       })
 
+      const follow = await post(port, "/follow-mode", {
+        target: { chatId: "456" },
+        mode: "following",
+      }, auth)
+      expect(follow.status).toBe(200)
+      expect(resultOf(follow.body)).toEqual({ mode: "following" })
+
+      const unfollow = await post(port, "/follow-mode", {
+        target: { userId: "42" },
+        mode: "unfollowed",
+      }, auth)
+      expect(unfollow.status).toBe(200)
+      expect(resultOf(unfollow.body)).toEqual({ mode: "unfollowed" })
+
+      const invalidFollowMode = await post(port, "/follow-mode", {
+        target: { chatId: "456" },
+        mode: "automatic",
+      }, auth)
+      expect(invalidFollowMode.status).toBe(400)
+      expect(invalidFollowMode.body).toMatchObject({ ok: false, errorKind: "bad_format" })
+
       const messages = await post(port, "/messages", {
         target: { chatId: "123" },
         messageIds: ["9001"],
@@ -370,6 +391,7 @@ describe("sidecar runtime", () => {
       expect(callsJson).toContain("invokeUncheckedRaw:DELETE_REACTION")
       expect(callsJson).toContain("invokeUncheckedRaw:PIN_MESSAGE")
       expect(callsJson).toContain("invokeUncheckedRaw:CREATE_SUBTHREAD")
+      expect(callsJson).toContain("invokeUncheckedRaw:UPDATE_DIALOG_FOLLOW_MODE")
     } finally {
       await post(port, "/shutdown", {}, auth).catch(() => undefined)
       sidecar.kill("SIGTERM")

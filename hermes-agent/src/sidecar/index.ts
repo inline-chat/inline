@@ -4,6 +4,7 @@ import { timingSafeEqual } from "node:crypto"
 import { mkdir, readFile, stat } from "node:fs/promises"
 import path from "node:path"
 import {
+  DialogFollowMode,
   InlineSdkClient,
   JsonFileStateStore,
   GetChatInput,
@@ -25,6 +26,11 @@ import {
   type InlineSdkUploadFileParams,
   type InlineSdkUploadFileResult,
 } from "@inline-chat/realtime-sdk"
+
+// The server contract defines UNFOLLOWED = 2, but the currently published
+// protocol package predates that generated enum member. Keep the compatibility
+// value named and typed until the dependency catches up.
+const DIALOG_FOLLOW_MODE_UNFOLLOWED = 2 as DialogFollowMode
 import {
   SidecarError,
   asOptionalRecord,
@@ -229,6 +235,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return
     case "/chat":
       await endpointChat(res, body)
+      return
+    case "/follow-mode":
+      await endpointFollowMode(res, body)
       return
     case "/messages":
       await endpointMessages(res, body)
@@ -477,6 +486,26 @@ async function endpointChat(res: ServerResponse, body: unknown) {
       chat: safeJson(chat),
     },
   })
+}
+
+async function endpointFollowMode(res: ServerResponse, body: unknown) {
+  const record = asRecord(body)
+  const target = parseTarget(record)
+  const mode = readRequiredString(record, "mode")
+  const followMode = mode === "following"
+    ? DialogFollowMode.FOLLOWING
+    : mode === "unfollowed" ? DIALOG_FOLLOW_MODE_UNFOLLOWED : null
+  if (followMode == null) {
+    throw new SidecarError("mode must be following or unfollowed", "bad_format")
+  }
+  await client.invokeUncheckedRaw(Method.UPDATE_DIALOG_FOLLOW_MODE, {
+    oneofKind: "updateDialogFollowMode",
+    updateDialogFollowMode: {
+      peerId: inputPeerFromTarget(target),
+      followMode,
+    },
+  })
+  writeJson(res, 200, { ok: true, result: { mode } })
 }
 
 async function endpointMessages(res: ServerResponse, body: unknown) {

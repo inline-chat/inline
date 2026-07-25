@@ -267,7 +267,7 @@ os.environ["INLINE_SETTINGS_PATH"] = str(test_settings_dir / "adapter-settings.j
 sys.path.insert(0, "plugin")
 
 import inline.adapter as inline_adapter_module
-from inline.adapter import InlineAdapter, _apply_yaml_config, _env_enablement, _inline_menu_commands, _inline_update_lane, _install_inline_display_defaults, _normalize_inline_plugin_command_text, _standalone_send, _target_from_chat_id
+from inline.adapter import InlineAdapter, _apply_yaml_config, _env_enablement, _inline_menu_commands, _inline_update_lane, _inline_update_log_text, _install_inline_display_defaults, _normalize_inline_plugin_command_text, _standalone_send, _target_from_chat_id
 from inline.adapter import register, validate_config
 from inline import cli as inline_cli
 from inline import tools as inline_tools
@@ -280,10 +280,12 @@ assert token_only._token == "top-level-token"
 menu_commands, hidden_commands = _inline_menu_commands(100)
 assert hidden_commands == 0
 menu_names = [entry["command"] for entry in menu_commands]
-assert menu_names == ["threads", "inline_update", "help", "model", "update", "bad_name"]
+assert menu_names == ["threads", "follow", "unfollow", "inline_update", "help", "model", "update", "bad_name"]
 assert menu_commands[0]["description"] == "Configure Inline reply-thread routing"
-assert menu_commands[1]["description"] == "Update the Inline Hermes plugin"
-assert menu_commands[4]["description"] == "Update Hermes"
+assert menu_commands[1]["description"] == "Explicitly follow this Inline chat or thread"
+assert menu_commands[2]["description"] == "Explicitly unfollow this Inline chat or thread"
+assert menu_commands[3]["description"] == "Update the Inline Hermes plugin"
+assert menu_commands[6]["description"] == "Update Hermes"
 assert all("/" not in name and "-" not in name for name in menu_names)
 assert _normalize_inline_plugin_command_text("/inline_update") == "/inline-update"
 assert _normalize_inline_plugin_command_text("/inline_update now") == "/inline-update now"
@@ -292,6 +294,15 @@ assert _inline_update_lane("1.2.3") == "latest"
 assert _inline_update_lane("1.2.3-beta.4") == "beta"
 assert _inline_update_lane("1.2.3-canary-edge.2") == "canary-edge"
 assert _inline_update_lane("not-semver") is None
+redacted_update_log = _inline_update_log_text(
+    "Bearer top-secret-token https://user:pass@example.com/pkg?token=query-secret "
+    "NPM_TOKEN=env-secret-value /Users/example/.hermes/plugins/inline"
+)
+assert "top-secret-token" not in redacted_update_log
+assert "user:pass" not in redacted_update_log
+assert "query-secret" not in redacted_update_log
+assert "env-secret-value" not in redacted_update_log
+assert "[REDACTED]" in redacted_update_log
 
 os.environ["INLINE_CUSTOM_TOKEN"] = "custom-token"
 env_ref_token = "$" + "{INLINE_CUSTOM_TOKEN}"
@@ -366,17 +377,19 @@ assert "inline-hermes install" in ctx.platform["install_hint"]
 assert "INLINE_TOKEN/INLINE_BOT_TOKEN" in ctx.platform["install_hint"]
 assert "platforms.inline.token" in ctx.platform["install_hint"]
 assert "inline.token" in ctx.platform["install_hint"]
-assert len(ctx.commands) == 2
-assert ctx.commands[0]["name"] == "threads"
-assert ctx.commands[0]["description"] == "Configure Inline reply-thread routing"
-assert ctx.commands[0]["args_hint"] == "[status|on|off|auto|reset]"
-thread_fallback = ctx.commands[0]["handler"]("off")
+assert len(ctx.commands) == 4
+registered_commands = {command["name"]: command for command in ctx.commands}
+assert list(registered_commands) == ["threads", "follow", "unfollow", "inline-update"]
+assert registered_commands["threads"]["description"] == "Configure Inline reply-thread routing"
+assert registered_commands["threads"]["args_hint"] == "[status|on|off|auto|reset]"
+thread_fallback = registered_commands["threads"]["handler"]("off")
 assert "/threads off" in thread_fallback
 assert "inside the target Inline DM or group chat" in thread_fallback
 assert "restart the Hermes gateway" in thread_fallback
-assert ctx.commands[1]["name"] == "inline-update"
-assert ctx.commands[1]["description"] == "Update the Inline Hermes plugin"
-assert ctx.commands[1]["args_hint"] == ""
+assert "target Inline DM, group chat, or reply thread" in registered_commands["follow"]["handler"]("")
+assert "/unfollow" in registered_commands["unfollow"]["handler"]("unexpected")
+assert registered_commands["inline-update"]["description"] == "Update the Inline Hermes plugin"
+assert registered_commands["inline-update"]["args_hint"] == ""
 
 async def assert_inline_update_command():
     with tempfile.TemporaryDirectory(prefix="inline-hermes-update-") as tmp:
@@ -390,7 +403,10 @@ async def assert_inline_update_command():
         saved_hermes_version = hermes_cli.__version__
         original_which = inline_adapter_module.shutil.which
         original_run = inline_adapter_module.subprocess.run
+        original_log_error = inline_adapter_module.logger.error
         calls = []
+        failure_output = None
+        error_logs = []
         try:
             os.environ["HERMES_HOME"] = str(hermes_home)
             os.environ["INLINE_TOKEN"] = "must-not-reach-npm"
@@ -405,10 +421,14 @@ async def assert_inline_update_command():
                         "inlineHermes": {"minHermesVersion": "0.17.0"},
                     }
                     return types.SimpleNamespace(returncode=0, stdout=json.dumps(metadata))
+                if failure_output is not None:
+                    return types.SimpleNamespace(returncode=1, stdout=failure_output)
                 return types.SimpleNamespace(returncode=0, stdout="installed")
 
             inline_adapter_module.subprocess.run = fake_run
-            response = await ctx.commands[1]["handler"]("")
+            inline_adapter_module.logger.error = lambda message, *args: error_logs.append(message % args)
+            update_handler = registered_commands["inline-update"]["handler"]
+            response = await update_handler("")
             assert response.startswith("Inline plugin updated to ")
             assert "0.0.5-alpha.4" in response
             assert "alpha" in response
@@ -443,30 +463,51 @@ async def assert_inline_update_command():
 
             calls.clear()
             (plugin_dir / "plugin.yaml").write_text("version: 0.0.4\n", encoding="utf-8")
-            stable_response = await ctx.commands[1]["handler"]("")
+            stable_response = await update_handler("")
             assert "latest" in stable_response
             assert calls[0][0][2] == "@inline-chat/hermes-agent-adapter@latest"
             assert calls[1][0][3] == "--package=@inline-chat/hermes-agent-adapter@latest"
 
             calls.clear()
             hermes_cli.__version__ = "0.16.0"
-            incompatible = await ctx.commands[1]["handler"]("")
+            incompatible = await update_handler("")
             assert "requires Hermes" in incompatible
             assert "Update Hermes first" in incompatible
             assert len(calls) == 1
             assert calls[0][0][1] == "view"
             hermes_cli.__version__ = "0.18.2"
 
-            usage = await ctx.commands[1]["handler"]("unexpected")
+            calls.clear()
+            (plugin_dir / "plugin.yaml").write_text("version: 0.0.5-alpha.4\n", encoding="utf-8")
+            failure_output = (
+                "npm ERR! Bearer must-not-reach-npm\n"
+                "https://user:password@example.com/pkg?authId=private-id\n"
+                f"target: {hermes_home}/plugins/inline\n"
+            )
+            failure = await update_handler("")
+            assert "exit code 1" in failure
+            assert "[inline-update]" in failure
+            assert len(error_logs) == 1
+            assert "stage=install failed" in error_logs[0]
+            assert "must-not-reach-npm" not in error_logs[0]
+            assert "user:password" not in error_logs[0]
+            assert "private-id" not in error_logs[0]
+            assert str(hermes_home) not in error_logs[0]
+            assert "$HERMES_HOME/plugins/inline" in error_logs[0]
+            assert "[REDACTED]" in error_logs[0]
+            failure_output = None
+
+            usage = await update_handler("unexpected")
             assert "/inline_update" in usage
             inline_adapter_module._INLINE_UPDATE_LOCK.acquire()
             try:
-                assert await ctx.commands[1]["handler"]("") == "An Inline plugin update is already running."
+                assert await update_handler("") == "An Inline plugin update is already running."
             finally:
                 inline_adapter_module._INLINE_UPDATE_LOCK.release()
         finally:
             inline_adapter_module.shutil.which = original_which
             inline_adapter_module.subprocess.run = original_run
+            inline_adapter_module.logger.error = original_log_error
             if saved_home is None:
                 os.environ.pop("HERMES_HOME", None)
             else:
@@ -1090,10 +1131,12 @@ async def assert_bot_command_sync():
     assert calls[0][2]["Content-Type"] == "application/json"
     assert calls[0][3] == 10.0
     names = [entry["command"] for entry in calls[0][1]["commands"]]
-    assert names == ["threads", "inline_update", "help", "model", "update", "bad_name"]
+    assert names == ["threads", "follow", "unfollow", "inline_update", "help", "model", "update", "bad_name"]
     assert calls[0][1]["commands"][0]["description"] == "Configure Inline reply-thread routing"
-    assert calls[0][1]["commands"][1]["description"] == "Update the Inline Hermes plugin"
-    assert calls[0][1]["commands"][4]["description"] == "Update Hermes"
+    assert calls[0][1]["commands"][1]["description"] == "Explicitly follow this Inline chat or thread"
+    assert calls[0][1]["commands"][2]["description"] == "Explicitly unfollow this Inline chat or thread"
+    assert calls[0][1]["commands"][3]["description"] == "Update the Inline Hermes plugin"
+    assert calls[0][1]["commands"][6]["description"] == "Update Hermes"
 
     fallback = InlineAdapter(PlatformConfig(extra={**base_extra, "token": "path token"}))
     fallback_calls = []
@@ -1780,6 +1823,7 @@ async def assert_reply_thread_slash_command():
         sends = []
         edits = []
         answers = []
+        sidecar_calls = []
 
         async def fake_send(chat_id, content, reply_to=None, metadata=None, actions=None):
             sends.append((chat_id, content, reply_to, metadata, actions))
@@ -1793,7 +1837,11 @@ async def assert_reply_thread_slash_command():
             answers.append((interaction_id, toast))
 
         async def fake_handle_message(event):
-            raise AssertionError("thread slash command should not reach Hermes handler")
+            raise AssertionError("chat-scoped Inline slash command should not reach Hermes handler")
+
+        async def fake_sidecar_call(path, body):
+            sidecar_calls.append((path, body))
+            return {"ok": True, "result": {}}
 
         async def fake_get_chat_info(chat_id):
             if chat_id == "99":
@@ -1811,6 +1859,7 @@ async def assert_reply_thread_slash_command():
         adapter.handle_message = fake_handle_message
         adapter._get_chat_info = fake_get_chat_info
         adapter._fetch_message = fake_fetch_message
+        adapter._sidecar_call = fake_sidecar_call
 
         await adapter._dispatch_message({
             "seq": 13,
@@ -1834,8 +1883,47 @@ async def assert_reply_thread_slash_command():
         assert "off for this chat" in sends[-1][1]
         saved = json.loads(settings_path.read_text())
         assert saved["reply_threads"] == {"10": "off"}
-
         auto_action = sends[-1][4]["rows"][0]["actions"][0]["id"]
+
+        adapter._chat_info_cache["10"] = (time.time(), {"chatId": "10", "dialogFollowMode": "0"})
+        await adapter._dispatch_message({
+            "seq": 130,
+            "chatId": "10",
+            "message": {
+                "id": "cmd-follow",
+                "chatId": "10",
+                "fromId": "u1",
+                "message": "/follow",
+                "peerId": {"peer": {"oneofKind": "chat"}},
+            },
+        })
+        assert sidecar_calls[-1] == ("/follow-mode", {
+            "target": {"chatId": "10"},
+            "mode": "following",
+        })
+        assert "10" not in adapter._chat_info_cache
+        assert sends[-1][2] == "cmd-follow"
+        assert "explicitly following" in sends[-1][1]
+
+        await adapter._dispatch_message({
+            "seq": 1301,
+            "chatId": "99",
+            "message": {
+                "id": "cmd-unfollow",
+                "chatId": "99",
+                "fromId": "u1",
+                "message": "/unfollow",
+                "peerId": {"peer": {"oneofKind": "chat"}},
+            },
+        })
+        assert sidecar_calls[-1] == ("/follow-mode", {
+            "target": {"chatId": "99"},
+            "mode": "unfollowed",
+        })
+        assert sends[-1][2] == "cmd-unfollow"
+        assert sends[-1][3] == {"thread_id": "99"}
+        assert "Explicitly unfollowed" in sends[-1][1]
+
         assert auto_action.startswith("th:")
         assert await adapter._handle_action({
             "chatId": "10",

@@ -26,12 +26,12 @@ Supported:
 - Supervised loopback Node sidecar using the Inline realtime SDK.
 - Realtime inbound messages, catch-up, replies to bot messages, and action callbacks.
 - Outbound text, Markdown parsing, opt-in edit-message streaming, long-message splitting, edits, deletes, typing, and presence.
-- Inline reply-thread routing, explicit-request auto mode, `/threads` controls, parent chat metadata, parent/thread prompt fallback, and thread-specific skill bindings.
+- Inline reply-thread routing, explicit-request auto mode, `/threads` controls, explicit `/follow` and `/unfollow` dialog relevance controls, parent chat metadata, parent/thread prompt fallback, and thread-specific skill bindings.
 - Native Hermes `inline` tool for current-chat/thread reads, bounded history and search, exact message lookup, editing/deleting bot-owned messages, reactions, pin/unpin/list pins, reply-thread creation, and avatar presence/status.
 - Per-turn Inline sender/chat/thread IDs, selective reply/thread/observed context, and parent-thread context, with prompt guidance for sender mentions and current chat/thread Markdown links.
 - OpenClaw-style entity summaries for live turns and tool-fetched history, including mentions, text links, thread links, thread-title links, code/pre blocks, bot commands, and group mentions as untrusted Hermes context.
 - DM and group policies, user allowlists, group sender allowlists, mention requirements, strict mention mode, allowed chats, and free-response chats.
-- Native Inline `/` command-menu sync for Hermes slash commands, including `/threads`, `/inline_update`, and `/update`; typed slash commands continue to work even if menu sync is disabled or rejected.
+- Native Inline `/` command-menu sync for Hermes slash commands, including `/threads`, `/follow`, `/unfollow`, `/inline_update`, and `/update`; typed slash commands continue to work even if menu sync is disabled or rejected.
 - Inline-native buttons for clarify prompts, command approvals, slash confirmations, and model selection.
 - Outbound local photo, video, voice, and document uploads with configurable size caps.
 - Inbound photo, video, voice, and document summaries, with URL-backed media cached locally for Hermes when available.
@@ -319,7 +319,8 @@ model-picker callbacks. The stricter callback gate prevents group-visible
 buttons from becoming a bypass when message intake is otherwise `open`.
 
 On gateway startup, the adapter derives the Inline `/` menu from Hermes'
-central slash-command registry, normalizes names to Inline Bot API constraints
+declarative local command registry plus Hermes' central slash-command registry,
+normalizes names to Inline Bot API constraints
 (`^[a-z0-9_]+$`, max 32 characters), and calls `setMyCommands`. If Inline
 rejects the full list with `BOT_COMMANDS_TOO_MUCH`, the adapter retries with a
 smaller prefix. Menu sync failures are logged as warnings and do not prevent
@@ -333,6 +334,14 @@ minimum Hermes version against the running agent and refuses incompatible or
 unverifiable updates. The update runs in the background without exposing the
 Inline token to npm, then asks you to run `/restart` so Hermes loads the
 installed version. Development symlink installs are left untouched.
+Unexpected precheck or installer failures write bounded, credential-redacted
+diagnostics to the standard Hermes log stream under the `[inline-update]`
+marker, so `hermes logs` and Hermes debug reports can surface the root cause.
+
+Run `/follow` in an Inline DM, group, or reply thread to explicitly opt into
+eligible unmentioned activity waking Hermes. Run `/unfollow` to explicitly opt
+out; server auto-follow heuristics will not turn following back on, while
+mentions and replies retain their normal relevance behavior.
 
 The plugin id is `inline`, which is intentionally the same id an eventual
 bundled Hermes adapter should use.
