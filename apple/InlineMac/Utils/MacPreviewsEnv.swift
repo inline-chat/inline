@@ -7,7 +7,7 @@ public extension View {
       .environmentObject(MainWindowViewModel())
       .environmentObject(NavigationModel())
       .environmentObject(Nav.main)
-      .environmentObject(OverlayManager())
+      .environment(OverlayManager())
       .environmentObject(INUserSettings.current.notification)
   }
 }

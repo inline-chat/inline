@@ -17,8 +17,7 @@ let package = Package(
   name: "InlineMacUI",
 
   platforms: [
-    // TODO: Update to macOS 15 when main app target is updated to macOS 15
-    .macOS(.v14),
+    .macOS(.v15),
   ],
 
   products: [

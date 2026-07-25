@@ -1,8 +1,10 @@
 import AppKit
+import Observation
 import SwiftUI
 
 @MainActor
-final class OverlayManager: ObservableObject, ToastPresenting {
+@Observable
+final class OverlayManager: ToastPresenting {
   enum ToastStyle: Equatable {
     case info
     case success
@@ -29,20 +31,19 @@ final class OverlayManager: ObservableObject, ToastPresenting {
     }
   }
 
-  private weak var toastContainerView: NSView?
-  private var toastHostingView: NSHostingView<ToastBannerView>?
-  private var toastPlacementConstraint: NSLayoutConstraint?
-  private var toastPlacement = ToastPlacement.standard
-  @Published private(set) var toastModel: ToastModel?
-  private var dismissTask: Task<Void, Never>?
-
-  func attachToast(to containerView: NSView) {
-    if toastContainerView !== containerView, toastHostingView != nil {
-      dismissToast()
-    }
-    toastContainerView = containerView
-    ToastCenter.shared.presenter = self
+  private struct ToastRequest {
+    let message: String
+    let style: ToastStyle
+    let showsSpinner: Bool
+    let countdown: ToastModel.Countdown?
+    let actionTitle: String?
+    let action: (@MainActor () -> Void)?
+    let placement: ToastPlacement
+    let dismissAfter: TimeInterval?
   }
+
+  private(set) var toastModel: ToastModel?
+  @ObservationIgnored private var dismissTask: Task<Void, Never>?
 
   func showLoading(
     _ message: String,
@@ -50,7 +51,7 @@ final class OverlayManager: ObservableObject, ToastPresenting {
     action: (@MainActor () -> Void)?,
     placement: ToastPlacement
   ) {
-    showToast(
+    showToast(ToastRequest(
       message: message,
       style: .info,
       showsSpinner: true,
@@ -58,8 +59,8 @@ final class OverlayManager: ObservableObject, ToastPresenting {
       actionTitle: actionTitle,
       action: action,
       placement: placement,
-      autoDismissAfter: nil
-    )
+      dismissAfter: nil
+    ))
   }
 
   func showUndoCountdown(
@@ -69,7 +70,7 @@ final class OverlayManager: ObservableObject, ToastPresenting {
     action: @escaping @MainActor () -> Void,
     placement: ToastPlacement
   ) {
-    showToast(
+    showToast(ToastRequest(
       message: message,
       style: .info,
       showsSpinner: false,
@@ -77,12 +78,12 @@ final class OverlayManager: ObservableObject, ToastPresenting {
       actionTitle: actionTitle,
       action: action,
       placement: placement,
-      autoDismissAfter: nil
-    )
+      dismissAfter: nil
+    ))
   }
 
   func showInfo(_ message: String, placement: ToastPlacement) {
-    showToast(
+    showToast(ToastRequest(
       message: message,
       style: .info,
       showsSpinner: false,
@@ -90,8 +91,8 @@ final class OverlayManager: ObservableObject, ToastPresenting {
       actionTitle: nil,
       action: nil,
       placement: placement,
-      autoDismissAfter: 1.4
-    )
+      dismissAfter: 1.4
+    ))
   }
 
   func showSuccess(
@@ -100,7 +101,7 @@ final class OverlayManager: ObservableObject, ToastPresenting {
     action: (@MainActor () -> Void)?,
     placement: ToastPlacement
   ) {
-    showToast(
+    showToast(ToastRequest(
       message: message,
       style: .success,
       showsSpinner: false,
@@ -108,12 +109,12 @@ final class OverlayManager: ObservableObject, ToastPresenting {
       actionTitle: actionTitle,
       action: action,
       placement: placement,
-      autoDismissAfter: actionTitle == nil ? 1.4 : 6.0
-    )
+      dismissAfter: actionTitle == nil ? 1.4 : 6.0
+    ))
   }
 
   func showError(_ message: String, placement: ToastPlacement) {
-    showToast(
+    showToast(ToastRequest(
       message: message,
       style: .error,
       showsSpinner: false,
@@ -121,59 +122,32 @@ final class OverlayManager: ObservableObject, ToastPresenting {
       actionTitle: nil,
       action: nil,
       placement: placement,
-      autoDismissAfter: 2.0
-    )
+      dismissAfter: 2.0
+    ))
   }
 
   func dismissToast() {
     dismissTask?.cancel()
     dismissTask = nil
-    let placement = toastModel?.placement ?? toastPlacement
     toastModel = nil
-
-    guard let host = toastHostingView else { return }
-    let placementConstraint = toastPlacementConstraint
-    let containerView = host.superview
-    NSAnimationContext.runAnimationGroup { ctx in
-      ctx.duration = 0.2
-      host.animator().alphaValue = 0
-      placementConstraint?.animator().constant = placement.hiddenConstant
-      containerView?.animator().layoutSubtreeIfNeeded()
-    } completionHandler: { [weak self, weak host] in
-      Task { @MainActor in
-        guard self?.toastModel == nil else { return }
-        host?.removeFromSuperview()
-        self?.toastHostingView = nil
-        self?.toastPlacementConstraint = nil
-      }
-    }
   }
 
-  private func showToast(
-    message: String,
-    style: ToastStyle,
-    showsSpinner: Bool,
-    countdown: ToastModel.Countdown?,
-    actionTitle: String?,
-    action: (@MainActor () -> Void)?,
-    placement: ToastPlacement,
-    autoDismissAfter seconds: TimeInterval?
-  ) {
+  private func showToast(_ request: ToastRequest) {
     dismissTask?.cancel()
     dismissTask = nil
 
     let model = ToastModel(
-      message: message,
-      style: style,
-      showsSpinner: showsSpinner,
-      countdown: countdown,
-      actionTitle: actionTitle,
-      action: action,
-      placement: placement
+      message: request.message,
+      style: request.style,
+      showsSpinner: request.showsSpinner,
+      countdown: request.countdown,
+      actionTitle: request.actionTitle,
+      action: request.action,
+      placement: request.placement
     )
     toastModel = model
 
-    if let seconds {
+    if let seconds = request.dismissAfter {
       dismissTask = Task { [weak self] in
         try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
         await MainActor.run {
@@ -184,55 +158,6 @@ final class OverlayManager: ObservableObject, ToastPresenting {
         }
       }
     }
-
-    guard let containerView = toastContainerView else { return }
-
-    let banner = ToastBannerView(
-      model: model,
-      dismiss: { [weak self] in
-        self?.dismissToast()
-      }
-    )
-
-    let host: NSHostingView<ToastBannerView>
-    if let existing = toastHostingView {
-      host = existing
-      host.rootView = banner
-      if toastPlacement != placement || toastPlacementConstraint == nil {
-        setToastPlacement(placement, host: host, containerView: containerView, hidden: true)
-      }
-    } else {
-      host = NSHostingView(rootView: banner)
-      host.translatesAutoresizingMaskIntoConstraints = false
-      host.alphaValue = 0
-      toastHostingView = host
-      containerView.addSubview(host)
-
-      NSLayoutConstraint.activate([
-        host.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
-        host.widthAnchor.constraint(lessThanOrEqualTo: containerView.widthAnchor, constant: -36),
-      ])
-      setToastPlacement(placement, host: host, containerView: containerView, hidden: true)
-      containerView.layoutSubtreeIfNeeded()
-    }
-
-    NSAnimationContext.runAnimationGroup { ctx in
-      ctx.duration = 0.2
-      host.animator().alphaValue = 1
-      toastPlacementConstraint?.animator().constant = placement.visibleConstant
-      containerView.animator().layoutSubtreeIfNeeded()
-    }
-  }
-
-  private func setToastPlacement(_ placement: ToastPlacement, host: NSView, containerView: NSView, hidden: Bool) {
-    toastPlacementConstraint?.isActive = false
-
-    let constraint = placement.constraint(host: host, containerView: containerView)
-    constraint.constant = hidden ? placement.hiddenConstant : placement.visibleConstant
-    constraint.isActive = true
-
-    toastPlacement = placement
-    toastPlacementConstraint = constraint
   }
 
   func showError(title: String? = nil, message: String, error: Error? = nil) {
@@ -248,35 +173,6 @@ final class OverlayManager: ObservableObject, ToastPresenting {
   }
 }
 
-private extension ToastPlacement {
-  var visibleConstant: CGFloat {
-    switch self {
-      case let .topCenter(offset):
-        offset
-      case let .bottomCenter(offset):
-        -offset
-    }
-  }
-
-  var hiddenConstant: CGFloat {
-    switch self {
-      case let .topCenter(offset):
-        max(8, offset - 10)
-      case .bottomCenter:
-        36
-    }
-  }
-
-  func constraint(host: NSView, containerView: NSView) -> NSLayoutConstraint {
-    switch self {
-      case .topCenter:
-        host.topAnchor.constraint(equalTo: containerView.topAnchor)
-      case .bottomCenter:
-        host.bottomAnchor.constraint(equalTo: containerView.bottomAnchor)
-    }
-  }
-}
-
 extension View {
   @ViewBuilder
   func toastOverlayHost(_ overlay: OverlayManager?) -> some View {
@@ -289,7 +185,7 @@ extension View {
 }
 
 private struct ToastOverlayModifier: ViewModifier {
-  @ObservedObject var overlay: OverlayManager
+  let overlay: OverlayManager
 
   func body(content: Content) -> some View {
     content
@@ -315,12 +211,12 @@ private extension View {
   @ViewBuilder
   func toastPlacement(_ placement: ToastPlacement) -> some View {
     switch placement {
-      case let .topCenter(offset):
-        frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-          .padding(.top, offset)
-      case let .bottomCenter(offset):
-        frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-          .padding(.bottom, offset)
+    case let .topCenter(offset):
+      frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.top, offset)
+    case let .bottomCenter(offset):
+      frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .padding(.bottom, offset)
     }
   }
 }
@@ -342,23 +238,23 @@ private struct ToastBannerView: View {
 
   private var iconName: String {
     switch model.style {
-      case .info:
-        "info.circle.fill"
-      case .success:
-        "checkmark.circle.fill"
-      case .error:
-        "exclamationmark.triangle.fill"
+    case .info:
+      "info.circle.fill"
+    case .success:
+      "checkmark.circle.fill"
+    case .error:
+      "exclamationmark.triangle.fill"
     }
   }
 
   private var iconColor: Color {
     switch model.style {
-      case .info:
-        .secondary
-      case .success:
-        .green
-      case .error:
-        .red
+    case .info:
+      .secondary
+    case .success:
+      .green
+    case .error:
+      .red
     }
   }
 

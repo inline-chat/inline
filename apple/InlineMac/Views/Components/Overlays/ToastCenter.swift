@@ -40,16 +40,13 @@ extension ToastPresenting {
 }
 
 /// Global access point for showing toasts on the active window.
-/// The window root attaches a presenter (OverlayManager) at runtime.
 @MainActor
 final class ToastCenter {
   static let shared = ToastCenter()
   private init() {}
 
-  weak var presenter: (any ToastPresenting)?
-
   private var targetPresenter: (any ToastPresenting)? {
-    MainWindowOpenCoordinator.shared.activeToastPresenter ?? presenter
+    MainWindowOpenCoordinator.shared.activeToastPresenter
   }
 
   func showLoading(

@@ -50,7 +50,7 @@ extension View {
   func environment(dependencies deps: AppDependencies) -> some View {
     let result = environment(\.auth, deps.auth)
       .environmentObject(deps.viewModel)
-      .environmentObject(deps.overlay)
+      .environment(deps.overlay)
       .environmentObject(deps.navigation)
       .environmentObject(deps.nav)
       .environmentObject(deps.data)
