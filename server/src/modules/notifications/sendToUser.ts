@@ -1,4 +1,4 @@
-import { SessionsModel } from "@in/server/db/models/sessions"
+import { SessionsModel, type PushSession } from "@in/server/db/models/sessions"
 import { getApnProvider } from "@in/server/libs/apn"
 import { isSuppressedApnFailure, summarizeApnFailure } from "@in/server/libs/apnFailures"
 import {
@@ -146,11 +146,17 @@ const configurePlaintextSendMessageNotification = ({
 const genericEncryptedAlertTitle = "New message"
 const genericEncryptedAlertBody = "Open Inline to read it."
 
-type UserSession = Awaited<ReturnType<typeof SessionsModel.getValidPushSessionsByUserId>>[number]
+type PushContentSession = Pick<
+  PushSession,
+  | "pushContentKeyPublic"
+  | "pushContentKeyId"
+  | "pushContentVersion"
+  | "pushContentKeyAlgorithm"
+>
 
 const sessionSupportsEncryptedPushContent = (
-  session: UserSession,
-): session is UserSession & {
+  session: PushContentSession,
+): session is PushContentSession & {
   pushContentKeyPublic: Uint8Array
   pushContentVersion: number
   pushContentKeyAlgorithm: string
@@ -158,6 +164,129 @@ const sessionSupportsEncryptedPushContent = (
   if (!session.pushContentKeyPublic || session.pushContentKeyPublic.length === 0) return false
   if (!session.pushContentVersion || session.pushContentVersion < PUSH_CONTENT_VERSION) return false
   return session.pushContentKeyAlgorithm === PUSH_CONTENT_ALGORITHM
+}
+
+export const buildApnNotification = ({
+  session,
+  payload,
+  silent,
+  topic,
+  nowSeconds,
+  encrypt = encryptSendMessagePushContent,
+  onEncryptionError,
+}: {
+  session: PushContentSession
+  payload: PushToUserPayload
+  silent: boolean
+  topic: string
+  nowSeconds: number
+  encrypt?: typeof encryptSendMessagePushContent
+  onEncryptionError?: (error: unknown) => void
+}): Notification | undefined => {
+  const notification = new Notification()
+  notification.topic = topic
+  notification.threadId = payload.threadId
+
+  if (payload.kind === "send_message") {
+    let encryptedContent: ReturnType<typeof encryptSendMessagePushContent> | undefined
+    if (sessionSupportsEncryptedPushContent(session)) {
+      try {
+        encryptedContent = encrypt({
+          recipientPublicKey: session.pushContentKeyPublic,
+          recipientKeyId: session.pushContentKeyId ?? undefined,
+          content: {
+            kind: "send_message",
+            sender: {
+              id: payload.senderUserId,
+              displayName: payload.senderDisplayName,
+              profilePhotoUrl: payload.senderProfilePhotoUrl,
+            },
+            title: payload.title,
+            body: payload.body,
+            subtitle: payload.subtitle,
+            threadId: payload.threadId,
+            messageId: payload.messageId,
+            isThread: payload.isThread ?? false,
+            isReplyThread: payload.isReplyThread ?? false,
+            threadEmoji: payload.threadEmoji,
+          },
+        })
+      } catch (error) {
+        onEncryptionError?.(error)
+      }
+    }
+
+    if (encryptedContent) {
+      notification.payload = {
+        kind: "send_message_encrypted",
+        threadId: payload.threadId,
+        messageId: payload.messageId,
+        encryptedContent,
+      }
+      notification.contentAvailable = true
+      notification.mutableContent = true
+      configureAlertNotification(notification)
+      configureSound({ notification, silent, isUrgentNudge: payload.isUrgentNudge })
+      if (payload.isUrgentNudge) {
+        configureTimeSensitive(notification)
+      }
+      notification.alert = {
+        title: genericEncryptedAlertTitle,
+        body: genericEncryptedAlertBody,
+      }
+    } else {
+      configurePlaintextSendMessageNotification({ notification, payload, silent })
+    }
+    return notification
+  }
+
+  if (payload.kind === "alert") {
+    notification.payload = {
+      kind: "alert",
+      userId: payload.senderUserId,
+      threadId: payload.threadId,
+      isThread: payload.isThread ?? false,
+      isReplyThread: payload.isReplyThread ?? false,
+      threadEmoji: payload.threadEmoji,
+    }
+    notification.contentAvailable = true
+    notification.mutableContent = false
+    configureAlertNotification(notification)
+    configureSound({ notification, silent })
+    notification.alert = {
+      title: payload.title,
+      body: payload.body,
+      subtitle: payload.subtitle,
+    }
+    return notification
+  }
+
+  if (payload.kind === "message_deleted") {
+    if (!payload.messageIds.length) return undefined
+    configureBackgroundNotification({
+      notification,
+      expirySeconds: nowSeconds + 60 * 60,
+    })
+    notification.payload = {
+      kind: "message_deleted",
+      threadId: payload.threadId,
+      messageIds: payload.messageIds,
+    }
+    return notification
+  }
+
+  if (!payload.readUpToMessageId) return undefined
+  configureBackgroundNotification({
+    notification,
+    expirySeconds: nowSeconds + 60 * 10,
+    collapseId: `messages_read:${payload.threadId}`,
+  })
+  notification.payload = {
+    kind: "messages_read",
+    threadId: payload.threadId,
+    readUpToMessageId: payload.readUpToMessageId,
+  }
+  return notification
 }
 
 export const sendPushNotificationToUser = async ({ userId, payload }: SendPushToUserInput) => {
@@ -196,116 +325,22 @@ export const sendPushNotificationToUser = async ({ userId, payload }: SendPushTo
       const topic = iOSTopic
       if (!topic) continue
 
-      const notification = new Notification()
-      notification.topic = topic
-      notification.threadId = payload.threadId
-
-      if (payload.kind === "send_message") {
-        if (sessionSupportsEncryptedPushContent(session)) {
-          let encryptedContent: ReturnType<typeof encryptSendMessagePushContent> | undefined
-          try {
-            encryptedContent = encryptSendMessagePushContent({
-              recipientPublicKey: session.pushContentKeyPublic,
-              recipientKeyId: session.pushContentKeyId ?? undefined,
-              content: {
-                kind: "send_message",
-                sender: {
-                  id: payload.senderUserId,
-                  displayName: payload.senderDisplayName,
-                  profilePhotoUrl: payload.senderProfilePhotoUrl,
-                },
-                title: payload.title,
-                body: payload.body,
-                subtitle: payload.subtitle,
-                threadId: payload.threadId,
-                messageId: payload.messageId,
-                isThread: payload.isThread ?? false,
-                isReplyThread: payload.isReplyThread ?? false,
-                threadEmoji: payload.threadEmoji,
-              },
-            })
-          } catch (error) {
-            log.error("Failed to encrypt push content", {
-              error,
-              userId,
-              sessionId: session.id,
-              threadId: payload.threadId,
-            })
-          }
-
-          if (encryptedContent) {
-            notification.payload = {
-              kind: "send_message_encrypted",
-              threadId: payload.threadId,
-              messageId: payload.messageId,
-              encryptedContent,
-            }
-            notification.contentAvailable = true
-            notification.mutableContent = true
-            configureAlertNotification(notification)
-
-            configureSound({ notification, silent, isUrgentNudge: payload.isUrgentNudge })
-            if (payload.isUrgentNudge) {
-              configureTimeSensitive(notification)
-            }
-
-            notification.alert = {
-              title: genericEncryptedAlertTitle,
-              body: genericEncryptedAlertBody,
-            }
-          } else {
-            configurePlaintextSendMessageNotification({ notification, payload, silent })
-          }
-        } else {
-          configurePlaintextSendMessageNotification({ notification, payload, silent })
-        }
-      } else if (payload.kind === "alert") {
-        notification.payload = {
-          kind: "alert",
-          userId: payload.senderUserId,
-          threadId: payload.threadId,
-          isThread: payload.isThread ?? false,
-          isReplyThread: payload.isReplyThread ?? false,
-          threadEmoji: payload.threadEmoji,
-        }
-
-        notification.contentAvailable = true
-        notification.mutableContent = false
-        configureAlertNotification(notification)
-
-        configureSound({ notification, silent })
-        notification.alert = {
-          title: payload.title,
-          body: payload.body,
-          subtitle: payload.subtitle,
-        }
-      } else if (payload.kind === "message_deleted") {
-        if (!payload.messageIds.length) continue
-        configureBackgroundNotification({
-          notification,
-          expirySeconds: Math.floor(Date.now() / 1000) + 60 * 60,
-        })
-        notification.payload = {
-          kind: "message_deleted",
-          threadId: payload.threadId,
-          messageIds: payload.messageIds,
-        }
-      } else if (payload.kind === "messages_read") {
-        if (!payload.readUpToMessageId) continue
-        const collapseId = `messages_read:${payload.threadId}`
-        configureBackgroundNotification({
-          notification,
-          expirySeconds: Math.floor(Date.now() / 1000) + 60 * 10,
-          collapseId,
-        })
-        notification.payload = {
-          kind: "messages_read",
-          threadId: payload.threadId,
-          readUpToMessageId: payload.readUpToMessageId,
-        }
-      } else {
-        continue
-      }
+      const notification = buildApnNotification({
+        session,
+        payload,
+        silent,
+        topic,
+        nowSeconds: Math.floor(Date.now() / 1_000),
+        onEncryptionError: (error) => {
+          log.error("Failed to encrypt push content", {
+            error,
+            userId,
+            sessionId: session.id,
+            threadId: payload.threadId,
+          })
+        },
+      })
+      if (!notification) continue
 
       const sendPush = async () => {
         if (!session.applePushToken) return
@@ -365,7 +400,7 @@ async function sendExpoPush({
   silent,
   userId,
 }: {
-  session: UserSession
+  session: PushSession
   payload: PushToUserPayload
   silent: boolean
   userId: number
@@ -510,7 +545,7 @@ async function handleExpoTickets({
   userId,
 }: {
   tickets: ExpoPushTicket[]
-  session: UserSession
+  session: PushSession
   payload: PushToUserPayload
   userId: number
 }) {

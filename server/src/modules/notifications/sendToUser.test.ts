@@ -1,5 +1,13 @@
 import { describe, expect, it } from "bun:test"
-import { buildExpoPushMessage, shouldPlayNotificationSound } from "./sendToUser"
+import { PUSH_CONTENT_ALGORITHM, PUSH_CONTENT_VERSION } from "./pushContentEncryption"
+import { buildApnNotification, buildExpoPushMessage, shouldPlayNotificationSound } from "./sendToUser"
+
+const unencryptedSession = {
+  pushContentKeyPublic: null,
+  pushContentKeyId: null,
+  pushContentVersion: null,
+  pushContentKeyAlgorithm: null,
+}
 
 describe("sendToUser notification sound", () => {
   it("plays sound by default", () => {
@@ -77,5 +85,123 @@ describe("sendToUser Expo payloads", () => {
       priority: "default",
       channelId: "messages_silent",
     })
+  })
+})
+
+describe("sendToUser APN payloads", () => {
+  it("builds deterministic background notification metadata", () => {
+    const deleted = buildApnNotification({
+      session: unencryptedSession,
+      payload: {
+        kind: "message_deleted",
+        threadId: "chat_34",
+        messageIds: ["90"],
+      },
+      silent: false,
+      topic: "chat.inline.Inline",
+      nowSeconds: 500,
+    })
+    const read = buildApnNotification({
+      session: unencryptedSession,
+      payload: {
+        kind: "messages_read",
+        threadId: "chat_34",
+        readUpToMessageId: "99",
+      },
+      silent: false,
+      topic: "chat.inline.Inline",
+      nowSeconds: 500,
+    })
+
+    expect(deleted?.expiry).toBe(4_100)
+    expect(deleted?.payload).toEqual({
+      kind: "message_deleted",
+      threadId: "chat_34",
+      messageIds: ["90"],
+    })
+    expect(read?.expiry).toBe(1_100)
+    expect(read?.collapseId).toBe("messages_read:chat_34")
+  })
+
+  it("skips empty background payloads", () => {
+    const notification = buildApnNotification({
+      session: unencryptedSession,
+      payload: {
+        kind: "message_deleted",
+        threadId: "chat_34",
+        messageIds: [],
+      },
+      silent: false,
+      topic: "chat.inline.Inline",
+      nowSeconds: 500,
+    })
+
+    expect(notification).toBeUndefined()
+  })
+
+  it("preserves urgent plaintext message behavior", () => {
+    const notification = buildApnNotification({
+      session: unencryptedSession,
+      payload: {
+        kind: "send_message",
+        senderUserId: 12,
+        threadId: "chat_34",
+        messageId: "90",
+        title: "Title",
+        body: "Body",
+        isUrgentNudge: true,
+      },
+      silent: true,
+      topic: "chat.inline.Inline",
+      nowSeconds: 500,
+    })
+
+    expect(notification?.topic).toBe("chat.inline.Inline")
+    expect((notification?.aps as Record<string, unknown>)["thread-id"]).toBe("chat_34")
+    expect(notification?.payload).toMatchObject({
+      userId: 12,
+      threadId: "chat_34",
+      messageId: "90",
+    })
+    expect(notification?.aps.sound).toBe("default")
+    expect((notification?.aps as unknown as Record<string, unknown>)["interruption-level"]).toBe("time-sensitive")
+  })
+
+  it("reports encryption failure and falls back to plaintext", () => {
+    const encryptionError = new Error("encryption failed")
+    let reportedError: unknown
+    const notification = buildApnNotification({
+      session: {
+        pushContentKeyPublic: Buffer.alloc(32),
+        pushContentKeyId: "key-1",
+        pushContentVersion: PUSH_CONTENT_VERSION,
+        pushContentKeyAlgorithm: PUSH_CONTENT_ALGORITHM,
+      },
+      payload: {
+        kind: "send_message",
+        senderUserId: 12,
+        threadId: "chat_34",
+        messageId: "90",
+        title: "Title",
+        body: "Body",
+      },
+      silent: false,
+      topic: "chat.inline.Inline",
+      nowSeconds: 500,
+      encrypt: () => {
+        throw encryptionError
+      },
+      onEncryptionError: (error) => {
+        reportedError = error
+      },
+    })
+
+    expect(reportedError).toBe(encryptionError)
+    expect(notification?.payload).toMatchObject({
+      userId: 12,
+      threadId: "chat_34",
+      messageId: "90",
+    })
+    expect(notification?.aps.alert).toEqual({ title: "Title", body: "Body" })
   })
 })
