@@ -18,6 +18,7 @@ import argparse
 import json
 import socket
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -1952,6 +1953,96 @@ async def assert_group_room_controls():
     assert len(await run(strict, {**base_msg, "id": "room-msg-2", "message": "Hermes: hello", "replyToMsgId": "parent"}, reply=own_reply)) == 1
 
 asyncio.run(assert_group_room_controls())
+
+async def assert_chat_info_cache_invalidation():
+    adapter = InlineAdapter(PlatformConfig(extra={**base_extra, "require_mention": True}))
+    adapter._me_id = "bot"
+    following = {"value": True}
+    calls = []
+    events = []
+
+    async def fake_sidecar_call(path, body):
+        calls.append((path, body))
+        if path == "/chat":
+            chat_id = str(body["target"]["chatId"])
+            if chat_id == "99":
+                return {"result": {
+                    "chatId": "99",
+                    "title": "Reply thread",
+                    "parentChatId": "10",
+                    "parentMessageId": "5",
+                    "dialogFollowMode": "1" if following["value"] else "2",
+                    "followModeMentionEligible": True,
+                }}
+            return {"result": {"chatId": chat_id, "title": "Parent room"}}
+        if path == "/messages":
+            return {"result": {"messages": []}}
+        if path == "/send":
+            return {"result": {"messageId": "sent"}}
+        raise AssertionError(f"unexpected sidecar path {path}")
+
+    async def capture(event):
+        events.append(event)
+
+    adapter._sidecar_call = fake_sidecar_call
+    adapter.handle_message = capture
+
+    stale_unfollowed = {
+        "chatId": "99",
+        "dialogFollowMode": "2",
+        "followModeMentionEligible": True,
+    }
+    adapter._chat_info_cache["99"] = (time.time(), stale_unfollowed)
+    first = {
+        "kind": "message.new",
+        "seq": 1,
+        "chatId": "99",
+        "message": {
+            "id": "1",
+            "chatId": "99",
+            "fromId": "u1",
+            "message": "follow up without a mention",
+            "peerId": {"peer": {"oneofKind": "chat"}},
+        },
+    }
+    await adapter._on_inbound(json.dumps(first))
+    assert len(events) == 1
+    assert any(path == "/chat" and body["target"] == {"chatId": "99"} for path, body in calls)
+
+    following["value"] = False
+    stale_following = {**stale_unfollowed, "dialogFollowMode": "1"}
+    adapter._chat_info_cache["99"] = (time.time(), stale_following)
+    second = {
+        **first,
+        "seq": 2,
+        "message": {**first["message"], "id": "2", "message": "another follow up"},
+    }
+    await adapter._on_inbound(json.dumps(second))
+    assert len(events) == 1
+
+    adapter._chat_info_cache["99"] = (time.time(), stale_following)
+    result = await adapter._send_sidecar("/send", {
+        "target": {"chatId": "99"},
+        "text": "Hermes response",
+    })
+    assert result.success
+    assert "99" not in adapter._chat_info_cache
+
+    adapter._chat_info_cache["99"] = (time.time(), stale_following)
+
+    async def failed_sidecar_call(path, body):
+        raise RuntimeError("send failed")
+
+    adapter._sidecar_call = failed_sidecar_call
+    adapter._is_retryable_error = lambda message: False
+    failed = await adapter._send_sidecar("/send", {
+        "target": {"chatId": "99"},
+        "text": "Hermes response",
+    })
+    assert failed.success is False
+    assert "99" in adapter._chat_info_cache
+
+asyncio.run(assert_chat_info_cache_invalidation())
 
 async def assert_action_thread_targets():
     adapter = InlineAdapter(PlatformConfig(extra=base_extra))

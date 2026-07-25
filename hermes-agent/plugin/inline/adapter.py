@@ -1390,6 +1390,12 @@ class InlineAdapter(BasePlatformAdapter):
             event = json.loads(line)
         except json.JSONDecodeError:
             return
+        # Chat snapshots include mutable dialog and routing fields such as
+        # followMode and lastMsgId. Invalidating here intentionally makes the
+        # next group-message dispatch perform an extra GET_CHAT; correctness
+        # across missed/reordered updates is worth that fetch until the sidecar
+        # owns a coherent client-state cache.
+        self._invalidate_chat_info(event.get("chatId"))
         kind = event.get("kind")
         if kind == "message.action.invoke":
             if await self._handle_action(event):
@@ -2437,6 +2443,11 @@ class InlineAdapter(BasePlatformAdapter):
             self._visible_reply_thread_targets.move_to_end(chat_id)
             if len(self._visible_reply_thread_targets) > _CHAT_INFO_CACHE_MAX_SIZE:
                 self._visible_reply_thread_targets.popitem(last=False)
+
+    def _invalidate_chat_info(self, chat_id: Any) -> None:
+        key = self._chat_key(chat_id)
+        if key:
+            self._chat_info_cache.pop(key, None)
 
     def _reply_to_for_target(self, reply_to: Optional[str], target: Dict[str, str]) -> Optional[str]:
         if not reply_to:
@@ -3511,6 +3522,9 @@ class InlineAdapter(BasePlatformAdapter):
         try:
             data = await self._sidecar_call(path, body)
             result = data.get("result") or {}
+            target = body.get("target")
+            if isinstance(target, dict):
+                self._invalidate_chat_info(target.get("chatId"))
             return _send_result(
                 success=True,
                 message_id=str(result.get("messageId") or "") or None,
