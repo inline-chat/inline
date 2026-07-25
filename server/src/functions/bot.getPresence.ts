@@ -6,6 +6,7 @@ import { getBotPresenceState } from "@in/server/modules/botPresence/state"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { ModelError } from "@in/server/db/models/_errors"
 import { BotPresenceState_Kind, type GetBotPresenceInput, type GetBotPresenceResult } from "@inline-chat/protocol/core"
 import { and, asc, eq } from "drizzle-orm"
 import type { FunctionContext } from "./_types"
@@ -19,7 +20,15 @@ export const getBotPresence = async (
     throw RealtimeRpcError.BadRequest()
   }
 
-  const chat = await ChatModel.getChatFromInputPeer(peerIdInput, context)
+  const chat = await ChatModel.getChatFromInputPeer(peerIdInput, context).catch((error) => {
+    if (
+      error instanceof ModelError &&
+      error.code === ModelError.Codes.CHAT_INVALID
+    ) {
+      throw RealtimeRpcError.PeerIdInvalid()
+    }
+    throw error
+  })
   await AccessGuards.ensureChatAccess(chat, context.currentUserId)
 
   const row =
