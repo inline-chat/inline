@@ -1,11 +1,11 @@
-import { app, BrowserWindow, nativeImage, NativeImage } from "electron";
-import { isMacOS } from "./utils";
+import { app, BrowserWindow, nativeImage } from "electron"
+import { isMacOS } from "./utils"
 
 app.whenReady().then(() => {
   // Set dev icon
   if (isMacOS) {
-    let image = nativeImage.createFromPath("./assets/dev-app-icon-256.png");
-    app.dock?.setIcon(image);
+    const image = nativeImage.createFromPath("./assets/dev-app-icon-256.png")
+    app.dock?.setIcon(image)
   }
 
   const mainWindow = new BrowserWindow({
@@ -23,7 +23,7 @@ app.whenReady().then(() => {
     titleBarOverlay: true,
     titleBarStyle: "hidden",
     vibrancy: "popover",
-  });
+  })
 
-  mainWindow.loadURL("http://localhost:8001/app");
-});
+  void mainWindow.loadURL("http://localhost:8001/app")
+})

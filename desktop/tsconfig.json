@@ -4,9 +4,16 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
     "skipLibCheck": true,
-    "types": ["bun", "node"],
-    "noEmit": true
+    "types": ["bun", "node", "electron"]
   },
-  "include": ["src", "scripts"]
+  "include": [
+    "src/main/**/*.ts",
+    "src/platform/**/*.ts",
+    "src/preload/**/*.ts",
+    "scripts/build.ts",
+    "scripts/dev.ts"
+  ]
 }

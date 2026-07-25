@@ -1,42 +1,20 @@
-import { $ } from "bun";
-import { watch } from "fs";
+import { compileDesktopHost } from "./build"
 
-const build = async () => {
-  console.log("Building...");
-  await Bun.build({
-    entrypoints: ["./src/index.ts"],
-    outdir: "./build",
-    external: ["electron"],
-    target: "node",
-  });
-};
+const root = import.meta.dir.replace(/\/scripts$/, "")
+const url = process.env.INLINE_WEB_DEV_URL ?? "http://127.0.0.1:8001"
 
-const run = () => {
-  console.log("Running...");
+await compileDesktopHost()
 
-  const proc = Bun.spawn(["bun", "electron", "build/index.js"], {
-    stdout: "inherit",
-  });
+const electron = Bun.spawn(["bun", "electron", "build/main.cjs"], {
+  cwd: root,
+  env: {
+    ...process.env,
+    INLINE_WEB_DEV_URL: url,
+  },
+  stdin: "inherit",
+  stdout: "inherit",
+  stderr: "inherit",
+})
 
-  return () => {
-    console.log("Killing...");
-    proc.kill("SIGINT");
-  };
-};
-
-let killPrev: () => void;
-
-await build();
-killPrev = run();
-
-// Build
-watch("./src/", async () => {
-  killPrev?.();
-  try {
-    await build();
-    killPrev = run();
-  } catch (error) {
-    console.error("Failed to build");
-    console.error(error);
-  }
-});
+const exitCode = await electron.exited
+process.exit(exitCode)

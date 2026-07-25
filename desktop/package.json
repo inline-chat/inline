@@ -2,19 +2,21 @@
   "name": "@inline-chat/desktop",
   "private": true,
   "type": "module",
-  "main": "src/index.ts",
+  "main": "build/main.cjs",
   "scripts": {
     "dev": "bun scripts/dev.ts",
+    "build:host": "bun scripts/build.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "bunx oxlint --ignore-path ../.oxlintignore src scripts",
+    "lint": "oxlint --ignore-path ../.oxlintignore src/main src/platform src/preload scripts/build.ts scripts/dev.ts",
     "test": "echo \"No tests yet for @inline-chat/desktop\""
   },
   "dependencies": {
-    "electron": "^39.2.6"
+    "electron": "^43.1.1"
   },
   "devDependencies": {
     "@types/bun": "^1.3.5",
     "@types/node": "^20.11.30",
+    "oxlint": "^1.74.0",
     "typescript": "^5.8.3"
   }
 }
