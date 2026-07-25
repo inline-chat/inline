@@ -77,6 +77,7 @@ const OAuthAuthorizeQuery = {
   scope: OptionalString,
   code_challenge: OptionalString,
   code_challenge_method: OptionalString,
+  resource: OptionalString,
 } as const
 
 const OAuthEmailPayload = Schema.Struct({
@@ -114,6 +115,7 @@ const OAuthTokenPayload = Schema.Struct({
   redirect_uri: OptionalString,
   code_verifier: OptionalString,
   refresh_token: OptionalString,
+  resource: OptionalString,
 }).annotate({
   identifier: "OAuthTokenForm",
 })
@@ -185,6 +187,7 @@ export const OAuthIntrospectionResult = Schema.Struct({
   grant_id: Schema.String,
   client_id: Schema.String,
   scope: Schema.String,
+  aud: Schema.String,
   exp: UnixSeconds,
   inline_user_id: Schema.String,
   space_ids: Schema.Array(Schema.String),

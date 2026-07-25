@@ -6,7 +6,6 @@ import {
   base64UrlEncode,
   constantTimeEqual,
   createRandomToken,
-  hasScope,
   isAllowedRedirectUri,
   normalizeEmail,
   normalizeRateLimitKeyPart,
@@ -314,12 +313,16 @@ export async function handleAuthorizeGet(url: URL): Promise<Response> {
   const redirectUri = url.searchParams.get("redirect_uri")
   const state = url.searchParams.get("state")
   const scopeRaw = url.searchParams.get("scope") ?? ""
+  const requestedResource = url.searchParams.get("resource")
   const codeChallenge = url.searchParams.get("code_challenge")
   const codeChallengeMethod = url.searchParams.get("code_challenge_method") ?? "S256"
 
   if (responseType !== "code") return json(400, { error: "invalid_response_type" })
   if (!clientId || !redirectUri || !state || !codeChallenge) return json(400, { error: "missing_params" })
   if (codeChallengeMethod !== "S256") return json(400, { error: "invalid_code_challenge_method" })
+  if (requestedResource != null && requestedResource !== config.resource) {
+    return json(400, { error: "invalid_target" })
+  }
 
   const client = await OauthModel.getClient(clientId)
   if (!client) return json(400, { error: "invalid_client" })
@@ -336,6 +339,7 @@ export async function handleAuthorizeGet(url: URL): Promise<Response> {
     redirectUri,
     state,
     scope: normalizeScopes(scopeRaw),
+    resource: requestedResource ?? config.resource,
     codeChallenge,
     csrfToken,
     deviceId,
@@ -703,6 +707,7 @@ export async function handleAuthorizeConsent(req: Request, body: unknown): Promi
     clientId: authRequest.clientId,
     inlineUserId: authRequest.inlineUserId,
     scope: authRequest.scope,
+    resource: authRequest.resource,
     spaceIds: chosenSpaceIds,
     allowDms,
     allowHomeThreads,
@@ -763,6 +768,7 @@ export async function handleToken(
     const clientId = params["client_id"]
     const redirectUri = params["redirect_uri"]
     const verifier = params["code_verifier"]
+    const requestedResource = params["resource"]
 
     if (!code || !clientId || !redirectUri || !verifier) {
       return json(400, { error: "missing_params" })
@@ -782,51 +788,43 @@ export async function handleToken(
     if (!grant || grant.revokedAtMs != null) {
       return json(400, { error: "invalid_grant" })
     }
-
-    await OauthModel.markAuthCodeUsed(code, nowMs)
+    if (requestedResource != null && requestedResource !== grant.resource) {
+      return json(400, { error: "invalid_target" })
+    }
 
     const accessToken = createRandomToken("mcp_at")
     const accessHash = await sha256Hex(accessToken)
-    await OauthModel.createAccessToken({
-      tokenHash: accessHash,
-      grantId: grant.id,
-      nowMs,
-      expiresAtMs: nowMs + config.accessTokenTtlMs,
-    })
-
-    const baseResponse = {
-      access_token: accessToken,
-      token_type: "bearer",
-      expires_in: Math.floor(config.accessTokenTtlMs / 1000),
-      scope: grant.scope,
-    }
-
-    if (!hasScope(grant.scope, "offline_access")) {
-      return json(200, baseResponse, { "cache-control": "no-store" })
-    }
-
     const refreshToken = createRandomToken("mcp_rt")
     const refreshHash = await sha256Hex(refreshToken)
-    await OauthModel.createRefreshToken({
-      tokenHash: refreshHash,
+
+    const issued = await OauthModel.consumeAuthCodeAndCreateTokens({
+      code,
       grantId: grant.id,
       nowMs,
-      expiresAtMs: nowMs + config.refreshTokenTtlMs,
+      accessTokenHash: accessHash,
+      accessTokenExpiresAtMs: nowMs + config.accessTokenTtlMs,
+      refreshTokenHash: refreshHash,
+      refreshTokenExpiresAtMs: nowMs + config.refreshTokenTtlMs,
     })
+    if (!issued) return json(400, { error: "invalid_grant" })
 
     return json(
       200,
       {
-        ...baseResponse,
+        access_token: accessToken,
         refresh_token: refreshToken,
+        token_type: "bearer",
+        expires_in: Math.floor(config.accessTokenTtlMs / 1000),
+        scope: grant.scope,
       },
-      { "cache-control": "no-store" },
+      { "cache-control": "no-store", pragma: "no-cache" },
     )
   }
 
   if (grantType === "refresh_token") {
     const refreshToken = params["refresh_token"]
     const clientId = params["client_id"]
+    const requestedResource = params["resource"]
     if (!refreshToken) {
       return json(400, { error: "missing_refresh_token" })
     }
@@ -842,6 +840,9 @@ export async function handleToken(
     if (result.grant.clientId !== clientId) {
       return json(400, { error: "invalid_grant" })
     }
+    if (requestedResource != null && requestedResource !== result.grant.resource) {
+      return json(400, { error: "invalid_target" })
+    }
 
     const accessToken = createRandomToken("mcp_at")
     const accessHash = await sha256Hex(accessToken)
@@ -849,21 +850,16 @@ export async function handleToken(
     const newRefreshToken = createRandomToken("mcp_rt")
     const newRefreshHash = await sha256Hex(newRefreshToken)
 
-    await Promise.all([
-      OauthModel.createAccessToken({
-        tokenHash: accessHash,
-        grantId: result.grant.id,
-        nowMs,
-        expiresAtMs: nowMs + config.accessTokenTtlMs,
-      }),
-      OauthModel.createRefreshToken({
-        tokenHash: newRefreshHash,
-        grantId: result.grant.id,
-        nowMs,
-        expiresAtMs: nowMs + config.refreshTokenTtlMs,
-      }),
-      OauthModel.revokeRefreshToken(refreshHash, nowMs, newRefreshHash),
-    ])
+    const rotated = await OauthModel.rotateRefreshToken({
+      currentTokenHash: refreshHash,
+      replacementTokenHash: newRefreshHash,
+      grantId: result.grant.id,
+      nowMs,
+      accessTokenHash: accessHash,
+      accessTokenExpiresAtMs: nowMs + config.accessTokenTtlMs,
+      refreshTokenExpiresAtMs: nowMs + config.refreshTokenTtlMs,
+    })
+    if (!rotated) return json(400, { error: "invalid_grant" })
 
     return json(
       200,
@@ -874,7 +870,7 @@ export async function handleToken(
         expires_in: Math.floor(config.accessTokenTtlMs / 1000),
         scope: result.grant.scope,
       },
-      { "cache-control": "no-store" },
+      { "cache-control": "no-store", pragma: "no-cache" },
     )
   }
 
@@ -934,6 +930,7 @@ export async function handleIntrospect(req: Request, body: unknown): Promise<Res
     grant_id: result.grant.id,
     client_id: result.grant.clientId,
     scope: result.grant.scope,
+    aud: result.grant.resource,
     exp: Math.floor(result.accessToken.expiresAtMs / 1000),
     inline_user_id: String(result.grant.inlineUserId),
     space_ids: result.grant.spaceIds.map((spaceId) => spaceId.toString()),

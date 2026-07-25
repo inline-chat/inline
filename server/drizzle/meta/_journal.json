@@ -694,6 +694,13 @@
       "when": 1784046917770,
       "tag": "0098_grid_snapshot_revision",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1784993492672,
+      "tag": "0099_mcp-oauth-resource-audience",
+      "breakpoints": true
     }
   ]
 }

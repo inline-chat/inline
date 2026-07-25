@@ -22,6 +22,7 @@ export type OauthAuthRequest = {
   redirectUri: string
   state: string
   scope: string
+  resource: string
   codeChallenge: string
   csrfToken: string
   deviceId: string
@@ -38,6 +39,7 @@ export type OauthGrant = {
   clientId: string
   inlineUserId: number
   scope: string
+  resource: string
   spaceIds: bigint[]
   allowDms: boolean
   allowHomeThreads: boolean
@@ -103,6 +105,7 @@ function mapAuthRequest(row: typeof oauthAuthRequests.$inferSelect): OauthAuthRe
     redirectUri: row.redirectUri,
     state: row.state,
     scope: row.scope,
+    resource: row.resource,
     codeChallenge: row.codeChallenge,
     csrfToken: row.csrfToken,
     deviceId: row.deviceId,
@@ -122,6 +125,7 @@ function mapGrant(row: typeof oauthGrants.$inferSelect): OauthGrant {
     clientId: row.clientId,
     inlineUserId: row.inlineUserId,
     scope: row.scope,
+    resource: row.resource,
     spaceIds: spaceIdsRaw.map((value) => BigInt(value)),
     allowDms: row.allowDms,
     allowHomeThreads: row.allowHomeThreads,
@@ -210,6 +214,7 @@ export const OauthModel = {
     redirectUri: string
     state: string
     scope: string
+    resource: string
     codeChallenge: string
     csrfToken: string
     deviceId: string
@@ -224,6 +229,7 @@ export const OauthModel = {
         redirectUri: input.redirectUri,
         state: input.state,
         scope: input.scope,
+        resource: input.resource,
         codeChallenge: input.codeChallenge,
         csrfToken: input.csrfToken,
         deviceId: input.deviceId,
@@ -273,6 +279,7 @@ export const OauthModel = {
     clientId: string
     inlineUserId: number
     scope: string
+    resource: string
     spaceIds: bigint[]
     allowDms: boolean
     allowHomeThreads: boolean
@@ -286,6 +293,7 @@ export const OauthModel = {
         clientId: input.clientId,
         inlineUserId: input.inlineUserId,
         scope: input.scope,
+        resource: input.resource,
         spaceIdsJson: input.spaceIds.map((spaceId) => Number(spaceId)),
         allowDms: input.allowDms,
         allowHomeThreads: input.allowHomeThreads,
@@ -392,6 +400,97 @@ export const OauthModel = {
       grantId: input.grantId,
       date: toDate(input.nowMs),
       expiresAt: toDate(input.expiresAtMs),
+    })
+  },
+
+  async consumeAuthCodeAndCreateTokens(input: {
+    code: string
+    grantId: string
+    nowMs: number
+    accessTokenHash: string
+    accessTokenExpiresAtMs: number
+    refreshTokenHash: string
+    refreshTokenExpiresAtMs: number
+  }): Promise<boolean> {
+    return await db.transaction(async (tx) => {
+      const consumed = await tx
+        .update(oauthAuthCodes)
+        .set({ usedAt: toDate(input.nowMs) })
+        .where(
+          and(
+            eq(oauthAuthCodes.code, input.code),
+            eq(oauthAuthCodes.grantId, input.grantId),
+            isNull(oauthAuthCodes.usedAt),
+            gt(oauthAuthCodes.expiresAt, toDate(input.nowMs)),
+          ),
+        )
+        .returning({ code: oauthAuthCodes.code })
+
+      if (consumed.length !== 1) {
+        return false
+      }
+
+      await tx.insert(oauthAccessTokens).values({
+        tokenHash: input.accessTokenHash,
+        grantId: input.grantId,
+        date: toDate(input.nowMs),
+        expiresAt: toDate(input.accessTokenExpiresAtMs),
+      })
+      await tx.insert(oauthRefreshTokens).values({
+        tokenHash: input.refreshTokenHash,
+        grantId: input.grantId,
+        date: toDate(input.nowMs),
+        expiresAt: toDate(input.refreshTokenExpiresAtMs),
+      })
+
+      return true
+    })
+  },
+
+  async rotateRefreshToken(input: {
+    currentTokenHash: string
+    replacementTokenHash: string
+    grantId: string
+    nowMs: number
+    accessTokenHash: string
+    accessTokenExpiresAtMs: number
+    refreshTokenExpiresAtMs: number
+  }): Promise<boolean> {
+    return await db.transaction(async (tx) => {
+      const consumed = await tx
+        .update(oauthRefreshTokens)
+        .set({
+          revokedAt: toDate(input.nowMs),
+          replacedByHash: input.replacementTokenHash,
+        })
+        .where(
+          and(
+            eq(oauthRefreshTokens.tokenHash, input.currentTokenHash),
+            eq(oauthRefreshTokens.grantId, input.grantId),
+            isNull(oauthRefreshTokens.revokedAt),
+            gt(oauthRefreshTokens.expiresAt, toDate(input.nowMs)),
+          ),
+        )
+        .returning({ tokenHash: oauthRefreshTokens.tokenHash })
+
+      if (consumed.length !== 1) {
+        return false
+      }
+
+      await tx.insert(oauthAccessTokens).values({
+        tokenHash: input.accessTokenHash,
+        grantId: input.grantId,
+        date: toDate(input.nowMs),
+        expiresAt: toDate(input.accessTokenExpiresAtMs),
+      })
+      await tx.insert(oauthRefreshTokens).values({
+        tokenHash: input.replacementTokenHash,
+        grantId: input.grantId,
+        date: toDate(input.nowMs),
+        expiresAt: toDate(input.refreshTokenExpiresAtMs),
+      })
+
+      return true
     })
   },
 

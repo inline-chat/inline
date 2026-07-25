@@ -35,6 +35,7 @@ export const oauthAuthRequests = pgTable(
     redirectUri: text("redirect_uri").notNull(),
     state: text("state").notNull(),
     scope: text("scope").notNull(),
+    resource: text("resource").default("https://mcp.inline.chat").notNull(),
     codeChallenge: text("code_challenge").notNull(),
     csrfToken: text("csrf_token").notNull(),
     deviceId: varchar("device_id", { length: 128 }).notNull(),
@@ -63,6 +64,7 @@ export const oauthGrants = pgTable(
       .notNull()
       .references(() => users.id),
     scope: text("scope").notNull(),
+    resource: text("resource").default("https://mcp.inline.chat").notNull(),
     spaceIdsJson: jsonb("space_ids_json").$type<number[]>().notNull(),
     allowDms: boolean("allow_dms").default(false).notNull(),
     allowHomeThreads: boolean("allow_home_threads").default(false).notNull(),

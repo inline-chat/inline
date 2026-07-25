@@ -3,6 +3,7 @@ import type { RateLimitRule } from "@in/server/modules/oauth/rateLimiter"
 
 export type OauthServerConfig = {
   issuer: string
+  resource: string
   cookiePrefix: string
   authRequestTtlMs: number
   authCodeTtlMs: number
@@ -48,6 +49,7 @@ export function oauthConfig(): OauthServerConfig {
 
   return {
     issuer,
+    resource: process.env["MCP_OAUTH_RESOURCE"] || "https://mcp.inline.chat",
     cookiePrefix: process.env["MCP_OAUTH_COOKIE_PREFIX"] || "inline_mcp",
     authRequestTtlMs: parsePositiveIntEnv("MCP_OAUTH_AUTH_REQUEST_TTL_MS", 15 * 60_000, {
       min: 60_000,
@@ -57,11 +59,11 @@ export function oauthConfig(): OauthServerConfig {
       min: 30_000,
       max: 2 * 60 * 60_000,
     }),
-    accessTokenTtlMs: parsePositiveIntEnv("MCP_OAUTH_ACCESS_TOKEN_TTL_MS", 60 * 60_000, {
+    accessTokenTtlMs: parsePositiveIntEnv("MCP_OAUTH_ACCESS_TOKEN_TTL_MS", 2 * 60 * 60_000, {
       min: 60_000,
       max: 7 * 24 * 60 * 60_000,
     }),
-    refreshTokenTtlMs: parsePositiveIntEnv("MCP_OAUTH_REFRESH_TOKEN_TTL_MS", 30 * 24 * 60 * 60_000, {
+    refreshTokenTtlMs: parsePositiveIntEnv("MCP_OAUTH_REFRESH_TOKEN_TTL_MS", 180 * 24 * 60 * 60_000, {
       min: 60_000,
       max: 365 * 24 * 60 * 60_000,
     }),

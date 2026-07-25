@@ -44,6 +44,7 @@ describe("OAuth controller", () => {
         redirectUri: "https://example.com/callback",
         state: `state-${id}`,
         scope: "messages:read",
+        resource: "https://mcp.inline.chat",
         codeChallenge: `challenge-${id}`,
         csrfToken: `csrf-${id}`,
         deviceId: `device-${id}`,
@@ -112,7 +113,7 @@ describe("OAuth controller", () => {
     expect(typeof authRequest?.challengeToken).toBe("string")
   })
 
-  it("issues tokens from authorization_code grants persisted in postgres", async () => {
+  it("issues two-hour access and 180-day refresh tokens without requiring offline_access", async () => {
     const nowMs = Date.now()
     const user = await testUtils.createUser("oauth-token-user@example.com")
     const client = await OauthModel.createClient({
@@ -126,7 +127,8 @@ describe("OAuth controller", () => {
       id: crypto.randomUUID(),
       clientId: client.clientId,
       inlineUserId: user.id,
-      scope: "messages:read spaces:read offline_access",
+      scope: "messages:read spaces:read",
+      resource: "https://mcp.inline.chat",
       spaceIds: [1n, 2n],
       allowDms: true,
       allowHomeThreads: true,
@@ -154,6 +156,7 @@ describe("OAuth controller", () => {
     tokenForm.set("client_id", client.clientId)
     tokenForm.set("redirect_uri", "https://example.com/callback")
     tokenForm.set("code_verifier", verifier)
+    tokenForm.set("resource", "https://mcp.inline.chat")
 
     const tokenRes = await app.handle(new Request("http://localhost/oauth/token", { method: "POST", body: tokenForm }))
     expect(tokenRes.status).toBe(200)
@@ -162,6 +165,8 @@ describe("OAuth controller", () => {
     expect(typeof tokenBody.access_token).toBe("string")
     expect(typeof tokenBody.refresh_token).toBe("string")
     expect(tokenBody.token_type).toBe("bearer")
+    expect(tokenBody.expires_in).toBe(2 * 60 * 60)
+    expect(tokenRes.headers.get("pragma")).toBe("no-cache")
 
     const accessHash = await sha256Hex(String(tokenBody.access_token))
     const refreshHash = await sha256Hex(String(tokenBody.refresh_token))
@@ -171,6 +176,8 @@ describe("OAuth controller", () => {
 
     expect(persistedAccess?.grantId).toBe(grant.id)
     expect(persistedRefresh?.grantId).toBe(grant.id)
+    expect(persistedAccess && persistedAccess.expiresAtMs - persistedAccess.createdAtMs).toBe(2 * 60 * 60_000)
+    expect(persistedRefresh && persistedRefresh.expiresAtMs - persistedRefresh.createdAtMs).toBe(180 * 24 * 60 * 60_000)
   })
 
   it("requires matching client_id for refresh_token grants", async () => {
@@ -194,6 +201,7 @@ describe("OAuth controller", () => {
       clientId: client.clientId,
       inlineUserId: user.id,
       scope: "messages:read spaces:read offline_access",
+      resource: "https://mcp.inline.chat",
       spaceIds: [1n],
       allowDms: false,
       allowHomeThreads: false,
@@ -228,13 +236,20 @@ describe("OAuth controller", () => {
     expect(wrongClientIdRes.status).toBe(400)
     expect((await wrongClientIdRes.json()).error).toBe("invalid_grant")
 
-    const validForm = new FormData()
-    validForm.set("grant_type", "refresh_token")
-    validForm.set("refresh_token", refreshToken)
-    validForm.set("client_id", client.clientId)
-    const validRes = await app.handle(new Request("http://localhost/oauth/token", { method: "POST", body: validForm }))
-    expect(validRes.status).toBe(200)
+    const refreshRequest = () => {
+      const form = new FormData()
+      form.set("grant_type", "refresh_token")
+      form.set("refresh_token", refreshToken)
+      form.set("client_id", client.clientId)
+      form.set("resource", "https://mcp.inline.chat")
+      return app.handle(new Request("http://localhost/oauth/token", { method: "POST", body: form }))
+    }
+    const refreshResponses = await Promise.all([refreshRequest(), refreshRequest()])
+    expect(refreshResponses.map((response) => response.status).sort()).toEqual([200, 400])
 
+    const validRes = refreshResponses.find((response) => response.status === 200)!
+    const rejectedRes = refreshResponses.find((response) => response.status === 400)!
+    expect((await rejectedRes.json()).error).toBe("invalid_grant")
     const validBody = await validRes.json()
     expect(typeof validBody.access_token).toBe("string")
     expect(typeof validBody.refresh_token).toBe("string")
@@ -265,6 +280,7 @@ describe("OAuth controller", () => {
       clientId: client.clientId,
       inlineUserId: user.id,
       scope: "messages:read spaces:read offline_access",
+      resource: "https://mcp.inline.chat",
       spaceIds: [1n],
       allowDms: false,
       allowHomeThreads: false,
