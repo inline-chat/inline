@@ -334,6 +334,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
       Log.shared.error("Failed to save photo", error: error)
     }
 
+    let didPrepareImage = !attachmentItems.isEmpty
     for (_, attachment) in attachmentItems {
       Transactions.shared.mutate(
         transaction: .sendMessage(
@@ -350,6 +351,10 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
       )
     }
 
+    if didPrepareImage, let chatId {
+      IntentDonationCoordinator.donateOutgoing(peerId: peerId, chatId: chatId)
+    }
+
     resetComposeStateAfterPreviewSend()
     dismissPreview(dismissAttachmentPicker: currentPreviewUsesAttachmentPicker)
     clearAttachments()
@@ -361,6 +366,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
 
     let replyToMessageId = ChatState.shared.getState(peer: peerId).replyingMessageId
 
+    var didSendImage = false
     for (index, photoItem) in photoItems.enumerated() {
       do {
         let mediaItem = try makeImageAttachment(photoItem.image, optimizePhoto: true)
@@ -383,6 +389,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
             )
           )
         )
+        didSendImage = true
 
         Log.shared
           .debug(
@@ -391,6 +398,10 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
       } catch {
         Log.shared.error("Failed to save and send photo \(index + 1)", error: error)
       }
+    }
+
+    if didSendImage, let chatId {
+      IntentDonationCoordinator.donateOutgoing(peerId: peerId, chatId: chatId)
     }
 
     // Clear state and dismiss

@@ -21,6 +21,7 @@ let package = Package(
 
   products: [
     .library(name: "InlineAvatarRendering", targets: ["InlineAvatarRendering"]),
+    .library(name: "InlineIntents", targets: ["InlineIntents"]),
     .library(name: "InlineUI", targets: ["InlineUI"]),
     .library(name: "EmojiAutocomplete", targets: ["EmojiAutocomplete"]),
     .library(name: "ReactionPickerEmojis", targets: ["ReactionPickerEmojis"]),
@@ -39,6 +40,12 @@ let package = Package(
     .target(
       name: "InlineAvatarRendering",
       dependencies: [],
+      swiftSettings: swiftSettings
+    ),
+
+    .target(
+      name: "InlineIntents",
+      dependencies: ["InlineAvatarRendering"],
       swiftSettings: swiftSettings
     ),
 
@@ -91,6 +98,12 @@ let package = Package(
     .testTarget(
       name: "InlineUITests",
       dependencies: ["InlineUI", "EmojiAutocomplete", "TextProcessing", "Translation"],
+      swiftSettings: swiftSettings
+    ),
+
+    .testTarget(
+      name: "InlineIntentsTests",
+      dependencies: ["InlineIntents"],
       swiftSettings: swiftSettings
     ),
 

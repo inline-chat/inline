@@ -32,6 +32,7 @@ enum LogoutPerformer {
     }
 
     Analytics.logout()
+    await IntentDonationCoordinator.deleteAll()
 
     await MainActor.run {
       TabsManager.shared.reset()

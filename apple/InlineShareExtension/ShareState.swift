@@ -2,10 +2,9 @@ import Auth
 import AVFoundation
 import Foundation
 import ImageIO
-import InlineAvatarRendering
+import InlineIntents
 import InlineKit
 import InlineProtocol
-import Intents
 import Logger
 import MultipartFormDataKit
 import SwiftUI
@@ -162,7 +161,6 @@ private final class SendMessageInvocationGate: @unchecked Sendable {
 /// Handles loading shared content, uploading files, and sending messages
 @MainActor
 class ShareState: ObservableObject {
-  private nonisolated static let sharedContainerIdentifier = "group.chat.inline"
   private nonisolated static let maxMedia = 10
   private nonisolated static let maxUrls = 10
   private nonisolated static let imageCompressionQuality: CGFloat = 0.52
@@ -2093,6 +2091,19 @@ class ShareState: ObservableObject {
           }
         }
 
+        if destinationChats.count == 1, let chat = destinationChats.first {
+          do {
+            let users = await MainActor.run {
+              self.sharedData?.shareExtensionData.users ?? []
+            }
+            try await InlineMessageIntentDonation.donate(
+              chat.intentDonationRequest(users: users, direction: .outgoing)
+            )
+          } catch {
+            log.warning(tagged("Failed to donate send-message intent: \(error.localizedDescription)"))
+          }
+        }
+
         await MainActor.run {
           self.isSending = false
           self.isSent = true
@@ -2102,8 +2113,6 @@ class ShareState: ObservableObject {
             detail: destinationChats.count == 1 ? self.displayName(for: destinationChats[0]) : "\(destinationChats.count) chats",
             fractionCompleted: 1
           )
-          self.donateSendMessageIntents(for: destinationChats)
-
           let feedback = UINotificationFeedbackGenerator()
           feedback.prepare()
           feedback.notificationOccurred(.success)
@@ -2289,161 +2298,6 @@ class ShareState: ObservableObject {
     )
   }
 
-  private func donateSendMessageIntents(for chats: [SharedChat]) {
-    let users = sharedData?.shareExtensionData.users ?? []
-    for chat in chats {
-      let title = displayName(for: chat, users: users)
-      let recipient = intentRecipient(for: chat, title: title, users: users)
-      let intent = INSendMessageIntent(
-        recipients: [recipient],
-        outgoingMessageType: .outgoingMessageText,
-        content: nil,
-        speakableGroupName: INSpeakableString(spokenPhrase: title),
-        conversationIdentifier: chat.intentConversationIdentifier,
-        serviceName: "Inline",
-        sender: nil,
-        attachments: nil
-      )
-      let metadata = INSendMessageIntentDonationMetadata()
-      metadata.recipientCount = 1
-      intent.donationMetadata = metadata
-
-      let interaction = INInteraction(intent: intent, response: nil)
-      interaction.direction = .outgoing
-      interaction.donate { [log, shareSessionId] error in
-        if let error {
-          log.warning("[share \(shareSessionId)] Failed to donate send-message intent: \(error.localizedDescription)")
-        }
-      }
-    }
-  }
-
-  private nonisolated func intentRecipient(
-    for chat: SharedChat,
-    title: String,
-    users: [SharedUser]
-  ) -> INPerson {
-    let user = intentUser(for: chat, users: users)
-    let suggestionType: INPersonSuggestionType = user == nil ? .none : .instantMessageAddress
-
-    return INPerson(
-      personHandle: intentPersonHandle(for: chat, user: user),
-      nameComponents: intentNameComponents(for: user),
-      displayName: title,
-      image: intentImage(for: chat, title: title, user: user),
-      contactIdentifier: nil,
-      customIdentifier: chat.intentConversationIdentifier,
-      isContactSuggestion: user != nil,
-      suggestionType: suggestionType
-    )
-  }
-
-  private nonisolated func intentUser(for chat: SharedChat, users: [SharedUser]) -> SharedUser? {
-    guard let peerUserId = chat.peerUserId else { return nil }
-    return users.first(where: { $0.id == peerUserId })
-  }
-
-  private nonisolated func intentPersonHandle(for chat: SharedChat, user: SharedUser?) -> INPersonHandle {
-    if let email = trimmedIntentString(user?.email) {
-      return INPersonHandle(value: email, type: .emailAddress)
-    }
-
-    if let username = trimmedIntentString(user?.username) {
-      return INPersonHandle(value: username, type: .unknown)
-    }
-
-    return INPersonHandle(value: chat.intentConversationIdentifier, type: .unknown)
-  }
-
-  private nonisolated func intentNameComponents(for user: SharedUser?) -> PersonNameComponents? {
-    guard let user else { return nil }
-
-    let givenName = trimmedIntentString(user.firstName)
-    let familyName = trimmedIntentString(user.lastName)
-    guard givenName != nil || familyName != nil else { return nil }
-
-    var components = PersonNameComponents()
-    components.givenName = givenName
-    components.familyName = familyName
-    return components
-  }
-
-  private nonisolated func intentImage(
-    for chat: SharedChat,
-    title: String,
-    user: SharedUser?
-  ) -> INImage? {
-    if let user,
-       let image = exportedIntentImage(for: user) ?? generatedUserIntentImage(for: user) {
-      return image
-    }
-
-    return generatedChatIntentImage(for: chat, title: title)
-  }
-
-  private nonisolated func exportedIntentImage(for user: SharedUser) -> INImage? {
-    guard let relativePath = trimmedIntentString(user.profileSharedLocalPath),
-          relativePath.hasPrefix("/") == false,
-          relativePath.contains("..") == false,
-          let containerURL = FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: Self.sharedContainerIdentifier
-          )
-    else {
-      return nil
-    }
-
-    let imageURL = containerURL.appendingPathComponent(relativePath)
-    guard FileManager.default.fileExists(atPath: imageURL.path) else {
-      return nil
-    }
-
-    return INImage(url: imageURL)
-  }
-
-  private nonisolated func generatedUserIntentImage(for user: SharedUser) -> INImage? {
-    let identity = InlineUserAvatarRenderIdentity(
-      firstName: trimmedIntentString(user.firstName),
-      lastName: trimmedIntentString(user.lastName),
-      displayName: trimmedIntentString(user.displayName),
-      email: trimmedIntentString(user.email),
-      username: trimmedIntentString(user.username),
-      stableIdentifier: "user:\(user.id)"
-    )
-    guard let data = InlineAvatarBitmapRenderer.userInitialsImageData(
-      identity: identity,
-      size: CGSize(width: 160, height: 160),
-      scale: 1
-    ) else {
-      return nil
-    }
-
-    return INImage(imageData: data)
-  }
-
-  private nonisolated func generatedChatIntentImage(for chat: SharedChat, title: String) -> INImage? {
-    let identity = InlineThreadAvatarRenderIdentity(
-      emoji: chat.emoji,
-      title: title,
-      isReplyThread: chat.isReplyThread ?? false,
-      stableIdentifier: chat.intentConversationIdentifier
-    )
-    guard let data = InlineAvatarBitmapRenderer.threadImageData(
-      identity: identity,
-      size: CGSize(width: 160, height: 160),
-      scale: 1
-    ) else {
-      return nil
-    }
-
-    return INImage(imageData: data)
-  }
-
-  private nonisolated func trimmedIntentString(_ value: String?) -> String? {
-    guard let value else { return nil }
-    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmed.isEmpty ? nil : trimmed
-  }
-
   private func displayName(for chat: SharedChat) -> String {
     displayName(for: chat, users: sharedData?.shareExtensionData.users ?? [])
   }
@@ -2472,17 +2326,5 @@ class ShareState: ObservableObject {
       }
     }
     return "Chat"
-  }
-}
-
-private extension SharedChat {
-  var intentConversationIdentifier: String {
-    if let peerUserId {
-      return "inline:user:\(peerUserId)"
-    }
-    if let peerThreadId {
-      return "inline:thread:\(peerThreadId)"
-    }
-    return "inline:chat:\(id)"
   }
 }

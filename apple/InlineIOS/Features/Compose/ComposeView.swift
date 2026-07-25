@@ -354,6 +354,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       )
     }
 
+    if let chatId { IntentDonationCoordinator.donateOutgoing(peerId: peerId, chatId: chatId) }
+
     ChatState.shared.clearEditingMessageId(peer: peerId)
     ChatState.shared.clearReplyingMessageId(peer: peerId)
 
@@ -379,6 +381,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
         )
       )
     )
+
+    if let chatId { IntentDonationCoordinator.donateOutgoing(peerId: peerId, chatId: chatId) }
 
     ChatState.shared.clearReplyingMessageId(peer: peerId)
   }
@@ -1004,6 +1008,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
         )
       )
 
+      IntentDonationCoordinator.donateOutgoing(peerId: peerId, chatId: chatId)
+
       ChatState.shared.clearReplyingMessageId(peer: peerId)
       resetComposeStateWithoutSendAnimation()
       reconcileVoiceControls(animated: true)
@@ -1229,6 +1235,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       }
 
       ChatState.shared.clearForwarding(peer: peerId)
+      IntentDonationCoordinator.donateOutgoing(peerId: peerId, chatId: chatId)
     } else {
       let replyToMessageId = state.replyingMessageId
       mentionedParticipantsAccess.handle(entities: entities, peer: peerId, chatId: chatId)
@@ -1252,6 +1259,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       }
 
       ChatState.shared.clearReplyingMessageId(peer: peerId)
+      IntentDonationCoordinator.donateOutgoing(peerId: peerId, chatId: chatId)
     }
 
     if shouldSendTextOnly {

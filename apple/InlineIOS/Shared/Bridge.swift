@@ -1,4 +1,5 @@
 import Foundation
+import InlineIntents
 import Logger
 
 struct SharedData: Codable {
@@ -104,6 +105,123 @@ struct SharedUser: Codable, Equatable {
     self.profileLocalPath = profileLocalPath
     self.profileFileUniqueId = profileFileUniqueId
     self.profileSharedLocalPath = profileSharedLocalPath
+  }
+}
+
+extension SharedUser {
+  var sharedAvatarURL: URL? {
+    guard let relativePath = profileSharedLocalPath?.trimmedForIntent,
+          !relativePath.hasPrefix("/"),
+          !relativePath.split(separator: "/").contains(".."),
+          let containerURL = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: "group.chat.inline"
+          )
+    else { return nil }
+
+    let standardizedContainerURL = containerURL.standardizedFileURL
+    let avatarURL = standardizedContainerURL
+      .appendingPathComponent(relativePath)
+      .standardizedFileURL
+    guard avatarURL.path.hasPrefix(standardizedContainerURL.path + "/") else {
+      return nil
+    }
+    return avatarURL
+  }
+}
+
+extension SharedChat {
+  var intentConversationIdentifier: String {
+    if let peerUserId {
+      return InlineMessageIntentDonation.userConversationIdentifier(String(peerUserId))
+    }
+    if let peerThreadId {
+      return InlineMessageIntentDonation.threadConversationIdentifier(String(peerThreadId))
+    }
+    return InlineMessageIntentDonation.chatConversationIdentifier(String(id))
+  }
+
+  func intentDonationRequest(
+    users: [SharedUser],
+    direction: InlineMessageIntentDonation.Direction
+  ) -> InlineMessageIntentDonation.Request {
+    let user = peerUserId.flatMap { userId in users.first(where: { $0.id == userId }) }
+    let displayName = intentDisplayName(user: user)
+    let recipient = user.map { $0.intentPerson(conversationIdentifier: intentConversationIdentifier) }
+    let avatar: InlineMessageIntentDonation.Avatar = if let user {
+      user.intentAvatar
+    } else {
+      .thread(.init(
+        emoji: emoji,
+        title: displayName,
+        isReplyThread: isReplyThread ?? false,
+        stableIdentifier: intentConversationIdentifier
+      ))
+    }
+
+    return .init(
+      conversation: .init(
+        identifier: intentConversationIdentifier,
+        displayName: displayName,
+        avatar: avatar,
+        recipientCount: recipient == nil ? nil : 1
+      ),
+      direction: direction,
+      recipients: recipient.map { [$0] } ?? []
+    )
+  }
+
+  private func intentDisplayName(user: SharedUser?) -> String {
+    if let title = title.trimmedForIntent { return title }
+    return user?.intentDisplayName ?? "Chat"
+  }
+}
+
+private extension SharedUser {
+  var intentDisplayName: String {
+    if let displayName = displayName?.trimmedForIntent { return displayName }
+    let fullName = [firstName.trimmedForIntent, lastName.trimmedForIntent]
+      .compactMap(\.self)
+      .joined(separator: " ")
+    if !fullName.isEmpty { return fullName }
+    return username?.trimmedForIntent ?? email?.trimmedForIntent ?? "Chat"
+  }
+
+  var intentAvatar: InlineMessageIntentDonation.Avatar {
+    .user(.init(
+      imageData: intentAvatarData,
+      firstName: firstName,
+      lastName: lastName,
+      displayName: displayName,
+      email: email,
+      username: username,
+      stableIdentifier: "user:\(id)"
+    ))
+  }
+
+  func intentPerson(conversationIdentifier: String) -> InlineMessageIntentDonation.Person {
+    let email = email?.trimmedForIntent
+    let username = username?.trimmedForIntent
+    return .init(
+      identifier: conversationIdentifier,
+      handle: email ?? username ?? conversationIdentifier,
+      handleType: email == nil ? .unknown : .emailAddress,
+      firstName: firstName,
+      lastName: lastName,
+      displayName: intentDisplayName,
+      avatar: intentAvatar
+    )
+  }
+
+  var intentAvatarData: Data? {
+    guard let sharedAvatarURL else { return nil }
+    return try? Data(contentsOf: sharedAvatarURL)
+  }
+}
+
+private extension String {
+  var trimmedForIntent: String? {
+    let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
   }
 }
 

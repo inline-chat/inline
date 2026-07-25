@@ -1,7 +1,6 @@
 import CryptoKit
 import Foundation
-import InlineAvatarRendering
-import Intents
+import InlineIntents
 import OSLog
 import Security
 import UIKit
@@ -12,14 +11,12 @@ final class NotificationService: UNNotificationServiceExtension {
   private var contentHandler: ((UNNotificationContent) -> Void)?
   private var bestAttemptContent: UNMutableNotificationContent?
   private var avatarTask: URLSessionDataTask?
-  private var requestIdentifier: String?
 
   override func didReceive(
     _ request: UNNotificationRequest,
     withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void
   ) {
     self.contentHandler = contentHandler
-    requestIdentifier = request.identifier
     bestAttemptContent = request.content.mutableCopy() as? UNMutableNotificationContent
 
     guard let bestAttemptContent else {
@@ -32,7 +29,7 @@ final class NotificationService: UNNotificationServiceExtension {
     let userInfo = bestAttemptContent.userInfo
     guard let sender = SenderPayload(userInfo: userInfo) else {
       // No sender metadata; deliver as-is to avoid breaking existing behaviour
-      contentHandler(bestAttemptContent)
+      finish(with: bestAttemptContent)
       return
     }
 
@@ -43,24 +40,24 @@ final class NotificationService: UNNotificationServiceExtension {
         if let error {
           self?.logger.error("avatar download failed: \(error.localizedDescription, privacy: .public)")
         }
-        let image: INImage? = if let data, UIImage(data: data) != nil {
-          INImage(imageData: data)
+        let imageData: Data? = if let data, UIImage(data: data) != nil {
+          data
         } else {
-          self?.makeSenderFallbackAvatar(sender: sender)
+          nil
         }
-        self?.applyIntent(sender: sender, image: image, requestIdentifier: request.identifier)
+        self?.applyIntent(sender: sender, imageData: imageData)
       }
       avatarTask?.resume()
     } else {
       logger.info("no avatar URL provided")
-      applyIntent(sender: sender, image: makeSenderFallbackAvatar(sender: sender), requestIdentifier: request.identifier)
+      applyIntent(sender: sender, imageData: nil)
     }
   }
 
   override func serviceExtensionTimeWillExpire() {
     avatarTask?.cancel()
-    guard let contentHandler, let bestAttemptContent else { return }
-    contentHandler(bestAttemptContent)
+    guard let bestAttemptContent else { return }
+    finish(with: bestAttemptContent)
   }
 }
 
@@ -263,8 +260,8 @@ private extension NotificationService {
     }
   }
 
-  func applyIntent(sender: SenderPayload, image: INImage?, requestIdentifier: String) {
-    guard let bestAttemptContent, let contentHandler else { return }
+  func applyIntent(sender: SenderPayload, imageData: Data?) {
+    guard let bestAttemptContent else { return }
 
     logger.info("applying intent for sender \(sender.id, privacy: .public)")
 
@@ -272,27 +269,15 @@ private extension NotificationService {
     let isReplyThread = boolValue(bestAttemptContent.userInfo["isReplyThread"])
     let threadTitle = bestAttemptContent.title.nonEmpty ?? bestAttemptContent.subtitle.nonEmpty
     let threadEmoji = bestAttemptContent.userInfo["threadEmoji"] as? String
-    let conversationIdentifier = conversationId(from: bestAttemptContent) ?? sender.id
-    let person: INPerson
-    let recipients: [INPerson]?
+    let rawConversationIdentifier = conversationId(from: bestAttemptContent) ?? sender.id
+    let conversationIdentifier = canonicalConversationIdentifier(
+      rawConversationIdentifier,
+      isThread: isThread,
+      senderId: sender.id
+    )
     if let threadTitle, isThread {
-      // For threads/channels: represent the chat as the sender and the user as the sole recipient.
-      person = makeGroupPerson(
-        threadId: conversationIdentifier,
-        title: threadTitle,
-        image: makeGroupAvatar(
-          emoji: threadEmoji,
-          title: threadTitle,
-          isReplyThread: isReplyThread,
-          stableIdentifier: conversationIdentifier
-        )
-      )
-      recipients = [makeMePerson()]
       bestAttemptContent.title = threadTitle
       bestAttemptContent.subtitle = ""
-    } else {
-      person = makePerson(from: sender, image: image)
-      recipients = nil // DM path: system infers current user
     }
 
     let groupName = isThread ? threadTitle : nil
@@ -302,21 +287,69 @@ private extension NotificationService {
         "notification context: isThread=\(isThread, privacy: .public) title=\(bestAttemptContent.title, privacy: .public) subtitle=\(bestAttemptContent.subtitle, privacy: .public) groupName=\(groupNameLog, privacy: .public)"
       )
 
-    let intent = makeSendMessageIntent(
-      sender: person,
-      content: bestAttemptContent.body,
-      conversationIdentifier: conversationIdentifier,
-      groupName: groupName,
-      recipients: recipients
+    let senderName = senderNameComponents(sender.displayName)
+    let senderAvatar = InlineMessageIntentDonation.Avatar.user(.init(
+      imageData: imageData,
+      firstName: senderName.givenName,
+      lastName: senderName.familyName,
+      displayName: sender.displayName,
+      email: nil,
+      username: nil,
+      stableIdentifier: "sender:\(sender.id)"
+    ))
+    let conversationAvatar: InlineMessageIntentDonation.Avatar = if let threadTitle, isThread {
+      .thread(.init(
+        emoji: threadEmoji,
+        title: threadTitle,
+        isReplyThread: isReplyThread,
+        stableIdentifier: conversationIdentifier
+      ))
+    } else {
+      senderAvatar
+    }
+    let intentSender: InlineMessageIntentDonation.Person
+    let recipients: [InlineMessageIntentDonation.Person]
+    if let threadTitle, isThread {
+      // Preserve Inline's established communication-notification presentation:
+      // the chat is the displayed sender and the current user is its recipient.
+      intentSender = .init(
+        identifier: conversationIdentifier,
+        handle: conversationIdentifier,
+        displayName: threadTitle,
+        avatar: conversationAvatar
+      )
+      recipients = [.init(
+        identifier: "inline:current-user",
+        handle: "0",
+        isCurrentUser: true
+      )]
+    } else {
+      intentSender = .init(
+        identifier: InlineMessageIntentDonation.userConversationIdentifier(sender.id),
+        handle: sender.id,
+        firstName: senderName.givenName,
+        lastName: senderName.familyName,
+        displayName: sender.displayName,
+        avatar: senderAvatar
+      )
+      recipients = []
+    }
+    let request = InlineMessageIntentDonation.Request(
+      conversation: .init(
+        identifier: conversationIdentifier,
+        displayName: groupName ?? sender.displayName,
+        avatar: conversationAvatar
+      ),
+      direction: .incoming,
+      sender: intentSender,
+      recipients: recipients,
+      content: bestAttemptContent.body
     )
 
-    // Donate interaction so the system can render a communication notification
-    let interaction = INInteraction(intent: intent, response: nil)
-    interaction.direction = INInteractionDirection.incoming
     Task {
       let contentToDeliver: UNNotificationContent
       do {
-        try await interaction.donate()
+        let intent = try await InlineMessageIntentDonation.donate(request)
         logger.info("interaction donation succeeded (conversation=\(conversationIdentifier, privacy: .public))")
         let updated = try bestAttemptContent.updating(from: intent)
         contentToDeliver = updated
@@ -326,127 +359,33 @@ private extension NotificationService {
         logger.error("interaction donation or content update failed: \(error.localizedDescription, privacy: .public)")
         contentToDeliver = bestAttemptContent
       }
-      contentHandler(contentToDeliver)
+      finish(with: contentToDeliver)
     }
   }
 
-  func makePerson(from sender: SenderPayload, image: INImage?) -> INPerson {
-    // TODO(privacy): Enrich from a local user object (cache/DB) so we can provide
-    // stronger contact hints without including email/phone in push payloads.
-    // Replace this when encrypted notification content is available.
-    let handle = INPersonHandle(value: sender.id, type: .unknown)
-
+  func senderNameComponents(_ displayName: String?) -> PersonNameComponents {
     var nameComponents = PersonNameComponents()
-    if let displayName = sender.displayName {
-      // Best effort split of first/last
+    if let displayName {
       let parts = displayName.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
       if let first = parts.first { nameComponents.givenName = String(first) }
       if parts.count > 1 { nameComponents.familyName = String(parts[1]) }
     }
-
-    return INPerson(
-      personHandle: handle,
-      nameComponents: nameComponents,
-      displayName: sender.displayName,
-      image: image,
-      contactIdentifier: sender.id,
-      customIdentifier: sender.id,
-      isMe: false,
-      suggestionType: .none
-    )
+    return nameComponents
   }
 
-  func makeSendMessageIntent(
-    sender: INPerson,
-    content: String,
-    conversationIdentifier: String,
-    groupName: String?,
-    recipients: [INPerson]?
-  ) -> INSendMessageIntent {
-    let intent = INSendMessageIntent(
-      recipients: recipients,
-      outgoingMessageType: .outgoingMessageText,
-      content: content,
-      speakableGroupName: groupName.map { INSpeakableString(spokenPhrase: $0) },
-      conversationIdentifier: conversationIdentifier,
-      serviceName: "Inline",
-      sender: sender,
-      attachments: nil
-    )
-    intent.setImage(sender.image, forParameterNamed: \.sender)
-    return intent
+  func canonicalConversationIdentifier(_ rawValue: String, isThread: Bool, senderId: String) -> String {
+    if rawValue.hasPrefix("inline:") { return rawValue }
+    return isThread
+      ? InlineMessageIntentDonation.threadConversationIdentifier(rawValue)
+      : InlineMessageIntentDonation.userConversationIdentifier(senderId)
   }
 
-  func makeGroupPerson(threadId: String, title: String, image: INImage?) -> INPerson {
-    let handle = INPersonHandle(value: threadId, type: .unknown)
-    var components = PersonNameComponents()
-    components.nickname = title
-    return INPerson(
-      personHandle: handle,
-      nameComponents: components,
-      displayName: title,
-      image: image,
-      contactIdentifier: threadId,
-      customIdentifier: threadId,
-      isMe: false,
-      suggestionType: .none
-    )
-  }
-
-  func makeMePerson() -> INPerson {
-    INPerson(
-      personHandle: INPersonHandle(value: "0", type: .unknown),
-      nameComponents: nil,
-      displayName: nil,
-      image: nil,
-      contactIdentifier: nil,
-      customIdentifier: nil,
-      isMe: true,
-      suggestionType: .none
-    )
-  }
-
-  func makeGroupAvatar(
-    emoji: String?,
-    title: String,
-    isReplyThread: Bool,
-    stableIdentifier: String
-  ) -> INImage? {
-    let identity = InlineThreadAvatarRenderIdentity(
-      emoji: emoji,
-      title: title,
-      isReplyThread: isReplyThread,
-      stableIdentifier: stableIdentifier
-    )
-    guard let data = InlineAvatarBitmapRenderer.threadImageData(
-      identity: identity,
-      size: CGSize(width: 60, height: 60),
-      scale: UIScreen.main.scale
-    ) else {
-      return nil
+  func finish(with content: UNNotificationContent) {
+    DispatchQueue.main.async { [weak self] in
+      guard let self, let contentHandler = self.contentHandler else { return }
+      self.contentHandler = nil
+      contentHandler(content)
     }
-
-    return INImage(imageData: data)
-  }
-
-  func makeSenderFallbackAvatar(sender: SenderPayload) -> INImage? {
-    let identity = InlineUserAvatarRenderIdentity(
-      firstName: nil,
-      lastName: nil,
-      displayName: sender.displayName,
-      email: nil,
-      username: nil,
-      stableIdentifier: "sender:\(sender.id)"
-    )
-    guard let data = InlineAvatarBitmapRenderer.userInitialsImageData(
-      identity: identity,
-      size: CGSize(width: 60, height: 60),
-      scale: UIScreen.main.scale
-    ) else {
-      return nil
-    }
-
-    return INImage(imageData: data)
   }
 
   func boolValue(_ value: Any?) -> Bool {

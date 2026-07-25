@@ -2,6 +2,7 @@ import Foundation
 import GRDB
 import ImageIO
 import InlineAvatarRendering
+import InlineIntents
 import InlineKit
 import Logger
 import UIKit
@@ -11,7 +12,7 @@ class AppDataUpdater {
   static let shared = AppDataUpdater()
   private static let sharedContainerIdentifier = "group.chat.inline"
   private static let intentAvatarDirectoryName = "IntentAvatars"
-  private static let intentAvatarMaxPixelSize = 160
+  private static let intentAvatarMaxPixelSize = Int(InlineMessageIntentDonation.preferredAvatarPixelSize)
   private static let intentAvatarJPEGQuality: CGFloat = 0.82
 
   private struct IntentAvatarExport {
@@ -33,6 +34,51 @@ class AppDataUpdater {
         }
       }
     }
+  }
+
+  func outgoingIntentRequest(
+    peerId: Peer,
+    chatId: Int64
+  ) async -> InlineMessageIntentDonation.Request? {
+    if let data = BridgeManager.shared.loadSharedData(),
+       let request = Self.outgoingIntentRequest(
+         peerId: peerId,
+         chatId: chatId,
+         data: data.shareExtensionData
+       ) {
+      return request
+    }
+
+    return await withCheckedContinuation { continuation in
+      fetchChatsAndUsers { chats, users in
+        guard let chats, let users else {
+          continuation.resume(returning: nil)
+          return
+        }
+
+        continuation.resume(returning: Self.outgoingIntentRequest(
+          peerId: peerId,
+          chatId: chatId,
+          data: .init(chats: chats, users: users)
+        ))
+      }
+    }
+  }
+
+  private static func outgoingIntentRequest(
+    peerId: Peer,
+    chatId: Int64,
+    data: ShareExtensionData
+  ) -> InlineMessageIntentDonation.Request? {
+    let chat = data.chats.first { chat in
+      switch peerId {
+      case let .user(userId):
+        return chat.peerUserId == userId
+      case let .thread(threadId):
+        return chat.peerThreadId == threadId
+      }
+    } ?? data.chats.first(where: { $0.id == chatId })
+    return chat?.intentDonationRequest(users: data.users, direction: .outgoing)
   }
 
   // Fetch recent chats and users from app data
