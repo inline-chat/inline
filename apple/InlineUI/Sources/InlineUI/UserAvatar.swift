@@ -61,7 +61,8 @@ public struct UserAvatar: View, Equatable {
     size: CGFloat = 32,
     ignoresSafeArea: Bool = false,
     backgroundOpacity: Double = 1.0,
-    cacheRemoteAvatar: Bool = true
+    cacheRemoteAvatar: Bool = true,
+    localAvatarURL: URL? = nil
   ) {
     userId = user.id
     firstName = user.firstName
@@ -70,7 +71,7 @@ public struct UserAvatar: View, Equatable {
     username = user.username
     self.size = size
     remoteUrl = user.getRemoteURL()
-    localUrl = Self.existingFileUrl(user.getLocalURL())
+    localUrl = Self.existingFileUrl(localAvatarURL) ?? Self.existingFileUrl(user.getLocalURL())
     stableAvatarIdentity = user.stableAvatarIdentity
     self.ignoresSafeArea = ignoresSafeArea
     self.backgroundOpacity = backgroundOpacity

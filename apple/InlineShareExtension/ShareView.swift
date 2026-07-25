@@ -476,7 +476,12 @@ private struct ShareAvatarView: View, Equatable {
   var body: some View {
     Group {
       if let user {
-        UserAvatar(user: user.inlineUser, size: size, cacheRemoteAvatar: false)
+        UserAvatar(
+          user: user.inlineUser,
+          size: size,
+          cacheRemoteAvatar: false,
+          localAvatarURL: user.sharedAvatarURL
+        )
       } else {
         ThreadIconView(
           ThreadIconDescriptor(

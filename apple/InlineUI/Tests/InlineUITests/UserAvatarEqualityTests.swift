@@ -38,4 +38,23 @@ struct UserAvatarEqualityTests {
 
     #expect(lhs != rhs)
   }
+
+  @Test("explicit local avatar URL is preferred over the model cache path")
+  @MainActor
+  func explicitLocalAvatarURLIsPreferred() {
+    var user = User(id: 42, email: "avatar@example.com", firstName: "Avatar")
+    user.profileLocalPath = "unavailable-in-extension.jpg"
+    user.profileCdnUrl = "https://cdn.inline.chat/avatar.jpg"
+    let sharedAvatarURL = URL(fileURLWithPath: "/dev/null")
+
+    let avatar = UserAvatar(
+      user: user,
+      size: 32,
+      cacheRemoteAvatar: false,
+      localAvatarURL: sharedAvatarURL
+    )
+
+    #expect(avatar.localUrl == sharedAvatarURL)
+    #expect(avatar.remoteUrl == URL(string: "https://cdn.inline.chat/avatar.jpg"))
+  }
 }
