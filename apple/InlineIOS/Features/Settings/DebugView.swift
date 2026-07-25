@@ -1,3 +1,4 @@
+import InlineIntents
 import SwiftUI
 
 struct DebugView: View {
@@ -5,7 +6,7 @@ struct DebugView: View {
   @State private var showClearAlert = false
   @State private var clearError: Error?
   @State private var showClearError = false
-  
+
   var body: some View {
     List {
       Section("Sync") {
@@ -35,6 +36,8 @@ struct DebugView: View {
         }
         .disabled(isClearing)
       }
+
+      IntentDonationDebugSection()
     }
     .listStyle(.insetGrouped)
     .navigationTitle("Debug")
@@ -53,10 +56,10 @@ struct DebugView: View {
       Text(clearError?.localizedDescription ?? "An unknown error occurred")
     }
   }
-  
+
   private func clearSharedData() {
     isClearing = true
-    
+
     Task {
       do {
         try BridgeManager.shared.clearSharedData()
@@ -73,6 +76,76 @@ struct DebugView: View {
     }
   }
 
+}
+
+private struct IntentDonationDebugSection: View {
+  @State private var isClearing = false
+  @State private var showConfirmation = false
+  @State private var showSuccess = false
+  @State private var clearError: Error?
+  @State private var showError = false
+
+  var body: some View {
+    Section {
+      Button {
+        showConfirmation = true
+      } label: {
+        SettingsItem(
+          icon: "person.crop.circle.badge.xmark",
+          iconColor: .red,
+          title: "Clear Share Suggestions"
+        ) {
+          if isClearing {
+            ProgressView()
+              .padding(.trailing, 8)
+          }
+        }
+      }
+      .disabled(isClearing)
+    } header: {
+      Text("Share Sheet")
+    } footer: {
+      Text("Clears the people and conversations Inline donated to iOS. Chats and messages are not deleted.")
+    }
+    .confirmationDialog(
+      "Clear Share Suggestions?",
+      isPresented: $showConfirmation,
+      titleVisibility: .visible
+    ) {
+      Button("Clear", role: .destructive) {
+        clearIntentDonations()
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("This removes every message interaction Inline donated to iOS for share-sheet suggestions.")
+    }
+    .alert("Share Suggestions Cleared", isPresented: $showSuccess) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      Text("iOS may take a moment to refresh the share sheet.")
+    }
+    .alert("Couldn’t Clear Share Suggestions", isPresented: $showError, presenting: clearError) { _ in
+      Button("OK", role: .cancel) {}
+    } message: { error in
+      Text(error.localizedDescription)
+    }
+  }
+
+  private func clearIntentDonations() {
+    isClearing = true
+
+    Task { @MainActor in
+      do {
+        try await InlineMessageIntentDonation.deleteAll()
+        isClearing = false
+        showSuccess = true
+      } catch {
+        clearError = error
+        isClearing = false
+        showError = true
+      }
+    }
+  }
 }
 
 #Preview("Debug") {
