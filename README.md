@@ -6,6 +6,11 @@
 </h1>
   <p align="center">
     Work chat for high-performance teams.
+    <br><br>
+    <a href="#download">Download</a> ·
+    <a href="#packages">Packages</a> ·
+    <a href="#faq">FAQ</a> ·
+    <a href="#license">License</a>
   </p>
 </p>
 
@@ -89,24 +94,26 @@ Inline is currently invite-only. If you have access, you can use the alpha build
 
 Inline is built by a team of two focused solely on this project since September 2024, mostly using our savings (I sold my car :)). We love building Inline in public, and we want to keep it free for most users and communities without annoying limitations while charging commercial teams.
 
-## Builders
+## Packages
 
-If you're building on top of Inline, start here:
+Start with the [developer docs](https://inline.chat/docs), or jump directly to a package:
 
-- [Docs](https://inline.chat/docs)
-- [Hermes Agent adapter](docs/hermes.md)
-- [OpenClaw setup](https://inline.chat/docs/openclaw)
-- [MCP setup](https://inline.chat/docs/mcp)
-- [Bot API](https://inline.chat/docs/bot-api)
-- [Realtime API](https://inline.chat/docs/realtime-api)
-- [CLI](cli/README.md)
+| Package | What it provides | Links |
+| --- | --- | --- |
+| `@inline-chat/cli` / `inline-cli` | Command-line access for people, agents, and automation | [Docs](https://inline.chat/docs/cli) · [Source](cli/) |
+| `@inline-chat/realtime-sdk` | TypeScript SDK for the realtime API | [Docs](https://inline.chat/docs/realtime-api) · [Source](sdk/) |
+| `@inline-chat/bot-api` | TypeScript client for the Bot API | [Docs](https://inline.chat/docs/bot-api) · [Source](packages/bot-api/) |
+| `@inline-chat/mcp` | Hosted MCP server for AI clients | [Docs](https://inline.chat/docs/mcp) · [Source](mcp/) |
+| `@inline-openclaw/inline` | Inline channel plugin for OpenClaw | [Docs](https://inline.chat/docs/openclaw) · [Source](openclaw/) |
+| `@inline-chat/hermes-agent-adapter` | Inline platform adapter for Hermes Agent | [Docs](https://inline.chat/docs/hermes) · [Source](hermes-agent/) |
+| `@inline-chat/protocol` | Generated TypeScript protocol types | [Docs](https://inline.chat/docs/realtime-api#protocol-buffers) · [Source](packages/protocol/) |
+| `@inline-chat/bot-api-types` | Generated TypeScript Bot API types | [Docs](https://inline.chat/docs/bot-api) · [Source](packages/bot-api-types/) |
+| `@inline-chat/oauth-core` | Shared OAuth helpers used by hosted integrations | [Docs](https://inline.chat/docs/mcp) · [Source](packages/oauth-core/) |
+| `inline-client` | Stateful Rust client foundation | [Docs](https://docs.rs/inline-client) · [Source](crates/client/) |
+| `inline-sdk` | Rust SDK for API calls, uploads, and realtime RPC | [Docs](https://inline.chat/docs/rust-sdk) · [Source](crates/sdk/) |
+| `inline-protocol` | Generated Rust protocol types | [Docs](https://inline.chat/docs/rust-sdk#packages) · [Source](crates/protocol/) |
 
-Rust crates in this repo:
-
-- [`inline-sdk`](crates/sdk/README.md): Rust SDK for API calls, uploads, client identity, and realtime RPC.
-- [`inline-protocol`](crates/protocol/README.md): generated Rust protocol types from `proto/core.proto`.
-
-### Contributing
+## Contributing
 
 - We are not accepting external code contributions at this time.
 - The project is under heavy development and we don't have the capacity or a process for accepting contributions, especially given that LLMs have changed the dynamics here.
