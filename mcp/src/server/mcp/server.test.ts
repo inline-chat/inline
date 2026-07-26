@@ -296,9 +296,31 @@ describe("mcp tool server", () => {
       "messages.send",
     ])
 
+    const expectedAnnotations: Record<
+      string,
+      { readOnlyHint: boolean; openWorldHint: boolean; destructiveHint: boolean }
+    > = {
+      "account.me": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+      "spaces.list": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+      "people.search": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+      "conversations.list": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+      "conversations.get": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+      "conversations.create": { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
+      "files.upload": { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
+      "files.get": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+      "messages.send_media": { readOnlyHint: false, openWorldHint: false, destructiveHint: true },
+      "messages.send_batch": { readOnlyHint: false, openWorldHint: false, destructiveHint: true },
+      "messages.list": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+      "messages.context": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+      "messages.search": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+      "messages.unread": { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+      "messages.send": { readOnlyHint: false, openWorldHint: false, destructiveHint: true },
+    }
+
     for (const tool of tools) {
       expect(tool.outputSchema?.type).toBe("object")
       expect(tool._meta?.securitySchemes?.[0]?.type).toBe("oauth2")
+      expect(tool.annotations).toMatchObject(expectedAnnotations[tool.name])
     }
 
     const accountMe = tools.find((tool) => tool.name === "account.me")
@@ -308,7 +330,7 @@ describe("mcp tool server", () => {
     const send = tools.find((tool) => tool.name === "messages.send")
     expect(send.description).toContain("Provide exactly one of chatId or userId")
     expect(send.annotations.readOnlyHint).toBe(false)
-    expect(send.annotations.destructiveHint).toBe(false)
+    expect(send.annotations.destructiveHint).toBe(true)
     expect(send.annotations.idempotentHint).toBe(false)
     expect(send._meta.securitySchemes[0].scopes).toEqual(["messages:write"])
 

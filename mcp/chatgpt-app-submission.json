@@ -1,0 +1,260 @@
+{
+  "$schema": "https://developers.openai.com/apps-sdk/schemas/chatgpt-app-submission.v1.json",
+  "schema_version": 1,
+  "app_info": {
+    "display_name": "Inline",
+    "subtitle": "Work chats in ChatGPT",
+    "description": "Inline helps users find people and conversations, read and search scoped work chats, create threads, upload files, and send messages through ChatGPT.",
+    "category": "COLLABORATION"
+  },
+  "tools": {
+    "account.me": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only returns the current Inline authorization, scopes, and allowed chat context without changing account or workspace state.",
+        "open_world_justification": "Does not write to public internet state or any third-party system.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform an irreversible action."
+      }
+    },
+    "spaces.list": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only lists spaces available to the scoped Inline grant and does not modify them.",
+        "open_world_justification": "Does not write to public internet state or any third-party system.",
+        "destructive_justification": "Does not delete, overwrite, or otherwise change a space."
+      }
+    },
+    "people.search": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only searches known people in allowed Inline contexts and returns matching profile summaries.",
+        "open_world_justification": "Does not contact people or write to public internet or third-party systems.",
+        "destructive_justification": "Does not update profiles, memberships, or conversations."
+      }
+    },
+    "conversations.list": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only lists or resolves conversations visible to the scoped Inline grant.",
+        "open_world_justification": "Does not publish content or change any external system.",
+        "destructive_justification": "Does not create, update, archive, or delete conversations."
+      }
+    },
+    "conversations.get": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only retrieves metadata, participants, and pinned-message identifiers for one allowed Inline conversation.",
+        "open_world_justification": "Does not write to public internet state or any third-party system.",
+        "destructive_justification": "Does not change the conversation, its participants, or its messages."
+      }
+    },
+    "conversations.create": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates a new thread or chat in an allowed Inline space or home context.",
+        "open_world_justification": "The new conversation remains inside the user's bounded Inline workspace rather than publishing to the public internet or a third party.",
+        "destructive_justification": "Creates a new conversation without deleting, overwriting, or revoking existing data."
+      }
+    },
+    "files.upload": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Uploads provided bytes or content fetched from an HTTPS URL into the user's scoped Inline account.",
+        "open_world_justification": "Only reads an optional source URL and stores the resulting file in Inline without changing public or third-party state.",
+        "destructive_justification": "Creates a new uploaded file and does not delete or overwrite existing content."
+      }
+    },
+    "files.get": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only extracts file and media metadata from messages in an allowed Inline conversation.",
+        "open_world_justification": "Does not download from or write to public internet or third-party systems.",
+        "destructive_justification": "Does not modify messages, files, previews, or conversations."
+      }
+    },
+    "messages.send_media": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Sends an uploaded photo, video, or document with an optional caption to an allowed Inline chat or DM.",
+        "open_world_justification": "The message is delivered only within Inline rather than to the public internet or a third-party system.",
+        "destructive_justification": "Sends recipient-visible content that cannot be withdrawn through this tool after delivery."
+      }
+    },
+    "messages.send_batch": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Sends an ordered batch of text and media items to an allowed Inline chat or DM.",
+        "open_world_justification": "The batch is delivered only within Inline rather than to the public internet or a third-party system.",
+        "destructive_justification": "Can send multiple recipient-visible messages, including partial batches, that cannot be withdrawn through this tool."
+      }
+    },
+    "messages.list": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only retrieves a filtered page of messages from one allowed Inline chat or DM.",
+        "open_world_justification": "Does not publish messages or change public or third-party state.",
+        "destructive_justification": "Does not mark, edit, send, or delete messages."
+      }
+    },
+    "messages.context": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only retrieves a bounded message window around an anchor or the latest context in an allowed conversation.",
+        "open_world_justification": "Does not publish messages or change public or third-party state.",
+        "destructive_justification": "Does not mark, edit, send, or delete messages."
+      }
+    },
+    "messages.search": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only searches messages within one allowed Inline conversation and returns matching results.",
+        "open_world_justification": "Does not publish messages or change public or third-party state.",
+        "destructive_justification": "Does not mark, edit, send, or delete messages."
+      }
+    },
+    "messages.unread": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only lists unread messages across conversations approved by the Inline grant without marking them read.",
+        "open_world_justification": "Does not publish messages or change public or third-party state.",
+        "destructive_justification": "Does not mark, edit, send, or delete messages."
+      }
+    },
+    "messages.send": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Sends text to an allowed Inline chat or DM and records the send in the MCP audit log.",
+        "open_world_justification": "The message is delivered only within Inline rather than to the public internet or a third-party system.",
+        "destructive_justification": "Sends a recipient-visible message that cannot be withdrawn through this tool after delivery."
+      }
+    }
+  },
+  "test_cases": [
+    {
+      "description": "Resolve a conversation by title before reading or sending.",
+      "user_prompt": "Find the conversation named Project Atlas and show me the best match.",
+      "file_attachment_urls": null,
+      "tools_triggered": "conversations.list",
+      "expected_output": "Returns the best matching allowed conversation with its title, chat identifier, and useful context.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Review unread work-chat activity within a time range.",
+      "user_prompt": "Show me my unread Inline messages from yesterday.",
+      "file_attachment_urls": null,
+      "tools_triggered": "messages.unread",
+      "expected_output": "Returns unread messages from approved conversations within yesterday's time window without marking them read.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Read recent messages from a resolved conversation.",
+      "user_prompt": "List the latest 20 messages from Inline chat 12345 so I can summarize the discussion.",
+      "file_attachment_urls": null,
+      "tools_triggered": "messages.list",
+      "expected_output": "Returns up to 20 recent messages from the allowed chat with structured message details.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Create a private work thread in an allowed context.",
+      "user_prompt": "Create a private Inline thread called Launch Checklist with the selected project participants.",
+      "file_attachment_urls": null,
+      "tools_triggered": "conversations.create",
+      "expected_output": "Creates the bounded Inline conversation and returns its chat details for subsequent actions.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Send a message to a clearly identified Inline conversation.",
+      "user_prompt": "Send 'The launch review starts at 3 PM' to Inline chat 12345.",
+      "file_attachment_urls": null,
+      "tools_triggered": "messages.send",
+      "expected_output": "Sends the text to the specified allowed conversation and returns the resulting message identifier.",
+      "expected_output_url": null
+    }
+  ],
+  "negative_test_cases": [
+    {
+      "description": "Do not trigger Inline for calendar management.",
+      "user_prompt": "Move my meeting tomorrow from 2 PM to 4 PM.",
+      "file_attachment_urls": null,
+      "tools_triggered": null,
+      "expected_output": "The app should not be invoked because Inline does not manage calendar events.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Do not trigger Inline for sending email.",
+      "user_prompt": "Email the quarterly report to our accountant.",
+      "file_attachment_urls": null,
+      "tools_triggered": null,
+      "expected_output": "The app should not be invoked because Inline tools do not send email.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Do not trigger Inline for open-web research.",
+      "user_prompt": "Search the web for today's technology headlines.",
+      "file_attachment_urls": null,
+      "tools_triggered": null,
+      "expected_output": "The app should not be invoked because the request does not involve the user's Inline workspace.",
+      "expected_output_url": null
+    }
+  ]
+}
