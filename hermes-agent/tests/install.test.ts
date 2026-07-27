@@ -26,6 +26,7 @@ afterEach(async () => {
 describe("inline-hermes installer", () => {
   beforeEach(() => {
     setEnv("INLINE_NODE_BIN", nodeBin)
+    setEnv("INLINE_HERMES_PYTHON_BIN", path.join(os.tmpdir(), "missing-inline-hermes-python"))
   })
 
   it("prints help from command or flag form", async () => {
@@ -92,6 +93,12 @@ describe("inline-hermes installer", () => {
     await expect(readFile(path.join(installed, "plugin.yaml"), "utf8")).resolves.toContain("name: inline-platform")
     await expect(readFile(path.join(installed, "adapter.py"), "utf8")).resolves.toContain("class InlineAdapter")
     await expect(readFile(path.join(installed, "sidecar", "index.mjs"), "utf8")).resolves.toContain("inline-sidecar")
+
+    const log = vi.spyOn(console, "log").mockImplementation(() => {})
+    expect(await main(["doctor", "--hermes-home", home, "--json"])).toBe(1)
+    const payload = JSON.parse(String(log.mock.calls.at(-1)?.[0]))
+    expect(payload.activation.installOwnershipAligned).toBe(true)
+    expect(payload.warnings.join("\n")).not.toContain("internal /inline_update may fail")
   })
 
   it("routes new installs into the guided Hermes setup", async () => {
@@ -106,6 +113,24 @@ describe("inline-hermes installer", () => {
     expect(text).toContain("hermes gateway setup")
     expect(text).toContain("select Inline")
     expect(text).not.toContain("platforms.inline.token")
+  })
+
+  it("only recommends a gateway restart after upgrading a configured install", async () => {
+    const home = await tempDir()
+    const fakePython = path.join(home, "hermes-python")
+    const log = vi.spyOn(console, "log").mockImplementation(() => {})
+    await writeFile(fakePython, "#!/bin/sh\nprintf '%s\\n' '__INLINE_HERMES_TOKEN_CONFIGURED__=1'\n")
+    await chmod(fakePython, 0o755)
+    setEnv("INLINE_HERMES_PYTHON_BIN", fakePython)
+    await writeEnabledHermesConfig(home)
+
+    const code = await main(["install", "--hermes-home", home, "--force"])
+
+    expect(code).toBe(0)
+    const text = log.mock.calls.map((call) => String(call[0])).join("\n")
+    expect(text).toContain("Restart the Hermes gateway")
+    expect(text).not.toContain("hermes plugins enable")
+    expect(text).not.toContain("hermes gateway setup")
   })
 
   it("can symlink the plugin for local development", async () => {
@@ -237,7 +262,7 @@ describe("inline-hermes installer", () => {
       configTokenConfigured: false,
       tokenConfigured: false,
     })
-    expect(payload.warnings).toContain("No Inline token was detected in INLINE_TOKEN, INLINE_BOT_TOKEN, or Hermes Inline config; live Inline realtime checks will not connect")
+    expect(payload.warnings).toContain("No Inline token was detected in INLINE_TOKEN, INLINE_BOT_TOKEN, the Hermes credential store, or Hermes Inline config; live Inline realtime checks will not connect")
   })
 
   it("uses consistent env and config-token wording for runtime readiness warnings", async () => {
@@ -251,7 +276,31 @@ describe("inline-hermes installer", () => {
     expect(code).toBe(0)
     const payload = JSON.parse(String(log.mock.calls.at(-1)?.[0]))
     expect(payload.warnings).toContain("Inline platform config is not enabled. Add platforms.inline.enabled: true and set INLINE_TOKEN/INLINE_BOT_TOKEN in the gateway environment, or set platforms.inline.token/inline.token in Hermes config")
-    expect(payload.warnings).toContain("No Inline token was detected in INLINE_TOKEN, INLINE_BOT_TOKEN, or Hermes Inline config; live Inline realtime checks will not connect")
+    expect(payload.warnings).toContain("No Inline token was detected in INLINE_TOKEN, INLINE_BOT_TOKEN, the Hermes credential store, or Hermes Inline config; live Inline realtime checks will not connect")
+  })
+
+  it("detects a token saved in the Hermes credential store without printing it", async () => {
+    const home = await tempDir()
+    const fakePython = path.join(home, "hermes-python")
+    const log = vi.spyOn(console, "log").mockImplementation(() => {})
+    await writeFile(fakePython, "#!/bin/sh\nprintf '%s\\n' 'fake-token' '__INLINE_HERMES_TOKEN_CONFIGURED__=1'\n")
+    await chmod(fakePython, 0o755)
+    setEnv("INLINE_HERMES_PYTHON_BIN", fakePython)
+
+    expect(await main(["install", "--hermes-home", home, "--force"])).toBe(0)
+    await writeEnabledHermesConfig(home)
+    const code = await main(["doctor", "--hermes-home", home, "--json"])
+
+    expect(code).toBe(0)
+    const text = String(log.mock.calls.at(-1)?.[0])
+    const payload = JSON.parse(text)
+    expect(payload.activation).toMatchObject({
+      hermesCredentialStoreChecked: true,
+      hermesCredentialStoreTokenConfigured: true,
+      tokenConfigured: true,
+    })
+    expect(payload.warnings).toEqual([])
+    expect(text).not.toContain("fake-token")
   })
 
   it("treats a Hermes config token as runtime-ready without printing it", async () => {

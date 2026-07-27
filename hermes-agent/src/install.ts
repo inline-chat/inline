@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { constants as fsConstants, existsSync, realpathSync } from "node:fs"
-import { access, cp, lstat, mkdir, readFile, realpath, rm, stat, symlink } from "node:fs/promises"
+import { access, chown, cp, lchown, lstat, mkdir, readFile, readdir, realpath, rm, stat, symlink } from "node:fs/promises"
 import http from "node:http"
 import { createHash, randomBytes } from "node:crypto"
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process"
@@ -58,8 +58,11 @@ type ActivationInfo = {
   pluginEnabled: boolean
   platformConfigured: boolean
   configTokenConfigured: boolean
+  hermesCredentialStoreChecked: boolean
+  hermesCredentialStoreTokenConfigured: boolean
   tokenPresent: boolean
   tokenConfigured: boolean
+  installOwnershipAligned: boolean
 }
 
 type TokenInfo = {
@@ -179,6 +182,7 @@ async function installPlugin(params: {
       filter: shouldCopyPluginFile,
     })
   }
+  await alignInstallOwnership(params.opts.hermesHome, params.target, params.opts.link)
 
   const after = await inspectInstall(params)
   return {
@@ -210,7 +214,7 @@ async function inspectInstall(params: {
   const sourceSidecar = await inspectSidecar(params.source)
   const targetSidecar = targetExists ? await inspectSidecar(params.target) : null
   const node = await inspectNode()
-  const activation = await inspectActivation(params.opts.hermesHome)
+  const activation = await inspectActivation(params.opts.hermesHome, params.target)
   const issues: string[] = []
   const warnings: string[] = []
 
@@ -236,7 +240,10 @@ async function inspectInstall(params: {
     warnings.push("Inline platform config is not enabled. Add platforms.inline.enabled: true and set INLINE_TOKEN/INLINE_BOT_TOKEN in the gateway environment, or set platforms.inline.token/inline.token in Hermes config")
   }
   if (targetExists && activation.pluginEnabled && !activation.tokenConfigured) {
-    warnings.push("No Inline token was detected in INLINE_TOKEN, INLINE_BOT_TOKEN, or Hermes Inline config; live Inline realtime checks will not connect")
+    warnings.push("No Inline token was detected in INLINE_TOKEN, INLINE_BOT_TOKEN, the Hermes credential store, or Hermes Inline config; live Inline realtime checks will not connect")
+  }
+  if (targetExists && !activation.installOwnershipAligned) {
+    warnings.push("Installed plugin ownership differs from the Hermes home owner; internal /inline_update may fail until inline-hermes install --force repairs it")
   }
 
   return {
@@ -583,7 +590,7 @@ async function inspectNode(): Promise<NodeInfo> {
   }
 }
 
-async function inspectActivation(hermesHome: string): Promise<ActivationInfo> {
+async function inspectActivation(hermesHome: string, target: string): Promise<ActivationInfo> {
   const configPath = path.join(hermesHome, "config.yaml")
   let config: unknown = null
   let configExists = false
@@ -595,6 +602,8 @@ async function inspectActivation(hermesHome: string): Promise<ActivationInfo> {
   }
   const tokenPresent = Boolean(process.env.INLINE_TOKEN || process.env.INLINE_BOT_TOKEN)
   const configTokenConfigured = configTokenIsConfigured(config, ["platforms", defaultPluginId, "token"]) || configTokenIsConfigured(config, [defaultPluginId, "token"])
+  const hermesCredentialStore = inspectHermesCredentialStore()
+  const installOwnershipAligned = await inspectInstallOwnership(hermesHome, target)
 
   return {
     configPath,
@@ -602,9 +611,101 @@ async function inspectActivation(hermesHome: string): Promise<ActivationInfo> {
     pluginEnabled: readConfigList(config, ["plugins", "enabled"]).includes(pluginEnableKey),
     platformConfigured: readConfigBoolean(config, ["platforms", defaultPluginId, "enabled"]) || readConfigBoolean(config, [defaultPluginId, "enabled"]),
     configTokenConfigured,
+    hermesCredentialStoreChecked: hermesCredentialStore.checked,
+    hermesCredentialStoreTokenConfigured: hermesCredentialStore.tokenConfigured,
     tokenPresent,
-    tokenConfigured: tokenPresent || configTokenConfigured,
+    tokenConfigured: tokenPresent || configTokenConfigured || hermesCredentialStore.tokenConfigured,
+    installOwnershipAligned,
   }
+}
+
+async function inspectInstallOwnership(hermesHome: string, target: string): Promise<boolean> {
+  if (!await exists(target)) return true
+  try {
+    const homeInfo = await stat(hermesHome)
+    const pluginsInfo = await stat(path.dirname(target))
+    return pluginsInfo.uid === homeInfo.uid
+      && pluginsInfo.gid === homeInfo.gid
+      && await treeOwnershipMatches(target, homeInfo.uid, homeInfo.gid)
+  } catch {
+    return false
+  }
+}
+
+async function treeOwnershipMatches(target: string, uid: number, gid: number): Promise<boolean> {
+  const info = await lstat(target)
+  if (info.uid !== uid || info.gid !== gid) return false
+  if (!info.isDirectory()) return true
+  const entries = await readdir(target)
+  for (const entry of entries) {
+    if (!await treeOwnershipMatches(path.join(target, entry), uid, gid)) return false
+  }
+  return true
+}
+
+async function alignInstallOwnership(hermesHome: string, target: string, linked: boolean): Promise<void> {
+  if (typeof process.getuid !== "function" || process.getuid() !== 0) return
+  const homeInfo = await stat(hermesHome)
+  if (homeInfo.uid === 0) return
+  await chown(path.dirname(target), homeInfo.uid, homeInfo.gid)
+  if (linked) {
+    await lchown(target, homeInfo.uid, homeInfo.gid)
+    return
+  }
+  await chownTree(target, homeInfo.uid, homeInfo.gid)
+}
+
+async function chownTree(target: string, uid: number, gid: number): Promise<void> {
+  const info = await lstat(target)
+  if (info.isSymbolicLink()) {
+    await lchown(target, uid, gid)
+    return
+  }
+  if (info.isDirectory()) {
+    const entries = await readdir(target)
+    for (const entry of entries) await chownTree(path.join(target, entry), uid, gid)
+  }
+  await chown(target, uid, gid)
+}
+
+function inspectHermesCredentialStore(): { checked: boolean; tokenConfigured: boolean } {
+  const configuredPython = normalizeToken(process.env.INLINE_HERMES_PYTHON_BIN)
+  const candidates = configuredPython
+    ? [configuredPython]
+    : hermesPythonCandidates()
+  const probe = [
+    "from hermes_cli import gateway",
+    "configured = bool(gateway.get_env_value('INLINE_TOKEN') or gateway.get_env_value('INLINE_BOT_TOKEN'))",
+    "print('__INLINE_HERMES_TOKEN_CONFIGURED__=' + ('1' if configured else '0'))",
+  ].join("; ")
+
+  for (const candidate of candidates) {
+    const result = spawnSync(candidate, ["-c", probe], {
+      encoding: "utf8",
+      timeout: 2_000,
+      maxBuffer: 64 * 1024,
+    })
+    if (result.status !== 0) continue
+    const match = /^__INLINE_HERMES_TOKEN_CONFIGURED__=([01])$/m.exec(result.stdout || "")
+    if (match) return { checked: true, tokenConfigured: match[1] === "1" }
+  }
+  return { checked: false, tokenConfigured: false }
+}
+
+function hermesPythonCandidates(): string[] {
+  const candidates = ["/opt/hermes/.venv/bin/python"]
+  const hermesCommand = spawnSync("which", ["hermes"], { encoding: "utf8", timeout: 1_000 })
+  const hermesPath = normalizeToken(hermesCommand.stdout)
+  if (hermesCommand.status === 0 && hermesPath) {
+    try {
+      const binDir = path.dirname(realpathSync(hermesPath))
+      candidates.push(path.join(binDir, "python"), path.join(binDir, "python3"))
+    } catch {
+      // Continue with the standard interpreter candidates.
+    }
+  }
+  candidates.push("python3", "python")
+  return [...new Set(candidates)]
 }
 
 function readConfigList(config: unknown, pathParts: string[]): string[] {
@@ -968,8 +1069,14 @@ function printInstallResult(result: InstallResult) {
   printStatus(result)
   if (result.installed || result.dryRun) {
     console.log("")
-    console.log(`Enable the Hermes plugin with \`hermes plugins enable ${pluginEnableKey}\`.`)
-    console.log("Then run `hermes gateway setup`, select Inline, and follow the guided bot setup.")
+    if (!result.activation.pluginEnabled) {
+      console.log(`Enable the Hermes plugin with \`hermes plugins enable ${pluginEnableKey}\`.`)
+    }
+    if (!result.activation.platformConfigured || !result.activation.tokenConfigured) {
+      console.log("Run `hermes gateway setup`, select Inline, and follow the guided bot setup.")
+    } else if (result.installed) {
+      console.log("Restart the Hermes gateway to load the updated Inline plugin files.")
+    }
   }
 }
 
@@ -1008,6 +1115,7 @@ function printStatus(status: Awaited<ReturnType<typeof inspectInstall>>) {
   console.log(`node: ${formatNodeInfo(status.node)}`)
   console.log(`hermes plugin enabled: ${status.activation.pluginEnabled ? "yes" : "no"}`)
   console.log(`inline platform configured: ${status.activation.platformConfigured || status.activation.tokenConfigured ? "yes" : "no"}`)
+  console.log(`inline token configured: ${status.activation.tokenConfigured ? "yes" : "no"}`)
   if (status.warnings.length > 0) {
     console.log("warnings:")
     for (const warning of status.warnings) console.log(`- ${warning}`)

@@ -58,6 +58,12 @@ hermes plugins enable inline-platform
 hermes gateway setup
 ```
 
+When installation runs as root but the Hermes home belongs to its service user,
+the installer automatically aligns the plugin directory ownership with that
+service user. Subsequent `/inline_update` commands replace the durable plugin
+directly; users do not need to maintain a second npm prefix or repeat the
+host-side install commands for routine updates.
+
 Select Inline in the messaging-platform picker. The default path is: go to
 **Inline → Settings → Bots → Create a new bot**, then paste its token. See the
 [Inline bot creation guide](https://inline.chat/docs/creating-a-bot). The
@@ -106,10 +112,12 @@ inline-hermes --version
 
 `doctor` verifies required plugin files, the Node executable used for the
 sidecar, the installed sidecar bundle hash, and whether Hermes config enables
-the external plugin with `plugins.enabled: [inline-platform]`. It honors
-`INLINE_NODE_BIN` and fails if that explicit path is missing, not executable,
-older than Node 20, or cannot report a Node version. It also fails if a copied
-plugin has drifted from the package bundle.
+the external plugin with `plugins.enabled: [inline-platform]`. It detects
+Inline credentials from the current environment, Hermes config, or the managed
+credential store used by `hermes gateway setup`, without printing token values.
+It honors `INLINE_NODE_BIN` and fails if that explicit path is missing, not
+executable, older than Node 20, or cannot report a Node version. It also fails
+if a copied plugin has drifted from the package bundle.
 
 Confirm Hermes sees the plugin:
 
@@ -349,7 +357,8 @@ bundled Hermes adapter should use.
 ## Troubleshooting
 
 Run `inline-hermes doctor --json` first. It checks the installed plugin path,
-required files, Node executable, and source/installed sidecar bundle hashes.
+required files, Node executable, source/installed sidecar bundle hashes, and
+whether an Inline token is available to Hermes.
 
 - `plugin is not installed`: run `inline-hermes install`.
 - `Hermes plugin 'inline-platform' is not enabled`: run
