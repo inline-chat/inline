@@ -200,6 +200,8 @@ pub struct RealtimeClient {
 pub enum RealtimeEvent {
     /// Inline protocol updates pushed by the server.
     Updates(Vec<proto::Update>),
+    /// Transient Grid state or connection event pushed by the server.
+    Grid(proto::GridEvent),
     /// Server acknowledgement for a previously sent client message.
     Ack {
         /// Client message ID acknowledged by the server.
@@ -791,6 +793,10 @@ impl RealtimeClient {
             Some(proto::server_message::Payload::Update(payload)) => {
                 self.send_ack(message_id).await?;
                 Ok(Some(RealtimeEvent::Updates(payload.updates)))
+            }
+            Some(proto::server_message::Payload::Grid(event)) => {
+                self.send_ack(message_id).await?;
+                Ok(Some(RealtimeEvent::Grid(event)))
             }
             None => Ok(None),
         }
@@ -1527,6 +1533,70 @@ rpc_requests!(
         ToggleSpaceGridResult,
         ToggleSpaceGrid
     ),
+    (GetGridInput, GetGrid, GetGrid, GetGridResult, GetGrid),
+    (
+        CreateGridRoomInput,
+        CreateGridRoom,
+        CreateGridRoom,
+        CreateGridRoomResult,
+        CreateGridRoom
+    ),
+    (
+        JoinGridRoomInput,
+        JoinGridRoom,
+        JoinGridRoom,
+        JoinGridRoomResult,
+        JoinGridRoom
+    ),
+    (
+        LeaveGridRoomInput,
+        LeaveGridRoom,
+        LeaveGridRoom,
+        LeaveGridRoomResult,
+        LeaveGridRoom
+    ),
+    (
+        SetGridRoomTitleInput,
+        SetGridRoomTitle,
+        SetGridRoomTitle,
+        SetGridRoomTitleResult,
+        SetGridRoomTitle
+    ),
+    (
+        SetGridRoomLockedInput,
+        SetGridRoomLocked,
+        SetGridRoomLocked,
+        SetGridRoomLockedResult,
+        SetGridRoomLocked
+    ),
+    (
+        DeleteGridRoomInput,
+        DeleteGridRoom,
+        DeleteGridRoom,
+        DeleteGridRoomResult,
+        DeleteGridRoom
+    ),
+    (
+        PrepareGridConnectionInput,
+        PrepareGridConnection,
+        PrepareGridConnection,
+        PrepareGridConnectionResult,
+        PrepareGridConnection
+    ),
+    (
+        SetGridAvatarMicrophoneEnabledInput,
+        SetGridAvatarMicrophoneEnabled,
+        SetGridAvatarMicrophoneEnabled,
+        SetGridAvatarMicrophoneEnabledResult,
+        SetGridAvatarMicrophoneEnabled
+    ),
+    (
+        GetGridHomeInput,
+        GetGridHome,
+        GetGridHome,
+        GetGridHomeResult,
+        GetGridHome
+    ),
     (
         GetThreadReferencesInput,
         GetThreadReferences,
@@ -1701,6 +1771,7 @@ fn realtime_header_value(field: &'static str, value: &str) -> Result<HeaderValue
 fn realtime_event_kind(event: &RealtimeEvent) -> &'static str {
     match event {
         RealtimeEvent::Updates(_) => "updates",
+        RealtimeEvent::Grid(_) => "grid",
         RealtimeEvent::Ack { .. } => "ack",
         RealtimeEvent::Pong { .. } => "pong",
     }
@@ -1999,6 +2070,60 @@ mod tests {
                 }
             }
             other => panic!("expected updates event, got {other:?}"),
+        }
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn realtime_client_receives_grid_events_and_acks_them() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+
+            let init = read_test_client_message(&mut ws).await;
+            assert!(matches!(
+                init.body,
+                Some(proto::client_message::Body::ConnectionInit(_))
+            ));
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+            send_test_server_message(&mut ws, test_grid_server_message(9, 7)).await;
+
+            let ack = read_test_client_message(&mut ws).await;
+            match ack.body {
+                Some(proto::client_message::Body::Ack(ack)) => {
+                    assert_eq!(ack.msg_id, 9);
+                }
+                other => panic!("expected ack for pushed Grid event, got {other:?}"),
+            }
+        });
+
+        let mut client = RealtimeClient::builder(format!("ws://{addr}/realtime"), "token-1")
+            .without_connect_timeout()
+            .without_rpc_timeout()
+            .connect()
+            .await
+            .unwrap();
+        let event = client.next_event().await.unwrap();
+
+        match event {
+            RealtimeEvent::Grid(event) => match event.event {
+                Some(proto::grid_event::Event::Changed(changed)) => {
+                    assert_eq!(changed.space_ids, vec![7]);
+                }
+                other => panic!("expected changed Grid event, got {other:?}"),
+            },
+            other => panic!("expected Grid event, got {other:?}"),
         }
         server.await.unwrap();
     }
@@ -2644,6 +2769,22 @@ mod tests {
                             }],
                         },
                     )),
+                },
+            )),
+        }
+    }
+
+    fn test_grid_server_message(message_id: u64, space_id: i64) -> proto::ServerProtocolMessage {
+        proto::ServerProtocolMessage {
+            id: message_id,
+            body: Some(proto::server_protocol_message::Body::Message(
+                proto::ServerMessage {
+                    payload: Some(proto::server_message::Payload::Grid(proto::GridEvent {
+                        event: Some(proto::grid_event::Event::Changed(proto::GridChanged {
+                            space_ids: vec![space_id],
+                            room_id: None,
+                        })),
+                    })),
                 },
             )),
         }

@@ -159,6 +159,12 @@ export interface ServerMessage {
          */
         update: UpdatesPayload;
     } | {
+        oneofKind: "grid";
+        /**
+         * @generated from protobuf field: GridEvent grid = 5;
+         */
+        grid: GridEvent;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -606,6 +612,19 @@ export interface Dialog {
     followMode?: DialogFollowMode;
 }
 /**
+ * Effective actions the current user may take on a chat.
+ *
+ * @generated from protobuf message ChatPermissions
+ */
+export interface ChatPermissions {
+    /**
+     * Change the chat title, emoji, and other fields owned by messages.updateChatInfo.
+     *
+     * @generated from protobuf field: bool can_update_info = 1;
+     */
+    canUpdateInfo: boolean;
+}
+/**
  * A thread
  *
  * @generated from protobuf message Chat
@@ -693,6 +712,12 @@ export interface Chat {
      * @generated from protobuf field: optional int32 number = 14;
      */
     number?: number;
+    /**
+     * Effective permissions for the user this chat was encoded for.
+     *
+     * @generated from protobuf field: optional ChatPermissions permissions = 15;
+     */
+    permissions?: ChatPermissions;
 }
 /**
  * @generated from protobuf message MessageReplies
@@ -2770,6 +2795,66 @@ export interface RpcCall {
          */
         getThreadSubthreads: GetThreadSubthreadsInput;
     } | {
+        oneofKind: "getGrid";
+        /**
+         * @generated from protobuf field: GetGridInput getGrid = 84;
+         */
+        getGrid: GetGridInput;
+    } | {
+        oneofKind: "createGridRoom";
+        /**
+         * @generated from protobuf field: CreateGridRoomInput createGridRoom = 85;
+         */
+        createGridRoom: CreateGridRoomInput;
+    } | {
+        oneofKind: "joinGridRoom";
+        /**
+         * @generated from protobuf field: JoinGridRoomInput joinGridRoom = 86;
+         */
+        joinGridRoom: JoinGridRoomInput;
+    } | {
+        oneofKind: "leaveGridRoom";
+        /**
+         * @generated from protobuf field: LeaveGridRoomInput leaveGridRoom = 87;
+         */
+        leaveGridRoom: LeaveGridRoomInput;
+    } | {
+        oneofKind: "setGridRoomTitle";
+        /**
+         * @generated from protobuf field: SetGridRoomTitleInput setGridRoomTitle = 88;
+         */
+        setGridRoomTitle: SetGridRoomTitleInput;
+    } | {
+        oneofKind: "setGridRoomLocked";
+        /**
+         * @generated from protobuf field: SetGridRoomLockedInput setGridRoomLocked = 89;
+         */
+        setGridRoomLocked: SetGridRoomLockedInput;
+    } | {
+        oneofKind: "deleteGridRoom";
+        /**
+         * @generated from protobuf field: DeleteGridRoomInput deleteGridRoom = 90;
+         */
+        deleteGridRoom: DeleteGridRoomInput;
+    } | {
+        oneofKind: "prepareGridConnection";
+        /**
+         * @generated from protobuf field: PrepareGridConnectionInput prepareGridConnection = 91;
+         */
+        prepareGridConnection: PrepareGridConnectionInput;
+    } | {
+        oneofKind: "setGridAvatarMicrophoneEnabled";
+        /**
+         * @generated from protobuf field: SetGridAvatarMicrophoneEnabledInput setGridAvatarMicrophoneEnabled = 92;
+         */
+        setGridAvatarMicrophoneEnabled: SetGridAvatarMicrophoneEnabledInput;
+    } | {
+        oneofKind: "getGridHome";
+        /**
+         * @generated from protobuf field: GetGridHomeInput getGridHome = 93;
+         */
+        getGridHome: GetGridHomeInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -3235,6 +3320,66 @@ export interface RpcResult {
          */
         getThreadSubthreads: GetThreadSubthreadsResult;
     } | {
+        oneofKind: "getGrid";
+        /**
+         * @generated from protobuf field: GetGridResult getGrid = 84;
+         */
+        getGrid: GetGridResult;
+    } | {
+        oneofKind: "createGridRoom";
+        /**
+         * @generated from protobuf field: CreateGridRoomResult createGridRoom = 85;
+         */
+        createGridRoom: CreateGridRoomResult;
+    } | {
+        oneofKind: "joinGridRoom";
+        /**
+         * @generated from protobuf field: JoinGridRoomResult joinGridRoom = 86;
+         */
+        joinGridRoom: JoinGridRoomResult;
+    } | {
+        oneofKind: "leaveGridRoom";
+        /**
+         * @generated from protobuf field: LeaveGridRoomResult leaveGridRoom = 87;
+         */
+        leaveGridRoom: LeaveGridRoomResult;
+    } | {
+        oneofKind: "setGridRoomTitle";
+        /**
+         * @generated from protobuf field: SetGridRoomTitleResult setGridRoomTitle = 88;
+         */
+        setGridRoomTitle: SetGridRoomTitleResult;
+    } | {
+        oneofKind: "setGridRoomLocked";
+        /**
+         * @generated from protobuf field: SetGridRoomLockedResult setGridRoomLocked = 89;
+         */
+        setGridRoomLocked: SetGridRoomLockedResult;
+    } | {
+        oneofKind: "deleteGridRoom";
+        /**
+         * @generated from protobuf field: DeleteGridRoomResult deleteGridRoom = 90;
+         */
+        deleteGridRoom: DeleteGridRoomResult;
+    } | {
+        oneofKind: "prepareGridConnection";
+        /**
+         * @generated from protobuf field: PrepareGridConnectionResult prepareGridConnection = 91;
+         */
+        prepareGridConnection: PrepareGridConnectionResult;
+    } | {
+        oneofKind: "setGridAvatarMicrophoneEnabled";
+        /**
+         * @generated from protobuf field: SetGridAvatarMicrophoneEnabledResult setGridAvatarMicrophoneEnabled = 92;
+         */
+        setGridAvatarMicrophoneEnabled: SetGridAvatarMicrophoneEnabledResult;
+    } | {
+        oneofKind: "getGridHome";
+        /**
+         * @generated from protobuf field: GetGridHomeResult getGridHome = 93;
+         */
+        getGridHome: GetGridHomeResult;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -3324,13 +3469,6 @@ export interface GetUpdatesInput {
      * @generated from protobuf field: int32 limit = 5;
      */
     limit: number;
-    /**
-     * Client-supported lossless sync schema. Servers must reject pages that
-     * contain update variants newer than this revision.
-     *
-     * @generated from protobuf field: uint32 core_sync_schema_revision = 6;
-     */
-    coreSyncSchemaRevision: number;
 }
 /**
  * @generated from protobuf message UpdateSidecars
@@ -3432,12 +3570,6 @@ export interface GetUpdatesResult {
      * @generated from protobuf field: repeated SyncSkippedSequence skipped_sequences = 7;
      */
     skippedSequences: SyncSkippedSequence[];
-    /**
-     * Server lossless-sync schema used to encode this page.
-     *
-     * @generated from protobuf field: uint32 core_sync_schema_revision = 8;
-     */
-    coreSyncSchemaRevision: number;
 }
 /**
  * @generated from protobuf enum GetUpdatesResult.ResultType
@@ -3582,6 +3714,492 @@ export interface ToggleSpaceGridResult {
     updates: Update[];
 }
 /**
+ * A user's current presence in a Grid room. Microphone state is stored beside
+ * the leased presence so direct Grid events and GetGrid snapshots can repair
+ * each other without placing media state in a sequenced update bucket.
+ *
+ * @generated from protobuf message GridAvatar
+ */
+export interface GridAvatar {
+    /**
+     * @generated from protobuf field: User user = 1;
+     */
+    user?: User;
+    /**
+     * @generated from protobuf field: int64 joined_at = 2;
+     */
+    joinedAt: bigint;
+    /**
+     * @generated from protobuf field: bool owned_by_current_session = 3;
+     */
+    ownedByCurrentSession: boolean;
+    /**
+     * @generated from protobuf field: bool microphone_enabled = 4;
+     */
+    microphoneEnabled: boolean;
+    /**
+     * @generated from protobuf field: string membership_id = 5;
+     */
+    membershipId: string;
+    /**
+     * @generated from protobuf field: int32 microphone_revision = 6;
+     */
+    microphoneRevision: number;
+}
+/**
+ * Public summary of the current media connection for a room. Credentials are
+ * delivered separately and only to the authenticated session that owns an
+ * avatar in this generation.
+ *
+ * @generated from protobuf message GridConnection
+ */
+export interface GridConnection {
+    /**
+     * @generated from protobuf field: int64 room_id = 1;
+     */
+    roomId: bigint;
+    /**
+     * @generated from protobuf field: int32 generation = 2;
+     */
+    generation: number;
+    /**
+     * @generated from protobuf field: int64 started_at = 3;
+     */
+    startedAt: bigint;
+}
+/**
+ * @generated from protobuf message GridRoom
+ */
+export interface GridRoom {
+    /**
+     * @generated from protobuf field: int64 id = 1;
+     */
+    id: bigint;
+    /**
+     * @generated from protobuf field: int64 space_id = 2;
+     */
+    spaceId: bigint;
+    /**
+     * @generated from protobuf field: int64 created_by_user_id = 3;
+     */
+    createdByUserId: bigint;
+    /**
+     * @generated from protobuf field: optional string title = 4;
+     */
+    title?: string;
+    /**
+     * @generated from protobuf field: bool locked = 5;
+     */
+    locked: boolean;
+    /**
+     * @generated from protobuf field: int64 created_at = 6;
+     */
+    createdAt: bigint;
+    /**
+     * @generated from protobuf field: int64 updated_at = 7;
+     */
+    updatedAt: bigint;
+    /**
+     * @generated from protobuf field: repeated GridAvatar avatars = 8;
+     */
+    avatars: GridAvatar[];
+    /**
+     * @generated from protobuf field: optional GridConnection connection = 9;
+     */
+    connection?: GridConnection;
+}
+/**
+ * Replaceable current state for one Space's implicit Grid.
+ *
+ * @generated from protobuf message Grid
+ */
+export interface Grid {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+    /**
+     * @generated from protobuf field: bool enabled = 2;
+     */
+    enabled: boolean;
+    /**
+     * @generated from protobuf field: repeated GridRoom rooms = 3;
+     */
+    rooms: GridRoom[];
+    /**
+     * @generated from protobuf field: optional int64 current_room_id = 4;
+     */
+    currentRoomId?: bigint;
+    /**
+     * Server-owned monotonic revision for this Space's complete Grid snapshot.
+     * Clients must not replace a newer snapshot with a lower revision.
+     *
+     * @generated from protobuf field: int64 revision = 5;
+     */
+    revision: bigint;
+}
+/**
+ * Short-lived, session-targeted LiveKit credentials. Never persist or include
+ * this message in repairable Update buckets.
+ *
+ * @generated from protobuf message GridConnectionCredentials
+ */
+export interface GridConnectionCredentials {
+    /**
+     * @generated from protobuf field: GridConnection connection = 1;
+     */
+    connection?: GridConnection;
+    /**
+     * @generated from protobuf field: string server_url = 2;
+     */
+    serverUrl: string;
+    /**
+     * @generated from protobuf field: string participant_identity = 3;
+     */
+    participantIdentity: string;
+    /**
+     * @generated from protobuf field: string token = 4;
+     */
+    token: string;
+    /**
+     * @generated from protobuf field: int64 expires_at = 5;
+     */
+    expiresAt: bigint;
+}
+/**
+ * @generated from protobuf message GetGridInput
+ */
+export interface GetGridInput {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+}
+/**
+ * @generated from protobuf message GetGridResult
+ */
+export interface GetGridResult {
+    /**
+     * @generated from protobuf field: Grid grid = 1;
+     */
+    grid?: Grid;
+}
+/**
+ * Home-level discovery for every Grid-enabled Space the current user can see.
+ * This is a bounded summary: full rooms remain available only through GetGrid.
+ *
+ * @generated from protobuf message GridHomeSpace
+ */
+export interface GridHomeSpace {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+    /**
+     * @generated from protobuf field: int32 active_avatar_count = 2;
+     */
+    activeAvatarCount: number;
+    /**
+     * @generated from protobuf field: repeated GridAvatar recent_avatars = 3;
+     */
+    recentAvatars: GridAvatar[];
+    /**
+     * @generated from protobuf field: int64 latest_activity_at = 4;
+     */
+    latestActivityAt: bigint;
+}
+/**
+ * @generated from protobuf message GetGridHomeInput
+ */
+export interface GetGridHomeInput {
+}
+/**
+ * @generated from protobuf message GetGridHomeResult
+ */
+export interface GetGridHomeResult {
+    /**
+     * @generated from protobuf field: repeated GridHomeSpace spaces = 1;
+     */
+    spaces: GridHomeSpace[];
+}
+/**
+ * @generated from protobuf message CreateGridRoomInput
+ */
+export interface CreateGridRoomInput {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+}
+/**
+ * @generated from protobuf message CreateGridRoomResult
+ */
+export interface CreateGridRoomResult {
+    /**
+     * @generated from protobuf field: repeated Grid grids = 1;
+     */
+    grids: Grid[];
+    /**
+     * @generated from protobuf field: optional GridConnectionCredentials connection = 2;
+     */
+    connection?: GridConnectionCredentials;
+}
+/**
+ * @generated from protobuf message JoinGridRoomInput
+ */
+export interface JoinGridRoomInput {
+    /**
+     * @generated from protobuf field: int64 room_id = 1;
+     */
+    roomId: bigint;
+}
+/**
+ * @generated from protobuf message JoinGridRoomResult
+ */
+export interface JoinGridRoomResult {
+    /**
+     * @generated from protobuf field: repeated Grid grids = 1;
+     */
+    grids: Grid[];
+    /**
+     * @generated from protobuf field: optional GridConnectionCredentials connection = 2;
+     */
+    connection?: GridConnectionCredentials;
+}
+/**
+ * @generated from protobuf message LeaveGridRoomInput
+ */
+export interface LeaveGridRoomInput {
+    /**
+     * @generated from protobuf field: int64 expected_room_id = 1;
+     */
+    expectedRoomId: bigint;
+}
+/**
+ * @generated from protobuf message LeaveGridRoomResult
+ */
+export interface LeaveGridRoomResult {
+    /**
+     * @generated from protobuf field: repeated Grid grids = 1;
+     */
+    grids: Grid[];
+}
+/**
+ * @generated from protobuf message SetGridRoomTitleInput
+ */
+export interface SetGridRoomTitleInput {
+    /**
+     * @generated from protobuf field: int64 room_id = 1;
+     */
+    roomId: bigint;
+    /**
+     * Trimmed empty input clears the title and makes the room ephemeral.
+     *
+     * @generated from protobuf field: string title = 2;
+     */
+    title: string;
+}
+/**
+ * @generated from protobuf message SetGridRoomTitleResult
+ */
+export interface SetGridRoomTitleResult {
+    /**
+     * @generated from protobuf field: Grid grid = 1;
+     */
+    grid?: Grid;
+}
+/**
+ * @generated from protobuf message SetGridRoomLockedInput
+ */
+export interface SetGridRoomLockedInput {
+    /**
+     * @generated from protobuf field: int64 room_id = 1;
+     */
+    roomId: bigint;
+    /**
+     * @generated from protobuf field: bool locked = 2;
+     */
+    locked: boolean;
+}
+/**
+ * @generated from protobuf message SetGridRoomLockedResult
+ */
+export interface SetGridRoomLockedResult {
+    /**
+     * @generated from protobuf field: Grid grid = 1;
+     */
+    grid?: Grid;
+}
+/**
+ * @generated from protobuf message DeleteGridRoomInput
+ */
+export interface DeleteGridRoomInput {
+    /**
+     * @generated from protobuf field: int64 room_id = 1;
+     */
+    roomId: bigint;
+}
+/**
+ * @generated from protobuf message DeleteGridRoomResult
+ */
+export interface DeleteGridRoomResult {
+    /**
+     * @generated from protobuf field: Grid grid = 1;
+     */
+    grid?: Grid;
+}
+/**
+ * @generated from protobuf message PrepareGridConnectionInput
+ */
+export interface PrepareGridConnectionInput {
+    /**
+     * @generated from protobuf field: int64 room_id = 1;
+     */
+    roomId: bigint;
+    /**
+     * @generated from protobuf field: int32 generation = 2;
+     */
+    generation: number;
+}
+/**
+ * @generated from protobuf message PrepareGridConnectionResult
+ */
+export interface PrepareGridConnectionResult {
+    /**
+     * @generated from protobuf field: optional GridConnectionCredentials connection = 1;
+     */
+    connection?: GridConnectionCredentials;
+    /**
+     * @generated from protobuf field: GridConnectionUnavailableReason unavailable_reason = 2;
+     */
+    unavailableReason: GridConnectionUnavailableReason;
+}
+/**
+ * @generated from protobuf message SetGridAvatarMicrophoneEnabledInput
+ */
+export interface SetGridAvatarMicrophoneEnabledInput {
+    /**
+     * @generated from protobuf field: int64 expected_room_id = 1;
+     */
+    expectedRoomId: bigint;
+    /**
+     * @generated from protobuf field: bool enabled = 2;
+     */
+    enabled: boolean;
+}
+/**
+ * @generated from protobuf message SetGridAvatarMicrophoneEnabledResult
+ */
+export interface SetGridAvatarMicrophoneEnabledResult {
+    /**
+     * @generated from protobuf field: bool enabled = 1;
+     */
+    enabled: boolean;
+}
+/**
+ * Transient room-change nudges and session-targeted connection credentials.
+ * Missed messages repair through GetGrid and PrepareGridConnection.
+ *
+ * @generated from protobuf message GridEvent
+ */
+export interface GridEvent {
+    /**
+     * @generated from protobuf oneof: event
+     */
+    event: {
+        oneofKind: "changed";
+        /**
+         * @generated from protobuf field: GridChanged changed = 1;
+         */
+        changed: GridChanged;
+    } | {
+        oneofKind: "connectionReady";
+        /**
+         * @generated from protobuf field: GridConnectionReady connection_ready = 2;
+         */
+        connectionReady: GridConnectionReady;
+    } | {
+        oneofKind: "avatarStateChanged";
+        /**
+         * @generated from protobuf field: GridAvatarStateChanged avatar_state_changed = 3;
+         */
+        avatarStateChanged: GridAvatarStateChanged;
+    } | {
+        oneofKind: "accessRevoked";
+        /**
+         * @generated from protobuf field: GridAccessRevoked access_revoked = 4;
+         */
+        accessRevoked: GridAccessRevoked;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
+ * @generated from protobuf message GridChanged
+ */
+export interface GridChanged {
+    /**
+     * @generated from protobuf field: repeated int64 space_ids = 1;
+     */
+    spaceIds: bigint[];
+    /**
+     * @generated from protobuf field: optional int64 room_id = 2;
+     */
+    roomId?: bigint;
+}
+/**
+ * @generated from protobuf message GridConnectionReady
+ */
+export interface GridConnectionReady {
+    /**
+     * @generated from protobuf field: GridConnectionCredentials credentials = 1;
+     */
+    credentials?: GridConnectionCredentials;
+}
+/**
+ * @generated from protobuf message GridAvatarStateChanged
+ */
+export interface GridAvatarStateChanged {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+    /**
+     * @generated from protobuf field: int64 room_id = 2;
+     */
+    roomId: bigint;
+    /**
+     * @generated from protobuf field: int64 user_id = 3;
+     */
+    userId: bigint;
+    /**
+     * @generated from protobuf field: bool microphone_enabled = 4;
+     */
+    microphoneEnabled: boolean;
+    /**
+     * @generated from protobuf field: string membership_id = 5;
+     */
+    membershipId: string;
+    /**
+     * @generated from protobuf field: int32 microphone_revision = 6;
+     */
+    microphoneRevision: number;
+}
+/**
+ * Direct, ephemeral invalidation for a client that no longer has access to a
+ * Space. This is intentionally independent of bucket sync: the client must
+ * drop local Grid/media demand immediately, while normal membership sync
+ * remains the durable source for the Space itself.
+ *
+ * @generated from protobuf message GridAccessRevoked
+ */
+export interface GridAccessRevoked {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+}
+/**
  * @generated from protobuf message SpaceUrlPreviewExclusion
  */
 export interface SpaceUrlPreviewExclusion {
@@ -3694,12 +4312,6 @@ export interface GetUpdatesStateInput {
      * @generated from protobuf field: int64 date = 2;
      */
     date: bigint;
-    /**
-     * Client-supported lossless sync schema.
-     *
-     * @generated from protobuf field: uint32 core_sync_schema_revision = 3;
-     */
-    coreSyncSchemaRevision: number;
 }
 /**
  * @generated from protobuf message GetUpdatesStateResult
@@ -3717,13 +4329,6 @@ export interface GetUpdatesStateResult {
      * @generated from protobuf field: optional bool updates_found = 2;
      */
     updatesFound?: boolean;
-    /**
-     * Server lossless-sync schema. Stateful clients must reject incompatible
-     * servers before consuming bucket updates.
-     *
-     * @generated from protobuf field: uint32 core_sync_schema_revision = 3;
-     */
-    coreSyncSchemaRevision: number;
 }
 /**
  * @generated from protobuf message GetChatInput
@@ -6114,6 +6719,12 @@ export interface Update {
          */
         spaceSettings: UpdateSpaceSettings;
     } | {
+        oneofKind: "chatPermissions";
+        /**
+         * @generated from protobuf field: UpdateChatPermissions chat_permissions = 44;
+         */
+        chatPermissions: UpdateChatPermissions;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -6205,6 +6816,21 @@ export interface UpdateChatInfo {
      * @generated from protobuf field: optional bool untitled = 4;
      */
     untitled?: boolean;
+}
+/**
+ * Update when effective permissions for the current user change.
+ *
+ * @generated from protobuf message UpdateChatPermissions
+ */
+export interface UpdateChatPermissions {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: ChatPermissions permissions = 2;
+     */
+    permissions?: ChatPermissions;
 }
 /**
  * Update when pinned messages change for a chat
@@ -7627,7 +8253,64 @@ export enum Method {
     /**
      * @generated from protobuf enum value: GET_THREAD_SUBTHREADS = 75;
      */
-    GET_THREAD_SUBTHREADS = 75
+    GET_THREAD_SUBTHREADS = 75,
+    /**
+     * @generated from protobuf enum value: GET_GRID = 83;
+     */
+    GET_GRID = 83,
+    /**
+     * @generated from protobuf enum value: CREATE_GRID_ROOM = 84;
+     */
+    CREATE_GRID_ROOM = 84,
+    /**
+     * @generated from protobuf enum value: JOIN_GRID_ROOM = 85;
+     */
+    JOIN_GRID_ROOM = 85,
+    /**
+     * @generated from protobuf enum value: LEAVE_GRID_ROOM = 86;
+     */
+    LEAVE_GRID_ROOM = 86,
+    /**
+     * @generated from protobuf enum value: SET_GRID_ROOM_TITLE = 87;
+     */
+    SET_GRID_ROOM_TITLE = 87,
+    /**
+     * @generated from protobuf enum value: SET_GRID_ROOM_LOCKED = 88;
+     */
+    SET_GRID_ROOM_LOCKED = 88,
+    /**
+     * @generated from protobuf enum value: DELETE_GRID_ROOM = 89;
+     */
+    DELETE_GRID_ROOM = 89,
+    /**
+     * @generated from protobuf enum value: PREPARE_GRID_CONNECTION = 90;
+     */
+    PREPARE_GRID_CONNECTION = 90,
+    /**
+     * @generated from protobuf enum value: SET_GRID_AVATAR_MICROPHONE_ENABLED = 91;
+     */
+    SET_GRID_AVATAR_MICROPHONE_ENABLED = 91,
+    /**
+     * @generated from protobuf enum value: GET_GRID_HOME = 92;
+     */
+    GET_GRID_HOME = 92
+}
+/**
+ * @generated from protobuf enum GridConnectionUnavailableReason
+ */
+export enum GridConnectionUnavailableReason {
+    /**
+     * @generated from protobuf enum value: GRID_CONNECTION_UNAVAILABLE_REASON_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: GRID_CONNECTION_UNAVAILABLE_REASON_NOT_ACTIVE = 1;
+     */
+    NOT_ACTIVE = 1,
+    /**
+     * @generated from protobuf enum value: GRID_CONNECTION_UNAVAILABLE_REASON_PROVIDER_UNAVAILABLE = 2;
+     */
+    PROVIDER_UNAVAILABLE = 2
 }
 /**
  * @generated from protobuf enum UsernameAvailability
@@ -8043,7 +8726,8 @@ export const ServerProtocolMessage = new ServerProtocolMessage$Type();
 class ServerMessage$Type extends MessageType<ServerMessage> {
     constructor() {
         super("ServerMessage", [
-            { no: 4, name: "update", kind: "message", oneof: "payload", T: () => UpdatesPayload }
+            { no: 4, name: "update", kind: "message", oneof: "payload", T: () => UpdatesPayload },
+            { no: 5, name: "grid", kind: "message", oneof: "payload", T: () => GridEvent }
         ]);
     }
     create(value?: PartialMessage<ServerMessage>): ServerMessage {
@@ -8064,6 +8748,12 @@ class ServerMessage$Type extends MessageType<ServerMessage> {
                         update: UpdatesPayload.internalBinaryRead(reader, reader.uint32(), options, (message.payload as any).update)
                     };
                     break;
+                case /* GridEvent grid */ 5:
+                    message.payload = {
+                        oneofKind: "grid",
+                        grid: GridEvent.internalBinaryRead(reader, reader.uint32(), options, (message.payload as any).grid)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -8079,6 +8769,9 @@ class ServerMessage$Type extends MessageType<ServerMessage> {
         /* UpdatesPayload update = 4; */
         if (message.payload.oneofKind === "update")
             UpdatesPayload.internalBinaryWrite(message.payload.update, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* GridEvent grid = 5; */
+        if (message.payload.oneofKind === "grid")
+            GridEvent.internalBinaryWrite(message.payload.grid, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9179,6 +9872,53 @@ class Dialog$Type extends MessageType<Dialog> {
  */
 export const Dialog = new Dialog$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class ChatPermissions$Type extends MessageType<ChatPermissions> {
+    constructor() {
+        super("ChatPermissions", [
+            { no: 1, name: "can_update_info", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ChatPermissions>): ChatPermissions {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.canUpdateInfo = false;
+        if (value !== undefined)
+            reflectionMergePartial<ChatPermissions>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ChatPermissions): ChatPermissions {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool can_update_info */ 1:
+                    message.canUpdateInfo = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ChatPermissions, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool can_update_info = 1; */
+        if (message.canUpdateInfo !== false)
+            writer.tag(1, WireType.Varint).bool(message.canUpdateInfo);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ChatPermissions
+ */
+export const ChatPermissions = new ChatPermissions$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class Chat$Type extends MessageType<Chat> {
     constructor() {
         super("Chat", [
@@ -9195,7 +9935,8 @@ class Chat$Type extends MessageType<Chat> {
             { no: 11, name: "parent_chat_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 12, name: "parent_message_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 13, name: "untitled", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 14, name: "number", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 14, name: "number", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 15, name: "permissions", kind: "message", T: () => ChatPermissions }
         ]);
     }
     create(value?: PartialMessage<Chat>): Chat {
@@ -9253,6 +9994,9 @@ class Chat$Type extends MessageType<Chat> {
                 case /* optional int32 number */ 14:
                     message.number = reader.int32();
                     break;
+                case /* optional ChatPermissions permissions */ 15:
+                    message.permissions = ChatPermissions.internalBinaryRead(reader, reader.uint32(), options, message.permissions);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -9307,6 +10051,9 @@ class Chat$Type extends MessageType<Chat> {
         /* optional int32 number = 14; */
         if (message.number !== undefined)
             writer.tag(14, WireType.Varint).int32(message.number);
+        /* optional ChatPermissions permissions = 15; */
+        if (message.permissions)
+            ChatPermissions.internalBinaryWrite(message.permissions, writer.tag(15, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -12835,7 +13582,17 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 73, name: "getSpaceSettings", kind: "message", oneof: "input", T: () => GetSpaceSettingsInput },
             { no: 74, name: "toggleSpaceGrid", kind: "message", oneof: "input", T: () => ToggleSpaceGridInput },
             { no: 75, name: "getThreadReferences", kind: "message", oneof: "input", T: () => GetThreadReferencesInput },
-            { no: 76, name: "getThreadSubthreads", kind: "message", oneof: "input", T: () => GetThreadSubthreadsInput }
+            { no: 76, name: "getThreadSubthreads", kind: "message", oneof: "input", T: () => GetThreadSubthreadsInput },
+            { no: 84, name: "getGrid", kind: "message", oneof: "input", T: () => GetGridInput },
+            { no: 85, name: "createGridRoom", kind: "message", oneof: "input", T: () => CreateGridRoomInput },
+            { no: 86, name: "joinGridRoom", kind: "message", oneof: "input", T: () => JoinGridRoomInput },
+            { no: 87, name: "leaveGridRoom", kind: "message", oneof: "input", T: () => LeaveGridRoomInput },
+            { no: 88, name: "setGridRoomTitle", kind: "message", oneof: "input", T: () => SetGridRoomTitleInput },
+            { no: 89, name: "setGridRoomLocked", kind: "message", oneof: "input", T: () => SetGridRoomLockedInput },
+            { no: 90, name: "deleteGridRoom", kind: "message", oneof: "input", T: () => DeleteGridRoomInput },
+            { no: 91, name: "prepareGridConnection", kind: "message", oneof: "input", T: () => PrepareGridConnectionInput },
+            { no: 92, name: "setGridAvatarMicrophoneEnabled", kind: "message", oneof: "input", T: () => SetGridAvatarMicrophoneEnabledInput },
+            { no: 93, name: "getGridHome", kind: "message", oneof: "input", T: () => GetGridHomeInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -13304,6 +14061,66 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getThreadSubthreads: GetThreadSubthreadsInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getThreadSubthreads)
                     };
                     break;
+                case /* GetGridInput getGrid */ 84:
+                    message.input = {
+                        oneofKind: "getGrid",
+                        getGrid: GetGridInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getGrid)
+                    };
+                    break;
+                case /* CreateGridRoomInput createGridRoom */ 85:
+                    message.input = {
+                        oneofKind: "createGridRoom",
+                        createGridRoom: CreateGridRoomInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).createGridRoom)
+                    };
+                    break;
+                case /* JoinGridRoomInput joinGridRoom */ 86:
+                    message.input = {
+                        oneofKind: "joinGridRoom",
+                        joinGridRoom: JoinGridRoomInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).joinGridRoom)
+                    };
+                    break;
+                case /* LeaveGridRoomInput leaveGridRoom */ 87:
+                    message.input = {
+                        oneofKind: "leaveGridRoom",
+                        leaveGridRoom: LeaveGridRoomInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).leaveGridRoom)
+                    };
+                    break;
+                case /* SetGridRoomTitleInput setGridRoomTitle */ 88:
+                    message.input = {
+                        oneofKind: "setGridRoomTitle",
+                        setGridRoomTitle: SetGridRoomTitleInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).setGridRoomTitle)
+                    };
+                    break;
+                case /* SetGridRoomLockedInput setGridRoomLocked */ 89:
+                    message.input = {
+                        oneofKind: "setGridRoomLocked",
+                        setGridRoomLocked: SetGridRoomLockedInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).setGridRoomLocked)
+                    };
+                    break;
+                case /* DeleteGridRoomInput deleteGridRoom */ 90:
+                    message.input = {
+                        oneofKind: "deleteGridRoom",
+                        deleteGridRoom: DeleteGridRoomInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).deleteGridRoom)
+                    };
+                    break;
+                case /* PrepareGridConnectionInput prepareGridConnection */ 91:
+                    message.input = {
+                        oneofKind: "prepareGridConnection",
+                        prepareGridConnection: PrepareGridConnectionInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).prepareGridConnection)
+                    };
+                    break;
+                case /* SetGridAvatarMicrophoneEnabledInput setGridAvatarMicrophoneEnabled */ 92:
+                    message.input = {
+                        oneofKind: "setGridAvatarMicrophoneEnabled",
+                        setGridAvatarMicrophoneEnabled: SetGridAvatarMicrophoneEnabledInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).setGridAvatarMicrophoneEnabled)
+                    };
+                    break;
+                case /* GetGridHomeInput getGridHome */ 93:
+                    message.input = {
+                        oneofKind: "getGridHome",
+                        getGridHome: GetGridHomeInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getGridHome)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -13544,6 +14361,36 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetThreadSubthreadsInput getThreadSubthreads = 76; */
         if (message.input.oneofKind === "getThreadSubthreads")
             GetThreadSubthreadsInput.internalBinaryWrite(message.input.getThreadSubthreads, writer.tag(76, WireType.LengthDelimited).fork(), options).join();
+        /* GetGridInput getGrid = 84; */
+        if (message.input.oneofKind === "getGrid")
+            GetGridInput.internalBinaryWrite(message.input.getGrid, writer.tag(84, WireType.LengthDelimited).fork(), options).join();
+        /* CreateGridRoomInput createGridRoom = 85; */
+        if (message.input.oneofKind === "createGridRoom")
+            CreateGridRoomInput.internalBinaryWrite(message.input.createGridRoom, writer.tag(85, WireType.LengthDelimited).fork(), options).join();
+        /* JoinGridRoomInput joinGridRoom = 86; */
+        if (message.input.oneofKind === "joinGridRoom")
+            JoinGridRoomInput.internalBinaryWrite(message.input.joinGridRoom, writer.tag(86, WireType.LengthDelimited).fork(), options).join();
+        /* LeaveGridRoomInput leaveGridRoom = 87; */
+        if (message.input.oneofKind === "leaveGridRoom")
+            LeaveGridRoomInput.internalBinaryWrite(message.input.leaveGridRoom, writer.tag(87, WireType.LengthDelimited).fork(), options).join();
+        /* SetGridRoomTitleInput setGridRoomTitle = 88; */
+        if (message.input.oneofKind === "setGridRoomTitle")
+            SetGridRoomTitleInput.internalBinaryWrite(message.input.setGridRoomTitle, writer.tag(88, WireType.LengthDelimited).fork(), options).join();
+        /* SetGridRoomLockedInput setGridRoomLocked = 89; */
+        if (message.input.oneofKind === "setGridRoomLocked")
+            SetGridRoomLockedInput.internalBinaryWrite(message.input.setGridRoomLocked, writer.tag(89, WireType.LengthDelimited).fork(), options).join();
+        /* DeleteGridRoomInput deleteGridRoom = 90; */
+        if (message.input.oneofKind === "deleteGridRoom")
+            DeleteGridRoomInput.internalBinaryWrite(message.input.deleteGridRoom, writer.tag(90, WireType.LengthDelimited).fork(), options).join();
+        /* PrepareGridConnectionInput prepareGridConnection = 91; */
+        if (message.input.oneofKind === "prepareGridConnection")
+            PrepareGridConnectionInput.internalBinaryWrite(message.input.prepareGridConnection, writer.tag(91, WireType.LengthDelimited).fork(), options).join();
+        /* SetGridAvatarMicrophoneEnabledInput setGridAvatarMicrophoneEnabled = 92; */
+        if (message.input.oneofKind === "setGridAvatarMicrophoneEnabled")
+            SetGridAvatarMicrophoneEnabledInput.internalBinaryWrite(message.input.setGridAvatarMicrophoneEnabled, writer.tag(92, WireType.LengthDelimited).fork(), options).join();
+        /* GetGridHomeInput getGridHome = 93; */
+        if (message.input.oneofKind === "getGridHome")
+            GetGridHomeInput.internalBinaryWrite(message.input.getGridHome, writer.tag(93, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -13633,7 +14480,17 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 73, name: "getSpaceSettings", kind: "message", oneof: "result", T: () => GetSpaceSettingsResult },
             { no: 74, name: "toggleSpaceGrid", kind: "message", oneof: "result", T: () => ToggleSpaceGridResult },
             { no: 75, name: "getThreadReferences", kind: "message", oneof: "result", T: () => GetThreadReferencesResult },
-            { no: 76, name: "getThreadSubthreads", kind: "message", oneof: "result", T: () => GetThreadSubthreadsResult }
+            { no: 76, name: "getThreadSubthreads", kind: "message", oneof: "result", T: () => GetThreadSubthreadsResult },
+            { no: 84, name: "getGrid", kind: "message", oneof: "result", T: () => GetGridResult },
+            { no: 85, name: "createGridRoom", kind: "message", oneof: "result", T: () => CreateGridRoomResult },
+            { no: 86, name: "joinGridRoom", kind: "message", oneof: "result", T: () => JoinGridRoomResult },
+            { no: 87, name: "leaveGridRoom", kind: "message", oneof: "result", T: () => LeaveGridRoomResult },
+            { no: 88, name: "setGridRoomTitle", kind: "message", oneof: "result", T: () => SetGridRoomTitleResult },
+            { no: 89, name: "setGridRoomLocked", kind: "message", oneof: "result", T: () => SetGridRoomLockedResult },
+            { no: 90, name: "deleteGridRoom", kind: "message", oneof: "result", T: () => DeleteGridRoomResult },
+            { no: 91, name: "prepareGridConnection", kind: "message", oneof: "result", T: () => PrepareGridConnectionResult },
+            { no: 92, name: "setGridAvatarMicrophoneEnabled", kind: "message", oneof: "result", T: () => SetGridAvatarMicrophoneEnabledResult },
+            { no: 93, name: "getGridHome", kind: "message", oneof: "result", T: () => GetGridHomeResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -14102,6 +14959,66 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getThreadSubthreads: GetThreadSubthreadsResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getThreadSubthreads)
                     };
                     break;
+                case /* GetGridResult getGrid */ 84:
+                    message.result = {
+                        oneofKind: "getGrid",
+                        getGrid: GetGridResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getGrid)
+                    };
+                    break;
+                case /* CreateGridRoomResult createGridRoom */ 85:
+                    message.result = {
+                        oneofKind: "createGridRoom",
+                        createGridRoom: CreateGridRoomResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).createGridRoom)
+                    };
+                    break;
+                case /* JoinGridRoomResult joinGridRoom */ 86:
+                    message.result = {
+                        oneofKind: "joinGridRoom",
+                        joinGridRoom: JoinGridRoomResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).joinGridRoom)
+                    };
+                    break;
+                case /* LeaveGridRoomResult leaveGridRoom */ 87:
+                    message.result = {
+                        oneofKind: "leaveGridRoom",
+                        leaveGridRoom: LeaveGridRoomResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).leaveGridRoom)
+                    };
+                    break;
+                case /* SetGridRoomTitleResult setGridRoomTitle */ 88:
+                    message.result = {
+                        oneofKind: "setGridRoomTitle",
+                        setGridRoomTitle: SetGridRoomTitleResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).setGridRoomTitle)
+                    };
+                    break;
+                case /* SetGridRoomLockedResult setGridRoomLocked */ 89:
+                    message.result = {
+                        oneofKind: "setGridRoomLocked",
+                        setGridRoomLocked: SetGridRoomLockedResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).setGridRoomLocked)
+                    };
+                    break;
+                case /* DeleteGridRoomResult deleteGridRoom */ 90:
+                    message.result = {
+                        oneofKind: "deleteGridRoom",
+                        deleteGridRoom: DeleteGridRoomResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).deleteGridRoom)
+                    };
+                    break;
+                case /* PrepareGridConnectionResult prepareGridConnection */ 91:
+                    message.result = {
+                        oneofKind: "prepareGridConnection",
+                        prepareGridConnection: PrepareGridConnectionResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).prepareGridConnection)
+                    };
+                    break;
+                case /* SetGridAvatarMicrophoneEnabledResult setGridAvatarMicrophoneEnabled */ 92:
+                    message.result = {
+                        oneofKind: "setGridAvatarMicrophoneEnabled",
+                        setGridAvatarMicrophoneEnabled: SetGridAvatarMicrophoneEnabledResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).setGridAvatarMicrophoneEnabled)
+                    };
+                    break;
+                case /* GetGridHomeResult getGridHome */ 93:
+                    message.result = {
+                        oneofKind: "getGridHome",
+                        getGridHome: GetGridHomeResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getGridHome)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -14342,6 +15259,36 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetThreadSubthreadsResult getThreadSubthreads = 76; */
         if (message.result.oneofKind === "getThreadSubthreads")
             GetThreadSubthreadsResult.internalBinaryWrite(message.result.getThreadSubthreads, writer.tag(76, WireType.LengthDelimited).fork(), options).join();
+        /* GetGridResult getGrid = 84; */
+        if (message.result.oneofKind === "getGrid")
+            GetGridResult.internalBinaryWrite(message.result.getGrid, writer.tag(84, WireType.LengthDelimited).fork(), options).join();
+        /* CreateGridRoomResult createGridRoom = 85; */
+        if (message.result.oneofKind === "createGridRoom")
+            CreateGridRoomResult.internalBinaryWrite(message.result.createGridRoom, writer.tag(85, WireType.LengthDelimited).fork(), options).join();
+        /* JoinGridRoomResult joinGridRoom = 86; */
+        if (message.result.oneofKind === "joinGridRoom")
+            JoinGridRoomResult.internalBinaryWrite(message.result.joinGridRoom, writer.tag(86, WireType.LengthDelimited).fork(), options).join();
+        /* LeaveGridRoomResult leaveGridRoom = 87; */
+        if (message.result.oneofKind === "leaveGridRoom")
+            LeaveGridRoomResult.internalBinaryWrite(message.result.leaveGridRoom, writer.tag(87, WireType.LengthDelimited).fork(), options).join();
+        /* SetGridRoomTitleResult setGridRoomTitle = 88; */
+        if (message.result.oneofKind === "setGridRoomTitle")
+            SetGridRoomTitleResult.internalBinaryWrite(message.result.setGridRoomTitle, writer.tag(88, WireType.LengthDelimited).fork(), options).join();
+        /* SetGridRoomLockedResult setGridRoomLocked = 89; */
+        if (message.result.oneofKind === "setGridRoomLocked")
+            SetGridRoomLockedResult.internalBinaryWrite(message.result.setGridRoomLocked, writer.tag(89, WireType.LengthDelimited).fork(), options).join();
+        /* DeleteGridRoomResult deleteGridRoom = 90; */
+        if (message.result.oneofKind === "deleteGridRoom")
+            DeleteGridRoomResult.internalBinaryWrite(message.result.deleteGridRoom, writer.tag(90, WireType.LengthDelimited).fork(), options).join();
+        /* PrepareGridConnectionResult prepareGridConnection = 91; */
+        if (message.result.oneofKind === "prepareGridConnection")
+            PrepareGridConnectionResult.internalBinaryWrite(message.result.prepareGridConnection, writer.tag(91, WireType.LengthDelimited).fork(), options).join();
+        /* SetGridAvatarMicrophoneEnabledResult setGridAvatarMicrophoneEnabled = 92; */
+        if (message.result.oneofKind === "setGridAvatarMicrophoneEnabled")
+            SetGridAvatarMicrophoneEnabledResult.internalBinaryWrite(message.result.setGridAvatarMicrophoneEnabled, writer.tag(92, WireType.LengthDelimited).fork(), options).join();
+        /* GetGridHomeResult getGridHome = 93; */
+        if (message.result.oneofKind === "getGridHome")
+            GetGridHomeResult.internalBinaryWrite(message.result.getGridHome, writer.tag(93, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -14548,8 +15495,7 @@ class GetUpdatesInput$Type extends MessageType<GetUpdatesInput> {
             { no: 2, name: "start_seq", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 3, name: "total_limit", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 4, name: "seq_end", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 5, name: "limit", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
-            { no: 6, name: "core_sync_schema_revision", kind: "scalar", T: 13 /*ScalarType.UINT32*/ }
+            { no: 5, name: "limit", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<GetUpdatesInput>): GetUpdatesInput {
@@ -14558,7 +15504,6 @@ class GetUpdatesInput$Type extends MessageType<GetUpdatesInput> {
         message.totalLimit = 0;
         message.seqEnd = 0n;
         message.limit = 0;
-        message.coreSyncSchemaRevision = 0;
         if (value !== undefined)
             reflectionMergePartial<GetUpdatesInput>(this, message, value);
         return message;
@@ -14582,9 +15527,6 @@ class GetUpdatesInput$Type extends MessageType<GetUpdatesInput> {
                     break;
                 case /* int32 limit */ 5:
                     message.limit = reader.int32();
-                    break;
-                case /* uint32 core_sync_schema_revision */ 6:
-                    message.coreSyncSchemaRevision = reader.uint32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -14613,9 +15555,6 @@ class GetUpdatesInput$Type extends MessageType<GetUpdatesInput> {
         /* int32 limit = 5; */
         if (message.limit !== 0)
             writer.tag(5, WireType.Varint).int32(message.limit);
-        /* uint32 core_sync_schema_revision = 6; */
-        if (message.coreSyncSchemaRevision !== 0)
-            writer.tag(6, WireType.Varint).uint32(message.coreSyncSchemaRevision);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -14770,8 +15709,7 @@ class GetUpdatesResult$Type extends MessageType<GetUpdatesResult> {
             { no: 4, name: "final", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 5, name: "result_type", kind: "enum", T: () => ["GetUpdatesResult.ResultType", GetUpdatesResult_ResultType, "RESULT_TYPE_"] },
             { no: 6, name: "sidecars", kind: "message", T: () => UpdateSidecars },
-            { no: 7, name: "skipped_sequences", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => SyncSkippedSequence },
-            { no: 8, name: "core_sync_schema_revision", kind: "scalar", T: 13 /*ScalarType.UINT32*/ }
+            { no: 7, name: "skipped_sequences", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => SyncSkippedSequence }
         ]);
     }
     create(value?: PartialMessage<GetUpdatesResult>): GetUpdatesResult {
@@ -14781,7 +15719,6 @@ class GetUpdatesResult$Type extends MessageType<GetUpdatesResult> {
         message.date = 0n;
         message.resultType = 0;
         message.skippedSequences = [];
-        message.coreSyncSchemaRevision = 0;
         if (value !== undefined)
             reflectionMergePartial<GetUpdatesResult>(this, message, value);
         return message;
@@ -14811,9 +15748,6 @@ class GetUpdatesResult$Type extends MessageType<GetUpdatesResult> {
                     break;
                 case /* repeated SyncSkippedSequence skipped_sequences */ 7:
                     message.skippedSequences.push(SyncSkippedSequence.internalBinaryRead(reader, reader.uint32(), options));
-                    break;
-                case /* uint32 core_sync_schema_revision */ 8:
-                    message.coreSyncSchemaRevision = reader.uint32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -14848,9 +15782,6 @@ class GetUpdatesResult$Type extends MessageType<GetUpdatesResult> {
         /* repeated SyncSkippedSequence skipped_sequences = 7; */
         for (let i = 0; i < message.skippedSequences.length; i++)
             SyncSkippedSequence.internalBinaryWrite(message.skippedSequences[i], writer.tag(7, WireType.LengthDelimited).fork(), options).join();
-        /* uint32 core_sync_schema_revision = 8; */
-        if (message.coreSyncSchemaRevision !== 0)
-            writer.tag(8, WireType.Varint).uint32(message.coreSyncSchemaRevision);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -15330,6 +16261,1780 @@ class ToggleSpaceGridResult$Type extends MessageType<ToggleSpaceGridResult> {
  */
 export const ToggleSpaceGridResult = new ToggleSpaceGridResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class GridAvatar$Type extends MessageType<GridAvatar> {
+    constructor() {
+        super("GridAvatar", [
+            { no: 1, name: "user", kind: "message", T: () => User },
+            { no: 2, name: "joined_at", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "owned_by_current_session", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 4, name: "microphone_enabled", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 5, name: "membership_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "microphone_revision", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GridAvatar>): GridAvatar {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.joinedAt = 0n;
+        message.ownedByCurrentSession = false;
+        message.microphoneEnabled = false;
+        message.membershipId = "";
+        message.microphoneRevision = 0;
+        if (value !== undefined)
+            reflectionMergePartial<GridAvatar>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GridAvatar): GridAvatar {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* User user */ 1:
+                    message.user = User.internalBinaryRead(reader, reader.uint32(), options, message.user);
+                    break;
+                case /* int64 joined_at */ 2:
+                    message.joinedAt = reader.int64().toBigInt();
+                    break;
+                case /* bool owned_by_current_session */ 3:
+                    message.ownedByCurrentSession = reader.bool();
+                    break;
+                case /* bool microphone_enabled */ 4:
+                    message.microphoneEnabled = reader.bool();
+                    break;
+                case /* string membership_id */ 5:
+                    message.membershipId = reader.string();
+                    break;
+                case /* int32 microphone_revision */ 6:
+                    message.microphoneRevision = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GridAvatar, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* User user = 1; */
+        if (message.user)
+            User.internalBinaryWrite(message.user, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* int64 joined_at = 2; */
+        if (message.joinedAt !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.joinedAt);
+        /* bool owned_by_current_session = 3; */
+        if (message.ownedByCurrentSession !== false)
+            writer.tag(3, WireType.Varint).bool(message.ownedByCurrentSession);
+        /* bool microphone_enabled = 4; */
+        if (message.microphoneEnabled !== false)
+            writer.tag(4, WireType.Varint).bool(message.microphoneEnabled);
+        /* string membership_id = 5; */
+        if (message.membershipId !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.membershipId);
+        /* int32 microphone_revision = 6; */
+        if (message.microphoneRevision !== 0)
+            writer.tag(6, WireType.Varint).int32(message.microphoneRevision);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GridAvatar
+ */
+export const GridAvatar = new GridAvatar$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GridConnection$Type extends MessageType<GridConnection> {
+    constructor() {
+        super("GridConnection", [
+            { no: 1, name: "room_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "generation", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 3, name: "started_at", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GridConnection>): GridConnection {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.roomId = 0n;
+        message.generation = 0;
+        message.startedAt = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<GridConnection>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GridConnection): GridConnection {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 room_id */ 1:
+                    message.roomId = reader.int64().toBigInt();
+                    break;
+                case /* int32 generation */ 2:
+                    message.generation = reader.int32();
+                    break;
+                case /* int64 started_at */ 3:
+                    message.startedAt = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GridConnection, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 room_id = 1; */
+        if (message.roomId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.roomId);
+        /* int32 generation = 2; */
+        if (message.generation !== 0)
+            writer.tag(2, WireType.Varint).int32(message.generation);
+        /* int64 started_at = 3; */
+        if (message.startedAt !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.startedAt);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GridConnection
+ */
+export const GridConnection = new GridConnection$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GridRoom$Type extends MessageType<GridRoom> {
+    constructor() {
+        super("GridRoom", [
+            { no: 1, name: "id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "created_by_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "locked", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 6, name: "created_at", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 7, name: "updated_at", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 8, name: "avatars", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => GridAvatar },
+            { no: 9, name: "connection", kind: "message", T: () => GridConnection }
+        ]);
+    }
+    create(value?: PartialMessage<GridRoom>): GridRoom {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.id = 0n;
+        message.spaceId = 0n;
+        message.createdByUserId = 0n;
+        message.locked = false;
+        message.createdAt = 0n;
+        message.updatedAt = 0n;
+        message.avatars = [];
+        if (value !== undefined)
+            reflectionMergePartial<GridRoom>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GridRoom): GridRoom {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 id */ 1:
+                    message.id = reader.int64().toBigInt();
+                    break;
+                case /* int64 space_id */ 2:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* int64 created_by_user_id */ 3:
+                    message.createdByUserId = reader.int64().toBigInt();
+                    break;
+                case /* optional string title */ 4:
+                    message.title = reader.string();
+                    break;
+                case /* bool locked */ 5:
+                    message.locked = reader.bool();
+                    break;
+                case /* int64 created_at */ 6:
+                    message.createdAt = reader.int64().toBigInt();
+                    break;
+                case /* int64 updated_at */ 7:
+                    message.updatedAt = reader.int64().toBigInt();
+                    break;
+                case /* repeated GridAvatar avatars */ 8:
+                    message.avatars.push(GridAvatar.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional GridConnection connection */ 9:
+                    message.connection = GridConnection.internalBinaryRead(reader, reader.uint32(), options, message.connection);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GridRoom, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 id = 1; */
+        if (message.id !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.id);
+        /* int64 space_id = 2; */
+        if (message.spaceId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.spaceId);
+        /* int64 created_by_user_id = 3; */
+        if (message.createdByUserId !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.createdByUserId);
+        /* optional string title = 4; */
+        if (message.title !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.title);
+        /* bool locked = 5; */
+        if (message.locked !== false)
+            writer.tag(5, WireType.Varint).bool(message.locked);
+        /* int64 created_at = 6; */
+        if (message.createdAt !== 0n)
+            writer.tag(6, WireType.Varint).int64(message.createdAt);
+        /* int64 updated_at = 7; */
+        if (message.updatedAt !== 0n)
+            writer.tag(7, WireType.Varint).int64(message.updatedAt);
+        /* repeated GridAvatar avatars = 8; */
+        for (let i = 0; i < message.avatars.length; i++)
+            GridAvatar.internalBinaryWrite(message.avatars[i], writer.tag(8, WireType.LengthDelimited).fork(), options).join();
+        /* optional GridConnection connection = 9; */
+        if (message.connection)
+            GridConnection.internalBinaryWrite(message.connection, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GridRoom
+ */
+export const GridRoom = new GridRoom$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class Grid$Type extends MessageType<Grid> {
+    constructor() {
+        super("Grid", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "enabled", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "rooms", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => GridRoom },
+            { no: 4, name: "current_room_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "revision", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<Grid>): Grid {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        message.enabled = false;
+        message.rooms = [];
+        message.revision = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<Grid>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: Grid): Grid {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* bool enabled */ 2:
+                    message.enabled = reader.bool();
+                    break;
+                case /* repeated GridRoom rooms */ 3:
+                    message.rooms.push(GridRoom.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional int64 current_room_id */ 4:
+                    message.currentRoomId = reader.int64().toBigInt();
+                    break;
+                case /* int64 revision */ 5:
+                    message.revision = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: Grid, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        /* bool enabled = 2; */
+        if (message.enabled !== false)
+            writer.tag(2, WireType.Varint).bool(message.enabled);
+        /* repeated GridRoom rooms = 3; */
+        for (let i = 0; i < message.rooms.length; i++)
+            GridRoom.internalBinaryWrite(message.rooms[i], writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 current_room_id = 4; */
+        if (message.currentRoomId !== undefined)
+            writer.tag(4, WireType.Varint).int64(message.currentRoomId);
+        /* int64 revision = 5; */
+        if (message.revision !== 0n)
+            writer.tag(5, WireType.Varint).int64(message.revision);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message Grid
+ */
+export const Grid = new Grid$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GridConnectionCredentials$Type extends MessageType<GridConnectionCredentials> {
+    constructor() {
+        super("GridConnectionCredentials", [
+            { no: 1, name: "connection", kind: "message", T: () => GridConnection },
+            { no: 2, name: "server_url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "participant_identity", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "token", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "expires_at", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GridConnectionCredentials>): GridConnectionCredentials {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.serverUrl = "";
+        message.participantIdentity = "";
+        message.token = "";
+        message.expiresAt = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<GridConnectionCredentials>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GridConnectionCredentials): GridConnectionCredentials {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* GridConnection connection */ 1:
+                    message.connection = GridConnection.internalBinaryRead(reader, reader.uint32(), options, message.connection);
+                    break;
+                case /* string server_url */ 2:
+                    message.serverUrl = reader.string();
+                    break;
+                case /* string participant_identity */ 3:
+                    message.participantIdentity = reader.string();
+                    break;
+                case /* string token */ 4:
+                    message.token = reader.string();
+                    break;
+                case /* int64 expires_at */ 5:
+                    message.expiresAt = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GridConnectionCredentials, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* GridConnection connection = 1; */
+        if (message.connection)
+            GridConnection.internalBinaryWrite(message.connection, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* string server_url = 2; */
+        if (message.serverUrl !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.serverUrl);
+        /* string participant_identity = 3; */
+        if (message.participantIdentity !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.participantIdentity);
+        /* string token = 4; */
+        if (message.token !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.token);
+        /* int64 expires_at = 5; */
+        if (message.expiresAt !== 0n)
+            writer.tag(5, WireType.Varint).int64(message.expiresAt);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GridConnectionCredentials
+ */
+export const GridConnectionCredentials = new GridConnectionCredentials$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetGridInput$Type extends MessageType<GetGridInput> {
+    constructor() {
+        super("GetGridInput", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetGridInput>): GetGridInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<GetGridInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetGridInput): GetGridInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetGridInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetGridInput
+ */
+export const GetGridInput = new GetGridInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetGridResult$Type extends MessageType<GetGridResult> {
+    constructor() {
+        super("GetGridResult", [
+            { no: 1, name: "grid", kind: "message", T: () => Grid }
+        ]);
+    }
+    create(value?: PartialMessage<GetGridResult>): GetGridResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<GetGridResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetGridResult): GetGridResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Grid grid */ 1:
+                    message.grid = Grid.internalBinaryRead(reader, reader.uint32(), options, message.grid);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetGridResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Grid grid = 1; */
+        if (message.grid)
+            Grid.internalBinaryWrite(message.grid, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetGridResult
+ */
+export const GetGridResult = new GetGridResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GridHomeSpace$Type extends MessageType<GridHomeSpace> {
+    constructor() {
+        super("GridHomeSpace", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "active_avatar_count", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 3, name: "recent_avatars", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => GridAvatar },
+            { no: 4, name: "latest_activity_at", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GridHomeSpace>): GridHomeSpace {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        message.activeAvatarCount = 0;
+        message.recentAvatars = [];
+        message.latestActivityAt = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<GridHomeSpace>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GridHomeSpace): GridHomeSpace {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* int32 active_avatar_count */ 2:
+                    message.activeAvatarCount = reader.int32();
+                    break;
+                case /* repeated GridAvatar recent_avatars */ 3:
+                    message.recentAvatars.push(GridAvatar.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* int64 latest_activity_at */ 4:
+                    message.latestActivityAt = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GridHomeSpace, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        /* int32 active_avatar_count = 2; */
+        if (message.activeAvatarCount !== 0)
+            writer.tag(2, WireType.Varint).int32(message.activeAvatarCount);
+        /* repeated GridAvatar recent_avatars = 3; */
+        for (let i = 0; i < message.recentAvatars.length; i++)
+            GridAvatar.internalBinaryWrite(message.recentAvatars[i], writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* int64 latest_activity_at = 4; */
+        if (message.latestActivityAt !== 0n)
+            writer.tag(4, WireType.Varint).int64(message.latestActivityAt);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GridHomeSpace
+ */
+export const GridHomeSpace = new GridHomeSpace$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetGridHomeInput$Type extends MessageType<GetGridHomeInput> {
+    constructor() {
+        super("GetGridHomeInput", []);
+    }
+    create(value?: PartialMessage<GetGridHomeInput>): GetGridHomeInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<GetGridHomeInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetGridHomeInput): GetGridHomeInput {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: GetGridHomeInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetGridHomeInput
+ */
+export const GetGridHomeInput = new GetGridHomeInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetGridHomeResult$Type extends MessageType<GetGridHomeResult> {
+    constructor() {
+        super("GetGridHomeResult", [
+            { no: 1, name: "spaces", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => GridHomeSpace }
+        ]);
+    }
+    create(value?: PartialMessage<GetGridHomeResult>): GetGridHomeResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaces = [];
+        if (value !== undefined)
+            reflectionMergePartial<GetGridHomeResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetGridHomeResult): GetGridHomeResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated GridHomeSpace spaces */ 1:
+                    message.spaces.push(GridHomeSpace.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetGridHomeResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated GridHomeSpace spaces = 1; */
+        for (let i = 0; i < message.spaces.length; i++)
+            GridHomeSpace.internalBinaryWrite(message.spaces[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetGridHomeResult
+ */
+export const GetGridHomeResult = new GetGridHomeResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CreateGridRoomInput$Type extends MessageType<CreateGridRoomInput> {
+    constructor() {
+        super("CreateGridRoomInput", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<CreateGridRoomInput>): CreateGridRoomInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<CreateGridRoomInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CreateGridRoomInput): CreateGridRoomInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CreateGridRoomInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message CreateGridRoomInput
+ */
+export const CreateGridRoomInput = new CreateGridRoomInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CreateGridRoomResult$Type extends MessageType<CreateGridRoomResult> {
+    constructor() {
+        super("CreateGridRoomResult", [
+            { no: 1, name: "grids", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Grid },
+            { no: 2, name: "connection", kind: "message", T: () => GridConnectionCredentials }
+        ]);
+    }
+    create(value?: PartialMessage<CreateGridRoomResult>): CreateGridRoomResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.grids = [];
+        if (value !== undefined)
+            reflectionMergePartial<CreateGridRoomResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CreateGridRoomResult): CreateGridRoomResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Grid grids */ 1:
+                    message.grids.push(Grid.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional GridConnectionCredentials connection */ 2:
+                    message.connection = GridConnectionCredentials.internalBinaryRead(reader, reader.uint32(), options, message.connection);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CreateGridRoomResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Grid grids = 1; */
+        for (let i = 0; i < message.grids.length; i++)
+            Grid.internalBinaryWrite(message.grids[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional GridConnectionCredentials connection = 2; */
+        if (message.connection)
+            GridConnectionCredentials.internalBinaryWrite(message.connection, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message CreateGridRoomResult
+ */
+export const CreateGridRoomResult = new CreateGridRoomResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class JoinGridRoomInput$Type extends MessageType<JoinGridRoomInput> {
+    constructor() {
+        super("JoinGridRoomInput", [
+            { no: 1, name: "room_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<JoinGridRoomInput>): JoinGridRoomInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.roomId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<JoinGridRoomInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: JoinGridRoomInput): JoinGridRoomInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 room_id */ 1:
+                    message.roomId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: JoinGridRoomInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 room_id = 1; */
+        if (message.roomId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.roomId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message JoinGridRoomInput
+ */
+export const JoinGridRoomInput = new JoinGridRoomInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class JoinGridRoomResult$Type extends MessageType<JoinGridRoomResult> {
+    constructor() {
+        super("JoinGridRoomResult", [
+            { no: 1, name: "grids", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Grid },
+            { no: 2, name: "connection", kind: "message", T: () => GridConnectionCredentials }
+        ]);
+    }
+    create(value?: PartialMessage<JoinGridRoomResult>): JoinGridRoomResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.grids = [];
+        if (value !== undefined)
+            reflectionMergePartial<JoinGridRoomResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: JoinGridRoomResult): JoinGridRoomResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Grid grids */ 1:
+                    message.grids.push(Grid.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional GridConnectionCredentials connection */ 2:
+                    message.connection = GridConnectionCredentials.internalBinaryRead(reader, reader.uint32(), options, message.connection);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: JoinGridRoomResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Grid grids = 1; */
+        for (let i = 0; i < message.grids.length; i++)
+            Grid.internalBinaryWrite(message.grids[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional GridConnectionCredentials connection = 2; */
+        if (message.connection)
+            GridConnectionCredentials.internalBinaryWrite(message.connection, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message JoinGridRoomResult
+ */
+export const JoinGridRoomResult = new JoinGridRoomResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class LeaveGridRoomInput$Type extends MessageType<LeaveGridRoomInput> {
+    constructor() {
+        super("LeaveGridRoomInput", [
+            { no: 1, name: "expected_room_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<LeaveGridRoomInput>): LeaveGridRoomInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.expectedRoomId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<LeaveGridRoomInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: LeaveGridRoomInput): LeaveGridRoomInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 expected_room_id */ 1:
+                    message.expectedRoomId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: LeaveGridRoomInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 expected_room_id = 1; */
+        if (message.expectedRoomId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.expectedRoomId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message LeaveGridRoomInput
+ */
+export const LeaveGridRoomInput = new LeaveGridRoomInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class LeaveGridRoomResult$Type extends MessageType<LeaveGridRoomResult> {
+    constructor() {
+        super("LeaveGridRoomResult", [
+            { no: 1, name: "grids", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Grid }
+        ]);
+    }
+    create(value?: PartialMessage<LeaveGridRoomResult>): LeaveGridRoomResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.grids = [];
+        if (value !== undefined)
+            reflectionMergePartial<LeaveGridRoomResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: LeaveGridRoomResult): LeaveGridRoomResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Grid grids */ 1:
+                    message.grids.push(Grid.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: LeaveGridRoomResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Grid grids = 1; */
+        for (let i = 0; i < message.grids.length; i++)
+            Grid.internalBinaryWrite(message.grids[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message LeaveGridRoomResult
+ */
+export const LeaveGridRoomResult = new LeaveGridRoomResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SetGridRoomTitleInput$Type extends MessageType<SetGridRoomTitleInput> {
+    constructor() {
+        super("SetGridRoomTitleInput", [
+            { no: 1, name: "room_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "title", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SetGridRoomTitleInput>): SetGridRoomTitleInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.roomId = 0n;
+        message.title = "";
+        if (value !== undefined)
+            reflectionMergePartial<SetGridRoomTitleInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SetGridRoomTitleInput): SetGridRoomTitleInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 room_id */ 1:
+                    message.roomId = reader.int64().toBigInt();
+                    break;
+                case /* string title */ 2:
+                    message.title = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SetGridRoomTitleInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 room_id = 1; */
+        if (message.roomId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.roomId);
+        /* string title = 2; */
+        if (message.title !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.title);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SetGridRoomTitleInput
+ */
+export const SetGridRoomTitleInput = new SetGridRoomTitleInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SetGridRoomTitleResult$Type extends MessageType<SetGridRoomTitleResult> {
+    constructor() {
+        super("SetGridRoomTitleResult", [
+            { no: 1, name: "grid", kind: "message", T: () => Grid }
+        ]);
+    }
+    create(value?: PartialMessage<SetGridRoomTitleResult>): SetGridRoomTitleResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<SetGridRoomTitleResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SetGridRoomTitleResult): SetGridRoomTitleResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Grid grid */ 1:
+                    message.grid = Grid.internalBinaryRead(reader, reader.uint32(), options, message.grid);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SetGridRoomTitleResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Grid grid = 1; */
+        if (message.grid)
+            Grid.internalBinaryWrite(message.grid, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SetGridRoomTitleResult
+ */
+export const SetGridRoomTitleResult = new SetGridRoomTitleResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SetGridRoomLockedInput$Type extends MessageType<SetGridRoomLockedInput> {
+    constructor() {
+        super("SetGridRoomLockedInput", [
+            { no: 1, name: "room_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "locked", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SetGridRoomLockedInput>): SetGridRoomLockedInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.roomId = 0n;
+        message.locked = false;
+        if (value !== undefined)
+            reflectionMergePartial<SetGridRoomLockedInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SetGridRoomLockedInput): SetGridRoomLockedInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 room_id */ 1:
+                    message.roomId = reader.int64().toBigInt();
+                    break;
+                case /* bool locked */ 2:
+                    message.locked = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SetGridRoomLockedInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 room_id = 1; */
+        if (message.roomId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.roomId);
+        /* bool locked = 2; */
+        if (message.locked !== false)
+            writer.tag(2, WireType.Varint).bool(message.locked);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SetGridRoomLockedInput
+ */
+export const SetGridRoomLockedInput = new SetGridRoomLockedInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SetGridRoomLockedResult$Type extends MessageType<SetGridRoomLockedResult> {
+    constructor() {
+        super("SetGridRoomLockedResult", [
+            { no: 1, name: "grid", kind: "message", T: () => Grid }
+        ]);
+    }
+    create(value?: PartialMessage<SetGridRoomLockedResult>): SetGridRoomLockedResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<SetGridRoomLockedResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SetGridRoomLockedResult): SetGridRoomLockedResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Grid grid */ 1:
+                    message.grid = Grid.internalBinaryRead(reader, reader.uint32(), options, message.grid);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SetGridRoomLockedResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Grid grid = 1; */
+        if (message.grid)
+            Grid.internalBinaryWrite(message.grid, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SetGridRoomLockedResult
+ */
+export const SetGridRoomLockedResult = new SetGridRoomLockedResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class DeleteGridRoomInput$Type extends MessageType<DeleteGridRoomInput> {
+    constructor() {
+        super("DeleteGridRoomInput", [
+            { no: 1, name: "room_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<DeleteGridRoomInput>): DeleteGridRoomInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.roomId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<DeleteGridRoomInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: DeleteGridRoomInput): DeleteGridRoomInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 room_id */ 1:
+                    message.roomId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: DeleteGridRoomInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 room_id = 1; */
+        if (message.roomId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.roomId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message DeleteGridRoomInput
+ */
+export const DeleteGridRoomInput = new DeleteGridRoomInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class DeleteGridRoomResult$Type extends MessageType<DeleteGridRoomResult> {
+    constructor() {
+        super("DeleteGridRoomResult", [
+            { no: 1, name: "grid", kind: "message", T: () => Grid }
+        ]);
+    }
+    create(value?: PartialMessage<DeleteGridRoomResult>): DeleteGridRoomResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<DeleteGridRoomResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: DeleteGridRoomResult): DeleteGridRoomResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Grid grid */ 1:
+                    message.grid = Grid.internalBinaryRead(reader, reader.uint32(), options, message.grid);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: DeleteGridRoomResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Grid grid = 1; */
+        if (message.grid)
+            Grid.internalBinaryWrite(message.grid, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message DeleteGridRoomResult
+ */
+export const DeleteGridRoomResult = new DeleteGridRoomResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class PrepareGridConnectionInput$Type extends MessageType<PrepareGridConnectionInput> {
+    constructor() {
+        super("PrepareGridConnectionInput", [
+            { no: 1, name: "room_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "generation", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<PrepareGridConnectionInput>): PrepareGridConnectionInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.roomId = 0n;
+        message.generation = 0;
+        if (value !== undefined)
+            reflectionMergePartial<PrepareGridConnectionInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: PrepareGridConnectionInput): PrepareGridConnectionInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 room_id */ 1:
+                    message.roomId = reader.int64().toBigInt();
+                    break;
+                case /* int32 generation */ 2:
+                    message.generation = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: PrepareGridConnectionInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 room_id = 1; */
+        if (message.roomId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.roomId);
+        /* int32 generation = 2; */
+        if (message.generation !== 0)
+            writer.tag(2, WireType.Varint).int32(message.generation);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message PrepareGridConnectionInput
+ */
+export const PrepareGridConnectionInput = new PrepareGridConnectionInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class PrepareGridConnectionResult$Type extends MessageType<PrepareGridConnectionResult> {
+    constructor() {
+        super("PrepareGridConnectionResult", [
+            { no: 1, name: "connection", kind: "message", T: () => GridConnectionCredentials },
+            { no: 2, name: "unavailable_reason", kind: "enum", T: () => ["GridConnectionUnavailableReason", GridConnectionUnavailableReason, "GRID_CONNECTION_UNAVAILABLE_REASON_"] }
+        ]);
+    }
+    create(value?: PartialMessage<PrepareGridConnectionResult>): PrepareGridConnectionResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.unavailableReason = 0;
+        if (value !== undefined)
+            reflectionMergePartial<PrepareGridConnectionResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: PrepareGridConnectionResult): PrepareGridConnectionResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional GridConnectionCredentials connection */ 1:
+                    message.connection = GridConnectionCredentials.internalBinaryRead(reader, reader.uint32(), options, message.connection);
+                    break;
+                case /* GridConnectionUnavailableReason unavailable_reason */ 2:
+                    message.unavailableReason = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: PrepareGridConnectionResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional GridConnectionCredentials connection = 1; */
+        if (message.connection)
+            GridConnectionCredentials.internalBinaryWrite(message.connection, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* GridConnectionUnavailableReason unavailable_reason = 2; */
+        if (message.unavailableReason !== 0)
+            writer.tag(2, WireType.Varint).int32(message.unavailableReason);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message PrepareGridConnectionResult
+ */
+export const PrepareGridConnectionResult = new PrepareGridConnectionResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SetGridAvatarMicrophoneEnabledInput$Type extends MessageType<SetGridAvatarMicrophoneEnabledInput> {
+    constructor() {
+        super("SetGridAvatarMicrophoneEnabledInput", [
+            { no: 1, name: "expected_room_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "enabled", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SetGridAvatarMicrophoneEnabledInput>): SetGridAvatarMicrophoneEnabledInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.expectedRoomId = 0n;
+        message.enabled = false;
+        if (value !== undefined)
+            reflectionMergePartial<SetGridAvatarMicrophoneEnabledInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SetGridAvatarMicrophoneEnabledInput): SetGridAvatarMicrophoneEnabledInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 expected_room_id */ 1:
+                    message.expectedRoomId = reader.int64().toBigInt();
+                    break;
+                case /* bool enabled */ 2:
+                    message.enabled = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SetGridAvatarMicrophoneEnabledInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 expected_room_id = 1; */
+        if (message.expectedRoomId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.expectedRoomId);
+        /* bool enabled = 2; */
+        if (message.enabled !== false)
+            writer.tag(2, WireType.Varint).bool(message.enabled);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SetGridAvatarMicrophoneEnabledInput
+ */
+export const SetGridAvatarMicrophoneEnabledInput = new SetGridAvatarMicrophoneEnabledInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SetGridAvatarMicrophoneEnabledResult$Type extends MessageType<SetGridAvatarMicrophoneEnabledResult> {
+    constructor() {
+        super("SetGridAvatarMicrophoneEnabledResult", [
+            { no: 1, name: "enabled", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SetGridAvatarMicrophoneEnabledResult>): SetGridAvatarMicrophoneEnabledResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.enabled = false;
+        if (value !== undefined)
+            reflectionMergePartial<SetGridAvatarMicrophoneEnabledResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SetGridAvatarMicrophoneEnabledResult): SetGridAvatarMicrophoneEnabledResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool enabled */ 1:
+                    message.enabled = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SetGridAvatarMicrophoneEnabledResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool enabled = 1; */
+        if (message.enabled !== false)
+            writer.tag(1, WireType.Varint).bool(message.enabled);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SetGridAvatarMicrophoneEnabledResult
+ */
+export const SetGridAvatarMicrophoneEnabledResult = new SetGridAvatarMicrophoneEnabledResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GridEvent$Type extends MessageType<GridEvent> {
+    constructor() {
+        super("GridEvent", [
+            { no: 1, name: "changed", kind: "message", oneof: "event", T: () => GridChanged },
+            { no: 2, name: "connection_ready", kind: "message", oneof: "event", T: () => GridConnectionReady },
+            { no: 3, name: "avatar_state_changed", kind: "message", oneof: "event", T: () => GridAvatarStateChanged },
+            { no: 4, name: "access_revoked", kind: "message", oneof: "event", T: () => GridAccessRevoked }
+        ]);
+    }
+    create(value?: PartialMessage<GridEvent>): GridEvent {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.event = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<GridEvent>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GridEvent): GridEvent {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* GridChanged changed */ 1:
+                    message.event = {
+                        oneofKind: "changed",
+                        changed: GridChanged.internalBinaryRead(reader, reader.uint32(), options, (message.event as any).changed)
+                    };
+                    break;
+                case /* GridConnectionReady connection_ready */ 2:
+                    message.event = {
+                        oneofKind: "connectionReady",
+                        connectionReady: GridConnectionReady.internalBinaryRead(reader, reader.uint32(), options, (message.event as any).connectionReady)
+                    };
+                    break;
+                case /* GridAvatarStateChanged avatar_state_changed */ 3:
+                    message.event = {
+                        oneofKind: "avatarStateChanged",
+                        avatarStateChanged: GridAvatarStateChanged.internalBinaryRead(reader, reader.uint32(), options, (message.event as any).avatarStateChanged)
+                    };
+                    break;
+                case /* GridAccessRevoked access_revoked */ 4:
+                    message.event = {
+                        oneofKind: "accessRevoked",
+                        accessRevoked: GridAccessRevoked.internalBinaryRead(reader, reader.uint32(), options, (message.event as any).accessRevoked)
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GridEvent, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* GridChanged changed = 1; */
+        if (message.event.oneofKind === "changed")
+            GridChanged.internalBinaryWrite(message.event.changed, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* GridConnectionReady connection_ready = 2; */
+        if (message.event.oneofKind === "connectionReady")
+            GridConnectionReady.internalBinaryWrite(message.event.connectionReady, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* GridAvatarStateChanged avatar_state_changed = 3; */
+        if (message.event.oneofKind === "avatarStateChanged")
+            GridAvatarStateChanged.internalBinaryWrite(message.event.avatarStateChanged, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* GridAccessRevoked access_revoked = 4; */
+        if (message.event.oneofKind === "accessRevoked")
+            GridAccessRevoked.internalBinaryWrite(message.event.accessRevoked, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GridEvent
+ */
+export const GridEvent = new GridEvent$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GridChanged$Type extends MessageType<GridChanged> {
+    constructor() {
+        super("GridChanged", [
+            { no: 1, name: "space_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "room_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GridChanged>): GridChanged {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceIds = [];
+        if (value !== undefined)
+            reflectionMergePartial<GridChanged>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GridChanged): GridChanged {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated int64 space_ids */ 1:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.spaceIds.push(reader.int64().toBigInt());
+                    else
+                        message.spaceIds.push(reader.int64().toBigInt());
+                    break;
+                case /* optional int64 room_id */ 2:
+                    message.roomId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GridChanged, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated int64 space_ids = 1; */
+        if (message.spaceIds.length) {
+            writer.tag(1, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.spaceIds.length; i++)
+                writer.int64(message.spaceIds[i]);
+            writer.join();
+        }
+        /* optional int64 room_id = 2; */
+        if (message.roomId !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.roomId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GridChanged
+ */
+export const GridChanged = new GridChanged$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GridConnectionReady$Type extends MessageType<GridConnectionReady> {
+    constructor() {
+        super("GridConnectionReady", [
+            { no: 1, name: "credentials", kind: "message", T: () => GridConnectionCredentials }
+        ]);
+    }
+    create(value?: PartialMessage<GridConnectionReady>): GridConnectionReady {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<GridConnectionReady>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GridConnectionReady): GridConnectionReady {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* GridConnectionCredentials credentials */ 1:
+                    message.credentials = GridConnectionCredentials.internalBinaryRead(reader, reader.uint32(), options, message.credentials);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GridConnectionReady, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* GridConnectionCredentials credentials = 1; */
+        if (message.credentials)
+            GridConnectionCredentials.internalBinaryWrite(message.credentials, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GridConnectionReady
+ */
+export const GridConnectionReady = new GridConnectionReady$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GridAvatarStateChanged$Type extends MessageType<GridAvatarStateChanged> {
+    constructor() {
+        super("GridAvatarStateChanged", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "room_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "microphone_enabled", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 5, name: "membership_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "microphone_revision", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GridAvatarStateChanged>): GridAvatarStateChanged {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        message.roomId = 0n;
+        message.userId = 0n;
+        message.microphoneEnabled = false;
+        message.membershipId = "";
+        message.microphoneRevision = 0;
+        if (value !== undefined)
+            reflectionMergePartial<GridAvatarStateChanged>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GridAvatarStateChanged): GridAvatarStateChanged {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* int64 room_id */ 2:
+                    message.roomId = reader.int64().toBigInt();
+                    break;
+                case /* int64 user_id */ 3:
+                    message.userId = reader.int64().toBigInt();
+                    break;
+                case /* bool microphone_enabled */ 4:
+                    message.microphoneEnabled = reader.bool();
+                    break;
+                case /* string membership_id */ 5:
+                    message.membershipId = reader.string();
+                    break;
+                case /* int32 microphone_revision */ 6:
+                    message.microphoneRevision = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GridAvatarStateChanged, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        /* int64 room_id = 2; */
+        if (message.roomId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.roomId);
+        /* int64 user_id = 3; */
+        if (message.userId !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.userId);
+        /* bool microphone_enabled = 4; */
+        if (message.microphoneEnabled !== false)
+            writer.tag(4, WireType.Varint).bool(message.microphoneEnabled);
+        /* string membership_id = 5; */
+        if (message.membershipId !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.membershipId);
+        /* int32 microphone_revision = 6; */
+        if (message.microphoneRevision !== 0)
+            writer.tag(6, WireType.Varint).int32(message.microphoneRevision);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GridAvatarStateChanged
+ */
+export const GridAvatarStateChanged = new GridAvatarStateChanged$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GridAccessRevoked$Type extends MessageType<GridAccessRevoked> {
+    constructor() {
+        super("GridAccessRevoked", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GridAccessRevoked>): GridAccessRevoked {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<GridAccessRevoked>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GridAccessRevoked): GridAccessRevoked {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GridAccessRevoked, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GridAccessRevoked
+ */
+export const GridAccessRevoked = new GridAccessRevoked$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class SpaceUrlPreviewExclusion$Type extends MessageType<SpaceUrlPreviewExclusion> {
     constructor() {
         super("SpaceUrlPreviewExclusion", [
@@ -15723,14 +18428,12 @@ export const RemoveSpaceUrlPreviewExclusionResult = new RemoveSpaceUrlPreviewExc
 class GetUpdatesStateInput$Type extends MessageType<GetUpdatesStateInput> {
     constructor() {
         super("GetUpdatesStateInput", [
-            { no: 2, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 3, name: "core_sync_schema_revision", kind: "scalar", T: 13 /*ScalarType.UINT32*/ }
+            { no: 2, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<GetUpdatesStateInput>): GetUpdatesStateInput {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.date = 0n;
-        message.coreSyncSchemaRevision = 0;
         if (value !== undefined)
             reflectionMergePartial<GetUpdatesStateInput>(this, message, value);
         return message;
@@ -15742,9 +18445,6 @@ class GetUpdatesStateInput$Type extends MessageType<GetUpdatesStateInput> {
             switch (fieldNo) {
                 case /* int64 date */ 2:
                     message.date = reader.int64().toBigInt();
-                    break;
-                case /* uint32 core_sync_schema_revision */ 3:
-                    message.coreSyncSchemaRevision = reader.uint32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -15761,9 +18461,6 @@ class GetUpdatesStateInput$Type extends MessageType<GetUpdatesStateInput> {
         /* int64 date = 2; */
         if (message.date !== 0n)
             writer.tag(2, WireType.Varint).int64(message.date);
-        /* uint32 core_sync_schema_revision = 3; */
-        if (message.coreSyncSchemaRevision !== 0)
-            writer.tag(3, WireType.Varint).uint32(message.coreSyncSchemaRevision);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -15779,14 +18476,12 @@ class GetUpdatesStateResult$Type extends MessageType<GetUpdatesStateResult> {
     constructor() {
         super("GetUpdatesStateResult", [
             { no: 1, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "updates_found", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 3, name: "core_sync_schema_revision", kind: "scalar", T: 13 /*ScalarType.UINT32*/ }
+            { no: 2, name: "updates_found", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<GetUpdatesStateResult>): GetUpdatesStateResult {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.date = 0n;
-        message.coreSyncSchemaRevision = 0;
         if (value !== undefined)
             reflectionMergePartial<GetUpdatesStateResult>(this, message, value);
         return message;
@@ -15801,9 +18496,6 @@ class GetUpdatesStateResult$Type extends MessageType<GetUpdatesStateResult> {
                     break;
                 case /* optional bool updates_found */ 2:
                     message.updatesFound = reader.bool();
-                    break;
-                case /* uint32 core_sync_schema_revision */ 3:
-                    message.coreSyncSchemaRevision = reader.uint32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -15823,9 +18515,6 @@ class GetUpdatesStateResult$Type extends MessageType<GetUpdatesStateResult> {
         /* optional bool updates_found = 2; */
         if (message.updatesFound !== undefined)
             writer.tag(2, WireType.Varint).bool(message.updatesFound);
-        /* uint32 core_sync_schema_revision = 3; */
-        if (message.coreSyncSchemaRevision !== 0)
-            writer.tag(3, WireType.Varint).uint32(message.coreSyncSchemaRevision);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -22973,7 +25662,8 @@ class Update$Type extends MessageType<Update> {
             { no: 40, name: "updated_user", kind: "message", oneof: "update", T: () => UpdateUpdatedUser },
             { no: 41, name: "participant_group_add", kind: "message", oneof: "update", T: () => UpdateChatParticipantGroupAdd },
             { no: 42, name: "participant_group_delete", kind: "message", oneof: "update", T: () => UpdateChatParticipantGroupDelete },
-            { no: 43, name: "space_settings", kind: "message", oneof: "update", T: () => UpdateSpaceSettings }
+            { no: 43, name: "space_settings", kind: "message", oneof: "update", T: () => UpdateSpaceSettings },
+            { no: 44, name: "chat_permissions", kind: "message", oneof: "update", T: () => UpdateChatPermissions }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -23234,6 +25924,12 @@ class Update$Type extends MessageType<Update> {
                         spaceSettings: UpdateSpaceSettings.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).spaceSettings)
                     };
                     break;
+                case /* UpdateChatPermissions chat_permissions */ 44:
+                    message.update = {
+                        oneofKind: "chatPermissions",
+                        chatPermissions: UpdateChatPermissions.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).chatPermissions)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -23372,6 +26068,9 @@ class Update$Type extends MessageType<Update> {
         /* UpdateSpaceSettings space_settings = 43; */
         if (message.update.oneofKind === "spaceSettings")
             UpdateSpaceSettings.internalBinaryWrite(message.update.spaceSettings, writer.tag(43, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateChatPermissions chat_permissions = 44; */
+        if (message.update.oneofKind === "chatPermissions")
+            UpdateChatPermissions.internalBinaryWrite(message.update.chatPermissions, writer.tag(44, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -23669,6 +26368,60 @@ class UpdateChatInfo$Type extends MessageType<UpdateChatInfo> {
  * @generated MessageType for protobuf message UpdateChatInfo
  */
 export const UpdateChatInfo = new UpdateChatInfo$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateChatPermissions$Type extends MessageType<UpdateChatPermissions> {
+    constructor() {
+        super("UpdateChatPermissions", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "permissions", kind: "message", T: () => ChatPermissions }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateChatPermissions>): UpdateChatPermissions {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateChatPermissions>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateChatPermissions): UpdateChatPermissions {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* ChatPermissions permissions */ 2:
+                    message.permissions = ChatPermissions.internalBinaryRead(reader, reader.uint32(), options, message.permissions);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateChatPermissions, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* ChatPermissions permissions = 2; */
+        if (message.permissions)
+            ChatPermissions.internalBinaryWrite(message.permissions, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateChatPermissions
+ */
+export const UpdateChatPermissions = new UpdateChatPermissions$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UpdatePinnedMessages$Type extends MessageType<UpdatePinnedMessages> {
     constructor() {

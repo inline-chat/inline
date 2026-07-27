@@ -51,7 +51,10 @@ message ServerProtocolMessage {
 message ServerMessage {
   reserved 1, 2, 3;
 
-  oneof payload { UpdatesPayload update = 4; }
+  oneof payload {
+    UpdatesPayload update = 4;
+    GridEvent grid = 5;
+  }
 }
 
 message UpdatesPayload { repeated Update updates = 1; }
@@ -215,6 +218,12 @@ enum DialogFollowMode {
   UNFOLLOWED = 2;
 }
 
+// Effective actions the current user may take on a chat.
+message ChatPermissions {
+  // Change the chat title, emoji, and other fields owned by messages.updateChatInfo.
+  bool can_update_info = 1;
+}
+
 // A thread
 message Chat {
   int64 id = 1;
@@ -257,6 +266,9 @@ message Chat {
 
   // Per-space thread number. Unset for home threads and pre-backfill space threads.
   optional int32 number = 14;
+
+  // Effective permissions for the user this chat was encoded for.
+  optional ChatPermissions permissions = 15;
 }
 
 message MessageReplies {
@@ -996,6 +1008,16 @@ enum Method {
   TOGGLE_SPACE_GRID = 73;
   GET_THREAD_REFERENCES = 74;
   GET_THREAD_SUBTHREADS = 75;
+  GET_GRID = 83;
+  CREATE_GRID_ROOM = 84;
+  JOIN_GRID_ROOM = 85;
+  LEAVE_GRID_ROOM = 86;
+  SET_GRID_ROOM_TITLE = 87;
+  SET_GRID_ROOM_LOCKED = 88;
+  DELETE_GRID_ROOM = 89;
+  PREPARE_GRID_CONNECTION = 90;
+  SET_GRID_AVATAR_MICROPHONE_ENABLED = 91;
+  GET_GRID_HOME = 92;
 }
 
 message RpcCall {
@@ -1076,6 +1098,16 @@ message RpcCall {
     ToggleSpaceGridInput toggleSpaceGrid = 74;
     GetThreadReferencesInput getThreadReferences = 75;
     GetThreadSubthreadsInput getThreadSubthreads = 76;
+    GetGridInput getGrid = 84;
+    CreateGridRoomInput createGridRoom = 85;
+    JoinGridRoomInput joinGridRoom = 86;
+    LeaveGridRoomInput leaveGridRoom = 87;
+    SetGridRoomTitleInput setGridRoomTitle = 88;
+    SetGridRoomLockedInput setGridRoomLocked = 89;
+    DeleteGridRoomInput deleteGridRoom = 90;
+    PrepareGridConnectionInput prepareGridConnection = 91;
+    SetGridAvatarMicrophoneEnabledInput setGridAvatarMicrophoneEnabled = 92;
+    GetGridHomeInput getGridHome = 93;
   }
 }
 
@@ -1158,6 +1190,16 @@ message RpcResult {
     ToggleSpaceGridResult toggleSpaceGrid = 74;
     GetThreadReferencesResult getThreadReferences = 75;
     GetThreadSubthreadsResult getThreadSubthreads = 76;
+    GetGridResult getGrid = 84;
+    CreateGridRoomResult createGridRoom = 85;
+    JoinGridRoomResult joinGridRoom = 86;
+    LeaveGridRoomResult leaveGridRoom = 87;
+    SetGridRoomTitleResult setGridRoomTitle = 88;
+    SetGridRoomLockedResult setGridRoomLocked = 89;
+    DeleteGridRoomResult deleteGridRoom = 90;
+    PrepareGridConnectionResult prepareGridConnection = 91;
+    SetGridAvatarMicrophoneEnabledResult setGridAvatarMicrophoneEnabled = 92;
+    GetGridHomeResult getGridHome = 93;
   }
 }
 
@@ -1176,6 +1218,9 @@ message UpdateBucketSpace { int64 space_id = 1; }
 message UpdateBucketChat { InputPeer peer_id = 1; }
 
 message GetUpdatesInput {
+  reserved 6;
+  reserved "core_sync_schema_revision";
+
   UpdateBucket bucket = 1;
 
   int64 start_seq = 2;
@@ -1192,10 +1237,6 @@ message GetUpdatesInput {
 
   // max number of updates to return in this response
   int32 limit = 5;
-
-  // Client-supported lossless sync schema. Servers must reject pages that
-  // contain update variants newer than this revision.
-  uint32 core_sync_schema_revision = 6;
 }
 
 message UpdateSidecars {
@@ -1219,6 +1260,8 @@ message SyncSkippedSequence {
 }
 
 message GetUpdatesResult {
+  reserved 8;
+  reserved "core_sync_schema_revision";
 
   repeated Update updates = 1;
 
@@ -1247,9 +1290,6 @@ message GetUpdatesResult {
   // Explicit accounting for stored lossless records intentionally omitted
   // from `updates`. Every sequence through `seq` must be delivered or listed.
   repeated SyncSkippedSequence skipped_sequences = 7;
-
-  // Server lossless-sync schema used to encode this page.
-  uint32 core_sync_schema_revision = 8;
 }
 
 // Remove member from space
@@ -1301,6 +1341,172 @@ message ToggleSpaceGridResult {
   repeated Update updates = 2;
 }
 
+// A user's current presence in a Grid room. Microphone state is stored beside
+// the leased presence so direct Grid events and GetGrid snapshots can repair
+// each other without placing media state in a sequenced update bucket.
+message GridAvatar {
+  User user = 1;
+  int64 joined_at = 2;
+  bool owned_by_current_session = 3;
+  bool microphone_enabled = 4;
+  string membership_id = 5;
+  int32 microphone_revision = 6;
+}
+
+// Public summary of the current media connection for a room. Credentials are
+// delivered separately and only to the authenticated session that owns an
+// avatar in this generation.
+message GridConnection {
+  int64 room_id = 1;
+  int32 generation = 2;
+  int64 started_at = 3;
+}
+
+message GridRoom {
+  int64 id = 1;
+  int64 space_id = 2;
+  int64 created_by_user_id = 3;
+  optional string title = 4;
+  bool locked = 5;
+  int64 created_at = 6;
+  int64 updated_at = 7;
+  repeated GridAvatar avatars = 8;
+  optional GridConnection connection = 9;
+}
+
+// Replaceable current state for one Space's implicit Grid.
+message Grid {
+  int64 space_id = 1;
+  bool enabled = 2;
+  repeated GridRoom rooms = 3;
+  optional int64 current_room_id = 4;
+  // Server-owned monotonic revision for this Space's complete Grid snapshot.
+  // Clients must not replace a newer snapshot with a lower revision.
+  int64 revision = 5;
+}
+
+// Short-lived, session-targeted LiveKit credentials. Never persist or include
+// this message in repairable Update buckets.
+message GridConnectionCredentials {
+  GridConnection connection = 1;
+  string server_url = 2;
+  string participant_identity = 3;
+  string token = 4;
+  int64 expires_at = 5;
+}
+
+message GetGridInput { int64 space_id = 1; }
+
+message GetGridResult { Grid grid = 1; }
+
+// Home-level discovery for every Grid-enabled Space the current user can see.
+// This is a bounded summary: full rooms remain available only through GetGrid.
+message GridHomeSpace {
+  int64 space_id = 1;
+  int32 active_avatar_count = 2;
+  repeated GridAvatar recent_avatars = 3;
+  int64 latest_activity_at = 4;
+}
+
+message GetGridHomeInput {}
+
+message GetGridHomeResult { repeated GridHomeSpace spaces = 1; }
+
+message CreateGridRoomInput { int64 space_id = 1; }
+
+message CreateGridRoomResult {
+  repeated Grid grids = 1;
+  optional GridConnectionCredentials connection = 2;
+}
+
+message JoinGridRoomInput { int64 room_id = 1; }
+
+message JoinGridRoomResult {
+  repeated Grid grids = 1;
+  optional GridConnectionCredentials connection = 2;
+}
+
+message LeaveGridRoomInput { int64 expected_room_id = 1; }
+
+message LeaveGridRoomResult { repeated Grid grids = 1; }
+
+message SetGridRoomTitleInput {
+  int64 room_id = 1;
+  // Trimmed empty input clears the title and makes the room ephemeral.
+  string title = 2;
+}
+
+message SetGridRoomTitleResult { Grid grid = 1; }
+
+message SetGridRoomLockedInput {
+  int64 room_id = 1;
+  bool locked = 2;
+}
+
+message SetGridRoomLockedResult { Grid grid = 1; }
+
+message DeleteGridRoomInput { int64 room_id = 1; }
+
+message DeleteGridRoomResult { Grid grid = 1; }
+
+message PrepareGridConnectionInput {
+  int64 room_id = 1;
+  int32 generation = 2;
+}
+
+enum GridConnectionUnavailableReason {
+  GRID_CONNECTION_UNAVAILABLE_REASON_UNSPECIFIED = 0;
+  GRID_CONNECTION_UNAVAILABLE_REASON_NOT_ACTIVE = 1;
+  GRID_CONNECTION_UNAVAILABLE_REASON_PROVIDER_UNAVAILABLE = 2;
+}
+
+message PrepareGridConnectionResult {
+  optional GridConnectionCredentials connection = 1;
+  GridConnectionUnavailableReason unavailable_reason = 2;
+}
+
+message SetGridAvatarMicrophoneEnabledInput {
+  int64 expected_room_id = 1;
+  bool enabled = 2;
+}
+
+message SetGridAvatarMicrophoneEnabledResult { bool enabled = 1; }
+
+// Transient room-change nudges and session-targeted connection credentials.
+// Missed messages repair through GetGrid and PrepareGridConnection.
+message GridEvent {
+  oneof event {
+    GridChanged changed = 1;
+    GridConnectionReady connection_ready = 2;
+    GridAvatarStateChanged avatar_state_changed = 3;
+    GridAccessRevoked access_revoked = 4;
+  }
+}
+
+message GridChanged {
+  repeated int64 space_ids = 1;
+  optional int64 room_id = 2;
+}
+
+message GridConnectionReady {
+  GridConnectionCredentials credentials = 1;
+}
+
+message GridAvatarStateChanged {
+  int64 space_id = 1;
+  int64 room_id = 2;
+  int64 user_id = 3;
+  bool microphone_enabled = 4;
+  string membership_id = 5;
+  int32 microphone_revision = 6;
+}
+
+// Direct, ephemeral invalidation for a client that no longer has access to a
+// Space. This is intentionally independent of bucket sync: the client must
+// drop local Grid/media demand immediately, while normal membership sync
+// remains the durable source for the Space itself.
+message GridAccessRevoked { int64 space_id = 1; }
+
 message SpaceUrlPreviewExclusion {
   int64 id = 1;
   int64 space_id = 2;
@@ -1340,24 +1546,22 @@ message RemoveSpaceUrlPreviewExclusionResult {}
 
 message GetUpdatesStateInput {
   reserved 1;
+  reserved 3;
+  reserved "core_sync_schema_revision";
 
   // Local date of state
   int64 date = 2;
-
-  // Client-supported lossless sync schema.
-  uint32 core_sync_schema_revision = 3;
 }
 
 message GetUpdatesStateResult {
+  reserved 3;
+  reserved "core_sync_schema_revision";
+
   // Current date of the state
   int64 date = 1;
 
   // Set by newer servers to tell clients whether discovery found any bucket work.
   optional bool updates_found = 2;
-
-  // Server lossless-sync schema. Stateful clients must reject incompatible
-  // servers before consuming bucket updates.
-  uint32 core_sync_schema_revision = 3;
 }
 
 message GetChatInput {
@@ -2268,6 +2472,7 @@ message Update {
     UpdateChatParticipantGroupAdd participant_group_add = 41;
     UpdateChatParticipantGroupDelete participant_group_delete = 42;
     UpdateSpaceSettings space_settings = 43;
+    UpdateChatPermissions chat_permissions = 44;
   }
 }
 
@@ -2305,6 +2510,12 @@ message UpdateChatInfo {
   optional string title = 2;
   optional string emoji = 3;
   optional bool untitled = 4;
+}
+
+// Update when effective permissions for the current user change.
+message UpdateChatPermissions {
+  int64 chat_id = 1;
+  ChatPermissions permissions = 2;
 }
 
 // Update when pinned messages change for a chat
