@@ -83,6 +83,9 @@ jobs:
             exit 1
           fi
 
+          # Keep this mapping in sync with scripts/release-npm.ts. It is
+          # duplicated intentionally so the workflow revalidates the release
+          # request independently of the local wrapper.
           case "$RELEASE_KEY" in
             protocol)
               package_dir="packages/protocol"

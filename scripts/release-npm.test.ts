@@ -94,3 +94,20 @@ test("parses the workflow run URL emitted by gh", () => {
   })
   expect(parseWorkflowRunUrl("workflow queued")).toBeUndefined()
 })
+
+test("keeps the local allowlist aligned with the workflow security boundary", async () => {
+  const workflow = await Bun.file(
+    new URL("../.github/workflows/npm-publish.yml", import.meta.url),
+  ).text()
+
+  for (const config of Object.values(PACKAGE_CONFIGS)) {
+    expect(workflow).toContain(`          - ${config.key}`)
+
+    const branch = workflow
+      .split(`            ${config.key})`, 2)[1]
+      ?.split("              ;;", 1)[0]
+    expect(branch).toBeDefined()
+    expect(branch).toContain(`              package_dir="${config.directory}"`)
+    expect(branch).toContain(`              package_name="${config.name}"`)
+  }
+})

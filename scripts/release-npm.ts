@@ -53,6 +53,9 @@ interface WorkflowRun {
   createdAt?: string
 }
 
+// Keep this allowlist in sync with npm-publish.yml. The workflow intentionally
+// revalidates it independently so a modified local wrapper cannot weaken the
+// trusted-publishing boundary.
 export const PACKAGE_CONFIGS: Readonly<Record<string, PackageConfig>> = {
   protocol: {
     key: "protocol",
