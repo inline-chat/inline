@@ -786,13 +786,6 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       }
     }
 
-    const positiveId = (value: unknown): bigint | null => {
-      if (typeof value === "bigint") return value > 0n ? value : null
-      if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return BigInt(value)
-      if (typeof value !== "string" || !/^[1-9]\d*$/.test(value.trim())) return null
-      return BigInt(value.trim())
-    }
-
     return {
       JsonFileStateStore: class {
         constructor(_path: string) {}
@@ -814,14 +807,6 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       DialogFollowMode: {
         DIALOG_FOLLOW_MODE_UNSPECIFIED: 0,
         FOLLOWING: 1,
-      },
-      isInlineFollowModeMentionGateEligible: (chat: {
-        parentMessageId?: unknown
-        lastMsgId?: unknown
-      }) => {
-        if (positiveId(chat.parentMessageId) != null) return true
-        const lastMsgId = positiveId(chat.lastMsgId)
-        return lastMsgId != null && lastMsgId < 50n
       },
       BotPresenceState_Kind: {
         IDLE: BOT_PRESENCE_IDLE,
@@ -2940,7 +2925,7 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("does not treat follow mode as an implicit mention in large non-reply threads", async () => {
+  it("keeps treating follow mode as an implicit mention in large non-reply threads", async () => {
     const harness = await setupMonitorHarness({
       events: [
         {
@@ -2974,7 +2959,7 @@ describe("inline/monitor", () => {
         ],
       },
       dispatchReplyPayload: {
-        text: "should not send",
+        text: "still following",
       },
     })
 
@@ -2988,9 +2973,21 @@ describe("inline/monitor", () => {
     })
 
     await waitFor(() => {
-      expect(runtime.log).toHaveBeenCalledWith(expect.stringContaining("no mention"))
-      expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
-      expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          WasMentioned: true,
+          ExplicitlyMentionedBot: false,
+          MentionSource: "implicit_thread",
+          ImplicitMentionKinds: ["follow_mode"],
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 7201n,
+          text: "still following",
+        }),
+      )
     })
 
     await handle.stop()

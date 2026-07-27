@@ -2173,13 +2173,16 @@ async def assert_group_room_controls():
         return {
             "chatId": chat_id,
             "title": f"Large followed {chat_id}",
+            "lastMsgId": "75",
             "dialogFollowMode": "1",
+            # Legacy sidecars may still publish this false classifier. Durable
+            # FOLLOWING state must remain the sole follow-mode wake signal.
             "followModeMentionEligible": False,
         }
 
     followed_large = InlineAdapter(PlatformConfig(extra={**base_extra, "require_mention": True}))
     followed_large._get_chat_info = followed_large_info
-    assert await run(followed_large, base_msg) == []
+    assert len(await run(followed_large, base_msg)) == 1
 
     strict_followed = InlineAdapter(PlatformConfig(extra={**base_extra, "require_mention": True, "strict_mention": True}))
     strict_followed._get_chat_info = followed_info

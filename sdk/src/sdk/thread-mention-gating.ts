@@ -1,5 +1,6 @@
 import type { InlineIdLike } from "../ids.js"
 
+/** @deprecated Freshness belongs to the server's auto-follow policy. */
 export const INLINE_FOLLOW_MODE_MENTION_FRESH_LAST_MESSAGE_ID_LIMIT = 50
 
 export type InlineMentionGateIdLike = InlineIdLike | string
@@ -14,6 +15,7 @@ export function isInlineReplyThreadForMentionGate(chat: InlineFollowModeMentionG
   return parsePositiveInteger(chat.parentMessageId) != null
 }
 
+/** @deprecated Freshness must not gate messages after a dialog is followed. */
 export function isInlineFreshThreadForMentionGate(
   lastMsgId: InlineMentionGateIdLike | null | undefined,
   limit = INLINE_FOLLOW_MODE_MENTION_FRESH_LAST_MESSAGE_ID_LIMIT,
@@ -22,6 +24,11 @@ export function isInlineFreshThreadForMentionGate(
   return normalized != null && normalized < BigInt(limit)
 }
 
+/**
+ * @deprecated Follow state is itself the durable mention-gate signal. Thread
+ * freshness belongs to the server's auto-follow policy and must not be
+ * reapplied while routing inbound messages. Retained for API compatibility.
+ */
 export function isInlineFollowModeMentionGateEligible(chat: InlineFollowModeMentionGateChat): boolean {
   if (isInlineReplyThreadForMentionGate(chat)) {
     return true

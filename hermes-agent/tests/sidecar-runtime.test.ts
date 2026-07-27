@@ -265,7 +265,6 @@ describe("sidecar runtime", () => {
         lastMsgId: "9002",
         dialog: expect.objectContaining({ followMode: 1 }),
         dialogFollowMode: "1",
-        followModeMentionEligible: true,
         untitled: true,
         pinnedMessageIds: ["8801"],
       })

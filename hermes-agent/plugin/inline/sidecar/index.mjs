@@ -23810,36 +23810,6 @@ var resolveUploadFileUrl = (baseUrl) => {
   return url;
 };
 var hasMethodMapping = (method) => Object.prototype.hasOwnProperty.call(rpcInputKindByMethod, method) && Object.prototype.hasOwnProperty.call(rpcResultKindByMethod, method);
-// ../sdk/dist/sdk/thread-mention-gating.js
-var INLINE_FOLLOW_MODE_MENTION_FRESH_LAST_MESSAGE_ID_LIMIT = 50;
-function isInlineReplyThreadForMentionGate(chat) {
-  return parsePositiveInteger(chat.parentMessageId) != null;
-}
-function isInlineFreshThreadForMentionGate(lastMsgId, limit = INLINE_FOLLOW_MODE_MENTION_FRESH_LAST_MESSAGE_ID_LIMIT) {
-  const normalized = parsePositiveInteger(lastMsgId);
-  return normalized != null && normalized < BigInt(limit);
-}
-function isInlineFollowModeMentionGateEligible(chat) {
-  if (isInlineReplyThreadForMentionGate(chat)) {
-    return true;
-  }
-  return isInlineFreshThreadForMentionGate(chat.lastMsgId);
-}
-function parsePositiveInteger(value) {
-  if (value == null)
-    return null;
-  if (typeof value === "bigint")
-    return value > 0n ? value : null;
-  if (typeof value === "number") {
-    if (!Number.isSafeInteger(value) || value <= 0)
-      return null;
-    return BigInt(value);
-  }
-  const text = value.trim();
-  if (!/^[1-9]\d*$/.test(text))
-    return null;
-  return BigInt(text);
-}
 // ../sdk/dist/state/json-file-state-store.js
 import { readFile, rename, writeFile } from "node:fs/promises";
 
@@ -24653,7 +24623,6 @@ async function endpointChat(res, body) {
   }
   const snapshot = await getRawChatSnapshot(target.chatId);
   const chat = snapshot.chat;
-  const followModeMentionEligible = isInlineFollowModeMentionGateEligible(chat);
   const anchorMessages = snapshot.anchorMessage != null ? await enrichMessages([snapshot.anchorMessage], target) : [];
   const anchorMessage = anchorMessages[0];
   writeJson(res, 200, {
@@ -24675,7 +24644,6 @@ async function endpointChat(res, body) {
       ...chat.number != null ? { number: chat.number } : {},
       ...snapshot.dialog != null ? { dialog: safeJson(snapshot.dialog) } : {},
       ...snapshot.dialogFollowMode != null ? { dialogFollowMode: String(snapshot.dialogFollowMode) } : {},
-      followModeMentionEligible,
       pinnedMessageIds: safeJson(snapshot.pinnedMessageIds),
       ...anchorMessage != null ? { anchorMessage: safeJson(anchorMessage) } : {},
       chat: safeJson(chat)

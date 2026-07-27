@@ -76,7 +76,6 @@ import {
   InlineSdkClient,
   JsonFileStateStore,
   Method,
-  isInlineFollowModeMentionGateEligible,
   type Message,
   type MessageActions,
   type MessageActionResponseUi,
@@ -3805,8 +3804,9 @@ export async function monitorInlineProvider(params: {
     const followModeImplicitMention =
       isGroup &&
       !replyThreadRequireExplicitMention &&
-      isInlineDialogFollowing(chatInfo.dialogFollowMode) &&
-      isInlineFollowModeMentionGateEligible(chatInfo)
+      // Freshness controls server-side auto-follow only. Once a dialog is
+      // FOLLOWING, its unmentioned activity remains relevant until unfollowed.
+      isInlineDialogFollowing(chatInfo.dialogFollowMode)
     const historyReplyThreadImplicitMention =
       isGroup &&
       replyThreadContext != null &&

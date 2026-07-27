@@ -17,7 +17,6 @@ import {
   MessageActionRow,
   MessageActions,
   MessageActionToast,
-  isInlineFollowModeMentionGateEligible,
   type InlineSdkClientOptions,
   type InlineSdkGetMessagesParams,
   type InlineSdkSendMessageParams,
@@ -464,7 +463,6 @@ async function endpointChat(res: ServerResponse, body: unknown) {
   }
   const snapshot = await getRawChatSnapshot(target.chatId)
   const chat = snapshot.chat
-  const followModeMentionEligible = isInlineFollowModeMentionGateEligible(chat)
   const anchorMessages = snapshot.anchorMessage != null
     ? await enrichMessages([snapshot.anchorMessage], target)
     : []
@@ -488,7 +486,6 @@ async function endpointChat(res: ServerResponse, body: unknown) {
       ...(chat.number != null ? { number: chat.number } : {}),
       ...(snapshot.dialog != null ? { dialog: safeJson(snapshot.dialog) } : {}),
       ...(snapshot.dialogFollowMode != null ? { dialogFollowMode: String(snapshot.dialogFollowMode) } : {}),
-      followModeMentionEligible,
       pinnedMessageIds: safeJson(snapshot.pinnedMessageIds),
       ...(anchorMessage != null ? { anchorMessage: safeJson(anchorMessage) } : {}),
       chat: safeJson(chat),

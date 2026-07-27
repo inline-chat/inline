@@ -1,7 +1,9 @@
-# Inline Thread Mention Gating
+# Inline Follow and Mention Resolution
 
-This document defines how Inline integrations decide whether an unmentioned group
-message may wake an agent.
+This document is the canonical map for how Inline integrations decide whether an
+unmentioned group message may wake an agent. It deliberately separates creating
+follow state from consuming follow state; mixing those decisions caused followed
+threads to stop waking bots after a message-count threshold.
 
 ## Canonical Signal
 
@@ -14,62 +16,87 @@ Do not infer participation from parent chat IDs alone. A chat with only
 `parentChatId` is older structural context, not a reply-thread signal for mention
 gating. Reply-thread eligibility is based on `parentMessageId`.
 
-## Auto-Follow Policy
+## Decision A: Materializing Follow State
 
-The server owns the policy for when a chat becomes followed:
+The server alone owns the policy for when activity automatically changes a
+dialog to `FOLLOWING`:
 
 - reply threads are auto-followed when the bot sends into them
-- normal Inline threads are auto-followed only while they are fresh
+- the reply-thread anchor sender may also be auto-followed when eligible
+- parentless normal Inline threads are auto-followed only while they are fresh
 - the freshness threshold currently lives in
   `server/src/modules/threadAutoFollow.ts` as
-  `FRESH_THREAD_LAST_MESSAGE_ID_LIMIT`
+  `FRESH_NORMAL_THREAD_MESSAGE_ID_LIMIT`, currently 15
+- a dialog explicitly set to `UNFOLLOWED` is excluded from automatic following,
+  so later activity does not silently turn following back on
 
-Changing which threads can materialize follow mode should start by changing that
-server policy.
+Freshness uses the newly assigned per-chat message ID as a cheap proxy for thread
+size. The boundary is currently `newMessageId <= 15`. It is evaluated only while
+deciding whether to materialize follow state. Changing which threads can become
+automatically followed must start with this server policy.
 
-## Follow-Mode Mention Eligibility
+An explicit `/follow` updates the current bot user's dialog directly and does not
+depend on thread freshness.
 
-Follow mode alone is not enough to bypass mention gating. The adapter must also
-classify the current chat as follow-mode mention eligible:
+## Decision B: Consuming Follow State
 
-- reply thread: `parentMessageId` is a positive id
-- fresh thread: `lastMsgId` is a positive id below
-  `INLINE_FOLLOW_MODE_MENTION_FRESH_LAST_MESSAGE_ID_LIMIT`
+Once `GET_CHAT` reports the current bot user's dialog as
+`DialogFollowMode.FOLLOWING`, that state is durable relevance. An unmentioned
+message may continue waking the bot regardless of the thread's current message
+count or whether it is a reply thread or parentless thread.
 
-The current threshold is 50, so `lastMsgId < 50` is fresh.
+The adapter must not reapply a freshness or size check here. Following continues
+until the dialog becomes `UNFOLLOWED`. A strict explicit-mention configuration
+may intentionally override this default and require a mention on every turn.
 
-This classifier is exposed by the realtime SDK as
-`isInlineFollowModeMentionGateEligible()`. Hermes computes it in the sidecar and
-returns `followModeMentionEligible` from `/chat`; OpenClaw uses the SDK helper
-directly.
+The realtime SDK previously exposed
+`isInlineFollowModeMentionGateEligible()` with a separate threshold of 50.
+Hermes and OpenClaw incorrectly combined that classifier with durable
+`FOLLOWING` state on every inbound message. That legacy classifier is retained
+temporarily for API compatibility but must not be used for response routing.
 
-This extra check protects older parent-style or large threads where follow mode
-may exist but should not override explicit mention gating.
+## Decision C: Resolving an Inbound Group Message
 
-## Mention Gate
+After access policy and adapter control-command handling, resolve relevance in
+this order:
 
-For group/thread chats, an unmentioned inbound message may wake the agent when:
+1. Free-response configuration or disabled mention gating allows the message.
+2. An explicit bot mention allows the message.
+3. If strict explicit-mention mode is enabled, stop: implicit signals are not
+   allowed.
+4. A reply-to-bot signal may allow the message where that integration enables
+   it.
+5. Current dialog `FOLLOWING` state allows the message, without a freshness
+   check.
+6. Integration-specific reply-thread participation fallback may allow the
+   message when server follow state is unavailable.
+7. Otherwise, retain the message only as observed context and do not respond.
 
-- `GET_CHAT` for the current chat returns the current bot user's dialog with
-  `followMode = FOLLOWING`
-- the current chat is follow-mode mention eligible
+Explicit addressing exclusions, such as a leading mention of another person or
+a command suffixed for another bot, are a separate precedence layer and should
+be checked before accepting an implicit signal.
 
 Explicit mention always wakes the agent when the group/user policy allows it.
 Free-response rooms continue to bypass mention gating by configuration.
 
-Strict explicit-mention modes, where every group/thread turn must mention the
-bot even if the dialog is following, are intentionally separate from this
-default policy. They may exist as opt-in compatibility/config overrides, but the
-default behavior is follow-mode based continuation for eligible reply/fresh
-threads.
-
 ## Integration Notes
 
-Hermes reads `dialogFollowMode` or `dialog.followMode`, plus
-`followModeMentionEligible`, from the Inline sidecar `/chat` response.
+Hermes reads `dialogFollowMode` or `dialog.followMode` from the Inline sidecar
+`/chat` response. In its default non-strict mention mode, `FOLLOWING` is an
+implicit wake signal.
 
 OpenClaw reads `dialogFollowMode` from the realtime SDK `getChat()` result and
-uses it as an implicit mention source only when
-`isInlineFollowModeMentionGateEligible(chatInfo)` is true. Its older local
-thread-participation cache is only a fallback for sparse history or older hosts
-where server follow mode is not available.
+uses `FOLLOWING` as an implicit mention source. Its older local
+thread-participation cache remains a fallback for sparse history or older hosts
+where server follow mode is unavailable.
+
+## Examples
+
+| State and message | Result |
+|---|---|
+| Parentless thread, message 6, no follow state, bot sends | Server may materialize `FOLLOWING` because the thread is fresh. |
+| Parentless thread, message 80, no follow state | Freshness prevents automatic following; an unmentioned message does not wake solely from follow mode. |
+| Parentless thread, message 80, dialog already `FOLLOWING` | The unmentioned message may wake the bot; message count does not expire following. |
+| Reply thread, message 500, dialog `FOLLOWING` | The unmentioned message may wake the bot. |
+| Any thread, dialog `UNFOLLOWED` | Follow mode does not wake the bot, and automatic following does not turn itself back on. |
+| Any followed thread with strict mention mode enabled | A bot mention is still required by explicit configuration. |
