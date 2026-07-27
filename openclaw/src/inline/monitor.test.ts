@@ -5801,6 +5801,62 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("falls back to cached directory users for group sender names", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 2001n,
+            date: 1_700_000_001n,
+            fromId: 51n,
+            message: "hello from group",
+            mentioned: true,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      participants: {
+        "88": [],
+      },
+      directoryUsers: [{ id: 51n, username: "alice", firstName: "Alice" }],
+      dispatchReplyPayload: {
+        text: "group reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          SenderId: "51",
+          SenderName: "Alice",
+          SenderUsername: "alice",
+          BodyForAgent: "hello from group",
+        }),
+      )
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(17, {
+        oneofKind: "getChats",
+        getChats: {},
+      })
+    })
+
+    await handle.stop()
+  })
+
   it("routes group messages by chat id and does not set DM last-route metadata", async () => {
     const harness = await setupMonitorHarness({
       events: [

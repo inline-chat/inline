@@ -3,7 +3,7 @@ const INLINE_FORMATTING_RULES = [
   "Prefer bullet lists over markdown tables.",
   "If a table is necessary, render it inside a fenced code block.",
   "Use plain URLs or markdown links; do not wrap bare URLs in inline code or backticks.",
-  "Mention Inline users with markdown links like [@FirstName](inline://user?id=123); use inline://user?username=username only when the user id is unavailable.",
+  "Mention Inline users as [@FirstName](inline://user?id=123), falling back to [@username](inline://user?id=123). Use inline://user?username=username only when the user id is unavailable, and never show user:<id> as the visible label.",
   "Link Inline chats/threads with markdown links like [Planning](inline://chat?id=123) or [Planning](inline://thread?id=123); use inline://thread?space_id=7 when only the title and space are known.",
   "Use inline code only for actual code, commands, file paths, env vars, or identifiers.",
   "Keep ordinary quoted prose, names, titles, statuses, and natural-language labels as plain text; quotation marks do not make text code.",
@@ -68,7 +68,7 @@ export function buildInlineUserMarkdownLink(params: {
 }): string {
   const userId = encodeInlineMarkdownValue(params.userId)
   const username = params.username?.trim()
-  const fallback = username ? `@${username.replace(/^@/, "")}` : `user:${String(params.userId)}`
+  const fallback = username ? `@${username.replace(/^@/, "")}` : "@user"
   const rawLabel = normalizeInlineMarkdownLabel(params.label, fallback)
   const label = rawLabel.startsWith("@") ? rawLabel : `@${rawLabel}`
   return `[${escapeInlineMarkdownLabel(label)}](inline://user?id=${userId})`

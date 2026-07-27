@@ -25,7 +25,7 @@ describe("inline/message-formatting", () => {
         "Prefer bullet lists over markdown tables.",
         "Use plain URLs or markdown links; do not wrap bare URLs in inline code or backticks.",
         "Keep ordinary quoted prose, names, titles, statuses, and natural-language labels as plain text; quotation marks do not make text code.",
-        "Mention Inline users with markdown links like [@FirstName](inline://user?id=123); use inline://user?username=username only when the user id is unavailable.",
+        "Mention Inline users as [@FirstName](inline://user?id=123), falling back to [@username](inline://user?id=123). Use inline://user?username=username only when the user id is unavailable, and never show user:<id> as the visible label.",
         "Link Inline chats/threads with markdown links like [Planning](inline://chat?id=123) or [Planning](inline://thread?id=123); use inline://thread?space_id=7 when only the title and space are known.",
       ]),
     })
@@ -34,6 +34,12 @@ describe("inline/message-formatting", () => {
   it("builds Inline markdown links for users, chats, and threads", () => {
     expect(buildInlineUserMarkdownLink({ userId: "99", label: "Alice" })).toBe(
       "[@Alice](inline://user?id=99)",
+    )
+    expect(buildInlineUserMarkdownLink({ userId: "99", username: "alice" })).toBe(
+      "[@alice](inline://user?id=99)",
+    )
+    expect(buildInlineUserMarkdownLink({ userId: "99" })).toBe(
+      "[@user](inline://user?id=99)",
     )
     expect(buildInlineChatMarkdownLink({ chatId: "7", title: "Alice DM" })).toBe(
       "[Alice DM](inline://chat?id=7)",

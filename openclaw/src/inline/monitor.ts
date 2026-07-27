@@ -111,6 +111,9 @@ import {
 } from "./outbound-sanitize.js"
 import { resolveInlineInteractiveTextFallback } from "./interactive-fallback.js"
 import {
+  InlineSenderProfileCache,
+} from "./sender-profile-cache.js"
+import {
   buildInlineCommandsListChannelData,
   buildInlineModelProviderButtons,
   parseInlineCommandsPageCallback,
@@ -231,10 +234,7 @@ type CachedChatInfo = {
   dialogFollowMode?: DialogFollowMode | null
 }
 
-type SenderProfile = {
-  name?: string
-  username?: string
-}
+type SenderProfileLookup = Pick<InlineSenderProfileCache, "get">
 
 type HistoryContext = {
   historyText: string | null
@@ -1943,34 +1943,6 @@ function resolveCallbackCommandBodyFromActionData(params: {
   return normalizeInlineCommandBody(normalized, params.botUsername)
 }
 
-function buildInlineSenderName(params: {
-  firstName: string | undefined
-  lastName: string | undefined
-}): string | undefined {
-  const name = [params.firstName, params.lastName].filter(Boolean).join(" ").trim()
-  return name || undefined
-}
-
-function mergeInlineSenderProfile(params: {
-  senderProfilesById: Map<string, SenderProfile>
-  user: User
-}): void {
-  const userId = String(params.user.id)
-  if (!userId) return
-
-  const nextName = buildInlineSenderName({ firstName: params.user.firstName, lastName: params.user.lastName })
-  const nextUsername = normalizeInlineUsername(params.user.username)
-  const previous = params.senderProfilesById.get(userId)
-  const mergedName = nextName ?? previous?.name
-  const mergedUsername = nextUsername ?? previous?.username
-
-  if (!mergedName && !mergedUsername) return
-  params.senderProfilesById.set(userId, {
-    ...(mergedName ? { name: mergedName } : {}),
-    ...(mergedUsername ? { username: mergedUsername } : {}),
-  })
-}
-
 function resolveInlineSystemPrompt(params: {
   account: ResolvedInlineAccount
   groupId?: string
@@ -2007,7 +1979,7 @@ function shouldCreateInlineReplyThreadDelivery(params: {
   return params.mode === "thread"
 }
 
-function rewriteNumericMentionsToUsernames(text: string, senderProfilesById: Map<string, SenderProfile>): string {
+function rewriteNumericMentionsToUsernames(text: string, senderProfilesById: SenderProfileLookup): string {
   if (!text.includes("@")) return text
   return text.replace(/(^|[^\w])@([0-9]+)\b/g, (full, prefix: string, userId: string) => {
     const username = senderProfilesById.get(userId)?.username
@@ -2241,7 +2213,7 @@ function extractCompleteParagraphText(text: string): string {
 function resolveHistorySenderLabel(params: {
   senderId: bigint
   meId: bigint
-  senderProfilesById: Map<string, SenderProfile>
+  senderProfilesById: SenderProfileLookup
 }): string {
   if (params.senderId === params.meId) return "assistant"
   const senderId = String(params.senderId)
@@ -2275,6 +2247,18 @@ function resolveInlineSenderLabel(params: {
   if (label && id) return `${label} ${id}`
   if (label) return label
   return fallback ?? "id:unknown"
+}
+
+function resolveInlineDirectSenderName(params: {
+  profileName: string | null | undefined
+  chatTitle: string | null | undefined
+  senderId: string
+}): string | undefined {
+  const profileName = params.profileName?.trim()
+  if (profileName) return profileName
+  const chatTitle = params.chatTitle?.trim()
+  if (!chatTitle || chatTitle === `user:${params.senderId}` || chatTitle === params.senderId) return undefined
+  return chatTitle
 }
 
 function resolveInlineConversationLabel(params: {
@@ -2330,7 +2314,7 @@ function mergeInboundHistoryEntries(params: {
 
 function buildInlineHistoryEntryPayload(params: {
   message: Message
-  senderProfilesById: Map<string, SenderProfile>
+  senderProfilesById: SenderProfileLookup
   meId: bigint
   syntheticMessageId?: string
 }): InlineHistoryEntryPayload {
@@ -2422,7 +2406,7 @@ function prependInlineReplyThreadAnchor(params: {
   historyContext: HistoryContext
   anchorMessage: Message
   parentChatId: bigint
-  senderProfilesById: Map<string, SenderProfile>
+  senderProfilesById: SenderProfileLookup
   meId: bigint
 }): HistoryContext {
   const entry = buildInlineHistoryEntryPayload({
@@ -2759,7 +2743,7 @@ async function buildReplyThreadParentHistoryContext(params: {
   client: InlineSdkClient
   replyThreadContext: InlineReplyThreadContext
   parentHistoryLimit: number
-  senderProfilesById: Map<string, SenderProfile>
+  senderProfilesById: SenderProfileLookup
   meId: bigint
   botMessageIdsByChat: Map<string, string[]>
 }): Promise<HistoryContext | null> {
@@ -2784,7 +2768,7 @@ async function buildHistoryContext(params: {
   chatId: bigint
   currentMessageId: bigint
   replyToMsgId: bigint | undefined
-  senderProfilesById: Map<string, SenderProfile>
+  senderProfilesById: SenderProfileLookup
   meId: bigint
   historyLimit: number
   botMessageIdsByChat: Map<string, string[]>
@@ -2895,7 +2879,7 @@ async function buildHistoryContext(params: {
 
 function buildInlineRecentHistoryLines(params: {
   messages: Message[]
-  senderProfilesById: Map<string, SenderProfile>
+  senderProfilesById: SenderProfileLookup
   meId: bigint
   maxLines: number
 }): string[] {
@@ -3055,71 +3039,36 @@ export async function monitorInlineProvider(params: {
   }
 
   const chatCache = new Map<bigint, CachedChatInfo>()
-  const senderProfilesById = new Map<string, SenderProfile>()
-  const botMessageIdsByChat = new Map<string, string[]>()
-  const groupPendingHistories = new Map<string, InlinePendingHistoryEntry[]>()
-  const hydratedParticipantChats = new Set<string>()
-  const participantFetches = new Map<string, Promise<void>>()
-  let cachedDirectoryUserProfilesHydrated = false
-  let cachedDirectoryUserProfilesFetch: Promise<void> | null = null
-  const inboundMediaMaxBytes = resolveInlineMediaMaxBytes({ cfg, account })
-
-  const hydrateChatParticipants = async (chatId: bigint): Promise<void> => {
-    const chatKey = String(chatId)
-    if (hydratedParticipantChats.has(chatKey)) return
-    const existing = participantFetches.get(chatKey)
-    if (existing) return existing
-
-    const run = (async () => {
+  const senderProfilesById = new InlineSenderProfileCache({
+    fetchChatParticipants: async (chatId) => {
       const result = await client.invokeRaw(Method.GET_CHAT_PARTICIPANTS, {
         oneofKind: "getChatParticipants",
         getChatParticipants: { chatId },
       })
-      if (result.oneofKind !== "getChatParticipants") return
-
-      for (const user of result.getChatParticipants.users ?? []) {
-        mergeInlineSenderProfile({ senderProfilesById, user })
+      if (result.oneofKind !== "getChatParticipants") {
+        throw new Error(`unexpected response: ${result.oneofKind ?? "unknown"}`)
       }
-
-      hydratedParticipantChats.add(chatKey)
-    })()
-      .catch((err) => {
-        publishStatus({ lastError: `getChatParticipants failed: ${String(err)}` })
-      })
-      .finally(() => {
-        participantFetches.delete(chatKey)
-      })
-
-    participantFetches.set(chatKey, run)
-    await run
-  }
-
-  const hydrateCachedDirectoryUserProfiles = async (): Promise<void> => {
-    if (cachedDirectoryUserProfilesHydrated) return
-    if (cachedDirectoryUserProfilesFetch) return cachedDirectoryUserProfilesFetch
-
-    const run = (async () => {
+      return result.getChatParticipants.users ?? []
+    },
+    fetchDirectoryUsers: async () => {
       const result = await client.invokeRaw(Method.GET_CHATS, {
         oneofKind: "getChats",
         getChats: {},
       })
-      if (result.oneofKind !== "getChats") return
-
-      for (const user of result.getChats.users ?? []) {
-        mergeInlineSenderProfile({ senderProfilesById, user })
+      if (result.oneofKind !== "getChats") {
+        throw new Error(`unexpected response: ${result.oneofKind ?? "unknown"}`)
       }
-      cachedDirectoryUserProfilesHydrated = true
-    })()
-      .catch((err) => {
-        publishStatus({ lastError: `getChats failed: ${String(err)}` })
-      })
-      .finally(() => {
-        cachedDirectoryUserProfilesFetch = null
-      })
+      return result.getChats.users ?? []
+    },
+    onError: (operation, error) => {
+      publishStatus({ lastError: `${operation} failed: ${String(error)}` })
+    },
+  })
+  const botMessageIdsByChat = new Map<string, string[]>()
+  const groupPendingHistories = new Map<string, InlinePendingHistoryEntry[]>()
+  const inboundMediaMaxBytes = resolveInlineMediaMaxBytes({ cfg, account })
 
-    cachedDirectoryUserProfilesFetch = run
-    await run
-  }
+  const hydrateChatParticipants = (chatId: bigint): Promise<void> => senderProfilesById.hydrateChat(chatId)
 
   const resolveInlineSystemEventContext = async (params: {
     chatId: bigint
@@ -3336,17 +3285,14 @@ export async function monitorInlineProvider(params: {
     })
     if (!ingress) return
 
-    await hydrateChatParticipants(params.chatId)
     const senderId = String(params.senderId)
     const chatInfo = chatCache.get(params.chatId)
-    let senderProfile = senderProfilesById.get(senderId)
-    if (chatInfo?.kind === "direct" && !senderProfile?.name) {
-      await hydrateCachedDirectoryUserProfiles()
-      senderProfile = senderProfilesById.get(senderId)
-    }
+    const senderProfile = await senderProfilesById.resolve({ userId: senderId, chatId: params.chatId })
     const senderLabel = resolveInlineSenderLabel({
       senderId,
-      senderName: senderProfile?.name ?? (chatInfo?.kind === "direct" ? chatInfo.title ?? undefined : undefined),
+      senderName: chatInfo?.kind === "direct"
+        ? resolveInlineDirectSenderName({ profileName: senderProfile?.name, chatTitle: chatInfo.title, senderId })
+        : senderProfile?.name,
       senderUsername: senderProfile?.username,
     })
 
@@ -3560,19 +3506,16 @@ export async function monitorInlineProvider(params: {
           })
         : DEFAULT_REPLY_THREAD_PARENT_HISTORY_LIMIT
     const senderId = String(msg.fromId)
-    await hydrateChatParticipants(chatId)
-    let senderProfile = senderProfilesById.get(senderId)
-    if (!isGroup && !senderProfile?.name) {
-      await hydrateCachedDirectoryUserProfiles()
-      senderProfile = senderProfilesById.get(senderId)
-    }
+    const senderProfile = await senderProfilesById.resolve({ userId: senderId, chatId })
     const senderUsername = senderProfile?.username
-    const senderName = senderProfile?.name ?? (!isGroup ? chatInfo.title ?? undefined : undefined)
+    const senderName = isGroup
+      ? senderProfile?.name
+      : resolveInlineDirectSenderName({ profileName: senderProfile?.name, chatTitle: chatInfo.title, senderId })
     if (callbackActionEvent) {
       const actor =
         senderUsername != null && senderUsername.length > 0
           ? `@${senderUsername}`
-          : senderName ?? `user:${senderId}`
+          : senderName ?? "the sender"
       rawBody = `${actor} pressed "${callbackActionEvent.actionId}" on message #${String(callbackActionEvent.targetMessageId)}`
     }
 
