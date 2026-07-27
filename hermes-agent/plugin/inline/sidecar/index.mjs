@@ -23998,7 +23998,7 @@ function statusForErrorKind(errorKind) {
       return 500;
   }
 }
-function normalizeInboundEvent(event, meId) {
+function normalizeInboundEvent(event, meId, sender) {
   if (event.kind === "message.new" || event.kind === "message.edit") {
     const message = asOptionalRecord(event.message);
     return safeJson({
@@ -24007,6 +24007,7 @@ function normalizeInboundEvent(event, meId) {
       seq: event.seq,
       date: event.date,
       meId,
+      ...sender ? { sender } : {},
       message: message ? normalizeMessage(message) : null
     });
   }
@@ -24014,10 +24015,11 @@ function normalizeInboundEvent(event, meId) {
     return safeJson({
       ...event,
       meId,
+      ...sender ? { sender } : {},
       dataBase64: event.data instanceof Uint8Array ? Buffer.from(event.data).toString("base64") : typeof event.data === "string" ? event.data : ""
     });
   }
-  return safeJson({ ...event, meId });
+  return safeJson({ ...event, meId, ...sender ? { sender } : {} });
 }
 function normalizeMessage(message) {
   return {
@@ -24162,6 +24164,152 @@ function defaultErrorText(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+// src/sidecar/user-directory.ts
+var DEFAULT_PROFILE_TTL_MS = 10 * 60000;
+var DEFAULT_MAX_PROFILES = 5000;
+
+class InlineUserDirectory {
+  client;
+  profiles = new Map;
+  hydratedChats = new Map;
+  chatFetches = new Map;
+  directoryExpiresAt = 0;
+  directoryFetch = null;
+  ttlMs;
+  maxProfiles;
+  now;
+  onError;
+  constructor(client, options = {}) {
+    this.client = client;
+    this.ttlMs = options.ttlMs ?? DEFAULT_PROFILE_TTL_MS;
+    this.maxProfiles = options.maxProfiles ?? DEFAULT_MAX_PROFILES;
+    this.now = options.now ?? Date.now;
+    this.onError = options.onError;
+  }
+  async resolve(params) {
+    const userId = params.userId.toString();
+    const cached2 = this.getFresh(userId);
+    if (hasDisplayIdentity(cached2))
+      return cached2;
+    if (params.direct) {
+      await this.hydrateDirectory();
+    } else {
+      await this.hydrateChat(params.chatId);
+      if (!hasDisplayIdentity(this.getFresh(userId)))
+        await this.hydrateDirectory();
+    }
+    const resolved = this.getFresh(userId);
+    return hasDisplayIdentity(resolved) ? resolved : undefined;
+  }
+  remember(users) {
+    const expiresAt = this.now() + this.ttlMs;
+    for (const user of users) {
+      const id = user.id?.toString();
+      if (!id || id === "0")
+        continue;
+      const previous = this.profiles.get(id)?.profile;
+      const profile = {
+        id,
+        ...readProfileField(user.firstName, previous?.firstName, "firstName"),
+        ...readProfileField(user.lastName, previous?.lastName, "lastName"),
+        ...readProfileField(user.username, previous?.username, "username")
+      };
+      this.profiles.delete(id);
+      this.profiles.set(id, { profile, expiresAt });
+    }
+    let evicted = false;
+    while (this.profiles.size > this.maxProfiles) {
+      const oldest = this.profiles.keys().next().value;
+      if (oldest == null)
+        break;
+      this.profiles.delete(oldest);
+      evicted = true;
+    }
+    if (evicted) {
+      this.hydratedChats.clear();
+      this.directoryExpiresAt = 0;
+    }
+  }
+  getFresh(userId) {
+    const cached2 = this.profiles.get(userId);
+    if (!cached2)
+      return;
+    if (cached2.expiresAt <= this.now()) {
+      this.profiles.delete(userId);
+      return;
+    }
+    this.profiles.delete(userId);
+    this.profiles.set(userId, cached2);
+    return cached2.profile;
+  }
+  async hydrateChat(chatId) {
+    const key = chatId.toString();
+    const hydratedUntil = this.hydratedChats.get(key) ?? 0;
+    if (hydratedUntil > this.now()) {
+      this.hydratedChats.delete(key);
+      this.hydratedChats.set(key, hydratedUntil);
+      return;
+    }
+    this.hydratedChats.delete(key);
+    const existing = this.chatFetches.get(key);
+    if (existing)
+      return existing;
+    const fetch2 = (async () => {
+      const result = await this.client.invokeUncheckedRaw(Method.GET_CHAT_PARTICIPANTS, {
+        oneofKind: "getChatParticipants",
+        getChatParticipants: { chatId }
+      });
+      this.remember(readUsers(result, "getChatParticipants"));
+      this.hydratedChats.delete(key);
+      this.hydratedChats.set(key, this.now() + this.ttlMs);
+      while (this.hydratedChats.size > this.maxProfiles) {
+        const oldest = this.hydratedChats.keys().next().value;
+        if (oldest == null)
+          break;
+        this.hydratedChats.delete(oldest);
+      }
+    })().catch((error) => this.onError?.("getChatParticipants", error)).finally(() => this.chatFetches.delete(key));
+    this.chatFetches.set(key, fetch2);
+    await fetch2;
+  }
+  async hydrateDirectory() {
+    if (this.directoryExpiresAt > this.now())
+      return;
+    if (this.directoryFetch)
+      return this.directoryFetch;
+    const fetch2 = (async () => {
+      const result = await this.client.invokeUncheckedRaw(Method.GET_CHATS, {
+        oneofKind: "getChats",
+        getChats: {}
+      });
+      this.remember(readUsers(result, "getChats"));
+      this.directoryExpiresAt = this.now() + this.ttlMs;
+    })().catch((error) => this.onError?.("getChats", error)).finally(() => {
+      this.directoryFetch = null;
+    });
+    this.directoryFetch = fetch2;
+    await fetch2;
+  }
+}
+function hasDisplayIdentity(profile) {
+  return Boolean(profile?.firstName || profile?.lastName || profile?.username);
+}
+function readProfileField(value, previous, key) {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  const resolved = normalized || previous;
+  return resolved ? { [key]: resolved } : {};
+}
+function readUsers(result, kind) {
+  if (!result || typeof result !== "object")
+    return [];
+  const record = result;
+  const payload = record[kind];
+  if (!payload || typeof payload !== "object")
+    return [];
+  const users = payload.users;
+  return Array.isArray(users) ? users : [];
+}
+
 // src/sidecar/index.ts
 var DIALOG_FOLLOW_MODE_UNFOLLOWED = 2;
 var token = process.env.INLINE_TOKEN || process.env.INLINE_BOT_TOKEN || "";
@@ -24234,7 +24382,8 @@ async function connectClientLoop() {
 async function consumeEvents() {
   try {
     for await (const event of client.events()) {
-      await deliver(normalizeInboundEvent(event, meId));
+      const sender = await resolveInboundSender(event);
+      await deliver(normalizeInboundEvent(event, meId, sender));
     }
   } catch (error) {
     if (!stopping) {
@@ -24491,11 +24640,12 @@ async function endpointChat(res, body) {
   const record = asRecord(body);
   const target = parseTarget(record);
   if ("userId" in target) {
+    const sender = await userDirectory.resolve({ userId: target.userId, chatId: target.userId, direct: true });
     writeJson(res, 200, {
       ok: true,
       result: {
         id: target.userId.toString(),
-        title: `user:${target.userId.toString()}`,
+        title: senderDisplayName(sender) ?? "Direct message",
         type: "dm"
       }
     });
@@ -24504,6 +24654,8 @@ async function endpointChat(res, body) {
   const snapshot = await getRawChatSnapshot(target.chatId);
   const chat = snapshot.chat;
   const followModeMentionEligible = isInlineFollowModeMentionGateEligible(chat);
+  const anchorMessages = snapshot.anchorMessage != null ? await enrichMessages([snapshot.anchorMessage], target) : [];
+  const anchorMessage = anchorMessages[0];
   writeJson(res, 200, {
     ok: true,
     result: {
@@ -24525,7 +24677,7 @@ async function endpointChat(res, body) {
       ...snapshot.dialogFollowMode != null ? { dialogFollowMode: String(snapshot.dialogFollowMode) } : {},
       followModeMentionEligible,
       pinnedMessageIds: safeJson(snapshot.pinnedMessageIds),
-      ...snapshot.anchorMessage != null ? { anchorMessage: safeJson(snapshot.anchorMessage) } : {},
+      ...anchorMessage != null ? { anchorMessage: safeJson(anchorMessage) } : {},
       chat: safeJson(chat)
     }
   });
@@ -24553,7 +24705,7 @@ async function endpointMessages(res, body) {
   const rawIds = Array.isArray(record.messageIds) ? record.messageIds : [];
   const messageIds = rawIds.map((id) => BigInt(String(id)));
   const result = "chatId" in target ? await client.getMessages({ chatId: target.chatId, messageIds }) : await client.getMessages({ userId: target.userId, messageIds });
-  writeJson(res, 200, { ok: true, result: { messages: safeJson(result.messages) } });
+  writeJson(res, 200, { ok: true, result: { messages: safeJson(await enrichMessages(result.messages, target)) } });
 }
 async function endpointHistory(res, body) {
   const record = asRecord(body);
@@ -24569,7 +24721,8 @@ async function endpointHistory(res, body) {
     }
   });
   const history = result;
-  writeJson(res, 200, { ok: true, result: { messages: safeJson(history.getChatHistory?.messages ?? []) } });
+  const messages = history.getChatHistory?.messages ?? [];
+  writeJson(res, 200, { ok: true, result: { messages: safeJson(await enrichMessages(messages, target)) } });
 }
 async function endpointSearch(res, body) {
   const record = asRecord(body);
@@ -24589,7 +24742,8 @@ async function endpointSearch(res, body) {
     }
   });
   const typed = result;
-  writeJson(res, 200, { ok: true, result: { messages: safeJson(typed.searchMessages?.messages ?? []) } });
+  const messages = typed.searchMessages?.messages ?? [];
+  writeJson(res, 200, { ok: true, result: { messages: safeJson(await enrichMessages(messages, target)) } });
 }
 async function endpointReaction(res, body) {
   const record = asRecord(body);
@@ -24626,10 +24780,11 @@ async function endpointReactions(res, body) {
   const messageId = readRequiredString(record, "messageId");
   const result = "chatId" in target ? await client.getMessages({ chatId: target.chatId, messageIds: [BigInt(messageId)] }) : await client.getMessages({ userId: target.userId, messageIds: [BigInt(messageId)] });
   const message = result.messages[0] ?? null;
+  const enriched = message == null ? null : (await enrichMessages([message], target))[0] ?? message;
   writeJson(res, 200, {
     ok: true,
     result: {
-      message: safeJson(message),
+      message: safeJson(enriched),
       reactions: safeJson(reactionsFromMessage(message))
     }
   });
@@ -24656,12 +24811,14 @@ async function endpointPins(res, body) {
     throw new SidecarError("pins requires a chat target", "bad_format");
   }
   const snapshot = await getRawChatSnapshot(target.chatId);
+  const anchorMessages = snapshot.anchorMessage != null ? await enrichMessages([snapshot.anchorMessage], target) : [];
+  const anchorMessage = anchorMessages[0];
   writeJson(res, 200, {
     ok: true,
     result: {
       chatId: target.chatId.toString(),
       pinnedMessageIds: safeJson(snapshot.pinnedMessageIds),
-      ...snapshot.anchorMessage != null ? { anchorMessage: safeJson(snapshot.anchorMessage) } : {}
+      ...anchorMessage != null ? { anchorMessage: safeJson(anchorMessage) } : {}
     }
   });
 }
@@ -24716,6 +24873,61 @@ function reactionsFromMessage(message) {
   if (!message || typeof message !== "object" || !("reactions" in message))
     return null;
   return message.reactions ?? null;
+}
+function senderDisplayName(sender) {
+  if (!sender)
+    return null;
+  const fullName = [sender.firstName?.trim(), sender.lastName?.trim()].filter(Boolean).join(" ");
+  if (fullName)
+    return fullName;
+  const username = sender.username?.trim().replace(/^@/, "");
+  return username ? `@${username}` : null;
+}
+async function enrichMessages(messages, target) {
+  return Promise.all(messages.map(async (message) => {
+    const record = asOptionalRecord(message);
+    if (!record)
+      return message;
+    const userId = asPositiveBigInt(record.fromId);
+    const chatId = "chatId" in target ? target.chatId : asPositiveBigInt(record.chatId);
+    if (!userId || !chatId)
+      return message;
+    const sender = await userDirectory.resolve({
+      userId,
+      chatId,
+      direct: "userId" in target || messagePeerIsDirect(record)
+    });
+    return sender ? { ...record, sender } : message;
+  }));
+}
+async function resolveInboundSender(event) {
+  const message = asOptionalRecord(event.message);
+  const reaction = asOptionalRecord(event.reaction);
+  const participant = asOptionalRecord(event.participant);
+  const userId = asPositiveBigInt(message?.fromId ?? event.actorUserId ?? reaction?.userId ?? event.userId ?? participant?.userId);
+  const chatId = asPositiveBigInt(event.chatId ?? message?.chatId ?? reaction?.chatId);
+  if (!userId || !chatId || userId.toString() === meId)
+    return;
+  return userDirectory.resolve({
+    userId,
+    chatId,
+    direct: message ? messagePeerIsDirect(message) : false
+  });
+}
+function messagePeerIsDirect(message) {
+  const peer = asOptionalRecord(message.peerId);
+  const type = asOptionalRecord(peer?.type);
+  return type?.oneofKind === "user";
+}
+function asPositiveBigInt(value) {
+  if (value == null)
+    return null;
+  try {
+    const parsed = BigInt(String(value));
+    return parsed > 0n ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 function clampResultLimit(value, max) {
   if (!Number.isInteger(value) || value < 1) {
@@ -24945,6 +25157,14 @@ class MockInlineClient {
   }
   async invokeUncheckedRaw(method, input) {
     this.record(`invokeUncheckedRaw:${methodName(method)}`, input);
+    if (method === Method.GET_CHAT_PARTICIPANTS) {
+      return {
+        oneofKind: "getChatParticipants",
+        getChatParticipants: {
+          users: [{ id: 111n, firstName: "Ada", lastName: "Lovelace", username: "ada" }]
+        }
+      };
+    }
     if (method === Method.CREATE_SUBTHREAD) {
       return {
         oneofKind: "createSubthread",
@@ -24973,6 +25193,17 @@ class MockInlineClient {
             message: `mock search ${String(queries[0] ?? "")}`.trim(),
             date: 127n
           }]
+        }
+      };
+    }
+    if (method === Method.GET_CHATS) {
+      return {
+        oneofKind: "getChats",
+        getChats: {
+          users: [
+            { id: 42n, firstName: "Grace", lastName: "Hopper", username: "grace" },
+            { id: 111n, firstName: "Ada", lastName: "Lovelace", username: "ada" }
+          ]
         }
       };
     }
@@ -25019,6 +25250,11 @@ function methodName(method) {
   return Method[method] ?? String(method);
 }
 var client = createClient(clientOptions);
+var userDirectory = new InlineUserDirectory(client, {
+  onError: (operation, error) => {
+    console.error(`inline-sidecar: ${operation} sender hydration failed: ${redactError(error)}`);
+  }
+});
 connectClientLoop();
 consumeEvents();
 var server = http.createServer((req, res) => {

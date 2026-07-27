@@ -334,6 +334,28 @@ def _target_from_chat_id(chat_id: str) -> Dict[str, str]:
     return {"chatId": raw}
 
 
+def _inline_sender_profile(event: Dict[str, Any], message: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+    raw = event.get("sender")
+    if not isinstance(raw, dict) and isinstance(message, dict):
+        raw = message.get("sender")
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        key: str(raw.get(key) or "").strip()
+        for key in ("id", "firstName", "lastName", "username")
+        if str(raw.get(key) or "").strip()
+    }
+
+
+def _inline_sender_identity(profile: Dict[str, str]) -> tuple[str, str, str]:
+    first_name = str(profile.get("firstName") or "").strip()
+    last_name = str(profile.get("lastName") or "").strip()
+    username = str(profile.get("username") or "").strip().lstrip("@")
+    full_name = " ".join(part for part in (first_name, last_name) if part)
+    sender_name = full_name or (f"@{username}" if username else "")
+    return sender_name, first_name, username
+
+
 def _to_str(value: Any) -> Optional[str]:
     if value is None:
         return None
@@ -1527,6 +1549,8 @@ class InlineAdapter(BasePlatformAdapter):
         from_id = str(msg.get("fromId") or "")
         if msg.get("out") or (self._me_id and from_id == self._me_id):
             return
+        sender_profile = _inline_sender_profile(event, msg)
+        sender_name, sender_first_name, sender_username = _inline_sender_identity(sender_profile)
 
         text = str(msg.get("message") or "").strip()
         media_text, media_urls, media_types, message_type = await self._normalize_media(msg)
@@ -1649,6 +1673,9 @@ class InlineAdapter(BasePlatformAdapter):
             chat_id=chat_id,
             msg_id=msg_id,
             from_id=from_id,
+            sender_name=sender_name,
+            sender_first_name=sender_first_name,
+            sender_username=sender_username,
             thread_id=thread_id,
             parent_chat_id=parent_chat_id,
             parent_message_id=parent_message_id,
@@ -1685,7 +1712,7 @@ class InlineAdapter(BasePlatformAdapter):
             chat_name=chat_name,
             chat_type=chat_type,
             user_id=from_id,
-            user_name=from_id or None,
+            user_name=sender_name or None,
             thread_id=thread_id,
             parent_chat_id=parent_chat_id,
             message_id=msg_id,
@@ -1739,7 +1766,7 @@ class InlineAdapter(BasePlatformAdapter):
             chat_name=chat_id,
             chat_type=chat_type,
             user_id=user_id,
-            user_name=user_id or None,
+            user_name=_inline_sender_identity(_inline_sender_profile(event))[0] or None,
             message_id=key,
         )
         await self.handle_message(MessageEvent(
@@ -1786,7 +1813,7 @@ class InlineAdapter(BasePlatformAdapter):
             chat_name=chat_id,
             chat_type="group",
             user_id=user_id or None,
-            user_name=user_id or None,
+            user_name=_inline_sender_identity(_inline_sender_profile(event))[0] or None,
             message_id=key,
         )
         await self.handle_message(MessageEvent(
@@ -2171,6 +2198,9 @@ class InlineAdapter(BasePlatformAdapter):
         chat_id: str,
         msg_id: str,
         from_id: str,
+        sender_name: str,
+        sender_first_name: str,
+        sender_username: str,
         thread_id: Optional[str],
         parent_chat_id: Optional[str],
         parent_message_id: Optional[str],
@@ -2187,11 +2217,6 @@ class InlineAdapter(BasePlatformAdapter):
             lines.append("- In top-level Inline chats, the adapter may create or use an Inline reply thread for responses according to /threads settings.")
         if has_thread:
             lines.append("- This turn is already scoped to an Inline reply thread.")
-        if from_id:
-            lines.append(
-                f"- Current Inline sender is `user:{self._chat_key(from_id)}`. "
-                f"If the sender asks to mention/tag \"me\", use `[@user:{self._chat_key(from_id)}](inline://user?id={self._chat_key(from_id)})`."
-            )
         if thread_id:
             lines.append(f"- Link this Inline reply thread as `[this thread](inline://thread?id={self._chat_key(thread_id)})`.")
         else:
@@ -2202,10 +2227,16 @@ class InlineAdapter(BasePlatformAdapter):
             lines.append("- Inline observed context contains recent group messages that were not necessarily addressed to you.")
         try:
             from . import tools as _inline_tools
+            if from_id:
+                lines.append(_inline_tools.inline_sender_guidance(
+                    sender_user_id=self._chat_key(from_id),
+                    sender_name=sender_name,
+                    sender_first_name=sender_first_name,
+                    sender_username=sender_username,
+                ))
             tool_prompt = _inline_tools.tool_context_prompt(
                 chat_id=self._chat_key(chat_id),
                 message_id=str(msg_id),
-                sender_user_id=self._chat_key(from_id) if from_id else None,
                 thread_id=self._chat_key(thread_id) if thread_id else None,
                 parent_chat_id=self._chat_key(parent_chat_id) if parent_chat_id else None,
                 parent_message_id=str(parent_message_id) if parent_message_id else None,
@@ -2440,7 +2471,12 @@ class InlineAdapter(BasePlatformAdapter):
         text = _inline_context_text(text, _CONTEXT_MESSAGE_TEXT_LIMIT) or "[no text]"
         prefix = f"- message:{message_id}" if message_id else "- message"
         if from_id:
-            prefix += f" user:{self._chat_key(from_id)}"
+            sender_profile = _inline_sender_profile({}, message)
+            if sender_profile:
+                sender_name = _inline_sender_identity(sender_profile)[0]
+                prefix += f" from {sender_name}"
+            else:
+                prefix += " from an unknown sender"
         return f"{prefix}: {text}"
 
     def _inline_event_metadata(
@@ -3566,7 +3602,13 @@ class InlineAdapter(BasePlatformAdapter):
         target = _target_from_chat_id(chat_id)
         if "userId" in target:
             user_id = str(target["userId"])
-            return {"id": user_id, "name": f"user:{user_id}", "type": "dm"}
+            try:
+                data = await self._sidecar_call("/chat", {"target": target})
+                result = data.get("result") if isinstance(data, dict) else {}
+                name = str((result or {}).get("title") or "").strip()
+            except Exception:
+                name = ""
+            return {"id": user_id, "name": name or "Direct message", "type": "dm"}
         info = await self._get_chat_info(str(target.get("chatId") or chat_id))
         out: Dict[str, Any] = {
             "id": str(target.get("chatId") or chat_id),
@@ -4071,15 +4113,7 @@ def register(ctx) -> None:
         emoji="💬",
         pii_safe=False,
         allow_update_command=True,
-        platform_hint=(
-            "You are communicating via Inline, a work chat app. "
-            "Use concise Markdown where helpful. The conversation may be a DM, "
-            "group chat, or Inline reply thread. Mention users with Inline "
-            "Markdown links like [@name](inline://user?id=123), link chats as "
-            "[title](inline://chat?id=123), and link reply threads as "
-            "[title](inline://thread?id=123). In Inline, reply threads are "
-            "chat ids; do not treat thread ids as reply/quote message ids."
-        ),
+        platform_hint=_tools.INLINE_PLATFORM_GUIDANCE,
     )
     register_command = getattr(ctx, "register_command", None)
     if callable(register_command):

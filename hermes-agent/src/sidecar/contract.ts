@@ -2,6 +2,12 @@ export type Target = { chatId: bigint; userId?: never } | { userId: bigint; chat
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
 export type ErrorKind = "too_long" | "bad_format" | "forbidden" | "not_found" | "rate_limited" | "transient" | "unknown"
 export type GenericInboundEvent = Record<string, unknown> & { kind?: string }
+export type GenericSenderProfile = {
+  id: string
+  firstName?: string
+  lastName?: string
+  username?: string
+}
 export type SecretRedaction = { value: string | null | undefined; label: string }
 
 const sensitiveUrlParams = new Set([
@@ -88,7 +94,11 @@ function statusForErrorKind(errorKind: ErrorKind): number {
   }
 }
 
-export function normalizeInboundEvent(event: GenericInboundEvent, meId?: string | null): Json {
+export function normalizeInboundEvent(
+  event: GenericInboundEvent,
+  meId?: string | null,
+  sender?: GenericSenderProfile,
+): Json {
   if (event.kind === "message.new" || event.kind === "message.edit") {
     const message = asOptionalRecord(event.message)
     return safeJson({
@@ -97,6 +107,7 @@ export function normalizeInboundEvent(event: GenericInboundEvent, meId?: string 
       seq: event.seq,
       date: event.date,
       meId,
+      ...(sender ? { sender } : {}),
       message: message ? normalizeMessage(message) : null,
     })
   }
@@ -105,6 +116,7 @@ export function normalizeInboundEvent(event: GenericInboundEvent, meId?: string 
     return safeJson({
       ...event,
       meId,
+      ...(sender ? { sender } : {}),
       dataBase64: event.data instanceof Uint8Array
         ? Buffer.from(event.data).toString("base64")
         : typeof event.data === "string"
@@ -113,7 +125,7 @@ export function normalizeInboundEvent(event: GenericInboundEvent, meId?: string 
     })
   }
 
-  return safeJson({ ...event, meId })
+  return safeJson({ ...event, meId, ...(sender ? { sender } : {}) })
 }
 
 export function normalizeMessage(message: Record<string, unknown>): Record<string, unknown> {

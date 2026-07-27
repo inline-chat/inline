@@ -244,8 +244,16 @@ describe("sidecar runtime", () => {
         chatId: "123",
         title: "Mock chat 123",
         pinnedMessageIds: ["8801"],
-        anchorMessage: expect.objectContaining({ id: "8801", message: "mock pinned message" }),
+        anchorMessage: expect.objectContaining({
+          id: "8801",
+          message: "mock pinned message",
+          sender: { id: "111", firstName: "Ada", lastName: "Lovelace", username: "ada" },
+        }),
       })
+
+      const directChat = await post(port, "/chat", { target: { userId: "42" } }, auth)
+      expect(directChat.status).toBe(200)
+      expect(resultOf(directChat.body)).toEqual({ id: "42", title: "Grace Hopper", type: "dm" })
 
       const replyThread = await post(port, "/chat", { target: { chatId: "456" } }, auth)
       expect(replyThread.status).toBe(200)
@@ -289,7 +297,11 @@ describe("sidecar runtime", () => {
       }, auth)
       expect(messages.status).toBe(200)
       expect(resultOf(messages.body).messages).toEqual([
-        expect.objectContaining({ id: "9001", message: "mock message 9001" }),
+        expect.objectContaining({
+          id: "9001",
+          message: "mock message 9001",
+          sender: { id: "111", firstName: "Ada", lastName: "Lovelace", username: "ada" },
+        }),
       ])
 
       const history = await post(port, "/history", {
@@ -298,7 +310,11 @@ describe("sidecar runtime", () => {
       }, auth)
       expect(history.status).toBe(200)
       expect(resultOf(history.body).messages).toEqual([
-        expect.objectContaining({ id: "8801", message: "mock history" }),
+        expect.objectContaining({
+          id: "8801",
+          message: "mock history",
+          sender: { id: "111", firstName: "Ada", lastName: "Lovelace", username: "ada" },
+        }),
       ])
 
       const search = await post(port, "/search", {
@@ -309,7 +325,11 @@ describe("sidecar runtime", () => {
       }, auth)
       expect(search.status).toBe(200)
       expect(resultOf(search.body).messages).toEqual([
-        expect.objectContaining({ id: "8802", message: "mock search deploy" }),
+        expect.objectContaining({
+          id: "8802",
+          message: "mock search deploy",
+          sender: { id: "111", firstName: "Ada", lastName: "Lovelace", username: "ada" },
+        }),
       ])
 
       const addReaction = await post(port, "/reaction", {
@@ -392,6 +412,7 @@ describe("sidecar runtime", () => {
       expect(callsJson).toContain("invokeUncheckedRaw:PIN_MESSAGE")
       expect(callsJson).toContain("invokeUncheckedRaw:CREATE_SUBTHREAD")
       expect(callsJson).toContain("invokeUncheckedRaw:UPDATE_DIALOG_FOLLOW_MODE")
+      expect(callsJson.match(/invokeUncheckedRaw:GET_CHAT_PARTICIPANTS/g)).toHaveLength(1)
     } finally {
       await post(port, "/shutdown", {}, auth).catch(() => undefined)
       sidecar.kill("SIGTERM")

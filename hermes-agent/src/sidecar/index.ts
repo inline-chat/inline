@@ -48,9 +48,11 @@ import {
   readRequiredString,
   safeJson,
   type GenericInboundEvent,
+  type GenericSenderProfile,
   type Json,
   type Target,
 } from "./contract.js"
+import { InlineUserDirectory } from "./user-directory.js"
 
 const token = process.env.INLINE_TOKEN || process.env.INLINE_BOT_TOKEN || ""
 const baseUrl = process.env.INLINE_BASE_URL || "https://api.inline.chat"
@@ -151,7 +153,8 @@ async function connectClientLoop() {
 async function consumeEvents() {
   try {
     for await (const event of client.events()) {
-      await deliver(normalizeInboundEvent(event, meId))
+      const sender = await resolveInboundSender(event)
+      await deliver(normalizeInboundEvent(event, meId, sender))
     }
   } catch (error) {
     if (!stopping) {
@@ -448,11 +451,12 @@ async function endpointChat(res: ServerResponse, body: unknown) {
   const record = asRecord(body)
   const target = parseTarget(record)
   if ("userId" in target) {
+    const sender = await userDirectory.resolve({ userId: target.userId, chatId: target.userId, direct: true })
     writeJson(res, 200, {
       ok: true,
       result: {
         id: target.userId.toString(),
-        title: `user:${target.userId.toString()}`,
+        title: senderDisplayName(sender) ?? "Direct message",
         type: "dm",
       },
     })
@@ -461,6 +465,10 @@ async function endpointChat(res: ServerResponse, body: unknown) {
   const snapshot = await getRawChatSnapshot(target.chatId)
   const chat = snapshot.chat
   const followModeMentionEligible = isInlineFollowModeMentionGateEligible(chat)
+  const anchorMessages = snapshot.anchorMessage != null
+    ? await enrichMessages([snapshot.anchorMessage], target)
+    : []
+  const anchorMessage = anchorMessages[0]
   writeJson(res, 200, {
     ok: true,
     result: {
@@ -482,7 +490,7 @@ async function endpointChat(res: ServerResponse, body: unknown) {
       ...(snapshot.dialogFollowMode != null ? { dialogFollowMode: String(snapshot.dialogFollowMode) } : {}),
       followModeMentionEligible,
       pinnedMessageIds: safeJson(snapshot.pinnedMessageIds),
-      ...(snapshot.anchorMessage != null ? { anchorMessage: safeJson(snapshot.anchorMessage) } : {}),
+      ...(anchorMessage != null ? { anchorMessage: safeJson(anchorMessage) } : {}),
       chat: safeJson(chat),
     },
   })
@@ -516,7 +524,7 @@ async function endpointMessages(res: ServerResponse, body: unknown) {
   const result = "chatId" in target
     ? await client.getMessages({ chatId: target.chatId, messageIds })
     : await client.getMessages({ userId: target.userId, messageIds })
-  writeJson(res, 200, { ok: true, result: { messages: safeJson(result.messages) } })
+  writeJson(res, 200, { ok: true, result: { messages: safeJson(await enrichMessages(result.messages, target)) } })
 }
 
 async function endpointHistory(res: ServerResponse, body: unknown) {
@@ -533,7 +541,8 @@ async function endpointHistory(res: ServerResponse, body: unknown) {
     },
   })
   const history = result as { getChatHistory?: { messages?: unknown[] } }
-  writeJson(res, 200, { ok: true, result: { messages: safeJson(history.getChatHistory?.messages ?? []) } })
+  const messages = history.getChatHistory?.messages ?? []
+  writeJson(res, 200, { ok: true, result: { messages: safeJson(await enrichMessages(messages, target)) } })
 }
 
 async function endpointSearch(res: ServerResponse, body: unknown) {
@@ -553,7 +562,8 @@ async function endpointSearch(res: ServerResponse, body: unknown) {
     },
   })
   const typed = result as { oneofKind?: string; searchMessages?: { messages?: unknown[] } }
-  writeJson(res, 200, { ok: true, result: { messages: safeJson(typed.searchMessages?.messages ?? []) } })
+  const messages = typed.searchMessages?.messages ?? []
+  writeJson(res, 200, { ok: true, result: { messages: safeJson(await enrichMessages(messages, target)) } })
 }
 
 async function endpointReaction(res: ServerResponse, body: unknown) {
@@ -594,10 +604,11 @@ async function endpointReactions(res: ServerResponse, body: unknown) {
     ? await client.getMessages({ chatId: target.chatId, messageIds: [BigInt(messageId)] })
     : await client.getMessages({ userId: target.userId, messageIds: [BigInt(messageId)] })
   const message = result.messages[0] ?? null
+  const enriched = message == null ? null : (await enrichMessages([message], target))[0] ?? message
   writeJson(res, 200, {
     ok: true,
     result: {
-      message: safeJson(message),
+      message: safeJson(enriched),
       reactions: safeJson(reactionsFromMessage(message)),
     },
   })
@@ -626,12 +637,16 @@ async function endpointPins(res: ServerResponse, body: unknown) {
     throw new SidecarError("pins requires a chat target", "bad_format")
   }
   const snapshot = await getRawChatSnapshot(target.chatId)
+  const anchorMessages = snapshot.anchorMessage != null
+    ? await enrichMessages([snapshot.anchorMessage], target)
+    : []
+  const anchorMessage = anchorMessages[0]
   writeJson(res, 200, {
     ok: true,
     result: {
       chatId: target.chatId.toString(),
       pinnedMessageIds: safeJson(snapshot.pinnedMessageIds),
-      ...(snapshot.anchorMessage != null ? { anchorMessage: safeJson(snapshot.anchorMessage) } : {}),
+      ...(anchorMessage != null ? { anchorMessage: safeJson(anchorMessage) } : {}),
     },
   })
 }
@@ -704,6 +719,66 @@ async function getRawChatSnapshot(chatId: bigint): Promise<{
 function reactionsFromMessage(message: unknown): unknown {
   if (!message || typeof message !== "object" || !("reactions" in message)) return null
   return (message as { reactions?: unknown }).reactions ?? null
+}
+
+function senderDisplayName(sender: GenericSenderProfile | undefined): string | null {
+  if (!sender) return null
+  const fullName = [sender.firstName?.trim(), sender.lastName?.trim()].filter(Boolean).join(" ")
+  if (fullName) return fullName
+  const username = sender.username?.trim().replace(/^@/, "")
+  return username ? `@${username}` : null
+}
+
+async function enrichMessages(messages: unknown[], target: Target): Promise<unknown[]> {
+  return Promise.all(messages.map(async (message) => {
+    const record = asOptionalRecord(message)
+    if (!record) return message
+    const userId = asPositiveBigInt(record.fromId)
+    const chatId = "chatId" in target ? target.chatId : asPositiveBigInt(record.chatId)
+    if (!userId || !chatId) return message
+    const sender = await userDirectory.resolve({
+      userId,
+      chatId,
+      direct: "userId" in target || messagePeerIsDirect(record),
+    })
+    return sender ? { ...record, sender } : message
+  }))
+}
+
+async function resolveInboundSender(event: GenericInboundEvent): Promise<GenericSenderProfile | undefined> {
+  const message = asOptionalRecord(event.message)
+  const reaction = asOptionalRecord(event.reaction)
+  const participant = asOptionalRecord(event.participant)
+  const userId = asPositiveBigInt(
+    message?.fromId
+      ?? event.actorUserId
+      ?? reaction?.userId
+      ?? event.userId
+      ?? participant?.userId,
+  )
+  const chatId = asPositiveBigInt(event.chatId ?? message?.chatId ?? reaction?.chatId)
+  if (!userId || !chatId || userId.toString() === meId) return undefined
+  return userDirectory.resolve({
+    userId,
+    chatId,
+    direct: message ? messagePeerIsDirect(message) : false,
+  })
+}
+
+function messagePeerIsDirect(message: Record<string, unknown>): boolean {
+  const peer = asOptionalRecord(message.peerId)
+  const type = asOptionalRecord(peer?.type)
+  return type?.oneofKind === "user"
+}
+
+function asPositiveBigInt(value: unknown): bigint | null {
+  if (value == null) return null
+  try {
+    const parsed = BigInt(String(value))
+    return parsed > 0n ? parsed : null
+  } catch {
+    return null
+  }
 }
 
 function clampResultLimit(value: number, max: number): number {
@@ -992,6 +1067,14 @@ class MockInlineClient implements SidecarClient {
 
   async invokeUncheckedRaw(method: Method, input: unknown): Promise<unknown> {
     this.record(`invokeUncheckedRaw:${methodName(method)}`, input)
+    if (method === Method.GET_CHAT_PARTICIPANTS) {
+      return {
+        oneofKind: "getChatParticipants",
+        getChatParticipants: {
+          users: [{ id: 111n, firstName: "Ada", lastName: "Lovelace", username: "ada" }],
+        },
+      }
+    }
     if (method === Method.CREATE_SUBTHREAD) {
       return {
         oneofKind: "createSubthread",
@@ -1020,6 +1103,17 @@ class MockInlineClient implements SidecarClient {
             message: `mock search ${String(queries[0] ?? "")}`.trim(),
             date: 127n,
           }],
+        },
+      }
+    }
+    if (method === Method.GET_CHATS) {
+      return {
+        oneofKind: "getChats",
+        getChats: {
+          users: [
+            { id: 42n, firstName: "Grace", lastName: "Hopper", username: "grace" },
+            { id: 111n, firstName: "Ada", lastName: "Lovelace", username: "ada" },
+          ],
         },
       }
     }
@@ -1066,6 +1160,11 @@ function methodName(method: Method): string {
 }
 
 const client: SidecarClient = createClient(clientOptions)
+const userDirectory = new InlineUserDirectory(client, {
+  onError: (operation, error) => {
+    console.error(`inline-sidecar: ${operation} sender hydration failed: ${redactError(error)}`)
+  },
+})
 
 void connectClientLoop()
 void consumeEvents()

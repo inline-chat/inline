@@ -273,6 +273,22 @@ from inline import cli as inline_cli
 from inline import tools as inline_tools
 
 base_extra = {"token": "fake", "context_history_limit": 0}
+assert "visible label is their first name, falling back to username" in inline_tools.INLINE_PLATFORM_GUIDANCE
+first_name_guidance = inline_tools.inline_sender_guidance(
+    sender_user_id="1600",
+    sender_name="Mo Jorjani",
+    sender_first_name="Mo",
+    sender_username="morajabi",
+)
+assert "Current Inline sender is Mo Jorjani" in first_name_guidance
+assert "[@Mo](inline://user?id=1600)" in first_name_guidance
+assert "@user:1600" not in first_name_guidance
+username_guidance = inline_tools.inline_sender_guidance(
+    sender_user_id="1600",
+    sender_username="morajabi",
+)
+assert "[@morajabi](inline://user?id=1600)" in username_guidance
+assert "@user:1600" not in username_guidance
 assert validate_config(PlatformConfig(token="top-level-token"))
 token_only = InlineAdapter(PlatformConfig(token="top-level-token"))
 assert token_only._token == "top-level-token"
@@ -550,6 +566,7 @@ def fake_inline_sidecar(path, body):
             "id": "8801",
             "chatId": body["target"]["chatId"],
             "fromId": "u1",
+            "sender": {"id": "u1", "firstName": "Ada", "lastName": "Lovelace", "username": "ada"},
             "message": "See Alice thread " + ("x" * 2000),
             "entities": {"entities": [
                 {
@@ -626,6 +643,12 @@ try:
     assert history_result["result"]["messages"][0]["text"].endswith("...")
     assert history_result["result"]["messages"][0]["entitySummary"] == 'mention "Alice" -> user:99 | thread link "thread" -> thread:77'
     assert history_result["result"]["messages"][0]["entityCount"] == 2
+    assert history_result["result"]["messages"][0]["sender"] == {
+        "id": "u1",
+        "firstName": "Ada",
+        "lastName": "Lovelace",
+        "username": "ada",
+    }
     assert "raw" not in json.dumps(history_result)
 
     send_result = json.loads(ctx.tool["handler"]({
@@ -1209,6 +1232,7 @@ async def assert_thread_bindings():
     await adapter._dispatch_message({
         "seq": 7,
         "chatId": "10",
+        "sender": {"id": "u1", "firstName": "Ada", "lastName": "Lovelace", "username": "ada"},
         "message": {
             "id": "5",
             "chatId": "10",
@@ -1225,7 +1249,9 @@ async def assert_thread_bindings():
     assert "This turn is already scoped to an Inline reply thread." in events[0].channel_prompt
     assert "Current Inline sender is" in events[0].channel_prompt
     assert "user:u1" in events[0].channel_prompt
-    assert '[@user:u1](inline://user?id=u1)' in events[0].channel_prompt
+    assert '[@Ada](inline://user?id=u1)' in events[0].channel_prompt
+    assert "@user:u1" not in events[0].channel_prompt
+    assert events[0].source.user_name == "Ada Lovelace"
     assert '[this thread](inline://thread?id=99)' in events[0].channel_prompt
     assert events[0].metadata["inline"]["sender_user_id"] == "u1"
     assert events[0].metadata["inline"]["thread_id"] == "99"
@@ -1449,6 +1475,7 @@ async def assert_default_dm_reply_thread_creation():
     await adapter._dispatch_message({
         "seq": 10,
         "chatId": "20",
+        "sender": {"id": "u1", "username": "fallback"},
         "message": {
             "id": "dm-7",
             "chatId": "20",
@@ -1468,6 +1495,8 @@ async def assert_default_dm_reply_thread_creation():
     assert events[0].source.chat_id == "20"
     assert events[0].source.thread_id == "dm-thread-99"
     assert events[0].source.parent_chat_id == "20"
+    assert events[0].source.user_name == "@fallback"
+    assert "[@fallback](inline://user?id=u1)" in events[0].channel_prompt
     assert "This turn is already scoped to an Inline reply thread." in events[0].channel_prompt
     assert events[0].metadata["inline"]["thread_id"] == "dm-thread-99"
     assert events[0].metadata["inline"]["parent_chat_id"] == "20"
@@ -1552,6 +1581,7 @@ async def assert_inline_entity_context():
     await adapter._dispatch_message({
         "seq": 15,
         "chatId": "10",
+        "sender": {"id": "u1", "firstName": "Mo", "lastName": "Jorjani", "username": "morajabi"},
         "message": {
             "id": "20",
             "chatId": "10",
@@ -1590,10 +1620,11 @@ async def assert_inline_entity_context():
     assert events[0].metadata["inline"]["sender_user_id"] == "u1"
     assert "Current Inline sender is" in events[0].channel_prompt
     assert "user:u1" in events[0].channel_prompt
-    assert '[@user:u1](inline://user?id=u1)' in events[0].channel_prompt
+    assert '[@Mo](inline://user?id=u1)' in events[0].channel_prompt
+    assert "@user:u1" not in events[0].channel_prompt
+    assert events[0].source.user_name == "Mo Jorjani"
     assert '[this chat](inline://chat?id=10)' in events[0].channel_prompt
     assert "Inline entity metadata maps visible text to IDs" in events[0].channel_prompt
-    assert "Alice" not in events[0].channel_prompt
     assert "https://example.com/docs" not in events[0].channel_prompt
 
 asyncio.run(assert_inline_entity_context())
@@ -1631,14 +1662,15 @@ async def assert_inline_thread_context_history():
                 "id": "9001",
                 "chatId": "123",
                 "fromId": "u2",
+                "sender": {"id": "u2", "firstName": "Alice", "username": "alice"},
                 "message": "Original incident report",
                 "date": "120",
             }]}}
         if path == "/history":
             return {"ok": True, "result": {"messages": [
                 {"id": "9002", "chatId": "456", "fromId": "u1", "message": "current", "date": "130"},
-                {"id": "9000", "chatId": "456", "fromId": "u3", "message": "Earlier analysis", "date": "121"},
-                {"id": "8999", "chatId": "456", "fromId": "u4", "message": "Needs deploy follow-up", "date": "119"},
+                {"id": "9000", "chatId": "456", "fromId": "u3", "sender": {"id": "u3", "firstName": "Dena"}, "message": "Earlier analysis", "date": "121"},
+                {"id": "8999", "chatId": "456", "fromId": "u4", "sender": {"id": "u4", "username": "qa_lead"}, "message": "Needs deploy follow-up", "date": "119"},
                 {"id": "8998", "chatId": "456", "fromId": "u5", "message": "too old", "date": "118"},
             ]}}
         raise AssertionError(f"unexpected sidecar path {path}")
@@ -1667,10 +1699,10 @@ async def assert_inline_thread_context_history():
     assert "parent_chat: 123 (Parent room)" in context
     assert "parent_message: 9001" in context
     assert "[Inline parent message]" in context
-    assert "message:9001 user:u2: Original incident report" in context
+    assert "message:9001 from Alice: Original incident report" in context
     assert "[Inline recent history]" in context
-    assert "message:9000 user:u3: Earlier analysis" in context
-    assert "message:8999 user:u4: Needs deploy follow-up" in context
+    assert "message:9000 from Dena: Earlier analysis" in context
+    assert "message:8999 from @qa_lead: Needs deploy follow-up" in context
     assert "message:9002" not in context
     assert "message:8998" not in context
     assert calls == [
@@ -1753,8 +1785,8 @@ async def assert_inline_reply_context_window():
     assert len(events) == 1
     context = events[0].channel_context
     assert "[Inline context around replied-to message]" in context
-    assert "message:50 user:u2: Can we ship this?" in context
-    assert "message:49 user:u3: Only after QA signs off" in context
+    assert "message:50 from an unknown sender: Can we ship this?" in context
+    assert "message:49 from an unknown sender: Only after QA signs off" in context
     assert "message:51" not in context
     assert calls == [("/history", {
         "target": {"chatId": "10"},
@@ -1806,7 +1838,7 @@ async def assert_observed_context_buffer():
     assert len(events) == 1
     assert events[0].text == "what changed?"
     assert "[Inline observed context]" in events[0].channel_context
-    assert "message:60 user:u2: QA found one blocker" in events[0].channel_context
+    assert "message:60 from an unknown sender: QA found one blocker" in events[0].channel_context
     assert "Inline observed context contains recent group messages" in events[0].channel_prompt
     assert adapter._observed_context == {}
 
@@ -2951,6 +2983,8 @@ async def assert_adapter_sidecar_loopback():
 
             info = await adapter.get_chat_info("chat:123")
             assert info["name"] == "Mock chat 123"
+            direct_info = await adapter.get_chat_info("user:42")
+            assert direct_info == {"id": "42", "name": "Grace Hopper", "type": "dm"}
 
             thread_id = await adapter.create_handoff_thread("123", "Spec thread")
             assert thread_id == "321"

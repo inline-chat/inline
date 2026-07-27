@@ -114,12 +114,23 @@ describe("sidecar contract helpers", () => {
         replies: { chatId: 11n },
         media: { media: { oneofKind: "photo", photo: { photoId: 5n } } },
       },
-    }, "1600")).toEqual({
+    }, "1600", {
+      id: "42",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      username: "ada",
+    })).toEqual({
       kind: "message.new",
       chatId: "10",
       seq: 7,
       date: "123",
       meId: "1600",
+      sender: {
+        id: "42",
+        firstName: "Ada",
+        lastName: "Lovelace",
+        username: "ada",
+      },
       message: {
         id: "99",
         fromId: "42",

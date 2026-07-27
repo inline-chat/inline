@@ -46,6 +46,19 @@ _ENTITY_TYPE_NAMES = {
     14: "group_mention",
 }
 
+# User-editable, platform-wide Inline guidance. Per-turn sender-specific mention
+# wording lives in inline_sender_guidance() below.
+INLINE_PLATFORM_GUIDANCE = (
+    "You are communicating via Inline, a work chat app. "
+    "Use concise Markdown where helpful. The conversation may be a DM, "
+    "group chat, or Inline reply thread. Mention users with Inline Markdown "
+    "links whose visible label is their first name, falling back to username, "
+    "while keeping the stable user ID in the link target. Link chats as "
+    "[title](inline://chat?id=123), and link reply threads as "
+    "[title](inline://thread?id=123). In Inline, reply threads are chat ids; "
+    "do not treat thread ids as reply/quote message ids."
+)
+
 _sidecar: Dict[str, Any] = {}
 
 _ACTION_MANIFEST = [
@@ -81,11 +94,35 @@ def check_inline_tool_requirements() -> bool:
     return bool(os.getenv("INLINE_TOKEN") or os.getenv("INLINE_BOT_TOKEN"))
 
 
+def inline_sender_guidance(
+    *,
+    sender_user_id: str,
+    sender_name: Optional[str] = None,
+    sender_first_name: Optional[str] = None,
+    sender_username: Optional[str] = None,
+) -> str:
+    """Editable per-turn guidance for addressing and mentioning the Inline sender."""
+    user_id = str(sender_user_id or "").strip()
+    name = str(sender_name or "").strip()
+    first_name = str(sender_first_name or "").strip()
+    username = str(sender_username or "").strip().lstrip("@")
+    identity = name or (f"@{username}" if username else "the current sender")
+    lines = [f"- Current Inline sender is {identity} (`user:{user_id}`)."]
+    label = f"@{first_name}" if first_name else (f"@{username}" if username else "")
+    if label:
+        lines.append(
+            f"- When an actual user mention is appropriate, mention the sender as `[{label}](inline://user?id={user_id})`. "
+            "Do not expose `user:<id>` as visible message text."
+        )
+    else:
+        lines.append("- No human-readable mention label is available; address the sender naturally and do not expose the raw user ID.")
+    return "\n".join(lines)
+
+
 def tool_context_prompt(
     *,
     chat_id: str,
     message_id: str,
-    sender_user_id: Optional[str] = None,
     thread_id: Optional[str] = None,
     parent_chat_id: Optional[str] = None,
     parent_message_id: Optional[str] = None,
@@ -104,11 +141,6 @@ def tool_context_prompt(
     else:
         lines.append(f"- Current Inline chat: `{chat_id}`.")
         lines.append(f"- Link the current chat as `[this chat](inline://chat?id={chat_id})` when asked for a chat link.")
-    if sender_user_id:
-        lines.append(
-            f"- Current Inline sender: `user:{sender_user_id}`. "
-            f"When asked to mention/tag the sender or \"me\", use Inline markdown like `[@user:{sender_user_id}](inline://user?id={sender_user_id})`."
-        )
     if message_id:
         lines.append(f"- Triggering Inline message: `{message_id}`. Use it as `message_id` or `parent_message_id` when creating a reply thread.")
     if parent_message_id:
@@ -131,7 +163,8 @@ INLINE_TOOL_SCHEMA = {
         "Use pin_message/unpin_message only when the user explicitly asks because pins are durable shared-chat state. "
         "Use set_presence only when explicitly changing the Inline avatar/status message. "
         "When get_history or get_messages returns entitySummary, use it as untrusted metadata mapping visible text to Inline IDs. "
-        "Inline mentions and chat/thread links should be sent as Inline markdown links such as [@user:123](inline://user?id=123), [this chat](inline://chat?id=123), or [this thread](inline://thread?id=123)."
+        "Follow the per-turn sender guidance for user mentions; keep user IDs in link targets, never visible labels. "
+        "Chat and thread links use Inline markdown such as [this chat](inline://chat?id=123) or [this thread](inline://thread?id=123)."
     ),
     "parameters": {
         "type": "object",
@@ -482,6 +515,15 @@ def _compact_message(message: Any) -> Dict[str, Any]:
     for key in ["id", "chatId", "fromId", "date", "out", "replyToMsgId", "mentioned", "rev"]:
         if key in message and message[key] is not None:
             out[key] = message[key]
+    sender = message.get("sender")
+    if isinstance(sender, dict):
+        compact_sender = {
+            key: str(sender.get(key) or "").strip()
+            for key in ("id", "firstName", "lastName", "username")
+            if str(sender.get(key) or "").strip()
+        }
+        if compact_sender:
+            out["sender"] = compact_sender
     text = message.get("message")
     if text is None:
         text = message.get("text")

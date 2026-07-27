@@ -49,7 +49,7 @@
   },
   "scripts": {
     "build": "mkdir -p plugin/inline/sidecar && bun build ./src/install.ts --outdir dist --entry-naming '[name].js' --target=node --format=esm --packages=bundle && bun build ./src/sidecar/index.ts --outdir plugin/inline/sidecar --entry-naming 'index.mjs' --target=node --format=esm --packages=bundle && tsc -p tsconfig.json --emitDeclarationOnly",
-    "lint": "bunx oxlint --ignore-path ../.oxlintignore scripts/release-stage.mjs src/install.ts src/sidecar/contract.ts src/sidecar/index.ts tests/adapter-python.test.ts tests/install.test.ts tests/package-artifact.test.ts tests/sidecar-contract.test.ts tests/sidecar-runtime.test.ts vitest.config.ts",
+    "lint": "bunx oxlint --ignore-path ../.oxlintignore scripts/release-stage.mjs src/install.ts src/sidecar/contract.ts src/sidecar/index.ts src/sidecar/user-directory.ts src/sidecar/user-directory.test.ts tests/adapter-python.test.ts tests/install.test.ts tests/package-artifact.test.ts tests/sidecar-contract.test.ts tests/sidecar-runtime.test.ts vitest.config.ts",
     "pretest": "bun run build",
     "prepack": "bun run build",
     "prepublishOnly": "bun run check",
