@@ -23,6 +23,7 @@ const BOT_PRESENCE_FAILED = 6
 const BOT_PRESENCE_WAITING = 7
 const BOT_PRESENCE_RUNNING = 8
 const BOT_PRESENCE_REVIEW = 9
+const UPDATE_DIALOG_FOLLOW_MODE = 60
 
 vi.mock("openclaw/plugin-sdk/models-provider-runtime", async () => {
   const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/models-provider-runtime")>(
@@ -262,6 +263,7 @@ type MonitorSetup = {
   sendMessageDelayMs?: number
   runtimeConfig?: Record<string, unknown>
   createSubthreadError?: string
+  followModeError?: string
   getMeError?: Error
   openKeyedStore?: ReturnType<typeof vi.fn>
 }
@@ -561,6 +563,15 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       }
     },
   ) => {
+    if (method === UPDATE_DIALOG_FOLLOW_MODE && input?.oneofKind === "updateDialogFollowMode") {
+      if (setup.followModeError) {
+        throw new Error(setup.followModeError)
+      }
+      return {
+        oneofKind: "updateDialogFollowMode",
+        updateDialogFollowMode: {},
+      }
+    }
     if (method === 1 && input?.oneofKind === "getMe") {
       if (setup.getMeError) {
         throw setup.getMeError
@@ -803,6 +814,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         INVOKE_MESSAGE_ACTION: 48,
         ANSWER_MESSAGE_ACTION: 49,
         SET_BOT_PRESENCE_STATE,
+        UPDATE_DIALOG_FOLLOW_MODE,
       },
       DialogFollowMode: {
         DIALOG_FOLLOW_MODE_UNSPECIFIED: 0,
@@ -2921,6 +2933,443 @@ describe("inline/monitor", () => {
         }),
       )
     })
+
+    await handle.stop()
+  })
+
+  it("handles /follow in a group and immediately uses the updated cached mode", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7300n,
+          message: {
+            id: 20n,
+            date: 1_700_000_020n,
+            fromId: 42n,
+            message: "/follow",
+            mentioned: false,
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 7300n,
+          message: {
+            id: 21n,
+            date: 1_700_000_021n,
+            fromId: 42n,
+            message: "continue without mentioning the bot",
+            mentioned: false,
+          },
+        },
+      ],
+      chats: {
+        "7300": {
+          kind: "group",
+          title: "Follow command room",
+          dialogFollowMode: 0,
+        },
+      },
+      historyByChat: {
+        "7300": [
+          { id: 20n, date: 1_700_000_020n, fromId: 42n, message: "/follow" },
+          { id: 21n, date: 1_700_000_021n, fromId: 42n, message: "continue without mentioning the bot" },
+        ],
+      },
+      dispatchReplyPayload: { text: "followed response" },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        groupAllowFrom: ["42"],
+        requireMention: true,
+        debounceMs: 0,
+        commands: { native: false },
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        UPDATE_DIALOG_FOLLOW_MODE,
+        {
+          oneofKind: "updateDialogFollowMode",
+          updateDialogFollowMode: {
+            peerId: {
+              type: {
+                oneofKind: "chat",
+                chat: { chatId: 7300n },
+              },
+            },
+            followMode: 1,
+          },
+        },
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 7300n,
+          text: expect.stringContaining("wake OpenClaw without an @mention"),
+          replyToMsgId: 20n,
+        }),
+      )
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: "continue without mentioning the bot",
+          ImplicitMentionKinds: ["follow_mode"],
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("handles /unfollow in a reply thread and immediately removes follow-mode relevance", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7401n,
+          message: {
+            id: 30n,
+            date: 1_700_000_030n,
+            fromId: 42n,
+            message: "/unfollow",
+            mentioned: false,
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 7401n,
+          message: {
+            id: 31n,
+            date: 1_700_000_031n,
+            fromId: 42n,
+            message: "ambient reply-thread follow-up",
+            mentioned: false,
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 7401n,
+          message: {
+            id: 32n,
+            date: 1_700_000_032n,
+            fromId: 42n,
+            message: "@inlinebot explicit follow-up",
+            mentioned: true,
+          },
+        },
+      ],
+      chats: {
+        "7400": { kind: "group", title: "Parent room" },
+        "7401": {
+          kind: "group",
+          title: "Reply thread",
+          parentChatId: 7400n,
+          parentMessageId: 29n,
+          dialogFollowMode: 1,
+        },
+      },
+      historyByChat: {
+        "7400": [{ id: 29n, date: 1_700_000_029n, fromId: 42n, message: "Parent anchor" }],
+        "7401": [
+          { id: 30n, date: 1_700_000_030n, fromId: 42n, message: "/unfollow" },
+          { id: 31n, date: 1_700_000_031n, fromId: 42n, message: "ambient reply-thread follow-up" },
+          { id: 32n, date: 1_700_000_032n, fromId: 42n, message: "@inlinebot explicit follow-up" },
+        ],
+      },
+      dispatchReplyPayload: { text: "explicit response" },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        groupAllowFrom: ["42"],
+        requireMention: true,
+        replyThreads: true,
+        debounceMs: 0,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        UPDATE_DIALOG_FOLLOW_MODE,
+        expect.objectContaining({
+          updateDialogFollowMode: expect.objectContaining({
+            peerId: {
+              type: {
+                oneofKind: "chat",
+                chat: { chatId: 7401n },
+              },
+            },
+            followMode: 2,
+          }),
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 7401n,
+          text: expect.stringContaining("Automatic follow and reply wakes are disabled"),
+          replyToMsgId: 30n,
+        }),
+      )
+    })
+
+    await handle.done
+    expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+    expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        Body: "@inlinebot explicit follow-up",
+        MentionSource: "explicit_bot",
+      }),
+    )
+    const explicitContext = harness.calls.finalizeInboundContext.mock.calls
+      .map((call) => call[0])
+      .find((context) => context.Body === "@inlinebot explicit follow-up")
+    expect(explicitContext).not.toHaveProperty("ImplicitMentionKinds")
+    expect(harness.calls.finalizeInboundContext).not.toHaveBeenCalledWith(
+      expect.objectContaining({ Body: "ambient reply-thread follow-up" }),
+    )
+    expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: 7401n,
+        text: "explicit response",
+      }),
+    )
+
+    await handle.stop()
+  })
+
+  it("does not mutate follow mode for an unauthorized DM command", async () => {
+    const runtime = { log: vi.fn(), error: vi.fn() }
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7450n,
+          message: {
+            id: 35n,
+            date: 1_700_000_035n,
+            fromId: 42n,
+            message: "/unfollow",
+            mentioned: false,
+          },
+        },
+      ],
+      chats: {
+        "7450": { kind: "direct", title: "Mo", peerUserId: 42n },
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        commands: {
+          ownerAllowFrom: ["99"],
+        },
+      } as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: runtime as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await handle.done
+    expect(runtime.log).toHaveBeenCalledWith(
+      expect.stringContaining("inline: drop control command (unauthorized) target=42"),
+    )
+    expect(harness.calls.invokeRaw).not.toHaveBeenCalledWith(
+      UPDATE_DIALOG_FOLLOW_MODE,
+      expect.anything(),
+    )
+    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+
+    await handle.stop()
+  })
+
+  it("does not mutate follow mode for a DM sender excluded by a restrictive channel allowlist", async () => {
+    const runtime = { log: vi.fn(), error: vi.fn() }
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7475n,
+          message: {
+            id: 37n,
+            date: 1_700_000_037n,
+            fromId: 42n,
+            message: "/follow",
+            mentioned: false,
+          },
+        },
+      ],
+      chats: {
+        "7475": { kind: "direct", title: "Mo", peerUserId: 42n },
+      },
+      resolveControlCommandGate: () => ({ shouldBlock: true, commandAuthorized: false }),
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open", allowFrom: ["99"] }),
+      runtime: runtime as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await handle.done
+    expect(runtime.log).toHaveBeenCalledWith(
+      expect.stringContaining("inline: drop control command (unauthorized) target=42"),
+    )
+    expect(harness.calls.invokeRaw).not.toHaveBeenCalledWith(
+      UPDATE_DIALOG_FOLLOW_MODE,
+      expect.anything(),
+    )
+    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+
+    await handle.stop()
+  })
+
+  it("targets the sender user peer for /follow in a DM", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7500n,
+          message: {
+            id: 40n,
+            date: 1_700_000_040n,
+            fromId: 42n,
+            message: "/follow",
+            mentioned: false,
+          },
+        },
+      ],
+      chats: {
+        "7500": { kind: "direct", title: "Mo", peerUserId: 42n },
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        UPDATE_DIALOG_FOLLOW_MODE,
+        expect.objectContaining({
+          updateDialogFollowMode: expect.objectContaining({
+            peerId: {
+              type: {
+                oneofKind: "user",
+                user: { userId: 42n },
+              },
+            },
+          }),
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("reports a retryable failure when the follow-mode mutation fails", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7600n,
+          message: {
+            id: 50n,
+            date: 1_700_000_050n,
+            fromId: 42n,
+            message: "/follow",
+            mentioned: false,
+          },
+        },
+      ],
+      chats: {
+        "7600": { kind: "group", title: "Failure room", dialogFollowMode: 0 },
+      },
+      followModeError: "rpc rejected",
+    })
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ groupPolicy: "open", groupAllowFrom: ["42"] }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log,
+    })
+
+    await waitFor(() => {
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.stringContaining("inline /follow failed for chat=7600: Error: rpc rejected"),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 7600n,
+          text: "Could not update Inline follow mode. Try /follow again.",
+          replyToMsgId: 50n,
+        }),
+      )
+      expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+    })
+
+    await handle.stop()
+  })
+
+  it("does not mutate follow mode for an unauthorized group command", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7700n,
+          message: {
+            id: 60n,
+            date: 1_700_000_060n,
+            fromId: 99n,
+            message: "/unfollow",
+            mentioned: false,
+          },
+        },
+      ],
+      chats: {
+        "7700": { kind: "group", title: "Protected room", dialogFollowMode: 1 },
+      },
+      resolveControlCommandGate: () => ({ shouldBlock: true, commandAuthorized: false }),
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ groupPolicy: "open", groupAllowFrom: ["42"] }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await handle.done
+    expect(harness.calls.invokeRaw).not.toHaveBeenCalledWith(
+      UPDATE_DIALOG_FOLLOW_MODE,
+      expect.anything(),
+    )
+    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
 
     await handle.stop()
   })
@@ -9175,6 +9624,62 @@ describe("inline/monitor", () => {
         }),
       )
     })
+
+    await handle.stop()
+  })
+
+  it("does not wake for a reply to the bot while the dialog is explicitly unfollowed", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 89n,
+          message: {
+            id: 7011n,
+            date: 1_700_000_101n,
+            fromId: 51n,
+            message: "follow up while unfollowed",
+            mentioned: false,
+            replyToMsgId: 5010n,
+          },
+        },
+      ],
+      chats: {
+        "89": { kind: "group", title: "Unfollowed room", dialogFollowMode: 2 },
+      },
+      historyByChat: {
+        "89": [
+          {
+            id: 5010n,
+            date: 1_700_000_100n,
+            fromId: 777n,
+            message: "earlier bot message",
+            out: true,
+          },
+        ],
+      },
+      dispatchReplyPayload: {
+        text: "should not send",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+        replyToBotWithoutMention: true,
+        historyLimit: 10,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await handle.done
+    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+    expect(harness.calls.finalizeInboundContext).not.toHaveBeenCalled()
 
     await handle.stop()
   })

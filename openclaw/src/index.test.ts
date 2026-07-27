@@ -106,7 +106,7 @@ describe("plugin entry", () => {
       "inline_bot_presence",
       "inline_parent_context",
     ])
-    expect(registeredCommandNames).toEqual(["threadreply"])
+    expect(registeredCommandNames).toEqual(["threadreply", "follow", "unfollow"])
     expect(hooks.has("message_sending")).toBe(true)
     expect(hooks.has("gateway_start")).toBe(true)
 

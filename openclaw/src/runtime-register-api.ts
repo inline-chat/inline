@@ -8,6 +8,7 @@ import { createInlineBotAvatarTool } from "./inline/bot-avatar-tool.js"
 import { createInlineProfileTool } from "./inline/profile-tool.js"
 import { createInlineBotCommandsTool } from "./inline/bot-commands-tool.js"
 import { syncInlineNativeCommands } from "./inline/bot-commands-sync.js"
+import { createInlineFollowCommands } from "./inline/follow-command.js"
 import { createInlineThreadReplyCommand } from "./inline/threadreply-command.js"
 
 export function registerInlinePluginFull(api: OpenClawPluginApi): void {
@@ -33,6 +34,9 @@ export function registerInlinePluginFull(api: OpenClawPluginApi): void {
     .registerCommand
   if (typeof registerCommand === "function") {
     registerCommand(createInlineThreadReplyCommand(api))
+    for (const command of createInlineFollowCommands(api)) {
+      registerCommand(command)
+    }
   }
   api.on("message_sending", (event, ctx) => {
     if (ctx.channelId !== "inline") return

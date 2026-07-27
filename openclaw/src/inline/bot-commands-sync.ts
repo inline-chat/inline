@@ -13,6 +13,7 @@ import {
 } from "./accounts.js"
 import { callInlineBotApi, type InlineBotCommand } from "./bot-commands-api.js"
 import { adaptInlineVisibleCopy } from "./message-formatting.js"
+import { listInlineFollowCommandSpecs } from "./follow-command.js"
 import { listInlineBuiltinCommandSpecs } from "./threadreply-command.js"
 
 type InlineCommandsSyncLogger = {
@@ -30,6 +31,7 @@ const INLINE_COMMAND_LIMIT = 100
 const INLINE_COMMAND_DESCRIPTION_LIMIT = 256
 const INLINE_COMMAND_RETRY_RATIO = 0.8
 const INLINE_NATIVE_COMMAND_PROVIDER = "inline"
+const INLINE_REQUIRED_COMMAND_NAMES = new Set(["follow", "unfollow", "threadreply"])
 
 function resolveInlineChannelCommands(cfg: OpenClawConfig): InlineCommandsConfig | undefined {
   const inline = cfg.channels?.inline
@@ -128,6 +130,14 @@ function appendUniqueCommand(
   out.push({ command: normalized, description: trimmedDescription })
 }
 
+function prioritizeRequiredInlineCommands(commands: InlineBotCommand[]): InlineBotCommand[] {
+  if (commands.length <= INLINE_COMMAND_LIMIT) return commands
+  return [
+    ...commands.filter((command) => INLINE_REQUIRED_COMMAND_NAMES.has(command.command)),
+    ...commands.filter((command) => !INLINE_REQUIRED_COMMAND_NAMES.has(command.command)),
+  ]
+}
+
 export function shouldSyncInlineNativeCommands(cfg: OpenClawConfig): boolean {
   const inlineNativeSetting = resolveInlineChannelCommands(cfg)?.native
   const effective = inlineNativeSetting ?? cfg.commands?.native ?? "auto"
@@ -183,6 +193,7 @@ async function buildInlineNativeCommandsForConfig(params: {
   })
   const pluginSpecs = [
     ...getPluginCommandSpecs("inline", { config: params.cfg }),
+    ...listInlineFollowCommandSpecs(),
     ...listInlineBuiltinCommandSpecs(),
   ]
   const seen = new Set<string>()
@@ -270,7 +281,7 @@ export async function syncInlineNativeCommands(params: {
       account,
       ...(params.logger ? { logger: params.logger } : {}),
     })
-    const commands = allCommands.slice(0, INLINE_COMMAND_LIMIT)
+    const commands = prioritizeRequiredInlineCommands(allCommands).slice(0, INLINE_COMMAND_LIMIT)
     if (allCommands.length > INLINE_COMMAND_LIMIT) {
       params.logger?.warn?.(
         `[inline] bot command sync truncating ${allCommands.length} commands to ${INLINE_COMMAND_LIMIT}`,

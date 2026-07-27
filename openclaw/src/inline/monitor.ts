@@ -148,6 +148,17 @@ import {
   handleInlineThreadReplyCommandWithConfigRuntime,
   listInlineBuiltinCommandSpecs,
 } from "./threadreply-command.js"
+import {
+  DIALOG_FOLLOW_MODE_UNFOLLOWED,
+  inlineFollowCommandFailureText,
+  inlineFollowCommandSuccessText,
+  inlineFollowCommandUsageText,
+  inlineFollowModeForCommand,
+  listInlineFollowCommandSpecs,
+  parseInlineFollowCommandBody,
+  summarizeInlineFollowCommandError,
+  updateInlineFollowMode,
+} from "./follow-command.js"
 
 const CHANNEL_ID = "inline" as const
 const INLINE_NATIVE_COMMAND_PROVIDER = CHANNEL_ID
@@ -983,6 +994,10 @@ function resolveInlineCommandAuthorized(params: {
   }).isAuthorizedSender
 }
 
+function hasExplicitInlineCommandAuthorizationPolicy(cfg: OpenClawConfig): boolean {
+  return cfg.commands?.ownerAllowFrom !== undefined || cfg.commands?.allowFrom !== undefined
+}
+
 async function resolveChatInfo(
   client: InlineSdkClient,
   cache: Map<bigint, CachedChatInfo>,
@@ -1150,6 +1165,7 @@ function listHostInlinePluginCommandSpecs(cfg: OpenClawConfig): Array<{ name: st
 function listInlinePluginCommandSpecs(cfg: OpenClawConfig): Array<{ name: string; description: string }> {
   return [
     ...listHostInlinePluginCommandSpecs(cfg),
+    ...listInlineFollowCommandSpecs(),
     ...listInlineBuiltinCommandSpecs(),
   ]
 }
@@ -1252,6 +1268,21 @@ function isInlineDialogFollowing(followMode: unknown): boolean {
     text === "following" ||
     text === "follow_mode_following" ||
     text === "dialog_following"
+  )
+}
+
+function isInlineDialogExplicitlyUnfollowed(followMode: unknown): boolean {
+  if (followMode == null || typeof followMode === "boolean") return false
+  if (typeof followMode === "number") return followMode === DIALOG_FOLLOW_MODE_UNFOLLOWED
+  if (typeof followMode === "bigint") {
+    return followMode === BigInt(DIALOG_FOLLOW_MODE_UNFOLLOWED)
+  }
+  const text = String(followMode).trim().toLowerCase()
+  return (
+    text === String(DIALOG_FOLLOW_MODE_UNFOLLOWED) ||
+    text === "unfollowed" ||
+    text === "follow_mode_unfollowed" ||
+    text === "dialog_unfollowed"
   )
 }
 
@@ -3619,7 +3650,9 @@ export async function monitorInlineProvider(params: {
       commandBody: normalizedCommandBody,
       agentId: route.agentId,
     })
-    const hasControlCommand = hasTextControlCommand || isRegisteredNativeCommand
+    const inlineFollowCommand = parseInlineFollowCommandBody(normalizedCommandBody)
+    const hasControlCommand =
+      hasTextControlCommand || isRegisteredNativeCommand || inlineFollowCommand != null
     const commandSource = hasControlCommand
       ? isRegisteredNativeCommand
         ? "native"
@@ -3733,7 +3766,12 @@ export async function monitorInlineProvider(params: {
       }
     }
 
-    if (isGroup && shouldBlockControlCommand) {
+    const shouldEnforceFollowCommandDmAuthorization =
+      inlineFollowCommand != null &&
+      !isGroup &&
+      (hasExplicitInlineCommandAuthorizationPolicy(cfg) ||
+        (effectiveAllowFrom.length > 0 && !effectiveAllowFrom.includes("*")))
+    if ((isGroup || shouldEnforceFollowCommandDmAuthorization) && shouldBlockControlCommand) {
       logInboundDrop({
         log: (m) => runtime.log?.(m),
         channel: CHANNEL_ID,
@@ -3801,6 +3839,7 @@ export async function monitorInlineProvider(params: {
             meId,
           })
         : historyContext
+    const explicitlyUnfollowed = isInlineDialogExplicitlyUnfollowed(chatInfo.dialogFollowMode)
     const followModeImplicitMention =
       isGroup &&
       !replyThreadRequireExplicitMention &&
@@ -3811,6 +3850,7 @@ export async function monitorInlineProvider(params: {
       isGroup &&
       replyThreadContext != null &&
       !replyThreadRequireExplicitMention &&
+      !explicitlyUnfollowed &&
       !followModeImplicitMention &&
       (effectiveHistoryContext.hasBotMessage ||
         await hasInlineThreadParticipationWithPersistence({
@@ -3821,6 +3861,7 @@ export async function monitorInlineProvider(params: {
     const replyThreadImplicitMention = followModeImplicitMention || historyReplyThreadImplicitMention
     const replyToBotImplicitMention =
       isGroup &&
+      !explicitlyUnfollowed &&
       (account.config.replyToBotWithoutMention ?? false) &&
       msg.replyToMsgId != null &&
       effectiveHistoryContext.repliedToBot
@@ -3892,6 +3933,48 @@ export async function monitorInlineProvider(params: {
     }
 
     const parseMarkdown = account.config.parseMarkdown ?? true
+    if (inlineFollowCommand) {
+      const { command, args } = inlineFollowCommand
+      let responseText: string
+      if (args) {
+        responseText = inlineFollowCommandUsageText(command)
+      } else {
+        const target = isGroup
+          ? { chatId }
+          : { userId: BigInt(senderId) }
+        try {
+          await updateInlineFollowMode({ client, target, command })
+          const { protocolMode } = inlineFollowModeForCommand(command)
+          chatCache.set(chatId, {
+            ...chatInfo,
+            dialogFollowMode: protocolMode,
+          })
+          responseText = inlineFollowCommandSuccessText(command)
+        } catch (error) {
+          log?.warn(
+            `[${account.accountId}] inline /${command} failed for chat=${String(chatId)}: ${summarizeInlineFollowCommandError(error)}`,
+          )
+          responseText = inlineFollowCommandFailureText(command)
+        }
+      }
+
+      const sent = await client.sendMessage({
+        chatId,
+        text: responseText,
+        replyToMsgId: msg.id,
+        parseMarkdown,
+      })
+      rememberSentBotMessage({
+        chatId,
+        messageId: sent.messageId,
+        replyThreadContext,
+      })
+      publishStatus({ lastOutboundAt: Date.now() })
+      await answerCallbackIfNeeded().catch((error) => {
+        runtime.error?.(`inline callback answer failed: ${String(error)}`)
+      })
+      return
+    }
     if (
       isInlineThreadReplyCommandBody(normalizedCommandBody) &&
       !hostInlinePluginCommandRegistered
