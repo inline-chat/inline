@@ -30,7 +30,7 @@ describe("extra and integration routes", () => {
     expect(rows.length).toBe(1)
   })
 
-  it("keeps root healthy even if waitlist subscribe hits duplicate-email failure", async () => {
+  it("treats repeated waitlist subscriptions as idempotent", async () => {
     const email = "waitlist-dup@test.com"
     const request = new Request("http://localhost/waitlist/subscribe", {
       method: "POST",
@@ -42,10 +42,11 @@ describe("extra and integration routes", () => {
     expect(first.status).toBe(200)
 
     const second = await app.handle(request)
-    expect(second.status).toBeGreaterThanOrEqual(400)
+    expect(second.status).toBe(200)
+    expect(await second.json()).toEqual({ ok: true })
 
-    const root = await app.handle(new Request("http://localhost/"))
-    expect(root.status).toBe(200)
+    const rows = await db.select().from(waitlistTable).where(eq(waitlistTable.email, email))
+    expect(rows.length).toBe(1)
   })
 
   it("creates there signups", async () => {

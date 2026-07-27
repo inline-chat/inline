@@ -121,6 +121,29 @@ export interface WaitlistOperationDependencies {
   ) => void
 }
 
+const WAITLIST_EMAIL_UNIQUE_CONSTRAINT =
+  "waitlist_email_unique"
+
+const isWaitlistEmailUniqueError = (
+  error: unknown,
+): boolean => {
+  if (!error || typeof error !== "object") {
+    return false
+  }
+
+  const record = error as Record<string, unknown>
+  return (
+    record["code"] === "23505" &&
+    (record["constraint"] ===
+      WAITLIST_EMAIL_UNIQUE_CONSTRAINT ||
+      record["constraint_name"] ===
+        WAITLIST_EMAIL_UNIQUE_CONSTRAINT ||
+      String(record["message"] ?? "").includes(
+        WAITLIST_EMAIL_UNIQUE_CONSTRAINT,
+      ))
+  )
+}
+
 export const makeWaitlistOperations = ({
   count,
   insert,
@@ -138,23 +161,32 @@ export const makeWaitlistOperations = ({
   subscribe: (input, clientIp) =>
     Effect.tryPromise({
       try: () => insert(input),
-      catch: (cause) =>
-        new WaitlistOperationFailure({
-          operation: "subscribe",
-          cause,
-        }),
+      catch: (cause) => cause,
     }).pipe(
-      Effect.andThen(
-        Effect.tryPromise({
-          try: () => notify(input, clientIp),
-          catch: (cause) => cause,
-        }).pipe(
-          Effect.catch((cause) =>
-            Effect.sync(() =>
-              noteNotificationFailure(cause),
+      Effect.as(true),
+      Effect.catch((cause) =>
+        isWaitlistEmailUniqueError(cause)
+          ? Effect.succeed(false)
+          : Effect.fail(
+              new WaitlistOperationFailure({
+                operation: "subscribe",
+                cause,
+              }),
             ),
-          ),
-        ),
+      ),
+      Effect.flatMap((created) =>
+        created
+          ? Effect.tryPromise({
+              try: () => notify(input, clientIp),
+              catch: (cause) => cause,
+            }).pipe(
+              Effect.catch((cause) =>
+                Effect.sync(() =>
+                  noteNotificationFailure(cause),
+                ),
+              ),
+            )
+          : Effect.void,
       ),
     ),
 })
