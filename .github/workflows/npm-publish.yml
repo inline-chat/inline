@@ -1,0 +1,205 @@
+name: Publish npm package
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Public package to publish
+        required: true
+        type: choice
+        options:
+          - protocol
+          - bot-api-types
+          - bot-api
+          - realtime-sdk
+          - openclaw
+          - hermes-agent
+      version:
+        description: Exact version already committed to package.json
+        required: true
+        type: string
+      tag:
+        description: npm dist-tag
+        required: true
+        default: latest
+        type: choice
+        options:
+          - latest
+          - alpha
+          - beta
+          - next
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish-${{ inputs.package }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish ${{ inputs.package }}@${{ inputs.version }}
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.1
+
+      - name: Setup Node and npm registry
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Use an OIDC-capable npm version
+        run: npm install --global npm@11.17.0
+
+      - name: Install workspace dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Resolve and validate release
+        id: release
+        env:
+          RELEASE_KEY: ${{ inputs.package }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          case "$RELEASE_KEY" in
+            protocol)
+              package_dir="packages/protocol"
+              package_name="@inline-chat/protocol"
+              ;;
+            bot-api-types)
+              package_dir="packages/bot-api-types"
+              package_name="@inline-chat/bot-api-types"
+              ;;
+            bot-api)
+              package_dir="packages/bot-api"
+              package_name="@inline-chat/bot-api"
+              ;;
+            realtime-sdk)
+              package_dir="sdk"
+              package_name="@inline-chat/realtime-sdk"
+              ;;
+            openclaw)
+              package_dir="openclaw"
+              package_name="@inline-openclaw/inline"
+              ;;
+            hermes-agent)
+              package_dir="hermes-agent"
+              package_name="@inline-chat/hermes-agent-adapter"
+              ;;
+            *)
+              echo "Unsupported package key: $RELEASE_KEY" >&2
+              exit 1
+              ;;
+          esac
+
+          manifest_name="$(node -p "require('./${package_dir}/package.json').name")"
+          manifest_version="$(node -p "require('./${package_dir}/package.json').version")"
+          manifest_private="$(node -p "Boolean(require('./${package_dir}/package.json').private)")"
+          repository_url="$(node -p "require('./${package_dir}/package.json').repository?.url ?? ''")"
+
+          if [[ "$manifest_name" != "$package_name" ]]; then
+            echo "Package mapping mismatch: expected $package_name, found $manifest_name" >&2
+            exit 1
+          fi
+          if [[ "$manifest_version" != "$RELEASE_VERSION" ]]; then
+            echo "Version mismatch: package.json has $manifest_version, requested $RELEASE_VERSION" >&2
+            exit 1
+          fi
+          if [[ "$manifest_private" != "false" ]]; then
+            echo "$package_name is marked private" >&2
+            exit 1
+          fi
+          if [[ "$repository_url" != "git+https://github.com/inline-chat/inline.git" ]]; then
+            echo "Repository URL must match the trusted GitHub repository" >&2
+            exit 1
+          fi
+
+          if [[ "$RELEASE_VERSION" == *-* ]]; then
+            prerelease_tag="${RELEASE_VERSION#*-}"
+            prerelease_tag="${prerelease_tag%%.*}"
+            if [[ "$RELEASE_TAG" != "$prerelease_tag" ]]; then
+              echo "Prerelease $RELEASE_VERSION must use the $prerelease_tag dist-tag" >&2
+              exit 1
+            fi
+          elif [[ "$RELEASE_TAG" != "latest" ]]; then
+            echo "Stable version $RELEASE_VERSION must use the latest dist-tag" >&2
+            exit 1
+          fi
+
+          if npm view "$package_name@$RELEASE_VERSION" version >/dev/null 2>&1; then
+            echo "$package_name@$RELEASE_VERSION already exists on npm" >&2
+            exit 1
+          fi
+
+          echo "package-dir=$package_dir" >> "$GITHUB_OUTPUT"
+          echo "package-name=$package_name" >> "$GITHUB_OUTPUT"
+
+      - name: Build shared package prerequisites
+        run: |
+          bun run --cwd packages/protocol build
+          bun run --cwd packages/oauth-core build
+          bun run --cwd packages/bot-api-types build
+          bun run --cwd sdk build
+
+      - name: Validate package
+        env:
+          RELEASE_KEY: ${{ inputs.package }}
+          PACKAGE_DIR: ${{ steps.release.outputs.package-dir }}
+        run: |
+          case "$RELEASE_KEY" in
+            protocol|realtime-sdk|openclaw)
+              bun run --cwd "$PACKAGE_DIR" check
+              ;;
+            bot-api-types|bot-api)
+              bun run --cwd "$PACKAGE_DIR" build
+              bun run --cwd "$PACKAGE_DIR" typecheck
+              bun run --cwd "$PACKAGE_DIR" lint
+              bun run --cwd "$PACKAGE_DIR" test
+              ;;
+            hermes-agent)
+              bun run --cwd hermes-agent release:preflight
+              ;;
+          esac
+
+      - name: Prepare Hermes isolated release directory
+        if: inputs.package == 'hermes-agent'
+        id: hermes
+        run: |
+          stage_log="$(mktemp)"
+          node hermes-agent/scripts/release-stage.mjs --prepare-only | tee "$stage_log"
+          stage_dir="$(sed -n 's/^Hermes release stage: //p' "$stage_log" | tail -1)"
+          if [[ -z "$stage_dir" || ! -f "$stage_dir/package.json" ]]; then
+            echo "Hermes release stage was not created" >&2
+            exit 1
+          fi
+          echo "package-dir=$stage_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Publish with npm trusted publishing
+        env:
+          PACKAGE_DIR: ${{ inputs.package == 'hermes-agent' && steps.hermes.outputs.package-dir || steps.release.outputs.package-dir }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          cd "$PACKAGE_DIR"
+          npm publish --access public --tag "$RELEASE_TAG"
+
+      - name: Verify registry version and dist-tag
+        env:
+          PACKAGE_NAME: ${{ steps.release.outputs.package-name }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          published_version="$(npm view "$PACKAGE_NAME@$RELEASE_VERSION" version)"
+          tagged_version="$(npm view "$PACKAGE_NAME" "dist-tags.$RELEASE_TAG")"
+          test "$published_version" = "$RELEASE_VERSION"
+          test "$tagged_version" = "$RELEASE_VERSION"

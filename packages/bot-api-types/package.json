@@ -3,6 +3,11 @@
   "version": "0.0.1",
   "private": false,
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/inline-chat/inline.git",
+    "directory": "packages/bot-api-types"
+  },
   "type": "module",
   "files": [
     "dist"

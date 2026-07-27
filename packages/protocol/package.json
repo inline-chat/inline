@@ -3,6 +3,11 @@
   "version": "0.0.6",
   "private": false,
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/inline-chat/inline.git",
+    "directory": "packages/protocol"
+  },
   "type": "module",
   "files": [
     "dist/core.d.ts",

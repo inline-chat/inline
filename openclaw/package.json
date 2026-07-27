@@ -2,6 +2,11 @@
   "name": "@inline-openclaw/inline",
   "version": "0.0.55",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/inline-chat/inline.git",
+    "directory": "openclaw"
+  },
   "type": "module",
   "files": [
     "dist/*.js",
