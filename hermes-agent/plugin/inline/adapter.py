@@ -1543,7 +1543,19 @@ class InlineAdapter(BasePlatformAdapter):
         chat_id = str(event.get("chatId") or msg.get("chatId") or "")
         if not msg_id or not chat_id:
             return
-        dedup_key = f"edit:{chat_id}:{msg_id}:{msg.get('rev') or event.get('seq') or ''}" if edit else f"{chat_id}:{msg_id}"
+        if edit:
+            dedup_key = f"edit:{chat_id}:{msg_id}:{msg.get('rev') or event.get('seq') or ''}"
+        else:
+            event_seq = str(event.get("seq") or "").strip()
+            message_date = str(msg.get("date") or event.get("date") or "").strip()
+            # Update sequence identifies the delivery even when an older server
+            # reuses a deleted message ID. Date keeps sequence-less events safer.
+            if event_seq:
+                dedup_key = f"new:{chat_id}:seq:{event_seq}"
+            elif message_date:
+                dedup_key = f"new:{chat_id}:msg:{msg_id}:date:{message_date}"
+            else:
+                dedup_key = f"new:{chat_id}:msg:{msg_id}"
         if self._is_duplicate(dedup_key):
             return
         from_id = str(msg.get("fromId") or "")

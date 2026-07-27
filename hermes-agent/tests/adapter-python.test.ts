@@ -2105,8 +2105,56 @@ async def assert_reply_thread_slash_command():
 
 asyncio.run(assert_reply_thread_slash_command())
 
+async def assert_new_message_delivery_dedup():
+    def event(seq, date, text):
+        return {
+            "seq": seq,
+            "date": date,
+            "chatId": "10",
+            "message": {
+                "id": "7",
+                "chatId": "10",
+                "fromId": "u1",
+                "message": text,
+                "date": date,
+                "peerId": {"peer": {"oneofKind": "user"}},
+            },
+        }
+
+    async def capture_with(adapter, deliveries):
+        events = []
+
+        async def capture(message_event):
+            events.append(message_event)
+
+        adapter.handle_message = capture
+        for delivery in deliveries:
+            await adapter._dispatch_message(delivery)
+        return [item.text for item in events]
+
+    sequenced = InlineAdapter(PlatformConfig(extra={**base_extra, "require_mention": False}))
+    assert await capture_with(sequenced, [
+        event(20, 100, "original"),
+        event(20, 100, "duplicate delivery"),
+        # A replacement can reuse both message ID and second-resolution date.
+        event(22, 100, "replacement"),
+    ]) == ["original", "replacement"]
+
+    legacy = InlineAdapter(PlatformConfig(extra={**base_extra, "require_mention": False}))
+    assert await capture_with(legacy, [
+        event(None, 100, "legacy original"),
+        event(None, 100, "legacy duplicate"),
+        event(None, 101, "legacy replacement"),
+    ]) == ["legacy original", "legacy replacement"]
+
+asyncio.run(assert_new_message_delivery_dedup())
+
 async def assert_group_room_controls():
+    next_seq = 9
+
     async def run(adapter, msg, reply=None):
+        nonlocal next_seq
+        next_seq += 1
         events = []
 
         async def capture(event):
@@ -2117,7 +2165,7 @@ async def assert_group_room_controls():
 
         adapter.handle_message = capture
         adapter._fetch_message = fetch_message
-        await adapter._dispatch_message({"seq": 10, "chatId": msg["chatId"], "message": msg})
+        await adapter._dispatch_message({"seq": next_seq, "chatId": msg["chatId"], "message": msg})
         return events
 
     base_msg = {
