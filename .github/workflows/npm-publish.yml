@@ -28,6 +28,10 @@ on:
           - alpha
           - beta
           - next
+      commit:
+        description: Exact main commit validated by the release wrapper
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -71,7 +75,14 @@ jobs:
           RELEASE_KEY: ${{ inputs.package }}
           RELEASE_VERSION: ${{ inputs.version }}
           RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
         run: |
+          checkout_commit="$(git rev-parse HEAD)"
+          if [[ "$checkout_commit" != "$RELEASE_COMMIT" ]]; then
+            echo "Commit mismatch: checked out $checkout_commit, requested $RELEASE_COMMIT" >&2
+            exit 1
+          fi
+
           case "$RELEASE_KEY" in
             protocol)
               package_dir="packages/protocol"
