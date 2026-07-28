@@ -27,6 +27,14 @@ describe("mcp app", () => {
     expect(await res.text()).toContain("Inline MCP server")
   })
 
+  it("returns the OpenAI Apps ownership challenge", async () => {
+    const app = createApp()
+    const res = await app.fetch(new Request("https://mcp.inline.chat/.well-known/openai-apps-challenge"))
+    expect(res.status).toBe(200)
+    expect(res.headers.get("content-type")).toContain("text/plain")
+    expect(await res.text()).toBe("eW-AusO0QlqMClXtl9W_XdVXoPzxO48GdZIGaQq7bvI")
+  })
+
   it("well-known protected resource points at configured oauth issuer", async () => {
     const app = createApp({ issuer: "https://mcp.inline.chat", oauthIssuer: "https://api.inline.chat" })
     const res = await app.fetch(new Request("https://mcp.inline.chat/.well-known/oauth-protected-resource"))

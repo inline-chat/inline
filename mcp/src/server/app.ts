@@ -18,6 +18,7 @@ const CORS_ALLOWED_METHODS = "GET, POST, DELETE, OPTIONS"
 const CORS_ALLOWED_HEADERS = "authorization, content-type, accept, mcp-session-id, mcp-protocol-version"
 const CORS_EXPOSE_HEADERS = "mcp-session-id, www-authenticate"
 const CORS_MAX_AGE_SECONDS = "600"
+const OPENAI_APPS_CHALLENGE = "eW-AusO0QlqMClXtl9W_XdVXoPzxO48GdZIGaQq7bvI"
 
 function normalizeHostLike(value: string): string | null {
   const trimmed = value.trim()
@@ -160,6 +161,10 @@ export function createApp(options?: CreateAppOptions): InlineMcpApp {
       const finish = (res: Response): Response => {
         if (!origin) return res
         return withCors(res, origin)
+      }
+
+      if (url.pathname === "/.well-known/openai-apps-challenge" && req.method === "GET") {
+        return finish(text(200, OPENAI_APPS_CHALLENGE))
       }
 
       if (url.pathname === "/mcp" && req.method === "POST" && !req.headers.get("mcp-session-id")) {
