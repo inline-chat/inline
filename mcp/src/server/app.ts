@@ -122,7 +122,8 @@ export function createApp(options?: CreateAppOptions): InlineMcpApp {
     config.allowedOriginHosts = defaultAllowedOriginHosts(config.issuer, config.allowedHosts)
   }
 
-  const mcp = Mcp.create({ config })
+  const legacyMcp = Mcp.create({ config, path: "/mcp", contractVersion: "legacy" })
+  const submissionMcp = Mcp.create({ config, path: "/mcp/v2", contractVersion: "submission-v2" })
   const initRateLimits = new Map<string, RateLimitBucket>()
 
   const consumeInitRateLimit = (key: string, nowMs: number): { allowed: boolean; retryAfterSeconds: number } => {
@@ -167,7 +168,7 @@ export function createApp(options?: CreateAppOptions): InlineMcpApp {
         return finish(text(200, OPENAI_APPS_CHALLENGE))
       }
 
-      if (url.pathname === "/mcp" && req.method === "POST" && !req.headers.get("mcp-session-id")) {
+      if ((url.pathname === "/mcp" || url.pathname === "/mcp/v2") && req.method === "POST" && !req.headers.get("mcp-session-id")) {
         const nowMs = Date.now()
         const ip = resolveClientIp(req)
         const rateLimit = consumeInitRateLimit(`endpoint:mcp-init:${ip}`, nowMs)
@@ -189,7 +190,7 @@ export function createApp(options?: CreateAppOptions): InlineMcpApp {
         return finish(withJson({ ok: true }))
       }
 
-      const mcpRes = await mcp.handle(req, url)
+      const mcpRes = (await legacyMcp.handle(req, url)) ?? (await submissionMcp.handle(req, url))
       if (mcpRes) return finish(mcpRes)
 
       const oauthRes = await OAuth.handle(req, url, config)

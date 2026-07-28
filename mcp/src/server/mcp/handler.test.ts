@@ -289,6 +289,33 @@ describe("/mcp", () => {
     expect(res.headers.get("mcp-session-id")).toBeTruthy()
   })
 
+  it("initializes the submission-v2 contract on its versioned endpoint", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(activeIntrospection({ grantId: "g1" })), { status: 200 }))
+
+    const app = createApp({
+      issuer: "http://localhost:8791",
+      oauthIntrospectionUrl: "https://api.inline.chat/oauth/introspect",
+      oauthInternalSharedSecret: "secret",
+    })
+
+    const res = await app.fetch(
+      new Request("http://localhost/mcp/v2", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer mcp_at_valid",
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(initRequest),
+      }),
+    )
+
+    expect(res.status).toBe(200)
+    expect(res.headers.get("content-type")).toContain("text/event-stream")
+    expect(res.headers.get("mcp-session-id")).toBeTruthy()
+    expect(await res.text()).toContain('"version":"0.2.0"')
+  })
+
   it("rejects session grant mismatches", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: unknown, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body ?? "{}")) as { token?: string }

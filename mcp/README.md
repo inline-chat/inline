@@ -36,7 +36,8 @@ The Docker image does not contain secrets. Provide runtime configuration through
 ## Endpoints
 
 - `GET /health`
-- `GET|POST|DELETE /mcp` (MCP Streamable HTTP)
+- `GET|POST|DELETE /mcp/v2` (current submission-safe MCP Streamable HTTP contract)
+- `GET|POST|DELETE /mcp` (deprecated legacy MCP contract for existing clients)
 - `GET /.well-known/oauth-authorization-server`
 - `GET /.well-known/oauth-protected-resource`
 - `POST /oauth/register` (alias: `POST /register`)
@@ -50,7 +51,9 @@ The Docker image does not contain secrets. Provide runtime configuration through
 OAuth routes above are proxied to the API OAuth server (`https://api.inline.chat` in default config).
 If embedding the app programmatically, you can override this via `createApp({ oauthProxyBaseUrl })`.
 
-## MCP Tools (v3)
+## MCP Tools (submission v2)
+
+Connect new clients to `https://mcp.inline.chat/mcp/v2`. Every conversation-scoped tool uses the stable `chatId`, including DMs. The legacy `/mcp` endpoint retains the earlier `chatId | userId` and selector shapes during the migration window; it is not intended for new integrations or ChatGPT submission scanning.
 
 - `account.me` (read-only): inspect current MCP authorization, scopes, and allowed chat context.
   - Input: `{}`
@@ -65,47 +68,46 @@ If embedding the app programmatically, you can override this via `createApp({ oa
   - Input: `{ query?, limit?, unreadOnly?, sort? }`
   - Output: `{ query, sort, bestMatch, unreadOnly, items[] }`
 - `conversations.get` (read-only): inspect one resolved chat/DM, including participants and pinned message IDs.
-  - Input: `{ chatId? | userId? }`
+  - Input: `{ chatId }`
   - Output: `{ chat, details, participants[] }`
 - `conversations.create` (write): create a new thread/chat in an allowed space or home threads.
   - Input: `{ title, spaceId?, description?, emoji?, isPublic?, participantUserIds? }`
   - Output: `{ chat }`
 - `files.upload` (write): secure media upload helper (base64 or HTTPS URL source) that returns Inline media IDs.
-  - Input: `{ kind?, base64? | url?, fileName?, contentType?, width?, height?, duration? }`
+  - Input: `{ sourceType: "base64" | "url", source, kind?, fileName?, contentType?, width?, height?, duration? }`
   - Output: `{ ok, source, sourceRef, sizeBytes, upload: { fileUniqueId, media, uploadKind, fileName, contentType } }`
-- `files.get` (read-only): extract file/media metadata from specific message IDs or recent messages.
-  - Input: `{ chatId? | userId?, messageId?, messageIds?, limit?, includeUrlPreviews? }`
+- `files.get` (read-only): extract file/media metadata from one or more known message IDs.
+  - Input: `{ chatId, messageIds, includeUrlPreviews? }`
   - Output: `{ chat, source, messageIds, includeUrlPreviews, items[] }`
 - `messages.list` (read-only): list messages from a chat or DM with useful filters.
-  - Input: `{ chatId? | userId?, limit?, offsetId?, since?, until?, content? }`
+  - Input: `{ chatId, limit?, offsetId?, since?, until?, content? }`
   - Output: `{ chat, nextOffsetId, since, until, content, messages[] }`
-- `messages.context` (read-only): fetch a before/after window around a message ID, or latest compact context.
-  - Input: `{ chatId? | userId?, anchorMessageId?, before?, after?, includeAnchor?, content? }`
+- `messages.context` (read-only): fetch a before/after window around a known message ID.
+  - Input: `{ chatId, anchorMessageId, before?, after?, includeAnchor?, content? }`
   - Output: `{ chat, anchorMessageId, before, after, includeAnchor, content, messages[] }`
 - `messages.search` (read-only): query messages in one chat/DM only (no global message search).
-  - Input: `{ chatId? | userId?, query?, limit?, since?, until?, content? }`
+  - Input: `{ chatId, query, limit?, since?, until?, content? }`
   - Output: `{ query, content, since, until, chat, messages[] }`
 - `messages.unread` (read-only): list unread messages across all approved conversations.
   - Input: `{ limit?, since?, until?, content? }`
   - Output: `{ scannedChats, since, until, content, items[] }`
 - `messages.send` (write): send to chat or DM.
-  - Input: `{ chatId? | userId?, text, replyToMsgId?, sendMode? }`
-  - Output: `{ ok, chatId?|userId?, messageId, metadata }`
+  - Input: `{ chatId, text, replyToMsgId?, sendMode? }`
+  - Output: `{ ok, chatId, messageId, metadata }`
 - `messages.send_media` (write): send uploaded photo/video/document to chat or DM.
-  - Input: `{ chatId? | userId?, mediaKind, mediaId, text?, replyToMsgId?, sendMode? }`
-  - Output: `{ ok, chatId?|userId?, media, messageId, metadata }`
+  - Input: `{ chatId, mediaKind, mediaId, text?, replyToMsgId?, sendMode? }`
+  - Output: `{ ok, chatId, media, messageId, metadata }`
 - `messages.send_batch` (write): send an ordered list of text/media items to a chat or DM.
-  - Input: `{ chatId? | userId?, stopOnError?, items[] }`
-  - `items[]` supports:
-    - `{ type: "text", text, replyToMsgId?, sendMode? }`
-    - `{ type: "media", mediaKind, mediaId, text?, replyToMsgId?, sendMode? }`
-  - Output: `{ ok, chatId?|userId?, total, sentCount, failedCount, results[] }`
+  - Input: `{ chatId, stopOnError?, items[] }`
+  - Every item has `{ type, content, replyToMsgId?, sendMode? }`.
+  - `type` is `"text"`, `"photo"`, `"video"`, or `"document"`; `content` is text for a text item and an uploaded media ID otherwise.
+  - Output: `{ ok, chatId, total, sentCount, failedCount, results[] }`
 
 Common workflows:
 1. Resolve a target clearly: `spaces.list` or `people.search`, then `conversations.list`, then `conversations.get`.
 2. Summarize a thread: `messages.list` with a time window (`since`/`until`) then summarize in the model.
 3. Read around a found message: `messages.search` or `messages.unread`, then `messages.context`.
-4. Find links/media/files in a thread: `messages.search` with `content: "links" | "media" | "files"`, or `files.get` for concrete file metadata.
+4. Find links/media/files in a thread: `messages.list` with `content: "links" | "media" | "files"`, then `files.get` for concrete metadata from known message IDs.
 5. Create thread then post: `conversations.create` then `messages.send`.
 6. List unread from yesterday: `messages.unread` with `since: "yesterday"` and `until: "yesterday"`.
 7. Send a photo/file from external source: `files.upload` then `messages.send_media`.

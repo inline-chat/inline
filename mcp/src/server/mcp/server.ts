@@ -43,7 +43,19 @@ type ResolvedUploadSource = {
 type SendMode = "normal" | "silent"
 type ConversationSort = "relevance" | "recent" | "unread"
 
+export type McpToolContract = "legacy" | "submission-v2"
+
+// Keep the deployed /mcp descriptors and behavior intact for cached or hand-written clients.
+// /mcp/v2 selects the explicit branches below so submission scanners never see legacy ambiguity.
+
 type SendBatchItem = {
+  type: "text" | InlineUploadedMediaKind
+  content: string
+  replyToMsgId?: string
+  sendMode?: SendMode
+}
+
+type LegacySendBatchItem = {
   type: "text" | "media"
   text?: string
   mediaKind?: InlineUploadedMediaKind
@@ -1434,6 +1446,14 @@ const fileUploadOutputSchema = z.object({
 
 const sendMessageOutputSchema = z.object({
   ok: z.boolean(),
+  chatId: z.string(),
+  text: z.string().optional(),
+  messageId: z.string().nullable(),
+  metadata: sendMetadataOutputSchema,
+})
+
+const legacySendMessageOutputSchema = z.object({
+  ok: z.boolean(),
   chatId: z.string().optional(),
   userId: z.string().optional(),
   text: z.string().optional(),
@@ -1442,6 +1462,18 @@ const sendMessageOutputSchema = z.object({
 })
 
 const sendMediaMessageOutputSchema = z.object({
+  ok: z.boolean(),
+  chatId: z.string(),
+  media: z.object({
+    kind: z.enum(["photo", "video", "document"]),
+    id: z.string(),
+  }),
+  text: z.string().optional(),
+  messageId: z.string().nullable(),
+  metadata: sendMetadataOutputSchema,
+})
+
+const legacySendMediaMessageOutputSchema = z.object({
   ok: z.boolean(),
   chatId: z.string().optional(),
   userId: z.string().optional(),
@@ -1456,7 +1488,7 @@ const sendMediaMessageOutputSchema = z.object({
 
 const sendBatchResultOutputSchema = z.object({
   index: z.number(),
-  type: z.enum(["text", "media"]),
+  type: z.enum(["text", "photo", "video", "document"]),
   status: z.enum(["sent", "failed"]),
   messageId: z.string().nullable().optional(),
   media: z
@@ -1472,13 +1504,39 @@ const sendBatchResultOutputSchema = z.object({
 
 const sendBatchOutputSchema = z.object({
   ok: z.boolean(),
+  chatId: z.string(),
+  stopOnError: z.boolean(),
+  total: z.number(),
+  sentCount: z.number(),
+  failedCount: z.number(),
+  results: z.array(sendBatchResultOutputSchema),
+})
+
+const legacySendBatchOutputSchema = z.object({
+  ok: z.boolean(),
   chatId: z.string().optional(),
   userId: z.string().optional(),
   stopOnError: z.boolean(),
   total: z.number(),
   sentCount: z.number(),
   failedCount: z.number(),
-  results: z.array(sendBatchResultOutputSchema),
+  results: z.array(
+    z.object({
+      index: z.number(),
+      type: z.enum(["text", "media"]),
+      status: z.enum(["sent", "failed"]),
+      messageId: z.string().nullable().optional(),
+      media: z
+        .object({
+          kind: z.enum(["photo", "video", "document"]),
+          id: z.string(),
+        })
+        .optional(),
+      text: z.string().optional(),
+      metadata: sendMetadataOutputSchema.optional(),
+      error: z.string().optional(),
+    }),
+  ),
 })
 
 const messagesListOutputSchema = z.object({
@@ -1541,6 +1599,19 @@ const fileItemOutputSchema = z.object({
 
 const filesGetOutputSchema = z.object({
   chat: chatMetadataOutputSchema,
+  source: z.literal("messages"),
+  messageIds: z.array(z.string()),
+  includeUrlPreviews: z.boolean(),
+  items: z.array(
+    z.object({
+      message: messageOutputSchema,
+      files: z.array(fileItemOutputSchema),
+    }),
+  ),
+})
+
+const legacyFilesGetOutputSchema = z.object({
+  chat: chatMetadataOutputSchema,
   source: z.enum(["messages", "recent"]),
   messageIds: z.array(z.string()).nullable(),
   includeUrlPreviews: z.boolean(),
@@ -1556,12 +1627,15 @@ export function createInlineMcpServer(params: {
   grant: McpGrant
   inline: InlineApi
   resourceMetadataUrl?: string
+  contractVersion?: McpToolContract
 }): McpServer {
   const resourceMetadataUrl = params.resourceMetadataUrl ?? DEFAULT_RESOURCE_METADATA_URL
+  const contractVersion = params.contractVersion ?? "legacy"
+  const submissionV2 = contractVersion === "submission-v2"
   const server = new McpServer(
     {
       name: "inline",
-      version: "0.1.0",
+      version: submissionV2 ? "0.2.0" : "0.1.0",
       title: "Inline",
       description: "Scoped access to Inline work chats for thread-first agents.",
       websiteUrl: "https://inline.chat",
@@ -1632,7 +1706,9 @@ export function createInlineMcpServer(params: {
         "Use this tool to list the spaces available to this MCP grant, including chat and unread counts. Use it before creating a space thread or narrowing conversation searches by team/workspace.",
       inputSchema: {
         query: z.string().min(1).optional().describe("Optional space name or space ID filter"),
-        limit: z.number().int().min(1).max(50).default(20).describe("Maximum spaces to return"),
+        limit: submissionV2
+          ? z.number().int().min(1).max(50).optional().describe("Maximum spaces to return; defaults to 20")
+          : z.number().int().min(1).max(50).default(20).describe("Maximum spaces to return"),
       },
       outputSchema: spacesListOutputSchema,
       annotations: {
@@ -1671,7 +1747,9 @@ export function createInlineMcpServer(params: {
         "Use this tool to resolve a person by name, @username, or user ID across allowed DMs and spaces. It returns userId for DMs and participant selection without exposing phone or email.",
       inputSchema: {
         query: z.string().min(1).optional().describe("Name, @username, or user ID. Omit to list known people in allowed contexts."),
-        limit: z.number().int().min(1).max(50).default(20).describe("Maximum people to return"),
+        limit: submissionV2
+          ? z.number().int().min(1).max(50).optional().describe("Maximum people to return; defaults to 20")
+          : z.number().int().min(1).max(50).default(20).describe("Maximum people to return"),
       },
       outputSchema: peopleSearchOutputSchema,
       annotations: {
@@ -1713,8 +1791,12 @@ export function createInlineMcpServer(params: {
         "Use this tool to find the chatId for a person, DM, thread, or space chat before listing messages or sending. Query can be a contact name, @username, chat title, or chat ID; omit query for recent approved conversations.",
       inputSchema: {
         query: z.string().min(1).optional().describe("Optional contact name, chat title, or chat ID"),
-        limit: z.number().int().min(1).max(50).default(20).describe("Maximum conversations to return"),
-        unreadOnly: z.boolean().default(false).describe("Only include conversations with unread messages"),
+        limit: submissionV2
+          ? z.number().int().min(1).max(50).optional().describe("Maximum conversations to return; defaults to 20")
+          : z.number().int().min(1).max(50).default(20).describe("Maximum conversations to return"),
+        unreadOnly: submissionV2
+          ? z.boolean().optional().describe("Only include conversations with unread messages; defaults to false")
+          : z.boolean().default(false).describe("Only include conversations with unread messages"),
         sort: z
           .enum(["relevance", "recent", "unread"])
           .optional()
@@ -1796,12 +1878,17 @@ export function createInlineMcpServer(params: {
     "conversations.get",
     {
       title: "Get Inline Conversation",
-      description:
-        "Use this tool after resolving a chatId or DM userId to inspect the conversation metadata, participants, pinned message IDs, and parent/thread details before reading or sending.",
-      inputSchema: {
-        chatId: z.string().min(1).optional().describe("Inline chat ID"),
-        userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
-      },
+      description: submissionV2
+        ? "Use this tool after resolving a chatId to inspect conversation metadata, participants, pinned message IDs, and parent/thread details before reading or sending. DMs also use chatId."
+        : "Use this tool after resolving a chatId or DM userId to inspect the conversation metadata, participants, pinned message IDs, and parent/thread details before reading or sending.",
+      inputSchema: submissionV2
+        ? {
+            chatId: z.string().regex(/^[1-9]\d*$/).describe("Inline chat ID; required for every conversation, including DMs"),
+          }
+        : {
+            chatId: z.string().min(1).optional().describe("Inline chat ID"),
+            userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
+          },
       outputSchema: conversationGetOutputSchema,
       annotations: {
         title: "Get Conversation",
@@ -1816,7 +1903,9 @@ export function createInlineMcpServer(params: {
       const scopes = auth?.scopes ?? params.grant.scope.split(/\s+/).filter(Boolean)
       requireScope(scopes, "messages:read")
 
-      const target = parseTarget({ chatId, userId }, "conversations.get")
+      const target = submissionV2
+        ? { chatId: parseChatId(chatId!) }
+        : parseTarget({ chatId, userId }, "conversations.get")
       const details = await params.inline.getConversation(target)
       const payload = conversationDetailsPayload(details)
       return {
@@ -1839,8 +1928,12 @@ export function createInlineMcpServer(params: {
         spaceId: z.string().min(1).optional().describe("Parent space ID for a thread"),
         description: z.string().max(1000).optional().describe("Optional description"),
         emoji: z.string().max(16).optional().describe("Optional emoji icon"),
-        isPublic: z.boolean().default(false).describe("Whether the conversation is visible to members of its Inline context; this does not publish it to the public internet"),
-        participantUserIds: z.array(z.string().min(1)).max(50).default([]).describe("Participant user IDs (for private chats)"),
+        isPublic: submissionV2
+          ? z.boolean().optional().describe("Whether the conversation is visible to members of its Inline context; defaults to false and does not publish it to the public internet")
+          : z.boolean().default(false).describe("Whether the conversation is visible to members of its Inline context; this does not publish it to the public internet"),
+        participantUserIds: submissionV2
+          ? z.array(z.string().min(1)).max(50).optional().describe("Participant user IDs for private chats; defaults to an empty list")
+          : z.array(z.string().min(1)).max(50).default([]).describe("Participant user IDs (for private chats)"),
       },
       outputSchema: conversationCreatedOutputSchema,
       annotations: {
@@ -1892,18 +1985,30 @@ export function createInlineMcpServer(params: {
     "files.upload",
     {
       title: "Upload File For Inline Media",
-      description:
-        "Use this tool to upload a local base64 payload or public HTTPS URL before sending media. It returns an Inline media kind/id pair for messages.send_media or messages.send_batch.",
-      inputSchema: {
-        kind: z.enum(["auto", "photo", "video", "document"]).default("auto").describe("Upload kind (`auto` infers photo/video/document)"),
-        base64: z.string().min(1).optional().describe("Base64 payload or data URL"),
-        url: z.string().url().optional().describe("HTTPS URL to download and upload"),
-        fileName: z.string().max(255).optional().describe("Optional file name override"),
-        contentType: z.string().max(255).optional().describe("Optional content type override"),
-        width: z.number().int().positive().optional().describe("Video width (video uploads only)"),
-        height: z.number().int().positive().optional().describe("Video height (video uploads only)"),
-        duration: z.number().int().positive().optional().describe("Video duration in seconds (video uploads only)"),
-      },
+      description: submissionV2
+        ? "Use this tool to upload one base64 payload or public HTTPS URL before sending media. Set sourceType to describe the required source value. It returns an Inline media kind/id pair for messages.send_media or messages.send_batch."
+        : "Use this tool to upload a local base64 payload or public HTTPS URL before sending media. It returns an Inline media kind/id pair for messages.send_media or messages.send_batch.",
+      inputSchema: submissionV2
+        ? {
+            sourceType: z.enum(["base64", "url"]).describe("How to interpret source"),
+            source: z.string().min(1).describe("Base64 payload or data URL when sourceType is base64; public HTTPS URL when sourceType is url"),
+            kind: z.enum(["auto", "photo", "video", "document"]).optional().describe("Upload kind; defaults to auto, which infers photo, video, or document"),
+            fileName: z.string().max(255).optional().describe("Optional file name override"),
+            contentType: z.string().max(255).optional().describe("Optional content type override"),
+            width: z.number().int().positive().optional().describe("Video width (video uploads only)"),
+            height: z.number().int().positive().optional().describe("Video height (video uploads only)"),
+            duration: z.number().int().positive().optional().describe("Video duration in seconds (video uploads only)"),
+          }
+        : {
+            kind: z.enum(["auto", "photo", "video", "document"]).default("auto").describe("Upload kind (`auto` infers photo/video/document)"),
+            base64: z.string().min(1).optional().describe("Base64 payload or data URL"),
+            url: z.string().url().optional().describe("HTTPS URL to download and upload"),
+            fileName: z.string().max(255).optional().describe("Optional file name override"),
+            contentType: z.string().max(255).optional().describe("Optional content type override"),
+            width: z.number().int().positive().optional().describe("Video width (video uploads only)"),
+            height: z.number().int().positive().optional().describe("Video height (video uploads only)"),
+            duration: z.number().int().positive().optional().describe("Video duration in seconds (video uploads only)"),
+          },
       outputSchema: fileUploadOutputSchema,
       annotations: {
         title: "Upload File",
@@ -1916,18 +2021,22 @@ export function createInlineMcpServer(params: {
     },
     async (
       {
-        kind,
+        sourceType,
+        source: sourceInput,
         base64,
         url,
+        kind,
         fileName,
         contentType,
         width,
         height,
         duration,
       }: {
-        kind?: RequestedUploadKind
+        sourceType?: "base64" | "url"
+        source?: string
         base64?: string
         url?: string
+        kind?: RequestedUploadKind
         fileName?: string
         contentType?: string
         width?: number
@@ -1940,7 +2049,9 @@ export function createInlineMcpServer(params: {
       const scopes = auth?.scopes ?? params.grant.scope.split(/\s+/).filter(Boolean)
       requireScope(scopes, "messages:write")
 
-      const source = await resolveUploadSource({ base64, url })
+      const source = submissionV2
+        ? await resolveUploadSource(sourceType === "base64" ? { base64: sourceInput } : { url: sourceInput })
+        : await resolveUploadSource({ base64, url })
       const requestedKind = parseUploadKind(kind)
       const safeContentType = parseContentTypeArg(contentType) ?? source.inferredContentType
       const chosenKind = chooseUploadType({
@@ -1993,17 +2104,24 @@ export function createInlineMcpServer(params: {
     "files.get",
     {
       title: "Get Inline Message Files",
-      description:
-        "Use this tool to extract file/media metadata and URLs from specific message IDs, or from recent messages in one chat/DM when message IDs are not known.",
-      inputSchema: {
-        chatId: z.string().min(1).optional().describe("Inline chat ID"),
-        userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
-        messageId: z.string().min(1).optional().describe("Single message ID to inspect"),
-        messageIds: z.array(z.string().min(1)).max(20).optional().describe("Message IDs to inspect"),
-        limit: z.number().int().min(1).max(50).default(20).describe("Recent messages to scan when no message IDs are provided"),
-        includeUrlPreviews: z.boolean().default(true).describe("Include media embedded in URL previews"),
-      },
-      outputSchema: filesGetOutputSchema,
+      description: submissionV2
+        ? "Use this tool to extract file and media metadata from 1-20 known message IDs in one chat. Use messages.list with a files or media content filter first when message IDs are not known. DMs also use chatId."
+        : "Use this tool to extract file/media metadata and URLs from specific message IDs, or from recent messages in one chat/DM when message IDs are not known.",
+      inputSchema: submissionV2
+        ? {
+            chatId: z.string().regex(/^[1-9]\d*$/).describe("Inline chat ID; required for every conversation, including DMs"),
+            messageIds: z.array(z.string().regex(/^[1-9]\d*$/)).min(1).max(20).describe("One to twenty message IDs from this chat to inspect"),
+            includeUrlPreviews: z.boolean().optional().describe("Include media embedded in URL previews; defaults to true"),
+          }
+        : {
+            chatId: z.string().min(1).optional().describe("Inline chat ID"),
+            userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
+            messageId: z.string().min(1).optional().describe("Single message ID to inspect"),
+            messageIds: z.array(z.string().min(1)).max(20).optional().describe("Message IDs to inspect"),
+            limit: z.number().int().min(1).max(50).default(20).describe("Recent messages to scan when no message IDs are provided"),
+            includeUrlPreviews: z.boolean().default(true).describe("Include media embedded in URL previews"),
+          },
+      outputSchema: submissionV2 ? filesGetOutputSchema : legacyFilesGetOutputSchema,
       annotations: {
         title: "Get Files",
         readOnlyHint: true,
@@ -2034,12 +2152,14 @@ export function createInlineMcpServer(params: {
       const scopes = auth?.scopes ?? params.grant.scope.split(/\s+/).filter(Boolean)
       requireScope(scopes, "messages:read")
 
-      const target = parseTarget({ chatId, userId }, "files.get")
+      const target = submissionV2
+        ? { chatId: parseChatId(chatId!) }
+        : parseTarget({ chatId, userId }, "files.get")
       const ids = [...(messageId ? [messageId] : []), ...(messageIds ?? [])].map((id) => parseInlineId(id, "messageId"))
       if (ids.length > 20) throw new Error("messageIds length must be at most 20")
       const includePreviews = includeUrlPreviews !== false
       const result =
-        ids.length > 0
+        submissionV2 || ids.length > 0
           ? await params.inline.getMessages({
               ...target,
               messageIds: ids,
@@ -2059,8 +2179,8 @@ export function createInlineMcpServer(params: {
         .filter((item) => item.files.length > 0)
       const payload = {
         chat: chatMetadata(result.chat),
-        source: ids.length > 0 ? ("messages" as const) : ("recent" as const),
-        messageIds: ids.length > 0 ? ids.map((id) => id.toString()) : null,
+        source: submissionV2 || ids.length > 0 ? ("messages" as const) : ("recent" as const),
+        messageIds: submissionV2 || ids.length > 0 ? ids.map((id) => id.toString()) : null,
         includeUrlPreviews: includePreviews,
         items,
       }
@@ -2077,18 +2197,28 @@ export function createInlineMcpServer(params: {
     "messages.send_media",
     {
       title: "Send Inline Media Message",
-      description:
-        "Use this tool to send an uploaded photo, video, or document to one chat or DM. Delivery is recipient-visible and cannot be withdrawn through this tool. Call files.upload first unless you already have an Inline media ID.",
-      inputSchema: {
-        chatId: z.string().min(1).optional().describe("Inline chat ID"),
-        userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
-        mediaKind: z.enum(["photo", "video", "document"]).describe("Uploaded media kind"),
-        mediaId: z.string().min(1).describe("Uploaded media ID"),
-        text: z.string().max(8000).optional().describe("Optional caption text"),
-        replyToMsgId: z.string().min(1).optional().describe("Reply-to message ID"),
-        sendMode: z.enum(["normal", "silent"]).default("normal").describe("Message delivery mode"),
-      },
-      outputSchema: sendMediaMessageOutputSchema,
+      description: submissionV2
+        ? "Use this tool to send an uploaded photo, video, or document to one chat. DMs also use chatId. Delivery is recipient-visible and cannot be withdrawn through this tool. Call files.upload first unless you already have an Inline media ID."
+        : "Use this tool to send an uploaded photo, video, or document to one chat or DM. Delivery is recipient-visible and cannot be withdrawn through this tool. Call files.upload first unless you already have an Inline media ID.",
+      inputSchema: submissionV2
+        ? {
+            chatId: z.string().regex(/^[1-9]\d*$/).describe("Inline chat ID; required for every conversation, including DMs"),
+            mediaKind: z.enum(["photo", "video", "document"]).describe("Uploaded media kind"),
+            mediaId: z.string().regex(/^[1-9]\d*$/).describe("Uploaded media ID"),
+            text: z.string().max(8000).optional().describe("Optional caption text"),
+            replyToMsgId: z.string().regex(/^[1-9]\d*$/).optional().describe("Reply-to message ID"),
+            sendMode: z.enum(["normal", "silent"]).optional().describe("Message delivery mode; defaults to normal"),
+          }
+        : {
+            chatId: z.string().min(1).optional().describe("Inline chat ID"),
+            userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
+            mediaKind: z.enum(["photo", "video", "document"]).describe("Uploaded media kind"),
+            mediaId: z.string().min(1).describe("Uploaded media ID"),
+            text: z.string().max(8000).optional().describe("Optional caption text"),
+            replyToMsgId: z.string().min(1).optional().describe("Reply-to message ID"),
+            sendMode: z.enum(["normal", "silent"]).default("normal").describe("Message delivery mode"),
+          },
+      outputSchema: submissionV2 ? sendMediaMessageOutputSchema : legacySendMediaMessageOutputSchema,
       annotations: {
         title: "Send Media Message",
         readOnlyHint: false,
@@ -2122,7 +2252,9 @@ export function createInlineMcpServer(params: {
       const scopes = auth?.scopes ?? params.grant.scope.split(/\s+/).filter(Boolean)
       requireScope(scopes, "messages:write")
 
-      const target = parseTarget({ chatId, userId }, "messages.send_media")
+      const target = submissionV2
+        ? { chatId: parseChatId(chatId!) }
+        : parseTarget({ chatId, userId }, "messages.send_media")
       const safeSendMode: "normal" | "silent" = sendMode === "silent" ? "silent" : "normal"
       const caption = text?.trim()
       const parsedMediaId = parseInlineId(mediaId, "mediaId")
@@ -2166,41 +2298,50 @@ export function createInlineMcpServer(params: {
     "messages.send_batch",
     {
       title: "Send Inline Message Batch",
-      description:
-        "Use this tool to send an ordered sequence of text and uploaded media items to one chat or DM. Delivered items are recipient-visible and cannot be withdrawn through this tool. Prefer this over many separate sends when seeding a new thread or posting a multi-part update.",
-      inputSchema: {
-        chatId: z.string().min(1).optional().describe("Inline chat ID"),
-        userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
-        stopOnError: z.boolean().optional().describe("Stop sending after the first item error; defaults to false"),
-        items: z
-          .array(
-            z.object({
-              type: z.enum(["text", "media"]).describe("Message item type"),
-              text: z
-                .string()
-                .min(1)
-                .max(8000)
-                .optional()
-                .describe("Required for text items; optional caption for media items"),
-              mediaKind: z
-                .enum(["photo", "video", "document"])
-                .optional()
-                .describe("Required for media items; omit for text items"),
-              mediaId: z.string().min(1).optional().describe("Required for media items; omit for text items"),
-              replyToMsgId: z.string().min(1).optional().describe("Optional message ID to reply to"),
-              sendMode: z
-                .enum(["normal", "silent"])
-                .optional()
-                .describe("Optional delivery mode; defaults to normal"),
-            }),
-          )
-          .min(1)
-          .max(100)
-          .describe(
-            "Ordered list of message items. Text items require text. Media items require mediaKind and mediaId.",
-          ),
-      },
-      outputSchema: sendBatchOutputSchema,
+      description: submissionV2
+        ? "Use this tool to send an ordered sequence of text and uploaded media items to one chat. DMs also use chatId. Every item requires type and content: content is message text for type text, or an uploaded media ID for photo, video, and document. Delivered items are recipient-visible and cannot be withdrawn through this tool."
+        : "Use this tool to send an ordered sequence of text and uploaded media items to one chat or DM. Delivered items are recipient-visible and cannot be withdrawn through this tool. Prefer this over many separate sends when seeding a new thread or posting a multi-part update.",
+      inputSchema: submissionV2
+        ? {
+            chatId: z.string().regex(/^[1-9]\d*$/).describe("Inline chat ID; required for every conversation, including DMs"),
+            stopOnError: z.boolean().optional().describe("Stop sending after the first item error; defaults to false"),
+            items: z
+              .array(
+                z.object({
+                  type: z.enum(["text", "photo", "video", "document"]).describe("Content type"),
+                  content: z
+                    .string()
+                    .min(1)
+                    .max(8000)
+                    .describe("Message text for type text; uploaded Inline media ID for photo, video, or document"),
+                  replyToMsgId: z.string().regex(/^[1-9]\d*$/).optional().describe("Optional message ID to reply to"),
+                  sendMode: z.enum(["normal", "silent"]).optional().describe("Optional delivery mode; defaults to normal"),
+                }),
+              )
+              .min(1)
+              .max(100)
+              .describe("One to one hundred ordered message items; every item requires type and content"),
+          }
+        : {
+            chatId: z.string().min(1).optional().describe("Inline chat ID"),
+            userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
+            stopOnError: z.boolean().optional().describe("Stop sending after the first item error; defaults to false"),
+            items: z
+              .array(
+                z.object({
+                  type: z.enum(["text", "media"]).describe("Message item type"),
+                  text: z.string().min(1).max(8000).optional().describe("Required for text items; optional caption for media items"),
+                  mediaKind: z.enum(["photo", "video", "document"]).optional().describe("Required for media items; omit for text items"),
+                  mediaId: z.string().min(1).optional().describe("Required for media items; omit for text items"),
+                  replyToMsgId: z.string().min(1).optional().describe("Optional message ID to reply to"),
+                  sendMode: z.enum(["normal", "silent"]).optional().describe("Optional delivery mode; defaults to normal"),
+                }),
+              )
+              .min(1)
+              .max(100)
+              .describe("Ordered list of message items. Text items require text. Media items require mediaKind and mediaId."),
+          },
+      outputSchema: submissionV2 ? sendBatchOutputSchema : legacySendBatchOutputSchema,
       annotations: {
         title: "Send Message Batch",
         readOnlyHint: false,
@@ -2220,7 +2361,7 @@ export function createInlineMcpServer(params: {
         chatId?: string
         userId?: string
         stopOnError?: boolean
-        items: SendBatchItem[]
+        items: Array<SendBatchItem | LegacySendBatchItem>
       },
       extra: { authInfo?: AuthInfo },
     ) => {
@@ -2228,7 +2369,9 @@ export function createInlineMcpServer(params: {
       const scopes = auth?.scopes ?? params.grant.scope.split(/\s+/).filter(Boolean)
       requireScope(scopes, "messages:write")
 
-      const target = parseTarget({ chatId, userId }, "messages.send_batch")
+      const target = submissionV2
+        ? { chatId: parseChatId(chatId!) }
+        : parseTarget({ chatId, userId }, "messages.send_batch")
       const safeStopOnError = stopOnError === true
       const results: Array<Record<string, unknown>> = []
       let sentCount = 0
@@ -2239,12 +2382,11 @@ export function createInlineMcpServer(params: {
         try {
           const safeSendMode: SendMode = item.sendMode === "silent" ? "silent" : "normal"
           if (item.type === "text") {
-            if (!item.text) {
-              throw new Error(`items[${index}].text is required for text items`)
-            }
+            const itemText = submissionV2 ? (item as SendBatchItem).content : (item as LegacySendBatchItem).text
+            if (!itemText) throw new Error(`items[${index}].text is required for text items`)
             const sent = await params.inline.sendMessage({
               ...target,
-              text: item.text,
+              text: itemText,
               ...(item.replyToMsgId ? { replyToMsgId: parseInlineId(item.replyToMsgId, "replyToMsgId") } : {}),
               sendMode: safeSendMode,
               parseMarkdown: true,
@@ -2263,18 +2405,18 @@ export function createInlineMcpServer(params: {
             continue
           }
 
-          if (!item.mediaKind) {
-            throw new Error(`items[${index}].mediaKind is required for media items`)
-          }
-          if (!item.mediaId) {
-            throw new Error(`items[${index}].mediaId is required for media items`)
-          }
-          const parsedMediaId = parseInlineId(item.mediaId, "mediaId")
-          const caption = item.text?.trim()
+          const mediaKind = submissionV2
+            ? (item as SendBatchItem).type as InlineUploadedMediaKind
+            : (item as LegacySendBatchItem).mediaKind
+          const mediaId = submissionV2 ? (item as SendBatchItem).content : (item as LegacySendBatchItem).mediaId
+          if (!mediaKind) throw new Error(`items[${index}].mediaKind is required for media items`)
+          if (!mediaId) throw new Error(`items[${index}].mediaId is required for media items`)
+          const parsedMediaId = parseInlineId(mediaId, submissionV2 ? "content" : "mediaId")
+          const caption = submissionV2 ? undefined : (item as LegacySendBatchItem).text?.trim()
           const sent = await params.inline.sendMediaMessage({
             ...target,
             media: {
-              kind: item.mediaKind,
+              kind: mediaKind,
               id: parsedMediaId,
             },
             ...(caption ? { text: caption } : {}),
@@ -2285,11 +2427,11 @@ export function createInlineMcpServer(params: {
           sentCount += 1
           results.push({
             index,
-            type: "media",
+            type: submissionV2 ? mediaKind : "media",
             status: "sent",
             messageId: sent.messageId?.toString() ?? null,
             media: {
-              kind: item.mediaKind,
+              kind: mediaKind,
               id: parsedMediaId.toString(),
             },
             ...(caption ? { text: caption } : {}),
@@ -2335,17 +2477,27 @@ export function createInlineMcpServer(params: {
     "messages.list",
     {
       title: "List Inline Messages",
-      description:
-        "Use this tool to read recent context from one resolved chatId or DM userId for summarization, answering questions, or preparing a reply. Supports time windows like today, yesterday, 2d ago, YYYY-MM-DD, or epoch seconds.",
-      inputSchema: {
-        chatId: z.string().min(1).optional().describe("Inline chat ID"),
-        userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
-        limit: z.number().int().min(1).max(50).default(20).describe("Maximum messages to return"),
-        offsetId: z.string().min(1).optional().describe("Fetch messages older than this message ID"),
-        since: z.string().min(1).optional().describe("Lower time bound (e.g. yesterday, 2d ago, 2026-02-20)"),
-        until: z.string().min(1).optional().describe("Upper time bound"),
-        content: z.enum(["all", "links", "media", "photos", "videos", "documents", "files"]).default("all").describe("Content type filter"),
-      },
+      description: submissionV2
+        ? "Use this tool to read recent context from one resolved chatId for summarization, answering questions, or preparing a reply. DMs also use chatId. Supports time windows like today, yesterday, 2d ago, YYYY-MM-DD, or epoch seconds."
+        : "Use this tool to read recent context from one resolved chatId or DM userId for summarization, answering questions, or preparing a reply. Supports time windows like today, yesterday, 2d ago, YYYY-MM-DD, or epoch seconds.",
+      inputSchema: submissionV2
+        ? {
+            chatId: z.string().regex(/^[1-9]\d*$/).describe("Inline chat ID; required for every conversation, including DMs"),
+            limit: z.number().int().min(1).max(50).optional().describe("Maximum messages to return; defaults to 20"),
+            offsetId: z.string().regex(/^[1-9]\d*$/).optional().describe("Fetch messages older than this message ID"),
+            since: z.string().min(1).optional().describe("Lower time bound (e.g. yesterday, 2d ago, 2026-02-20)"),
+            until: z.string().min(1).optional().describe("Upper time bound"),
+            content: z.enum(["all", "links", "media", "photos", "videos", "documents", "files"]).optional().describe("Content type filter; defaults to all"),
+          }
+        : {
+            chatId: z.string().min(1).optional().describe("Inline chat ID"),
+            userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
+            limit: z.number().int().min(1).max(50).default(20).describe("Maximum messages to return"),
+            offsetId: z.string().min(1).optional().describe("Fetch messages older than this message ID"),
+            since: z.string().min(1).optional().describe("Lower time bound (e.g. yesterday, 2d ago, 2026-02-20)"),
+            until: z.string().min(1).optional().describe("Upper time bound"),
+            content: z.enum(["all", "links", "media", "photos", "videos", "documents", "files"]).default("all").describe("Content type filter"),
+          },
       outputSchema: messagesListOutputSchema,
       annotations: {
         title: "List Messages",
@@ -2379,7 +2531,9 @@ export function createInlineMcpServer(params: {
       const scopes = auth?.scopes ?? params.grant.scope.split(/\s+/).filter(Boolean)
       requireScope(scopes, "messages:read")
 
-      const target = parseTarget({ chatId, userId }, "messages.list")
+      const target = submissionV2
+        ? { chatId: parseChatId(chatId!) }
+        : parseTarget({ chatId, userId }, "messages.list")
       const parsedOffsetId = offsetId ? parseChatId(offsetId) : undefined
       const parsedSince = parseTimeInput(since, "since")
       const parsedUntil = parseTimeInput(until, "until")
@@ -2416,17 +2570,27 @@ export function createInlineMcpServer(params: {
     "messages.context",
     {
       title: "Get Inline Message Context",
-      description:
-        "Use this tool after messages.search, messages.unread, or a known message ID to fetch a before/after window around that message. Omit anchorMessageId to get a compact latest context window.",
-      inputSchema: {
-        chatId: z.string().min(1).optional().describe("Inline chat ID"),
-        userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
-        anchorMessageId: z.string().min(1).optional().describe("Message ID to center the context window around"),
-        before: z.number().int().min(0).max(50).default(8).describe("Messages before/older than the anchor"),
-        after: z.number().int().min(0).max(50).default(8).describe("Messages after/newer than the anchor"),
-        includeAnchor: z.boolean().default(true).describe("Include the anchor message when anchorMessageId is provided"),
-        content: z.enum(["all", "links", "media", "photos", "videos", "documents", "files"]).default("all").describe("Content type filter"),
-      },
+      description: submissionV2
+        ? "Use this tool after messages.search, messages.unread, or a known message ID to fetch a before/after window around that message in one chat. DMs also use chatId. Use messages.list for the latest context when there is no anchor message."
+        : "Use this tool after messages.search, messages.unread, or a known message ID to fetch a before/after window around that message. Omit anchorMessageId to get a compact latest context window.",
+      inputSchema: submissionV2
+        ? {
+            chatId: z.string().regex(/^[1-9]\d*$/).describe("Inline chat ID; required for every conversation, including DMs"),
+            anchorMessageId: z.string().regex(/^[1-9]\d*$/).describe("Message ID to center the context window around"),
+            before: z.number().int().min(0).max(50).optional().describe("Messages before/older than the anchor; defaults to 8"),
+            after: z.number().int().min(0).max(50).optional().describe("Messages after/newer than the anchor; defaults to 8"),
+            includeAnchor: z.boolean().optional().describe("Include the anchor message; defaults to true"),
+            content: z.enum(["all", "links", "media", "photos", "videos", "documents", "files"]).optional().describe("Content type filter; defaults to all"),
+          }
+        : {
+            chatId: z.string().min(1).optional().describe("Inline chat ID"),
+            userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
+            anchorMessageId: z.string().min(1).optional().describe("Message ID to center the context window around"),
+            before: z.number().int().min(0).max(50).default(8).describe("Messages before/older than the anchor"),
+            after: z.number().int().min(0).max(50).default(8).describe("Messages after/newer than the anchor"),
+            includeAnchor: z.boolean().default(true).describe("Include the anchor message when anchorMessageId is provided"),
+            content: z.enum(["all", "links", "media", "photos", "videos", "documents", "files"]).default("all").describe("Content type filter"),
+          },
       outputSchema: messagesContextOutputSchema,
       annotations: {
         title: "Get Message Context",
@@ -2460,7 +2624,9 @@ export function createInlineMcpServer(params: {
       const scopes = auth?.scopes ?? params.grant.scope.split(/\s+/).filter(Boolean)
       requireScope(scopes, "messages:read")
 
-      const target = parseTarget({ chatId, userId }, "messages.context")
+      const target = submissionV2
+        ? { chatId: parseChatId(chatId!) }
+        : parseTarget({ chatId, userId }, "messages.context")
       const safeContent = parseContentFilter(content)
       const context = await params.inline.messageContext({
         ...target,
@@ -2492,17 +2658,27 @@ export function createInlineMcpServer(params: {
     "messages.search",
     {
       title: "Search Inline Messages In Chat",
-      description:
-        "Use this tool to search within one resolved chatId or DM userId. This is intentionally scoped to a single conversation; use conversations.list first when the target is unclear.",
-      inputSchema: {
-        chatId: z.string().min(1).optional().describe("Inline chat ID"),
-        userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
-        query: z.string().min(1).optional().describe("Optional search query"),
-        limit: z.number().int().min(1).max(50).default(20).describe("Maximum messages to return"),
-        since: z.string().min(1).optional().describe("Lower time bound"),
-        until: z.string().min(1).optional().describe("Upper time bound"),
-        content: z.enum(["all", "links", "media", "photos", "videos", "documents", "files"]).default("all").describe("Content type filter"),
-      },
+      description: submissionV2
+        ? "Use this tool to search for required text within one resolved chatId. DMs also use chatId. Use conversations.list first when the target is unclear, or messages.list when filtering only by time/content without search text."
+        : "Use this tool to search within one resolved chatId or DM userId. This is intentionally scoped to a single conversation; use conversations.list first when the target is unclear.",
+      inputSchema: submissionV2
+        ? {
+            chatId: z.string().regex(/^[1-9]\d*$/).describe("Inline chat ID; required for every conversation, including DMs"),
+            query: z.string().min(1).describe("Text to search for in this conversation"),
+            limit: z.number().int().min(1).max(50).optional().describe("Maximum messages to return; defaults to 20"),
+            since: z.string().min(1).optional().describe("Lower time bound"),
+            until: z.string().min(1).optional().describe("Upper time bound"),
+            content: z.enum(["all", "links", "media", "photos", "videos", "documents", "files"]).optional().describe("Content type filter; defaults to all"),
+          }
+        : {
+            chatId: z.string().min(1).optional().describe("Inline chat ID"),
+            userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
+            query: z.string().min(1).optional().describe("Optional search query"),
+            limit: z.number().int().min(1).max(50).default(20).describe("Maximum messages to return"),
+            since: z.string().min(1).optional().describe("Lower time bound"),
+            until: z.string().min(1).optional().describe("Upper time bound"),
+            content: z.enum(["all", "links", "media", "photos", "videos", "documents", "files"]).default("all").describe("Content type filter"),
+          },
       outputSchema: messagesSearchOutputSchema,
       annotations: {
         title: "Search Messages",
@@ -2536,7 +2712,9 @@ export function createInlineMcpServer(params: {
       const scopes = auth?.scopes ?? params.grant.scope.split(/\s+/).filter(Boolean)
       requireScope(scopes, "messages:read")
 
-      const target = parseTarget({ chatId, userId }, "messages.search")
+      const target = submissionV2
+        ? { chatId: parseChatId(chatId!) }
+        : parseTarget({ chatId, userId }, "messages.search")
       const parsedSince = parseTimeInput(since, "since")
       const parsedUntil = parseTimeInput(until, "until")
       const safeContent = parseContentFilter(content)
@@ -2576,10 +2754,14 @@ export function createInlineMcpServer(params: {
       description:
         "Use this tool to triage unread messages across all approved conversations. Results include chat metadata so you can follow up with messages.list on a specific chatId.",
       inputSchema: {
-        limit: z.number().int().min(1).max(200).default(50).describe("Maximum unread messages to return"),
+        limit: submissionV2
+          ? z.number().int().min(1).max(200).optional().describe("Maximum unread messages to return; defaults to 50")
+          : z.number().int().min(1).max(200).default(50).describe("Maximum unread messages to return"),
         since: z.string().min(1).optional().describe("Lower time bound"),
         until: z.string().min(1).optional().describe("Upper time bound"),
-        content: z.enum(["all", "links", "media", "photos", "videos", "documents", "files"]).default("all").describe("Content type filter"),
+        content: submissionV2
+          ? z.enum(["all", "links", "media", "photos", "videos", "documents", "files"]).optional().describe("Content type filter; defaults to all")
+          : z.enum(["all", "links", "media", "photos", "videos", "documents", "files"]).default("all").describe("Content type filter"),
       },
       outputSchema: messagesUnreadOutputSchema,
       annotations: {
@@ -2633,16 +2815,24 @@ export function createInlineMcpServer(params: {
     "messages.send",
     {
       title: "Send Inline Message",
-      description:
-        "Use this tool to send one recipient-visible text message after the target is clear; it cannot be withdrawn through this tool. Provide exactly one of chatId or userId; use conversations.list first when resolving a person, DM, thread, or space chat.",
-      inputSchema: {
-        chatId: z.string().min(1).optional().describe("Inline chat ID"),
-        userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
-        text: z.string().min(1).max(8000).describe("Message text"),
-        replyToMsgId: z.string().min(1).optional().describe("Reply-to message ID"),
-        sendMode: z.enum(["normal", "silent"]).default("normal").describe("Message delivery mode"),
-      },
-      outputSchema: sendMessageOutputSchema,
+      description: submissionV2
+        ? "Use this tool to send one recipient-visible text message to one resolved chatId; DMs also use chatId. It cannot be withdrawn through this tool. Use conversations.list first when resolving a person, DM, thread, or space chat."
+        : "Use this tool to send one recipient-visible text message after the target is clear; it cannot be withdrawn through this tool. Provide exactly one of chatId or userId; use conversations.list first when resolving a person, DM, thread, or space chat.",
+      inputSchema: submissionV2
+        ? {
+            chatId: z.string().regex(/^[1-9]\d*$/).describe("Inline chat ID; required for every conversation, including DMs"),
+            text: z.string().min(1).max(8000).describe("Message text"),
+            replyToMsgId: z.string().regex(/^[1-9]\d*$/).optional().describe("Reply-to message ID"),
+            sendMode: z.enum(["normal", "silent"]).optional().describe("Message delivery mode; defaults to normal"),
+          }
+        : {
+            chatId: z.string().min(1).optional().describe("Inline chat ID"),
+            userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
+            text: z.string().min(1).max(8000).describe("Message text"),
+            replyToMsgId: z.string().min(1).optional().describe("Reply-to message ID"),
+            sendMode: z.enum(["normal", "silent"]).default("normal").describe("Message delivery mode"),
+          },
+      outputSchema: submissionV2 ? sendMessageOutputSchema : legacySendMessageOutputSchema,
       annotations: {
         title: "Send Message",
         readOnlyHint: false,
@@ -2678,7 +2868,9 @@ export function createInlineMcpServer(params: {
       try {
         requireScope(scopes, "messages:write")
 
-        const target = parseTarget({ chatId, userId }, "messages.send")
+        const target = submissionV2
+          ? { chatId: parseChatId(chatId!) }
+          : parseTarget({ chatId, userId }, "messages.send")
         const safeSendMode: "normal" | "silent" = sendMode === "silent" ? "silent" : "normal"
         const res = await params.inline.sendMessage({
           ...target,

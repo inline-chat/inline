@@ -1,6 +1,6 @@
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js"
 import { MCP_DEFAULT_SCOPE } from "@inline-chat/oauth-core"
-import { createInlineMcpServer } from "./server"
+import { createInlineMcpServer, type McpToolContract } from "./server"
 import { McpSessionManager } from "./sessions"
 import { getBearerToken } from "./auth"
 import type { McpConfig } from "../config"
@@ -250,12 +250,14 @@ async function buildAuthInfo(
 }
 
 export const Mcp = {
-  create(params: { config: McpConfig }) {
+  create(params: { config: McpConfig; path?: string; contractVersion?: McpToolContract }) {
+    const path = params.path ?? "/mcp"
+    const contractVersion = params.contractVersion ?? "legacy"
     const sessions = new McpSessionManager()
 
     return {
       async handle(req: Request, url: URL): Promise<Response | null> {
-        if (url.pathname !== "/mcp") return null
+        if (url.pathname !== path) return null
 
         try {
           const bearer = getBearerToken(req)
@@ -320,6 +322,7 @@ export const Mcp = {
             grant: authRes.grant,
             inline,
             resourceMetadataUrl: `${params.config.issuer}/.well-known/oauth-protected-resource`,
+            contractVersion,
           })
 
           const { transport } = sessions.createTransport({

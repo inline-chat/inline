@@ -112,6 +112,14 @@ describe("mcp app", () => {
     expect(second.headers.get("retry-after")).toBeTruthy()
   })
 
+  it("serves the clean submission contract at /mcp/v2", async () => {
+    const app = createApp({ issuer: "http://localhost:1234" })
+    const res = await app.fetch(new Request("http://localhost/mcp/v2", { method: "POST" }))
+    expect(res.status).toBe(401)
+    expect(await res.json()).toEqual({ error: "missing_authorization" })
+    expect(res.headers.get("www-authenticate")).toContain("Bearer")
+  })
+
   it("rejects requests from disallowed hosts", async () => {
     const app = createApp({
       allowedHosts: ["allowed.example"],

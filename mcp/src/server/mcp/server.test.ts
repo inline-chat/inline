@@ -343,8 +343,19 @@ describe("mcp tool server", () => {
     expect(sendBatch.inputSchema.properties.items.items.oneOf).toBeUndefined()
     expect(sendBatch.inputSchema.properties.items.items.anyOf).toBeUndefined()
 
+    const conversation = tools.find((tool) => tool.name === "conversations.get")
+    expect(conversation.inputSchema.properties).toHaveProperty("userId")
+    const upload = tools.find((tool) => tool.name === "files.upload")
+    expect(upload.inputSchema.properties).toHaveProperty("base64")
+    expect(upload.inputSchema.properties).toHaveProperty("url")
+    expect(upload.inputSchema.properties).not.toHaveProperty("sourceType")
+    const files = tools.find((tool) => tool.name === "files.get")
+    expect(files.inputSchema.properties).toHaveProperty("userId")
+    expect(files.inputSchema.properties).toHaveProperty("messageId")
+
     const list = tools.find((tool) => tool.name === "messages.list")
     expect(list.annotations.readOnlyHint).toBe(true)
+    expect(list.inputSchema.properties).toHaveProperty("userId")
     expect(list.outputSchema.properties.messages.type).toBe("array")
     expect(list.outputSchema.properties.messages.items.properties.uri.type).toBe("string")
     expect(list.inputSchema.properties.direction).toBeUndefined()
@@ -355,6 +366,225 @@ describe("mcp tool server", () => {
     expect(spaces._meta.securitySchemes[0].scopes).toEqual(["spaces:read"])
     const context = tools.find((tool) => tool.name === "messages.context")
     expect(context.outputSchema.properties.messages.type).toBe("array")
+  })
+
+  it("submission-v2 exposes explicit unambiguous input schemas", async () => {
+    const inline = createInlineStub({})
+    const server = createInlineMcpServer({ grant, inline, contractVersion: "submission-v2" })
+    const authInfo = createAuthInfo(["messages:read", "messages:write", "spaces:read"])
+    const { transport, sent, initialize } = await connectAndInitialize(server, authInfo)
+
+    expect(initialize.result.serverInfo.version).toBe("0.2.0")
+
+    await sendRequest(transport, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} } as any, { authInfo })
+    const res = await waitForResponse(sent, 2)
+    const tools = res.result.tools as Array<any>
+    const byName = new Map(tools.map((tool) => [tool.name, tool]))
+
+    const expectedRequired: Record<string, string[]> = {
+      "account.me": [],
+      "spaces.list": [],
+      "people.search": [],
+      "conversations.list": [],
+      "conversations.get": ["chatId"],
+      "conversations.create": ["title"],
+      "files.upload": ["sourceType", "source"],
+      "files.get": ["chatId", "messageIds"],
+      "messages.send_media": ["chatId", "mediaKind", "mediaId"],
+      "messages.send_batch": ["chatId", "items"],
+      "messages.list": ["chatId"],
+      "messages.context": ["chatId", "anchorMessageId"],
+      "messages.search": ["chatId", "query"],
+      "messages.unread": [],
+      "messages.send": ["chatId", "text"],
+    }
+
+    const assertPlainSchema = (value: unknown): void => {
+      if (Array.isArray(value)) {
+        for (const item of value) assertPlainSchema(item)
+        return
+      }
+      if (!value || typeof value !== "object") return
+      const record = value as Record<string, unknown>
+      expect(record.default).toBeUndefined()
+      expect(record.oneOf).toBeUndefined()
+      expect(record.anyOf).toBeUndefined()
+      expect(record.allOf).toBeUndefined()
+      for (const child of Object.values(record)) assertPlainSchema(child)
+    }
+
+    for (const [name, required] of Object.entries(expectedRequired)) {
+      const tool = byName.get(name)
+      expect(tool, `missing ${name}`).toBeTruthy()
+      expect(tool.inputSchema.required ?? []).toEqual(required)
+      assertPlainSchema(tool.inputSchema)
+    }
+
+    expect(byName.get("conversations.get").inputSchema.properties.userId).toBeUndefined()
+    expect(byName.get("files.upload").inputSchema.properties).not.toHaveProperty("base64")
+    expect(byName.get("files.upload").inputSchema.properties).not.toHaveProperty("url")
+    expect(byName.get("files.get").inputSchema.properties).not.toHaveProperty("messageId")
+    expect(byName.get("files.get").inputSchema.properties).not.toHaveProperty("userId")
+
+    for (const name of [
+      "messages.send_media",
+      "messages.send_batch",
+      "messages.list",
+      "messages.context",
+      "messages.search",
+      "messages.send",
+    ]) {
+      expect(byName.get(name).inputSchema.properties.userId, `${name} still exposes userId`).toBeUndefined()
+    }
+
+    const batchItem = byName.get("messages.send_batch").inputSchema.properties.items.items
+    expect(batchItem.required).toEqual(["type", "content"])
+    expect(batchItem.properties.type.enum).toEqual(["text", "photo", "video", "document"])
+    expect(Object.keys(batchItem.properties)).toEqual(["type", "content", "replyToMsgId", "sendMode"])
+  })
+
+  it("submission-v2 rejects legacy and incomplete argument shapes before handlers run", async () => {
+    const inline = createInlineStub({
+      async getConversation() {
+        throw new Error("handler should not run")
+      },
+      async getMessages() {
+        throw new Error("handler should not run")
+      },
+      async recentMessages() {
+        throw new Error("handler should not run")
+      },
+      async searchMessages() {
+        throw new Error("handler should not run")
+      },
+      async uploadFile() {
+        throw new Error("handler should not run")
+      },
+      async sendMessage() {
+        throw new Error("handler should not run")
+      },
+      async sendMediaMessage() {
+        throw new Error("handler should not run")
+      },
+    })
+    const server = createInlineMcpServer({ grant, inline, contractVersion: "submission-v2" })
+    const authInfo = createAuthInfo(["messages:read", "messages:write", "spaces:read"])
+    const { transport, sent } = await connectAndInitialize(server, authInfo)
+    const invalidCalls = [
+      { name: "conversations.get", arguments: { userId: "2" } },
+      { name: "files.upload", arguments: { base64: "aGVsbG8=" } },
+      { name: "files.get", arguments: { chatId: "7", messageId: "44" } },
+      { name: "messages.send_media", arguments: { userId: "2", mediaKind: "photo", mediaId: "9" } },
+      { name: "messages.send_batch", arguments: { chatId: "7", items: [{ type: "text", text: "hello" }] } },
+      { name: "messages.list", arguments: { userId: "2" } },
+      { name: "messages.context", arguments: { chatId: "7" } },
+      { name: "messages.search", arguments: { chatId: "7" } },
+      { name: "messages.send", arguments: { userId: "2", text: "hello" } },
+    ]
+
+    for (let index = 0; index < invalidCalls.length; index += 1) {
+      const id = index + 2
+      await sendRequest(
+        transport,
+        { jsonrpc: "2.0", id, method: "tools/call", params: invalidCalls[index] } as any,
+        { authInfo },
+      )
+      const response = await waitForResponse(sent, id)
+      expect(response.result?.isError, invalidCalls[index].name).toBe(true)
+      const errorText = response.result?.content?.[0]?.text ?? ""
+      expect(errorText, invalidCalls[index].name).toContain("Invalid arguments")
+      expect(errorText, invalidCalls[index].name).not.toContain("handler should not run")
+    }
+  })
+
+  it("submission-v2 executes the clean upload, file lookup, and batch contracts", async () => {
+    const calls: string[] = []
+    const inline = createInlineStub({
+      async uploadFile({ type, file }) {
+        calls.push("upload")
+        expect(type).toBe("document")
+        expect(file).toBeInstanceOf(Uint8Array)
+        expect(new TextDecoder().decode(file as Uint8Array)).toBe("hello")
+        return { fileUniqueId: "file_1", media: { kind: "document", id: 99n } }
+      },
+      async getMessages({ chatId, messageIds }) {
+        calls.push("files")
+        expect(chatId).toBe(7n)
+        expect(messageIds).toEqual([44n, 45n])
+        return { chat: defaultEligibleChat(), messages: [] }
+      },
+      async sendMessage({ chatId, text }) {
+        calls.push("text")
+        expect(chatId).toBe(7n)
+        expect(text).toBe("hello")
+        return { messageId: 46n, spaceId: 10n }
+      },
+      async sendMediaMessage({ chatId, media }) {
+        calls.push("media")
+        expect(chatId).toBe(7n)
+        expect(media).toEqual({ kind: "document", id: 99n })
+        return { messageId: 47n, spaceId: 10n }
+      },
+    })
+    const server = createInlineMcpServer({ grant, inline, contractVersion: "submission-v2" })
+    const authInfo = createAuthInfo(["messages:read", "messages:write"])
+    const { transport, sent } = await connectAndInitialize(server, authInfo)
+
+    await sendRequest(
+      transport,
+      {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: {
+          name: "files.upload",
+          arguments: { sourceType: "base64", source: "aGVsbG8=", kind: "document", fileName: "hello.txt" },
+        },
+      } as any,
+      { authInfo },
+    )
+    expect((await waitForResponse(sent, 2)).result.structuredContent.upload.media).toEqual({ kind: "document", id: "99" })
+
+    await sendRequest(
+      transport,
+      {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "files.get", arguments: { chatId: "7", messageIds: ["44", "45"] } },
+      } as any,
+      { authInfo },
+    )
+    expect((await waitForResponse(sent, 3)).result.structuredContent).toMatchObject({
+      source: "messages",
+      messageIds: ["44", "45"],
+    })
+
+    await sendRequest(
+      transport,
+      {
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
+        params: {
+          name: "messages.send_batch",
+          arguments: {
+            chatId: "7",
+            items: [
+              { type: "text", content: "hello" },
+              { type: "document", content: "99" },
+            ],
+          },
+        },
+      } as any,
+      { authInfo },
+    )
+    const batch = await waitForResponse(sent, 4)
+    expect(batch.result.structuredContent.results).toMatchObject([
+      { type: "text", status: "sent", messageId: "46" },
+      { type: "document", status: "sent", messageId: "47", media: { kind: "document", id: "99" } },
+    ])
+    expect(calls).toEqual(["upload", "files", "text", "media"])
   })
 
   it("account.me returns scoped account and allowed context", async () => {

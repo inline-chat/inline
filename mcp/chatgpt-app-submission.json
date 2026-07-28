@@ -147,7 +147,7 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Only retrieves a bounded message window around an anchor or the latest context in an allowed conversation.",
+        "read_only_justification": "Only retrieves a bounded message window around a specified anchor in an allowed conversation.",
         "open_world_justification": "Does not publish messages or change public or third-party state.",
         "destructive_justification": "Does not mark, edit, send, or delete messages."
       }
