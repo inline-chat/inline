@@ -6,6 +6,7 @@ This repository contains Inline developer tooling and integration packages.
 
 Key paths:
 
+- `skills/inline/` - distributable Inline skill source for ChatGPT and Codex; it intentionally lives outside `.agents/skills/` so it is not auto-loaded while working in this repository.
 - `proto/` - synced public protobuf contract; do not hand-edit generated release artifacts.
 - `packages/protocol/` - synced generated TypeScript protocol package.
 - `packages/bot-api-types/` - synced Bot API types package.

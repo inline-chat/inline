@@ -109,6 +109,7 @@ Start with the [developer docs](https://inline.chat/docs), or jump directly to a
 | `@inline-chat/protocol` | Generated TypeScript protocol types | [Docs](https://inline.chat/docs/realtime-api#protocol-buffers) · [Source](packages/protocol/) |
 | `@inline-chat/bot-api-types` | Generated TypeScript Bot API types | [Docs](https://inline.chat/docs/bot-api) · [Source](packages/bot-api-types/) |
 | `@inline-chat/oauth-core` | Shared OAuth helpers used by hosted integrations | [Docs](https://inline.chat/docs/mcp) · [Source](packages/oauth-core/) |
+| Inline agent skill | Reusable ChatGPT and Codex workflows for Inline chats, threads, and messages | [Source](skills/inline/) |
 | `inline-client` | Stateful Rust client foundation | [Docs](https://docs.rs/inline-client) · [Source](crates/client/) |
 | `inline-sdk` | Rust SDK for API calls, uploads, and realtime RPC | [Docs](https://inline.chat/docs/rust-sdk) · [Source](crates/sdk/) |
 | `inline-protocol` | Generated Rust protocol types | [Docs](https://inline.chat/docs/rust-sdk#packages) · [Source](crates/protocol/) |

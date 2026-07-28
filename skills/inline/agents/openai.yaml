@@ -1,0 +1,15 @@
+interface:
+  display_name: "Inline"
+  short_description: "Work with Inline chats, threads, and messages"
+  default_prompt: "Use $inline to find the relevant Inline conversation, read its context, and help me act on it."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "inline"
+      description: "Inline MCP server for scoped work-chat access"
+      transport: "streamable_http"
+      url: "https://mcp.inline.chat/mcp/v2"
+
+policy:
+  allow_implicit_invocation: true
