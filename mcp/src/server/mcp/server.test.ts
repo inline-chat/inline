@@ -334,6 +334,15 @@ describe("mcp tool server", () => {
     expect(send.annotations.idempotentHint).toBe(false)
     expect(send._meta.securitySchemes[0].scopes).toEqual(["messages:write"])
 
+    const sendBatch = tools.find((tool) => tool.name === "messages.send_batch")
+    expect(sendBatch.inputSchema.required).toEqual(["items"])
+    expect(sendBatch.inputSchema.properties.items.items).toMatchObject({
+      type: "object",
+      required: ["type"],
+    })
+    expect(sendBatch.inputSchema.properties.items.items.oneOf).toBeUndefined()
+    expect(sendBatch.inputSchema.properties.items.items.anyOf).toBeUndefined()
+
     const list = tools.find((tool) => tool.name === "messages.list")
     expect(list.annotations.readOnlyHint).toBe(true)
     expect(list.outputSchema.properties.messages.type).toBe("array")

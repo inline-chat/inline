@@ -43,21 +43,14 @@ type ResolvedUploadSource = {
 type SendMode = "normal" | "silent"
 type ConversationSort = "relevance" | "recent" | "unread"
 
-type SendBatchItem =
-  | {
-      type: "text"
-      text: string
-      replyToMsgId?: string
-      sendMode?: SendMode
-    }
-  | {
-      type: "media"
-      mediaKind: InlineUploadedMediaKind
-      mediaId: string
-      text?: string
-      replyToMsgId?: string
-      sendMode?: SendMode
-    }
+type SendBatchItem = {
+  type: "text" | "media"
+  text?: string
+  mediaKind?: InlineUploadedMediaKind
+  mediaId?: string
+  replyToMsgId?: string
+  sendMode?: SendMode
+}
 
 class InsufficientScopeError extends Error {
   constructor(readonly neededScope: string) {
@@ -2178,29 +2171,34 @@ export function createInlineMcpServer(params: {
       inputSchema: {
         chatId: z.string().min(1).optional().describe("Inline chat ID"),
         userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
-        stopOnError: z.boolean().default(false).describe("Stop sending after the first item error"),
+        stopOnError: z.boolean().optional().describe("Stop sending after the first item error; defaults to false"),
         items: z
           .array(
-            z.discriminatedUnion("type", [
-              z.object({
-                type: z.literal("text"),
-                text: z.string().min(1).max(8000),
-                replyToMsgId: z.string().min(1).optional(),
-                sendMode: z.enum(["normal", "silent"]).default("normal"),
-              }),
-              z.object({
-                type: z.literal("media"),
-                mediaKind: z.enum(["photo", "video", "document"]),
-                mediaId: z.string().min(1),
-                text: z.string().max(8000).optional(),
-                replyToMsgId: z.string().min(1).optional(),
-                sendMode: z.enum(["normal", "silent"]).default("normal"),
-              }),
-            ]),
+            z.object({
+              type: z.enum(["text", "media"]).describe("Message item type"),
+              text: z
+                .string()
+                .min(1)
+                .max(8000)
+                .optional()
+                .describe("Required for text items; optional caption for media items"),
+              mediaKind: z
+                .enum(["photo", "video", "document"])
+                .optional()
+                .describe("Required for media items; omit for text items"),
+              mediaId: z.string().min(1).optional().describe("Required for media items; omit for text items"),
+              replyToMsgId: z.string().min(1).optional().describe("Optional message ID to reply to"),
+              sendMode: z
+                .enum(["normal", "silent"])
+                .optional()
+                .describe("Optional delivery mode; defaults to normal"),
+            }),
           )
           .min(1)
           .max(100)
-          .describe("Ordered list of message items"),
+          .describe(
+            "Ordered list of message items. Text items require text. Media items require mediaKind and mediaId.",
+          ),
       },
       outputSchema: sendBatchOutputSchema,
       annotations: {
@@ -2241,6 +2239,9 @@ export function createInlineMcpServer(params: {
         try {
           const safeSendMode: SendMode = item.sendMode === "silent" ? "silent" : "normal"
           if (item.type === "text") {
+            if (!item.text) {
+              throw new Error(`items[${index}].text is required for text items`)
+            }
             const sent = await params.inline.sendMessage({
               ...target,
               text: item.text,
@@ -2262,6 +2263,12 @@ export function createInlineMcpServer(params: {
             continue
           }
 
+          if (!item.mediaKind) {
+            throw new Error(`items[${index}].mediaKind is required for media items`)
+          }
+          if (!item.mediaId) {
+            throw new Error(`items[${index}].mediaId is required for media items`)
+          }
           const parsedMediaId = parseInlineId(item.mediaId, "mediaId")
           const caption = item.text?.trim()
           const sent = await params.inline.sendMediaMessage({
