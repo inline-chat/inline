@@ -440,7 +440,8 @@ describe("mcp tool server", () => {
     const batchItem = byName.get("messages.send_batch").inputSchema.properties.items.items
     expect(batchItem.required).toEqual(["type", "content"])
     expect(batchItem.properties.type.enum).toEqual(["text", "photo", "video", "document"])
-    expect(Object.keys(batchItem.properties)).toEqual(["type", "content", "replyToMsgId", "sendMode"])
+    expect(Object.keys(batchItem.properties)).toEqual(["type", "content"])
+    expect(batchItem.additionalProperties).toBe(false)
   })
 
   it("submission-v2 rejects legacy and incomplete argument shapes before handlers run", async () => {
@@ -476,6 +477,7 @@ describe("mcp tool server", () => {
       { name: "files.get", arguments: { chatId: "7", messageId: "44" } },
       { name: "messages.send_media", arguments: { userId: "2", mediaKind: "photo", mediaId: "9" } },
       { name: "messages.send_batch", arguments: { chatId: "7", items: [{ type: "text", text: "hello" }] } },
+      { name: "messages.send_batch", arguments: { chatId: "7", items: [{ type: "text", content: "hello", replyToMsgId: "1", sendMode: "silent" }] } },
       { name: "messages.list", arguments: { userId: "2" } },
       { name: "messages.context", arguments: { chatId: "7" } },
       { name: "messages.search", arguments: { chatId: "7" } },

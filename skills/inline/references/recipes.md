@@ -47,7 +47,7 @@
 
 1. Resolve and verify the target.
 2. Upload each attachment with `files.upload({ sourceType, source, ... })`.
-3. Build ordered items shaped as `{ type: "text" | "photo" | "video" | "document", content, ... }`; `content` is text or the uploaded media ID.
+3. Build ordered items shaped exactly as `{ type: "text" | "photo" | "video" | "document", content }`; `content` is text or the uploaded media ID.
 4. `messages.send_batch({ chatId, stopOnError: true, items })`
 5. Report sent and failed indices without repeating successes.
 

@@ -99,8 +99,9 @@ Connect new clients to `https://mcp.inline.chat/mcp/v2`. Every conversation-scop
   - Output: `{ ok, chatId, media, messageId, metadata }`
 - `messages.send_batch` (write): send an ordered list of text/media items to a chat or DM.
   - Input: `{ chatId, stopOnError?, items[] }`
-  - Every item has `{ type, content, replyToMsgId?, sendMode? }`.
+  - Every item has exactly `{ type, content }` and uses normal, non-reply delivery.
   - `type` is `"text"`, `"photo"`, `"video"`, or `"document"`; `content` is text for a text item and an uploaded media ID otherwise.
+  - Use `messages.send` or `messages.send_media` when a reply target or silent delivery is needed.
   - Output: `{ ok, chatId, total, sentCount, failedCount, results[] }`
 
 Common workflows:

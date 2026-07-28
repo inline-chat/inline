@@ -51,8 +51,6 @@ export type McpToolContract = "legacy" | "submission-v2"
 type SendBatchItem = {
   type: "text" | InlineUploadedMediaKind
   content: string
-  replyToMsgId?: string
-  sendMode?: SendMode
 }
 
 type LegacySendBatchItem = {
@@ -2299,7 +2297,7 @@ export function createInlineMcpServer(params: {
     {
       title: "Send Inline Message Batch",
       description: submissionV2
-        ? "Use this tool to send an ordered sequence of text and uploaded media items to one chat. DMs also use chatId. Every item requires type and content: content is message text for type text, or an uploaded media ID for photo, video, and document. Delivered items are recipient-visible and cannot be withdrawn through this tool."
+        ? "Use this tool to send an ordered sequence of normal, non-reply text and uploaded media items to one chat. DMs also use chatId. Every item has exactly two fields: type and content. Content is message text for type text, or an uploaded media ID for photo, video, and document. Use messages.send or messages.send_media instead when a reply target or silent delivery is needed. Delivered items are recipient-visible and cannot be withdrawn through this tool."
         : "Use this tool to send an ordered sequence of text and uploaded media items to one chat or DM. Delivered items are recipient-visible and cannot be withdrawn through this tool. Prefer this over many separate sends when seeding a new thread or posting a multi-part update.",
       inputSchema: submissionV2
         ? {
@@ -2314,9 +2312,7 @@ export function createInlineMcpServer(params: {
                     .min(1)
                     .max(8000)
                     .describe("Message text for type text; uploaded Inline media ID for photo, video, or document"),
-                  replyToMsgId: z.string().regex(/^[1-9]\d*$/).optional().describe("Optional message ID to reply to"),
-                  sendMode: z.enum(["normal", "silent"]).optional().describe("Optional delivery mode; defaults to normal"),
-                }),
+                }).strict(),
               )
               .min(1)
               .max(100)
@@ -2380,14 +2376,16 @@ export function createInlineMcpServer(params: {
       for (let index = 0; index < items.length; index += 1) {
         const item = items[index]
         try {
-          const safeSendMode: SendMode = item.sendMode === "silent" ? "silent" : "normal"
+          const legacyItem = submissionV2 ? undefined : (item as LegacySendBatchItem)
+          const safeSendMode: SendMode = legacyItem?.sendMode === "silent" ? "silent" : "normal"
+          const replyToMsgId = legacyItem?.replyToMsgId
           if (item.type === "text") {
             const itemText = submissionV2 ? (item as SendBatchItem).content : (item as LegacySendBatchItem).text
             if (!itemText) throw new Error(`items[${index}].text is required for text items`)
             const sent = await params.inline.sendMessage({
               ...target,
               text: itemText,
-              ...(item.replyToMsgId ? { replyToMsgId: parseInlineId(item.replyToMsgId, "replyToMsgId") } : {}),
+              ...(replyToMsgId ? { replyToMsgId: parseInlineId(replyToMsgId, "replyToMsgId") } : {}),
               sendMode: safeSendMode,
               parseMarkdown: true,
             })
@@ -2399,7 +2397,7 @@ export function createInlineMcpServer(params: {
               messageId: sent.messageId?.toString() ?? null,
               metadata: {
                 sendMode: safeSendMode,
-                ...(item.replyToMsgId ? { replyToMsgId: item.replyToMsgId } : {}),
+                ...(replyToMsgId ? { replyToMsgId } : {}),
               },
             })
             continue
@@ -2420,7 +2418,7 @@ export function createInlineMcpServer(params: {
               id: parsedMediaId,
             },
             ...(caption ? { text: caption } : {}),
-            ...(item.replyToMsgId ? { replyToMsgId: parseInlineId(item.replyToMsgId, "replyToMsgId") } : {}),
+            ...(replyToMsgId ? { replyToMsgId: parseInlineId(replyToMsgId, "replyToMsgId") } : {}),
             sendMode: safeSendMode,
             parseMarkdown: true,
           })
@@ -2437,7 +2435,7 @@ export function createInlineMcpServer(params: {
             ...(caption ? { text: caption } : {}),
             metadata: {
               sendMode: safeSendMode,
-              ...(item.replyToMsgId ? { replyToMsgId: item.replyToMsgId } : {}),
+              ...(replyToMsgId ? { replyToMsgId } : {}),
             },
           })
         } catch (error) {

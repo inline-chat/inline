@@ -52,7 +52,7 @@
 1. Confirm the source, target, media kind, filename, and caption.
 2. Call `files.upload` with `sourceType: "base64" | "url"` and put the corresponding base64 payload, data URL, or HTTPS URL in `source`.
 3. Use the returned media kind and ID in `messages.send_media`.
-4. For several ordered items, prefer one `messages.send_batch` call.
+4. For several ordered normal, non-reply items, prefer one `messages.send_batch` call whose items contain only `type` and `content`; use individual send tools for replies or silent delivery.
 5. Report partial batch failures item by item; do not resend successful items.
 
 ## Recover safely
