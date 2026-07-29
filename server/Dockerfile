@@ -43,6 +43,7 @@ COPY --from=build /usr/src/app/server/dist ./server/dist
 COPY --from=build /usr/src/app/server/drizzle ./server/drizzle
 COPY --from=build /usr/src/app/server/scripts/start-production.ts ./server/scripts/start-production.ts
 COPY --from=build /usr/src/app/server/scripts/migrate.ts ./server/scripts/migrate.ts
+COPY --from=build /usr/src/app/server/scripts/livekit-cutover-preflight.ts ./server/scripts/livekit-cutover-preflight.ts
 COPY --from=build /usr/src/app/server/scripts/helpers ./server/scripts/helpers
 COPY --from=build /usr/src/app/packages/oauth-core/dist ./packages/oauth-core/dist
 COPY --from=build /usr/src/app/packages/protocol/dist ./packages/protocol/dist
