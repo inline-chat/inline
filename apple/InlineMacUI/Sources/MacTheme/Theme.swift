@@ -27,33 +27,106 @@ public enum Theme {
       NSColor(red: 158 / 255, green: 158 / 255, blue: 158 / 255, alpha: 1)
   }
 
+  /// Theme colors are computed so changing presets creates a fresh dynamic color.
+  /// These colors must remain unnamed: SwiftUI compares named NSColors by name,
+  /// which would make two different theme values appear equal during live updates.
+  public static var accentColor: NSColor {
+    semanticColor(role: .accent)
+  }
+
+  public static var prominentColor: NSColor {
+    semanticColor(role: .prominent)
+  }
+
+  public static func resolvedColor(
+    role: ThemeColorRole,
+    preset: AppThemePreset,
+    variant: ThemeAppearanceVariant,
+    userDefaults: UserDefaults = .standard
+  ) -> ThemeColorValue {
+    resolvedPalette(
+      preset: preset,
+      variant: variant,
+      userDefaults: userDefaults
+    )[role]
+  }
+
+  public static func resolvedPalette(
+    preset: AppThemePreset,
+    variant: ThemeAppearanceVariant,
+    userDefaults: UserDefaults = .standard
+  ) -> ThemePalette {
+    var palette = ThemePaletteOverrides.applyingOverrides(
+      to: basePalette(preset: preset, variant: variant),
+      preset: preset,
+      variant: variant,
+      userDefaults: userDefaults
+    )
+
+    if preset == .system {
+      let systemAccent = ThemePreference.selectedSystemAccent(userDefaults: userDefaults)
+      let nativeAccent = systemAccent.colorValue(appearance: variant.nsAppearance)
+      palette.accent = nativeAccent
+      palette.prominent = nativeAccent
+    }
+    return palette
+  }
+
   // MARK: - Window
 
   public static let windowMinimumSize: CGSize = .init(width: 320, height: 300)
-  public static let windowBackgroundColor: NSColor = .init(
-    "windowBackgroundColor",
-    light: NSColor(red: 249 / 255, green: 251 / 255, blue: 255 / 255, alpha: 0.5),
-    dark: NSColor(red: 25 / 255, green: 25 / 255, blue: 26 / 255, alpha: 0.6)
-  )
+  public static var windowBackgroundColor: NSColor {
+    semanticColor(role: .background)
+  }
 
-  public static let windowContentBackgroundColor: NSColor = .init(
-    name: "windowContentBackgroundColor"
-  ) { appearance in
-    if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
-      // Prefer the system's darker content background in dark mode.
-      return NSColor.controlBackgroundColor
+  public static var windowContentBackgroundColor: NSColor {
+    semanticColor(role: .background)
+  }
+
+  public static var settingsWindowBackgroundColor: NSColor {
+    .init(name: nil) { appearance in
+      let native = NSColor.windowBackgroundColor.resolvedColor(with: appearance)
+      guard ThemePreference.selectedPreset() != .system else { return native }
+      let theme = windowContentBackgroundColor.resolvedColor(with: appearance)
+      return native.blended(withFraction: 0.7, of: theme) ?? theme
     }
-    return NSColor.windowBackgroundColor
+  }
+
+  public static var sidebarOverlayColor: NSColor {
+    .init(name: nil) { appearance in
+      let preset = ThemePreference.selectedPreset()
+      let variant = ThemeAppearanceVariant(appearance: appearance)
+      return resolvedSidebarOverlayColor(preset: preset, variant: variant).nsColor
+    }
+  }
+
+  public static func resolvedSidebarOverlayColor(
+    preset: AppThemePreset,
+    variant: ThemeAppearanceVariant,
+    userDefaults: UserDefaults = .standard
+  ) -> ThemeColorValue {
+    guard preset != .system else {
+      return ThemeColorValue(red: 0, green: 0, blue: 0, alpha: 0)
+    }
+
+    let accent = resolvedColor(
+      role: .accent,
+      preset: preset,
+      variant: variant,
+      userDefaults: userDefaults
+    ).nsColor.withAlphaComponent(variant == .dark ? 0.1 : 0.07)
+    return ThemeColorValue(nsColor: accent, appearance: variant.nsAppearance)
   }
 
   /// A subtle inspector-like tint that still belongs to the main chat surface family.
-  public static let replyThreadPaneBackgroundColor: NSColor = .init(
-    name: "replyThreadPaneBackgroundColor"
-  ) { appearance in
-    let background = windowContentBackgroundColor.resolvedColor(with: appearance)
-    let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-    let tint = isDark ? NSColor.white : NSColor.black
-    return background.blended(withFraction: 0.025, of: tint) ?? background
+  public static var replyThreadPaneBackgroundColor: NSColor {
+    .init(name: nil) { appearance in
+      let background = windowContentBackgroundColor.resolvedColor(with: appearance)
+      guard ThemePreference.selectedPreset() != .system else { return background }
+      let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+      let tint = isDark ? NSColor.white : NSColor.black
+      return background.blended(withFraction: 0.025, of: tint) ?? background
+    }
   }
 
   // MARK: - Main View & Split View
@@ -133,34 +206,64 @@ public enum Theme {
   }
 
   // - after bubble -
-  public static let messageBubblePrimaryBgColor: NSColor = .init(name: "messageBubblePrimaryBgColor") { appearance in
-    appearance.name == .darkAqua ? NSColor(
-      calibratedRed: 120 / 255,
-      green: 94 / 255,
-      blue: 212 / 255,
-      alpha: 1.0
-    ) : NSColor(
-      calibratedRed: 143 / 255,
-      green: 116 / 255,
-      blue: 238 / 255,
-      alpha: 1.0
-    )
+  public static var messageBubblePrimaryBgColor: NSColor {
+    semanticColor(role: .bubble)
   }
 
-  public static let messageBubbleSecondaryBgColor: NSColor =
-    .init(name: "messageBubbleSecondaryBgColor") { appearance in
-      appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? solidBubbleColor(
-        background: windowContentBackgroundColor,
+  public static var messageBubbleSecondaryBgColor: NSColor {
+    .init(name: nil) { appearance in
+      let preset = ThemePreference.selectedPreset()
+      let variant = ThemeAppearanceVariant(appearance: appearance)
+      return resolvedSecondaryBubbleColor(preset: preset, variant: variant).nsColor
+    }
+  }
+
+  public static func resolvedSecondaryBubbleColor(
+    preset: AppThemePreset,
+    variant: ThemeAppearanceVariant,
+    userDefaults: UserDefaults = .standard
+  ) -> ThemeColorValue {
+    let palette = resolvedPalette(
+      preset: preset,
+      variant: variant,
+      userDefaults: userDefaults
+    )
+
+    if preset == .system {
+      if variant == .light {
+        return .init(rgb: 0xECECEC)
+      }
+
+      let color = solidBubbleColor(
+        background: palette.background.nsColor,
         overlay: .white,
         alpha: 0.1,
-        appearance: appearance
-      ) : .init(
-          calibratedRed: 236 / 255,
-          green: 236 / 255,
-          blue: 236 / 255,
-          alpha: 1.0
-        )
+        appearance: variant.nsAppearance
+      )
+      return ThemeColorValue(nsColor: color, appearance: variant.nsAppearance)
     }
+
+    // A fixed cool-neutral base gives light incoming bubbles reliable separation
+    // without darkening warm page colors into muddy gray or brown. A trace of the
+    // outgoing hue coordinates the pair. Dark bubbles lift from their own page.
+    let neutral = if variant == .light {
+      ThemeColorValue(rgb: 0xEDF0F4).nsColor
+    } else {
+      solidBubbleColor(
+        background: palette.background.nsColor,
+        overlay: .white,
+        alpha: 0.12,
+        appearance: variant.nsAppearance
+      )
+    }
+    let color = solidBubbleColor(
+      background: neutral,
+      overlay: palette.bubble.nsColor,
+      alpha: variant == .dark ? 0.07 : 0.045,
+      appearance: variant.nsAppearance
+    )
+    return ThemeColorValue(nsColor: color, appearance: variant.nsAppearance)
+  }
 
   /// used for bubbles diff to edge
   public static let messageRowSafeAreaInset: CGFloat = 50.0
@@ -221,6 +324,121 @@ public enum Theme {
     let bg = background.resolvedColor(with: appearance).withAlphaComponent(1)
     let fg = overlay.resolvedColor(with: appearance).withAlphaComponent(1)
     return bg.blended(withFraction: alpha, of: fg)?.withAlphaComponent(1) ?? bg
+  }
+
+  private static func semanticColor(role: ThemeColorRole) -> NSColor {
+    NSColor(name: nil) { appearance in
+      let preset = ThemePreference.selectedPreset()
+      let variant = ThemeAppearanceVariant(appearance: appearance)
+      return resolvedColor(role: role, preset: preset, variant: variant).nsColor
+    }
+  }
+
+  private static func basePalette(
+    preset: AppThemePreset,
+    variant: ThemeAppearanceVariant
+  ) -> ThemePalette {
+    switch (preset, variant) {
+    case (.system, .light):
+      ThemePalette(
+        accent: .init(rgb: 0x0A84FF),
+        prominent: .init(rgb: 0x0A84FF),
+        bubble: .init(rgb: 0x3395FF),
+        background: .init(nsColor: .windowBackgroundColor, appearance: variant.nsAppearance)
+      )
+    case (.system, .dark):
+      ThemePalette(
+        accent: .init(rgb: 0x0A84FF),
+        prominent: .init(rgb: 0x0A84FF),
+        bubble: .init(rgb: 0x0A84FF),
+        background: .init(nsColor: .windowBackgroundColor, appearance: variant.nsAppearance)
+      )
+    case (.sunset, .light):
+      ThemePalette(
+        accent: .init(rgb: 0xC84165),
+        prominent: .init(rgb: 0xC44F3F),
+        bubble: .init(rgb: 0xC84643),
+        background: .init(rgb: 0xFFF8F5)
+      )
+    case (.sunset, .dark):
+      ThemePalette(
+        accent: .init(rgb: 0xC84A69),
+        prominent: .init(rgb: 0xC35434),
+        bubble: .init(rgb: 0xB8422D),
+        background: .init(rgb: 0x21191B)
+      )
+    case (.midnight, .light):
+      ThemePalette(
+        accent: .init(rgb: 0x2F6FA8),
+        prominent: .init(rgb: 0x385EC7),
+        bubble: .init(rgb: 0x3A7BAA),
+        background: .init(rgb: 0xF5F8FF)
+      )
+    case (.midnight, .dark):
+      ThemePalette(
+        accent: .init(rgb: 0x4C86C6),
+        prominent: .init(rgb: 0x4777BC),
+        bubble: .init(rgb: 0x3D6A97),
+        background: .init(rgb: 0x111827)
+      )
+    case (.ash, .light):
+      ThemePalette(
+        accent: .init(rgb: 0x5F6875),
+        prominent: .init(rgb: 0x667080),
+        bubble: .init(rgb: 0x626B78),
+        background: .init(rgb: 0xF6F6F7)
+      )
+    case (.ash, .dark):
+      ThemePalette(
+        accent: .init(rgb: 0x6F7886),
+        prominent: .init(rgb: 0x6A7483),
+        bubble: .init(rgb: 0x3D414D),
+        background: .init(rgb: 0x0E0F11)
+      )
+    // Flexoki palette by Steph Ango: https://github.com/kepano/flexoki (MIT).
+    case (.flexoki, .light):
+      ThemePalette(
+        accent: .init(rgb: 0x66800B),
+        prominent: .init(rgb: 0xBC5215),
+        bubble: .init(rgb: 0x205EA6),
+        background: .init(rgb: 0xFFFCF0)
+      )
+    case (.flexoki, .dark):
+      ThemePalette(
+        accent: .init(rgb: 0x879A39),
+        prominent: .init(rgb: 0xBC5215),
+        bubble: .init(rgb: 0x205EA6),
+        background: .init(rgb: 0x100F0F)
+      )
+    case (.pastel, .light):
+      ThemePalette(
+        accent: .init(rgb: 0x835FC7),
+        prominent: .init(rgb: 0xA95682),
+        bubble: .init(rgb: 0x7E5FE5),
+        background: .init(rgb: 0xFAF6FF)
+      )
+    case (.pastel, .dark):
+      ThemePalette(
+        accent: .init(rgb: 0x8D68C4),
+        prominent: .init(rgb: 0xA35F88),
+        bubble: .init(rgb: 0x6547B8),
+        background: .init(rgb: 0x1E1E2E)
+      )
+    case (.neonNoir, .light):
+      ThemePalette(
+        accent: .init(rgb: 0x6C3BFF),
+        prominent: .init(rgb: 0x007E88),
+        bubble: .init(rgb: 0x7748FF),
+        background: .init(rgb: 0xF7F6FB)
+      )
+    case (.neonNoir, .dark):
+      ThemePalette(
+        accent: .init(rgb: 0x9D6CFF),
+        prominent: .init(rgb: 0x00857F),
+        bubble: .init(rgb: 0x5B2FD0),
+        background: .init(rgb: 0x0A0A0F)
+      )
+    }
   }
 
   // MARK: - Devtools

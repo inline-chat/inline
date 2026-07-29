@@ -74,10 +74,12 @@ extension View {
     let updateResult = result
 #endif
 
+    let themedResult = updateResult.modifier(AppThemeModifier())
+
     if let rootData = deps.rootData {
-      updateResult.environmentObject(rootData)
+      themedResult.environmentObject(rootData)
     } else {
-      updateResult
+      themedResult
     }
   }
 
@@ -88,6 +90,19 @@ extension View {
     } else {
       self
     }
+  }
+}
+
+private struct AppThemeModifier: ViewModifier {
+  @ObservedObject private var settings = AppSettings.shared
+
+  func body(content: Content) -> some View {
+    content.tint(themeTint)
+  }
+
+  private var themeTint: Color {
+    _ = settings.themeRevision
+    return Color(nsColor: Theme.accentColor)
   }
 }
 

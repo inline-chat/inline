@@ -6,6 +6,7 @@ import InlineKit
 import InlineMacUI
 import Logger
 import MacDevtools
+import MacTheme
 import RealtimeV2
 import Sentry
 import SwiftUI
@@ -61,6 +62,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationDidFinishLaunching(_: Notification) {
     initializeServices()
     setupAppearanceSetting()
+    setupThemeSetting()
     setupMainMenu()
     presentInstallLocationPromptIfNeeded()
     registerMainWindowCoordinator()
@@ -557,16 +559,53 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       .store(in: &cancellables)
   }
 
+  private func setupThemeSetting() {
+    applyTheme()
+
+    AppSettings.shared.$themeRevision
+      .dropFirst()
+      .removeDuplicates()
+      .debounce(for: .milliseconds(33), scheduler: RunLoop.main)
+      .sink { [weak self] _ in
+        self?.applyTheme()
+      }
+      .store(in: &cancellables)
+  }
+
+  private func applyTheme() {
+    for window in NSApp.windows {
+      if window.windowController is MainWindowController {
+        window.backgroundColor = Theme.windowContentBackgroundColor
+      } else if window.windowController is SettingsWindowController {
+        window.backgroundColor = Theme.settingsWindowBackgroundColor
+      }
+      if let contentView = window.contentView {
+        invalidateTheme(in: contentView)
+      }
+      window.invalidateShadow()
+    }
+  }
+
+  private func invalidateTheme(in view: NSView) {
+    if let refreshableView = view as? AppThemeRefreshable {
+      refreshableView.refreshAppTheme()
+    }
+    view.needsDisplay = true
+    view.layer?.setNeedsDisplay()
+    for subview in view.subviews {
+      invalidateTheme(in: subview)
+    }
+  }
+
   private func applyAppearance(_ appearance: AppAppearance) {
     let resolvedAppearance = appearance.nsAppearance
     if NSApp.appearance?.name != resolvedAppearance?.name {
       NSApp.appearance = resolvedAppearance
     }
-    for window in NSApp.windows {
-      if window.appearance?.name != resolvedAppearance?.name {
-        window.appearance = resolvedAppearance
-      }
+    for window in NSApp.windows where window.appearance?.name != resolvedAppearance?.name {
+      window.appearance = resolvedAppearance
     }
+    applyTheme()
   }
 
 }

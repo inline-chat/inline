@@ -65,6 +65,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
     window.titleVisibility = .visible
     window.titlebarAppearsTransparent = false
     window.toolbarStyle = .unified
+    window.backgroundColor = Theme.settingsWindowBackgroundColor
     window.minSize = NSSize(width: 780, height: 520)
     if !window.setFrameUsingName("SettingsWindow") {
       window.center()

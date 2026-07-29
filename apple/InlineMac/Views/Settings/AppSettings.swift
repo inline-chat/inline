@@ -3,6 +3,7 @@ import Combine
 import Foundation
 import InlineKit
 import InlineMacUI
+import MacTheme
 import SwiftUI
 import TextProcessing
 
@@ -214,6 +215,27 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  @Published var appTheme: AppThemePreset {
+    didSet {
+      guard appTheme != oldValue else { return }
+      UserDefaults.standard.set(appTheme.rawValue, forKey: ThemePreference.selectedPresetKey)
+      publishThemeChange()
+    }
+  }
+
+  @Published var systemThemeAccent: SystemThemeAccent {
+    didSet {
+      guard systemThemeAccent != oldValue else { return }
+      UserDefaults.standard.set(
+        systemThemeAccent.rawValue,
+        forKey: ThemePreference.selectedSystemAccentKey
+      )
+      publishThemeChange()
+    }
+  }
+
+  @Published private(set) var themeRevision = 0
+
   @Published var toolbarStyle: MacToolbarStyle {
     didSet {
       UserDefaults.standard.set(toolbarStyle.rawValue, forKey: "macToolbarStyle")
@@ -223,6 +245,14 @@ final class AppSettings: ObservableObject {
   var usesCompactToolbar: Bool {
     get { toolbarStyle == .unifiedCompact }
     set { toolbarStyle = newValue ? .unifiedCompact : .unified }
+  }
+
+  func themePaletteDidChange() {
+    publishThemeChange()
+  }
+
+  private func publishThemeChange() {
+    themeRevision &+= 1
   }
 
   @Published var messageRenderStyle: MessageRenderStyle {
@@ -332,6 +362,9 @@ final class AppSettings: ObservableObject {
     } else {
       appearance = .system
     }
+
+    appTheme = ThemePreference.selectedPreset()
+    systemThemeAccent = ThemePreference.selectedSystemAccent()
 
     if let storedToolbarStyle = UserDefaults.standard.string(forKey: "macToolbarStyle"),
        let toolbarStyleValue = MacToolbarStyle(rawValue: storedToolbarStyle) {

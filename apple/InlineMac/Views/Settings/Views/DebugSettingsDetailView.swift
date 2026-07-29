@@ -10,6 +10,9 @@ struct DebugSettingsDetailView: View {
   @State private var isDeletingDatabase = false
   @State private var databaseErrorMessage = ""
   @State private var showDatabaseError = false
+#if DEBUG || DEBUG_BUILD
+  @State private var showThemeWorkshop = false
+#endif
 #if (DEBUG || DEBUG_BUILD) && SPARKLE
   @State private var updatePreview = DebugSoftwareUpdatePreview.updateAvailable
   @Environment(UpdateController.self) private var updates
@@ -57,6 +60,21 @@ struct DebugSettingsDetailView: View {
         SettingsSectionHeader("Tools")
       }
 #if DEBUG || DEBUG_BUILD
+      Section {
+        LabeledContent {
+          Button("Open") {
+            showThemeWorkshop = true
+          }
+        } label: {
+          SettingsRowLabel(
+            "Theme Workshop",
+            description: "Tune preset colors live and copy a palette export for production polish."
+          )
+        }
+      } header: {
+        SettingsSectionHeader("Appearance")
+      }
+
       Section {
         LabeledContent {
           Button(role: .destructive) {
@@ -124,6 +142,9 @@ struct DebugSettingsDetailView: View {
       PermissionsDebugSheet()
     }
 #if DEBUG || DEBUG_BUILD
+    .sheet(isPresented: $showThemeWorkshop) {
+      ThemeWorkshopView()
+    }
     .confirmationDialog(
       "Delete database file?",
       isPresented: $confirmDeleteDatabase,

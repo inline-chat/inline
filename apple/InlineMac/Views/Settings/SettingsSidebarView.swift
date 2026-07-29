@@ -6,6 +6,7 @@ import SwiftUI
 struct SettingsSidebarView: View {
   @Binding var selectedCategory: SettingsCategory
   @Environment(\.auth) private var auth
+  @ObservedObject private var settings = AppSettings.shared
 
   var body: some View {
     List(selection: $selectedCategory) {
@@ -15,11 +16,17 @@ struct SettingsSidebarView: View {
       }
     }
     .listStyle(.sidebar)
+    .background(sidebarTint)
     .scrollEdgeEffectStyleSoftIfAvailable()
     .navigationTitle("Settings")
     .safeAreaInset(edge: .bottom, spacing: 0) {
       SettingsSidebarFooterView()
     }
+  }
+
+  private var sidebarTint: Color {
+    _ = settings.themeRevision
+    return Color(nsColor: Theme.sidebarOverlayColor)
   }
 
   private var availableCategories: [SettingsCategory] {

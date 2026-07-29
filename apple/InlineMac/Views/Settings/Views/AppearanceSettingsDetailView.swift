@@ -1,28 +1,16 @@
+import AppKit
 import InlineMacUI
+import MacTheme
 import SwiftUI
 import TextProcessing
+import UniformTypeIdentifiers
 
 struct AppearanceSettingsDetailView: View {
   @StateObject private var appSettings = AppSettings.shared
 
   var body: some View {
     Form {
-      Section {
-        LabeledContent {
-          AppearancePicker(selection: $appSettings.appearance)
-        } label: {
-          SettingsRowLabel("Appearance")
-        }
-
-        Toggle(isOn: $appSettings.usesCompactToolbar) {
-          SettingsRowLabel(
-            "Compact Toolbar",
-            description: "Use less vertical space in chat window toolbars."
-          )
-        }
-      } header: {
-        SettingsSectionHeader("Interface")
-      }
+      AppearanceAndThemeSettingsSection(settings: appSettings)
 
       Section {
         LabeledContent {
@@ -72,8 +60,360 @@ struct AppearanceSettingsDetailView: View {
       } header: {
         SettingsSectionHeader("Badges")
       }
+
+      ToolbarSettingsSection(usesCompactToolbar: $appSettings.usesCompactToolbar)
     }
     .settingsFormStyle()
+  }
+}
+
+private struct AppearanceAndThemeSettingsSection: View {
+  @ObservedObject var settings: AppSettings
+  @Environment(\.colorScheme) private var colorScheme
+  @State private var showsThemePicker = false
+  @State private var importsTheme = false
+  @State private var exportsTheme = false
+  @State private var exportDocument = ThemePaletteFileDocument()
+  @State private var transferErrorMessage = ""
+  @State private var showsTransferError = false
+  @State private var clipboardStatus: LocalizedStringResource?
+  @State private var showsThemeCustomization = false
+
+  var body: some View {
+    let customizedPresets = currentCustomizedPresets
+
+    Section {
+      LabeledContent {
+        AppearancePicker(selection: $settings.appearance)
+      } label: {
+        SettingsRowLabel("Appearance")
+      }
+
+      LabeledContent {
+        Button {
+          clipboardStatus = nil
+          showsThemePicker.toggle()
+        } label: {
+          ThemePickerSummary(
+            preset: settings.appTheme,
+            variant: previewVariant,
+            isCustomized: customizedPresets.contains(settings.appTheme)
+          )
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showsThemePicker, arrowEdge: .trailing) {
+          ThemePickerPopover(
+            selection: $settings.appTheme,
+            systemAccent: $settings.systemThemeAccent,
+            variant: previewVariant,
+            customizedPresets: customizedPresets,
+            clipboardStatus: clipboardStatus,
+            importFromClipboardAction: importFromClipboard,
+            importFromFileAction: prepareFileImport,
+            copyToClipboardAction: copyToClipboard,
+            exportToFileAction: prepareFileExport,
+            customizeAction: customizeTheme
+          )
+        }
+      } label: {
+        SettingsRowLabel(
+          "Theme",
+          description: "Choose colors for the current light or dark appearance."
+        )
+      }
+    } header: {
+      SettingsSectionHeader("Appearance")
+    }
+    .fileImporter(
+      isPresented: $importsTheme,
+      allowedContentTypes: [.json]
+    ) { result in
+      importTheme(result)
+    }
+    .fileExporter(
+      isPresented: $exportsTheme,
+      document: exportDocument,
+      contentType: .json,
+      defaultFilename: "\(settings.appTheme.rawValue)-inline-theme"
+    ) { result in
+      if case let .failure(error) = result {
+        presentTransferError(error)
+      }
+    }
+    .alert("Theme Import or Export Error", isPresented: $showsTransferError) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      Text(transferErrorMessage)
+    }
+    .sheet(isPresented: $showsThemeCustomization) {
+      ActiveThemeCustomizationView(
+        preset: settings.appTheme,
+        initialVariant: previewVariant
+      )
+    }
+  }
+
+  private var previewVariant: ThemeAppearanceVariant {
+    switch settings.appearance {
+    case .light:
+      .light
+    case .dark:
+      .dark
+    case .system:
+      colorScheme == .dark ? .dark : .light
+    }
+  }
+
+  private var currentCustomizedPresets: Set<AppThemePreset> {
+    _ = settings.themeRevision
+    return ThemePaletteOverrides.customizedPresets()
+  }
+
+  private func prepareFileImport() {
+    showsThemePicker = false
+    DispatchQueue.main.async {
+      importsTheme = true
+    }
+  }
+
+  private func prepareFileExport() {
+    do {
+      exportDocument = ThemePaletteFileDocument(
+        data: try ThemePaletteOverrides.exportData(preset: settings.appTheme)
+      )
+      showsThemePicker = false
+      DispatchQueue.main.async {
+        exportsTheme = true
+      }
+    } catch {
+      presentTransferError(error)
+    }
+  }
+
+  private func importFromClipboard() {
+    do {
+      guard let value = NSPasteboard.general.string(forType: .string),
+            let data = value.data(using: .utf8),
+            data.isEmpty == false
+      else {
+        throw ThemeClipboardError.missingThemeJSON
+      }
+      try importTheme(data)
+      clipboardStatus = "Imported"
+    } catch {
+      presentTransferError(error)
+    }
+  }
+
+  private func copyToClipboard() {
+    do {
+      let data = try ThemePaletteOverrides.exportData(preset: settings.appTheme)
+      guard let value = String(data: data, encoding: .utf8) else {
+        throw ThemeClipboardError.encodingFailed
+      }
+      let pasteboard = NSPasteboard.general
+      pasteboard.clearContents()
+      guard pasteboard.setString(value, forType: .string) else {
+        throw ThemeClipboardError.writeFailed
+      }
+      clipboardStatus = "Copied"
+    } catch {
+      presentTransferError(error)
+    }
+  }
+
+  private func customizeTheme() {
+    showsThemePicker = false
+    DispatchQueue.main.async {
+      showsThemeCustomization = true
+    }
+  }
+
+  private func importTheme(_ result: Result<URL, any Error>) {
+    do {
+      let url = try result.get()
+      let accessed = url.startAccessingSecurityScopedResource()
+      defer {
+        if accessed {
+          url.stopAccessingSecurityScopedResource()
+        }
+      }
+
+      try importTheme(Data(contentsOf: url))
+    } catch {
+      presentTransferError(error)
+    }
+  }
+
+  private func importTheme(_ data: Data) throws {
+    let preset = try ThemePaletteOverrides.importData(data)
+    if settings.appTheme == preset {
+      settings.themePaletteDidChange()
+    } else {
+      settings.appTheme = preset
+    }
+  }
+
+  private func presentTransferError(_ error: any Error) {
+    transferErrorMessage = error.localizedDescription
+    showsThemePicker = false
+    DispatchQueue.main.async {
+      showsTransferError = true
+    }
+  }
+}
+
+private struct ThemePickerSummary: View {
+  let preset: AppThemePreset
+  let variant: ThemeAppearanceVariant
+  let isCustomized: Bool
+
+  var body: some View {
+    HStack(spacing: 10) {
+      ThemePresetPreview(preset: preset, variant: variant)
+        .frame(width: 112)
+
+      VStack(alignment: .leading, spacing: 2) {
+        Text(preset.title)
+          .fontWeight(.medium)
+
+        Text(summarySubtitle)
+          .font(isCustomized ? .caption2 : .caption)
+          .foregroundStyle(isCustomized ? .tertiary : .secondary)
+      }
+
+      Image(systemName: "chevron.up.chevron.down")
+        .font(.caption)
+        .foregroundStyle(.tertiary)
+    }
+    .padding(6)
+    .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
+    .contentShape(.rect)
+  }
+
+  private var summarySubtitle: LocalizedStringResource {
+    isCustomized ? "Custom" : "Pick Theme…"
+  }
+}
+
+private struct ThemePickerPopover: View {
+  @Binding var selection: AppThemePreset
+  @Binding var systemAccent: SystemThemeAccent
+  let variant: ThemeAppearanceVariant
+  let customizedPresets: Set<AppThemePreset>
+  let clipboardStatus: LocalizedStringResource?
+  let importFromClipboardAction: () -> Void
+  let importFromFileAction: () -> Void
+  let copyToClipboardAction: () -> Void
+  let exportToFileAction: () -> Void
+  let customizeAction: () -> Void
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text("Pick Theme")
+        .font(.headline)
+        .foregroundStyle(.primary)
+
+      ThemePicker(
+        selection: $selection,
+        systemAccent: $systemAccent,
+        variant: variant,
+        customizedPresets: customizedPresets
+      )
+
+      Divider()
+
+      HStack(spacing: 8) {
+        Menu {
+          Button(
+            "From Clipboard",
+            systemImage: "clipboard",
+            action: importFromClipboardAction
+          )
+          Button("From File…", systemImage: "document", action: importFromFileAction)
+        } label: {
+          Label("Import", systemImage: "square.and.arrow.down")
+        }
+
+        Menu {
+          Button(
+            "Copy to Clipboard",
+            systemImage: "clipboard",
+            action: copyToClipboardAction
+          )
+          Button("Save to File…", systemImage: "document", action: exportToFileAction)
+        } label: {
+          Label("Export", systemImage: "square.and.arrow.up")
+        }
+
+        if let clipboardStatus {
+          Text(clipboardStatus)
+            .font(.caption)
+            .foregroundStyle(.tertiary)
+        }
+
+        Spacer()
+        Button("Customize…", systemImage: "slider.horizontal.3", action: customizeAction)
+      }
+      .controlSize(.small)
+    }
+    .padding(16)
+    .frame(width: 540)
+  }
+}
+
+private enum ThemeClipboardError: LocalizedError {
+  case missingThemeJSON
+  case encodingFailed
+  case writeFailed
+
+  var errorDescription: String? {
+    switch self {
+    case .missingThemeJSON:
+      String(localized: "The clipboard does not contain theme JSON.")
+    case .encodingFailed:
+      String(localized: "The theme JSON could not be encoded as text.")
+    case .writeFailed:
+      String(localized: "The theme JSON could not be copied to the clipboard.")
+    }
+  }
+}
+
+private struct ThemePaletteFileDocument: FileDocument {
+  static let readableContentTypes: [UTType] = [.json]
+
+  var data: Data
+
+  init(data: Data = Data()) {
+    self.data = data
+  }
+
+  init(configuration: ReadConfiguration) throws {
+    guard let data = configuration.file.regularFileContents else {
+      throw CocoaError(.fileReadCorruptFile)
+    }
+    self.data = data
+  }
+
+  func fileWrapper(configuration _: WriteConfiguration) throws -> FileWrapper {
+    FileWrapper(regularFileWithContents: data)
+  }
+}
+
+private struct ToolbarSettingsSection: View {
+  @Binding var usesCompactToolbar: Bool
+
+  var body: some View {
+    Section {
+      Toggle(isOn: $usesCompactToolbar) {
+        SettingsRowLabel(
+          "Compact Toolbar",
+          description: "Use less vertical space in chat window toolbars."
+        )
+      }
+    } header: {
+      SettingsSectionHeader("Toolbar")
+    }
   }
 }
 
@@ -152,7 +492,7 @@ private struct AppearanceOption: View {
           .overlay {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
               .strokeBorder(
-                isSelected ? Color.accentColor : Color.clear,
+                isSelected ? Color(nsColor: Theme.accentColor) : Color.clear,
                 lineWidth: 3
               )
           }
@@ -335,7 +675,7 @@ private struct UnreadBadgeStyleOption: View {
         .overlay {
           RoundedRectangle(cornerRadius: 7, style: .continuous)
             .strokeBorder(
-              isSelected ? Color.accentColor : Color.clear,
+              isSelected ? Color(nsColor: Theme.accentColor) : Color.clear,
               lineWidth: 2
             )
         }

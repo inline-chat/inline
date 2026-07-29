@@ -20,6 +20,7 @@ struct SettingsRootView: View {
   @State private var navigationHistory: [SettingsCategory]
   @State private var historyIndex = 0
   @State private var isHistoryNavigation = false
+  @ObservedObject private var settings = AppSettings.shared
 
   init(navigation: SettingsNavigationModel) {
     self.navigation = navigation
@@ -43,6 +44,7 @@ struct SettingsRootView: View {
       NavigationStack {
         SettingsDetailView(category: navigation.selectedCategory)
       }
+      .background(themeBackground)
     }
     .navigationTitle("Settings")
     .navigationSplitViewStyle(.balanced)
@@ -72,7 +74,19 @@ struct SettingsRootView: View {
     .onChange(of: navigation.selectedCategory) { _, _ in
       recordNavigation()
     }
+    .tint(themeAccent)
+    .background(themeBackground)
     .environmentObject(root)
+  }
+
+  private var themeAccent: Color {
+    _ = settings.themeRevision
+    return Color(nsColor: Theme.accentColor)
+  }
+
+  private var themeBackground: Color {
+    _ = settings.themeRevision
+    return Color(nsColor: Theme.settingsWindowBackgroundColor)
   }
 
   private var canGoBack: Bool {

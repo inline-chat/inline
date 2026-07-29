@@ -44,7 +44,7 @@ let package = Package(
 
     .target(
       name: "InlineMacUI",
-      dependencies: baseDependencies + ["InlineMacHotkeys", "InlineMacTabStrip"],
+      dependencies: baseDependencies + ["InlineMacHotkeys", "InlineMacTabStrip", "MacTheme"],
       swiftSettings: swiftSettings
     ),
 
@@ -77,7 +77,7 @@ let package = Package(
 
     .testTarget(
       name: "InlineMacUITests",
-      dependencies: ["InlineMacUI"],
+      dependencies: ["InlineMacUI", "MacTheme"],
       swiftSettings: swiftSettings
     ),
 
