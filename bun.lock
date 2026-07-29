@@ -269,7 +269,7 @@
         "elysia-rate-limit": "4.6.2",
         "expo-server-sdk": "6.1.0",
         "libphonenumber-js": "^1.12.7",
-        "livekit-server-sdk": "^2.17.0",
+        "livekit-server-sdk": "2.17.0",
         "nanoid": "^5.0.7",
         "nanoid-dictionary": "^4.3.0",
         "openai": "^6.32.0",

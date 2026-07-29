@@ -1,0 +1,1 @@
+ALTER TABLE "grid_provider_effects" ADD COLUMN "provider_target" varchar(255);

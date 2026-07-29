@@ -105,6 +105,13 @@ export const NOTION_CLIENT_SECRET_DEV = process.env["NOTION_CLIENT_SECRET_DEV"]
 export const LIVEKIT_URL = process.env["LIVEKIT_URL"]
 export const LIVEKIT_API_KEY = process.env["LIVEKIT_API_KEY"]
 export const LIVEKIT_API_SECRET = process.env["LIVEKIT_API_SECRET"]
+export const LIVEKIT_PROVIDER = process.env["LIVEKIT_PROVIDER"] ?? "self_hosted"
+export const LIVEKIT_CLOUD_URL = process.env["LIVEKIT_CLOUD_URL"]
+export const LIVEKIT_CLOUD_API_KEY = process.env["LIVEKIT_CLOUD_API_KEY"]
+export const LIVEKIT_CLOUD_API_SECRET = process.env["LIVEKIT_CLOUD_API_SECRET"]
+export const LIVEKIT_SELF_HOSTED_URL = process.env["LIVEKIT_SELF_HOSTED_URL"]
+export const LIVEKIT_SELF_HOSTED_API_KEY = process.env["LIVEKIT_SELF_HOSTED_API_KEY"]
+export const LIVEKIT_SELF_HOSTED_API_SECRET = process.env["LIVEKIT_SELF_HOSTED_API_SECRET"]
 
 // Check required variables
 const requiredProductionVariables = [
@@ -163,9 +170,6 @@ const optionalVariables = [
   "NOTION_CLIENT_ID",
   "NOTION_CLIENT_SECRET",
   "FILES_PROXY_SIGNING_KEY",
-  "LIVEKIT_URL",
-  "LIVEKIT_API_KEY",
-  "LIVEKIT_API_SECRET",
 ]
 
 optionalVariables.forEach((variable) => {
@@ -173,3 +177,29 @@ optionalVariables.forEach((variable) => {
     Log.shared.warn(`${variable} env variable is not defined.`)
   }
 })
+
+const liveKitProvider = LIVEKIT_PROVIDER.trim().toLowerCase() || "self_hosted"
+const legacyLiveKitVariables = ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"]
+const selectedLiveKitVariables = liveKitProvider === "cloud"
+  ? ["LIVEKIT_CLOUD_URL", "LIVEKIT_CLOUD_API_KEY", "LIVEKIT_CLOUD_API_SECRET"]
+  : liveKitProvider === "self_hosted"
+    ? ["LIVEKIT_SELF_HOSTED_URL", "LIVEKIT_SELF_HOSTED_API_KEY", "LIVEKIT_SELF_HOSTED_API_SECRET"]
+    : []
+const selectedLiveKitConfigured = selectedLiveKitVariables.length > 0
+  && selectedLiveKitVariables.every((variable) => !!process.env[variable]?.trim())
+const legacyLiveKitConfigured = legacyLiveKitVariables.every((variable) => !!process.env[variable]?.trim())
+
+if (!isTest && selectedLiveKitVariables.length === 0) {
+  Log.shared.warn("LIVEKIT_PROVIDER must be either 'cloud' or 'self_hosted'.")
+}
+if (!isTest && selectedLiveKitVariables.length > 0 && !selectedLiveKitConfigured && legacyLiveKitConfigured) {
+  Log.shared.warn(
+    `LiveKit ${liveKitProvider} variables are incomplete; falling back to legacy LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET.`,
+  )
+} else if (isProd && !selectedLiveKitConfigured) {
+  for (const variable of selectedLiveKitVariables) {
+    if (!process.env[variable]?.trim()) {
+      Log.shared.warn(`${variable} selected by LIVEKIT_PROVIDER is not defined.`)
+    }
+  }
+}

@@ -6,7 +6,10 @@ import {
   enqueueGridConnectionCleanup,
   enqueueGridParticipantRevocation,
 } from "@in/server/modules/grid/providerEffects"
-import { gridParticipantIdentity } from "@in/server/modules/grid/livekit"
+import {
+  gridParticipantIdentity,
+  liveKitRequiresGenerationRotation,
+} from "@in/server/modules/grid/livekit"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { Log } from "@in/server/utils/log"
 import { and, count, eq, gt, inArray, sql } from "drizzle-orm"
@@ -43,6 +46,7 @@ export async function lockGridMutations(tx: Transaction) {
 export async function reconcileGridRoom(
   tx: Transaction,
   roomId: number,
+  options: { rotateForAccessRevocation?: boolean } = {},
 ): Promise<GridConnection | undefined> {
   const startedAt = Date.now()
   const [room] = await tx.select().from(gridRooms).where(eq(gridRooms.id, roomId)).for("update").limit(1)
@@ -60,7 +64,11 @@ export async function reconcileGridRoom(
 
   if (occupantCount === 0 && room.title === null) {
     await tx.delete(gridRooms).where(eq(gridRooms.id, roomId))
-    if (endedConnection) await enqueueGridConnectionCleanup(tx, endedConnection)
+    if (endedConnection) {
+      await enqueueGridConnectionCleanup(tx, endedConnection, Date.now(), {
+        delayMs: options.rotateForAccessRevocation ? 0 : undefined,
+      })
+    }
     log.debug("GRID_TRACE phase=reconcile_deleted_ephemeral", {
       roomId,
       occupantCount,
@@ -76,7 +84,31 @@ export async function reconcileGridRoom(
       .update(gridRooms)
       .set({ locked: occupantCount === 0 ? false : room.locked, connectionStartedAt: null, updatedAt: now })
       .where(eq(gridRooms.id, roomId))
-    if (endedConnection) await enqueueGridConnectionCleanup(tx, endedConnection)
+    if (endedConnection) {
+      await enqueueGridConnectionCleanup(tx, endedConnection, Date.now(), {
+        delayMs: options.rotateForAccessRevocation ? 0 : undefined,
+      })
+    }
+    return endedConnection
+  }
+
+  if (room.connectionStartedAt !== null && options.rotateForAccessRevocation) {
+    await tx
+      .update(gridRooms)
+      .set({
+        connectionGeneration: sql`${gridRooms.connectionGeneration} + 1`,
+        connectionStartedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(gridRooms.id, roomId))
+    await enqueueGridConnectionCleanup(tx, endedConnection!, Date.now(), { delayMs: 0 })
+    log.info("GRID_TRACE phase=connection_rotated_for_access_revocation", {
+      roomId,
+      previousGeneration: room.connectionGeneration,
+      generation: room.connectionGeneration + 1,
+      occupantCount,
+      elapsedMs: Date.now() - startedAt,
+    })
     return endedConnection
   }
 
@@ -232,7 +264,10 @@ async function removeGridPresenceInTransaction(
       gridParticipantIdentity(input.userId, row.presence.mediaMembershipId),
     )
   }
-  const endedConnection = await reconcileGridRoom(tx, row.room.id)
+  const endedConnection = await reconcileGridRoom(tx, row.room.id, {
+    rotateForAccessRevocation:
+      activeConnection !== undefined && liveKitRequiresGenerationRotation(),
+  })
   return {
     affectedSpaceIds: new Set([row.room.spaceId]),
     changedRoomId: row.room.id,

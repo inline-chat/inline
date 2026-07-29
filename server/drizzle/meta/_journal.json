@@ -701,6 +701,13 @@
       "when": 1784993492672,
       "tag": "0099_mcp-oauth-resource-audience",
       "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1785273505031,
+      "tag": "0100_livekit-provider-target",
+      "breakpoints": true
     }
   ]
 }

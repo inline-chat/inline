@@ -18,6 +18,8 @@ import { toggleSpaceGrid } from "@in/server/functions/space.settings"
 import { eq } from "drizzle-orm"
 import { setupTestLifecycle, testUtils } from "../setup"
 import { revokeSession } from "@in/server/modules/sessions/revokeSession"
+import { removeGridMemberPresence } from "@in/server/modules/grid/roomLifecycle"
+import { durableLiveKitProviderTarget } from "@in/server/modules/grid/livekit"
 
 const runId = Date.now()
 let counter = 0
@@ -212,6 +214,31 @@ describe("grid", () => {
     expect(left.grids[0]!.rooms[0]!.connection?.generation).toBe(generation)
   })
 
+  test("rotates an active generation when member access is revoked", async () => {
+    const { space, contexts } = await createFixture("three-person-access-revocation", 3)
+    await toggleSpaceGrid({ spaceId: BigInt(space.id), enabled: true }, contexts[0]!)
+    const created = await createGridRoom({ spaceId: BigInt(space.id) }, contexts[0]!)
+    const roomId = created.grids[0]!.rooms[0]!.id
+    await joinGridRoom({ roomId }, contexts[1]!)
+    const joined = await joinGridRoom({ roomId }, contexts[2]!)
+    const oldGeneration = joined.grids[0]!.rooms[0]!.connection!.generation
+
+    const state = await removeGridMemberPresence(space.id, contexts[2]!.currentUserId)
+    const current = await getGrid({ spaceId: BigInt(space.id) }, contexts[0]!)
+    const newGeneration = current.grid!.rooms[0]!.connection!.generation
+    const cleanup = await db
+      .select()
+      .from(gridProviderEffects)
+      .where(eq(gridProviderEffects.kind, "close_connection"))
+
+    expect(state.endedConnections.map((connection) => connection.generation)).toContain(oldGeneration)
+    expect(newGeneration).toBe(oldGeneration + 1)
+    expect(cleanup.some((effect) => effect.connectionGeneration === oldGeneration)).toBe(true)
+    const oldGenerationCleanup = cleanup.find((effect) => effect.connectionGeneration === oldGeneration)!
+    expect(oldGenerationCleanup.providerTarget).toBe(durableLiveKitProviderTarget())
+    expect(oldGenerationCleanup.availableAt.getTime()).toBeLessThanOrEqual(Date.now())
+  })
+
   test("an old participant revocation cannot target a rapid rejoin in the same generation", async () => {
     const { space, contexts } = await createFixture("membership-identity", 3)
     await toggleSpaceGrid({ spaceId: BigInt(space.id), enabled: true }, contexts[0]!)
@@ -240,6 +267,7 @@ describe("grid", () => {
     expect(after?.mediaMembershipId).not.toBe(before?.mediaMembershipId)
     expect(revocation?.participantIdentity).toContain(before!.mediaMembershipId)
     expect(revocation?.participantIdentity).not.toContain(after!.mediaMembershipId)
+    expect(revocation?.providerTarget).toBe(durableLiveKitProviderTarget())
   })
 
   test("moves one global avatar between Spaces atomically", async () => {

@@ -1,20 +1,26 @@
 import type { GridConnection, GridConnectionCredentials } from "@inline-chat/protocol/core"
-import { LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL } from "@in/server/env"
+import {
+  LIVEKIT_API_KEY,
+  LIVEKIT_API_SECRET,
+  LIVEKIT_CLOUD_API_KEY,
+  LIVEKIT_CLOUD_API_SECRET,
+  LIVEKIT_CLOUD_URL,
+  LIVEKIT_PROVIDER,
+  LIVEKIT_SELF_HOSTED_API_KEY,
+  LIVEKIT_SELF_HOSTED_API_SECRET,
+  LIVEKIT_SELF_HOSTED_URL,
+  LIVEKIT_URL,
+} from "@in/server/env"
 import { Log } from "@in/server/utils/log"
 import { AccessToken, RoomServiceClient } from "livekit-server-sdk"
 
 const TOKEN_TTL_SECONDS = 5 * 60
 const log = new Log("grid.livekit")
 
-/**
- * LiveKit Cloud's bounded region failover handles a transient edge or region
- * transport failure inside one logical provider operation. The durable Grid
- * outbox remains the owner of retries that must survive the process. The
- * worker deadline covers all three SDK attempts plus discovery and backoff.
- */
+export const UNCONFIGURED_LIVEKIT_PROVIDER_TARGET = "unconfigured"
+
 export const GRID_PROVIDER_HTTP_POLICY = {
   requestTimeoutSeconds: 6,
-  failover: true,
   workerTimeoutSeconds: 25,
 } as const
 
@@ -24,6 +30,31 @@ export type LiveKitGridConfig = {
   serverUrl: string
   apiKey: string
   apiSecret: string
+  provider?: LiveKitProvider
+}
+
+export type LiveKitProvider = "cloud" | "self_hosted"
+
+export type LiveKitGridEnvironment = {
+  provider?: string
+  legacy?: Partial<LiveKitGridConfig>
+  cloud?: Partial<LiveKitGridConfig>
+  selfHosted?: Partial<LiveKitGridConfig>
+}
+
+export type LiveKitProviderCapabilities = {
+  persistentTokenRevocation: boolean
+  regionFailover: boolean
+}
+
+const LIVEKIT_CLOUD_CAPABILITIES: LiveKitProviderCapabilities = {
+  persistentTokenRevocation: true,
+  regionFailover: true,
+}
+
+const SELF_HOSTED_LIVEKIT_CAPABILITIES: LiveKitProviderCapabilities = {
+  persistentTokenRevocation: false,
+  regionFailover: false,
 }
 
 export async function createGridConnectionCredentials(
@@ -81,11 +112,75 @@ export async function createGridConnectionCredentials(
 }
 
 export function getLiveKitGridConfig(): LiveKitGridConfig | undefined {
-  const serverUrl = LIVEKIT_URL?.trim()
-  const apiKey = LIVEKIT_API_KEY?.trim()
-  const apiSecret = LIVEKIT_API_SECRET?.trim()
-  if (!serverUrl || !apiKey || !apiSecret) return undefined
-  return { serverUrl, apiKey, apiSecret }
+  return resolveLiveKitGridConfig({
+    provider: LIVEKIT_PROVIDER,
+    legacy: { serverUrl: LIVEKIT_URL, apiKey: LIVEKIT_API_KEY, apiSecret: LIVEKIT_API_SECRET },
+    cloud: {
+      serverUrl: LIVEKIT_CLOUD_URL,
+      apiKey: LIVEKIT_CLOUD_API_KEY,
+      apiSecret: LIVEKIT_CLOUD_API_SECRET,
+    },
+    selfHosted: {
+      serverUrl: LIVEKIT_SELF_HOSTED_URL,
+      apiKey: LIVEKIT_SELF_HOSTED_API_KEY,
+      apiSecret: LIVEKIT_SELF_HOSTED_API_SECRET,
+    },
+  })
+}
+
+export function resolveLiveKitGridConfig(environment: LiveKitGridEnvironment): LiveKitGridConfig | undefined {
+  const provider = environment.provider?.trim().toLowerCase() || "self_hosted"
+  if (provider === "cloud") {
+    return completeLiveKitConfig(environment.cloud, "cloud")
+      ?? completeLiveKitConfig(environment.legacy)
+  }
+  if (provider === "self_hosted") {
+    return completeLiveKitConfig(environment.selfHosted, "self_hosted")
+      ?? completeLiveKitConfig(environment.legacy)
+  }
+  return undefined
+}
+
+/** Explicit dual-provider selection wins; legacy configuration falls back to host inference. */
+export function liveKitProviderCapabilities(
+  config: Pick<LiveKitGridConfig, "serverUrl" | "provider">,
+): LiveKitProviderCapabilities {
+  if ("provider" in config && config.provider) {
+    return config.provider === "cloud" ? LIVEKIT_CLOUD_CAPABILITIES : SELF_HOSTED_LIVEKIT_CAPABILITIES
+  }
+  return liveKitServerHostname(config.serverUrl).endsWith(".livekit.cloud")
+    ? LIVEKIT_CLOUD_CAPABILITIES
+    : SELF_HOSTED_LIVEKIT_CAPABILITIES
+}
+
+/**
+ * A room-generation boundary replaces persistent token revocation when the
+ * provider cannot invalidate an already issued participant token. Missing
+ * configuration stays fail-safe because no provider revocation can be proven.
+ */
+export function liveKitRequiresGenerationRotation(
+  config: Pick<LiveKitGridConfig, "serverUrl" | "provider"> | null | undefined = getLiveKitGridConfig(),
+): boolean {
+  return !config || !liveKitProviderCapabilities(config).persistentTokenRevocation
+}
+
+/** Non-secret stable identity used to keep durable effects on their originating provider. */
+export function liveKitProviderTarget(
+  config: Pick<LiveKitGridConfig, "serverUrl"> | null | undefined = getLiveKitGridConfig(),
+): string | undefined {
+  if (!config) return undefined
+  return new URL(httpServiceURL(config.serverUrl)).origin.toLowerCase()
+}
+
+/**
+ * Durable effects must never fall back to the provider configured at execution
+ * time. The sentinel keeps new effects fail-closed when ownership cannot be
+ * established; only rows predating the provider-target migration stay null.
+ */
+export function durableLiveKitProviderTarget(
+  config: Pick<LiveKitGridConfig, "serverUrl"> | null | undefined = getLiveKitGridConfig(),
+): string {
+  return liveKitProviderTarget(config) ?? UNCONFIGURED_LIVEKIT_PROVIDER_TARGET
 }
 
 export async function closeGridConnections(
@@ -125,9 +220,10 @@ export async function closeGridConnection(
 }
 
 /**
- * Disconnects one removed member and invalidates every token minted for this
- * participant identity before the revocation timestamp. Inline membership is
- * still authoritative; this closes the provider-side window immediately.
+ * Disconnects one removed member. LiveKit Cloud also invalidates previously
+ * minted tokens for this participant identity. Self-hosted LiveKit ignores the
+ * revocation field, so the authoritative Grid lifecycle rotates the room
+ * generation when access is revoked.
  */
 export async function revokeGridParticipantAccess(
   connection: GridConnectionIdentity,
@@ -139,7 +235,7 @@ export async function revokeGridParticipantAccess(
     removeParticipant?: (
       roomName: string,
       participantIdentity: string,
-      revokeTokenTs: bigint,
+      options?: { revokeTokenTs?: bigint },
     ) => Promise<void>
   } = {},
 ): Promise<void> {
@@ -147,20 +243,26 @@ export async function revokeGridParticipantAccess(
 
   const roomName = providerRoomName(connection)
   const participantIdentity = options.participantIdentity ?? legacyGridParticipantIdentity(userId)
-  // Token nbf values use whole seconds. Advancing one second ensures a token
-  // minted during the current second is also invalidated.
-  const revokeTokenTs = BigInt(Math.floor((options.now?.() ?? Date.now()) / 1_000) + 1)
-  const removeParticipant = options.removeParticipant ?? (async (room, identity, timestamp) => {
+  const capabilities = liveKitProviderCapabilities(config)
+  const removalOptions = capabilities.persistentTokenRevocation
+    ? {
+        // Token nbf values use whole seconds. Advancing one second ensures a
+        // token minted during the current second is also invalidated.
+        revokeTokenTs: BigInt(Math.floor((options.now?.() ?? Date.now()) / 1_000) + 1),
+      }
+    : undefined
+  const removeParticipant = options.removeParticipant ?? (async (room, identity, requestOptions) => {
     const service = roomServiceClient(config)
-    await service.removeParticipant(room, identity, { revokeTokenTs: timestamp })
+    await service.removeParticipant(room, identity, requestOptions)
   })
 
   const startedAt = Date.now()
-  await removeParticipant(roomName, participantIdentity, revokeTokenTs)
-  log.info("GRID_TRACE phase=participant_access_revoked", {
+  await removeParticipant(roomName, participantIdentity, removalOptions)
+  log.info("GRID_TRACE phase=participant_disconnected", {
     roomId: connection.roomId.toString(),
     generation: connection.generation,
     userId,
+    persistentTokenRevocation: capabilities.persistentTokenRevocation,
     elapsedMs: Date.now() - startedAt,
   })
 }
@@ -182,10 +284,28 @@ function legacyGridParticipantIdentity(userId: number): string {
 }
 
 function roomServiceClient(config: LiveKitGridConfig): RoomServiceClient {
+  const capabilities = liveKitProviderCapabilities(config)
   return new RoomServiceClient(httpServiceURL(config.serverUrl), config.apiKey, config.apiSecret, {
     requestTimeout: GRID_PROVIDER_HTTP_POLICY.requestTimeoutSeconds,
-    failover: GRID_PROVIDER_HTTP_POLICY.failover,
+    failover: capabilities.regionFailover,
   })
+}
+
+function liveKitServerHostname(url: string): string {
+  return new URL(httpServiceURL(url)).hostname.toLowerCase()
+}
+
+function completeLiveKitConfig(
+  config: Partial<LiveKitGridConfig> | null | undefined,
+  provider?: LiveKitProvider,
+): LiveKitGridConfig | undefined {
+  const serverUrl = config?.serverUrl?.trim()
+  const apiKey = config?.apiKey?.trim()
+  const apiSecret = config?.apiSecret?.trim()
+  if (!serverUrl || !apiKey || !apiSecret) return undefined
+  return provider
+    ? { serverUrl, apiKey, apiSecret, provider }
+    : { serverUrl, apiKey, apiSecret }
 }
 
 function httpServiceURL(url: string): string {

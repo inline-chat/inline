@@ -84,6 +84,7 @@ export const gridProviderEffects = pgTable(
     deduplicationKey: varchar("deduplication_key", { length: 128 }).notNull(),
     roomId: integer("room_id").notNull(),
     connectionGeneration: integer("connection_generation").notNull(),
+    providerTarget: varchar("provider_target", { length: 255 }),
     userId: integer("user_id"),
     participantIdentity: varchar("participant_identity", { length: 128 }),
     availableAt: timestamp("available_at", { mode: "date", precision: 3 }).notNull(),

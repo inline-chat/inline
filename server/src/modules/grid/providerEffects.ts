@@ -4,8 +4,10 @@ import { gridProviderEffects, type DbGridProviderEffect } from "@in/server/db/sc
 import type { Transaction } from "@in/server/db/types"
 import {
   closeGridConnection,
+  durableLiveKitProviderTarget,
   getLiveKitGridConfig,
   GRID_PROVIDER_HTTP_POLICY,
+  liveKitProviderTarget,
   revokeGridParticipantAccess,
 } from "@in/server/modules/grid/livekit"
 import { Log } from "@in/server/utils/log"
@@ -49,6 +51,7 @@ export async function enqueueGridConnectionCleanup(
   tx: Transaction,
   connection: Pick<GridConnection, "roomId" | "generation">,
   now = Date.now(),
+  options: { delayMs?: number } = {},
 ): Promise<void> {
   await tx
     .insert(gridProviderEffects)
@@ -57,7 +60,8 @@ export async function enqueueGridConnectionCleanup(
       deduplicationKey: providerEffectKey("close_connection", connection),
       roomId: Number(connection.roomId),
       connectionGeneration: connection.generation,
-      availableAt: new Date(now + CONNECTION_CLEANUP_GRACE_MS),
+      providerTarget: durableLiveKitProviderTarget(),
+      availableAt: new Date(now + (options.delayMs ?? CONNECTION_CLEANUP_GRACE_MS)),
     })
     .onConflictDoNothing({ target: gridProviderEffects.deduplicationKey })
 }
@@ -77,6 +81,7 @@ export async function enqueueGridParticipantRevocation(
       deduplicationKey: providerEffectKey("revoke_participant", connection, participantIdentity),
       roomId: Number(connection.roomId),
       connectionGeneration: connection.generation,
+      providerTarget: durableLiveKitProviderTarget(),
       userId,
       participantIdentity,
       availableAt: new Date(now),
@@ -249,9 +254,17 @@ async function claimGridProviderEffects(input: {
   })
 }
 
-async function executeGridProviderEffect(effect: ClaimedGridProviderEffect): Promise<void> {
-  const config = getLiveKitGridConfig()
+export async function executeGridProviderEffect(
+  effect: ClaimedGridProviderEffect,
+  config = getLiveKitGridConfig(),
+): Promise<void> {
   if (!config) throw new Error("Grid media provider is not configured")
+  const currentProviderTarget = liveKitProviderTarget(config)
+  if (effect.providerTarget !== null && effect.providerTarget !== currentProviderTarget) {
+    throw new Error(
+      `Grid provider target mismatch: effect=${effect.providerTarget} current=${currentProviderTarget ?? "unconfigured"}`,
+    )
+  }
   const connection = {
     roomId: BigInt(effect.roomId),
     generation: effect.connectionGeneration,

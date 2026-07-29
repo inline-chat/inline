@@ -83,6 +83,29 @@ describe("startup and config guards", () => {
     expect(result.stderr).toContain("Required production variable DATABASE_URL is not defined.")
   })
 
+  it("warns without exposing values when the selected LiveKit triplet falls back to legacy variables", () => {
+    const result = runBunSnippet(`
+      process.env.NODE_ENV = "development";
+      process.env.DATABASE_URL = "postgres://localhost:5432/dev";
+      process.env.LIVEKIT_PROVIDER = "self_hosted";
+      delete process.env.LIVEKIT_SELF_HOSTED_URL;
+      delete process.env.LIVEKIT_SELF_HOSTED_API_KEY;
+      delete process.env.LIVEKIT_SELF_HOSTED_API_SECRET;
+      process.env.LIVEKIT_URL = "wss://legacy.example";
+      process.env.LIVEKIT_API_KEY = "synthetic-key";
+      process.env.LIVEKIT_API_SECRET = "synthetic-secret";
+      import("./src/env.ts")
+        .then(() => process.exit(0))
+        .catch(() => process.exit(1));
+    `)
+
+    const output = `${result.stdout}\n${result.stderr}`
+    expect(result.exitCode).toBe(0)
+    expect(output).toContain("falling back to legacy LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET")
+    expect(output).not.toContain("synthetic-key")
+    expect(output).not.toContain("synthetic-secret")
+  })
+
   it("fails test DB setup when neither TEST_DATABASE_URL nor DATABASE_URL are available at call time", () => {
     const result = runBunSnippet(
       `

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { GridProviderEffectWorker } from "@in/server/modules/grid/providerEffects"
+import { executeGridProviderEffect, GridProviderEffectWorker } from "@in/server/modules/grid/providerEffects"
 
 const effect = {
   id: 1,
@@ -7,6 +7,7 @@ const effect = {
   deduplicationKey: "revoke_participant:42:3:inline-grid-user-7-1000",
   roomId: 42,
   connectionGeneration: 3,
+  providerTarget: "https://cloud-project.livekit.cloud",
   userId: 7,
   participantIdentity: "inline-grid-user-7-1000",
   availableAt: new Date(1_000),
@@ -80,5 +81,28 @@ describe("Grid provider effect worker", () => {
     await worker.pollOnce()
     await worker.stop()
     expect(retryMessage).toContain("timed out")
+  })
+
+  test("refuses to replay an effect against a different provider origin", async () => {
+    await expect(
+      executeGridProviderEffect(effect, {
+        serverUrl: "wss://livekit.inline.chat",
+        apiKey: "test-key",
+        apiSecret: "test-secret-that-is-long-enough-for-hmac",
+      }),
+    ).rejects.toThrow("Grid provider target mismatch")
+  })
+
+  test("keeps an effect with unknown ownership fail-closed", async () => {
+    await expect(
+      executeGridProviderEffect(
+        { ...effect, providerTarget: "unconfigured" },
+        {
+          serverUrl: "wss://livekit.inline.chat",
+          apiKey: "test-key",
+          apiSecret: "test-secret-that-is-long-enough-for-hmac",
+        },
+      ),
+    ).rejects.toThrow("Grid provider target mismatch")
   })
 })
