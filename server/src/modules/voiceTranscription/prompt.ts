@@ -1,4 +1,5 @@
 import type { DbFullVoice } from "@in/server/db/models/files"
+import { MessageModel } from "@in/server/db/models/messages"
 import type { DbMessage } from "@in/server/db/schema"
 import { getCachedChatInfo } from "@in/server/modules/cache/chatInfo"
 import { getCachedSpaceInfo } from "@in/server/modules/cache/spaceCache"
@@ -7,59 +8,117 @@ import { getCachedUserName, type UserName } from "@in/server/modules/cache/userN
 const maxParticipantNames = 24
 const maxNameLength = 80
 const maxTitleLength = 140
+const maxKeywordCount = 64
+const maxKeywordLength = 80
+const recentMessageScanLimit = 32
+const maxRecentTranscripts = 4
+const maxRecentTranscriptLength = 240
+const commonKeywords = [
+  "Inline",
+  "RealtimeV2",
+  "OpenClaw",
+  "iOS",
+  "macOS",
+  "API",
+  "PR",
+  "DM",
+  "work chat",
+  "direct message",
+]
 
-export type VoiceTranscriptionPromptInput = {
+export type VoiceTranscriptionContextInput = {
   message: DbMessage
   voice: DbFullVoice
 }
 
-export type VoiceTranscriptionPrompt = {
+export type VoiceTranscriptionContext = {
   prompt: string
+  keywords: string[]
+  languages: string[]
   chatType?: "private" | "thread"
   participantCount: number
   includedParticipantCount: number
+  recentTranscriptCount: number
   hasChatTitle: boolean
   hasSpaceName: boolean
 }
 
-export function baseVoiceTranscriptionPrompt(): VoiceTranscriptionPrompt {
+export function baseVoiceTranscriptionContext(): VoiceTranscriptionContext {
+  return buildVoiceTranscriptionContextFromParts({})
+}
+
+export type VoiceTranscriptionContextParts = {
+  chatType?: "private" | "thread"
+  chatTitle?: string
+  spaceName?: string
+  senderName?: string
+  participantKeywords?: string[]
+  participantCount?: number
+  includedParticipantCount?: number
+  recentTranscripts?: string[]
+  voiceDurationSeconds?: number | null
+}
+
+export function buildVoiceTranscriptionContextFromParts(
+  parts: VoiceTranscriptionContextParts,
+): VoiceTranscriptionContext {
+  const chatTitle = cleanText(parts.chatTitle, maxTitleLength)
+  const spaceName = cleanText(parts.spaceName, maxTitleLength)
+  const senderName = cleanText(parts.senderName, maxNameLength * 2)
+  const recentTranscripts = (parts.recentTranscripts ?? [])
+    .map((transcript) => cleanText(transcript, maxRecentTranscriptLength))
+    .filter((transcript): transcript is string => Boolean(transcript))
+    .slice(-maxRecentTranscripts)
+  const keywords = uniqueKeywords([
+    chatTitle,
+    spaceName,
+    ...(parts.participantKeywords ?? []),
+    ...commonKeywords,
+  ]).slice(0, maxKeywordCount)
+
   return {
-    prompt: buildPromptText({}),
-    participantCount: 0,
-    includedParticipantCount: 0,
-    hasChatTitle: false,
-    hasSpaceName: false,
+    prompt: buildPromptText({
+      chatType: parts.chatType,
+      chatTitle,
+      spaceName,
+      senderName,
+      recentTranscripts,
+      voiceDurationSeconds: parts.voiceDurationSeconds,
+    }),
+    keywords,
+    // TODO: Populate from user.languages once the product user model exposes it.
+    languages: [],
+    chatType: parts.chatType,
+    participantCount: parts.participantCount ?? 0,
+    includedParticipantCount: parts.includedParticipantCount ?? 0,
+    recentTranscriptCount: recentTranscripts.length,
+    hasChatTitle: Boolean(chatTitle),
+    hasSpaceName: Boolean(spaceName),
   }
 }
 
-export async function buildVoiceTranscriptionPrompt(
-  input: VoiceTranscriptionPromptInput,
-): Promise<VoiceTranscriptionPrompt> {
+export async function buildVoiceTranscriptionContext(
+  input: VoiceTranscriptionContextInput,
+): Promise<VoiceTranscriptionContext> {
   const chatInfo = await getCachedChatInfo(input.message.chatId)
   const spaceInfo = chatInfo?.spaceId ? await getCachedSpaceInfo(chatInfo.spaceId) : undefined
   const senderName = await userLabel(input.message.fromId)
   const participantIds = uniqueIds([input.message.fromId, ...(chatInfo?.participantUserIds ?? [])])
   const includedParticipantIds = participantIds.slice(0, maxParticipantNames)
-  const participantNames = await participantNameHints(includedParticipantIds)
-  const chatTitle = cleanText(chatInfo?.title, maxTitleLength)
-  const spaceName = cleanText(spaceInfo?.name, maxTitleLength)
+  const participantKeywords = await participantKeywordHints(includedParticipantIds)
+  const recentTranscripts = await recentVoiceTranscripts(input.message)
 
-  return {
-    prompt: buildPromptText({
-      chatType: chatInfo?.type,
-      chatTitle,
-      spaceName,
-      senderName,
-      participantNames,
-      omittedParticipantCount: Math.max(0, participantIds.length - includedParticipantIds.length),
-      voiceDurationSeconds: input.voice.duration ?? undefined,
-    }),
+  return buildVoiceTranscriptionContextFromParts({
     chatType: chatInfo?.type,
+    chatTitle: chatInfo?.title ?? undefined,
+    spaceName: spaceInfo?.name ?? undefined,
+    senderName,
+    participantKeywords,
     participantCount: participantIds.length,
-    includedParticipantCount: participantNames.length,
-    hasChatTitle: Boolean(chatTitle),
-    hasSpaceName: Boolean(spaceName),
-  }
+    includedParticipantCount: includedParticipantIds.length,
+    recentTranscripts,
+    voiceDurationSeconds: input.voice.duration ?? undefined,
+  })
 }
 
 function buildPromptText({
@@ -67,52 +126,46 @@ function buildPromptText({
   chatTitle,
   spaceName,
   senderName,
-  participantNames,
-  omittedParticipantCount,
+  recentTranscripts,
   voiceDurationSeconds,
 }: {
   chatType?: "private" | "thread"
   chatTitle?: string
   spaceName?: string
   senderName?: string
-  participantNames?: string[]
-  omittedParticipantCount?: number
+  recentTranscripts?: string[]
   voiceDurationSeconds?: number | null
 }): string {
-  const participantLine = participantNames?.length
-    ? `${participantNames.join(", ")}${omittedParticipantCount ? `, and ${omittedParticipantCount} more` : ""}`
-    : undefined
-
   return [
-    "You are transcribing a voice message in Inline, a work chat app for teammates.",
-    "Return only the spoken words as the transcript. Do not summarize, translate, answer, add commentary, or add speaker labels unless they were spoken.",
-    "Use the context below only to spell names, projects, teams, product terms, and acronyms correctly. Do not include this context unless it was actually spoken.",
-    "If the audio is unclear, transcribe the best supported words and do not invent names or facts.",
-    "",
-    "Context:",
+    "A voice message recorded in Inline, a work chat app for teammates.",
     "- Message kind: voice message",
     chatType ? `- Chat type: ${chatType === "private" ? "direct message" : "thread"}` : undefined,
     chatTitle ? `- Chat title: ${chatTitle}` : undefined,
     spaceName ? `- Space/workspace: ${spaceName}` : undefined,
     senderName ? `- Voice sender: ${senderName}` : undefined,
-    participantLine ? `- Participant/name hints: ${participantLine}` : undefined,
     voiceDurationSeconds !== undefined && voiceDurationSeconds !== null
       ? `- Voice duration: ${voiceDurationSeconds} seconds`
       : undefined,
-    "- Common Inline/work terms: Inline, work chat, space, thread, direct message, DM, teammate, PR, API, server, client, iOS, macOS, RealtimeV2, OpenClaw.",
+    recentTranscripts?.length ? "Earlier voice-message transcripts in this chat, oldest to newest:" : undefined,
+    ...(recentTranscripts?.map((transcript, index) => `${index + 1}. ${transcript}`) ?? []),
   ]
     .filter((line): line is string => Boolean(line))
     .join("\n")
 }
 
-async function participantNameHints(userIds: number[]): Promise<string[]> {
-  const labels = await Promise.all(userIds.map((userId) => userNameHint(userId)))
-  return uniqueLabels(labels.filter((label): label is string => Boolean(label)))
+async function participantKeywordHints(userIds: number[]): Promise<string[]> {
+  const keywords = await Promise.all(userIds.map((userId) => userNameKeywords(userId)))
+  return uniqueKeywords(keywords.flat())
 }
 
-async function userNameHint(userId: number): Promise<string | undefined> {
+async function userNameKeywords(userId: number): Promise<string[]> {
   const name = await getCachedUserName(userId)
-  return userNameLabel(name)
+  if (!name) return []
+
+  return [
+    [name.firstName, name.lastName].filter(Boolean).join(" "),
+    name.username,
+  ].filter((keyword): keyword is string => Boolean(keyword))
 }
 
 async function userLabel(userId: number): Promise<string | undefined> {
@@ -134,18 +187,38 @@ function uniqueIds(ids: number[]): number[] {
   return Array.from(new Set(ids.filter((id) => Number.isInteger(id) && id > 0)))
 }
 
-function uniqueLabels(labels: string[]): string[] {
+function uniqueKeywords(values: Array<string | null | undefined>): string[] {
   const seen = new Set<string>()
   const result: string[] = []
 
-  for (const label of labels) {
-    const key = label.toLowerCase()
+  for (const value of values) {
+    const keyword = cleanKeyword(value)
+    if (!keyword) continue
+    const key = keyword.toLowerCase()
     if (seen.has(key)) continue
     seen.add(key)
-    result.push(label)
+    result.push(keyword)
   }
 
   return result
+}
+
+async function recentVoiceTranscripts(message: DbMessage): Promise<string[]> {
+  const recentMessages = await MessageModel.getNonFullMessagesFromNewToOld({
+    chatId: message.chatId,
+    newestMsgId: message.messageId,
+    limit: recentMessageScanLimit,
+  })
+
+  return recentMessages
+    .filter((candidate) => candidate.mediaType === "voice")
+    .map((candidate) => cleanText(candidate.text, maxRecentTranscriptLength))
+    .filter((transcript): transcript is string => Boolean(transcript))
+    .slice(-maxRecentTranscripts)
+}
+
+function cleanKeyword(value: string | null | undefined): string | undefined {
+  return cleanText(value?.replace(/[<>\r\n]/g, " "), maxKeywordLength)
 }
 
 function cleanText(value: string | null | undefined, maxLength: number): string | undefined {

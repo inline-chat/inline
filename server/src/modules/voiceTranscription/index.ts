@@ -7,9 +7,9 @@ import { editMessage } from "@in/server/functions/messages.editMessage"
 import { Log } from "@in/server/utils/log"
 import { transcribeVoiceWithOpenAI, type VoiceTranscriber } from "./openAITranscriber"
 import {
-  baseVoiceTranscriptionPrompt,
-  buildVoiceTranscriptionPrompt,
-  type VoiceTranscriptionPrompt,
+  baseVoiceTranscriptionContext,
+  buildVoiceTranscriptionContext,
+  type VoiceTranscriptionContext,
 } from "./prompt"
 
 const log = new Log("modules/voiceTranscription")
@@ -24,7 +24,7 @@ export type VoiceMessageTranscriptionInput = {
 export type VoiceMessageTranscriptionDeps = {
   transcribeVoice: VoiceTranscriber
   editText: typeof editMessage
-  buildPrompt?: typeof buildVoiceTranscriptionPrompt
+  buildContext?: typeof buildVoiceTranscriptionContext
 }
 
 export const VoiceTranscriptionModule = {
@@ -58,21 +58,28 @@ export async function transcribeAndEditVoiceMessage(
     return { didEdit: false }
   }
 
-  const prompt = await safeBuildPrompt(input, deps.buildPrompt)
+  const transcriptionContext = await safeBuildContext(input, deps.buildContext)
   log.info("Starting voice transcription", {
     chatId: input.message.chatId,
     messageId: input.message.messageId,
     voiceId: input.voice.id,
     fileId: input.voice.fileId,
-    chatType: prompt.chatType,
-    promptLength: prompt.prompt.length,
-    participantCount: prompt.participantCount,
-    includedParticipantCount: prompt.includedParticipantCount,
-    hasChatTitle: prompt.hasChatTitle,
-    hasSpaceName: prompt.hasSpaceName,
+    chatType: transcriptionContext.chatType,
+    promptLength: transcriptionContext.prompt.length,
+    keywordCount: transcriptionContext.keywords.length,
+    languageHintCount: transcriptionContext.languages.length,
+    recentTranscriptCount: transcriptionContext.recentTranscriptCount,
+    participantCount: transcriptionContext.participantCount,
+    includedParticipantCount: transcriptionContext.includedParticipantCount,
+    hasChatTitle: transcriptionContext.hasChatTitle,
+    hasSpaceName: transcriptionContext.hasSpaceName,
   })
 
-  const text = await deps.transcribeVoice(input.voice, { prompt: prompt.prompt })
+  const text = await deps.transcribeVoice(input.voice, {
+    prompt: transcriptionContext.prompt,
+    keywords: transcriptionContext.keywords,
+    languages: transcriptionContext.languages,
+  })
   if (!text) {
     log.warn("Voice transcription produced no text", {
       chatId: input.message.chatId,
@@ -115,12 +122,12 @@ export async function transcribeAndEditVoiceMessage(
   return { didEdit: true, text }
 }
 
-async function safeBuildPrompt(
+async function safeBuildContext(
   input: VoiceMessageTranscriptionInput,
-  buildPrompt: typeof buildVoiceTranscriptionPrompt = buildVoiceTranscriptionPrompt,
-): Promise<VoiceTranscriptionPrompt> {
+  buildContext: typeof buildVoiceTranscriptionContext = buildVoiceTranscriptionContext,
+): Promise<VoiceTranscriptionContext> {
   try {
-    return await buildPrompt(input)
+    return await buildContext(input)
   } catch (error) {
     log.warn("Failed to build voice transcription prompt context", {
       error,
@@ -129,7 +136,7 @@ async function safeBuildPrompt(
       voiceId: input.voice.id,
       fileId: input.voice.fileId,
     })
-    return baseVoiceTranscriptionPrompt()
+    return baseVoiceTranscriptionContext()
   }
 }
 

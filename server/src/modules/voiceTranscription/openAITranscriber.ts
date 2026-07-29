@@ -6,11 +6,13 @@ import { Log } from "@in/server/utils/log"
 import { resolveVoiceMimeType, type VoiceMimeType } from "@in/server/modules/files/voiceMime"
 
 const log = new Log("modules/voiceTranscription/openAI")
-const model = "gpt-4o-mini-transcribe"
+export const voiceTranscriptionModel = "gpt-transcribe"
 const fetchTimeoutMs = 30_000
 
 export type VoiceTranscriptionOptions = {
   prompt?: string
+  keywords?: string[]
+  languages?: string[]
 }
 
 export type VoiceTranscriber = (voice: DbFullVoice, options?: VoiceTranscriptionOptions) => Promise<string | undefined>
@@ -30,31 +32,27 @@ export const transcribeVoiceWithOpenAI: VoiceTranscriber = async (voice, options
   }
 
   const startMs = Date.now()
-  const prompt = options?.prompt?.trim()
+  const { request, context } = buildGptTranscribeRequest(file, options)
   log.info("Sending voice transcription request to OpenAI", {
     voiceId: voice.id,
     fileId: voice.fileId,
-    model,
+    model: voiceTranscriptionModel,
     fileSize: voice.file.fileSize ?? null,
     duration: voice.duration ?? null,
-    hasPrompt: Boolean(prompt),
-    promptLength: prompt?.length ?? 0,
+    hasPrompt: context.hasPrompt,
+    promptLength: context.promptLength,
+    keywordCount: context.keywordCount,
+    languageHintCount: context.languageHintCount,
   })
 
-  const response = await openaiClient.audio.transcriptions.create({
-    file,
-    model,
-    ...(prompt ? { prompt } : {}),
-    response_format: "json",
-    temperature: 0,
-  })
+  const response = await openaiClient.audio.transcriptions.create(request)
 
   const text = cleanTranscript(response.text)
   if (!text) {
     log.warn("OpenAI voice transcription returned empty text", {
       voiceId: voice.id,
       fileId: voice.fileId,
-      model,
+      model: voiceTranscriptionModel,
       durationMs: Date.now() - startMs,
     })
     return undefined
@@ -63,12 +61,37 @@ export const transcribeVoiceWithOpenAI: VoiceTranscriber = async (voice, options
   log.info("OpenAI voice transcription completed", {
     voiceId: voice.id,
     fileId: voice.fileId,
-    model,
+    model: voiceTranscriptionModel,
     durationMs: Date.now() - startMs,
     transcriptLength: text.length,
   })
 
   return text
+}
+
+export function buildGptTranscribeRequest(file: File, options?: VoiceTranscriptionOptions) {
+  const prompt = options?.prompt?.trim()
+  const keywords = normalizeKeywords(options?.keywords)
+  const languages = normalizeLanguages(options?.languages)
+  const request = {
+    file,
+    model: voiceTranscriptionModel,
+    ...(prompt ? { prompt } : {}),
+    ...(keywords.length ? { keywords } : {}),
+    ...(languages.length ? { languages } : {}),
+    response_format: "json" as const,
+    temperature: 0,
+  }
+
+  return {
+    request,
+    context: {
+      hasPrompt: Boolean(prompt),
+      promptLength: prompt?.length ?? 0,
+      keywordCount: keywords.length,
+      languageHintCount: languages.length,
+    },
+  }
 }
 
 async function fetchVoiceFile(voice: DbFullVoice): Promise<File | undefined> {
@@ -133,4 +156,30 @@ function extensionForMimeType(mimeType: VoiceMimeType): string {
 function cleanTranscript(text: string | undefined): string | undefined {
   const trimmed = text?.trim()
   return trimmed ? trimmed : undefined
+}
+
+function normalizeKeywords(values: string[] | undefined): string[] {
+  return normalizeContextValues(values, (value) => value.replace(/[<>\r\n]/g, " "))
+}
+
+function normalizeLanguages(values: string[] | undefined): string[] {
+  return normalizeContextValues(values, (value) => value.toLowerCase())
+}
+
+function normalizeContextValues(
+  values: string[] | undefined,
+  normalize: (value: string) => string,
+): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+
+  for (const value of values ?? []) {
+    const normalized = normalize(value).replace(/\s+/g, " ").trim()
+    const key = normalized.toLowerCase()
+    if (!normalized || seen.has(key)) continue
+    seen.add(key)
+    result.push(normalized)
+  }
+
+  return result
 }
