@@ -35,6 +35,15 @@ class DocumentView: NSView {
   private var white = false
   private var locallyAvailableFileURL: URL?
 
+  private var actionColor: NSColor {
+    white ? .white : Theme.accentColor
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    refreshAppTheme()
+  }
+
   // MARK: - UI Elements
 
   private lazy var iconContainer: NSView = {
@@ -68,7 +77,7 @@ class DocumentView: NSView {
         minVisibleProgress: 0.06,
         rotationDuration: 1.5,
         ringInset: 1,
-        strokeColor: white ? .white : .systemBlue
+        strokeColor: actionColor
       )
     )
     ring.isHidden = true
@@ -84,7 +93,7 @@ class DocumentView: NSView {
     let config = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
     button.image = NSImage(systemSymbolName: Symbol.cancel, accessibilityDescription: "Cancel Upload")?
       .withSymbolConfiguration(config)
-    button.contentTintColor = white ? .white : .systemBlue
+    button.contentTintColor = actionColor
     button.setButtonType(.momentaryChange)
     button.focusRingType = .none
     button.target = self
@@ -98,7 +107,7 @@ class DocumentView: NSView {
     imageView.translatesAutoresizingMaskIntoConstraints = false
     imageView.wantsLayer = true
     imageView.image = NSImage(systemSymbolName: Symbol.cancel, accessibilityDescription: "Cancel")
-    imageView.contentTintColor = NSColor.systemBlue
+    imageView.contentTintColor = Theme.accentColor
 
     let config = NSImage.SymbolConfiguration(pointSize: 21, weight: .regular)
     imageView.symbolConfiguration = config
@@ -133,7 +142,7 @@ class DocumentView: NSView {
     button.isBordered = false
     button.font = .systemFont(ofSize: 12)
     button.translatesAutoresizingMaskIntoConstraints = false
-    button.contentTintColor = white ? .white : NSColor.controlAccentColor
+    button.contentTintColor = actionColor
     return button
   }()
 
@@ -372,8 +381,8 @@ class DocumentView: NSView {
     }
 
     // Keep the cancel icon color aligned with bubble style
-    cancelIcon.contentTintColor = white ? .white : NSColor.systemBlue
-    uploadCancelButton.contentTintColor = white ? .white : NSColor.systemBlue
+    cancelIcon.contentTintColor = actionColor
+    uploadCancelButton.contentTintColor = actionColor
   }
 
   private func fileTypeSymbolName() -> String {
@@ -395,7 +404,7 @@ class DocumentView: NSView {
         actionButton.isHidden = false
         fileSizeLabel.stringValue = FileHelpers.formatFileSize(UInt64(documentInfo.document.size ?? 0))
         actionButton.title = "Show in Finder"
-        actionButton.contentTintColor = white ? .white : NSColor.systemBlue
+        actionButton.contentTintColor = actionColor
         updateIconForCurrentState()
 
       case .needsDownload:
@@ -407,7 +416,7 @@ class DocumentView: NSView {
         actionButton.isHidden = false
         fileSizeLabel.stringValue = FileHelpers.formatFileSize(UInt64(documentInfo.document.size ?? 0))
         actionButton.title = "Download"
-        actionButton.contentTintColor = white ? .white : NSColor.controlAccentColor
+        actionButton.contentTintColor = actionColor
         updateIconForCurrentState()
 
       case let .downloading(bytesReceived, totalBytes):
@@ -419,7 +428,7 @@ class DocumentView: NSView {
         actionButton.isHidden = true
 
         // Ensure cancel icon matches the current bubble color scheme
-        cancelIcon.contentTintColor = white ? .white : NSColor.systemBlue
+        cancelIcon.contentTintColor = actionColor
         cancelIcon.image = NSImage(systemSymbolName: Symbol.cancel, accessibilityDescription: "Cancel")
 
         // Format the progress text
@@ -813,6 +822,14 @@ class DocumentView: NSView {
         Log.shared.error("Failed to delete local message row for document cancel", error: error)
       }
     }
+  }
+}
+
+extension DocumentView: AppThemeRefreshable {
+  func refreshAppTheme() {
+    uploadProgressRing.setStrokeColor(actionColor)
+    updateIconForCurrentState()
+    updateButtonState()
   }
 }
 

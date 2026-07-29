@@ -60,8 +60,9 @@ extension Nav3Route {
 }
 
 private struct TranslucentPageWindowBackground: ViewModifier {
-  @Environment(\.colorScheme) private var colorScheme
   @Environment(\.appearsActive) private var appearsActive
+  @Environment(\.colorScheme) private var colorScheme
+  @ObservedObject private var settings = AppSettings.shared
 
   func body(content: Content) -> some View {
     content
@@ -85,20 +86,43 @@ private struct TranslucentPageWindowBackground: ViewModifier {
     ZStack {
       VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
 
-      windowOverlayColor
-        .opacity(appearsActive ? 0.7 : 0)
+      surfaceOverlay
+        .opacity(surfaceOverlayOpacity)
     }
     .ignoresSafeArea()
     .allowsHitTesting(false)
   }
 
   private var windowBackground: some View {
-    Color(nsColor: .windowBackgroundColor)
+    surfaceBackground
       .ignoresSafeArea()
       .allowsHitTesting(false)
   }
 
-  private var windowOverlayColor: Color {
-    colorScheme == .dark ? Color.black : Color.white
+  private var usesNativeSurfaces: Bool {
+    settings.appTheme == .system
+  }
+
+  private var surfaceBackground: Color {
+    usesNativeSurfaces ? Color(nsColor: .windowBackgroundColor) : themeBackground
+  }
+
+  private var surfaceOverlay: Color {
+    if usesNativeSurfaces {
+      return colorScheme == .dark ? .black : .white
+    }
+    return themeBackground
+  }
+
+  private var surfaceOverlayOpacity: Double {
+    if usesNativeSurfaces {
+      return appearsActive ? 0.7 : 0
+    }
+    return appearsActive ? 0.84 : 0.72
+  }
+
+  private var themeBackground: Color {
+    _ = settings.themeRevision
+    return Color(nsColor: Theme.windowContentBackgroundColor)
   }
 }

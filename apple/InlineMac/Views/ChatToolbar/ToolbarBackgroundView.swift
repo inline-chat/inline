@@ -27,14 +27,16 @@ class ToolbarBackgroundView: NSView {
   private let separatorView = NSView()
   private var separatorHeightConstraint: NSLayoutConstraint?
 
+  override var wantsUpdateLayer: Bool { true }
+
   init(
     separatorEdge: ToolbarBackgroundSeparatorEdge = .bottom,
-    backgroundColor: NSColor = Theme.windowContentBackgroundColor
+    surfaceStyle: ChatViewAppearance.SurfaceStyle = .content
   ) {
     self.separatorEdge = separatorEdge
 
     if #available(macOS 27.0, *) {
-      let view = ToolbarBackgroundMaterialView(tintColor: backgroundColor)
+      let view = ToolbarBackgroundMaterialView(surfaceStyle: surfaceStyle)
       backgroundView = view
       materialView = view
     } else {
@@ -64,6 +66,12 @@ class ToolbarBackgroundView: NSView {
 
   override func viewDidChangeEffectiveAppearance() {
     super.viewDidChangeEffectiveAppearance()
+    materialView?.updateAppearance()
+    updateSeparatorColor()
+  }
+
+  override func updateLayer() {
+    super.updateLayer()
     materialView?.updateAppearance()
     updateSeparatorColor()
   }
@@ -165,13 +173,20 @@ class ToolbarBackgroundView: NSView {
   }
 }
 
+extension ToolbarBackgroundView: AppThemeRefreshable {
+  func refreshAppTheme() {
+    materialView?.updateAppearance()
+    updateSeparatorColor()
+  }
+}
+
 private final class ToolbarBackgroundMaterialView: NSView {
   private let backdropLayer = ToolbarBackgroundPrivateBackdrop.makeLayer()
   private let tintLayer = CALayer()
-  private let tintColor: NSColor
+  private let surfaceStyle: ChatViewAppearance.SurfaceStyle
 
-  init(tintColor: NSColor) {
-    self.tintColor = tintColor
+  init(surfaceStyle: ChatViewAppearance.SurfaceStyle) {
+    self.surfaceStyle = surfaceStyle
     super.init(frame: .zero)
     setupLayers()
   }
@@ -210,7 +225,7 @@ private final class ToolbarBackgroundMaterialView: NSView {
   }
 
   func updateAppearance() {
-    let tint = tintColor
+    let tint = surfaceStyle.backgroundColor
       .resolvedColor(with: effectiveAppearance)
       .withAlphaComponent(ToolbarBackgroundMaterial.tintAlpha)
 

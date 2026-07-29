@@ -63,7 +63,7 @@ struct ReplyThreadPaneView: View {
 
   var body: some View {
     let appearance = ChatViewAppearance(
-      surfaceBackgroundColor: Theme.replyThreadPaneBackgroundColor,
+      surfaceStyle: .replyThread,
       additionalTopContentInset: ReplyThreadPaneMetrics.floatingToolbarContentInset
     )
 

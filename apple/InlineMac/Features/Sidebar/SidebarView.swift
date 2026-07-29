@@ -87,6 +87,11 @@ struct SidebarView: View {
     }
   }
 
+  private var sidebarTint: Color {
+    _ = settings.themeRevision
+    return Color(nsColor: Theme.sidebarOverlayColor)
+  }
+
   private var spaceConfirmationPresented: Binding<Bool> {
     Binding {
       pendingSpaceAction != nil
@@ -124,6 +129,7 @@ struct SidebarView: View {
       }
     }
     .contentMargins(.top, 0, for: .scrollContent)
+    .background(sidebarTint)
     .animation(.smoothSnappy, value: visibleItemAnimationKeys)
     .animation(.smoothSnappy, value: sidebarDrag.animationKey)
     .animation(.smoothSnappy, value: isArchiveVisible)
@@ -1755,7 +1761,7 @@ private struct SidebarProminentUnreadBadge: View, Equatable {
       .frame(minWidth: Self.height)
       .frame(height: Self.height)
       .fixedSize(horizontal: true, vertical: false)
-      .background(Capsule().fill(Color.accentColor))
+      .background(Capsule().fill(Color(nsColor: Theme.prominentColor)))
       .accessibilityHidden(true)
   }
 }

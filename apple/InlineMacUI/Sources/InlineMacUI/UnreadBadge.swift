@@ -1,3 +1,4 @@
+import MacTheme
 import SwiftUI
 
 public enum UnreadBadgeStyle: String, CaseIterable, Hashable, Identifiable, Sendable {
@@ -87,7 +88,7 @@ public struct UnreadDotBadge: View {
 
   public var body: some View {
     Circle()
-      .fill(prominent ? Color.accentColor : mutedColor)
+      .fill(prominent ? Color(nsColor: Theme.prominentColor) : mutedColor)
       .overlay {
         if prominent == false {
           Circle()
@@ -134,7 +135,7 @@ public struct UnreadCountBadge: View {
 
   private var backgroundColor: Color {
     if prominent {
-      return .accentColor
+      return Color(nsColor: Theme.prominentColor)
     }
 
     if colorScheme == .dark {

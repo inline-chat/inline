@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ComposeSendButtonSwiftUI: View {
+  @ObservedObject private var settings = AppSettings.shared
   @ObservedObject var state: ComposeSendButtonState
   let mode: ComposeControlMode
   var action: () -> Void
@@ -9,17 +10,18 @@ struct ComposeSendButtonSwiftUI: View {
   @Environment(\.colorScheme) private var colorScheme
 
   private var size: CGFloat { mode.sendButtonSize }
-  private let disabledBackgroundColor: Color = Color(nsColor: .quinaryLabel)
+  private let disabledBackgroundColor: Color = Color(nsColor: .quinaryLabelColor)
 
   private var enabledBackgroundColor: Color {
-    guard state.sendSilently else { return .accent }
+    _ = settings.themeRevision
+    guard state.sendSilently else { return Color(nsColor: Theme.accentColor) }
     return colorScheme == .dark
       ? Color(nsColor: NSColor(calibratedWhite: 0.92, alpha: 1.0))
       : Color(nsColor: NSColor(calibratedWhite: 0.28, alpha: 1.0))
   }
 
   private var hoveredEnabledBackgroundColor: Color {
-    guard state.sendSilently else { return .accent.opacity(0.82) }
+    guard state.sendSilently else { return Color(nsColor: Theme.accentColor).opacity(0.82) }
     return colorScheme == .dark
       ? Color(nsColor: NSColor(calibratedWhite: 0.97, alpha: 1.0))
       : Color(nsColor: NSColor(calibratedWhite: 0.22, alpha: 1.0))

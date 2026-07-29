@@ -77,7 +77,7 @@ struct SidebarUnreadBelowButton: View {
       .foregroundStyle(Color.white)
       .padding(.horizontal, countText.count > 1 ? 5 : 0)
       .frame(minWidth: Self.badgeHeight, minHeight: Self.badgeHeight)
-      .background(Capsule().fill(Color.accentColor))
+      .background(Capsule().fill(Color(nsColor: Theme.prominentColor)))
       .contentTransition(.numericText())
       .allowsHitTesting(false)
       .accessibilityHidden(true)

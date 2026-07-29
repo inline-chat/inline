@@ -269,13 +269,14 @@ final class ReactionChipButton: NSButton {
   }
 
   private func updateColors() {
-    let background = backgroundColor
+    let background = backgroundColor.resolvedColor(with: effectiveAppearance)
     layer?.backgroundColor = background.cgColor
     countLabel.textColor = foregroundColor
   }
 
-  private var isDarkMode: Bool {
-    effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    updateColors()
   }
 
   private var backgroundColor: NSColor {
@@ -283,18 +284,14 @@ final class ReactionChipButton: NSButton {
       return weReacted ? override.primary : override.secondary
     }
     if neutralStyle {
-      let base = NSColor.controlAccentColor
+      let base = Theme.accentColor
       return base.withAlphaComponent(weReacted ? 0.22 : 0.12)
     }
     if forceIncomingStyle {
-      let base: NSColor = isDarkMode ? .white : .controlAccentColor
+      let base = Theme.accentColor
       return weReacted ? base.withAlphaComponent(0.9) : base.withAlphaComponent(0.2)
     }
-    let base: NSColor = if isDarkMode {
-      .white
-    } else {
-      isOutgoing ? .white : .controlAccentColor
-    }
+    let base: NSColor = isOutgoing ? .white : Theme.accentColor
 
     return weReacted ? base.withAlphaComponent(0.9) : base.withAlphaComponent(0.2)
   }
@@ -304,22 +301,22 @@ final class ReactionChipButton: NSButton {
       return override
     }
     if neutralStyle {
-      return weReacted ? .labelColor : .controlAccentColor
+      return weReacted ? .labelColor : Theme.accentColor
     }
     if forceIncomingStyle {
-      if isDarkMode {
-        return weReacted ? .controlAccentColor : .white
-      }
-      return weReacted ? .white : .controlAccentColor
-    }
-    if isDarkMode {
-      return weReacted ? .controlAccentColor : .white
+      return weReacted ? .white : Theme.accentColor
     }
 
     if isOutgoing {
-      return weReacted ? .controlAccentColor : .white
+      return weReacted ? Theme.accentColor : .white
     }
 
-    return weReacted ? .white : .controlAccentColor
+    return weReacted ? .white : Theme.accentColor
+  }
+}
+
+extension ReactionChipButton: AppThemeRefreshable {
+  func refreshAppTheme() {
+    updateColors()
   }
 }

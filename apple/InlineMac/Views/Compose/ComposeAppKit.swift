@@ -25,7 +25,7 @@ final class ComposeAppKit: NSView {
   // exists; broad layout-mode conditionals already proved too fragile here.
   private let implementation: any ComposeImplementation
   private let usesGlassCompose: Bool
-  private let surfaceBackgroundColor: NSColor
+  private let surfaceStyle: ChatViewAppearance.SurfaceStyle
 
   weak var messageList: MessageListAppKit? {
     get { implementation.messageList }
@@ -41,9 +41,9 @@ final class ComposeAppKit: NSView {
     toolbarState: ChatToolbarState? = nil,
     parentChatView: ChatViewAppKit? = nil,
     dialog: InlineKit.Dialog?,
-    surfaceBackgroundColor: NSColor = Theme.windowContentBackgroundColor
+    surfaceStyle: ChatViewAppearance.SurfaceStyle = .content
   ) {
-    self.surfaceBackgroundColor = surfaceBackgroundColor
+    self.surfaceStyle = surfaceStyle
     if #available(macOS 26.0, *) {
       implementation = GlassComposeAppKit(
         peerId: peerId,
@@ -110,7 +110,7 @@ final class ComposeAppKit: NSView {
     var constraints: [NSLayoutConstraint] = []
 
     if usesGlassCompose {
-      let backgroundView = GlassComposeBackgroundUnderlayView(backgroundColor: surfaceBackgroundColor)
+      let backgroundView = GlassComposeBackgroundUnderlayView(surfaceStyle: surfaceStyle)
       backgroundView.translatesAutoresizingMaskIntoConstraints = false
       addSubview(backgroundView)
 
@@ -142,13 +142,13 @@ private final class GlassComposeBackgroundUnderlayView: NSView {
   private static let maxOpacity: CGFloat = 0.7
   private static let fadeStops: [CGFloat] = [0, 0.35, 0.72, 1]
   private static let fadeOpacities: [CGFloat] = [0, maxOpacity * 0.3, maxOpacity * 0.7, maxOpacity]
-  private let backgroundColor: NSColor
+  private let surfaceStyle: ChatViewAppearance.SurfaceStyle
 
   override var isFlipped: Bool { true }
   override var isOpaque: Bool { false }
 
-  init(backgroundColor: NSColor) {
-    self.backgroundColor = backgroundColor
+  init(surfaceStyle: ChatViewAppearance.SurfaceStyle) {
+    self.surfaceStyle = surfaceStyle
     super.init(frame: .zero)
   }
 
@@ -177,7 +177,7 @@ private final class GlassComposeBackgroundUnderlayView: NSView {
     guard let context = NSGraphicsContext.current?.cgContext else { return }
     guard bounds.width > 0, bounds.height > 0 else { return }
 
-    let backgroundColor = self.backgroundColor
+    let backgroundColor = surfaceStyle.backgroundColor
       .resolvedColor(with: effectiveAppearance)
     let maxColor = backgroundColor.withAlphaComponent(Self.maxOpacity).cgColor
     let fadeHeight = min(Self.fadeHeight, bounds.height)
@@ -211,5 +211,11 @@ private final class GlassComposeBackgroundUnderlayView: NSView {
       end: CGPoint(x: bounds.midX, y: bounds.minY + fadeHeight),
       options: []
     )
+  }
+}
+
+extension GlassComposeBackgroundUnderlayView: AppThemeRefreshable {
+  func refreshAppTheme() {
+    needsDisplay = true
   }
 }

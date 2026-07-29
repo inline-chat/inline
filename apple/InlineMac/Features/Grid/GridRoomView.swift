@@ -283,7 +283,7 @@ private struct GridRoomSurface: View {
 
   var body: some View {
     RoundedRectangle(cornerRadius: 16, style: .continuous)
-      .fill(isCurrent ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.045))
+      .fill(isCurrent ? Color(nsColor: Theme.accentColor).opacity(0.12) : Color.primary.opacity(0.045))
       .overlay {
         GridRoomAvatars(
           avatars: room.avatars,
@@ -307,7 +307,10 @@ private struct GridRoomSurface: View {
       }
       .overlay {
         RoundedRectangle(cornerRadius: 16, style: .continuous)
-          .stroke(isCurrent ? Color.accentColor.opacity(0.55) : Color.primary.opacity(0.07), lineWidth: 1)
+          .stroke(
+            isCurrent ? Color(nsColor: Theme.accentColor).opacity(0.55) : Color.primary.opacity(0.07),
+            lineWidth: 1
+          )
       }
       .contentShape(.rect(cornerRadius: 16))
   }
@@ -642,7 +645,7 @@ private struct GridAvatarConnectingIndicator: View {
 
   var body: some View {
     Circle()
-      .fill(.blue)
+      .fill(Color(nsColor: Theme.accentColor))
       .frame(width: 7, height: 7)
       .scaleEffect(isPulsing ? 1.2 : 0.85)
       .opacity(isPulsing ? 1 : 0.55)

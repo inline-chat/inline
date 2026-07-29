@@ -103,6 +103,7 @@ private struct ChatToolbarNotificationPresentations: ViewModifier {
 
 private struct ChatToolbarNotificationPopover: View {
   @ObservedObject var model: ChatToolbarNotificationModel
+  @ObservedObject private var appSettings = AppSettings.shared
   @EnvironmentObject private var notificationSettings: NotificationSettingsManager
 
   @FocusState private var focusedOption: DialogNotificationSettingSelection?
@@ -196,13 +197,18 @@ private struct ChatToolbarNotificationPopover: View {
   private func optionIcon(_ option: DialogNotificationSettingSelection, selected: Bool) -> some View {
     ZStack {
       Circle()
-        .fill(selected ? Color.accentColor : Color.secondary.opacity(0.16))
+        .fill(selected ? themeAccentColor : Color.secondary.opacity(0.16))
         .frame(width: 26, height: 26)
 
       Image(systemName: option.iconName)
         .font(.system(size: 11, weight: .semibold))
         .foregroundStyle(selected ? Color.white : Color.secondary)
     }
+  }
+
+  private var themeAccentColor: Color {
+    _ = appSettings.themeRevision
+    return Color(nsColor: Theme.accentColor)
   }
 
   private func rowBackground(selected: Bool, focused: Bool, hovered: Bool) -> Color {

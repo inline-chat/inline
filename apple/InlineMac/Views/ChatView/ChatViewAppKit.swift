@@ -15,21 +15,39 @@ enum ChatViewError: Error {
 }
 
 struct ChatViewAppearance {
-  let surfaceBackgroundColor: NSColor
+  enum SurfaceStyle {
+    case content
+    case replyThread
+
+    var backgroundColor: NSColor {
+      switch self {
+      case .content:
+        Theme.windowContentBackgroundColor
+      case .replyThread:
+        Theme.replyThreadPaneBackgroundColor
+      }
+    }
+  }
+
+  let surfaceStyle: SurfaceStyle
   let additionalTopContentInset: CGFloat
 
+  var surfaceBackgroundColor: NSColor {
+    surfaceStyle.backgroundColor
+  }
+
   init(
-    surfaceBackgroundColor: NSColor,
+    surfaceStyle: SurfaceStyle,
     additionalTopContentInset: CGFloat = 0
   ) {
-    self.surfaceBackgroundColor = surfaceBackgroundColor
+    self.surfaceStyle = surfaceStyle
     self.additionalTopContentInset = additionalTopContentInset.isFinite
       ? max(0, additionalTopContentInset)
       : 0
   }
 
   static let standard = ChatViewAppearance(
-    surfaceBackgroundColor: Theme.windowContentBackgroundColor,
+    surfaceStyle: .content,
     additionalTopContentInset: 0
   )
 }
@@ -154,7 +172,7 @@ class ChatViewAppKit: NSViewController {
     }
 
     let rootView = ChatDropView()
-    rootView.surfaceBackgroundColor = appearance.surfaceBackgroundColor
+    rootView.surfaceStyle = appearance.surfaceStyle
     view = rootView
     view.translatesAutoresizingMaskIntoConstraints = false
     view.wantsLayer = true
@@ -350,7 +368,7 @@ class ChatViewAppKit: NSViewController {
         showUnreadAfter: unreadBoundaryAtOpen(),
         initialState: preparedPayload?.messagesInitialState,
         initialPinnedMessage: preparedPayload?.pinnedMessage,
-        surfaceBackgroundColor: appearance.surfaceBackgroundColor,
+        surfaceStyle: appearance.surfaceStyle,
         additionalTopContentInset: appearance.additionalTopContentInset
       )
     }
@@ -376,7 +394,7 @@ class ChatViewAppKit: NSViewController {
         toolbarState: toolbarState,
         parentChatView: self,
         dialog: dialog,
-        surfaceBackgroundColor: appearance.surfaceBackgroundColor
+        surfaceStyle: appearance.surfaceStyle
       )
     }
     view.addSubview(compose)

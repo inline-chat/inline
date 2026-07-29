@@ -432,3 +432,9 @@ final class MessageActionButtonView: NSView {
     return true
   }
 }
+
+extension MessageActionButtonView: AppThemeRefreshable {
+  func refreshAppTheme() {
+    applyAppearance()
+  }
+}

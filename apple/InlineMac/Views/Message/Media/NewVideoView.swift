@@ -146,6 +146,10 @@ final class CircularTransferRingView: NSView {
     isHidden = false
   }
 
+  func setStrokeColor(_ color: NSColor) {
+    progressLayer.strokeColor = color.resolvedColor(with: effectiveAppearance).cgColor
+  }
+
   private func updatePath() {
     progressLayer.frame = bounds
 

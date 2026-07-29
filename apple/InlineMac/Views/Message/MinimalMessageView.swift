@@ -242,7 +242,7 @@ class MinimalMessageViewAppKit: NSView {
   }
 
   static func linkColor(outgoing _: Bool) -> NSColor {
-    .linkColor
+    Theme.accentColor
   }
 
   private var emojiMessage: Bool {
@@ -4090,13 +4090,13 @@ class MinimalMessageViewAppKit: NSView {
     let container = NSView(frame: NSRect(x: 0, y: 0, width: 24, height: 24))
     container.wantsLayer = true
     container.layer?.cornerRadius = 12
-    container.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.2).cgColor
+    container.layer?.backgroundColor = Theme.accentColor.withAlphaComponent(0.2).cgColor
 
     // Add reply icon (smaller size)
     let iconView = NSImageView(frame: NSRect(x: 4, y: 4, width: 16, height: 16))
     if let replyImage = NSImage(systemSymbolName: "arrowshape.turn.up.left.fill", accessibilityDescription: "Reply") {
       iconView.image = replyImage
-      iconView.contentTintColor = NSColor.controlAccentColor
+      iconView.contentTintColor = Theme.accentColor
       container.addSubview(iconView)
     }
 
@@ -4192,6 +4192,14 @@ class MinimalMessageViewAppKit: NSView {
         )
       }
     }
+  }
+}
+
+extension MinimalMessageViewAppKit: AppThemeRefreshable {
+  func refreshAppTheme() {
+    swipeAnimationView?.removeFromSuperview()
+    swipeAnimationView = nil
+    setupMessageText()
   }
 }
 

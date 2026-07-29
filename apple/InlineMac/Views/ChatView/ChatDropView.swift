@@ -3,9 +3,11 @@ import InlineMacUI
 
 class ChatDropView: NSView {
   var dropHandler: ((NSDraggingInfo) -> Bool)?
-  var surfaceBackgroundColor = Theme.windowContentBackgroundColor {
+  var surfaceStyle: ChatViewAppearance.SurfaceStyle = .content {
     didSet { updateSurfaceBackgroundColor() }
   }
+
+  override var wantsUpdateLayer: Bool { true }
 
   override init(frame: NSRect) {
     super.init(frame: frame)
@@ -22,6 +24,11 @@ class ChatDropView: NSView {
 
   override func viewDidChangeEffectiveAppearance() {
     super.viewDidChangeEffectiveAppearance()
+    updateSurfaceBackgroundColor()
+  }
+
+  override func updateLayer() {
+    super.updateLayer()
     updateSurfaceBackgroundColor()
   }
 
@@ -54,8 +61,14 @@ class ChatDropView: NSView {
   }
 
   private func updateSurfaceBackgroundColor() {
-    layer?.backgroundColor = surfaceBackgroundColor
+    layer?.backgroundColor = surfaceStyle.backgroundColor
       .resolvedColor(with: effectiveAppearance)
       .cgColor
+  }
+}
+
+extension ChatDropView: AppThemeRefreshable {
+  func refreshAppTheme() {
+    updateSurfaceBackgroundColor()
   }
 }

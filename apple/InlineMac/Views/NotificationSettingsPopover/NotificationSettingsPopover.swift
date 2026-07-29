@@ -11,6 +11,7 @@ struct NotificationSettingsButton: View {
 
   private let style: Style
   @EnvironmentObject private var notificationSettings: NotificationSettingsManager
+  @ObservedObject private var appSettings = AppSettings.shared
 
   @State private var presented = false
 
@@ -116,6 +117,8 @@ struct NotificationSettingsButton: View {
           title: "All",
           description: "Receive notifications for every message",
           selected: notificationSettings.mode == .all,
+          selectedColor: themeAccentColor,
+          selectedForegroundColor: .white,
           value: NotificationMode.all,
           onChange: {
             notificationSettings.mode = $0
@@ -129,6 +132,8 @@ struct NotificationSettingsButton: View {
           title: "Any message to you",
           description: "Mentions, direct messages, and replies to you",
           selected: notificationSettings.mode == .mentions,
+          selectedColor: themeAccentColor,
+          selectedForegroundColor: .white,
           value: NotificationMode.mentions,
           onChange: {
             notificationSettings.mode = $0
@@ -142,6 +147,8 @@ struct NotificationSettingsButton: View {
           title: "Only mentions",
           description: "Mentions and nudges still notify you",
           selected: notificationSettings.mode == .onlyMentions,
+          selectedColor: themeAccentColor,
+          selectedForegroundColor: .white,
           value: NotificationMode.onlyMentions,
           onChange: { mode in
             notificationSettings.mode = mode
@@ -154,6 +161,8 @@ struct NotificationSettingsButton: View {
           title: "None",
           description: "Zero notifications",
           selected: notificationSettings.mode == .none,
+          selectedColor: themeAccentColor,
+          selectedForegroundColor: .white,
           value: NotificationMode.none,
           onChange: {
             notificationSettings.mode = $0
@@ -164,6 +173,11 @@ struct NotificationSettingsButton: View {
     }
   }
 
+  private var themeAccentColor: Color {
+    _ = appSettings.themeRevision
+    return Color(nsColor: Theme.accentColor)
+  }
+
 }
 
 private struct NotificationSettingsItem<Value: Equatable>: View {
@@ -171,6 +185,8 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
   var title: String
   var description: String
   var selected: Bool
+  var selectedColor: Color
+  var selectedForegroundColor: Color
   var value: Value
   var onChange: (Value) -> Void
   var iconFontSize: CGFloat? = nil
@@ -184,12 +200,12 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
       } label: {
         HStack(spacing: 8) {
           Circle()
-            .fill(selected ? Color.accent : .secondary.opacity(0.3))
+            .fill(selected ? selectedColor : .secondary.opacity(0.3))
             .frame(width: 30, height: 30)
             .overlay {
               Image(systemName: systemImage)
                 .font(.system(size: iconFontSize ?? 16, weight: .regular))
-                .foregroundStyle(selected ? Color.white : .secondary.opacity(0.9))
+                .foregroundStyle(selected ? selectedForegroundColor : .secondary.opacity(0.9))
                 .frame(
                   width: 28,
                   height: 28,

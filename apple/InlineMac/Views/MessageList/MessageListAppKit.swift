@@ -25,7 +25,7 @@ class MessageListAppKit: NSViewController {
   private let chatRows: ChatRowListViewModel
   private let showUnreadAfter: Int64?
   private let initialPinnedMessage: PreparedPinnedMessage?
-  private let surfaceBackgroundColor: NSColor
+  private let surfaceStyle: ChatViewAppearance.SurfaceStyle
   private let additionalTopContentInset: CGFloat
   var viewModel: MessagesProgressiveViewModel { chatRows.progressiveViewModel }
   private var messages: [FullMessage] { chatRows.messages }
@@ -121,7 +121,7 @@ class MessageListAppKit: NSViewController {
     showUnreadAfter: Int64? = nil,
     initialState: MessagesProgressiveViewModel.InitialState? = nil,
     initialPinnedMessage: PreparedPinnedMessage? = nil,
-    surfaceBackgroundColor: NSColor = Theme.windowContentBackgroundColor,
+    surfaceStyle: ChatViewAppearance.SurfaceStyle = .content,
     additionalTopContentInset: CGFloat = 0
   ) {
     self.dependencies = dependencies
@@ -129,7 +129,7 @@ class MessageListAppKit: NSViewController {
     self.chat = chat
     self.showUnreadAfter = showUnreadAfter
     self.initialPinnedMessage = initialPinnedMessage
-    self.surfaceBackgroundColor = surfaceBackgroundColor
+    self.surfaceStyle = surfaceStyle
     self.additionalTopContentInset = additionalTopContentInset
     chatRows = ChatRowListViewModel(peer: peerId, initialState: initialState)
     let renderStyle = AppSettings.shared.messageRenderStyle
@@ -231,7 +231,7 @@ class MessageListAppKit: NSViewController {
     fatalError("init(coder:) has not been implemented")
   }
 
-  private lazy var toolbarBgView = ToolbarBackgroundView(backgroundColor: surfaceBackgroundColor)
+  private lazy var toolbarBgView = ToolbarBackgroundView(surfaceStyle: surfaceStyle)
   private var pinnedHeaderHeight: CGFloat = 0
   private var pinnedHeaderTopConstraint: NSLayoutConstraint?
   private var pinnedHeaderHeightConstraint: NSLayoutConstraint?
