@@ -19,6 +19,8 @@ struct ChatView: View {
   @State private var activeChatToken: MessagesPublisher.ActiveChatToken?
   @State private var isVisible = false
   @State private var userGroupMentionTarget: UserGroupMentionTarget?
+  @State private var botChatSettingsCoordinator: BotChatSettingsCoordinator
+  @State private var isBotChatSettingsPresented = false
 
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
 
@@ -28,6 +30,7 @@ struct ChatView: View {
   @Environment(\.scenePhase) var scenePhase
   @Environment(\.realtimeV2) var realtimeV2
   @Environment(\.colorScheme) var colorScheme
+  @Environment(\.appDatabase) private var appDatabase
 
   static let formatter = RelativeDateTimeFormatter()
 
@@ -65,6 +68,7 @@ struct ChatView: View {
     self.contextSpaceId = contextSpaceId
     self.preview = preview
     self.autoCleanupUntitledEmptyThreadOnBack = autoCleanupUntitledEmptyThreadOnBack
+    _botChatSettingsCoordinator = State(initialValue: BotChatSettingsCoordinator(peer: peer))
     _fullChatViewModel = EnvironmentStateObject { env in
       FullChatViewModel(db: env.appDatabase, peer: peer)
     }
@@ -105,6 +109,17 @@ struct ChatView: View {
         }
       }
 
+      if botChatSettingsCoordinator.isToolbarVisible {
+        ToolbarItem(placement: .primaryAction) {
+          Button {
+            isBotChatSettingsPresented = true
+          } label: {
+            Label("Agent Settings", systemImage: "slider.horizontal.3")
+          }
+          .accessibilityLabel("Agent Settings")
+        }
+      }
+
       if #available(iOS 26.0, *) {
         ToolbarItem(placement: .principal) {
           ChatToolbarLeadingView(
@@ -127,11 +142,21 @@ struct ChatView: View {
     .task {
       await fetchChatIfNeeded()
     }
+    .task(id: peerId.toString()) {
+      botChatSettingsCoordinator.startObservingDiscoveryScope(in: appDatabase)
+      await botChatSettingsCoordinator.warmUp()
+    }
+    .sheet(isPresented: $isBotChatSettingsPresented) {
+      BotChatSettingsSheet(coordinator: botChatSettingsCoordinator)
+    }
     .onAppear {
       isVisible = true
       updateMessageUpdateActivation()
     }
-    .onChange(of: peerId) { _, _ in
+    .onChange(of: peerId) { _, newPeer in
+      isBotChatSettingsPresented = false
+      botChatSettingsCoordinator.cancel()
+      botChatSettingsCoordinator = BotChatSettingsCoordinator(peer: newPeer)
       updateMessageUpdateActivation()
     }
     .onChange(of: fullChatViewModel.chat?.id) { _, chatId in
@@ -140,6 +165,7 @@ struct ChatView: View {
     }
     .onDisappear {
       isVisible = false
+      botChatSettingsCoordinator.cancel()
       updateMessageUpdateActivation()
       scheduleUntitledThreadCleanupIfNeeded()
     }
