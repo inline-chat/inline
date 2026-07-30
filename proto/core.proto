@@ -54,6 +54,16 @@ message ServerMessage {
   oneof payload {
     UpdatesPayload update = 4;
     GridEvent grid = 5;
+    BotEvent bot = 6;
+  }
+}
+
+// Ephemeral bot-owned interactions. These events are not persisted in sync
+// buckets and do not advance update sequences.
+message BotEvent {
+  oneof event {
+    BotChatSettingsRequested chat_settings_requested = 1;
+    BotChatSettingsItemInvoked chat_settings_item_invoked = 2;
   }
 }
 
@@ -460,6 +470,7 @@ message MessageEntity {
     int64 space_id = 1;
     string title = 2;
   }
+  message MessageEntityBotCommand { int64 bot_user_id = 1; }
 
   oneof entity {
     MessageEntityMention mention = 4;
@@ -468,6 +479,7 @@ message MessageEntity {
     MessageEntityThread thread = 7;
     MessageEntityThreadTitle thread_title = 8;
     MessageEntityGroupMention group_mention = 9;
+    MessageEntityBotCommand bot_command = 10;
   }
 }
 
@@ -1008,6 +1020,13 @@ enum Method {
   TOGGLE_SPACE_GRID = 73;
   GET_THREAD_REFERENCES = 74;
   GET_THREAD_SUBTHREADS = 75;
+  GET_PEER_BOTS = 76;
+  GET_MY_BOT_CAPABILITIES = 77;
+  SET_MY_BOT_CAPABILITIES = 78;
+  REQUEST_BOT_CHAT_SETTINGS = 79;
+  INVOKE_BOT_CHAT_SETTINGS_ITEM = 80;
+  ANSWER_BOT_CHAT_SETTINGS = 81;
+  reserved 82;
   GET_GRID = 83;
   CREATE_GRID_ROOM = 84;
   JOIN_GRID_ROOM = 85;
@@ -1022,6 +1041,7 @@ enum Method {
 
 message RpcCall {
   Method method = 1;
+  reserved 83;
   oneof input {
     GetMeInput getMe = 2;
     GetPeerPhotoInput getPeerPhoto = 3;
@@ -1098,6 +1118,12 @@ message RpcCall {
     ToggleSpaceGridInput toggleSpaceGrid = 74;
     GetThreadReferencesInput getThreadReferences = 75;
     GetThreadSubthreadsInput getThreadSubthreads = 76;
+    GetPeerBotsInput getPeerBots = 77;
+    GetMyBotCapabilitiesInput getMyBotCapabilities = 78;
+    SetMyBotCapabilitiesInput setMyBotCapabilities = 79;
+    RequestBotChatSettingsInput requestBotChatSettings = 80;
+    InvokeBotChatSettingsItemInput invokeBotChatSettingsItem = 81;
+    AnswerBotChatSettingsInput answerBotChatSettings = 82;
     GetGridInput getGrid = 84;
     CreateGridRoomInput createGridRoom = 85;
     JoinGridRoomInput joinGridRoom = 86;
@@ -1113,6 +1139,7 @@ message RpcCall {
 
 message RpcResult {
   uint64 req_msg_id = 1;
+  reserved 83;
 
   oneof result {
     GetMeResult getMe = 2;
@@ -1190,6 +1217,12 @@ message RpcResult {
     ToggleSpaceGridResult toggleSpaceGrid = 74;
     GetThreadReferencesResult getThreadReferences = 75;
     GetThreadSubthreadsResult getThreadSubthreads = 76;
+    GetPeerBotsResult getPeerBots = 77;
+    GetMyBotCapabilitiesResult getMyBotCapabilities = 78;
+    SetMyBotCapabilitiesResult setMyBotCapabilities = 79;
+    RequestBotChatSettingsResult requestBotChatSettings = 80;
+    InvokeBotChatSettingsItemResult invokeBotChatSettingsItem = 81;
+    AnswerBotChatSettingsResult answerBotChatSettings = 82;
     GetGridResult getGrid = 84;
     CreateGridRoomResult createGridRoom = 85;
     JoinGridRoomResult joinGridRoom = 86;
@@ -2064,6 +2097,7 @@ message ClearChatHistoryInput {
 message ClearChatHistoryResult { repeated Update updates = 1; }
 
 message EditMessageInput {
+  reserved 10;
   int64 message_id = 1;
   InputPeer peer_id = 2;
   string text = 3;
@@ -2544,6 +2578,7 @@ message UpdateChatMoved {
 }
 
 message UpdateNewMessageNotification {
+  reserved 3;
   enum Reason {
     REASON_UNSPECIFIED = 0;
     REASON_MENTION = 1;
@@ -2555,6 +2590,7 @@ message UpdateNewMessageNotification {
 
   // Reason for the notification
   Reason reason = 2;
+
 }
 
 message UpdateUserSettings { UserSettings settings = 1; }
@@ -2936,4 +2972,192 @@ message PinMessageResult { repeated Update updates = 1; }
 message DraftMessage {
   string text = 1;
   optional MessageEntities entities = 2;
+}
+
+message BotCapability {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    CHAT_SETTINGS = 1;
+  }
+
+  Kind kind = 1;
+  uint32 version = 2;
+}
+
+message PeerBot {
+  User bot = 1;
+  repeated BotCapability capabilities = 2;
+}
+
+message GetPeerBotsInput { InputPeer peer_id = 1; }
+
+message GetPeerBotsResult {
+  repeated PeerBot bots = 1;
+  optional int64 suggested_bot_user_id = 2;
+}
+
+message GetMyBotCapabilitiesInput {}
+
+message GetMyBotCapabilitiesResult { repeated BotCapability capabilities = 1; }
+
+message SetMyBotCapabilitiesInput { repeated BotCapability capabilities = 1; }
+
+message SetMyBotCapabilitiesResult { repeated BotCapability capabilities = 1; }
+
+// A bot-owned, plain-text settings document. Bots must never include secrets,
+// credentials, private prompts, or token material.
+message BotChatSettingsDocument {
+  uint32 version = 1;
+  string revision = 2;
+  repeated BotChatSettingsSection sections = 3;
+}
+
+message BotChatSettingsSection {
+  string id = 1;
+  optional string title = 2;
+  optional string description = 3;
+  repeated BotChatSettingsItem items = 4;
+}
+
+message BotChatSettingsItem {
+  string id = 1;
+  optional string label = 2;
+  optional string description = 3;
+  bool disabled = 4;
+  optional string disabled_reason = 5;
+
+  oneof control {
+    BotChatSettingsToggle toggle = 6;
+    BotChatSettingsSelect select = 7;
+    BotChatSettingsInfo info = 8;
+    BotChatSettingsButton button = 9;
+    BotChatSettingsFolder folder = 10;
+  }
+}
+
+message BotChatSettingsToggle { bool value = 1; }
+
+message BotChatSettingsSelect {
+  string value = 1;
+  repeated BotChatSettingsSelectOption options = 2;
+}
+
+message BotChatSettingsSelectOption {
+  string value = 1;
+  string label = 2;
+  optional string description = 3;
+  bool disabled = 4;
+}
+
+message BotChatSettingsInfo {
+  enum Tone {
+    TONE_UNSPECIFIED = 0;
+    NEUTRAL = 1;
+    SUCCESS = 2;
+    WARNING = 3;
+    ERROR = 4;
+  }
+
+  // Plain text. A short wrapped paragraph is allowed for user guidance.
+  string text = 1;
+  Tone tone = 2;
+}
+
+message BotChatSettingsButton {}
+
+// A host-local workspace selector. Values are opaque bot-owned identifiers;
+// local filesystem paths must not be placed in this document or mutations.
+message BotChatSettingsFolder {
+  string value = 1;
+  repeated BotChatSettingsFolderOption recent_folders = 2;
+  string host_installation_id = 3;
+  string host_label = 4;
+  bool allows_local_picker = 5;
+  // Ephemeral 127.0.0.1 endpoint metadata for a host-local native picker.
+  // The capability is opaque, service-epoch scoped, and never a filesystem
+  // path. Clients must probe this exact endpoint before opening a picker.
+  optional uint32 local_picker_port = 6;
+  optional string local_picker_capability = 7;
+}
+
+message BotChatSettingsFolderOption {
+  string value = 1;
+  string label = 2;
+  optional string parent_hint = 3;
+  bool disabled = 4;
+}
+
+message BotChatSettingsValue {
+  oneof value {
+    bool bool_value = 1;
+    string string_value = 2;
+  }
+}
+
+message BotChatSettingsProblem {
+  enum Code {
+    CODE_UNSPECIFIED = 0;
+    UNAVAILABLE = 1;
+    INVALID_VALUE = 2;
+    STALE = 3;
+    FAILED = 4;
+    // Generated by Inline when a capable bot has no reachable connection or
+    // does not answer in time.
+    UNREACHABLE = 5;
+  }
+
+  Code code = 1;
+  string message = 2;
+  optional BotChatSettingsDocument current_document = 3;
+}
+
+message BotChatSettingsResponse {
+  oneof result {
+    BotChatSettingsDocument document = 1;
+    BotChatSettingsProblem problem = 2;
+  }
+}
+
+message RequestBotChatSettingsInput {
+  InputPeer peer_id = 1;
+  int64 bot_user_id = 2;
+  uint32 version = 3;
+}
+
+message RequestBotChatSettingsResult { BotChatSettingsResponse response = 1; }
+
+message InvokeBotChatSettingsItemInput {
+  InputPeer peer_id = 1;
+  int64 bot_user_id = 2;
+  uint32 version = 3;
+  string item_id = 4;
+  optional BotChatSettingsValue value = 5;
+  string document_revision = 6;
+}
+
+message InvokeBotChatSettingsItemResult { BotChatSettingsResponse response = 1; }
+
+// Used only by an authenticated bot to resolve a pending settings request.
+message AnswerBotChatSettingsInput {
+  uint64 request_id = 1;
+  BotChatSettingsResponse response = 2;
+}
+
+message AnswerBotChatSettingsResult {}
+
+message BotChatSettingsRequested {
+  uint64 request_id = 1;
+  int64 chat_id = 2;
+  int64 actor_user_id = 3;
+  uint32 version = 4;
+}
+
+message BotChatSettingsItemInvoked {
+  uint64 request_id = 1;
+  int64 chat_id = 2;
+  int64 actor_user_id = 3;
+  uint32 version = 4;
+  string item_id = 5;
+  optional BotChatSettingsValue value = 6;
+  string document_revision = 7;
 }

@@ -125,11 +125,17 @@ export type BotCommand = {
   sort_order?: number
 }
 
+export type BotCapability = {
+  kind: "chat_settings"
+  version: 1
+}
+
 export type GetMeResult = { user: BotUser }
 export type GetChatResult = { chat: BotChat }
 export type GetChatHistoryResult = { messages: BotMessage[] }
 export type SendMessageResult = { message: BotMessage }
 export type GetMyCommandsResult = { commands: BotCommand[] }
+export type GetMyCapabilitiesResult = { capabilities: BotCapability[] }
 export type EditMessageTextResult = { message: BotMessage }
 export type EmptyResult = Record<string, never>
 
@@ -173,6 +179,10 @@ export type SetMyCommandsParams = {
   commands: BotCommand[]
 }
 
+export type SetMyCapabilitiesParams = {
+  capabilities: BotCapability[]
+}
+
 export type BotMethodName =
   | "getMe"
   | "getChat"
@@ -180,6 +190,9 @@ export type BotMethodName =
   | "getMyCommands"
   | "setMyCommands"
   | "deleteMyCommands"
+  | "getMyCapabilities"
+  | "setMyCapabilities"
+  | "deleteMyCapabilities"
   | "sendMessage"
   | "editMessageText"
   | "deleteMessage"
@@ -192,6 +205,9 @@ export type BotMethodParamsByName = {
   getMyCommands: undefined
   setMyCommands: SetMyCommandsParams
   deleteMyCommands: undefined
+  getMyCapabilities: undefined
+  setMyCapabilities: SetMyCapabilitiesParams
+  deleteMyCapabilities: undefined
   sendMessage: SendMessageParams
   editMessageText: EditMessageTextParams
   deleteMessage: DeleteMessageParams
@@ -205,6 +221,9 @@ export type BotMethodResultByName = {
   getMyCommands: GetMyCommandsResult
   setMyCommands: EmptyResult
   deleteMyCommands: EmptyResult
+  getMyCapabilities: GetMyCapabilitiesResult
+  setMyCapabilities: GetMyCapabilitiesResult
+  deleteMyCapabilities: EmptyResult
   sendMessage: SendMessageResult
   editMessageText: EditMessageTextResult
   deleteMessage: EmptyResult
