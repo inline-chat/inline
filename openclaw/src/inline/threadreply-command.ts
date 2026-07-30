@@ -110,7 +110,7 @@ function resolveInlineConfigForAccount(
   return inline
 }
 
-function resolveCurrentMode(params: {
+export function resolveCurrentMode(params: {
   cfg: OpenClawConfig
   accountId?: string | undefined
   groupId: string
@@ -175,7 +175,7 @@ function resolveMutableInlineConfigForAccount(
   return account
 }
 
-function setGroupMode(params: {
+export function setGroupMode(params: {
   draft: OpenClawConfig
   accountId?: string | undefined
   groupId: string

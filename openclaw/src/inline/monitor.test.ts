@@ -80,6 +80,8 @@ type MonitorHarness = {
     dispatchReply: ReturnType<typeof vi.fn>
     enqueueSystemEvent: ReturnType<typeof vi.fn>
     answerMessageAction: ReturnType<typeof vi.fn>
+    answerBotChatSettings: ReturnType<typeof vi.fn>
+    setMyBotCapabilities: ReturnType<typeof vi.fn>
     closeClient: ReturnType<typeof vi.fn>
     upsertPairingRequest: ReturnType<typeof vi.fn>
     buildPairingReply: ReturnType<typeof vi.fn>
@@ -170,6 +172,13 @@ type MonitorSetup = {
         data: Uint8Array
         seq?: number
         date?: bigint
+      }
+    | {
+        kind: "bot.chatSettings.request"
+        requestId: bigint
+        chatId: bigint
+        actorUserId: bigint
+        version: number
       }
   >
   chats: Record<string, {
@@ -439,6 +448,8 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
   const sendTyping = vi.fn(setup.sendTyping ?? (async () => {}))
   const uploadFile = vi.fn(async () => ({ fileUniqueId: "INP_1", photoId: 200n }))
   const answerMessageAction = vi.fn(async () => {})
+  const answerBotChatSettingsMock = vi.fn(async () => {})
+  const setMyBotCapabilitiesMock = vi.fn(async () => ({}))
   const closeClient = vi.fn(async () => {})
   const fetchRemoteMedia = vi.fn(async ({ url }: { url: string }) => {
     const media = setup.mediaByUrl?.[url]
@@ -785,6 +796,11 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
           continue
         }
 
+        if (event.kind === "bot.chatSettings.request") {
+          yield event
+          continue
+        }
+
         yield {
           kind: event.kind,
           chatId: event.chatId,
@@ -798,6 +814,24 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     }
 
     return {
+      registerBotCapabilitiesWithRetry: async ({ register }: { register: () => Promise<unknown> }) => {
+        try {
+          await register()
+          return true
+        } catch {
+          return false
+        }
+      },
+      BotCapability_Kind: { CHAT_SETTINGS: 1 },
+      BotChatSettingsInfo_Tone: { TONE_UNSPECIFIED: 0, NEUTRAL: 1, SUCCESS: 2, WARNING: 3, ERROR: 4 },
+      BotChatSettingsProblem_Code: {
+        CODE_UNSPECIFIED: 0,
+        UNAVAILABLE: 1,
+        INVALID_VALUE: 2,
+        STALE: 3,
+        FAILED: 4,
+        UNREACHABLE: 5,
+      },
       JsonFileStateStore: class {
         constructor(_path: string) {}
       },
@@ -860,6 +894,8 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         uploadFile = uploadFile
         sendTyping = sendTyping
         answerMessageAction = answerMessageAction
+        setMyBotCapabilities = setMyBotCapabilitiesMock
+        answerBotChatSettings = answerBotChatSettingsMock
         invokeRaw = invokeRaw
         invokeUncheckedRaw = this.invokeRaw
         getDiagnostics = vi.fn(() => setup.getDiagnostics?.() ?? ({
@@ -1076,6 +1112,8 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       dispatchReply,
       enqueueSystemEvent,
       answerMessageAction,
+      answerBotChatSettings: answerBotChatSettingsMock,
+      setMyBotCapabilities: setMyBotCapabilitiesMock,
       closeClient,
       upsertPairingRequest,
       buildPairingReply,
@@ -1085,6 +1123,49 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
 }
 
 describe("inline/monitor", () => {
+  it("registers capability and answers a DM settings request", async () => {
+    const harness = await setupMonitorHarness({
+      events: [{
+        kind: "bot.chatSettings.request",
+        requestId: 81n,
+        chatId: 7n,
+        actorUserId: 42n,
+        version: 1,
+      }],
+      chats: {
+        "7": { kind: "direct", title: "Alice", peerUserId: 42n },
+      },
+      runtimeConfig: {
+        agents: { defaults: { model: "openai/gpt-5" } },
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      statusSink: vi.fn(),
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.setMyBotCapabilities).toHaveBeenCalledWith({
+        capabilities: [{ kind: 1, version: 1 }],
+      })
+      expect(harness.calls.answerBotChatSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestId: 81n,
+          response: expect.objectContaining({
+            result: expect.objectContaining({ oneofKind: "document" }),
+          }),
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
   it("publishes connected and inbound transport status", async () => {
     const statusPatches: Array<Record<string, unknown>> = []
     const harness = await setupMonitorHarness({

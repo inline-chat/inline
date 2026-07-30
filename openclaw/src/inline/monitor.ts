@@ -71,11 +71,14 @@ import type { OpenClawConfig, PluginCommandContext } from "openclaw/plugin-sdk/c
 import type { ChannelRuntimeSurface } from "openclaw/plugin-sdk/channel-contract"
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env"
 import {
+  BotCapability_Kind,
+  BotChatSettingsProblem_Code,
   BotPresenceState_Kind,
   DialogFollowMode,
   InlineSdkClient,
   JsonFileStateStore,
   Method,
+  registerBotCapabilitiesWithRetry,
   type Message,
   type MessageActions,
   type MessageActionResponseUi,
@@ -147,6 +150,8 @@ import {
 import {
   handleInlineThreadReplyCommandWithConfigRuntime,
   listInlineBuiltinCommandSpecs,
+  resolveCurrentMode as resolveInlineThreadReplyMode,
+  setGroupMode as setInlineThreadReplyMode,
 } from "./threadreply-command.js"
 import {
   DIALOG_FOLLOW_MODE_UNFOLLOWED,
@@ -159,6 +164,14 @@ import {
   summarizeInlineFollowCommandError,
   updateInlineFollowMode,
 } from "./follow-command.js"
+import {
+  OPENCLAW_BOT_CHAT_SETTINGS_VERSION,
+  buildOpenClawBotChatSettingsDocument,
+  invokeOpenClawBotChatSetting,
+  openClawBotChatSettingsProblem,
+  type OpenClawBotChatSettingsContext,
+  type OpenClawBotChatSettingsOption,
+} from "./bot-chat-settings.js"
 
 const CHANNEL_ID = "inline" as const
 const INLINE_NATIVE_COMMAND_PROVIDER = CHANNEL_ID
@@ -688,6 +701,10 @@ type InlineParsedInboundEvent = {
 type InlineSystemEventContext = {
   channelLabel: string
   sessionKey: string
+  agentId: string
+  effectiveChatId: bigint
+  isReplyThread: boolean
+  chatInfo: CachedChatInfo
 }
 
 function summarizeSdkMeta(meta: unknown): string {
@@ -2675,15 +2692,25 @@ async function resolveInlineInboundReplyThreadContext(params: {
   chatId: bigint
   chatInfo: CachedChatInfo
   chatCache: Map<bigint, CachedChatInfo>
+  useCachedChatMetadata?: boolean
 }): Promise<InlineReplyThreadContext | null> {
   if (params.chatInfo.kind === "direct" || !params.replyThreadsEnabled) {
     return null
   }
 
-  const metadata = await loadInlineReplyThreadMetadata({
-    client: params.client,
-    chatId: params.chatId,
-  })
+  const metadata = params.useCachedChatMetadata
+    ? params.chatInfo.parentChatId != null
+      ? {
+          childChatId: params.chatId,
+          parentChatId: params.chatInfo.parentChatId,
+          parentMessageId: params.chatInfo.parentMessageId ?? null,
+          title: params.chatInfo.title ?? null,
+        }
+      : null
+    : await loadInlineReplyThreadMetadata({
+        client: params.client,
+        chatId: params.chatId,
+      })
   if (!metadata) {
     return null
   }
@@ -3047,6 +3074,21 @@ export async function monitorInlineProvider(params: {
   }
   const meId = meUser.id
   const botUsername = normalizeInlineUsername(meUser.username)?.toLowerCase()
+  void registerBotCapabilitiesWithRetry({
+    register: () => client.setMyBotCapabilities({
+      capabilities: [{
+        kind: BotCapability_Kind.CHAT_SETTINGS,
+        version: OPENCLAW_BOT_CHAT_SETTINGS_VERSION,
+      }],
+    }),
+    isCancelled: () => abortSignal.aborted,
+    onFailure: (error, willRetry) => {
+      log?.warn(
+        `[${account.accountId}] inline agent settings registration failed: ${String(error)}`
+          + (willRetry ? "; retrying" : ""),
+      )
+    },
+  })
   log?.info(`[${account.accountId}] inline connected (me=${String(meId)})`)
   const connectedAt = Date.now()
   pushDiagnostics({
@@ -3109,8 +3151,8 @@ export async function monitorInlineProvider(params: {
     try {
       chatInfo = await resolveChatInfo(client, chatCache, params.chatId)
     } catch (err) {
-      chatInfo = { kind: "group", title: null }
       publishStatus({ lastError: `getChat failed: ${String(err)}` })
+      return null
     }
 
     const isGroup = chatInfo.kind !== "direct"
@@ -3121,6 +3163,7 @@ export async function monitorInlineProvider(params: {
       chatId: params.chatId,
       chatInfo,
       chatCache,
+      useCachedChatMetadata: params.eventKind.startsWith("bot.chatSettings."),
     }).catch((err) => {
       publishStatus({ lastError: `getChat (system event reply thread) failed: ${String(err)}` })
       return null
@@ -3202,6 +3245,10 @@ export async function monitorInlineProvider(params: {
         sessionKey: replyThreadContext
           ? buildInlineReplyThreadSessionKey(route.sessionKey, replyThreadContext.childChatId)
           : route.sessionKey,
+        agentId: route.agentId,
+        effectiveChatId,
+        isReplyThread: replyThreadContext != null,
+        chatInfo,
       }
     }
 
@@ -3251,6 +3298,10 @@ export async function monitorInlineProvider(params: {
         effectiveChatId: params.chatId,
       }),
       sessionKey: route.sessionKey,
+      agentId: route.agentId,
+      effectiveChatId: params.chatId,
+      isReplyThread: false,
+      chatInfo,
     }
   }
 
@@ -3501,7 +3552,7 @@ export async function monitorInlineProvider(params: {
     const effectiveChatId = replyThreadContext?.parentChatId ?? chatId
     const effectiveGroupTitle = replyThreadContext?.parentChatTitle ?? chatInfo.title ?? null
     const replyThreadMode =
-      isGroup && replyThreadsEnabled
+      replyThreadsEnabled
         ? resolveInlineGroupReplyThreadMode({
             cfg,
             accountId: account.accountId,
@@ -4302,12 +4353,10 @@ export async function monitorInlineProvider(params: {
 
     let deliveryReplyThreadContext = replyThreadContext
     const explicitReplyThreadIntent =
-      isGroup &&
       replyThreadsEnabled &&
       !deliveryReplyThreadContext &&
       hasExplicitInlineReplyThreadIntent(rawBody)
     const shouldCreateDeliveryThread =
-      isGroup &&
       replyThreadsEnabled &&
       !deliveryReplyThreadContext &&
       shouldCreateInlineReplyThreadDelivery({
@@ -5477,33 +5526,41 @@ export async function monitorInlineProvider(params: {
   const pendingInboundTasks = new Set<Promise<void>>()
   const inboundTaskChains = new Map<string, Promise<void>>()
 
-  const isAuthorizedInlineAbortMessage = async (entry: InlineDebounceEntry): Promise<boolean> => {
-    if (!isInlineAbortRequestMessage(entry.msg, botUsername)) return false
-
-    const senderId = entry.msg.fromId != null ? String(entry.msg.fromId) : null
-    if (!senderId) return false
+  const isAuthorizedInlineControlActor = async (params: {
+    chatId: bigint
+    actorUserId: bigint
+    resolvedContext?: InlineSystemEventContext
+  }): Promise<boolean> => {
+    const senderId = String(params.actorUserId)
 
     let chatInfo: CachedChatInfo
-    try {
-      chatInfo = await resolveChatInfo(client, chatCache, entry.chatId)
-    } catch (err) {
-      chatInfo = { kind: "group", title: null }
-      publishStatus({ lastError: `getChat failed: ${String(err)}` })
+    if (params.resolvedContext) {
+      chatInfo = params.resolvedContext.chatInfo
+    } else {
+      try {
+        chatInfo = await resolveChatInfo(client, chatCache, params.chatId)
+      } catch (err) {
+        chatInfo = { kind: "group", title: null }
+        publishStatus({ lastError: `getChat failed: ${String(err)}` })
+      }
     }
 
     const isGroup = chatInfo.kind !== "direct"
-    const replyThreadsEnabled = isInlineReplyThreadsEnabled({ cfg, accountId: account.accountId })
-    const replyThreadContext = await resolveInlineInboundReplyThreadContext({
-      replyThreadsEnabled,
-      client,
-      chatId: entry.chatId,
-      chatInfo,
-      chatCache,
-    }).catch((err) => {
-      publishStatus({ lastError: `getChat (abort reply thread) failed: ${String(err)}` })
-      return null
-    })
-    const effectiveChatId = replyThreadContext?.parentChatId ?? entry.chatId
+    let effectiveChatId = params.resolvedContext?.effectiveChatId
+    if (effectiveChatId == null) {
+      const replyThreadsEnabled = isInlineReplyThreadsEnabled({ cfg, accountId: account.accountId })
+      const replyThreadContext = await resolveInlineInboundReplyThreadContext({
+        replyThreadsEnabled,
+        client,
+        chatId: params.chatId,
+        chatInfo,
+        chatCache,
+      }).catch((err) => {
+        publishStatus({ lastError: `getChat (abort reply thread) failed: ${String(err)}` })
+        return null
+      })
+      effectiveChatId = replyThreadContext?.parentChatId ?? params.chatId
+    }
     const dmPolicy = account.config.dmPolicy ?? "pairing"
     const defaultGroupPolicy = cfg.channels?.defaults?.groupPolicy
     const groupPolicy = account.config.groupPolicy ?? defaultGroupPolicy ?? INLINE_DEFAULT_GROUP_POLICY
@@ -5584,6 +5641,434 @@ export async function monitorInlineProvider(params: {
       chatId: String(effectiveChatId),
       senderId,
       commandAuthorized: commandGate.commandAuthorized,
+    })
+  }
+
+  const isAuthorizedInlineAbortMessage = async (entry: InlineDebounceEntry): Promise<boolean> => {
+    if (!isInlineAbortRequestMessage(entry.msg, botUsername) || entry.msg.fromId == null) return false
+    return await isAuthorizedInlineControlActor({
+      chatId: entry.chatId,
+      actorUserId: entry.msg.fromId,
+    })
+  }
+
+  const botSettingsModelCatalogCache = new Map<string, {
+    expiresAt: number
+    options: OpenClawBotChatSettingsOption[]
+  }>()
+  const botSettingsModelCatalogLoads = new Map<string, Promise<OpenClawBotChatSettingsOption[]>>()
+
+  const loadOpenClawBotSettingsModelCatalog = async (params: {
+    cfg: OpenClawConfig
+    agentId: string
+  }): Promise<OpenClawBotChatSettingsOption[]> => {
+    const options = new Map<string, OpenClawBotChatSettingsOption>()
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    try {
+      const { byProvider, providers } = await Promise.race([
+        buildModelsProviderData(params.cfg, params.agentId),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error("model list timed out")), 5_000)
+        }),
+      ])
+      for (const provider of [...providers].sort()) {
+        for (const model of [...(byProvider.get(provider) ?? [])].sort()) {
+          const value = `${provider}/${model}`
+          options.set(value, { value, label: value })
+          if (options.size >= 100) return [...options.values()]
+        }
+      }
+    } catch (error) {
+      log?.warn(`inline agent settings model list unavailable: ${String(error)}`)
+    } finally {
+      if (timeout) clearTimeout(timeout)
+    }
+    return [...options.values()]
+  }
+
+  const resolveOpenClawBotSettingsModelOptions = async (params: {
+    cfg: OpenClawConfig
+    agentId: string
+    currentModel: string
+  }): Promise<OpenClawBotChatSettingsOption[]> => {
+    const startedAt = Date.now()
+    const cached = botSettingsModelCatalogCache.get(params.agentId)
+    let catalogOptions: OpenClawBotChatSettingsOption[]
+    let cacheResult: "hit" | "miss" | "shared"
+    if (cached && cached.expiresAt > Date.now()) {
+      catalogOptions = cached.options
+      cacheResult = "hit"
+    } else {
+      let load = botSettingsModelCatalogLoads.get(params.agentId)
+      cacheResult = load ? "shared" : "miss"
+      if (!load) {
+        load = loadOpenClawBotSettingsModelCatalog(params)
+        botSettingsModelCatalogLoads.set(params.agentId, load)
+        const currentLoad = load
+        const clearLoad = () => {
+          if (botSettingsModelCatalogLoads.get(params.agentId) === currentLoad) {
+            botSettingsModelCatalogLoads.delete(params.agentId)
+          }
+        }
+        load.then(clearLoad, clearLoad)
+      }
+      catalogOptions = await load
+      botSettingsModelCatalogCache.set(params.agentId, {
+        expiresAt: Date.now() + (catalogOptions.length > 0 ? 60_000 : 5_000),
+        options: catalogOptions,
+      })
+    }
+
+    const options = new Map<string, OpenClawBotChatSettingsOption>()
+    options.set(params.currentModel, { value: params.currentModel, label: params.currentModel })
+    for (const option of catalogOptions) {
+      options.set(option.value, option)
+      if (options.size >= 100) break
+    }
+    log?.info(
+      `[${account.accountId}] AGENT_SETTINGS_TRACE phase=model_catalog cache=${cacheResult} ` +
+      `options=${options.size} elapsed_ms=${Date.now() - startedAt}`,
+    )
+    return [...options.values()]
+  }
+
+  const resolveOpenClawBotSettingsReasoningOptions = (params: {
+    cfg: OpenClawConfig
+    provider: string
+    model: string
+    currentLevel: string
+  }): OpenClawBotChatSettingsOption[] => {
+    const command = findInlineNativeCommandFromBody("/think")
+    const menu = command
+      ? resolveCommandArgMenu({
+          command,
+          cfg: params.cfg,
+          provider: params.provider,
+          model: params.model,
+        })
+      : null
+    const options = new Map<string, OpenClawBotChatSettingsOption>()
+    options.set(params.currentLevel, { value: params.currentLevel, label: params.currentLevel })
+    for (const choice of menu?.choices ?? []) {
+      options.set(choice.value, { value: choice.value, label: choice.label })
+    }
+    return [...options.values()]
+  }
+
+  type ResolvedOpenClawBotSettings = {
+    context: OpenClawBotChatSettingsContext
+    ingress?: InlineSystemEventContext
+  }
+
+  const resolveOpenClawBotSettings = async (params: {
+    chatId: bigint
+    actorUserId: bigint
+    eventKind: string
+    modelOptions?: OpenClawBotChatSettingsOption[]
+    replyThreads?: "auto" | "on" | "off"
+  }): Promise<ResolvedOpenClawBotSettings> => {
+    const ingress = await resolveInlineSystemEventContext({
+      chatId: params.chatId,
+      senderId: params.actorUserId,
+      eventKind: params.eventKind,
+    })
+    if (!ingress) {
+      return {
+        context: {
+          scopeId: `chat:${String(params.chatId)}`,
+          access: "guideOnly",
+          replyThreads: "auto",
+        },
+      }
+    }
+
+    const canSetDefaultModel = await isAuthorizedInlineControlActor({
+      ...params,
+      resolvedContext: ingress,
+    })
+    const currentConfig = core.config.current() as OpenClawConfig
+    const modelContext = resolveInlineCommandMenuModelContext({
+      cfg: currentConfig,
+      agentId: ingress.agentId,
+      sessionKey: ingress.sessionKey,
+    })
+    const defaultModel = resolveDefaultModelForAgent({
+      cfg: currentConfig,
+      agentId: ingress.agentId,
+    })
+    const provider = modelContext.provider ?? defaultModel.provider
+    const model = modelContext.model ?? defaultModel.model
+    const currentModel = provider ? `${provider}/${model}` : model
+    const defaultModelValue = defaultModel.provider
+      ? `${defaultModel.provider}/${defaultModel.model}`
+      : defaultModel.model
+    const reasoningLevel = resolveInlineThinkMenuCurrentLevel({
+      cfg: currentConfig,
+      agentId: ingress.agentId,
+      provider,
+      model,
+      ...(modelContext.thinkingLevel ? { thinkingLevel: modelContext.thinkingLevel } : {}),
+    })
+    const modelOptions = params.modelOptions ?? await resolveOpenClawBotSettingsModelOptions({
+      cfg: currentConfig,
+      agentId: ingress.agentId,
+      currentModel,
+    })
+    const replyMode = params.replyThreads == null
+      ? resolveInlineThreadReplyMode({
+          cfg: currentConfig,
+          accountId: account.accountId,
+          groupId: String(ingress.effectiveChatId),
+        })
+      : undefined
+    return {
+      ingress,
+      context: {
+        scopeId: `${account.accountId}:${String(ingress.effectiveChatId)}:${ingress.sessionKey}`,
+        access: "full",
+        isReplyThread: ingress.isReplyThread,
+        currentModel,
+        defaultModel: defaultModelValue,
+        modelOptions,
+        reasoningLevel,
+        reasoningOptions: resolveOpenClawBotSettingsReasoningOptions({
+          cfg: currentConfig,
+          provider,
+          model,
+          currentLevel: reasoningLevel,
+        }),
+        following: isInlineDialogFollowing(ingress.chatInfo.dialogFollowMode),
+        replyThreads: params.replyThreads ?? (
+          replyMode === "thread" ? "on" : replyMode === "main" ? "off" : "auto"
+        ),
+        canSetDefaultModel,
+      },
+    }
+  }
+
+  const setOpenClawSessionModel = async (
+    ingress: InlineSystemEventContext,
+    selection: string,
+  ): Promise<void> => {
+    const separator = selection.indexOf("/")
+    if (separator <= 0 || separator >= selection.length - 1) throw new Error("invalid model")
+    const provider = selection.slice(0, separator)
+    const model = selection.slice(separator + 1)
+    const currentConfig = core.config.current() as OpenClawConfig
+    const storePath = resolveStorePath(currentConfig.session?.store, { agentId: ingress.agentId })
+    const resolvedDefault = resolveDefaultModelForAgent({ cfg: currentConfig, agentId: ingress.agentId })
+    await patchSessionEntry({
+      agentId: ingress.agentId,
+      sessionKey: ingress.sessionKey,
+      storePath,
+      fallbackEntry: { sessionId: ingress.sessionKey, updatedAt: Date.now() },
+      preserveActivity: true,
+      replaceEntry: true,
+      update: (entry) => {
+        const next = { ...entry }
+        applyModelOverrideToSessionEntry({
+          entry: next,
+          selection: {
+            provider,
+            model,
+            isDefault: provider === resolvedDefault.provider && model === resolvedDefault.model,
+          },
+        })
+        return next
+      },
+    })
+  }
+
+  const setOpenClawSessionReasoning = async (
+    ingress: InlineSystemEventContext,
+    reasoningLevel: string,
+  ): Promise<void> => {
+    const currentConfig = core.config.current() as OpenClawConfig
+    const storePath = resolveStorePath(currentConfig.session?.store, { agentId: ingress.agentId })
+    await patchSessionEntry({
+      agentId: ingress.agentId,
+      sessionKey: ingress.sessionKey,
+      storePath,
+      fallbackEntry: { sessionId: ingress.sessionKey, updatedAt: Date.now() },
+      preserveActivity: true,
+      replaceEntry: true,
+      update: (entry) => ({ ...entry, thinkingLevel: reasoningLevel }),
+    })
+  }
+
+  const setOpenClawDefaultModel = async (
+    ingress: InlineSystemEventContext,
+    selection: string,
+  ): Promise<void> => {
+    await core.config.mutateConfigFile({
+      afterWrite: { mode: "auto" },
+      mutate: (draft: OpenClawConfig) => {
+        const agents = draft.agents ?? {}
+        draft.agents = agents
+        const agent = agents.list?.find((candidate) => candidate.id === ingress.agentId)
+        if (agent) {
+          agent.model = selection
+        } else {
+          const defaults = agents.defaults ?? {}
+          agents.defaults = defaults
+          defaults.model = selection
+        }
+      },
+    })
+  }
+
+  const answerOpenClawBotSettingsRequest = async (event: {
+    requestId: bigint
+    chatId: bigint
+    actorUserId: bigint
+    version: number
+  }): Promise<void> => {
+    const startedAt = Date.now()
+    log?.info(
+      `[${account.accountId}] AGENT_SETTINGS_TRACE request=${String(event.requestId)} ` +
+      `phase=request_start chat=${String(event.chatId)}`,
+    )
+    let response
+    try {
+      if (event.version !== OPENCLAW_BOT_CHAT_SETTINGS_VERSION) {
+        response = openClawBotChatSettingsProblem(
+          BotChatSettingsProblem_Code.UNAVAILABLE,
+          "This OpenClaw version supports agent settings V1 only.",
+        )
+      } else {
+        const resolved = await resolveOpenClawBotSettings({
+          chatId: event.chatId,
+          actorUserId: event.actorUserId,
+          eventKind: "bot.chatSettings.request",
+        })
+        response = {
+          result: {
+            oneofKind: "document" as const,
+            document: buildOpenClawBotChatSettingsDocument(resolved.context),
+          },
+        }
+      }
+    } catch (error) {
+      runtime.error?.(`inline agent settings request failed: ${String(error)}`)
+      response = openClawBotChatSettingsProblem(
+        BotChatSettingsProblem_Code.FAILED,
+        "OpenClaw could not load settings.",
+      )
+    }
+    await client.answerBotChatSettings({ requestId: event.requestId, response }).then(() => {
+      log?.info(
+        `[${account.accountId}] AGENT_SETTINGS_TRACE request=${String(event.requestId)} ` +
+        `phase=request_answer result=${response.result.oneofKind} elapsed_ms=${Date.now() - startedAt}`,
+      )
+    }).catch(() => {
+      log?.warn(
+        `[${account.accountId}] AGENT_SETTINGS_TRACE request=${String(event.requestId)} ` +
+        `phase=request_answer_failed elapsed_ms=${Date.now() - startedAt}`,
+      )
+    })
+  }
+
+  const answerOpenClawBotSettingsMutation = async (event: {
+    requestId: bigint
+    chatId: bigint
+    actorUserId: bigint
+    version: number
+    itemId: string
+    value?: import("@inline-chat/realtime-sdk").BotChatSettingsValue
+    documentRevision: string
+  }): Promise<void> => {
+    const startedAt = Date.now()
+    log?.info(
+      `[${account.accountId}] AGENT_SETTINGS_TRACE request=${String(event.requestId)} ` +
+      `phase=mutation_start chat=${String(event.chatId)} item=${event.itemId}`,
+    )
+    let response
+    try {
+      const resolved = await resolveOpenClawBotSettings({
+        chatId: event.chatId,
+        actorUserId: event.actorUserId,
+        eventKind: "bot.chatSettings.item.invoke",
+      })
+      if (!resolved.ingress) {
+        response = openClawBotChatSettingsProblem(
+          BotChatSettingsProblem_Code.FAILED,
+          "This chat is not available to OpenClaw.",
+          buildOpenClawBotChatSettingsDocument(resolved.context),
+        )
+      } else {
+        const ingress = resolved.ingress
+        let appliedReplyThreads: "auto" | "on" | "off" | undefined
+        response = await invokeOpenClawBotChatSetting({
+          context: resolved.context,
+          mutators: {
+            setModel: (value) => setOpenClawSessionModel(ingress, value),
+            setDefaultModel: () => setOpenClawDefaultModel(ingress, resolved.context.currentModel ?? ""),
+            setReasoningLevel: (value) => setOpenClawSessionReasoning(ingress, value),
+            setFollowing: async (value) => {
+              await updateInlineFollowMode({
+                client,
+                target: ingress.chatInfo.kind === "direct"
+                  ? { userId: event.actorUserId }
+                  : { chatId: event.chatId },
+                command: value ? "follow" : "unfollow",
+              })
+              const cached = chatCache.get(event.chatId)
+              if (cached) {
+                chatCache.set(event.chatId, {
+                  ...cached,
+                  dialogFollowMode: value ? DialogFollowMode.FOLLOWING : 2 as DialogFollowMode,
+                })
+              }
+            },
+            setReplyThreads: async (value) => {
+              await core.config.mutateConfigFile({
+                afterWrite: { mode: "auto" },
+                mutate: (draft: OpenClawConfig) => setInlineThreadReplyMode({
+                  draft,
+                  accountId: account.accountId,
+                  groupId: String(ingress.effectiveChatId),
+                  mode: value === "on" ? "thread" : value === "off" ? "main" : "auto",
+                }),
+              })
+              appliedReplyThreads = value
+            },
+            resolveContext: async () => (await resolveOpenClawBotSettings({
+              chatId: event.chatId,
+              actorUserId: event.actorUserId,
+              eventKind: "bot.chatSettings.refresh",
+              ...(resolved.context.modelOptions
+                ? { modelOptions: resolved.context.modelOptions }
+                : {}),
+              ...(appliedReplyThreads ? { replyThreads: appliedReplyThreads } : {}),
+            })).context,
+          },
+          itemId: event.itemId,
+          ...(event.value ? { value: event.value } : {}),
+          documentRevision: event.documentRevision,
+        })
+      }
+    } catch (error) {
+      runtime.error?.(`inline agent settings update failed: ${String(error)}`)
+      response = openClawBotChatSettingsProblem(
+        BotChatSettingsProblem_Code.FAILED,
+        "OpenClaw could not update this setting.",
+      )
+    }
+    await client.answerBotChatSettings({ requestId: event.requestId, response }).then(() => {
+      const result = response.result.oneofKind === "problem"
+        ? `problem:${String(response.result.problem.code)}`
+        : response.result.oneofKind
+      log?.info(
+        `[${account.accountId}] AGENT_SETTINGS_TRACE request=${String(event.requestId)} ` +
+        `phase=mutation_answer chat=${String(event.chatId)} item=${event.itemId} ` +
+        `result=${result} elapsed_ms=${Date.now() - startedAt}`,
+      )
+    }).catch(() => {
+      log?.warn(
+        `[${account.accountId}] AGENT_SETTINGS_TRACE request=${String(event.requestId)} ` +
+        `phase=mutation_answer_failed chat=${String(event.chatId)} item=${event.itemId} ` +
+        `elapsed_ms=${Date.now() - startedAt}`,
+      )
     })
   }
 
@@ -5796,6 +6281,23 @@ export async function monitorInlineProvider(params: {
       for await (const event of client.events()) {
         if (abortSignal.aborted) break
         const rawEvent = event as Record<string, unknown>
+
+        if (event.kind === "bot.chatSettings.request") {
+          scheduleInboundTask(
+            "agent settings request",
+            () => answerOpenClawBotSettingsRequest(event),
+          )
+          continue
+        }
+
+        if (event.kind === "bot.chatSettings.item.invoke") {
+          scheduleInboundTask(
+            "agent settings update",
+            () => answerOpenClawBotSettingsMutation(event),
+            { serialKey: `agent-settings:${String(event.chatId)}` },
+          )
+          continue
+        }
 
         if (event.kind === "message.new") {
           const msg = {
