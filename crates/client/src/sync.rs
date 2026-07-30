@@ -348,7 +348,6 @@ impl SyncManager {
                     },
                     seq_end: request_end.unwrap_or_default(),
                     limit: self.config.page_limit,
-                    core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
                 })
                 .await?;
             let result_type = proto::get_updates_result::ResultType::try_from(response.result_type)
@@ -1029,6 +1028,9 @@ fn insert_unique_update(
         if existing == &update {
             return Ok(());
         }
+        if source == "fetched/realtime merge" && same_logical_message_update(existing, &update) {
+            return Ok(());
+        }
         return Err(BackendError::new(
             ClientErrorCategory::ProtocolMismatch,
             format!("conflicting Inline updates shared sequence {seq} in {source}"),
@@ -1036,6 +1038,34 @@ fn insert_unique_update(
     }
     updates.insert(seq, update);
     Ok(())
+}
+
+fn same_logical_message_update(left: &proto::Update, right: &proto::Update) -> bool {
+    match (left.update.as_ref(), right.update.as_ref()) {
+        (
+            Some(proto::update::Update::NewMessage(left)),
+            Some(proto::update::Update::NewMessage(right)),
+        ) => match (left.message.as_ref(), right.message.as_ref()) {
+            (Some(left), Some(right)) => {
+                left.id == right.id
+                    && left.chat_id == right.chat_id
+                    && left.from_id == right.from_id
+            }
+            _ => false,
+        },
+        (
+            Some(proto::update::Update::EditMessage(left)),
+            Some(proto::update::Update::EditMessage(right)),
+        ) => match (left.message.as_ref(), right.message.as_ref()) {
+            (Some(left), Some(right)) => {
+                left.id == right.id
+                    && left.chat_id == right.chat_id
+                    && left.from_id == right.from_id
+            }
+            _ => false,
+        },
+        _ => false,
+    }
 }
 
 fn validate_journal_updates(updates: &[proto::Update]) -> BackendResult<()> {
@@ -1288,7 +1318,6 @@ mod tests {
                 state: proto::GetUpdatesStateResult {
                     date: 100,
                     updates_found: Some(true),
-                    core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
                 },
                 responses: Arc::new(Mutex::new(
                     responses.into_iter().map(Ok).collect::<VecDeque<_>>(),
@@ -1422,15 +1451,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn safe_page_accepts_future_revision_metadata() {
+    async fn safe_page_accepts_structurally_compatible_metadata() {
         let store = Arc::new(InMemoryStore::new());
         let key = chat_key(7);
         store
             .save_sync_bucket_state(key, SyncBucketState { seq: 1, date: 10 })
             .await
             .unwrap();
-        let mut response = updates_result(vec![message_update(2, 20, 7, 102)], 2, 20, true);
-        response.core_sync_schema_revision = crate::CORE_SYNC_SCHEMA_REVISION + 1;
+        let response = updates_result(vec![message_update(2, 20, 7, 102)], 2, 20, true);
         let host = FakeHost::new(vec![response]);
         let sync = SyncManager::new(store.clone(), SyncConfig::default());
 
@@ -1447,12 +1475,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn discovery_accepts_unversioned_state_and_page_metadata() {
+    async fn discovery_accepts_state_and_page_without_legacy_revision_metadata() {
         let store = Arc::new(InMemoryStore::new());
-        let mut response = skipped_result(0, 1, 20);
-        response.core_sync_schema_revision = 0;
-        let mut host = FakeHost::new(vec![response]);
-        host.state.core_sync_schema_revision = 0;
+        let response = skipped_result(0, 1, 20);
+        let host = FakeHost::new(vec![response]);
         let sync = SyncManager::new(store.clone(), SyncConfig::default());
 
         let events = sync.discover(&host).await.unwrap();
@@ -1671,7 +1697,6 @@ mod tests {
             date: 80,
             r#final: Some(true),
             result_type: proto::get_updates_result::ResultType::Empty as i32,
-            core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
             ..Default::default()
         };
         let host = FakeHost::new(vec![empty(), empty(), empty()]);
@@ -1707,7 +1732,6 @@ mod tests {
                 date: 80,
                 r#final: Some(false),
                 result_type: proto::get_updates_result::ResultType::TooLong as i32,
-                core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
                 ..Default::default()
             },
             skipped_result(400, 500, 90),
@@ -1768,7 +1792,6 @@ mod tests {
                     date: 80,
                     r#final: Some(false),
                     result_type: proto::get_updates_result::ResultType::TooLong as i32,
-                    core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
                     ..Default::default()
                 },
                 skipped_result(400, 500, 90),
@@ -1806,7 +1829,6 @@ mod tests {
                 seq: 1,
                 reason: proto::sync_skipped_sequence::Reason::IrrelevantToBucket as i32,
             }],
-            core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
             ..Default::default()
         };
         let host = FakeHost::new(vec![empty(100), empty(200)]).with_fetch_delay(25);
@@ -1840,7 +1862,6 @@ mod tests {
             date,
             r#final: Some(final_page),
             result_type: proto::get_updates_result::ResultType::Slice as i32,
-            core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
             ..Default::default()
         }
     }
@@ -1858,7 +1879,6 @@ mod tests {
                     reason: proto::sync_skipped_sequence::Reason::IrrelevantToBucket as i32,
                 })
                 .collect(),
-            core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
             ..Default::default()
         }
     }
@@ -1890,6 +1910,105 @@ mod tests {
                 }),
             })),
         }
+    }
+
+    fn edit_message_update(seq: i32, date: i64, chat_id: i64, message_id: i64) -> proto::Update {
+        proto::Update {
+            seq: Some(seq),
+            date: Some(date),
+            update: Some(proto::update::Update::EditMessage(
+                proto::UpdateEditMessage {
+                    message: Some(proto::Message {
+                        id: message_id,
+                        chat_id,
+                        peer_id: Some(chat_peer(chat_id)),
+                        ..Default::default()
+                    }),
+                },
+            )),
+        }
+    }
+
+    #[test]
+    fn fetched_realtime_merge_prefers_fetched_copy_of_same_message() {
+        let fetched = message_update(2, 20, 7, 102);
+        let mut realtime = fetched.clone();
+        let Some(proto::update::Update::NewMessage(update)) = realtime.update.as_mut() else {
+            panic!("new message update");
+        };
+        let message = update.message.as_mut().expect("message");
+        message.out = true;
+        message.peer_id = Some(proto::Peer {
+            r#type: Some(proto::peer::Type::User(proto::PeerUser { user_id: 41 })),
+        });
+
+        let mut merged = BTreeMap::new();
+        insert_unique_update(&mut merged, 2, fetched.clone(), "fetched page").unwrap();
+        insert_unique_update(&mut merged, 2, realtime, "fetched/realtime merge").unwrap();
+
+        assert_eq!(merged.get(&2), Some(&fetched));
+    }
+
+    #[test]
+    fn fetched_realtime_merge_rejects_different_messages_at_same_sequence() {
+        let mut merged = BTreeMap::new();
+        insert_unique_update(
+            &mut merged,
+            2,
+            message_update(2, 20, 7, 102),
+            "fetched page",
+        )
+        .unwrap();
+
+        let error = insert_unique_update(
+            &mut merged,
+            2,
+            message_update(2, 20, 7, 103),
+            "fetched/realtime merge",
+        )
+        .unwrap_err();
+        assert_eq!(error.category, ClientErrorCategory::ProtocolMismatch);
+    }
+
+    #[test]
+    fn fetched_realtime_merge_prefers_fetched_copy_of_same_message_edit() {
+        let fetched = edit_message_update(2, 20, 7, 102);
+        let mut realtime = fetched.clone();
+        let Some(proto::update::Update::EditMessage(update)) = realtime.update.as_mut() else {
+            panic!("edit message update");
+        };
+        let message = update.message.as_mut().expect("message");
+        message.out = true;
+        message.peer_id = Some(proto::Peer {
+            r#type: Some(proto::peer::Type::User(proto::PeerUser { user_id: 41 })),
+        });
+
+        let mut merged = BTreeMap::new();
+        insert_unique_update(&mut merged, 2, fetched.clone(), "fetched page").unwrap();
+        insert_unique_update(&mut merged, 2, realtime, "fetched/realtime merge").unwrap();
+
+        assert_eq!(merged.get(&2), Some(&fetched));
+    }
+
+    #[test]
+    fn fetched_realtime_merge_rejects_different_message_edits_at_same_sequence() {
+        let mut merged = BTreeMap::new();
+        insert_unique_update(
+            &mut merged,
+            2,
+            edit_message_update(2, 20, 7, 102),
+            "fetched page",
+        )
+        .unwrap();
+
+        let error = insert_unique_update(
+            &mut merged,
+            2,
+            edit_message_update(2, 20, 7, 103),
+            "fetched/realtime merge",
+        )
+        .unwrap_err();
+        assert_eq!(error.category, ClientErrorCategory::ProtocolMismatch);
     }
 
     fn chat_peer(chat_id: i64) -> proto::Peer {

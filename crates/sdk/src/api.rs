@@ -447,7 +447,7 @@ impl ApiClient {
         validate_positive_id("user_id", user_id)?;
         let url = format!("{}/createPrivateChat", self.base_url);
         let mut payload = serde_json::Map::new();
-        payload.insert("userId".to_string(), json!(user_id));
+        payload.insert("userId".to_string(), json!(user_id.to_string()));
         self.post_with_token(url, token, payload).await
     }
 
@@ -1582,6 +1582,23 @@ mod tests {
         assert_eq!(request.body.get("peerUserId"), Some(&json!(42)));
         assert_eq!(request.body.get("maxId"), Some(&json!(99)));
         assert!(request.body.get("peerThreadId").is_none());
+    }
+
+    #[tokio::test]
+    async fn create_private_chat_posts_string_user_id() {
+        let request = capture_json_request(
+            r#"{"ok":true,"result":{"chat":{},"dialog":{},"user":{}}}"#,
+            |client| async move { client.create_private_chat("secret-token", 42).await },
+        )
+        .await;
+
+        assert_eq!(request.method, "POST");
+        assert_eq!(request.path, "/v1/createPrivateChat");
+        assert_eq!(
+            request.headers.get("authorization").map(String::as_str),
+            Some("Bearer secret-token")
+        );
+        assert_eq!(request.body.get("userId"), Some(&json!("42")));
     }
 
     #[tokio::test]

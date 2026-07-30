@@ -1824,6 +1824,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn empty_successful_receive_marks_a_quiet_reconnection_connected() {
+        let backend = InMemoryBackend::new();
+        let client = InlineClient::builder()
+            .backend(backend.clone())
+            .build()
+            .spawn();
+        let mut events = client.subscribe();
+
+        client.connect(token_connect()).await.unwrap();
+        backend.push_event_error(BackendError::new(
+            ClientErrorCategory::Network,
+            "connection interrupted",
+        ));
+        let _ = recv_until_event(&mut events, |event| {
+            matches!(
+                event,
+                ClientEvent::StatusChanged {
+                    status: ClientStatus::Reconnecting,
+                    ..
+                }
+            )
+        })
+        .await;
+
+        backend.push_event_batch(Vec::new());
+        let connected = recv_until_event(&mut events, |event| {
+            matches!(
+                event,
+                ClientEvent::StatusChanged {
+                    status: ClientStatus::Connected,
+                    ..
+                }
+            )
+        })
+        .await;
+        assert!(matches!(
+            connected,
+            ClientEvent::StatusChanged {
+                status: ClientStatus::Connected,
+                ..
+            }
+        ));
+        assert_eq!(client.status(), ClientStatus::Connected);
+    }
+
+    #[tokio::test]
     async fn auth_start_and_verify_flow_through_backend() {
         let client = InlineClient::builder().build().spawn();
         let mut events = client.subscribe();

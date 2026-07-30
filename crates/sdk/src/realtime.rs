@@ -798,6 +798,10 @@ impl RealtimeClient {
                 self.send_ack(message_id).await?;
                 Ok(Some(RealtimeEvent::Grid(event)))
             }
+            Some(_) => {
+                self.send_ack(message_id).await?;
+                Ok(None)
+            }
             None => Ok(None),
         }
     }
@@ -1040,6 +1044,7 @@ macro_rules! rpc_requests {
         fn rpc_result_variant_name(result: &proto::rpc_result::Result) -> &'static str {
             match result {
                 $(proto::rpc_result::Result::$result_variant(_) => stringify!($result_variant),)+
+                _ => "unknown",
             }
         }
     };

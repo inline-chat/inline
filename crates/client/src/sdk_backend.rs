@@ -179,6 +179,7 @@ impl SdkBackendBuilder {
             store: self.store,
             sync,
             sync_required: Arc::new(AtomicBool::new(true)),
+            event_reconnect_pending: Arc::new(AtomicBool::new(false)),
             realtime_handshake: self.realtime_handshake,
             realtime_connector: self.realtime_connector,
             realtime: Arc::new(Mutex::new(None)),
@@ -198,6 +199,7 @@ pub struct SdkBackend {
     store: Arc<dyn ClientStore>,
     sync: Arc<SyncManager>,
     sync_required: Arc<AtomicBool>,
+    event_reconnect_pending: Arc<AtomicBool>,
     realtime_handshake: bool,
     realtime_connector: Option<Arc<dyn RealtimeConnector>>,
     realtime: Arc<Mutex<Option<RealtimeSession>>>,
@@ -340,7 +342,16 @@ impl SdkBackend {
                 if realtime_error_closes_session(&error) {
                     self.clear_realtime().await;
                 }
-                Err(realtime_error_to_backend(error))
+                let error = realtime_error_to_backend(error);
+                if matches!(
+                    error.category,
+                    ClientErrorCategory::Network
+                        | ClientErrorCategory::Timeout
+                        | ClientErrorCategory::RateLimited
+                ) {
+                    self.event_reconnect_pending.store(true, Ordering::Release);
+                }
+                Err(error)
             }
         }
     }
@@ -509,6 +520,7 @@ impl SdkBackend {
         if self.sync_required.load(Ordering::Acquire) {
             let deliveries = self.sync.discover(self).await?;
             self.sync_required.store(false, Ordering::Release);
+            let recovered = self.event_reconnect_pending.swap(false, Ordering::AcqRel);
             self.mark_deliveries_in_flight(&deliveries);
             if !deliveries.is_empty() {
                 return Ok(deliveries);
@@ -516,6 +528,13 @@ impl SdkBackend {
             let pending = self.claim_pending_client_events().await?;
             if !pending.is_empty() {
                 return Ok(pending);
+            }
+            if recovered {
+                // A successful catch-up proves that the realtime session is
+                // live even when the account is quiet. Return one empty batch
+                // so the runner can leave Reconnecting without waiting for an
+                // unrelated future chat update.
+                return Ok(Vec::new());
             }
         }
         loop {
@@ -1852,13 +1871,7 @@ impl SyncHost for SdkBackend {
         Box::pin(async move {
             let session = backend.require_session().await?;
             backend
-                .call_realtime(
-                    &session,
-                    proto::GetUpdatesStateInput {
-                        date,
-                        core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
-                    },
-                )
+                .call_realtime(&session, proto::GetUpdatesStateInput { date })
                 .await
         })
     }
@@ -3198,6 +3211,12 @@ impl SdkBackend {
                     }
                 }
                 Some(proto::update::Update::ChatSkipPts(_)) => {}
+                // Chat permissions are server-owned authorization metadata.
+                // The CLI client does not currently project them into its
+                // local store, but a valid sequenced update must still advance
+                // the lossless cursor instead of permanently disconnecting a
+                // forward-compatible client runtime.
+                Some(proto::update::Update::ChatPermissions(_)) => {}
                 Some(proto::update::Update::UpdateUserStatus(update)) => {
                     let status = update.status.as_ref();
                     let is_online = status.and_then(|status| {
@@ -3319,6 +3338,7 @@ fn update_kind(update: &proto::update::Update) -> &'static str {
         Update::ParticipantGroupAdd(_) => "participant_group_add",
         Update::ParticipantGroupDelete(_) => "participant_group_delete",
         Update::SpaceSettings(_) => "space_settings",
+        Update::ChatPermissions(_) => "chat_permissions",
     }
 }
 
@@ -5078,6 +5098,91 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn quiet_successful_catch_up_returns_a_reconnection_signal() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let init = read_test_client_message(&mut ws).await;
+            assert!(matches!(
+                init.body,
+                Some(proto::client_message::Body::ConnectionInit(_))
+            ));
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+
+            let state = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    2,
+                    state.id,
+                    proto::rpc_result::Result::GetUpdatesState(proto::GetUpdatesStateResult {
+                        date: 100,
+                        updates_found: Some(false),
+                    }),
+                ),
+            )
+            .await;
+
+            let user_bucket = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    3,
+                    user_bucket.id,
+                    proto::rpc_result::Result::GetUpdates(proto::GetUpdatesResult {
+                        updates: Vec::new(),
+                        seq: 1,
+                        date: 100,
+                        r#final: Some(true),
+                        result_type: proto::get_updates_result::ResultType::Empty as i32,
+                        ..Default::default()
+                    }),
+                ),
+            )
+            .await;
+        });
+
+        let store = InMemoryStore::new();
+        store.save_session(connect_session()).await.unwrap();
+        store
+            .save_sync_bucket_state(
+                crate::SyncBucketKey::User,
+                crate::SyncBucketState { seq: 1, date: 100 },
+            )
+            .await
+            .unwrap();
+        let backend = SdkBackend::builder()
+            .store(store)
+            .realtime_url(format!("ws://{addr}/realtime"))
+            .build()
+            .unwrap();
+        backend
+            .event_reconnect_pending
+            .store(true, Ordering::Release);
+
+        let deliveries = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            backend.receive_next_event_deliveries(),
+        )
+        .await
+        .expect("quiet catch-up should report connection recovery")
+        .unwrap();
+        assert!(deliveries.is_empty());
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
     async fn sdk_backend_reuses_realtime_connection_for_multiple_rpc_calls() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -5662,7 +5767,6 @@ mod tests {
                     proto::rpc_result::Result::GetUpdatesState(proto::GetUpdatesStateResult {
                         date: 100,
                         updates_found: Some(true),
-                        core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
                     }),
                 ),
             )
@@ -5680,7 +5784,6 @@ mod tests {
                         date: 100,
                         r#final: Some(true),
                         result_type: proto::get_updates_result::ResultType::Empty as i32,
-                        core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
                         ..Default::default()
                     }),
                 ),
@@ -5750,7 +5853,6 @@ mod tests {
                         date: 101,
                         r#final: Some(true),
                         result_type: proto::get_updates_result::ResultType::Slice as i32,
-                        core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
                         ..Default::default()
                     }),
                 ),
@@ -5839,7 +5941,6 @@ mod tests {
                     proto::rpc_result::Result::GetUpdatesState(proto::GetUpdatesStateResult {
                         date: 100,
                         updates_found: Some(true),
-                        core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
                     }),
                 ),
             )
@@ -5856,7 +5957,6 @@ mod tests {
                         date: 100,
                         r#final: Some(true),
                         result_type: proto::get_updates_result::ResultType::Empty as i32,
-                        core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
                         ..Default::default()
                     }),
                 ),
@@ -5906,7 +6006,6 @@ mod tests {
                         date: 101,
                         r#final: Some(false),
                         result_type: proto::get_updates_result::ResultType::TooLong as i32,
-                        core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
                         ..Default::default()
                     }),
                 ),
@@ -6011,7 +6110,6 @@ mod tests {
                                     as i32,
                             })
                             .collect(),
-                        core_sync_schema_revision: crate::CORE_SYNC_SCHEMA_REVISION,
                         ..Default::default()
                     }),
                 ),
@@ -7042,6 +7140,25 @@ mod tests {
 
         assert_eq!(error.category, ClientErrorCategory::Unsupported);
         assert!(error.message.contains("chat_has_new_updates"));
+    }
+
+    #[tokio::test]
+    async fn apply_updates_accepts_unprojected_chat_permissions() {
+        let backend = SdkBackend::builder().build().unwrap();
+        let update = proto::Update {
+            seq: Some(1),
+            date: Some(10),
+            update: Some(proto::update::Update::ChatPermissions(
+                proto::UpdateChatPermissions::default(),
+            )),
+        };
+
+        let events = backend
+            .apply_updates(vec![update], None, None)
+            .await
+            .expect("chat permissions should not poison lossless sync");
+
+        assert!(events.is_empty());
     }
 
     #[tokio::test]
