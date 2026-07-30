@@ -182,6 +182,12 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case toggleSpaceGrid // = 73
   case getThreadReferences // = 74
   case getThreadSubthreads // = 75
+  case getPeerBots // = 76
+  case getMyBotCapabilities // = 77
+  case setMyBotCapabilities // = 78
+  case requestBotChatSettings // = 79
+  case invokeBotChatSettingsItem // = 80
+  case answerBotChatSettings // = 81
   case getGrid // = 83
   case createGridRoom // = 84
   case joinGridRoom // = 85
@@ -276,6 +282,12 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 73: self = .toggleSpaceGrid
     case 74: self = .getThreadReferences
     case 75: self = .getThreadSubthreads
+    case 76: self = .getPeerBots
+    case 77: self = .getMyBotCapabilities
+    case 78: self = .setMyBotCapabilities
+    case 79: self = .requestBotChatSettings
+    case 80: self = .invokeBotChatSettingsItem
+    case 81: self = .answerBotChatSettings
     case 83: self = .getGrid
     case 84: self = .createGridRoom
     case 85: self = .joinGridRoom
@@ -368,6 +380,12 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .toggleSpaceGrid: return 73
     case .getThreadReferences: return 74
     case .getThreadSubthreads: return 75
+    case .getPeerBots: return 76
+    case .getMyBotCapabilities: return 77
+    case .setMyBotCapabilities: return 78
+    case .requestBotChatSettings: return 79
+    case .invokeBotChatSettingsItem: return 80
+    case .answerBotChatSettings: return 81
     case .getGrid: return 83
     case .createGridRoom: return 84
     case .joinGridRoom: return 85
@@ -460,6 +478,12 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .toggleSpaceGrid,
     .getThreadReferences,
     .getThreadSubthreads,
+    .getPeerBots,
+    .getMyBotCapabilities,
+    .setMyBotCapabilities,
+    .requestBotChatSettings,
+    .invokeBotChatSettingsItem,
+    .answerBotChatSettings,
     .getGrid,
     .createGridRoom,
     .joinGridRoom,
@@ -963,11 +987,56 @@ public nonisolated struct ServerMessage: Sendable {
     set {payload = .grid(newValue)}
   }
 
+  public var bot: BotEvent {
+    get {
+      if case .bot(let v)? = payload {return v}
+      return BotEvent()
+    }
+    set {payload = .bot(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Payload: Equatable, Sendable {
     case update(UpdatesPayload)
     case grid(GridEvent)
+    case bot(BotEvent)
+
+  }
+
+  public init() {}
+}
+
+/// Ephemeral bot-owned interactions. These events are not persisted in sync
+/// buckets and do not advance update sequences.
+public nonisolated struct BotEvent: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var event: BotEvent.OneOf_Event? = nil
+
+  public var chatSettingsRequested: BotChatSettingsRequested {
+    get {
+      if case .chatSettingsRequested(let v)? = event {return v}
+      return BotChatSettingsRequested()
+    }
+    set {event = .chatSettingsRequested(newValue)}
+  }
+
+  public var chatSettingsItemInvoked: BotChatSettingsItemInvoked {
+    get {
+      if case .chatSettingsItemInvoked(let v)? = event {return v}
+      return BotChatSettingsItemInvoked()
+    }
+    set {event = .chatSettingsItemInvoked(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum OneOf_Event: Equatable, Sendable {
+    case chatSettingsRequested(BotChatSettingsRequested)
+    case chatSettingsItemInvoked(BotChatSettingsItemInvoked)
 
   }
 
@@ -2499,6 +2568,14 @@ public nonisolated struct MessageEntity: Sendable {
     set {entity = .groupMention(newValue)}
   }
 
+  public var botCommand: MessageEntity.MessageEntityBotCommand {
+    get {
+      if case .botCommand(let v)? = entity {return v}
+      return MessageEntity.MessageEntityBotCommand()
+    }
+    set {entity = .botCommand(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Entity: Equatable, Sendable {
@@ -2508,6 +2585,7 @@ public nonisolated struct MessageEntity: Sendable {
     case thread(MessageEntity.MessageEntityThread)
     case threadTitle(MessageEntity.MessageEntityThreadTitle)
     case groupMention(MessageEntity.MessageEntityGroupMention)
+    case botCommand(MessageEntity.MessageEntityBotCommand)
 
   }
 
@@ -2665,6 +2743,18 @@ public nonisolated struct MessageEntity: Sendable {
     public var spaceID: Int64 = 0
 
     public var title: String = String()
+
+    public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+    public init() {}
+  }
+
+  public nonisolated struct MessageEntityBotCommand: Sendable {
+    // SwiftProtobuf.Message conformance is added in an extension below. See the
+    // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+    // methods supported on all messages.
+
+    public var botUserID: Int64 = 0
 
     public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -4656,6 +4746,54 @@ public nonisolated struct RpcCall: Sendable {
     set {input = .getThreadSubthreads(newValue)}
   }
 
+  public var getPeerBots: GetPeerBotsInput {
+    get {
+      if case .getPeerBots(let v)? = input {return v}
+      return GetPeerBotsInput()
+    }
+    set {input = .getPeerBots(newValue)}
+  }
+
+  public var getMyBotCapabilities: GetMyBotCapabilitiesInput {
+    get {
+      if case .getMyBotCapabilities(let v)? = input {return v}
+      return GetMyBotCapabilitiesInput()
+    }
+    set {input = .getMyBotCapabilities(newValue)}
+  }
+
+  public var setMyBotCapabilities: SetMyBotCapabilitiesInput {
+    get {
+      if case .setMyBotCapabilities(let v)? = input {return v}
+      return SetMyBotCapabilitiesInput()
+    }
+    set {input = .setMyBotCapabilities(newValue)}
+  }
+
+  public var requestBotChatSettings: RequestBotChatSettingsInput {
+    get {
+      if case .requestBotChatSettings(let v)? = input {return v}
+      return RequestBotChatSettingsInput()
+    }
+    set {input = .requestBotChatSettings(newValue)}
+  }
+
+  public var invokeBotChatSettingsItem: InvokeBotChatSettingsItemInput {
+    get {
+      if case .invokeBotChatSettingsItem(let v)? = input {return v}
+      return InvokeBotChatSettingsItemInput()
+    }
+    set {input = .invokeBotChatSettingsItem(newValue)}
+  }
+
+  public var answerBotChatSettings: AnswerBotChatSettingsInput {
+    get {
+      if case .answerBotChatSettings(let v)? = input {return v}
+      return AnswerBotChatSettingsInput()
+    }
+    set {input = .answerBotChatSettings(newValue)}
+  }
+
   public var getGrid: GetGridInput {
     get {
       if case .getGrid(let v)? = input {return v}
@@ -4814,6 +4952,12 @@ public nonisolated struct RpcCall: Sendable {
     case toggleSpaceGrid(ToggleSpaceGridInput)
     case getThreadReferences(GetThreadReferencesInput)
     case getThreadSubthreads(GetThreadSubthreadsInput)
+    case getPeerBots(GetPeerBotsInput)
+    case getMyBotCapabilities(GetMyBotCapabilitiesInput)
+    case setMyBotCapabilities(SetMyBotCapabilitiesInput)
+    case requestBotChatSettings(RequestBotChatSettingsInput)
+    case invokeBotChatSettingsItem(InvokeBotChatSettingsItemInput)
+    case answerBotChatSettings(AnswerBotChatSettingsInput)
     case getGrid(GetGridInput)
     case createGridRoom(CreateGridRoomInput)
     case joinGridRoom(JoinGridRoomInput)
@@ -5439,6 +5583,54 @@ public nonisolated struct RpcResult: Sendable {
     set {result = .getThreadSubthreads(newValue)}
   }
 
+  public var getPeerBots: GetPeerBotsResult {
+    get {
+      if case .getPeerBots(let v)? = result {return v}
+      return GetPeerBotsResult()
+    }
+    set {result = .getPeerBots(newValue)}
+  }
+
+  public var getMyBotCapabilities: GetMyBotCapabilitiesResult {
+    get {
+      if case .getMyBotCapabilities(let v)? = result {return v}
+      return GetMyBotCapabilitiesResult()
+    }
+    set {result = .getMyBotCapabilities(newValue)}
+  }
+
+  public var setMyBotCapabilities: SetMyBotCapabilitiesResult {
+    get {
+      if case .setMyBotCapabilities(let v)? = result {return v}
+      return SetMyBotCapabilitiesResult()
+    }
+    set {result = .setMyBotCapabilities(newValue)}
+  }
+
+  public var requestBotChatSettings: RequestBotChatSettingsResult {
+    get {
+      if case .requestBotChatSettings(let v)? = result {return v}
+      return RequestBotChatSettingsResult()
+    }
+    set {result = .requestBotChatSettings(newValue)}
+  }
+
+  public var invokeBotChatSettingsItem: InvokeBotChatSettingsItemResult {
+    get {
+      if case .invokeBotChatSettingsItem(let v)? = result {return v}
+      return InvokeBotChatSettingsItemResult()
+    }
+    set {result = .invokeBotChatSettingsItem(newValue)}
+  }
+
+  public var answerBotChatSettings: AnswerBotChatSettingsResult {
+    get {
+      if case .answerBotChatSettings(let v)? = result {return v}
+      return AnswerBotChatSettingsResult()
+    }
+    set {result = .answerBotChatSettings(newValue)}
+  }
+
   public var getGrid: GetGridResult {
     get {
       if case .getGrid(let v)? = result {return v}
@@ -5597,6 +5789,12 @@ public nonisolated struct RpcResult: Sendable {
     case toggleSpaceGrid(ToggleSpaceGridResult)
     case getThreadReferences(GetThreadReferencesResult)
     case getThreadSubthreads(GetThreadSubthreadsResult)
+    case getPeerBots(GetPeerBotsResult)
+    case getMyBotCapabilities(GetMyBotCapabilitiesResult)
+    case setMyBotCapabilities(SetMyBotCapabilitiesResult)
+    case requestBotChatSettings(RequestBotChatSettingsResult)
+    case invokeBotChatSettingsItem(InvokeBotChatSettingsItemResult)
+    case answerBotChatSettings(AnswerBotChatSettingsResult)
     case getGrid(GetGridResult)
     case createGridRoom(CreateGridRoomResult)
     case joinGridRoom(JoinGridRoomResult)
@@ -12522,6 +12720,850 @@ public nonisolated struct DraftMessage: Sendable {
   fileprivate var _entities: MessageEntities? = nil
 }
 
+public nonisolated struct BotCapability: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var kind: BotCapability.Kind = .unspecified
+
+  public var version: UInt32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum Kind: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case unspecified // = 0
+    case chatSettings // = 1
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .unspecified
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .unspecified
+      case 1: self = .chatSettings
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .unspecified: return 0
+      case .chatSettings: return 1
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [BotCapability.Kind] = [
+      .unspecified,
+      .chatSettings,
+    ]
+
+  }
+
+  public init() {}
+}
+
+public nonisolated struct PeerBot: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var bot: User {
+    get {_bot ?? User()}
+    set {_bot = newValue}
+  }
+  /// Returns true if `bot` has been explicitly set.
+  public var hasBot: Bool {self._bot != nil}
+  /// Clears the value of `bot`. Subsequent reads from it will return its default value.
+  public mutating func clearBot() {self._bot = nil}
+
+  public var capabilities: [BotCapability] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _bot: User? = nil
+}
+
+public nonisolated struct GetPeerBotsInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var peerID: InputPeer {
+    get {_peerID ?? InputPeer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: InputPeer? = nil
+}
+
+public nonisolated struct GetPeerBotsResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var bots: [PeerBot] = []
+
+  public var suggestedBotUserID: Int64 {
+    get {_suggestedBotUserID ?? 0}
+    set {_suggestedBotUserID = newValue}
+  }
+  /// Returns true if `suggestedBotUserID` has been explicitly set.
+  public var hasSuggestedBotUserID: Bool {self._suggestedBotUserID != nil}
+  /// Clears the value of `suggestedBotUserID`. Subsequent reads from it will return its default value.
+  public mutating func clearSuggestedBotUserID() {self._suggestedBotUserID = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _suggestedBotUserID: Int64? = nil
+}
+
+public nonisolated struct GetMyBotCapabilitiesInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct GetMyBotCapabilitiesResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var capabilities: [BotCapability] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct SetMyBotCapabilitiesInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var capabilities: [BotCapability] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct SetMyBotCapabilitiesResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var capabilities: [BotCapability] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// A bot-owned, plain-text settings document. Bots must never include secrets,
+/// credentials, private prompts, or token material.
+public nonisolated struct BotChatSettingsDocument: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var version: UInt32 = 0
+
+  public var revision: String = String()
+
+  public var sections: [BotChatSettingsSection] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct BotChatSettingsSection: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var id: String = String()
+
+  public var title: String {
+    get {_title ?? String()}
+    set {_title = newValue}
+  }
+  /// Returns true if `title` has been explicitly set.
+  public var hasTitle: Bool {self._title != nil}
+  /// Clears the value of `title`. Subsequent reads from it will return its default value.
+  public mutating func clearTitle() {self._title = nil}
+
+  public var description_p: String {
+    get {_description_p ?? String()}
+    set {_description_p = newValue}
+  }
+  /// Returns true if `description_p` has been explicitly set.
+  public var hasDescription_p: Bool {self._description_p != nil}
+  /// Clears the value of `description_p`. Subsequent reads from it will return its default value.
+  public mutating func clearDescription_p() {self._description_p = nil}
+
+  public var items: [BotChatSettingsItem] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _title: String? = nil
+  fileprivate var _description_p: String? = nil
+}
+
+public nonisolated struct BotChatSettingsItem: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var id: String = String()
+
+  public var label: String {
+    get {_label ?? String()}
+    set {_label = newValue}
+  }
+  /// Returns true if `label` has been explicitly set.
+  public var hasLabel: Bool {self._label != nil}
+  /// Clears the value of `label`. Subsequent reads from it will return its default value.
+  public mutating func clearLabel() {self._label = nil}
+
+  public var description_p: String {
+    get {_description_p ?? String()}
+    set {_description_p = newValue}
+  }
+  /// Returns true if `description_p` has been explicitly set.
+  public var hasDescription_p: Bool {self._description_p != nil}
+  /// Clears the value of `description_p`. Subsequent reads from it will return its default value.
+  public mutating func clearDescription_p() {self._description_p = nil}
+
+  public var disabled: Bool = false
+
+  public var disabledReason: String {
+    get {_disabledReason ?? String()}
+    set {_disabledReason = newValue}
+  }
+  /// Returns true if `disabledReason` has been explicitly set.
+  public var hasDisabledReason: Bool {self._disabledReason != nil}
+  /// Clears the value of `disabledReason`. Subsequent reads from it will return its default value.
+  public mutating func clearDisabledReason() {self._disabledReason = nil}
+
+  public var control: BotChatSettingsItem.OneOf_Control? = nil
+
+  public var toggle: BotChatSettingsToggle {
+    get {
+      if case .toggle(let v)? = control {return v}
+      return BotChatSettingsToggle()
+    }
+    set {control = .toggle(newValue)}
+  }
+
+  public var select: BotChatSettingsSelect {
+    get {
+      if case .select(let v)? = control {return v}
+      return BotChatSettingsSelect()
+    }
+    set {control = .select(newValue)}
+  }
+
+  public var info: BotChatSettingsInfo {
+    get {
+      if case .info(let v)? = control {return v}
+      return BotChatSettingsInfo()
+    }
+    set {control = .info(newValue)}
+  }
+
+  public var button: BotChatSettingsButton {
+    get {
+      if case .button(let v)? = control {return v}
+      return BotChatSettingsButton()
+    }
+    set {control = .button(newValue)}
+  }
+
+  public var folder: BotChatSettingsFolder {
+    get {
+      if case .folder(let v)? = control {return v}
+      return BotChatSettingsFolder()
+    }
+    set {control = .folder(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum OneOf_Control: Equatable, Sendable {
+    case toggle(BotChatSettingsToggle)
+    case select(BotChatSettingsSelect)
+    case info(BotChatSettingsInfo)
+    case button(BotChatSettingsButton)
+    case folder(BotChatSettingsFolder)
+
+  }
+
+  public init() {}
+
+  fileprivate var _label: String? = nil
+  fileprivate var _description_p: String? = nil
+  fileprivate var _disabledReason: String? = nil
+}
+
+public nonisolated struct BotChatSettingsToggle: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var value: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct BotChatSettingsSelect: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var value: String = String()
+
+  public var options: [BotChatSettingsSelectOption] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct BotChatSettingsSelectOption: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var value: String = String()
+
+  public var label: String = String()
+
+  public var description_p: String {
+    get {_description_p ?? String()}
+    set {_description_p = newValue}
+  }
+  /// Returns true if `description_p` has been explicitly set.
+  public var hasDescription_p: Bool {self._description_p != nil}
+  /// Clears the value of `description_p`. Subsequent reads from it will return its default value.
+  public mutating func clearDescription_p() {self._description_p = nil}
+
+  public var disabled: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _description_p: String? = nil
+}
+
+public nonisolated struct BotChatSettingsInfo: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Plain text. A short wrapped paragraph is allowed for user guidance.
+  public var text: String = String()
+
+  public var tone: BotChatSettingsInfo.Tone = .unspecified
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum Tone: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case unspecified // = 0
+    case neutral // = 1
+    case success // = 2
+    case warning // = 3
+    case error // = 4
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .unspecified
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .unspecified
+      case 1: self = .neutral
+      case 2: self = .success
+      case 3: self = .warning
+      case 4: self = .error
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .unspecified: return 0
+      case .neutral: return 1
+      case .success: return 2
+      case .warning: return 3
+      case .error: return 4
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [BotChatSettingsInfo.Tone] = [
+      .unspecified,
+      .neutral,
+      .success,
+      .warning,
+      .error,
+    ]
+
+  }
+
+  public init() {}
+}
+
+public nonisolated struct BotChatSettingsButton: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// A host-local workspace selector. Values are opaque bot-owned identifiers;
+/// local filesystem paths must not be placed in this document or mutations.
+public nonisolated struct BotChatSettingsFolder: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var value: String = String()
+
+  public var recentFolders: [BotChatSettingsFolderOption] = []
+
+  public var hostInstallationID: String = String()
+
+  public var hostLabel: String = String()
+
+  public var allowsLocalPicker: Bool = false
+
+  /// Ephemeral 127.0.0.1 endpoint metadata for a host-local native picker.
+  /// The capability is opaque, service-epoch scoped, and never a filesystem
+  /// path. Clients must probe this exact endpoint before opening a picker.
+  public var localPickerPort: UInt32 {
+    get {_localPickerPort ?? 0}
+    set {_localPickerPort = newValue}
+  }
+  /// Returns true if `localPickerPort` has been explicitly set.
+  public var hasLocalPickerPort: Bool {self._localPickerPort != nil}
+  /// Clears the value of `localPickerPort`. Subsequent reads from it will return its default value.
+  public mutating func clearLocalPickerPort() {self._localPickerPort = nil}
+
+  public var localPickerCapability: String {
+    get {_localPickerCapability ?? String()}
+    set {_localPickerCapability = newValue}
+  }
+  /// Returns true if `localPickerCapability` has been explicitly set.
+  public var hasLocalPickerCapability: Bool {self._localPickerCapability != nil}
+  /// Clears the value of `localPickerCapability`. Subsequent reads from it will return its default value.
+  public mutating func clearLocalPickerCapability() {self._localPickerCapability = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _localPickerPort: UInt32? = nil
+  fileprivate var _localPickerCapability: String? = nil
+}
+
+public nonisolated struct BotChatSettingsFolderOption: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var value: String = String()
+
+  public var label: String = String()
+
+  public var parentHint: String {
+    get {_parentHint ?? String()}
+    set {_parentHint = newValue}
+  }
+  /// Returns true if `parentHint` has been explicitly set.
+  public var hasParentHint: Bool {self._parentHint != nil}
+  /// Clears the value of `parentHint`. Subsequent reads from it will return its default value.
+  public mutating func clearParentHint() {self._parentHint = nil}
+
+  public var disabled: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _parentHint: String? = nil
+}
+
+public nonisolated struct BotChatSettingsValue: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var value: BotChatSettingsValue.OneOf_Value? = nil
+
+  public var boolValue: Bool {
+    get {
+      if case .boolValue(let v)? = value {return v}
+      return false
+    }
+    set {value = .boolValue(newValue)}
+  }
+
+  public var stringValue: String {
+    get {
+      if case .stringValue(let v)? = value {return v}
+      return String()
+    }
+    set {value = .stringValue(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum OneOf_Value: Equatable, Sendable {
+    case boolValue(Bool)
+    case stringValue(String)
+
+  }
+
+  public init() {}
+}
+
+public nonisolated struct BotChatSettingsProblem: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var code: BotChatSettingsProblem.Code = .unspecified
+
+  public var message: String = String()
+
+  public var currentDocument: BotChatSettingsDocument {
+    get {_currentDocument ?? BotChatSettingsDocument()}
+    set {_currentDocument = newValue}
+  }
+  /// Returns true if `currentDocument` has been explicitly set.
+  public var hasCurrentDocument: Bool {self._currentDocument != nil}
+  /// Clears the value of `currentDocument`. Subsequent reads from it will return its default value.
+  public mutating func clearCurrentDocument() {self._currentDocument = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum Code: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case unspecified // = 0
+    case unavailable // = 1
+    case invalidValue // = 2
+    case stale // = 3
+    case failed // = 4
+
+    /// Generated by Inline when a capable bot has no reachable connection or
+    /// does not answer in time.
+    case unreachable // = 5
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .unspecified
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .unspecified
+      case 1: self = .unavailable
+      case 2: self = .invalidValue
+      case 3: self = .stale
+      case 4: self = .failed
+      case 5: self = .unreachable
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .unspecified: return 0
+      case .unavailable: return 1
+      case .invalidValue: return 2
+      case .stale: return 3
+      case .failed: return 4
+      case .unreachable: return 5
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [BotChatSettingsProblem.Code] = [
+      .unspecified,
+      .unavailable,
+      .invalidValue,
+      .stale,
+      .failed,
+      .unreachable,
+    ]
+
+  }
+
+  public init() {}
+
+  fileprivate var _currentDocument: BotChatSettingsDocument? = nil
+}
+
+public nonisolated struct BotChatSettingsResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var result: BotChatSettingsResponse.OneOf_Result? = nil
+
+  public var document: BotChatSettingsDocument {
+    get {
+      if case .document(let v)? = result {return v}
+      return BotChatSettingsDocument()
+    }
+    set {result = .document(newValue)}
+  }
+
+  public var problem: BotChatSettingsProblem {
+    get {
+      if case .problem(let v)? = result {return v}
+      return BotChatSettingsProblem()
+    }
+    set {result = .problem(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum OneOf_Result: Equatable, Sendable {
+    case document(BotChatSettingsDocument)
+    case problem(BotChatSettingsProblem)
+
+  }
+
+  public init() {}
+}
+
+public nonisolated struct RequestBotChatSettingsInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var peerID: InputPeer {
+    get {_peerID ?? InputPeer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  public var botUserID: Int64 = 0
+
+  public var version: UInt32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: InputPeer? = nil
+}
+
+public nonisolated struct RequestBotChatSettingsResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var response: BotChatSettingsResponse {
+    get {_response ?? BotChatSettingsResponse()}
+    set {_response = newValue}
+  }
+  /// Returns true if `response` has been explicitly set.
+  public var hasResponse: Bool {self._response != nil}
+  /// Clears the value of `response`. Subsequent reads from it will return its default value.
+  public mutating func clearResponse() {self._response = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _response: BotChatSettingsResponse? = nil
+}
+
+public nonisolated struct InvokeBotChatSettingsItemInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var peerID: InputPeer {
+    get {_peerID ?? InputPeer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  public var botUserID: Int64 = 0
+
+  public var version: UInt32 = 0
+
+  public var itemID: String = String()
+
+  public var value: BotChatSettingsValue {
+    get {_value ?? BotChatSettingsValue()}
+    set {_value = newValue}
+  }
+  /// Returns true if `value` has been explicitly set.
+  public var hasValue: Bool {self._value != nil}
+  /// Clears the value of `value`. Subsequent reads from it will return its default value.
+  public mutating func clearValue() {self._value = nil}
+
+  public var documentRevision: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: InputPeer? = nil
+  fileprivate var _value: BotChatSettingsValue? = nil
+}
+
+public nonisolated struct InvokeBotChatSettingsItemResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var response: BotChatSettingsResponse {
+    get {_response ?? BotChatSettingsResponse()}
+    set {_response = newValue}
+  }
+  /// Returns true if `response` has been explicitly set.
+  public var hasResponse: Bool {self._response != nil}
+  /// Clears the value of `response`. Subsequent reads from it will return its default value.
+  public mutating func clearResponse() {self._response = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _response: BotChatSettingsResponse? = nil
+}
+
+/// Used only by an authenticated bot to resolve a pending settings request.
+public nonisolated struct AnswerBotChatSettingsInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var requestID: UInt64 = 0
+
+  public var response: BotChatSettingsResponse {
+    get {_response ?? BotChatSettingsResponse()}
+    set {_response = newValue}
+  }
+  /// Returns true if `response` has been explicitly set.
+  public var hasResponse: Bool {self._response != nil}
+  /// Clears the value of `response`. Subsequent reads from it will return its default value.
+  public mutating func clearResponse() {self._response = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _response: BotChatSettingsResponse? = nil
+}
+
+public nonisolated struct AnswerBotChatSettingsResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct BotChatSettingsRequested: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var requestID: UInt64 = 0
+
+  public var chatID: Int64 = 0
+
+  public var actorUserID: Int64 = 0
+
+  public var version: UInt32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct BotChatSettingsItemInvoked: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var requestID: UInt64 = 0
+
+  public var chatID: Int64 = 0
+
+  public var actorUserID: Int64 = 0
+
+  public var version: UInt32 = 0
+
+  public var itemID: String = String()
+
+  public var value: BotChatSettingsValue {
+    get {_value ?? BotChatSettingsValue()}
+    set {_value = newValue}
+  }
+  /// Returns true if `value` has been explicitly set.
+  public var hasValue: Bool {self._value != nil}
+  /// Clears the value of `value`. Subsequent reads from it will return its default value.
+  public mutating func clearValue() {self._value = nil}
+
+  public var documentRevision: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _value: BotChatSettingsValue? = nil
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension DialogFollowMode: SwiftProtobuf._ProtoNameProviding {
@@ -12533,7 +13575,7 @@ nonisolated extension MessageSendMode: SwiftProtobuf._ProtoNameProviding {
 }
 
 nonisolated extension Method: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNSPECIFIED\0\u{1}GET_ME\0\u{1}SEND_MESSAGE\0\u{1}GET_PEER_PHOTO\0\u{1}DELETE_MESSAGES\0\u{1}GET_CHAT_HISTORY\0\u{1}ADD_REACTION\0\u{1}DELETE_REACTION\0\u{1}EDIT_MESSAGE\0\u{1}CREATE_CHAT\0\u{1}GET_SPACE_MEMBERS\0\u{1}DELETE_CHAT\0\u{1}INVITE_TO_SPACE\0\u{1}GET_CHAT_PARTICIPANTS\0\u{1}ADD_CHAT_PARTICIPANT\0\u{1}REMOVE_CHAT_PARTICIPANT\0\u{1}TRANSLATE_MESSAGES\0\u{1}GET_CHATS\0\u{1}UPDATE_USER_SETTINGS\0\u{1}GET_USER_SETTINGS\0\u{1}SEND_COMPOSE_ACTION\0\u{1}CREATE_BOT\0\u{1}DELETE_MEMBER\0\u{1}MARK_AS_UNREAD\0\u{1}GET_UPDATES_STATE\0\u{1}GET_CHAT\0\u{1}GET_UPDATES\0\u{1}UPDATE_MEMBER_ACCESS\0\u{1}SEARCH_MESSAGES\0\u{1}FORWARD_MESSAGES\0\u{1}UPDATE_CHAT_VISIBILITY\0\u{1}PIN_MESSAGE\0\u{1}UPDATE_CHAT_INFO\0\u{1}LIST_BOTS\0\u{1}REVEAL_BOT_TOKEN\0\u{1}MOVE_THREAD\0\u{1}ROTATE_BOT_TOKEN\0\u{1}UPDATE_BOT_PROFILE\0\u{1}GET_MESSAGES\0\u{1}UPDATE_DIALOG_NOTIFICATION_SETTINGS\0\u{1}READ_MESSAGES\0\u{1}UPDATE_PUSH_NOTIFICATION_DETAILS\0\u{1}CREATE_SUBTHREAD\0\u{1}GET_BOT_COMMANDS\0\u{1}SET_BOT_COMMANDS\0\u{1}GET_PEER_BOT_COMMANDS\0\u{1}SHOW_IN_CHAT_LIST\0\u{1}RESERVE_CHAT_IDS\0\u{1}INVOKE_MESSAGE_ACTION\0\u{1}ANSWER_MESSAGE_ACTION\0\u{1}REVOKE_SESSION\0\u{1}UPDATE_DIALOG_OPEN\0\u{1}UPDATE_DIALOG_ORDER\0\u{1}CLEAR_CHAT_HISTORY\0\u{1}DELETE_BOT\0\u{1}DELETE_MESSAGE_ATTACHMENT\0\u{1}SET_BOT_AVATAR\0\u{1}CLEAR_BOT_AVATAR\0\u{1}GET_BOT_PRESENCE\0\u{1}SET_BOT_PRESENCE_STATE\0\u{1}UPDATE_DIALOG_FOLLOW_MODE\0\u{1}GET_SESSIONS\0\u{1}CHECK_USERNAME\0\u{1}CHANGE_USERNAME\0\u{1}UPDATE_PROFILE\0\u{1}GET_SPACE_URL_PREVIEW_EXCLUSIONS\0\u{1}ADD_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}REMOVE_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}GET_USER_GROUPS\0\u{1}CREATE_USER_GROUP\0\u{1}UPDATE_USER_GROUP\0\u{1}DELETE_USER_GROUP\0\u{1}GET_SPACE_SETTINGS\0\u{1}TOGGLE_SPACE_GRID\0\u{1}GET_THREAD_REFERENCES\0\u{1}GET_THREAD_SUBTHREADS\0\u{2}\u{8}GET_GRID\0\u{1}CREATE_GRID_ROOM\0\u{1}JOIN_GRID_ROOM\0\u{1}LEAVE_GRID_ROOM\0\u{1}SET_GRID_ROOM_TITLE\0\u{1}SET_GRID_ROOM_LOCKED\0\u{1}DELETE_GRID_ROOM\0\u{1}PREPARE_GRID_CONNECTION\0\u{1}SET_GRID_AVATAR_MICROPHONE_ENABLED\0\u{1}GET_GRID_HOME\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNSPECIFIED\0\u{1}GET_ME\0\u{1}SEND_MESSAGE\0\u{1}GET_PEER_PHOTO\0\u{1}DELETE_MESSAGES\0\u{1}GET_CHAT_HISTORY\0\u{1}ADD_REACTION\0\u{1}DELETE_REACTION\0\u{1}EDIT_MESSAGE\0\u{1}CREATE_CHAT\0\u{1}GET_SPACE_MEMBERS\0\u{1}DELETE_CHAT\0\u{1}INVITE_TO_SPACE\0\u{1}GET_CHAT_PARTICIPANTS\0\u{1}ADD_CHAT_PARTICIPANT\0\u{1}REMOVE_CHAT_PARTICIPANT\0\u{1}TRANSLATE_MESSAGES\0\u{1}GET_CHATS\0\u{1}UPDATE_USER_SETTINGS\0\u{1}GET_USER_SETTINGS\0\u{1}SEND_COMPOSE_ACTION\0\u{1}CREATE_BOT\0\u{1}DELETE_MEMBER\0\u{1}MARK_AS_UNREAD\0\u{1}GET_UPDATES_STATE\0\u{1}GET_CHAT\0\u{1}GET_UPDATES\0\u{1}UPDATE_MEMBER_ACCESS\0\u{1}SEARCH_MESSAGES\0\u{1}FORWARD_MESSAGES\0\u{1}UPDATE_CHAT_VISIBILITY\0\u{1}PIN_MESSAGE\0\u{1}UPDATE_CHAT_INFO\0\u{1}LIST_BOTS\0\u{1}REVEAL_BOT_TOKEN\0\u{1}MOVE_THREAD\0\u{1}ROTATE_BOT_TOKEN\0\u{1}UPDATE_BOT_PROFILE\0\u{1}GET_MESSAGES\0\u{1}UPDATE_DIALOG_NOTIFICATION_SETTINGS\0\u{1}READ_MESSAGES\0\u{1}UPDATE_PUSH_NOTIFICATION_DETAILS\0\u{1}CREATE_SUBTHREAD\0\u{1}GET_BOT_COMMANDS\0\u{1}SET_BOT_COMMANDS\0\u{1}GET_PEER_BOT_COMMANDS\0\u{1}SHOW_IN_CHAT_LIST\0\u{1}RESERVE_CHAT_IDS\0\u{1}INVOKE_MESSAGE_ACTION\0\u{1}ANSWER_MESSAGE_ACTION\0\u{1}REVOKE_SESSION\0\u{1}UPDATE_DIALOG_OPEN\0\u{1}UPDATE_DIALOG_ORDER\0\u{1}CLEAR_CHAT_HISTORY\0\u{1}DELETE_BOT\0\u{1}DELETE_MESSAGE_ATTACHMENT\0\u{1}SET_BOT_AVATAR\0\u{1}CLEAR_BOT_AVATAR\0\u{1}GET_BOT_PRESENCE\0\u{1}SET_BOT_PRESENCE_STATE\0\u{1}UPDATE_DIALOG_FOLLOW_MODE\0\u{1}GET_SESSIONS\0\u{1}CHECK_USERNAME\0\u{1}CHANGE_USERNAME\0\u{1}UPDATE_PROFILE\0\u{1}GET_SPACE_URL_PREVIEW_EXCLUSIONS\0\u{1}ADD_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}REMOVE_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}GET_USER_GROUPS\0\u{1}CREATE_USER_GROUP\0\u{1}UPDATE_USER_GROUP\0\u{1}DELETE_USER_GROUP\0\u{1}GET_SPACE_SETTINGS\0\u{1}TOGGLE_SPACE_GRID\0\u{1}GET_THREAD_REFERENCES\0\u{1}GET_THREAD_SUBTHREADS\0\u{1}GET_PEER_BOTS\0\u{1}GET_MY_BOT_CAPABILITIES\0\u{1}SET_MY_BOT_CAPABILITIES\0\u{1}REQUEST_BOT_CHAT_SETTINGS\0\u{1}INVOKE_BOT_CHAT_SETTINGS_ITEM\0\u{1}ANSWER_BOT_CHAT_SETTINGS\0\u{2}\u{2}GET_GRID\0\u{1}CREATE_GRID_ROOM\0\u{1}JOIN_GRID_ROOM\0\u{1}LEAVE_GRID_ROOM\0\u{1}SET_GRID_ROOM_TITLE\0\u{1}SET_GRID_ROOM_LOCKED\0\u{1}DELETE_GRID_ROOM\0\u{1}PREPARE_GRID_CONNECTION\0\u{1}SET_GRID_AVATAR_MICROPHONE_ENABLED\0\u{1}GET_GRID_HOME\0")
 }
 
 nonisolated extension GridConnectionUnavailableReason: SwiftProtobuf._ProtoNameProviding {
@@ -12922,7 +13964,7 @@ nonisolated extension ServerProtocolMessage: SwiftProtobuf.Message, SwiftProtobu
 
 nonisolated extension ServerMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ServerMessage"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\u{4}update\0\u{1}grid\0\u{c}\u{1}\u{1}\u{c}\u{2}\u{1}\u{c}\u{3}\u{1}")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\u{4}update\0\u{1}grid\0\u{1}bot\0\u{c}\u{1}\u{1}\u{c}\u{2}\u{1}\u{c}\u{3}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -12956,6 +13998,19 @@ nonisolated extension ServerMessage: SwiftProtobuf.Message, SwiftProtobuf._Messa
           self.payload = .grid(v)
         }
       }()
+      case 6: try {
+        var v: BotEvent?
+        var hadOneofValue = false
+        if let current = self.payload {
+          hadOneofValue = true
+          if case .bot(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.payload = .bot(v)
+        }
+      }()
       default: break
       }
     }
@@ -12975,6 +14030,10 @@ nonisolated extension ServerMessage: SwiftProtobuf.Message, SwiftProtobuf._Messa
       guard case .grid(let v)? = self.payload else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
     }()
+    case .bot?: try {
+      guard case .bot(let v)? = self.payload else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -12982,6 +14041,73 @@ nonisolated extension ServerMessage: SwiftProtobuf.Message, SwiftProtobuf._Messa
 
   public static func ==(lhs: ServerMessage, rhs: ServerMessage) -> Bool {
     if lhs.payload != rhs.payload {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BotEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BotEvent"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_settings_requested\0\u{3}chat_settings_item_invoked\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: BotChatSettingsRequested?
+        var hadOneofValue = false
+        if let current = self.event {
+          hadOneofValue = true
+          if case .chatSettingsRequested(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.event = .chatSettingsRequested(v)
+        }
+      }()
+      case 2: try {
+        var v: BotChatSettingsItemInvoked?
+        var hadOneofValue = false
+        if let current = self.event {
+          hadOneofValue = true
+          if case .chatSettingsItemInvoked(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.event = .chatSettingsItemInvoked(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    switch self.event {
+    case .chatSettingsRequested?: try {
+      guard case .chatSettingsRequested(let v)? = self.event else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    }()
+    case .chatSettingsItemInvoked?: try {
+      guard case .chatSettingsItemInvoked(let v)? = self.event else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    }()
+    case nil: break
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BotEvent, rhs: BotEvent) -> Bool {
+    if lhs.event != rhs.event {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -14762,7 +15888,7 @@ nonisolated extension MessageEntities: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
 nonisolated extension MessageEntity: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageEntity"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}type\0\u{1}offset\0\u{1}length\0\u{1}mention\0\u{3}text_url\0\u{1}pre\0\u{1}thread\0\u{3}thread_title\0\u{3}group_mention\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}type\0\u{1}offset\0\u{1}length\0\u{1}mention\0\u{3}text_url\0\u{1}pre\0\u{1}thread\0\u{3}thread_title\0\u{3}group_mention\0\u{3}bot_command\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -14851,6 +15977,19 @@ nonisolated extension MessageEntity: SwiftProtobuf.Message, SwiftProtobuf._Messa
           self.entity = .groupMention(v)
         }
       }()
+      case 10: try {
+        var v: MessageEntity.MessageEntityBotCommand?
+        var hadOneofValue = false
+        if let current = self.entity {
+          hadOneofValue = true
+          if case .botCommand(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.entity = .botCommand(v)
+        }
+      }()
       default: break
       }
     }
@@ -14894,6 +16033,10 @@ nonisolated extension MessageEntity: SwiftProtobuf.Message, SwiftProtobuf._Messa
     case .groupMention?: try {
       guard case .groupMention(let v)? = self.entity else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+    }()
+    case .botCommand?: try {
+      guard case .botCommand(let v)? = self.entity else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
     }()
     case nil: break
     }
@@ -15094,6 +16237,36 @@ nonisolated extension MessageEntity.MessageEntityThreadTitle: SwiftProtobuf.Mess
   public static func ==(lhs: MessageEntity.MessageEntityThreadTitle, rhs: MessageEntity.MessageEntityThreadTitle) -> Bool {
     if lhs.spaceID != rhs.spaceID {return false}
     if lhs.title != rhs.title {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension MessageEntity.MessageEntityBotCommand: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = MessageEntity.protoMessageName + ".MessageEntityBotCommand"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.botUserID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.botUserID != 0 {
+      try visitor.visitSingularInt64Field(value: self.botUserID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: MessageEntity.MessageEntityBotCommand, rhs: MessageEntity.MessageEntityBotCommand) -> Bool {
+    if lhs.botUserID != rhs.botUserID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -16763,7 +17936,7 @@ nonisolated extension RpcError.Code: SwiftProtobuf._ProtoNameProviding {
 
 nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RpcCall"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}method\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}updatePushNotificationDetails\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{2}\u{8}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}method\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}updatePushNotificationDetails\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{c}S\u{1}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -17747,6 +18920,84 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
           self.input = .getThreadSubthreads(v)
         }
       }()
+      case 77: try {
+        var v: GetPeerBotsInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .getPeerBots(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .getPeerBots(v)
+        }
+      }()
+      case 78: try {
+        var v: GetMyBotCapabilitiesInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .getMyBotCapabilities(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .getMyBotCapabilities(v)
+        }
+      }()
+      case 79: try {
+        var v: SetMyBotCapabilitiesInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .setMyBotCapabilities(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .setMyBotCapabilities(v)
+        }
+      }()
+      case 80: try {
+        var v: RequestBotChatSettingsInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .requestBotChatSettings(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .requestBotChatSettings(v)
+        }
+      }()
+      case 81: try {
+        var v: InvokeBotChatSettingsItemInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .invokeBotChatSettingsItem(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .invokeBotChatSettingsItem(v)
+        }
+      }()
+      case 82: try {
+        var v: AnswerBotChatSettingsInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .answerBotChatSettings(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .answerBotChatSettings(v)
+        }
+      }()
       case 84: try {
         var v: GetGridInput?
         var hadOneofValue = false
@@ -18191,6 +19442,30 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       guard case .getThreadSubthreads(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 76)
     }()
+    case .getPeerBots?: try {
+      guard case .getPeerBots(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 77)
+    }()
+    case .getMyBotCapabilities?: try {
+      guard case .getMyBotCapabilities(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 78)
+    }()
+    case .setMyBotCapabilities?: try {
+      guard case .setMyBotCapabilities(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 79)
+    }()
+    case .requestBotChatSettings?: try {
+      guard case .requestBotChatSettings(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 80)
+    }()
+    case .invokeBotChatSettingsItem?: try {
+      guard case .invokeBotChatSettingsItem(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 81)
+    }()
+    case .answerBotChatSettings?: try {
+      guard case .answerBotChatSettings(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 82)
+    }()
     case .getGrid?: try {
       guard case .getGrid(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 84)
@@ -18246,7 +19521,7 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
 
 nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RpcResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}req_msg_id\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}updatePushNotificationDetails\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{2}\u{8}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}req_msg_id\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}updatePushNotificationDetails\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{c}S\u{1}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -19230,6 +20505,84 @@ nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
           self.result = .getThreadSubthreads(v)
         }
       }()
+      case 77: try {
+        var v: GetPeerBotsResult?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .getPeerBots(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .getPeerBots(v)
+        }
+      }()
+      case 78: try {
+        var v: GetMyBotCapabilitiesResult?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .getMyBotCapabilities(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .getMyBotCapabilities(v)
+        }
+      }()
+      case 79: try {
+        var v: SetMyBotCapabilitiesResult?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .setMyBotCapabilities(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .setMyBotCapabilities(v)
+        }
+      }()
+      case 80: try {
+        var v: RequestBotChatSettingsResult?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .requestBotChatSettings(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .requestBotChatSettings(v)
+        }
+      }()
+      case 81: try {
+        var v: InvokeBotChatSettingsItemResult?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .invokeBotChatSettingsItem(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .invokeBotChatSettingsItem(v)
+        }
+      }()
+      case 82: try {
+        var v: AnswerBotChatSettingsResult?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .answerBotChatSettings(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .answerBotChatSettings(v)
+        }
+      }()
       case 84: try {
         var v: GetGridResult?
         var hadOneofValue = false
@@ -19673,6 +21026,30 @@ nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
     case .getThreadSubthreads?: try {
       guard case .getThreadSubthreads(let v)? = self.result else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 76)
+    }()
+    case .getPeerBots?: try {
+      guard case .getPeerBots(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 77)
+    }()
+    case .getMyBotCapabilities?: try {
+      guard case .getMyBotCapabilities(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 78)
+    }()
+    case .setMyBotCapabilities?: try {
+      guard case .setMyBotCapabilities(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 79)
+    }()
+    case .requestBotChatSettings?: try {
+      guard case .requestBotChatSettings(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 80)
+    }()
+    case .invokeBotChatSettingsItem?: try {
+      guard case .invokeBotChatSettingsItem(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 81)
+    }()
+    case .answerBotChatSettings?: try {
+      guard case .answerBotChatSettings(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 82)
     }()
     case .getGrid?: try {
       guard case .getGrid(let v)? = self.result else { preconditionFailure() }
@@ -25267,7 +26644,7 @@ nonisolated extension ClearChatHistoryResult: SwiftProtobuf.Message, SwiftProtob
 
 nonisolated extension EditMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "EditMessageInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}message_id\0\u{3}peer_id\0\u{1}text\0\u{2}\u{4}entities\0\u{3}parse_markdown\0\u{1}actions\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}message_id\0\u{3}peer_id\0\u{1}text\0\u{2}\u{4}entities\0\u{3}parse_markdown\0\u{1}actions\0\u{c}\u{a}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -28340,7 +29717,7 @@ nonisolated extension UpdateChatMoved: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
 nonisolated extension UpdateNewMessageNotification: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateNewMessageNotification"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}message\0\u{1}reason\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}message\0\u{1}reason\0\u{c}\u{3}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -30777,6 +32154,1293 @@ nonisolated extension DraftMessage: SwiftProtobuf.Message, SwiftProtobuf._Messag
   public static func ==(lhs: DraftMessage, rhs: DraftMessage) -> Bool {
     if lhs.text != rhs.text {return false}
     if lhs._entities != rhs._entities {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BotCapability: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BotCapability"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}kind\0\u{1}version\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularEnumField(value: &self.kind) }()
+      case 2: try { try decoder.decodeSingularUInt32Field(value: &self.version) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.kind != .unspecified {
+      try visitor.visitSingularEnumField(value: self.kind, fieldNumber: 1)
+    }
+    if self.version != 0 {
+      try visitor.visitSingularUInt32Field(value: self.version, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BotCapability, rhs: BotCapability) -> Bool {
+    if lhs.kind != rhs.kind {return false}
+    if lhs.version != rhs.version {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BotCapability.Kind: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0KIND_UNSPECIFIED\0\u{1}CHAT_SETTINGS\0")
+}
+
+nonisolated extension PeerBot: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "PeerBot"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}bot\0\u{1}capabilities\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._bot) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.capabilities) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._bot {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if !self.capabilities.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.capabilities, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: PeerBot, rhs: PeerBot) -> Bool {
+    if lhs._bot != rhs._bot {return false}
+    if lhs.capabilities != rhs.capabilities {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension GetPeerBotsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetPeerBotsInput"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetPeerBotsInput, rhs: GetPeerBotsInput) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension GetPeerBotsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetPeerBotsResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}bots\0\u{3}suggested_bot_user_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.bots) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self._suggestedBotUserID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.bots.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.bots, fieldNumber: 1)
+    }
+    try { if let v = self._suggestedBotUserID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetPeerBotsResult, rhs: GetPeerBotsResult) -> Bool {
+    if lhs.bots != rhs.bots {return false}
+    if lhs._suggestedBotUserID != rhs._suggestedBotUserID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension GetMyBotCapabilitiesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetMyBotCapabilitiesInput"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetMyBotCapabilitiesInput, rhs: GetMyBotCapabilitiesInput) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension GetMyBotCapabilitiesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetMyBotCapabilitiesResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}capabilities\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.capabilities) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.capabilities.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.capabilities, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetMyBotCapabilitiesResult, rhs: GetMyBotCapabilitiesResult) -> Bool {
+    if lhs.capabilities != rhs.capabilities {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension SetMyBotCapabilitiesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "SetMyBotCapabilitiesInput"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}capabilities\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.capabilities) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.capabilities.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.capabilities, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: SetMyBotCapabilitiesInput, rhs: SetMyBotCapabilitiesInput) -> Bool {
+    if lhs.capabilities != rhs.capabilities {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension SetMyBotCapabilitiesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "SetMyBotCapabilitiesResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}capabilities\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.capabilities) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.capabilities.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.capabilities, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: SetMyBotCapabilitiesResult, rhs: SetMyBotCapabilitiesResult) -> Bool {
+    if lhs.capabilities != rhs.capabilities {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BotChatSettingsDocument: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BotChatSettingsDocument"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}version\0\u{1}revision\0\u{1}sections\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt32Field(value: &self.version) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.revision) }()
+      case 3: try { try decoder.decodeRepeatedMessageField(value: &self.sections) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.version != 0 {
+      try visitor.visitSingularUInt32Field(value: self.version, fieldNumber: 1)
+    }
+    if !self.revision.isEmpty {
+      try visitor.visitSingularStringField(value: self.revision, fieldNumber: 2)
+    }
+    if !self.sections.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.sections, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BotChatSettingsDocument, rhs: BotChatSettingsDocument) -> Bool {
+    if lhs.version != rhs.version {return false}
+    if lhs.revision != rhs.revision {return false}
+    if lhs.sections != rhs.sections {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BotChatSettingsSection: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BotChatSettingsSection"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}title\0\u{1}description\0\u{1}items\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.id) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._title) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._description_p) }()
+      case 4: try { try decoder.decodeRepeatedMessageField(value: &self.items) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.id.isEmpty {
+      try visitor.visitSingularStringField(value: self.id, fieldNumber: 1)
+    }
+    try { if let v = self._title {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
+    try { if let v = self._description_p {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
+    if !self.items.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.items, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BotChatSettingsSection, rhs: BotChatSettingsSection) -> Bool {
+    if lhs.id != rhs.id {return false}
+    if lhs._title != rhs._title {return false}
+    if lhs._description_p != rhs._description_p {return false}
+    if lhs.items != rhs.items {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BotChatSettingsItem: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BotChatSettingsItem"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}label\0\u{1}description\0\u{1}disabled\0\u{3}disabled_reason\0\u{1}toggle\0\u{1}select\0\u{1}info\0\u{1}button\0\u{1}folder\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.id) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._label) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._description_p) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self.disabled) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self._disabledReason) }()
+      case 6: try {
+        var v: BotChatSettingsToggle?
+        var hadOneofValue = false
+        if let current = self.control {
+          hadOneofValue = true
+          if case .toggle(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.control = .toggle(v)
+        }
+      }()
+      case 7: try {
+        var v: BotChatSettingsSelect?
+        var hadOneofValue = false
+        if let current = self.control {
+          hadOneofValue = true
+          if case .select(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.control = .select(v)
+        }
+      }()
+      case 8: try {
+        var v: BotChatSettingsInfo?
+        var hadOneofValue = false
+        if let current = self.control {
+          hadOneofValue = true
+          if case .info(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.control = .info(v)
+        }
+      }()
+      case 9: try {
+        var v: BotChatSettingsButton?
+        var hadOneofValue = false
+        if let current = self.control {
+          hadOneofValue = true
+          if case .button(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.control = .button(v)
+        }
+      }()
+      case 10: try {
+        var v: BotChatSettingsFolder?
+        var hadOneofValue = false
+        if let current = self.control {
+          hadOneofValue = true
+          if case .folder(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.control = .folder(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.id.isEmpty {
+      try visitor.visitSingularStringField(value: self.id, fieldNumber: 1)
+    }
+    try { if let v = self._label {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
+    try { if let v = self._description_p {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
+    if self.disabled != false {
+      try visitor.visitSingularBoolField(value: self.disabled, fieldNumber: 4)
+    }
+    try { if let v = self._disabledReason {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 5)
+    } }()
+    switch self.control {
+    case .toggle?: try {
+      guard case .toggle(let v)? = self.control else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+    }()
+    case .select?: try {
+      guard case .select(let v)? = self.control else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+    }()
+    case .info?: try {
+      guard case .info(let v)? = self.control else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
+    }()
+    case .button?: try {
+      guard case .button(let v)? = self.control else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+    }()
+    case .folder?: try {
+      guard case .folder(let v)? = self.control else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
+    }()
+    case nil: break
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BotChatSettingsItem, rhs: BotChatSettingsItem) -> Bool {
+    if lhs.id != rhs.id {return false}
+    if lhs._label != rhs._label {return false}
+    if lhs._description_p != rhs._description_p {return false}
+    if lhs.disabled != rhs.disabled {return false}
+    if lhs._disabledReason != rhs._disabledReason {return false}
+    if lhs.control != rhs.control {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BotChatSettingsToggle: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BotChatSettingsToggle"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}value\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularBoolField(value: &self.value) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.value != false {
+      try visitor.visitSingularBoolField(value: self.value, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BotChatSettingsToggle, rhs: BotChatSettingsToggle) -> Bool {
+    if lhs.value != rhs.value {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BotChatSettingsSelect: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BotChatSettingsSelect"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}value\0\u{1}options\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.value) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.options) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.value.isEmpty {
+      try visitor.visitSingularStringField(value: self.value, fieldNumber: 1)
+    }
+    if !self.options.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.options, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BotChatSettingsSelect, rhs: BotChatSettingsSelect) -> Bool {
+    if lhs.value != rhs.value {return false}
+    if lhs.options != rhs.options {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BotChatSettingsSelectOption: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BotChatSettingsSelectOption"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}value\0\u{1}label\0\u{1}description\0\u{1}disabled\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.value) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.label) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._description_p) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self.disabled) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.value.isEmpty {
+      try visitor.visitSingularStringField(value: self.value, fieldNumber: 1)
+    }
+    if !self.label.isEmpty {
+      try visitor.visitSingularStringField(value: self.label, fieldNumber: 2)
+    }
+    try { if let v = self._description_p {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
+    if self.disabled != false {
+      try visitor.visitSingularBoolField(value: self.disabled, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BotChatSettingsSelectOption, rhs: BotChatSettingsSelectOption) -> Bool {
+    if lhs.value != rhs.value {return false}
+    if lhs.label != rhs.label {return false}
+    if lhs._description_p != rhs._description_p {return false}
+    if lhs.disabled != rhs.disabled {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BotChatSettingsInfo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BotChatSettingsInfo"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}text\0\u{1}tone\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.text) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.tone) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.text.isEmpty {
+      try visitor.visitSingularStringField(value: self.text, fieldNumber: 1)
+    }
+    if self.tone != .unspecified {
+      try visitor.visitSingularEnumField(value: self.tone, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BotChatSettingsInfo, rhs: BotChatSettingsInfo) -> Bool {
+    if lhs.text != rhs.text {return false}
+    if lhs.tone != rhs.tone {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BotChatSettingsInfo.Tone: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0TONE_UNSPECIFIED\0\u{1}NEUTRAL\0\u{1}SUCCESS\0\u{1}WARNING\0\u{1}ERROR\0")
+}
+
+nonisolated extension BotChatSettingsButton: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BotChatSettingsButton"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BotChatSettingsButton, rhs: BotChatSettingsButton) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BotChatSettingsFolder: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BotChatSettingsFolder"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}value\0\u{3}recent_folders\0\u{3}host_installation_id\0\u{3}host_label\0\u{3}allows_local_picker\0\u{3}local_picker_port\0\u{3}local_picker_capability\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.value) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.recentFolders) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.hostInstallationID) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.hostLabel) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self.allowsLocalPicker) }()
+      case 6: try { try decoder.decodeSingularUInt32Field(value: &self._localPickerPort) }()
+      case 7: try { try decoder.decodeSingularStringField(value: &self._localPickerCapability) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.value.isEmpty {
+      try visitor.visitSingularStringField(value: self.value, fieldNumber: 1)
+    }
+    if !self.recentFolders.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.recentFolders, fieldNumber: 2)
+    }
+    if !self.hostInstallationID.isEmpty {
+      try visitor.visitSingularStringField(value: self.hostInstallationID, fieldNumber: 3)
+    }
+    if !self.hostLabel.isEmpty {
+      try visitor.visitSingularStringField(value: self.hostLabel, fieldNumber: 4)
+    }
+    if self.allowsLocalPicker != false {
+      try visitor.visitSingularBoolField(value: self.allowsLocalPicker, fieldNumber: 5)
+    }
+    try { if let v = self._localPickerPort {
+      try visitor.visitSingularUInt32Field(value: v, fieldNumber: 6)
+    } }()
+    try { if let v = self._localPickerCapability {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 7)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BotChatSettingsFolder, rhs: BotChatSettingsFolder) -> Bool {
+    if lhs.value != rhs.value {return false}
+    if lhs.recentFolders != rhs.recentFolders {return false}
+    if lhs.hostInstallationID != rhs.hostInstallationID {return false}
+    if lhs.hostLabel != rhs.hostLabel {return false}
+    if lhs.allowsLocalPicker != rhs.allowsLocalPicker {return false}
+    if lhs._localPickerPort != rhs._localPickerPort {return false}
+    if lhs._localPickerCapability != rhs._localPickerCapability {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BotChatSettingsFolderOption: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BotChatSettingsFolderOption"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}value\0\u{1}label\0\u{3}parent_hint\0\u{1}disabled\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.value) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.label) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._parentHint) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self.disabled) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.value.isEmpty {
+      try visitor.visitSingularStringField(value: self.value, fieldNumber: 1)
+    }
+    if !self.label.isEmpty {
+      try visitor.visitSingularStringField(value: self.label, fieldNumber: 2)
+    }
+    try { if let v = self._parentHint {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
+    if self.disabled != false {
+      try visitor.visitSingularBoolField(value: self.disabled, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BotChatSettingsFolderOption, rhs: BotChatSettingsFolderOption) -> Bool {
+    if lhs.value != rhs.value {return false}
+    if lhs.label != rhs.label {return false}
+    if lhs._parentHint != rhs._parentHint {return false}
+    if lhs.disabled != rhs.disabled {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BotChatSettingsValue: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BotChatSettingsValue"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bool_value\0\u{3}string_value\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: Bool?
+        try decoder.decodeSingularBoolField(value: &v)
+        if let v = v {
+          if self.value != nil {try decoder.handleConflictingOneOf()}
+          self.value = .boolValue(v)
+        }
+      }()
+      case 2: try {
+        var v: String?
+        try decoder.decodeSingularStringField(value: &v)
+        if let v = v {
+          if self.value != nil {try decoder.handleConflictingOneOf()}
+          self.value = .stringValue(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    switch self.value {
+    case .boolValue?: try {
+      guard case .boolValue(let v)? = self.value else { preconditionFailure() }
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 1)
+    }()
+    case .stringValue?: try {
+      guard case .stringValue(let v)? = self.value else { preconditionFailure() }
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    }()
+    case nil: break
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BotChatSettingsValue, rhs: BotChatSettingsValue) -> Bool {
+    if lhs.value != rhs.value {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BotChatSettingsProblem: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BotChatSettingsProblem"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}code\0\u{1}message\0\u{3}current_document\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularEnumField(value: &self.code) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.message) }()
+      case 3: try { try decoder.decodeSingularMessageField(value: &self._currentDocument) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.code != .unspecified {
+      try visitor.visitSingularEnumField(value: self.code, fieldNumber: 1)
+    }
+    if !self.message.isEmpty {
+      try visitor.visitSingularStringField(value: self.message, fieldNumber: 2)
+    }
+    try { if let v = self._currentDocument {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BotChatSettingsProblem, rhs: BotChatSettingsProblem) -> Bool {
+    if lhs.code != rhs.code {return false}
+    if lhs.message != rhs.message {return false}
+    if lhs._currentDocument != rhs._currentDocument {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BotChatSettingsProblem.Code: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0CODE_UNSPECIFIED\0\u{1}UNAVAILABLE\0\u{1}INVALID_VALUE\0\u{1}STALE\0\u{1}FAILED\0\u{1}UNREACHABLE\0")
+}
+
+nonisolated extension BotChatSettingsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BotChatSettingsResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}document\0\u{1}problem\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: BotChatSettingsDocument?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .document(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .document(v)
+        }
+      }()
+      case 2: try {
+        var v: BotChatSettingsProblem?
+        var hadOneofValue = false
+        if let current = self.result {
+          hadOneofValue = true
+          if case .problem(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.result = .problem(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    switch self.result {
+    case .document?: try {
+      guard case .document(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    }()
+    case .problem?: try {
+      guard case .problem(let v)? = self.result else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    }()
+    case nil: break
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BotChatSettingsResponse, rhs: BotChatSettingsResponse) -> Bool {
+    if lhs.result != rhs.result {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension RequestBotChatSettingsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "RequestBotChatSettingsInput"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}bot_user_id\0\u{1}version\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.botUserID) }()
+      case 3: try { try decoder.decodeSingularUInt32Field(value: &self.version) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.botUserID != 0 {
+      try visitor.visitSingularInt64Field(value: self.botUserID, fieldNumber: 2)
+    }
+    if self.version != 0 {
+      try visitor.visitSingularUInt32Field(value: self.version, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: RequestBotChatSettingsInput, rhs: RequestBotChatSettingsInput) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs.botUserID != rhs.botUserID {return false}
+    if lhs.version != rhs.version {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension RequestBotChatSettingsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "RequestBotChatSettingsResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}response\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._response) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._response {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: RequestBotChatSettingsResult, rhs: RequestBotChatSettingsResult) -> Bool {
+    if lhs._response != rhs._response {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension InvokeBotChatSettingsItemInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "InvokeBotChatSettingsItemInput"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}bot_user_id\0\u{1}version\0\u{3}item_id\0\u{1}value\0\u{3}document_revision\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.botUserID) }()
+      case 3: try { try decoder.decodeSingularUInt32Field(value: &self.version) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.itemID) }()
+      case 5: try { try decoder.decodeSingularMessageField(value: &self._value) }()
+      case 6: try { try decoder.decodeSingularStringField(value: &self.documentRevision) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.botUserID != 0 {
+      try visitor.visitSingularInt64Field(value: self.botUserID, fieldNumber: 2)
+    }
+    if self.version != 0 {
+      try visitor.visitSingularUInt32Field(value: self.version, fieldNumber: 3)
+    }
+    if !self.itemID.isEmpty {
+      try visitor.visitSingularStringField(value: self.itemID, fieldNumber: 4)
+    }
+    try { if let v = self._value {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+    } }()
+    if !self.documentRevision.isEmpty {
+      try visitor.visitSingularStringField(value: self.documentRevision, fieldNumber: 6)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: InvokeBotChatSettingsItemInput, rhs: InvokeBotChatSettingsItemInput) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs.botUserID != rhs.botUserID {return false}
+    if lhs.version != rhs.version {return false}
+    if lhs.itemID != rhs.itemID {return false}
+    if lhs._value != rhs._value {return false}
+    if lhs.documentRevision != rhs.documentRevision {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension InvokeBotChatSettingsItemResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "InvokeBotChatSettingsItemResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}response\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._response) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._response {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: InvokeBotChatSettingsItemResult, rhs: InvokeBotChatSettingsItemResult) -> Bool {
+    if lhs._response != rhs._response {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AnswerBotChatSettingsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AnswerBotChatSettingsInput"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{1}response\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.requestID) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._response) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.requestID != 0 {
+      try visitor.visitSingularUInt64Field(value: self.requestID, fieldNumber: 1)
+    }
+    try { if let v = self._response {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AnswerBotChatSettingsInput, rhs: AnswerBotChatSettingsInput) -> Bool {
+    if lhs.requestID != rhs.requestID {return false}
+    if lhs._response != rhs._response {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AnswerBotChatSettingsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AnswerBotChatSettingsResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AnswerBotChatSettingsResult, rhs: AnswerBotChatSettingsResult) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BotChatSettingsRequested: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BotChatSettingsRequested"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{3}chat_id\0\u{3}actor_user_id\0\u{1}version\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.requestID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.chatID) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.actorUserID) }()
+      case 4: try { try decoder.decodeSingularUInt32Field(value: &self.version) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.requestID != 0 {
+      try visitor.visitSingularUInt64Field(value: self.requestID, fieldNumber: 1)
+    }
+    if self.chatID != 0 {
+      try visitor.visitSingularInt64Field(value: self.chatID, fieldNumber: 2)
+    }
+    if self.actorUserID != 0 {
+      try visitor.visitSingularInt64Field(value: self.actorUserID, fieldNumber: 3)
+    }
+    if self.version != 0 {
+      try visitor.visitSingularUInt32Field(value: self.version, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BotChatSettingsRequested, rhs: BotChatSettingsRequested) -> Bool {
+    if lhs.requestID != rhs.requestID {return false}
+    if lhs.chatID != rhs.chatID {return false}
+    if lhs.actorUserID != rhs.actorUserID {return false}
+    if lhs.version != rhs.version {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BotChatSettingsItemInvoked: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BotChatSettingsItemInvoked"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{3}chat_id\0\u{3}actor_user_id\0\u{1}version\0\u{3}item_id\0\u{1}value\0\u{3}document_revision\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.requestID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.chatID) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.actorUserID) }()
+      case 4: try { try decoder.decodeSingularUInt32Field(value: &self.version) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self.itemID) }()
+      case 6: try { try decoder.decodeSingularMessageField(value: &self._value) }()
+      case 7: try { try decoder.decodeSingularStringField(value: &self.documentRevision) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.requestID != 0 {
+      try visitor.visitSingularUInt64Field(value: self.requestID, fieldNumber: 1)
+    }
+    if self.chatID != 0 {
+      try visitor.visitSingularInt64Field(value: self.chatID, fieldNumber: 2)
+    }
+    if self.actorUserID != 0 {
+      try visitor.visitSingularInt64Field(value: self.actorUserID, fieldNumber: 3)
+    }
+    if self.version != 0 {
+      try visitor.visitSingularUInt32Field(value: self.version, fieldNumber: 4)
+    }
+    if !self.itemID.isEmpty {
+      try visitor.visitSingularStringField(value: self.itemID, fieldNumber: 5)
+    }
+    try { if let v = self._value {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+    } }()
+    if !self.documentRevision.isEmpty {
+      try visitor.visitSingularStringField(value: self.documentRevision, fieldNumber: 7)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BotChatSettingsItemInvoked, rhs: BotChatSettingsItemInvoked) -> Bool {
+    if lhs.requestID != rhs.requestID {return false}
+    if lhs.chatID != rhs.chatID {return false}
+    if lhs.actorUserID != rhs.actorUserID {return false}
+    if lhs.version != rhs.version {return false}
+    if lhs.itemID != rhs.itemID {return false}
+    if lhs._value != rhs._value {return false}
+    if lhs.documentRevision != rhs.documentRevision {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
