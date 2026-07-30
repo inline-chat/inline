@@ -1,4 +1,7 @@
 import type {
+  BotCapability,
+  BotChatSettingsResponse,
+  BotChatSettingsValue,
   ChatParticipant,
   DialogFollowMode,
   Message,
@@ -93,6 +96,32 @@ export type InlineSdkAnswerMessageActionParams = {
   ui?: MessageActionResponseUi
 }
 
+export type InlineSdkPeerTarget =
+  | { chatId: InlineIdLike; userId?: never }
+  | { userId: InlineIdLike; chatId?: never }
+
+export type InlineSdkSetMyBotCapabilitiesParams = {
+  capabilities: BotCapability[]
+}
+
+export type InlineSdkRequestBotChatSettingsParams = InlineSdkPeerTarget & {
+  botUserId: InlineIdLike
+  version?: number
+}
+
+export type InlineSdkInvokeBotChatSettingsItemParams = InlineSdkPeerTarget & {
+  botUserId: InlineIdLike
+  version?: number
+  itemId: string
+  value?: BotChatSettingsValue
+  documentRevision: string
+}
+
+export type InlineSdkAnswerBotChatSettingsParams = {
+  requestId: InlineIdLike
+  response: BotChatSettingsResponse
+}
+
 export type InlineSdkGetMessagesParams =
   | {
       chatId: InlineIdLike
@@ -181,6 +210,23 @@ export type InlineSdkUploadFileResult = {
 }
 
 export type InlineInboundEvent =
+  | {
+      kind: "bot.chatSettings.request"
+      requestId: InlineId
+      chatId: InlineId
+      actorUserId: InlineId
+      version: number
+    }
+  | {
+      kind: "bot.chatSettings.item.invoke"
+      requestId: InlineId
+      chatId: InlineId
+      actorUserId: InlineId
+      version: number
+      itemId: string
+      value?: BotChatSettingsValue
+      documentRevision: string
+    }
   | { kind: "message.new"; chatId: InlineId; message: Message; seq: number; date: InlineUnixSeconds }
   | { kind: "message.edit"; chatId: InlineId; message: Message; seq: number; date: InlineUnixSeconds }
   | { kind: "message.delete"; chatId: InlineId; messageIds: InlineId[]; seq: number; date: InlineUnixSeconds }
@@ -297,6 +343,12 @@ export const rpcInputKindByMethod = {
   62: "checkUsername",
   63: "changeUsername",
   64: "updateProfile",
+  76: "getPeerBots",
+  77: "getMyBotCapabilities",
+  78: "setMyBotCapabilities",
+  79: "requestBotChatSettings",
+  80: "invokeBotChatSettingsItem",
+  81: "answerBotChatSettings",
 } as const satisfies Record<number, RpcInputKind | undefined>
 
 export const rpcResultKindByMethod = {
@@ -350,6 +402,12 @@ export const rpcResultKindByMethod = {
   62: "checkUsername",
   63: "changeUsername",
   64: "updateProfile",
+  76: "getPeerBots",
+  77: "getMyBotCapabilities",
+  78: "setMyBotCapabilities",
+  79: "requestBotChatSettings",
+  80: "invokeBotChatSettingsItem",
+  81: "answerBotChatSettings",
 } as const satisfies Record<number, RpcResultKind | undefined>
 
 type RpcInputKindByMethod = typeof rpcInputKindByMethod

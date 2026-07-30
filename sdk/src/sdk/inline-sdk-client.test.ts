@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { DialogFollowMode, GetUpdatesResult_ResultType, Method, ServerProtocolMessage, Update } from "@inline-chat/protocol/core"
+import { BotCapability_Kind, DialogFollowMode, GetUpdatesResult_ResultType, Method, ServerProtocolMessage, Update } from "@inline-chat/protocol/core"
 import { InlineSdkClient } from "./inline-sdk-client.js"
 import { MockTransport } from "../realtime/mock-transport.js"
 import type { InlineSdkState, InlineSdkStateStore } from "./types.js"
@@ -196,6 +196,188 @@ describe("InlineSdkClient", () => {
     )
 
     await expect(p).resolves.toEqual({ userId: 42n })
+    await client.close()
+  })
+
+  it("restores declared bot capabilities after reconnect", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+    })
+    await connectAndOpen(client, transport)
+
+    const registration = client.setMyBotCapabilities({
+      capabilities: [{ kind: BotCapability_Kind.CHAT_SETTINGS, version: 1 }],
+    })
+    await waitFor(() => transport.sent.some(
+      (message) => message.body.oneofKind === "rpcCall"
+        && message.body.rpcCall.method === Method.SET_MY_BOT_CAPABILITIES,
+    ))
+    const initial = transport.sent.find(
+      (message) => message.body.oneofKind === "rpcCall"
+        && message.body.rpcCall.method === Method.SET_MY_BOT_CAPABILITIES,
+    )
+    if (!initial || initial.body.oneofKind !== "rpcCall") throw new Error("missing capability registration")
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 2n,
+      body: {
+        oneofKind: "rpcResult",
+        rpcResult: {
+          reqMsgId: initial.id,
+          result: {
+            oneofKind: "setMyBotCapabilities",
+            setMyBotCapabilities: { capabilities: [{ kind: BotCapability_Kind.CHAT_SETTINGS, version: 1 }] },
+          },
+        },
+      },
+    }))
+    await registration
+
+    const callsBeforeReconnect = transport.sent.filter(
+      (message) => message.body.oneofKind === "rpcCall"
+        && message.body.rpcCall.method === Method.SET_MY_BOT_CAPABILITIES,
+    ).length
+    await transport.reconnect()
+    await transport.connect()
+    await waitFor(() => transport.sent.filter(
+      (message) => message.body.oneofKind === "connectionInit",
+    ).length >= 2)
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 3n,
+      body: { oneofKind: "connectionOpen", connectionOpen: {} },
+    }))
+    await waitFor(() => transport.sent.filter(
+      (message) => message.body.oneofKind === "rpcCall"
+        && message.body.rpcCall.method === Method.SET_MY_BOT_CAPABILITIES,
+    ).length === callsBeforeReconnect + 1)
+
+    await client.close()
+  })
+
+  it("does not start an overlapping capability registration on reconnect", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+    })
+    await connectAndOpen(client, transport)
+
+    const registration = client.setMyBotCapabilities({
+      capabilities: [{ kind: BotCapability_Kind.CHAT_SETTINGS, version: 1 }],
+    })
+    await waitFor(() => transport.sent.some(
+      (message) => message.body.oneofKind === "rpcCall"
+        && message.body.rpcCall.method === Method.SET_MY_BOT_CAPABILITIES,
+    ))
+    const first = transport.sent.find(
+      (message) => message.body.oneofKind === "rpcCall"
+        && message.body.rpcCall.method === Method.SET_MY_BOT_CAPABILITIES,
+    )
+    if (!first || first.body.oneofKind !== "rpcCall") throw new Error("missing capability registration")
+
+    await transport.reconnect()
+    await transport.connect()
+    await waitFor(() => transport.sent.filter(
+      (message) => message.body.oneofKind === "connectionInit",
+    ).length >= 2)
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 3n,
+      body: { oneofKind: "connectionOpen", connectionOpen: {} },
+    }))
+    await waitFor(() => transport.sent.filter(
+      (message) => message.body.oneofKind === "rpcCall"
+        && message.body.rpcCall.method === Method.SET_MY_BOT_CAPABILITIES,
+    ).length >= 2)
+    const capabilityCalls = transport.sent.filter(
+      (message) => message.body.oneofKind === "rpcCall"
+        && message.body.rpcCall.method === Method.SET_MY_BOT_CAPABILITIES,
+    )
+    expect(new Set(capabilityCalls.map((message) => message.id)).size).toBe(1)
+
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 4n,
+      body: {
+        oneofKind: "rpcResult",
+        rpcResult: {
+          reqMsgId: first.id,
+          result: {
+            oneofKind: "setMyBotCapabilities",
+            setMyBotCapabilities: { capabilities: [{ kind: BotCapability_Kind.CHAT_SETTINGS, version: 1 }] },
+          },
+        },
+      },
+    }))
+    await registration
+    await client.close()
+  })
+
+  it("flushes a newer capability declaration after an in-flight registration", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+    })
+    await connectAndOpen(client, transport)
+
+    const firstRegistration = client.setMyBotCapabilities({
+      capabilities: [{ kind: BotCapability_Kind.CHAT_SETTINGS, version: 1 }],
+    })
+    await waitFor(() => transport.sent.some(
+      (message) => message.body.oneofKind === "rpcCall"
+        && message.body.rpcCall.method === Method.SET_MY_BOT_CAPABILITIES,
+    ))
+    const first = transport.sent.find(
+      (message) => message.body.oneofKind === "rpcCall"
+        && message.body.rpcCall.method === Method.SET_MY_BOT_CAPABILITIES,
+    )
+    if (!first || first.body.oneofKind !== "rpcCall") throw new Error("missing capability registration")
+
+    const secondRegistration = client.setMyBotCapabilities({ capabilities: [] })
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 3n,
+      body: {
+        oneofKind: "rpcResult",
+        rpcResult: {
+          reqMsgId: first.id,
+          result: {
+            oneofKind: "setMyBotCapabilities",
+            setMyBotCapabilities: { capabilities: [{ kind: BotCapability_Kind.CHAT_SETTINGS, version: 1 }] },
+          },
+        },
+      },
+    }))
+
+    await waitFor(() => transport.sent.filter(
+      (message) => message.body.oneofKind === "rpcCall"
+        && message.body.rpcCall.method === Method.SET_MY_BOT_CAPABILITIES,
+    ).length === 2)
+    const calls = transport.sent.filter(
+      (message) => message.body.oneofKind === "rpcCall"
+        && message.body.rpcCall.method === Method.SET_MY_BOT_CAPABILITIES,
+    )
+    const second = calls[1]
+    if (!second || second.body.oneofKind !== "rpcCall") throw new Error("missing refreshed capability registration")
+    if (second.body.rpcCall.input.oneofKind !== "setMyBotCapabilities") throw new Error("missing capability input")
+    expect(second.body.rpcCall.input.setMyBotCapabilities.capabilities).toEqual([])
+
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 4n,
+      body: {
+        oneofKind: "rpcResult",
+        rpcResult: {
+          reqMsgId: second.id,
+          result: {
+            oneofKind: "setMyBotCapabilities",
+            setMyBotCapabilities: { capabilities: [] },
+          },
+        },
+      },
+    }))
+    await Promise.all([firstRegistration, secondRegistration])
     await client.close()
   })
 

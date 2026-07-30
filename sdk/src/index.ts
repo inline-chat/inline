@@ -1,13 +1,19 @@
 export { InlineSdkClient } from "./sdk/inline-sdk-client.js"
+export { registerBotCapabilitiesWithRetry } from "./sdk/bot-capabilities.js"
 export type {
   InlineSdkClientOptions,
   InlineSdkBotPresenceStateKind,
   InlineSdkGetMessagesParams,
+  InlineSdkPeerTarget,
+  InlineSdkRequestBotChatSettingsParams,
+  InlineSdkInvokeBotChatSettingsItemParams,
+  InlineSdkAnswerBotChatSettingsParams,
   InlineSdkInvokeMessageActionParams,
   InlineSdkAnswerMessageActionParams,
   InlineSdkSendMessageMedia,
   InlineSdkSendMessageParams,
   InlineSdkSetBotPresenceStateParams,
+  InlineSdkSetMyBotCapabilitiesParams,
   InlineSdkState,
   InlineSdkStateStore,
   InlineSdkUploadFileParams,

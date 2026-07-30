@@ -1,4 +1,4 @@
-import type { RpcError, RpcResult, ServerProtocolMessage, UpdatesPayload } from "@inline-chat/protocol/core"
+import type { BotEvent, RpcError, RpcResult, ServerProtocolMessage, UpdatesPayload } from "@inline-chat/protocol/core"
 
 export type ClientState = "connecting" | "open"
 
@@ -15,4 +15,4 @@ export type ClientEvent =
   | { type: "rpcResult"; msgId: bigint; rpcResult: RpcResult["result"] }
   | { type: "rpcError"; msgId: bigint; rpcError: RpcError }
   | { type: "updates"; updates: UpdatesPayload }
-
+  | { type: "bot"; bot: BotEvent }

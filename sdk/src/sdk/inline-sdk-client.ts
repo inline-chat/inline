@@ -1,4 +1,7 @@
 import {
+  type BotCapability,
+  type BotChatSettingsResponse,
+  type BotEvent,
   type ClearChatHistoryInput,
   BotPresenceState_Kind,
   GetChatInput,
@@ -24,16 +27,20 @@ import { ProtocolClient } from "../realtime/protocol-client.js"
 import { WebSocketTransport } from "../realtime/ws-transport.js"
 import type { Transport } from "../realtime/transport.js"
 import type {
+  InlineSdkAnswerBotChatSettingsParams,
   InlineSdkAnswerMessageActionParams,
   InlineSdkClearChatHistoryParams,
   InlineSdkClientOptions,
   InlineSdkChatInfo,
   InlineInboundEvent,
   InlineSdkGetMessagesParams,
+  InlineSdkInvokeBotChatSettingsItemParams,
   InlineSdkInvokeMessageActionParams,
+  InlineSdkRequestBotChatSettingsParams,
   InlineSdkSendMessageMedia,
   InlineSdkSendMessageParams,
   InlineSdkSetBotPresenceStateParams,
+  InlineSdkSetMyBotCapabilitiesParams,
   InlineSdkState,
   InlineSdkUploadFileParams,
   InlineSdkUploadFileResult,
@@ -111,6 +118,10 @@ export class InlineSdkClient {
   private catchUpInFlightBySpaceId = new Map<bigint, Promise<void>>()
   private catchUpRequestedBySpaceId = new Map<bigint, { endSeq: number }>()
   private userCatchUpInFlight: Promise<void> | null = null
+  private desiredBotCapabilities: BotCapability[] | null = null
+  private desiredBotCapabilitiesRevision = 0
+  private registeredBotCapabilitiesRevision = -1
+  private botCapabilitiesRegistrationInFlight: Promise<{ capabilities: BotCapability[] }> | null = null
 
   constructor(options: InlineSdkClientOptions) {
     this.options = options
@@ -506,6 +517,118 @@ export class InlineSdkClient {
     })
   }
 
+  async getPeerBots(params: { chatId: InlineIdLike; userId?: never } | { userId: InlineIdLike; chatId?: never }) {
+    const result = await this.invoke(Method.GET_PEER_BOTS, {
+      oneofKind: "getPeerBots",
+      getPeerBots: { peerId: this.inputPeerFromTarget(params, "getPeerBots") },
+    })
+    return result.getPeerBots
+  }
+
+  async getMyBotCapabilities(): Promise<{ capabilities: BotCapability[] }> {
+    const result = await this.invoke(Method.GET_MY_BOT_CAPABILITIES, {
+      oneofKind: "getMyBotCapabilities",
+      getMyBotCapabilities: {},
+    })
+    return { capabilities: result.getMyBotCapabilities.capabilities }
+  }
+
+  async setMyBotCapabilities(
+    params: InlineSdkSetMyBotCapabilitiesParams,
+  ): Promise<{ capabilities: BotCapability[] }> {
+    this.desiredBotCapabilities = params.capabilities.map((capability) => ({ ...capability }))
+    this.desiredBotCapabilitiesRevision += 1
+    return await this.registerDesiredBotCapabilities()
+  }
+
+  private async registerDesiredBotCapabilities(): Promise<{ capabilities: BotCapability[] }> {
+    if (this.botCapabilitiesRegistrationInFlight) {
+      const result = await this.botCapabilitiesRegistrationInFlight
+      return this.registeredBotCapabilitiesRevision < this.desiredBotCapabilitiesRevision
+        ? await this.registerDesiredBotCapabilities()
+        : result
+    }
+    const capabilities = this.desiredBotCapabilities
+    if (capabilities == null) return { capabilities: [] }
+    const revision = this.desiredBotCapabilitiesRevision
+    const registration = this.invoke(Method.SET_MY_BOT_CAPABILITIES, {
+      oneofKind: "setMyBotCapabilities",
+      setMyBotCapabilities: { capabilities },
+    }).then((result) => {
+      this.registeredBotCapabilitiesRevision = Math.max(this.registeredBotCapabilitiesRevision, revision)
+      return { capabilities: result.setMyBotCapabilities.capabilities }
+    })
+    this.botCapabilitiesRegistrationInFlight = registration
+    let result: { capabilities: BotCapability[] }
+    try {
+      result = await registration
+    } finally {
+      if (this.botCapabilitiesRegistrationInFlight === registration) {
+        this.botCapabilitiesRegistrationInFlight = null
+      }
+    }
+    return this.registeredBotCapabilitiesRevision < this.desiredBotCapabilitiesRevision
+      ? await this.registerDesiredBotCapabilities()
+      : result
+  }
+
+  async deleteMyBotCapabilities(): Promise<void> {
+    await this.setMyBotCapabilities({ capabilities: [] })
+  }
+
+  async requestBotChatSettings(
+    params: InlineSdkRequestBotChatSettingsParams,
+  ): Promise<{ response: BotChatSettingsResponse }> {
+    const result = await this.invoke(Method.REQUEST_BOT_CHAT_SETTINGS, {
+      oneofKind: "requestBotChatSettings",
+      requestBotChatSettings: {
+        peerId: this.inputPeerFromTarget(params, "requestBotChatSettings"),
+        botUserId: asInlineId(params.botUserId, "botUserId"),
+        version: params.version ?? 1,
+      },
+    })
+    const response = result.requestBotChatSettings.response
+    if (!response) throw new Error("requestBotChatSettings: missing response")
+    return { response }
+  }
+
+  async invokeBotChatSettingsItem(
+    params: InlineSdkInvokeBotChatSettingsItemParams,
+  ): Promise<{ response: BotChatSettingsResponse }> {
+    const itemId = params.itemId.trim()
+    const documentRevision = params.documentRevision.trim()
+    if (!itemId || !documentRevision) {
+      throw new Error("invokeBotChatSettingsItem: `itemId` and `documentRevision` must be non-empty")
+    }
+    const result = await this.invoke(Method.INVOKE_BOT_CHAT_SETTINGS_ITEM, {
+      oneofKind: "invokeBotChatSettingsItem",
+      invokeBotChatSettingsItem: {
+        peerId: this.inputPeerFromTarget(params, "invokeBotChatSettingsItem"),
+        botUserId: asInlineId(params.botUserId, "botUserId"),
+        version: params.version ?? 1,
+        itemId,
+        value: params.value,
+        documentRevision,
+      },
+    })
+    const response = result.invokeBotChatSettingsItem.response
+    if (!response) throw new Error("invokeBotChatSettingsItem: missing response")
+    return { response }
+  }
+
+  /** Bot settings are ordinary user-visible configuration. Never include secrets. */
+  async answerBotChatSettings(params: InlineSdkAnswerBotChatSettingsParams): Promise<void> {
+    await this.invoke(Method.ANSWER_BOT_CHAT_SETTINGS, {
+      oneofKind: "answerBotChatSettings",
+      answerBotChatSettings: {
+        requestId: asInlineId(params.requestId, "requestId"),
+        response: params.response,
+      },
+    })
+  }
+
+  // TODO(bot-chat-settings): add bot-initiated transient document replacement after V1.
+
   // Raw RPC invocation escape hatch. Validates method/input/result when the SDK
   // has a mapping for the method; otherwise behaves like unchecked raw.
   async invokeRaw(
@@ -583,6 +706,9 @@ export class InlineSdkClient {
           case "updates":
             await this.onUpdates(event.updates.updates)
             break
+          case "bot":
+            await this.onBotEvent(event.bot)
+            break
           case "rpcError":
           case "rpcResult":
           case "ack":
@@ -604,6 +730,43 @@ export class InlineSdkClient {
     // Best-effort: do not block `connect()` on cursor initialization.
     void this.initializeDateCursor()
     void this.requestCatchUpUser()
+    if (this.desiredBotCapabilities != null) {
+      void this.registerDesiredBotCapabilities().catch((error) => {
+        this.log.warn?.("Failed to restore bot capabilities after reconnect", error)
+      })
+    }
+  }
+
+  private async onBotEvent(event: BotEvent): Promise<void> {
+    switch (event.event.oneofKind) {
+      case "chatSettingsRequested": {
+        const request = event.event.chatSettingsRequested
+        await this.eventStream.send({
+          kind: "bot.chatSettings.request",
+          requestId: request.requestId,
+          chatId: request.chatId,
+          actorUserId: request.actorUserId,
+          version: request.version,
+        })
+        return
+      }
+      case "chatSettingsItemInvoked": {
+        const request = event.event.chatSettingsItemInvoked
+        await this.eventStream.send({
+          kind: "bot.chatSettings.item.invoke",
+          requestId: request.requestId,
+          chatId: request.chatId,
+          actorUserId: request.actorUserId,
+          version: request.version,
+          itemId: request.itemId,
+          value: request.value,
+          documentRevision: request.documentRevision,
+        })
+        return
+      }
+      default:
+        return
+    }
   }
 
   private async initializeDateCursor() {

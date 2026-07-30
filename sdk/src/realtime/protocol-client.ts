@@ -197,6 +197,8 @@ export class ProtocolClient {
       case "message":
         if (message.body.message.payload.oneofKind === "update") {
           await this.events.send({ type: "updates", updates: message.body.message.payload.update })
+        } else if (message.body.message.payload.oneofKind === "bot") {
+          await this.events.send({ type: "bot", bot: message.body.message.payload.bot })
         }
         break
       case "pong":

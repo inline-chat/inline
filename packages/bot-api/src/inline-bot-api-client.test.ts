@@ -323,6 +323,46 @@ describe("InlineBotApiClient", () => {
     expect(seenUrl).toBe("https://api.inline.chat/bot/deleteMyCommands")
   })
 
+  it("uses the expected transports for bot capabilities", async () => {
+    const calls: Array<{ url: string; method: string; body: unknown }> = []
+    const client = new InlineBotApiClient({
+      token: "t",
+      fetch: (async (input, init) => {
+        calls.push({
+          url: String(input),
+          method: init?.method ?? "",
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        })
+        return new Response(JSON.stringify({ ok: true, result: { capabilities: [] } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }) as any,
+    })
+
+    await client.getMyCapabilities()
+    await client.setMyCapabilities({ capabilities: [{ kind: "chat_settings", version: 1 }] })
+    await client.deleteMyCapabilities()
+
+    expect(calls).toEqual([
+      {
+        url: "https://api.inline.chat/bot/getMyCapabilities",
+        method: "GET",
+        body: undefined,
+      },
+      {
+        url: "https://api.inline.chat/bot/setMyCapabilities",
+        method: "POST",
+        body: { capabilities: [{ kind: "chat_settings", version: 1 }] },
+      },
+      {
+        url: "https://api.inline.chat/bot/deleteMyCapabilities",
+        method: "POST",
+        body: undefined,
+      },
+    ])
+  })
+
   it("uses global fetch when no fetch implementation is provided", async () => {
     const fetchMock = vi.fn(async () => {
       return new Response(JSON.stringify({ ok: true, result: { user: { id: 1, is_bot: true } } }), {
