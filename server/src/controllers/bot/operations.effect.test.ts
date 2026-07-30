@@ -24,6 +24,9 @@ const handlers = (
   getMyCommands: unused,
   setMyCommands: unused,
   deleteMyCommands: unused,
+  getMyCapabilities: unused,
+  setMyCapabilities: unused,
+  deleteMyCapabilities: unused,
 })
 
 describe("Bot operation error classification", () => {

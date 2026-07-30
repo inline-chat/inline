@@ -14,6 +14,7 @@ import type {
   SendMessageParams,
   SendReactionParams,
   SetMyCommandsParams,
+  SetMyCapabilitiesParams,
 } from "@inline-chat/bot-api-types"
 import type {
   InputPeer,
@@ -22,6 +23,7 @@ import type {
 } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { BotCommandsModel } from "@in/server/db/models/botCommands"
+import { BotCapabilitiesModel } from "@in/server/db/models/botCapabilities"
 import { MessageModel } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
 import { addReaction as addReactionFn } from "@in/server/functions/messages.addReaction"
@@ -963,6 +965,47 @@ const deleteMyCommands = async (
   return {}
 }
 
+const toBotCapability = (row: { kind: string; version: number }) =>
+  row.kind === "chat_settings" && row.version === 1
+    ? { kind: "chat_settings" as const, version: 1 as const }
+    : undefined
+
+const normalizeBotCapabilitiesInput = (input: SetMyCapabilitiesParams) => {
+  if (!Array.isArray(input.capabilities) || input.capabilities.length > 100) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+  const seen = new Set<string>()
+  return input.capabilities.map((capability) => {
+    if (capability?.kind !== "chat_settings" || capability.version !== 1 || seen.has(capability.kind)) {
+      throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+    }
+    seen.add(capability.kind)
+    return { kind: capability.kind, version: capability.version }
+  })
+}
+
+const getMyCapabilities = async (context: BotOperationContext) => ({
+  capabilities: (await BotCapabilitiesModel.getForBotUserId(context.currentUserId)).flatMap((row) => {
+    const capability = toBotCapability(row)
+    return capability ? [capability] : []
+  }),
+})
+
+const setMyCapabilities = async (input: SetMyCapabilitiesParams, context: BotOperationContext) => ({
+  capabilities: (await BotCapabilitiesModel.replaceForBotUserId(
+    context.currentUserId,
+    normalizeBotCapabilitiesInput(input),
+  )).flatMap((row) => {
+    const capability = toBotCapability(row)
+    return capability ? [capability] : []
+  }),
+})
+
+const deleteMyCapabilities = async (context: BotOperationContext) => {
+  await BotCapabilitiesModel.replaceForBotUserId(context.currentUserId, [])
+  return {}
+}
+
 export const botOperationHandlers: BotOperationHandlers = {
   getMe,
   sendMessage,
@@ -974,4 +1017,7 @@ export const botOperationHandlers: BotOperationHandlers = {
   getMyCommands,
   setMyCommands,
   deleteMyCommands,
+  getMyCapabilities,
+  setMyCapabilities,
+  deleteMyCapabilities,
 }

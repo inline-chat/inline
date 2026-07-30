@@ -1,5 +1,6 @@
 import type {
   BotChat as NeutralBotChat,
+  BotCapability as NeutralBotCapability,
   BotCommand as NeutralBotCommand,
   BotMessage as NeutralBotMessage,
   BotMessageEntityOutput as NeutralBotMessageEntityOutput,
@@ -232,6 +233,14 @@ export const BotCommand = Schema.Struct({
 }).annotate({
   identifier: "BotCommand",
   description: "A command advertised by the bot.",
+})
+
+export const BotCapability = Schema.Struct({
+  kind: Schema.Literal("chat_settings"),
+  version: Schema.Literal(1),
+}).annotate({
+  identifier: "BotCapability",
+  description: "A versioned capability advertised by the bot.",
 })
 
 export const BotChatLastMessage = Schema.Struct({
@@ -480,6 +489,13 @@ export const SetMyCommandsInput = Schema.Struct({
   description: "Commands to publish for the authenticated bot.",
 })
 
+export const SetMyCapabilitiesInput = Schema.Struct({
+  capabilities: Schema.Array(BotCapability).check(Schema.isMaxLength(100)),
+}).annotate({
+  identifier: "SetMyCapabilitiesInput",
+  description: "Complete capability list for the authenticated bot.",
+})
+
 export const BotEmptyResult = Schema.Record(
   Schema.String,
   Schema.Never,
@@ -536,6 +552,13 @@ export const BotGetMyCommandsResult = Schema.Struct({
 }).annotate({
   identifier: "BotGetMyCommandsResult",
   description: "The authenticated bot's command list.",
+})
+
+export const BotGetMyCapabilitiesResult = Schema.Struct({
+  capabilities: Schema.mutable(Schema.Array(BotCapability)),
+}).annotate({
+  identifier: "BotGetMyCapabilitiesResult",
+  description: "The authenticated bot's capability list.",
 })
 
 const exampleBotUserId = UserId.make(284_901)
@@ -693,6 +716,13 @@ export const BotGetMyCommandsSuccess = botApiSuccess(
     },
   ],
 })
+export const BotGetMyCapabilitiesSuccess = botApiSuccess(
+  BotGetMyCapabilitiesResult,
+).annotate({
+  identifier: "BotGetMyCapabilitiesSuccess",
+  description: "Successful bot capability response.",
+  examples: [{ ok: true, result: { capabilities: [{ kind: "chat_settings", version: 1 }] } }],
+})
 export const BotEmptySuccess = botApiSuccess(
   BotEmptyResult,
 ).annotate({
@@ -797,6 +827,9 @@ type _BotPeerMatchesNeutral = Assert<
 >
 type _BotCommandMatchesNeutral = Assert<
   Extends<typeof BotCommand.Type, NeutralBotCommand>
+>
+type _BotCapabilityMatchesNeutral = Assert<
+  Extends<typeof BotCapability.Type, NeutralBotCapability>
 >
 type _BotEntityMatchesNeutral = Assert<
   Extends<

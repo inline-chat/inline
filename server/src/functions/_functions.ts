@@ -39,6 +39,12 @@ import { deleteBot } from "./bot.deleteBot"
 import { getBotCommands } from "./bot.getCommands"
 import { setBotCommands } from "./bot.setCommands"
 import { getPeerBotCommands } from "./bot.getPeerCommands"
+import { getPeerBots } from "./bot.getPeerBots"
+import { getMyBotCapabilities } from "./bot.getMyCapabilities"
+import { setMyBotCapabilities } from "./bot.setMyCapabilities"
+import { requestBotChatSettings } from "./bot.requestChatSettings"
+import { invokeBotChatSettingsItem } from "./bot.invokeChatSettingsItem"
+import { answerBotChatSettings } from "./bot.answerChatSettings"
 import { revealBotToken } from "./bot.revealToken"
 import { rotateBotToken } from "./bot.rotateToken"
 import { updateBotProfile } from "./bot.updateProfile"
@@ -133,6 +139,12 @@ export const Functions = {
     getCommands: getBotCommands,
     setCommands: setBotCommands,
     getPeerCommands: getPeerBotCommands,
+    getPeerBots,
+    getMyCapabilities: getMyBotCapabilities,
+    setMyCapabilities: setMyBotCapabilities,
+    requestChatSettings: requestBotChatSettings,
+    invokeChatSettingsItem: invokeBotChatSettingsItem,
+    answerChatSettings: answerBotChatSettings,
     revealBotToken: revealBotToken,
     rotateBotToken: rotateBotToken,
     updateBotProfile: updateBotProfile,

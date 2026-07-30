@@ -383,6 +383,29 @@ export const sendMessageToRealtimeUser = async (
   }
 }
 
+/** Sends an ephemeral event only to connections authenticated as this bot. */
+export const sendMessageToRealtimeBot = async (
+  botUserId: number,
+  payload: ServerMessage["payload"],
+): Promise<number> => {
+  const connections = connectionManager
+    .getUserConnections(botUserId)
+    .filter((connection) => connection.isBot === true)
+  if (connections.length === 0) return 0
+
+  const id = genId()
+  for (const connection of connections) {
+    sendRaw(connection.ws, {
+      id,
+      body: {
+        oneofKind: "message",
+        message: { payload },
+      },
+    })
+  }
+  return connections.length
+}
+
 /**
  * Sends session-scoped material only to sockets authenticated by the exact app
  * session. A user may have several active sessions, and one session may own

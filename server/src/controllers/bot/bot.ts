@@ -6,6 +6,7 @@ import { TApiEnvelope, normalizeInputId } from "./helpers"
 import {
   TBotChat,
   TBotCommand,
+  TBotCapability,
   TBotMessage,
   TBotUser,
   TDeleteMessageInput,
@@ -13,6 +14,7 @@ import {
   TGetChatHistoryInput,
   TGetChatInput,
   TSetMyCommandsInput,
+  TSetMyCapabilitiesInput,
   TSendMessageInput,
   TSendReactionInput,
 } from "./types"
@@ -32,6 +34,7 @@ import { ModelError } from "@in/server/db/models/_errors"
 import { encodeBotEntities, parseBotEntities, type BotUserJson } from "./entities"
 import { UsersModel } from "@in/server/db/models/users"
 import { BotCommandsModel } from "@in/server/db/models/botCommands"
+import { BotCapabilitiesModel } from "@in/server/db/models/botCapabilities"
 import type {
   BotChat,
   BotChatLastMessage,
@@ -864,6 +867,52 @@ const botMethods = (authPlugin: any): any => {
     {
       response: TApiEnvelope(t.Object({})),
     },
+  )
+
+  app.get(
+    "/getMyCapabilities",
+    async ({ store }: any) => ({
+      ok: true,
+      result: {
+        capabilities: (await BotCapabilitiesModel.getForBotUserId(store.currentUserId))
+          .filter((row) => row.kind === "chat_settings" && row.version === 1)
+          .map(() => ({ kind: "chat_settings" as const, version: 1 as const })),
+      },
+    }),
+    { response: TApiEnvelope(t.Object({ capabilities: t.Array(TBotCapability) })) },
+  )
+
+  app.post(
+    "/setMyCapabilities",
+    async ({ body, query, store }: any) => {
+      const input = mergePostInput(body, query)
+      const raw = parseMaybeJsonValue(input["capabilities"])
+      if (!Array.isArray(raw) || raw.length > 100 || raw.some((item) =>
+        typeof item !== "object" || item === null || item.kind !== "chat_settings" || item.version !== 1
+      ) || new Set(raw.map((item) => item.kind)).size !== raw.length) {
+        throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+      }
+      const capabilities = await BotCapabilitiesModel.replaceForBotUserId(store.currentUserId, raw)
+      return {
+        ok: true,
+        result: {
+          capabilities: capabilities.map(() => ({ kind: "chat_settings" as const, version: 1 as const })),
+        },
+      }
+    },
+    {
+      detail: jsonBodyDoc(TSetMyCapabilitiesInput),
+      response: TApiEnvelope(t.Object({ capabilities: t.Array(TBotCapability) })),
+    },
+  )
+
+  app.post(
+    "/deleteMyCapabilities",
+    async ({ store }: any) => {
+      await BotCapabilitiesModel.replaceForBotUserId(store.currentUserId, [])
+      return { ok: true, result: {} }
+    },
+    { response: TApiEnvelope(t.Object({})) },
   )
 
   // Unknown methods should respond with a structured error envelope.

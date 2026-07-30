@@ -4,6 +4,7 @@ import { shutdownApnProvider } from "@in/server/libs/apn"
 import { stopUserSettingsCacheCleanup } from "@in/server/modules/cache/userSettings"
 import { stopDatabaseHealthMonitor } from "@in/server/modules/monitoring/databaseHealthMonitor"
 import { stopGridProviderEffectWorker } from "@in/server/modules/grid/providerEffects"
+import { shutdownBotChatSettingsBroker } from "@in/server/modules/botChatSettings/broker"
 import { Log } from "@in/server/utils/log"
 import { connectionManager } from "@in/server/ws/connections"
 import { presenceManager } from "@in/server/ws/presence"
@@ -24,6 +25,7 @@ export type GracefulShutdownDeps = {
   stopDatabaseMonitor: Step
   stopUserSettingsCleanup: Step
   stopGridProviderEffects: Step
+  stopBotChatSettings: Step
   stopServer: (
     server: Server<unknown>,
     closeActiveConnections: boolean,
@@ -65,6 +67,7 @@ const createDefaultDeps = (): GracefulShutdownDeps => ({
   stopDatabaseMonitor: () => stopDatabaseHealthMonitor(),
   stopUserSettingsCleanup: () => stopUserSettingsCacheCleanup(),
   stopGridProviderEffects: () => stopGridProviderEffectWorker(),
+  stopBotChatSettings: () => shutdownBotChatSettingsBroker(),
   stopServer: (server, closeActiveConnections) => server.stop(closeActiveConnections),
   closeConnections: () => connectionManager.shutdown(),
   shutdownPresence: () => presenceManager.shutdown(),
@@ -142,6 +145,7 @@ export const createGracefulShutdownManager = ({
       hasErrors = !(await runStep("stop_database_monitor", runtime.stopDatabaseMonitor)) || hasErrors
       hasErrors = !(await runStep("stop_user_settings_cleanup", runtime.stopUserSettingsCleanup)) || hasErrors
       hasErrors = !(await runStep("stop_grid_provider_effects", runtime.stopGridProviderEffects)) || hasErrors
+      hasErrors = !(await runStep("stop_bot_chat_settings", runtime.stopBotChatSettings)) || hasErrors
       // Bun's stop(false) stops accepting traffic but its Promise resolves only
       // after active connections drain. Start that drain without blocking the
       // connection-closing steps that make it able to resolve.

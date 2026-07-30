@@ -26,6 +26,11 @@ export const TBotCommand = t.Object({
   sort_order: t.Optional(t.Number()),
 })
 
+export const TBotCapability = t.Object({
+  kind: t.Literal("chat_settings"),
+  version: t.Literal(1),
+})
+
 export const TBotChat = t.Object({
   chat_id: t.Number(),
   title: t.Optional(t.String()),
@@ -109,4 +114,8 @@ export const TSendReactionInput = t.Object({
 
 export const TSetMyCommandsInput = t.Object({
   commands: t.Array(TBotCommand),
+})
+
+export const TSetMyCapabilitiesInput = t.Object({
+  capabilities: t.Array(TBotCapability, { maxItems: 100 }),
 })

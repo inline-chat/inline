@@ -34,6 +34,12 @@ import { deleteBotHandler } from "./deleteBot"
 import { getBotCommandsHandler } from "./getBotCommands"
 import { setBotCommandsHandler } from "./setBotCommands"
 import { getPeerBotCommandsHandler } from "./getPeerBotCommands"
+import { getPeerBotsHandler } from "./getPeerBots"
+import { getMyBotCapabilitiesHandler } from "./getMyBotCapabilities"
+import { setMyBotCapabilitiesHandler } from "./setMyBotCapabilities"
+import { requestBotChatSettingsHandler } from "./requestBotChatSettings"
+import { invokeBotChatSettingsItemHandler } from "./invokeBotChatSettingsItem"
+import { answerBotChatSettingsHandler } from "./answerBotChatSettings"
 import { revealBotTokenHandler } from "./revealBotToken"
 import { rotateBotTokenHandler } from "./rotateBotToken"
 import { updateBotProfileHandler } from "./updateBotProfile"
@@ -237,6 +243,41 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       return { oneofKind: "getPeerBotCommands", getPeerBotCommands: result }
     }
 
+    case Method.GET_PEER_BOTS: {
+      if (call.input.oneofKind !== "getPeerBots") throw RealtimeRpcError.BadRequest()
+      const result = await getPeerBotsHandler(call.input.getPeerBots, handlerContext)
+      return { oneofKind: "getPeerBots", getPeerBots: result }
+    }
+
+    case Method.GET_MY_BOT_CAPABILITIES: {
+      if (call.input.oneofKind !== "getMyBotCapabilities") throw RealtimeRpcError.BadRequest()
+      const result = await getMyBotCapabilitiesHandler(handlerContext)
+      return { oneofKind: "getMyBotCapabilities", getMyBotCapabilities: result }
+    }
+
+    case Method.SET_MY_BOT_CAPABILITIES: {
+      if (call.input.oneofKind !== "setMyBotCapabilities") throw RealtimeRpcError.BadRequest()
+      const result = await setMyBotCapabilitiesHandler(call.input.setMyBotCapabilities, handlerContext)
+      return { oneofKind: "setMyBotCapabilities", setMyBotCapabilities: result }
+    }
+
+    case Method.REQUEST_BOT_CHAT_SETTINGS: {
+      if (call.input.oneofKind !== "requestBotChatSettings") throw RealtimeRpcError.BadRequest()
+      const result = await requestBotChatSettingsHandler(call.input.requestBotChatSettings, handlerContext)
+      return { oneofKind: "requestBotChatSettings", requestBotChatSettings: result }
+    }
+
+    case Method.INVOKE_BOT_CHAT_SETTINGS_ITEM: {
+      if (call.input.oneofKind !== "invokeBotChatSettingsItem") throw RealtimeRpcError.BadRequest()
+      const result = await invokeBotChatSettingsItemHandler(call.input.invokeBotChatSettingsItem, handlerContext)
+      return { oneofKind: "invokeBotChatSettingsItem", invokeBotChatSettingsItem: result }
+    }
+
+    case Method.ANSWER_BOT_CHAT_SETTINGS: {
+      if (call.input.oneofKind !== "answerBotChatSettings") throw RealtimeRpcError.BadRequest()
+      const result = await answerBotChatSettingsHandler(call.input.answerBotChatSettings, handlerContext)
+      return { oneofKind: "answerBotChatSettings", answerBotChatSettings: result }
+    }
     case Method.GET_SPACE_MEMBERS: {
       if (call.input.oneofKind !== "getSpaceMembers") {
         throw RealtimeRpcError.BadRequest()

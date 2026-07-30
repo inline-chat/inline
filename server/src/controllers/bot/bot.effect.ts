@@ -5,6 +5,7 @@ import type {
   GetChatParams,
   SendMessageParams,
   SendReactionParams,
+  SetMyCapabilitiesParams,
   SetMyCommandsParams,
 } from "@inline-chat/bot-api-types"
 import {
@@ -63,6 +64,7 @@ import {
   BotGetChatHistoryRuntimeSuccess,
   BotGetChatSuccess,
   BotGetMyCommandsSuccess,
+  BotGetMyCapabilitiesSuccess,
   BotMessageSuccess,
   BotMessageRuntimeSuccess,
   DeleteMessageInput,
@@ -72,6 +74,7 @@ import {
   SendMessageInput,
   SendReactionInput,
   SetMyCommandsInput,
+  SetMyCapabilitiesInput,
   botTargetFieldDescriptions,
   botApiErrorAt,
   botApiErrors,
@@ -200,6 +203,18 @@ const BotMethodDocumentation = {
     summary: "Delete bot commands",
     description:
       "Deletes every command published by the authenticated bot. Returns an empty result when the command list is cleared.",
+  },
+  getMyCapabilities: {
+    summary: "Get bot capabilities",
+    description: "Returns the capabilities currently advertised by the authenticated bot.",
+  },
+  setMyCapabilities: {
+    summary: "Replace bot capabilities",
+    description: "Replaces the authenticated bot's complete capability list.",
+  },
+  deleteMyCapabilities: {
+    summary: "Delete bot capabilities",
+    description: "Clears every capability advertised by the authenticated bot.",
   },
 } satisfies Readonly<
   Record<BotOperation, BotEndpointDocumentation>
@@ -428,6 +443,24 @@ const HeaderBotEndpoints = {
     BotMethodDocumentation.deleteMyCommands,
     { success: BotEmptySuccess },
   ),
+  getMyCapabilities: headerGet(
+    "headerGetMyCapabilities",
+    "/bot/getMyCapabilities",
+    BotMethodDocumentation.getMyCapabilities,
+    { query: {}, success: BotGetMyCapabilitiesSuccess },
+  ),
+  setMyCapabilities: headerPost(
+    "headerSetMyCapabilities",
+    "/bot/setMyCapabilities",
+    BotMethodDocumentation.setMyCapabilities,
+    { payload: SetMyCapabilitiesInput, success: BotGetMyCapabilitiesSuccess },
+  ),
+  deleteMyCapabilities: headerPost(
+    "headerDeleteMyCapabilities",
+    "/bot/deleteMyCapabilities",
+    BotMethodDocumentation.deleteMyCapabilities,
+    { success: BotEmptySuccess },
+  ),
 } as const
 
 const PathBotEndpoints = {
@@ -519,6 +552,24 @@ const PathBotEndpoints = {
     "pathDeleteMyCommands",
     "/bot:token/deleteMyCommands",
     BotMethodDocumentation.deleteMyCommands,
+    { success: BotEmptySuccess },
+  ),
+  getMyCapabilities: pathGet(
+    "pathGetMyCapabilities",
+    "/bot:token/getMyCapabilities",
+    BotMethodDocumentation.getMyCapabilities,
+    { query: {}, success: BotGetMyCapabilitiesSuccess },
+  ),
+  setMyCapabilities: pathPost(
+    "pathSetMyCapabilities",
+    "/bot:token/setMyCapabilities",
+    BotMethodDocumentation.setMyCapabilities,
+    { payload: SetMyCapabilitiesInput, success: BotGetMyCapabilitiesSuccess },
+  ),
+  deleteMyCapabilities: pathPost(
+    "pathDeleteMyCapabilities",
+    "/bot:token/deleteMyCapabilities",
+    BotMethodDocumentation.deleteMyCapabilities,
     { success: BotEmptySuccess },
   ),
 } as const
@@ -694,6 +745,9 @@ export const BotApiGroup = HttpApiGroup.make("bot")
     HeaderBotEndpoints.getMyCommands,
     HeaderBotEndpoints.setMyCommands,
     HeaderBotEndpoints.deleteMyCommands,
+    HeaderBotEndpoints.getMyCapabilities,
+    HeaderBotEndpoints.setMyCapabilities,
+    HeaderBotEndpoints.deleteMyCapabilities,
     PathBotEndpoints.getMe,
     PathBotEndpoints.sendMessage,
     PathBotEndpoints.getChat,
@@ -704,6 +758,9 @@ export const BotApiGroup = HttpApiGroup.make("bot")
     PathBotEndpoints.getMyCommands,
     PathBotEndpoints.setMyCommands,
     PathBotEndpoints.deleteMyCommands,
+    PathBotEndpoints.getMyCapabilities,
+    PathBotEndpoints.setMyCapabilities,
+    PathBotEndpoints.deleteMyCapabilities,
     HeaderFallbackEndpoints.get,
     HeaderFallbackEndpoints.post,
     HeaderFallbackEndpoints.put,
@@ -966,6 +1023,9 @@ const normalizeInputForSchema = (
       ? commands.map(normalizeBotCommandForSchema)
       : commands
   }
+  if (operation === "setMyCapabilities") {
+    normalized["capabilities"] = parseCompatibilityJson(normalized["capabilities"])
+  }
   return normalized
 }
 
@@ -983,6 +1043,8 @@ const validateInput = (
       case "getMe":
       case "getMyCommands":
       case "deleteMyCommands":
+      case "getMyCapabilities":
+      case "deleteMyCapabilities":
         return Effect.succeed(value)
       case "sendMessage":
         return Schema.decodeUnknownEffect(SendMessageInput)(value)
@@ -1008,6 +1070,8 @@ const validateInput = (
         return Schema.decodeUnknownEffect(
           SetMyCommandsInput,
         )(value)
+      case "setMyCapabilities":
+        return Schema.decodeUnknownEffect(SetMyCapabilitiesInput)(value)
     }
   }
 
@@ -1033,6 +1097,8 @@ const prepareInput = (
     operation === "getMe" ||
     operation === "getMyCommands" ||
     operation === "deleteMyCommands"
+    || operation === "getMyCapabilities"
+    || operation === "deleteMyCapabilities"
   ) {
     return Effect.succeed({})
   }
@@ -1106,6 +1172,12 @@ const runOperation = (
         )
       case "deleteMyCommands":
         return operations.deleteMyCommands(context)
+      case "getMyCapabilities":
+        return operations.getMyCapabilities(context)
+      case "setMyCapabilities":
+        return operations.setMyCapabilities(input as SetMyCapabilitiesParams, context)
+      case "deleteMyCapabilities":
+        return operations.deleteMyCapabilities(context)
     }
   })
 
@@ -1140,10 +1212,14 @@ const validateSuccessEnvelope = (
         return Schema.decodeUnknownEffect(
           BotGetMyCommandsSuccess,
         )(envelope)
+      case "getMyCapabilities":
+      case "setMyCapabilities":
+        return Schema.decodeUnknownEffect(BotGetMyCapabilitiesSuccess)(envelope)
       case "deleteMessage":
       case "sendReaction":
       case "setMyCommands":
       case "deleteMyCommands":
+      case "deleteMyCapabilities":
         return Schema.decodeUnknownEffect(
           BotEmptyRuntimeSuccess,
         )(envelope)
@@ -1516,6 +1592,18 @@ export const makeBotRouteGroup = () => {
               ),
           )
           .handleRaw(
+            "headerGetMyCapabilities",
+            ({ request }) => execute("getMyCapabilities", request, undefined),
+          )
+          .handleRaw(
+            "headerSetMyCapabilities",
+            ({ request }) => execute("setMyCapabilities", request, undefined),
+          )
+          .handleRaw(
+            "headerDeleteMyCapabilities",
+            ({ request }) => execute("deleteMyCapabilities", request, undefined),
+          )
+          .handleRaw(
             "pathGetMe",
             ({ params, request }) =>
               execute("getMe", request, params.token),
@@ -1596,6 +1684,18 @@ export const makeBotRouteGroup = () => {
                 request,
                 params.token,
               ),
+          )
+          .handleRaw(
+            "pathGetMyCapabilities",
+            ({ params, request }) => execute("getMyCapabilities", request, params.token),
+          )
+          .handleRaw(
+            "pathSetMyCapabilities",
+            ({ params, request }) => execute("setMyCapabilities", request, params.token),
+          )
+          .handleRaw(
+            "pathDeleteMyCapabilities",
+            ({ params, request }) => execute("deleteMyCapabilities", request, params.token),
           )
           .handleRaw(
             "headerFallbackGet",

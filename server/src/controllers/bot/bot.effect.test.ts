@@ -109,6 +109,9 @@ const makeOperations = (
   getMyCommands: () => unused("getMyCommands"),
   setMyCommands: () => unused("setMyCommands"),
   deleteMyCommands: () => unused("deleteMyCommands"),
+  getMyCapabilities: () => unused("getMyCapabilities"),
+  setMyCapabilities: () => unused("setMyCapabilities"),
+  deleteMyCapabilities: () => unused("deleteMyCapabilities"),
   ...overrides,
 })
 
@@ -217,7 +220,7 @@ const jsonRequest = (
   })
 
 describe("Effect Bot routes", () => {
-  it("serves all ten methods through both header and path-token forms", async () => {
+  it("serves all thirteen methods through both header and path-token forms", async () => {
     const calls: BotMethodName[] = []
     const invoked = <A>(
       operation: BotMethodName,
@@ -260,6 +263,20 @@ describe("Effect Bot routes", () => {
         invoked("setMyCommands", {}),
       deleteMyCommands: () =>
         invoked("deleteMyCommands", {}),
+      getMyCapabilities: () =>
+        invoked("getMyCapabilities", {
+          capabilities: [
+            { kind: "chat_settings", version: 1 },
+          ],
+        }),
+      setMyCapabilities: () =>
+        invoked("setMyCapabilities", {
+          capabilities: [
+            { kind: "chat_settings", version: 1 },
+          ],
+        }),
+      deleteMyCapabilities: () =>
+        invoked("deleteMyCapabilities", {}),
     })
     const kernel = makeKernel({ operations })
     const methods = [
@@ -328,6 +345,25 @@ describe("Effect Bot routes", () => {
         method: "POST",
         input: {},
       },
+      {
+        name: "getMyCapabilities",
+        method: "GET",
+        input: undefined,
+      },
+      {
+        name: "setMyCapabilities",
+        method: "POST",
+        input: {
+          capabilities: [
+            { kind: "chat_settings", version: 1 },
+          ],
+        },
+      },
+      {
+        name: "deleteMyCapabilities",
+        method: "POST",
+        input: {},
+      },
     ] as const
 
     try {
@@ -381,7 +417,7 @@ describe("Effect Bot routes", () => {
         }
       }
 
-      expect(calls).toHaveLength(20)
+      expect(calls).toHaveLength(26)
       for (const method of methods) {
         expect(
           calls.filter((call) => call === method.name),
@@ -971,7 +1007,7 @@ describe("Effect Bot routes", () => {
     expect(() =>
       assertValidOpenApiDocument(spec),
     ).not.toThrow()
-    expect(Object.keys(spec.paths)).toHaveLength(20)
+    expect(Object.keys(spec.paths)).toHaveLength(26)
 
     const expectedMethods = [
       "getMe",
@@ -984,6 +1020,9 @@ describe("Effect Bot routes", () => {
       "getMyCommands",
       "setMyCommands",
       "deleteMyCommands",
+      "getMyCapabilities",
+      "setMyCapabilities",
+      "deleteMyCapabilities",
     ]
     for (const method of expectedMethods) {
       expect(spec.paths[`/bot/${method}`]).toBeDefined()

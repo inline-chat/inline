@@ -8,10 +8,12 @@ import type {
   GetChatResult,
   GetMeResult,
   GetMyCommandsResult,
+  GetMyCapabilitiesResult,
   SendMessageParams,
   SendMessageResult,
   SendReactionParams,
   SetMyCommandsParams,
+  SetMyCapabilitiesParams,
 } from "@inline-chat/bot-api-types"
 import {
   Context,
@@ -34,6 +36,9 @@ export type BotOperation =
   | "getMyCommands"
   | "setMyCommands"
   | "deleteMyCommands"
+  | "getMyCapabilities"
+  | "setMyCapabilities"
+  | "deleteMyCapabilities"
 
 export interface BotOperationContext {
   readonly currentUserId: number
@@ -101,6 +106,16 @@ export interface BotOperationsShape {
   readonly deleteMyCommands: (
     context: BotOperationContext,
   ) => Effect.Effect<EmptyResult, BotOperationError>
+  readonly getMyCapabilities: (
+    context: BotOperationContext,
+  ) => Effect.Effect<GetMyCapabilitiesResult, BotOperationError>
+  readonly setMyCapabilities: (
+    input: SetMyCapabilitiesParams,
+    context: BotOperationContext,
+  ) => Effect.Effect<GetMyCapabilitiesResult, BotOperationError>
+  readonly deleteMyCapabilities: (
+    context: BotOperationContext,
+  ) => Effect.Effect<EmptyResult, BotOperationError>
 }
 
 export class BotOperations extends Context.Service<
@@ -144,6 +159,16 @@ export interface BotOperationHandlers {
     context: BotOperationContext,
   ) => Promise<EmptyResult>
   readonly deleteMyCommands: (
+    context: BotOperationContext,
+  ) => Promise<EmptyResult>
+  readonly getMyCapabilities: (
+    context: BotOperationContext,
+  ) => Promise<GetMyCapabilitiesResult>
+  readonly setMyCapabilities: (
+    input: SetMyCapabilitiesParams,
+    context: BotOperationContext,
+  ) => Promise<GetMyCapabilitiesResult>
+  readonly deleteMyCapabilities: (
     context: BotOperationContext,
   ) => Promise<EmptyResult>
 }
@@ -276,5 +301,17 @@ export const makeBotOperations = (
   deleteMyCommands: (context) =>
     adapt("deleteMyCommands", () =>
       handlers.deleteMyCommands(context),
+    ),
+  getMyCapabilities: (context) =>
+    adapt("getMyCapabilities", () =>
+      handlers.getMyCapabilities(context),
+    ),
+  setMyCapabilities: (input, context) =>
+    adapt("setMyCapabilities", () =>
+      handlers.setMyCapabilities(input, context),
+    ),
+  deleteMyCapabilities: (context) =>
+    adapt("deleteMyCapabilities", () =>
+      handlers.deleteMyCapabilities(context),
     ),
 })
