@@ -8,6 +8,7 @@ final class ChatToolbarState {
     case notificationSettings
     case translate
     case participants
+    case botSettings
   }
 
   enum Anchor: Hashable {
@@ -32,6 +33,7 @@ final class ChatToolbarState {
     case participantsPopover(Anchor)
     case addParticipants(Anchor)
     case mentionParticipantPrompt(Anchor, [MentionCompletionItem])
+    case botSettings(Anchor)
 
     var anchor: Anchor {
       switch self {
@@ -41,7 +43,8 @@ final class ChatToolbarState {
            let .translationOptions(anchor),
            let .participantsPopover(anchor),
            let .addParticipants(anchor),
-           let .mentionParticipantPrompt(anchor, _):
+           let .mentionParticipantPrompt(anchor, _),
+           let .botSettings(anchor):
         anchor
       }
     }
@@ -52,7 +55,8 @@ final class ChatToolbarState {
            .translationPopover,
            .translationPrompt,
            .participantsPopover,
-           .mentionParticipantPrompt:
+           .mentionParticipantPrompt,
+           .botSettings:
         true
       case .translationOptions,
            .addParticipants:
@@ -98,6 +102,10 @@ final class ChatToolbarState {
 
   func presentParticipantsPopover() {
     presentation = .participantsPopover(anchor(for: .participants))
+  }
+
+  func presentBotSettings() {
+    presentation = .botSettings(anchor(for: .botSettings))
   }
 
   func presentAddParticipants(from anchor: Anchor? = nil) {

@@ -43,6 +43,7 @@ struct ReplyThreadPaneView: View {
   let onClose: () -> Void
 
   @State private var toolbarState = ChatToolbarState()
+  @State private var botChatSettingsCoordinator: BotChatSettingsCoordinator
   @State private var titleModel: ChatRouteToolbarTitleModel
 
   init(
@@ -55,6 +56,7 @@ struct ReplyThreadPaneView: View {
     self.dependencies = dependencies
     self.onExpand = onExpand
     self.onClose = onClose
+    _botChatSettingsCoordinator = State(initialValue: BotChatSettingsCoordinator(peer: peer))
     _titleModel = State(initialValue: ChatRouteToolbarTitleModel(
       peer: peer,
       db: dependencies.database
@@ -80,6 +82,8 @@ struct ReplyThreadPaneView: View {
           dependencies: dependencies,
           title: titleModel.title,
           iconPeer: titleModel.iconPeer,
+          botChatSettingsCoordinator: botChatSettingsCoordinator,
+          toolbarState: toolbarState,
           onExpand: onExpand,
           onClose: onClose
         )
@@ -97,8 +101,13 @@ struct ReplyThreadPaneView: View {
       dependencies: dependencies,
       toolbarState: toolbarState
     ))
+    .task(id: peer.toString(), priority: .utility) {
+      botChatSettingsCoordinator.startObservingDiscoveryScope(in: dependencies.database)
+      await botChatSettingsCoordinator.warmUp()
+    }
     .onDisappear {
       toolbarState.dismissPresentation()
+      botChatSettingsCoordinator.cancel()
     }
   }
 }
@@ -108,6 +117,8 @@ private struct ReplyThreadPaneControls: View {
   let dependencies: AppDependencies
   let title: String
   let iconPeer: ChatIcon.PeerType?
+  let botChatSettingsCoordinator: BotChatSettingsCoordinator
+  let toolbarState: ChatToolbarState
   let onExpand: () -> Void
   let onClose: () -> Void
 
@@ -134,6 +145,19 @@ private struct ReplyThreadPaneControls: View {
 
       Divider()
         .frame(height: 18)
+
+      if botChatSettingsCoordinator.isToolbarVisible {
+        BotChatSettingsToolbarButton(
+          coordinator: botChatSettingsCoordinator,
+          toolbarState: toolbarState
+        )
+        .buttonStyle(.plain)
+        .controlSize(.small)
+        .frame(width: 26, height: 26)
+
+        Divider()
+          .frame(height: 18)
+      }
 
       ReplyThreadPaneControlButton(
         systemImage: "xmark",

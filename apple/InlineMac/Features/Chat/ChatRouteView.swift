@@ -14,10 +14,16 @@ struct ChatRouteView: View {
   @ObservedObject private var botPresenceController = BotPresenceController.shared
   @ObservedObject private var settings = AppSettings.shared
   @State private var chatToolbarState = ChatToolbarState()
+  @State private var botChatSettingsCoordinator: BotChatSettingsCoordinator
   @State private var toolbarDialog: Dialog?
   @State private var nudgePopoverPresented = false
   @State private var navigationTitle = ""
   @State private var userGroupMentionTarget: UserGroupMentionTarget?
+
+  init(peer: Peer) {
+    self.peer = peer
+    _botChatSettingsCoordinator = State(initialValue: BotChatSettingsCoordinator(peer: peer))
+  }
 
   private var fallbackTitle: String {
     peer.isThread ? "Chat" : "Direct Message"
@@ -113,6 +119,8 @@ struct ChatRouteView: View {
         if oldPeer != newPeer {
           toolbarDialog = nil
           chatToolbarState.dismissPresentation()
+          botChatSettingsCoordinator.cancel()
+          botChatSettingsCoordinator = BotChatSettingsCoordinator(peer: peer)
           nudgePopoverPresented = false
         }
       }
@@ -129,9 +137,12 @@ struct ChatRouteView: View {
       .task(id: peer.toString(), priority: .utility) {
         BotPresenceController.shared.setContext(peer: peer, realtimeV2: dependencies.realtimeV2)
         await ensureToolbarParticipantsLoaded(dependencies: dependencies)
+        botChatSettingsCoordinator.startObservingDiscoveryScope(in: dependencies.database)
+        await botChatSettingsCoordinator.warmUp()
       }
       .onDisappear {
         BotPresenceController.shared.clearContext(peer: peer)
+        botChatSettingsCoordinator.cancel()
       }
       .onReceive(
         NotificationCenter.default
@@ -193,6 +204,21 @@ struct ChatRouteView: View {
             )
             .macToolbarLayout(toolbarLayout)
             .id(peer.toString())
+          }
+
+          if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed)
+          }
+        }
+
+        if botChatSettingsCoordinator.isToolbarVisible {
+          ToolbarItem {
+            BotChatSettingsToolbarButton(
+              coordinator: botChatSettingsCoordinator,
+              toolbarState: chatToolbarState
+            )
+            .macToolbarLayout(toolbarLayout)
+            .id("bot-settings-\(peer.toString())")
           }
 
           if #available(macOS 26.0, *) {
