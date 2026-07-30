@@ -5622,6 +5622,7 @@ var MessageEntity_Type;
   MessageEntity_Type2[MessageEntity_Type2["THREAD"] = 11] = "THREAD";
   MessageEntity_Type2[MessageEntity_Type2["THREAD_TITLE"] = 12] = "THREAD_TITLE";
   MessageEntity_Type2[MessageEntity_Type2["BOT_COMMAND"] = 13] = "BOT_COMMAND";
+  MessageEntity_Type2[MessageEntity_Type2["GROUP_MENTION"] = 14] = "GROUP_MENTION";
 })(MessageEntity_Type || (MessageEntity_Type = {}));
 var Member_Role;
 (function(Member_Role2) {
@@ -5674,6 +5675,12 @@ var RpcError_Code;
   RpcError_Code2[RpcError_Code2["USERNAME_TAKEN"] = 16] = "USERNAME_TAKEN";
   RpcError_Code2[RpcError_Code2["FIRST_NAME_INVALID"] = 17] = "FIRST_NAME_INVALID";
 })(RpcError_Code || (RpcError_Code = {}));
+var SyncSkippedSequence_Reason;
+(function(SyncSkippedSequence_Reason2) {
+  SyncSkippedSequence_Reason2[SyncSkippedSequence_Reason2["REASON_UNSPECIFIED"] = 0] = "REASON_UNSPECIFIED";
+  SyncSkippedSequence_Reason2[SyncSkippedSequence_Reason2["IRRELEVANT_TO_BUCKET"] = 1] = "IRRELEVANT_TO_BUCKET";
+  SyncSkippedSequence_Reason2[SyncSkippedSequence_Reason2["SNAPSHOT_REPAIR_REQUIRED"] = 2] = "SNAPSHOT_REPAIR_REQUIRED";
+})(SyncSkippedSequence_Reason || (SyncSkippedSequence_Reason = {}));
 var GetUpdatesResult_ResultType;
 (function(GetUpdatesResult_ResultType2) {
   GetUpdatesResult_ResultType2[GetUpdatesResult_ResultType2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
@@ -5723,10 +5730,33 @@ var UserStatus_Status;
   UserStatus_Status2[UserStatus_Status2["ONLINE"] = 1] = "ONLINE";
   UserStatus_Status2[UserStatus_Status2["OFFLINE"] = 2] = "OFFLINE";
 })(UserStatus_Status || (UserStatus_Status = {}));
+var BotCapability_Kind;
+(function(BotCapability_Kind2) {
+  BotCapability_Kind2[BotCapability_Kind2["KIND_UNSPECIFIED"] = 0] = "KIND_UNSPECIFIED";
+  BotCapability_Kind2[BotCapability_Kind2["CHAT_SETTINGS"] = 1] = "CHAT_SETTINGS";
+})(BotCapability_Kind || (BotCapability_Kind = {}));
+var BotChatSettingsInfo_Tone;
+(function(BotChatSettingsInfo_Tone2) {
+  BotChatSettingsInfo_Tone2[BotChatSettingsInfo_Tone2["TONE_UNSPECIFIED"] = 0] = "TONE_UNSPECIFIED";
+  BotChatSettingsInfo_Tone2[BotChatSettingsInfo_Tone2["NEUTRAL"] = 1] = "NEUTRAL";
+  BotChatSettingsInfo_Tone2[BotChatSettingsInfo_Tone2["SUCCESS"] = 2] = "SUCCESS";
+  BotChatSettingsInfo_Tone2[BotChatSettingsInfo_Tone2["WARNING"] = 3] = "WARNING";
+  BotChatSettingsInfo_Tone2[BotChatSettingsInfo_Tone2["ERROR"] = 4] = "ERROR";
+})(BotChatSettingsInfo_Tone || (BotChatSettingsInfo_Tone = {}));
+var BotChatSettingsProblem_Code;
+(function(BotChatSettingsProblem_Code2) {
+  BotChatSettingsProblem_Code2[BotChatSettingsProblem_Code2["CODE_UNSPECIFIED"] = 0] = "CODE_UNSPECIFIED";
+  BotChatSettingsProblem_Code2[BotChatSettingsProblem_Code2["UNAVAILABLE"] = 1] = "UNAVAILABLE";
+  BotChatSettingsProblem_Code2[BotChatSettingsProblem_Code2["INVALID_VALUE"] = 2] = "INVALID_VALUE";
+  BotChatSettingsProblem_Code2[BotChatSettingsProblem_Code2["STALE"] = 3] = "STALE";
+  BotChatSettingsProblem_Code2[BotChatSettingsProblem_Code2["FAILED"] = 4] = "FAILED";
+  BotChatSettingsProblem_Code2[BotChatSettingsProblem_Code2["UNREACHABLE"] = 5] = "UNREACHABLE";
+})(BotChatSettingsProblem_Code || (BotChatSettingsProblem_Code = {}));
 var DialogFollowMode;
 (function(DialogFollowMode2) {
   DialogFollowMode2[DialogFollowMode2["DIALOG_FOLLOW_MODE_UNSPECIFIED"] = 0] = "DIALOG_FOLLOW_MODE_UNSPECIFIED";
   DialogFollowMode2[DialogFollowMode2["FOLLOWING"] = 1] = "FOLLOWING";
+  DialogFollowMode2[DialogFollowMode2["UNFOLLOWED"] = 2] = "UNFOLLOWED";
 })(DialogFollowMode || (DialogFollowMode = {}));
 var MessageSendMode;
 (function(MessageSendMode2) {
@@ -5803,7 +5833,37 @@ var Method;
   Method2[Method2["GET_SPACE_URL_PREVIEW_EXCLUSIONS"] = 65] = "GET_SPACE_URL_PREVIEW_EXCLUSIONS";
   Method2[Method2["ADD_SPACE_URL_PREVIEW_EXCLUSION"] = 66] = "ADD_SPACE_URL_PREVIEW_EXCLUSION";
   Method2[Method2["REMOVE_SPACE_URL_PREVIEW_EXCLUSION"] = 67] = "REMOVE_SPACE_URL_PREVIEW_EXCLUSION";
+  Method2[Method2["GET_USER_GROUPS"] = 68] = "GET_USER_GROUPS";
+  Method2[Method2["CREATE_USER_GROUP"] = 69] = "CREATE_USER_GROUP";
+  Method2[Method2["UPDATE_USER_GROUP"] = 70] = "UPDATE_USER_GROUP";
+  Method2[Method2["DELETE_USER_GROUP"] = 71] = "DELETE_USER_GROUP";
+  Method2[Method2["GET_SPACE_SETTINGS"] = 72] = "GET_SPACE_SETTINGS";
+  Method2[Method2["TOGGLE_SPACE_GRID"] = 73] = "TOGGLE_SPACE_GRID";
+  Method2[Method2["GET_THREAD_REFERENCES"] = 74] = "GET_THREAD_REFERENCES";
+  Method2[Method2["GET_THREAD_SUBTHREADS"] = 75] = "GET_THREAD_SUBTHREADS";
+  Method2[Method2["GET_PEER_BOTS"] = 76] = "GET_PEER_BOTS";
+  Method2[Method2["GET_MY_BOT_CAPABILITIES"] = 77] = "GET_MY_BOT_CAPABILITIES";
+  Method2[Method2["SET_MY_BOT_CAPABILITIES"] = 78] = "SET_MY_BOT_CAPABILITIES";
+  Method2[Method2["REQUEST_BOT_CHAT_SETTINGS"] = 79] = "REQUEST_BOT_CHAT_SETTINGS";
+  Method2[Method2["INVOKE_BOT_CHAT_SETTINGS_ITEM"] = 80] = "INVOKE_BOT_CHAT_SETTINGS_ITEM";
+  Method2[Method2["ANSWER_BOT_CHAT_SETTINGS"] = 81] = "ANSWER_BOT_CHAT_SETTINGS";
+  Method2[Method2["GET_GRID"] = 83] = "GET_GRID";
+  Method2[Method2["CREATE_GRID_ROOM"] = 84] = "CREATE_GRID_ROOM";
+  Method2[Method2["JOIN_GRID_ROOM"] = 85] = "JOIN_GRID_ROOM";
+  Method2[Method2["LEAVE_GRID_ROOM"] = 86] = "LEAVE_GRID_ROOM";
+  Method2[Method2["SET_GRID_ROOM_TITLE"] = 87] = "SET_GRID_ROOM_TITLE";
+  Method2[Method2["SET_GRID_ROOM_LOCKED"] = 88] = "SET_GRID_ROOM_LOCKED";
+  Method2[Method2["DELETE_GRID_ROOM"] = 89] = "DELETE_GRID_ROOM";
+  Method2[Method2["PREPARE_GRID_CONNECTION"] = 90] = "PREPARE_GRID_CONNECTION";
+  Method2[Method2["SET_GRID_AVATAR_MICROPHONE_ENABLED"] = 91] = "SET_GRID_AVATAR_MICROPHONE_ENABLED";
+  Method2[Method2["GET_GRID_HOME"] = 92] = "GET_GRID_HOME";
 })(Method || (Method = {}));
+var GridConnectionUnavailableReason;
+(function(GridConnectionUnavailableReason2) {
+  GridConnectionUnavailableReason2[GridConnectionUnavailableReason2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  GridConnectionUnavailableReason2[GridConnectionUnavailableReason2["NOT_ACTIVE"] = 1] = "NOT_ACTIVE";
+  GridConnectionUnavailableReason2[GridConnectionUnavailableReason2["PROVIDER_UNAVAILABLE"] = 2] = "PROVIDER_UNAVAILABLE";
+})(GridConnectionUnavailableReason || (GridConnectionUnavailableReason = {}));
 var UsernameAvailability;
 (function(UsernameAvailability2) {
   UsernameAvailability2[UsernameAvailability2["USERNAME_AVAILABILITY_UNSPECIFIED"] = 0] = "USERNAME_AVAILABILITY_UNSPECIFIED";
@@ -5827,6 +5887,12 @@ var GetChatHistoryMode;
   GetChatHistoryMode2[GetChatHistoryMode2["HISTORY_MODE_NEWER"] = 3] = "HISTORY_MODE_NEWER";
   GetChatHistoryMode2[GetChatHistoryMode2["HISTORY_MODE_AROUND"] = 4] = "HISTORY_MODE_AROUND";
 })(GetChatHistoryMode || (GetChatHistoryMode = {}));
+var ThreadReferenceKind;
+(function(ThreadReferenceKind2) {
+  ThreadReferenceKind2[ThreadReferenceKind2["THREAD_REFERENCE_KIND_UNSPECIFIED"] = 0] = "THREAD_REFERENCE_KIND_UNSPECIFIED";
+  ThreadReferenceKind2[ThreadReferenceKind2["THREAD_LINK"] = 1] = "THREAD_LINK";
+  ThreadReferenceKind2[ThreadReferenceKind2["REPLY_THREAD"] = 2] = "REPLY_THREAD";
+})(ThreadReferenceKind || (ThreadReferenceKind = {}));
 var SearchMessagesFilter;
 (function(SearchMessagesFilter2) {
   SearchMessagesFilter2[SearchMessagesFilter2["FILTER_UNSPECIFIED"] = 0] = "FILTER_UNSPECIFIED";
@@ -5835,6 +5901,7 @@ var SearchMessagesFilter;
   SearchMessagesFilter2[SearchMessagesFilter2["FILTER_PHOTO_VIDEO"] = 3] = "FILTER_PHOTO_VIDEO";
   SearchMessagesFilter2[SearchMessagesFilter2["FILTER_DOCUMENTS"] = 4] = "FILTER_DOCUMENTS";
   SearchMessagesFilter2[SearchMessagesFilter2["FILTER_LINKS"] = 5] = "FILTER_LINKS";
+  SearchMessagesFilter2[SearchMessagesFilter2["FILTER_VOICE_MEMOS"] = 6] = "FILTER_VOICE_MEMOS";
 })(SearchMessagesFilter || (SearchMessagesFilter = {}));
 
 class ClientMessage$Type extends import_runtime4.MessageType {
@@ -6101,7 +6168,9 @@ var ServerProtocolMessage = new ServerProtocolMessage$Type;
 class ServerMessage$Type extends import_runtime4.MessageType {
   constructor() {
     super("ServerMessage", [
-      { no: 4, name: "update", kind: "message", oneof: "payload", T: () => UpdatesPayload }
+      { no: 4, name: "update", kind: "message", oneof: "payload", T: () => UpdatesPayload },
+      { no: 5, name: "grid", kind: "message", oneof: "payload", T: () => GridEvent },
+      { no: 6, name: "bot", kind: "message", oneof: "payload", T: () => BotEvent }
     ]);
   }
   create(value) {
@@ -6122,6 +6191,18 @@ class ServerMessage$Type extends import_runtime4.MessageType {
             update: UpdatesPayload.internalBinaryRead(reader, reader.uint32(), options, message.payload.update)
           };
           break;
+        case 5:
+          message.payload = {
+            oneofKind: "grid",
+            grid: GridEvent.internalBinaryRead(reader, reader.uint32(), options, message.payload.grid)
+          };
+          break;
+        case 6:
+          message.payload = {
+            oneofKind: "bot",
+            bot: BotEvent.internalBinaryRead(reader, reader.uint32(), options, message.payload.bot)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -6136,6 +6217,10 @@ class ServerMessage$Type extends import_runtime4.MessageType {
   internalBinaryWrite(message, writer, options) {
     if (message.payload.oneofKind === "update")
       UpdatesPayload.internalBinaryWrite(message.payload.update, writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.payload.oneofKind === "grid")
+      GridEvent.internalBinaryWrite(message.payload.grid, writer.tag(5, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.payload.oneofKind === "bot")
+      BotEvent.internalBinaryWrite(message.payload.bot, writer.tag(6, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -6143,6 +6228,61 @@ class ServerMessage$Type extends import_runtime4.MessageType {
   }
 }
 var ServerMessage = new ServerMessage$Type;
+
+class BotEvent$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BotEvent", [
+      { no: 1, name: "chat_settings_requested", kind: "message", oneof: "event", T: () => BotChatSettingsRequested },
+      { no: 2, name: "chat_settings_item_invoked", kind: "message", oneof: "event", T: () => BotChatSettingsItemInvoked }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.event = { oneofKind: undefined };
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.event = {
+            oneofKind: "chatSettingsRequested",
+            chatSettingsRequested: BotChatSettingsRequested.internalBinaryRead(reader, reader.uint32(), options, message.event.chatSettingsRequested)
+          };
+          break;
+        case 2:
+          message.event = {
+            oneofKind: "chatSettingsItemInvoked",
+            chatSettingsItemInvoked: BotChatSettingsItemInvoked.internalBinaryRead(reader, reader.uint32(), options, message.event.chatSettingsItemInvoked)
+          };
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.event.oneofKind === "chatSettingsRequested")
+      BotChatSettingsRequested.internalBinaryWrite(message.event.chatSettingsRequested, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.event.oneofKind === "chatSettingsItemInvoked")
+      BotChatSettingsItemInvoked.internalBinaryWrite(message.event.chatSettingsItemInvoked, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BotEvent = new BotEvent$Type;
 
 class UpdatesPayload$Type extends import_runtime4.MessageType {
   constructor() {
@@ -7124,6 +7264,49 @@ class Dialog$Type extends import_runtime4.MessageType {
 }
 var Dialog = new Dialog$Type;
 
+class ChatPermissions$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("ChatPermissions", [
+      { no: 1, name: "can_update_info", kind: "scalar", T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.canUpdateInfo = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.canUpdateInfo = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.canUpdateInfo !== false)
+      writer.tag(1, import_runtime.WireType.Varint).bool(message.canUpdateInfo);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var ChatPermissions = new ChatPermissions$Type;
+
 class Chat$Type extends import_runtime4.MessageType {
   constructor() {
     super("Chat", [
@@ -7140,7 +7323,8 @@ class Chat$Type extends import_runtime4.MessageType {
       { no: 11, name: "parent_chat_id", kind: "scalar", opt: true, T: 3, L: 0 },
       { no: 12, name: "parent_message_id", kind: "scalar", opt: true, T: 3, L: 0 },
       { no: 13, name: "untitled", kind: "scalar", opt: true, T: 8 },
-      { no: 14, name: "number", kind: "scalar", opt: true, T: 5 }
+      { no: 14, name: "number", kind: "scalar", opt: true, T: 5 },
+      { no: 15, name: "permissions", kind: "message", T: () => ChatPermissions }
     ]);
   }
   create(value) {
@@ -7198,6 +7382,9 @@ class Chat$Type extends import_runtime4.MessageType {
         case 14:
           message.number = reader.int32();
           break;
+        case 15:
+          message.permissions = ChatPermissions.internalBinaryRead(reader, reader.uint32(), options, message.permissions);
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -7238,6 +7425,8 @@ class Chat$Type extends import_runtime4.MessageType {
       writer.tag(13, import_runtime.WireType.Varint).bool(message.untitled);
     if (message.number !== undefined)
       writer.tag(14, import_runtime.WireType.Varint).int32(message.number);
+    if (message.permissions)
+      ChatPermissions.internalBinaryWrite(message.permissions, writer.tag(15, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -7648,6 +7837,151 @@ class MessageActionToast$Type extends import_runtime4.MessageType {
 }
 var MessageActionToast = new MessageActionToast$Type;
 
+class MessageService$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("MessageService", [
+      { no: 1, name: "thread_backlink", kind: "message", oneof: "event", T: () => MessageServiceThreadBacklink },
+      { no: 2, name: "pinned_message", kind: "message", oneof: "event", T: () => MessageServicePinnedMessage }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.event = { oneofKind: undefined };
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.event = {
+            oneofKind: "threadBacklink",
+            threadBacklink: MessageServiceThreadBacklink.internalBinaryRead(reader, reader.uint32(), options, message.event.threadBacklink)
+          };
+          break;
+        case 2:
+          message.event = {
+            oneofKind: "pinnedMessage",
+            pinnedMessage: MessageServicePinnedMessage.internalBinaryRead(reader, reader.uint32(), options, message.event.pinnedMessage)
+          };
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.event.oneofKind === "threadBacklink")
+      MessageServiceThreadBacklink.internalBinaryWrite(message.event.threadBacklink, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.event.oneofKind === "pinnedMessage")
+      MessageServicePinnedMessage.internalBinaryWrite(message.event.pinnedMessage, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var MessageService = new MessageService$Type;
+
+class MessageServiceThreadBacklink$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("MessageServiceThreadBacklink", [
+      { no: 1, name: "source_chat_id", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 2, name: "source_title", kind: "scalar", opt: true, T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.sourceChatId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.sourceTitle = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.sourceChatId !== undefined)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.sourceChatId);
+    if (message.sourceTitle !== undefined)
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.sourceTitle);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var MessageServiceThreadBacklink = new MessageServiceThreadBacklink$Type;
+
+class MessageServicePinnedMessage$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("MessageServicePinnedMessage", [
+      { no: 1, name: "message_id", kind: "scalar", opt: true, T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.messageId = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.messageId !== undefined)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.messageId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var MessageServicePinnedMessage = new MessageServicePinnedMessage$Type;
+
 class Message$Type extends import_runtime4.MessageType {
   constructor() {
     super("Message", [
@@ -7672,7 +8006,8 @@ class Message$Type extends import_runtime4.MessageType {
       { no: 18, name: "fwd_from", kind: "message", T: () => MessageFwdHeader },
       { no: 19, name: "replies", kind: "message", T: () => MessageReplies },
       { no: 20, name: "actions", kind: "message", T: () => MessageActions },
-      { no: 21, name: "rev", kind: "scalar", opt: true, T: 3, L: 0 }
+      { no: 21, name: "rev", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 22, name: "service_message", kind: "message", T: () => MessageService }
     ]);
   }
   create(value) {
@@ -7757,6 +8092,9 @@ class Message$Type extends import_runtime4.MessageType {
         case 21:
           message.rev = reader.int64().toBigInt();
           break;
+        case 22:
+          message.serviceMessage = MessageService.internalBinaryRead(reader, reader.uint32(), options, message.serviceMessage);
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -7813,6 +8151,8 @@ class Message$Type extends import_runtime4.MessageType {
       MessageActions.internalBinaryWrite(message.actions, writer.tag(20, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.rev !== undefined)
       writer.tag(21, import_runtime.WireType.Varint).int64(message.rev);
+    if (message.serviceMessage)
+      MessageService.internalBinaryWrite(message.serviceMessage, writer.tag(22, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -7930,7 +8270,9 @@ class MessageEntity$Type extends import_runtime4.MessageType {
       { no: 5, name: "text_url", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityTextUrl },
       { no: 6, name: "pre", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityPre },
       { no: 7, name: "thread", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityThread },
-      { no: 8, name: "thread_title", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityThreadTitle }
+      { no: 8, name: "thread_title", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityThreadTitle },
+      { no: 9, name: "group_mention", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityGroupMention },
+      { no: 10, name: "bot_command", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityBotCommand }
     ]);
   }
   create(value) {
@@ -7987,6 +8329,18 @@ class MessageEntity$Type extends import_runtime4.MessageType {
             threadTitle: MessageEntity_MessageEntityThreadTitle.internalBinaryRead(reader, reader.uint32(), options, message.entity.threadTitle)
           };
           break;
+        case 9:
+          message.entity = {
+            oneofKind: "groupMention",
+            groupMention: MessageEntity_MessageEntityGroupMention.internalBinaryRead(reader, reader.uint32(), options, message.entity.groupMention)
+          };
+          break;
+        case 10:
+          message.entity = {
+            oneofKind: "botCommand",
+            botCommand: MessageEntity_MessageEntityBotCommand.internalBinaryRead(reader, reader.uint32(), options, message.entity.botCommand)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -8015,6 +8369,10 @@ class MessageEntity$Type extends import_runtime4.MessageType {
       MessageEntity_MessageEntityThread.internalBinaryWrite(message.entity.thread, writer.tag(7, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.entity.oneofKind === "threadTitle")
       MessageEntity_MessageEntityThreadTitle.internalBinaryWrite(message.entity.threadTitle, writer.tag(8, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.entity.oneofKind === "groupMention")
+      MessageEntity_MessageEntityGroupMention.internalBinaryWrite(message.entity.groupMention, writer.tag(9, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.entity.oneofKind === "botCommand")
+      MessageEntity_MessageEntityBotCommand.internalBinaryWrite(message.entity.botCommand, writer.tag(10, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -8065,6 +8423,49 @@ class MessageEntity_MessageEntityMention$Type extends import_runtime4.MessageTyp
   }
 }
 var MessageEntity_MessageEntityMention = new MessageEntity_MessageEntityMention$Type;
+
+class MessageEntity_MessageEntityGroupMention$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("MessageEntity.MessageEntityGroupMention", [
+      { no: 1, name: "group_id", kind: "scalar", T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.groupId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.groupId = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.groupId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.groupId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var MessageEntity_MessageEntityGroupMention = new MessageEntity_MessageEntityGroupMention$Type;
 
 class MessageEntity_MessageEntityTextUrl$Type extends import_runtime4.MessageType {
   constructor() {
@@ -8244,6 +8645,49 @@ class MessageEntity_MessageEntityThreadTitle$Type extends import_runtime4.Messag
   }
 }
 var MessageEntity_MessageEntityThreadTitle = new MessageEntity_MessageEntityThreadTitle$Type;
+
+class MessageEntity_MessageEntityBotCommand$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("MessageEntity.MessageEntityBotCommand", [
+      { no: 1, name: "bot_user_id", kind: "scalar", T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.botUserId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.botUserId = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.botUserId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.botUserId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var MessageEntity_MessageEntityBotCommand = new MessageEntity_MessageEntityBotCommand$Type;
 
 class MessageReactions$Type extends import_runtime4.MessageType {
   constructor() {
@@ -8505,6 +8949,105 @@ class Space$Type extends import_runtime4.MessageType {
   }
 }
 var Space = new Space$Type;
+
+class UserGroup$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("UserGroup", [
+      { no: 1, name: "id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "space_id", kind: "scalar", T: 3, L: 0 },
+      { no: 3, name: "name", kind: "scalar", T: 9 },
+      { no: 4, name: "description", kind: "scalar", opt: true, T: 9 },
+      { no: 5, name: "member_count", kind: "scalar", T: 5 },
+      { no: 6, name: "user_ids", kind: "scalar", repeat: 1, T: 3, L: 0 },
+      { no: 7, name: "current_user_is_member", kind: "scalar", T: 8 },
+      { no: 8, name: "date", kind: "scalar", T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.id = 0n;
+    message.spaceId = 0n;
+    message.name = "";
+    message.memberCount = 0;
+    message.userIds = [];
+    message.currentUserIsMember = false;
+    message.date = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.id = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.spaceId = reader.int64().toBigInt();
+          break;
+        case 3:
+          message.name = reader.string();
+          break;
+        case 4:
+          message.description = reader.string();
+          break;
+        case 5:
+          message.memberCount = reader.int32();
+          break;
+        case 6:
+          if (wireType === import_runtime.WireType.LengthDelimited)
+            for (let e = reader.int32() + reader.pos;reader.pos < e; )
+              message.userIds.push(reader.int64().toBigInt());
+          else
+            message.userIds.push(reader.int64().toBigInt());
+          break;
+        case 7:
+          message.currentUserIsMember = reader.bool();
+          break;
+        case 8:
+          message.date = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.id !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.id);
+    if (message.spaceId !== 0n)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.spaceId);
+    if (message.name !== "")
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.name);
+    if (message.description !== undefined)
+      writer.tag(4, import_runtime.WireType.LengthDelimited).string(message.description);
+    if (message.memberCount !== 0)
+      writer.tag(5, import_runtime.WireType.Varint).int32(message.memberCount);
+    if (message.userIds.length) {
+      writer.tag(6, import_runtime.WireType.LengthDelimited).fork();
+      for (let i = 0;i < message.userIds.length; i++)
+        writer.int64(message.userIds[i]);
+      writer.join();
+    }
+    if (message.currentUserIsMember !== false)
+      writer.tag(7, import_runtime.WireType.Varint).bool(message.currentUserIsMember);
+    if (message.date !== 0n)
+      writer.tag(8, import_runtime.WireType.Varint).int64(message.date);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var UserGroup = new UserGroup$Type;
 
 class AddReactionInput$Type extends import_runtime4.MessageType {
   constructor() {
@@ -8824,7 +9367,8 @@ class UrlPreview$Type extends import_runtime4.MessageType {
       { no: 10, name: "provider", kind: "scalar", opt: true, T: 9 },
       { no: 11, name: "author", kind: "scalar", opt: true, T: 9 },
       { no: 12, name: "media", kind: "message", T: () => UrlPreviewMedia },
-      { no: 13, name: "layout", kind: "message", T: () => UrlPreviewLayout }
+      { no: 13, name: "layout", kind: "message", T: () => UrlPreviewLayout },
+      { no: 14, name: "author_photo", kind: "message", T: () => Photo }
     ]);
   }
   create(value) {
@@ -8878,6 +9422,9 @@ class UrlPreview$Type extends import_runtime4.MessageType {
         case 13:
           message.layout = UrlPreviewLayout.internalBinaryRead(reader, reader.uint32(), options, message.layout);
           break;
+        case 14:
+          message.authorPhoto = Photo.internalBinaryRead(reader, reader.uint32(), options, message.authorPhoto);
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -8916,6 +9463,8 @@ class UrlPreview$Type extends import_runtime4.MessageType {
       UrlPreviewMedia.internalBinaryWrite(message.media, writer.tag(12, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.layout)
       UrlPreviewLayout.internalBinaryWrite(message.layout, writer.tag(13, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.authorPhoto)
+      Photo.internalBinaryWrite(message.authorPhoto, writer.tag(14, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9571,7 +10120,9 @@ class Video$Type extends import_runtime4.MessageType {
       { no: 5, name: "duration", kind: "scalar", T: 5 },
       { no: 6, name: "size", kind: "scalar", T: 5 },
       { no: 7, name: "photo", kind: "message", T: () => Photo },
-      { no: 8, name: "cdn_url", kind: "scalar", opt: true, T: 9 }
+      { no: 8, name: "cdn_url", kind: "scalar", opt: true, T: 9 },
+      { no: 9, name: "is_animated", kind: "scalar", opt: true, T: 8 },
+      { no: 10, name: "has_audio", kind: "scalar", opt: true, T: 8 }
     ]);
   }
   create(value) {
@@ -9615,6 +10166,12 @@ class Video$Type extends import_runtime4.MessageType {
         case 8:
           message.cdnUrl = reader.string();
           break;
+        case 9:
+          message.isAnimated = reader.bool();
+          break;
+        case 10:
+          message.hasAudio = reader.bool();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -9643,6 +10200,10 @@ class Video$Type extends import_runtime4.MessageType {
       Photo.internalBinaryWrite(message.photo, writer.tag(7, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.cdnUrl !== undefined)
       writer.tag(8, import_runtime.WireType.LengthDelimited).string(message.cdnUrl);
+    if (message.isAnimated !== undefined)
+      writer.tag(9, import_runtime.WireType.Varint).bool(message.isAnimated);
+    if (message.hasAudio !== undefined)
+      writer.tag(10, import_runtime.WireType.Varint).bool(message.hasAudio);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -10098,7 +10659,31 @@ class RpcCall$Type extends import_runtime4.MessageType {
       { no: 65, name: "updateProfile", kind: "message", oneof: "input", T: () => UpdateProfileInput },
       { no: 66, name: "getSpaceUrlPreviewExclusions", kind: "message", oneof: "input", T: () => GetSpaceUrlPreviewExclusionsInput },
       { no: 67, name: "addSpaceUrlPreviewExclusion", kind: "message", oneof: "input", T: () => AddSpaceUrlPreviewExclusionInput },
-      { no: 68, name: "removeSpaceUrlPreviewExclusion", kind: "message", oneof: "input", T: () => RemoveSpaceUrlPreviewExclusionInput }
+      { no: 68, name: "removeSpaceUrlPreviewExclusion", kind: "message", oneof: "input", T: () => RemoveSpaceUrlPreviewExclusionInput },
+      { no: 69, name: "getUserGroups", kind: "message", oneof: "input", T: () => GetUserGroupsInput },
+      { no: 70, name: "createUserGroup", kind: "message", oneof: "input", T: () => CreateUserGroupInput },
+      { no: 71, name: "updateUserGroup", kind: "message", oneof: "input", T: () => UpdateUserGroupInput },
+      { no: 72, name: "deleteUserGroup", kind: "message", oneof: "input", T: () => DeleteUserGroupInput },
+      { no: 73, name: "getSpaceSettings", kind: "message", oneof: "input", T: () => GetSpaceSettingsInput },
+      { no: 74, name: "toggleSpaceGrid", kind: "message", oneof: "input", T: () => ToggleSpaceGridInput },
+      { no: 75, name: "getThreadReferences", kind: "message", oneof: "input", T: () => GetThreadReferencesInput },
+      { no: 76, name: "getThreadSubthreads", kind: "message", oneof: "input", T: () => GetThreadSubthreadsInput },
+      { no: 77, name: "getPeerBots", kind: "message", oneof: "input", T: () => GetPeerBotsInput },
+      { no: 78, name: "getMyBotCapabilities", kind: "message", oneof: "input", T: () => GetMyBotCapabilitiesInput },
+      { no: 79, name: "setMyBotCapabilities", kind: "message", oneof: "input", T: () => SetMyBotCapabilitiesInput },
+      { no: 80, name: "requestBotChatSettings", kind: "message", oneof: "input", T: () => RequestBotChatSettingsInput },
+      { no: 81, name: "invokeBotChatSettingsItem", kind: "message", oneof: "input", T: () => InvokeBotChatSettingsItemInput },
+      { no: 82, name: "answerBotChatSettings", kind: "message", oneof: "input", T: () => AnswerBotChatSettingsInput },
+      { no: 84, name: "getGrid", kind: "message", oneof: "input", T: () => GetGridInput },
+      { no: 85, name: "createGridRoom", kind: "message", oneof: "input", T: () => CreateGridRoomInput },
+      { no: 86, name: "joinGridRoom", kind: "message", oneof: "input", T: () => JoinGridRoomInput },
+      { no: 87, name: "leaveGridRoom", kind: "message", oneof: "input", T: () => LeaveGridRoomInput },
+      { no: 88, name: "setGridRoomTitle", kind: "message", oneof: "input", T: () => SetGridRoomTitleInput },
+      { no: 89, name: "setGridRoomLocked", kind: "message", oneof: "input", T: () => SetGridRoomLockedInput },
+      { no: 90, name: "deleteGridRoom", kind: "message", oneof: "input", T: () => DeleteGridRoomInput },
+      { no: 91, name: "prepareGridConnection", kind: "message", oneof: "input", T: () => PrepareGridConnectionInput },
+      { no: 92, name: "setGridAvatarMicrophoneEnabled", kind: "message", oneof: "input", T: () => SetGridAvatarMicrophoneEnabledInput },
+      { no: 93, name: "getGridHome", kind: "message", oneof: "input", T: () => GetGridHomeInput }
     ]);
   }
   create(value) {
@@ -10519,6 +11104,150 @@ class RpcCall$Type extends import_runtime4.MessageType {
             removeSpaceUrlPreviewExclusion: RemoveSpaceUrlPreviewExclusionInput.internalBinaryRead(reader, reader.uint32(), options, message.input.removeSpaceUrlPreviewExclusion)
           };
           break;
+        case 69:
+          message.input = {
+            oneofKind: "getUserGroups",
+            getUserGroups: GetUserGroupsInput.internalBinaryRead(reader, reader.uint32(), options, message.input.getUserGroups)
+          };
+          break;
+        case 70:
+          message.input = {
+            oneofKind: "createUserGroup",
+            createUserGroup: CreateUserGroupInput.internalBinaryRead(reader, reader.uint32(), options, message.input.createUserGroup)
+          };
+          break;
+        case 71:
+          message.input = {
+            oneofKind: "updateUserGroup",
+            updateUserGroup: UpdateUserGroupInput.internalBinaryRead(reader, reader.uint32(), options, message.input.updateUserGroup)
+          };
+          break;
+        case 72:
+          message.input = {
+            oneofKind: "deleteUserGroup",
+            deleteUserGroup: DeleteUserGroupInput.internalBinaryRead(reader, reader.uint32(), options, message.input.deleteUserGroup)
+          };
+          break;
+        case 73:
+          message.input = {
+            oneofKind: "getSpaceSettings",
+            getSpaceSettings: GetSpaceSettingsInput.internalBinaryRead(reader, reader.uint32(), options, message.input.getSpaceSettings)
+          };
+          break;
+        case 74:
+          message.input = {
+            oneofKind: "toggleSpaceGrid",
+            toggleSpaceGrid: ToggleSpaceGridInput.internalBinaryRead(reader, reader.uint32(), options, message.input.toggleSpaceGrid)
+          };
+          break;
+        case 75:
+          message.input = {
+            oneofKind: "getThreadReferences",
+            getThreadReferences: GetThreadReferencesInput.internalBinaryRead(reader, reader.uint32(), options, message.input.getThreadReferences)
+          };
+          break;
+        case 76:
+          message.input = {
+            oneofKind: "getThreadSubthreads",
+            getThreadSubthreads: GetThreadSubthreadsInput.internalBinaryRead(reader, reader.uint32(), options, message.input.getThreadSubthreads)
+          };
+          break;
+        case 77:
+          message.input = {
+            oneofKind: "getPeerBots",
+            getPeerBots: GetPeerBotsInput.internalBinaryRead(reader, reader.uint32(), options, message.input.getPeerBots)
+          };
+          break;
+        case 78:
+          message.input = {
+            oneofKind: "getMyBotCapabilities",
+            getMyBotCapabilities: GetMyBotCapabilitiesInput.internalBinaryRead(reader, reader.uint32(), options, message.input.getMyBotCapabilities)
+          };
+          break;
+        case 79:
+          message.input = {
+            oneofKind: "setMyBotCapabilities",
+            setMyBotCapabilities: SetMyBotCapabilitiesInput.internalBinaryRead(reader, reader.uint32(), options, message.input.setMyBotCapabilities)
+          };
+          break;
+        case 80:
+          message.input = {
+            oneofKind: "requestBotChatSettings",
+            requestBotChatSettings: RequestBotChatSettingsInput.internalBinaryRead(reader, reader.uint32(), options, message.input.requestBotChatSettings)
+          };
+          break;
+        case 81:
+          message.input = {
+            oneofKind: "invokeBotChatSettingsItem",
+            invokeBotChatSettingsItem: InvokeBotChatSettingsItemInput.internalBinaryRead(reader, reader.uint32(), options, message.input.invokeBotChatSettingsItem)
+          };
+          break;
+        case 82:
+          message.input = {
+            oneofKind: "answerBotChatSettings",
+            answerBotChatSettings: AnswerBotChatSettingsInput.internalBinaryRead(reader, reader.uint32(), options, message.input.answerBotChatSettings)
+          };
+          break;
+        case 84:
+          message.input = {
+            oneofKind: "getGrid",
+            getGrid: GetGridInput.internalBinaryRead(reader, reader.uint32(), options, message.input.getGrid)
+          };
+          break;
+        case 85:
+          message.input = {
+            oneofKind: "createGridRoom",
+            createGridRoom: CreateGridRoomInput.internalBinaryRead(reader, reader.uint32(), options, message.input.createGridRoom)
+          };
+          break;
+        case 86:
+          message.input = {
+            oneofKind: "joinGridRoom",
+            joinGridRoom: JoinGridRoomInput.internalBinaryRead(reader, reader.uint32(), options, message.input.joinGridRoom)
+          };
+          break;
+        case 87:
+          message.input = {
+            oneofKind: "leaveGridRoom",
+            leaveGridRoom: LeaveGridRoomInput.internalBinaryRead(reader, reader.uint32(), options, message.input.leaveGridRoom)
+          };
+          break;
+        case 88:
+          message.input = {
+            oneofKind: "setGridRoomTitle",
+            setGridRoomTitle: SetGridRoomTitleInput.internalBinaryRead(reader, reader.uint32(), options, message.input.setGridRoomTitle)
+          };
+          break;
+        case 89:
+          message.input = {
+            oneofKind: "setGridRoomLocked",
+            setGridRoomLocked: SetGridRoomLockedInput.internalBinaryRead(reader, reader.uint32(), options, message.input.setGridRoomLocked)
+          };
+          break;
+        case 90:
+          message.input = {
+            oneofKind: "deleteGridRoom",
+            deleteGridRoom: DeleteGridRoomInput.internalBinaryRead(reader, reader.uint32(), options, message.input.deleteGridRoom)
+          };
+          break;
+        case 91:
+          message.input = {
+            oneofKind: "prepareGridConnection",
+            prepareGridConnection: PrepareGridConnectionInput.internalBinaryRead(reader, reader.uint32(), options, message.input.prepareGridConnection)
+          };
+          break;
+        case 92:
+          message.input = {
+            oneofKind: "setGridAvatarMicrophoneEnabled",
+            setGridAvatarMicrophoneEnabled: SetGridAvatarMicrophoneEnabledInput.internalBinaryRead(reader, reader.uint32(), options, message.input.setGridAvatarMicrophoneEnabled)
+          };
+          break;
+        case 93:
+          message.input = {
+            oneofKind: "getGridHome",
+            getGridHome: GetGridHomeInput.internalBinaryRead(reader, reader.uint32(), options, message.input.getGridHome)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -10667,6 +11396,54 @@ class RpcCall$Type extends import_runtime4.MessageType {
       AddSpaceUrlPreviewExclusionInput.internalBinaryWrite(message.input.addSpaceUrlPreviewExclusion, writer.tag(67, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.input.oneofKind === "removeSpaceUrlPreviewExclusion")
       RemoveSpaceUrlPreviewExclusionInput.internalBinaryWrite(message.input.removeSpaceUrlPreviewExclusion, writer.tag(68, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "getUserGroups")
+      GetUserGroupsInput.internalBinaryWrite(message.input.getUserGroups, writer.tag(69, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "createUserGroup")
+      CreateUserGroupInput.internalBinaryWrite(message.input.createUserGroup, writer.tag(70, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "updateUserGroup")
+      UpdateUserGroupInput.internalBinaryWrite(message.input.updateUserGroup, writer.tag(71, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "deleteUserGroup")
+      DeleteUserGroupInput.internalBinaryWrite(message.input.deleteUserGroup, writer.tag(72, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "getSpaceSettings")
+      GetSpaceSettingsInput.internalBinaryWrite(message.input.getSpaceSettings, writer.tag(73, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "toggleSpaceGrid")
+      ToggleSpaceGridInput.internalBinaryWrite(message.input.toggleSpaceGrid, writer.tag(74, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "getThreadReferences")
+      GetThreadReferencesInput.internalBinaryWrite(message.input.getThreadReferences, writer.tag(75, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "getThreadSubthreads")
+      GetThreadSubthreadsInput.internalBinaryWrite(message.input.getThreadSubthreads, writer.tag(76, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "getPeerBots")
+      GetPeerBotsInput.internalBinaryWrite(message.input.getPeerBots, writer.tag(77, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "getMyBotCapabilities")
+      GetMyBotCapabilitiesInput.internalBinaryWrite(message.input.getMyBotCapabilities, writer.tag(78, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "setMyBotCapabilities")
+      SetMyBotCapabilitiesInput.internalBinaryWrite(message.input.setMyBotCapabilities, writer.tag(79, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "requestBotChatSettings")
+      RequestBotChatSettingsInput.internalBinaryWrite(message.input.requestBotChatSettings, writer.tag(80, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "invokeBotChatSettingsItem")
+      InvokeBotChatSettingsItemInput.internalBinaryWrite(message.input.invokeBotChatSettingsItem, writer.tag(81, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "answerBotChatSettings")
+      AnswerBotChatSettingsInput.internalBinaryWrite(message.input.answerBotChatSettings, writer.tag(82, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "getGrid")
+      GetGridInput.internalBinaryWrite(message.input.getGrid, writer.tag(84, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "createGridRoom")
+      CreateGridRoomInput.internalBinaryWrite(message.input.createGridRoom, writer.tag(85, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "joinGridRoom")
+      JoinGridRoomInput.internalBinaryWrite(message.input.joinGridRoom, writer.tag(86, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "leaveGridRoom")
+      LeaveGridRoomInput.internalBinaryWrite(message.input.leaveGridRoom, writer.tag(87, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "setGridRoomTitle")
+      SetGridRoomTitleInput.internalBinaryWrite(message.input.setGridRoomTitle, writer.tag(88, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "setGridRoomLocked")
+      SetGridRoomLockedInput.internalBinaryWrite(message.input.setGridRoomLocked, writer.tag(89, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "deleteGridRoom")
+      DeleteGridRoomInput.internalBinaryWrite(message.input.deleteGridRoom, writer.tag(90, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "prepareGridConnection")
+      PrepareGridConnectionInput.internalBinaryWrite(message.input.prepareGridConnection, writer.tag(91, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "setGridAvatarMicrophoneEnabled")
+      SetGridAvatarMicrophoneEnabledInput.internalBinaryWrite(message.input.setGridAvatarMicrophoneEnabled, writer.tag(92, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "getGridHome")
+      GetGridHomeInput.internalBinaryWrite(message.input.getGridHome, writer.tag(93, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -10745,7 +11522,31 @@ class RpcResult$Type extends import_runtime4.MessageType {
       { no: 65, name: "updateProfile", kind: "message", oneof: "result", T: () => UpdateProfileResult },
       { no: 66, name: "getSpaceUrlPreviewExclusions", kind: "message", oneof: "result", T: () => GetSpaceUrlPreviewExclusionsResult },
       { no: 67, name: "addSpaceUrlPreviewExclusion", kind: "message", oneof: "result", T: () => AddSpaceUrlPreviewExclusionResult },
-      { no: 68, name: "removeSpaceUrlPreviewExclusion", kind: "message", oneof: "result", T: () => RemoveSpaceUrlPreviewExclusionResult }
+      { no: 68, name: "removeSpaceUrlPreviewExclusion", kind: "message", oneof: "result", T: () => RemoveSpaceUrlPreviewExclusionResult },
+      { no: 69, name: "getUserGroups", kind: "message", oneof: "result", T: () => GetUserGroupsResult },
+      { no: 70, name: "createUserGroup", kind: "message", oneof: "result", T: () => CreateUserGroupResult },
+      { no: 71, name: "updateUserGroup", kind: "message", oneof: "result", T: () => UpdateUserGroupResult },
+      { no: 72, name: "deleteUserGroup", kind: "message", oneof: "result", T: () => DeleteUserGroupResult },
+      { no: 73, name: "getSpaceSettings", kind: "message", oneof: "result", T: () => GetSpaceSettingsResult },
+      { no: 74, name: "toggleSpaceGrid", kind: "message", oneof: "result", T: () => ToggleSpaceGridResult },
+      { no: 75, name: "getThreadReferences", kind: "message", oneof: "result", T: () => GetThreadReferencesResult },
+      { no: 76, name: "getThreadSubthreads", kind: "message", oneof: "result", T: () => GetThreadSubthreadsResult },
+      { no: 77, name: "getPeerBots", kind: "message", oneof: "result", T: () => GetPeerBotsResult },
+      { no: 78, name: "getMyBotCapabilities", kind: "message", oneof: "result", T: () => GetMyBotCapabilitiesResult },
+      { no: 79, name: "setMyBotCapabilities", kind: "message", oneof: "result", T: () => SetMyBotCapabilitiesResult },
+      { no: 80, name: "requestBotChatSettings", kind: "message", oneof: "result", T: () => RequestBotChatSettingsResult },
+      { no: 81, name: "invokeBotChatSettingsItem", kind: "message", oneof: "result", T: () => InvokeBotChatSettingsItemResult },
+      { no: 82, name: "answerBotChatSettings", kind: "message", oneof: "result", T: () => AnswerBotChatSettingsResult },
+      { no: 84, name: "getGrid", kind: "message", oneof: "result", T: () => GetGridResult },
+      { no: 85, name: "createGridRoom", kind: "message", oneof: "result", T: () => CreateGridRoomResult },
+      { no: 86, name: "joinGridRoom", kind: "message", oneof: "result", T: () => JoinGridRoomResult },
+      { no: 87, name: "leaveGridRoom", kind: "message", oneof: "result", T: () => LeaveGridRoomResult },
+      { no: 88, name: "setGridRoomTitle", kind: "message", oneof: "result", T: () => SetGridRoomTitleResult },
+      { no: 89, name: "setGridRoomLocked", kind: "message", oneof: "result", T: () => SetGridRoomLockedResult },
+      { no: 90, name: "deleteGridRoom", kind: "message", oneof: "result", T: () => DeleteGridRoomResult },
+      { no: 91, name: "prepareGridConnection", kind: "message", oneof: "result", T: () => PrepareGridConnectionResult },
+      { no: 92, name: "setGridAvatarMicrophoneEnabled", kind: "message", oneof: "result", T: () => SetGridAvatarMicrophoneEnabledResult },
+      { no: 93, name: "getGridHome", kind: "message", oneof: "result", T: () => GetGridHomeResult }
     ]);
   }
   create(value) {
@@ -11166,6 +11967,150 @@ class RpcResult$Type extends import_runtime4.MessageType {
             removeSpaceUrlPreviewExclusion: RemoveSpaceUrlPreviewExclusionResult.internalBinaryRead(reader, reader.uint32(), options, message.result.removeSpaceUrlPreviewExclusion)
           };
           break;
+        case 69:
+          message.result = {
+            oneofKind: "getUserGroups",
+            getUserGroups: GetUserGroupsResult.internalBinaryRead(reader, reader.uint32(), options, message.result.getUserGroups)
+          };
+          break;
+        case 70:
+          message.result = {
+            oneofKind: "createUserGroup",
+            createUserGroup: CreateUserGroupResult.internalBinaryRead(reader, reader.uint32(), options, message.result.createUserGroup)
+          };
+          break;
+        case 71:
+          message.result = {
+            oneofKind: "updateUserGroup",
+            updateUserGroup: UpdateUserGroupResult.internalBinaryRead(reader, reader.uint32(), options, message.result.updateUserGroup)
+          };
+          break;
+        case 72:
+          message.result = {
+            oneofKind: "deleteUserGroup",
+            deleteUserGroup: DeleteUserGroupResult.internalBinaryRead(reader, reader.uint32(), options, message.result.deleteUserGroup)
+          };
+          break;
+        case 73:
+          message.result = {
+            oneofKind: "getSpaceSettings",
+            getSpaceSettings: GetSpaceSettingsResult.internalBinaryRead(reader, reader.uint32(), options, message.result.getSpaceSettings)
+          };
+          break;
+        case 74:
+          message.result = {
+            oneofKind: "toggleSpaceGrid",
+            toggleSpaceGrid: ToggleSpaceGridResult.internalBinaryRead(reader, reader.uint32(), options, message.result.toggleSpaceGrid)
+          };
+          break;
+        case 75:
+          message.result = {
+            oneofKind: "getThreadReferences",
+            getThreadReferences: GetThreadReferencesResult.internalBinaryRead(reader, reader.uint32(), options, message.result.getThreadReferences)
+          };
+          break;
+        case 76:
+          message.result = {
+            oneofKind: "getThreadSubthreads",
+            getThreadSubthreads: GetThreadSubthreadsResult.internalBinaryRead(reader, reader.uint32(), options, message.result.getThreadSubthreads)
+          };
+          break;
+        case 77:
+          message.result = {
+            oneofKind: "getPeerBots",
+            getPeerBots: GetPeerBotsResult.internalBinaryRead(reader, reader.uint32(), options, message.result.getPeerBots)
+          };
+          break;
+        case 78:
+          message.result = {
+            oneofKind: "getMyBotCapabilities",
+            getMyBotCapabilities: GetMyBotCapabilitiesResult.internalBinaryRead(reader, reader.uint32(), options, message.result.getMyBotCapabilities)
+          };
+          break;
+        case 79:
+          message.result = {
+            oneofKind: "setMyBotCapabilities",
+            setMyBotCapabilities: SetMyBotCapabilitiesResult.internalBinaryRead(reader, reader.uint32(), options, message.result.setMyBotCapabilities)
+          };
+          break;
+        case 80:
+          message.result = {
+            oneofKind: "requestBotChatSettings",
+            requestBotChatSettings: RequestBotChatSettingsResult.internalBinaryRead(reader, reader.uint32(), options, message.result.requestBotChatSettings)
+          };
+          break;
+        case 81:
+          message.result = {
+            oneofKind: "invokeBotChatSettingsItem",
+            invokeBotChatSettingsItem: InvokeBotChatSettingsItemResult.internalBinaryRead(reader, reader.uint32(), options, message.result.invokeBotChatSettingsItem)
+          };
+          break;
+        case 82:
+          message.result = {
+            oneofKind: "answerBotChatSettings",
+            answerBotChatSettings: AnswerBotChatSettingsResult.internalBinaryRead(reader, reader.uint32(), options, message.result.answerBotChatSettings)
+          };
+          break;
+        case 84:
+          message.result = {
+            oneofKind: "getGrid",
+            getGrid: GetGridResult.internalBinaryRead(reader, reader.uint32(), options, message.result.getGrid)
+          };
+          break;
+        case 85:
+          message.result = {
+            oneofKind: "createGridRoom",
+            createGridRoom: CreateGridRoomResult.internalBinaryRead(reader, reader.uint32(), options, message.result.createGridRoom)
+          };
+          break;
+        case 86:
+          message.result = {
+            oneofKind: "joinGridRoom",
+            joinGridRoom: JoinGridRoomResult.internalBinaryRead(reader, reader.uint32(), options, message.result.joinGridRoom)
+          };
+          break;
+        case 87:
+          message.result = {
+            oneofKind: "leaveGridRoom",
+            leaveGridRoom: LeaveGridRoomResult.internalBinaryRead(reader, reader.uint32(), options, message.result.leaveGridRoom)
+          };
+          break;
+        case 88:
+          message.result = {
+            oneofKind: "setGridRoomTitle",
+            setGridRoomTitle: SetGridRoomTitleResult.internalBinaryRead(reader, reader.uint32(), options, message.result.setGridRoomTitle)
+          };
+          break;
+        case 89:
+          message.result = {
+            oneofKind: "setGridRoomLocked",
+            setGridRoomLocked: SetGridRoomLockedResult.internalBinaryRead(reader, reader.uint32(), options, message.result.setGridRoomLocked)
+          };
+          break;
+        case 90:
+          message.result = {
+            oneofKind: "deleteGridRoom",
+            deleteGridRoom: DeleteGridRoomResult.internalBinaryRead(reader, reader.uint32(), options, message.result.deleteGridRoom)
+          };
+          break;
+        case 91:
+          message.result = {
+            oneofKind: "prepareGridConnection",
+            prepareGridConnection: PrepareGridConnectionResult.internalBinaryRead(reader, reader.uint32(), options, message.result.prepareGridConnection)
+          };
+          break;
+        case 92:
+          message.result = {
+            oneofKind: "setGridAvatarMicrophoneEnabled",
+            setGridAvatarMicrophoneEnabled: SetGridAvatarMicrophoneEnabledResult.internalBinaryRead(reader, reader.uint32(), options, message.result.setGridAvatarMicrophoneEnabled)
+          };
+          break;
+        case 93:
+          message.result = {
+            oneofKind: "getGridHome",
+            getGridHome: GetGridHomeResult.internalBinaryRead(reader, reader.uint32(), options, message.result.getGridHome)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -11314,6 +12259,54 @@ class RpcResult$Type extends import_runtime4.MessageType {
       AddSpaceUrlPreviewExclusionResult.internalBinaryWrite(message.result.addSpaceUrlPreviewExclusion, writer.tag(67, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.result.oneofKind === "removeSpaceUrlPreviewExclusion")
       RemoveSpaceUrlPreviewExclusionResult.internalBinaryWrite(message.result.removeSpaceUrlPreviewExclusion, writer.tag(68, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "getUserGroups")
+      GetUserGroupsResult.internalBinaryWrite(message.result.getUserGroups, writer.tag(69, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "createUserGroup")
+      CreateUserGroupResult.internalBinaryWrite(message.result.createUserGroup, writer.tag(70, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "updateUserGroup")
+      UpdateUserGroupResult.internalBinaryWrite(message.result.updateUserGroup, writer.tag(71, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "deleteUserGroup")
+      DeleteUserGroupResult.internalBinaryWrite(message.result.deleteUserGroup, writer.tag(72, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "getSpaceSettings")
+      GetSpaceSettingsResult.internalBinaryWrite(message.result.getSpaceSettings, writer.tag(73, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "toggleSpaceGrid")
+      ToggleSpaceGridResult.internalBinaryWrite(message.result.toggleSpaceGrid, writer.tag(74, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "getThreadReferences")
+      GetThreadReferencesResult.internalBinaryWrite(message.result.getThreadReferences, writer.tag(75, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "getThreadSubthreads")
+      GetThreadSubthreadsResult.internalBinaryWrite(message.result.getThreadSubthreads, writer.tag(76, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "getPeerBots")
+      GetPeerBotsResult.internalBinaryWrite(message.result.getPeerBots, writer.tag(77, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "getMyBotCapabilities")
+      GetMyBotCapabilitiesResult.internalBinaryWrite(message.result.getMyBotCapabilities, writer.tag(78, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "setMyBotCapabilities")
+      SetMyBotCapabilitiesResult.internalBinaryWrite(message.result.setMyBotCapabilities, writer.tag(79, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "requestBotChatSettings")
+      RequestBotChatSettingsResult.internalBinaryWrite(message.result.requestBotChatSettings, writer.tag(80, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "invokeBotChatSettingsItem")
+      InvokeBotChatSettingsItemResult.internalBinaryWrite(message.result.invokeBotChatSettingsItem, writer.tag(81, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "answerBotChatSettings")
+      AnswerBotChatSettingsResult.internalBinaryWrite(message.result.answerBotChatSettings, writer.tag(82, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "getGrid")
+      GetGridResult.internalBinaryWrite(message.result.getGrid, writer.tag(84, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "createGridRoom")
+      CreateGridRoomResult.internalBinaryWrite(message.result.createGridRoom, writer.tag(85, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "joinGridRoom")
+      JoinGridRoomResult.internalBinaryWrite(message.result.joinGridRoom, writer.tag(86, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "leaveGridRoom")
+      LeaveGridRoomResult.internalBinaryWrite(message.result.leaveGridRoom, writer.tag(87, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "setGridRoomTitle")
+      SetGridRoomTitleResult.internalBinaryWrite(message.result.setGridRoomTitle, writer.tag(88, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "setGridRoomLocked")
+      SetGridRoomLockedResult.internalBinaryWrite(message.result.setGridRoomLocked, writer.tag(89, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "deleteGridRoom")
+      DeleteGridRoomResult.internalBinaryWrite(message.result.deleteGridRoom, writer.tag(90, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "prepareGridConnection")
+      PrepareGridConnectionResult.internalBinaryWrite(message.result.prepareGridConnection, writer.tag(91, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "setGridAvatarMicrophoneEnabled")
+      SetGridAvatarMicrophoneEnabledResult.internalBinaryWrite(message.result.setGridAvatarMicrophoneEnabled, writer.tag(92, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "getGridHome")
+      GetGridHomeResult.internalBinaryWrite(message.result.getGridHome, writer.tag(93, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -11569,7 +12562,8 @@ class UpdateSidecars$Type extends import_runtime4.MessageType {
       { no: 1, name: "users", kind: "message", repeat: 1, T: () => User },
       { no: 2, name: "chats", kind: "message", repeat: 1, T: () => Chat },
       { no: 3, name: "dialogs", kind: "message", repeat: 1, T: () => Dialog },
-      { no: 4, name: "spaces", kind: "message", repeat: 1, T: () => Space }
+      { no: 4, name: "spaces", kind: "message", repeat: 1, T: () => Space },
+      { no: 5, name: "user_groups", kind: "message", repeat: 1, T: () => UserGroup }
     ]);
   }
   create(value) {
@@ -11578,6 +12572,7 @@ class UpdateSidecars$Type extends import_runtime4.MessageType {
     message.chats = [];
     message.dialogs = [];
     message.spaces = [];
+    message.userGroups = [];
     if (value !== undefined)
       import_runtime3.reflectionMergePartial(this, message, value);
     return message;
@@ -11599,6 +12594,9 @@ class UpdateSidecars$Type extends import_runtime4.MessageType {
         case 4:
           message.spaces.push(Space.internalBinaryRead(reader, reader.uint32(), options));
           break;
+        case 5:
+          message.userGroups.push(UserGroup.internalBinaryRead(reader, reader.uint32(), options));
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -11619,6 +12617,8 @@ class UpdateSidecars$Type extends import_runtime4.MessageType {
       Dialog.internalBinaryWrite(message.dialogs[i], writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
     for (let i = 0;i < message.spaces.length; i++)
       Space.internalBinaryWrite(message.spaces[i], writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.userGroups.length; i++)
+      UserGroup.internalBinaryWrite(message.userGroups[i], writer.tag(5, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -11626,6 +12626,56 @@ class UpdateSidecars$Type extends import_runtime4.MessageType {
   }
 }
 var UpdateSidecars = new UpdateSidecars$Type;
+
+class SyncSkippedSequence$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SyncSkippedSequence", [
+      { no: 1, name: "seq", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "reason", kind: "enum", T: () => ["SyncSkippedSequence.Reason", SyncSkippedSequence_Reason] }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.seq = 0n;
+    message.reason = 0;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.seq = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.reason = reader.int32();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.seq !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.seq);
+    if (message.reason !== 0)
+      writer.tag(2, import_runtime.WireType.Varint).int32(message.reason);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SyncSkippedSequence = new SyncSkippedSequence$Type;
 
 class GetUpdatesResult$Type extends import_runtime4.MessageType {
   constructor() {
@@ -11635,7 +12685,8 @@ class GetUpdatesResult$Type extends import_runtime4.MessageType {
       { no: 3, name: "date", kind: "scalar", T: 3, L: 0 },
       { no: 4, name: "final", kind: "scalar", opt: true, T: 8 },
       { no: 5, name: "result_type", kind: "enum", T: () => ["GetUpdatesResult.ResultType", GetUpdatesResult_ResultType, "RESULT_TYPE_"] },
-      { no: 6, name: "sidecars", kind: "message", T: () => UpdateSidecars }
+      { no: 6, name: "sidecars", kind: "message", T: () => UpdateSidecars },
+      { no: 7, name: "skipped_sequences", kind: "message", repeat: 1, T: () => SyncSkippedSequence }
     ]);
   }
   create(value) {
@@ -11644,6 +12695,7 @@ class GetUpdatesResult$Type extends import_runtime4.MessageType {
     message.seq = 0n;
     message.date = 0n;
     message.resultType = 0;
+    message.skippedSequences = [];
     if (value !== undefined)
       import_runtime3.reflectionMergePartial(this, message, value);
     return message;
@@ -11671,6 +12723,9 @@ class GetUpdatesResult$Type extends import_runtime4.MessageType {
         case 6:
           message.sidecars = UpdateSidecars.internalBinaryRead(reader, reader.uint32(), options, message.sidecars);
           break;
+        case 7:
+          message.skippedSequences.push(SyncSkippedSequence.internalBinaryRead(reader, reader.uint32(), options));
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -11695,6 +12750,8 @@ class GetUpdatesResult$Type extends import_runtime4.MessageType {
       writer.tag(5, import_runtime.WireType.Varint).int32(message.resultType);
     if (message.sidecars)
       UpdateSidecars.internalBinaryWrite(message.sidecars, writer.tag(6, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.skippedSequences.length; i++)
+      SyncSkippedSequence.internalBinaryWrite(message.skippedSequences[i], writer.tag(7, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -11894,6 +12951,1849 @@ class UpdateMemberAccessResult$Type extends import_runtime4.MessageType {
   }
 }
 var UpdateMemberAccessResult = new UpdateMemberAccessResult$Type;
+
+class SpaceSettings$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SpaceSettings", [
+      { no: 1, name: "space_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "grid_enabled", kind: "scalar", T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.spaceId = 0n;
+    message.gridEnabled = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.spaceId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.gridEnabled = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.spaceId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.spaceId);
+    if (message.gridEnabled !== false)
+      writer.tag(2, import_runtime.WireType.Varint).bool(message.gridEnabled);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SpaceSettings = new SpaceSettings$Type;
+
+class GetSpaceSettingsInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetSpaceSettingsInput", [
+      { no: 1, name: "space_id", kind: "scalar", T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.spaceId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.spaceId = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.spaceId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.spaceId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetSpaceSettingsInput = new GetSpaceSettingsInput$Type;
+
+class GetSpaceSettingsResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetSpaceSettingsResult", [
+      { no: 1, name: "settings", kind: "message", T: () => SpaceSettings }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.settings = SpaceSettings.internalBinaryRead(reader, reader.uint32(), options, message.settings);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.settings)
+      SpaceSettings.internalBinaryWrite(message.settings, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetSpaceSettingsResult = new GetSpaceSettingsResult$Type;
+
+class ToggleSpaceGridInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("ToggleSpaceGridInput", [
+      { no: 1, name: "space_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "enabled", kind: "scalar", T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.spaceId = 0n;
+    message.enabled = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.spaceId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.enabled = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.spaceId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.spaceId);
+    if (message.enabled !== false)
+      writer.tag(2, import_runtime.WireType.Varint).bool(message.enabled);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var ToggleSpaceGridInput = new ToggleSpaceGridInput$Type;
+
+class ToggleSpaceGridResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("ToggleSpaceGridResult", [
+      { no: 1, name: "settings", kind: "message", T: () => SpaceSettings },
+      { no: 2, name: "updates", kind: "message", repeat: 1, T: () => Update }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.updates = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.settings = SpaceSettings.internalBinaryRead(reader, reader.uint32(), options, message.settings);
+          break;
+        case 2:
+          message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.settings)
+      SpaceSettings.internalBinaryWrite(message.settings, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.updates.length; i++)
+      Update.internalBinaryWrite(message.updates[i], writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var ToggleSpaceGridResult = new ToggleSpaceGridResult$Type;
+
+class GridAvatar$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GridAvatar", [
+      { no: 1, name: "user", kind: "message", T: () => User },
+      { no: 2, name: "joined_at", kind: "scalar", T: 3, L: 0 },
+      { no: 3, name: "owned_by_current_session", kind: "scalar", T: 8 },
+      { no: 4, name: "microphone_enabled", kind: "scalar", T: 8 },
+      { no: 5, name: "membership_id", kind: "scalar", T: 9 },
+      { no: 6, name: "microphone_revision", kind: "scalar", T: 5 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.joinedAt = 0n;
+    message.ownedByCurrentSession = false;
+    message.microphoneEnabled = false;
+    message.membershipId = "";
+    message.microphoneRevision = 0;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.user = User.internalBinaryRead(reader, reader.uint32(), options, message.user);
+          break;
+        case 2:
+          message.joinedAt = reader.int64().toBigInt();
+          break;
+        case 3:
+          message.ownedByCurrentSession = reader.bool();
+          break;
+        case 4:
+          message.microphoneEnabled = reader.bool();
+          break;
+        case 5:
+          message.membershipId = reader.string();
+          break;
+        case 6:
+          message.microphoneRevision = reader.int32();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.user)
+      User.internalBinaryWrite(message.user, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.joinedAt !== 0n)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.joinedAt);
+    if (message.ownedByCurrentSession !== false)
+      writer.tag(3, import_runtime.WireType.Varint).bool(message.ownedByCurrentSession);
+    if (message.microphoneEnabled !== false)
+      writer.tag(4, import_runtime.WireType.Varint).bool(message.microphoneEnabled);
+    if (message.membershipId !== "")
+      writer.tag(5, import_runtime.WireType.LengthDelimited).string(message.membershipId);
+    if (message.microphoneRevision !== 0)
+      writer.tag(6, import_runtime.WireType.Varint).int32(message.microphoneRevision);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GridAvatar = new GridAvatar$Type;
+
+class GridConnection$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GridConnection", [
+      { no: 1, name: "room_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "generation", kind: "scalar", T: 5 },
+      { no: 3, name: "started_at", kind: "scalar", T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.roomId = 0n;
+    message.generation = 0;
+    message.startedAt = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.roomId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.generation = reader.int32();
+          break;
+        case 3:
+          message.startedAt = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.roomId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.roomId);
+    if (message.generation !== 0)
+      writer.tag(2, import_runtime.WireType.Varint).int32(message.generation);
+    if (message.startedAt !== 0n)
+      writer.tag(3, import_runtime.WireType.Varint).int64(message.startedAt);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GridConnection = new GridConnection$Type;
+
+class GridRoom$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GridRoom", [
+      { no: 1, name: "id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "space_id", kind: "scalar", T: 3, L: 0 },
+      { no: 3, name: "created_by_user_id", kind: "scalar", T: 3, L: 0 },
+      { no: 4, name: "title", kind: "scalar", opt: true, T: 9 },
+      { no: 5, name: "locked", kind: "scalar", T: 8 },
+      { no: 6, name: "created_at", kind: "scalar", T: 3, L: 0 },
+      { no: 7, name: "updated_at", kind: "scalar", T: 3, L: 0 },
+      { no: 8, name: "avatars", kind: "message", repeat: 1, T: () => GridAvatar },
+      { no: 9, name: "connection", kind: "message", T: () => GridConnection }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.id = 0n;
+    message.spaceId = 0n;
+    message.createdByUserId = 0n;
+    message.locked = false;
+    message.createdAt = 0n;
+    message.updatedAt = 0n;
+    message.avatars = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.id = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.spaceId = reader.int64().toBigInt();
+          break;
+        case 3:
+          message.createdByUserId = reader.int64().toBigInt();
+          break;
+        case 4:
+          message.title = reader.string();
+          break;
+        case 5:
+          message.locked = reader.bool();
+          break;
+        case 6:
+          message.createdAt = reader.int64().toBigInt();
+          break;
+        case 7:
+          message.updatedAt = reader.int64().toBigInt();
+          break;
+        case 8:
+          message.avatars.push(GridAvatar.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 9:
+          message.connection = GridConnection.internalBinaryRead(reader, reader.uint32(), options, message.connection);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.id !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.id);
+    if (message.spaceId !== 0n)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.spaceId);
+    if (message.createdByUserId !== 0n)
+      writer.tag(3, import_runtime.WireType.Varint).int64(message.createdByUserId);
+    if (message.title !== undefined)
+      writer.tag(4, import_runtime.WireType.LengthDelimited).string(message.title);
+    if (message.locked !== false)
+      writer.tag(5, import_runtime.WireType.Varint).bool(message.locked);
+    if (message.createdAt !== 0n)
+      writer.tag(6, import_runtime.WireType.Varint).int64(message.createdAt);
+    if (message.updatedAt !== 0n)
+      writer.tag(7, import_runtime.WireType.Varint).int64(message.updatedAt);
+    for (let i = 0;i < message.avatars.length; i++)
+      GridAvatar.internalBinaryWrite(message.avatars[i], writer.tag(8, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.connection)
+      GridConnection.internalBinaryWrite(message.connection, writer.tag(9, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GridRoom = new GridRoom$Type;
+
+class Grid$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("Grid", [
+      { no: 1, name: "space_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "enabled", kind: "scalar", T: 8 },
+      { no: 3, name: "rooms", kind: "message", repeat: 1, T: () => GridRoom },
+      { no: 4, name: "current_room_id", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 5, name: "revision", kind: "scalar", T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.spaceId = 0n;
+    message.enabled = false;
+    message.rooms = [];
+    message.revision = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.spaceId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.enabled = reader.bool();
+          break;
+        case 3:
+          message.rooms.push(GridRoom.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 4:
+          message.currentRoomId = reader.int64().toBigInt();
+          break;
+        case 5:
+          message.revision = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.spaceId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.spaceId);
+    if (message.enabled !== false)
+      writer.tag(2, import_runtime.WireType.Varint).bool(message.enabled);
+    for (let i = 0;i < message.rooms.length; i++)
+      GridRoom.internalBinaryWrite(message.rooms[i], writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.currentRoomId !== undefined)
+      writer.tag(4, import_runtime.WireType.Varint).int64(message.currentRoomId);
+    if (message.revision !== 0n)
+      writer.tag(5, import_runtime.WireType.Varint).int64(message.revision);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var Grid = new Grid$Type;
+
+class GridConnectionCredentials$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GridConnectionCredentials", [
+      { no: 1, name: "connection", kind: "message", T: () => GridConnection },
+      { no: 2, name: "server_url", kind: "scalar", T: 9 },
+      { no: 3, name: "participant_identity", kind: "scalar", T: 9 },
+      { no: 4, name: "token", kind: "scalar", T: 9 },
+      { no: 5, name: "expires_at", kind: "scalar", T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.serverUrl = "";
+    message.participantIdentity = "";
+    message.token = "";
+    message.expiresAt = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.connection = GridConnection.internalBinaryRead(reader, reader.uint32(), options, message.connection);
+          break;
+        case 2:
+          message.serverUrl = reader.string();
+          break;
+        case 3:
+          message.participantIdentity = reader.string();
+          break;
+        case 4:
+          message.token = reader.string();
+          break;
+        case 5:
+          message.expiresAt = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.connection)
+      GridConnection.internalBinaryWrite(message.connection, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.serverUrl !== "")
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.serverUrl);
+    if (message.participantIdentity !== "")
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.participantIdentity);
+    if (message.token !== "")
+      writer.tag(4, import_runtime.WireType.LengthDelimited).string(message.token);
+    if (message.expiresAt !== 0n)
+      writer.tag(5, import_runtime.WireType.Varint).int64(message.expiresAt);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GridConnectionCredentials = new GridConnectionCredentials$Type;
+
+class GetGridInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetGridInput", [
+      { no: 1, name: "space_id", kind: "scalar", T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.spaceId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.spaceId = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.spaceId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.spaceId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetGridInput = new GetGridInput$Type;
+
+class GetGridResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetGridResult", [
+      { no: 1, name: "grid", kind: "message", T: () => Grid }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.grid = Grid.internalBinaryRead(reader, reader.uint32(), options, message.grid);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.grid)
+      Grid.internalBinaryWrite(message.grid, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetGridResult = new GetGridResult$Type;
+
+class GridHomeSpace$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GridHomeSpace", [
+      { no: 1, name: "space_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "active_avatar_count", kind: "scalar", T: 5 },
+      { no: 3, name: "recent_avatars", kind: "message", repeat: 1, T: () => GridAvatar },
+      { no: 4, name: "latest_activity_at", kind: "scalar", T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.spaceId = 0n;
+    message.activeAvatarCount = 0;
+    message.recentAvatars = [];
+    message.latestActivityAt = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.spaceId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.activeAvatarCount = reader.int32();
+          break;
+        case 3:
+          message.recentAvatars.push(GridAvatar.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 4:
+          message.latestActivityAt = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.spaceId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.spaceId);
+    if (message.activeAvatarCount !== 0)
+      writer.tag(2, import_runtime.WireType.Varint).int32(message.activeAvatarCount);
+    for (let i = 0;i < message.recentAvatars.length; i++)
+      GridAvatar.internalBinaryWrite(message.recentAvatars[i], writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.latestActivityAt !== 0n)
+      writer.tag(4, import_runtime.WireType.Varint).int64(message.latestActivityAt);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GridHomeSpace = new GridHomeSpace$Type;
+
+class GetGridHomeInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetGridHomeInput", []);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    return target ?? this.create();
+  }
+  internalBinaryWrite(message, writer, options) {
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetGridHomeInput = new GetGridHomeInput$Type;
+
+class GetGridHomeResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetGridHomeResult", [
+      { no: 1, name: "spaces", kind: "message", repeat: 1, T: () => GridHomeSpace }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.spaces = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.spaces.push(GridHomeSpace.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    for (let i = 0;i < message.spaces.length; i++)
+      GridHomeSpace.internalBinaryWrite(message.spaces[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetGridHomeResult = new GetGridHomeResult$Type;
+
+class CreateGridRoomInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("CreateGridRoomInput", [
+      { no: 1, name: "space_id", kind: "scalar", T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.spaceId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.spaceId = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.spaceId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.spaceId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var CreateGridRoomInput = new CreateGridRoomInput$Type;
+
+class CreateGridRoomResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("CreateGridRoomResult", [
+      { no: 1, name: "grids", kind: "message", repeat: 1, T: () => Grid },
+      { no: 2, name: "connection", kind: "message", T: () => GridConnectionCredentials }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.grids = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.grids.push(Grid.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 2:
+          message.connection = GridConnectionCredentials.internalBinaryRead(reader, reader.uint32(), options, message.connection);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    for (let i = 0;i < message.grids.length; i++)
+      Grid.internalBinaryWrite(message.grids[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.connection)
+      GridConnectionCredentials.internalBinaryWrite(message.connection, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var CreateGridRoomResult = new CreateGridRoomResult$Type;
+
+class JoinGridRoomInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("JoinGridRoomInput", [
+      { no: 1, name: "room_id", kind: "scalar", T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.roomId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.roomId = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.roomId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.roomId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var JoinGridRoomInput = new JoinGridRoomInput$Type;
+
+class JoinGridRoomResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("JoinGridRoomResult", [
+      { no: 1, name: "grids", kind: "message", repeat: 1, T: () => Grid },
+      { no: 2, name: "connection", kind: "message", T: () => GridConnectionCredentials }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.grids = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.grids.push(Grid.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 2:
+          message.connection = GridConnectionCredentials.internalBinaryRead(reader, reader.uint32(), options, message.connection);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    for (let i = 0;i < message.grids.length; i++)
+      Grid.internalBinaryWrite(message.grids[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.connection)
+      GridConnectionCredentials.internalBinaryWrite(message.connection, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var JoinGridRoomResult = new JoinGridRoomResult$Type;
+
+class LeaveGridRoomInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("LeaveGridRoomInput", [
+      { no: 1, name: "expected_room_id", kind: "scalar", T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.expectedRoomId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.expectedRoomId = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.expectedRoomId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.expectedRoomId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var LeaveGridRoomInput = new LeaveGridRoomInput$Type;
+
+class LeaveGridRoomResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("LeaveGridRoomResult", [
+      { no: 1, name: "grids", kind: "message", repeat: 1, T: () => Grid }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.grids = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.grids.push(Grid.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    for (let i = 0;i < message.grids.length; i++)
+      Grid.internalBinaryWrite(message.grids[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var LeaveGridRoomResult = new LeaveGridRoomResult$Type;
+
+class SetGridRoomTitleInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SetGridRoomTitleInput", [
+      { no: 1, name: "room_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "title", kind: "scalar", T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.roomId = 0n;
+    message.title = "";
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.roomId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.title = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.roomId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.roomId);
+    if (message.title !== "")
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.title);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SetGridRoomTitleInput = new SetGridRoomTitleInput$Type;
+
+class SetGridRoomTitleResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SetGridRoomTitleResult", [
+      { no: 1, name: "grid", kind: "message", T: () => Grid }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.grid = Grid.internalBinaryRead(reader, reader.uint32(), options, message.grid);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.grid)
+      Grid.internalBinaryWrite(message.grid, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SetGridRoomTitleResult = new SetGridRoomTitleResult$Type;
+
+class SetGridRoomLockedInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SetGridRoomLockedInput", [
+      { no: 1, name: "room_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "locked", kind: "scalar", T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.roomId = 0n;
+    message.locked = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.roomId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.locked = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.roomId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.roomId);
+    if (message.locked !== false)
+      writer.tag(2, import_runtime.WireType.Varint).bool(message.locked);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SetGridRoomLockedInput = new SetGridRoomLockedInput$Type;
+
+class SetGridRoomLockedResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SetGridRoomLockedResult", [
+      { no: 1, name: "grid", kind: "message", T: () => Grid }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.grid = Grid.internalBinaryRead(reader, reader.uint32(), options, message.grid);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.grid)
+      Grid.internalBinaryWrite(message.grid, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SetGridRoomLockedResult = new SetGridRoomLockedResult$Type;
+
+class DeleteGridRoomInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("DeleteGridRoomInput", [
+      { no: 1, name: "room_id", kind: "scalar", T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.roomId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.roomId = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.roomId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.roomId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var DeleteGridRoomInput = new DeleteGridRoomInput$Type;
+
+class DeleteGridRoomResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("DeleteGridRoomResult", [
+      { no: 1, name: "grid", kind: "message", T: () => Grid }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.grid = Grid.internalBinaryRead(reader, reader.uint32(), options, message.grid);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.grid)
+      Grid.internalBinaryWrite(message.grid, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var DeleteGridRoomResult = new DeleteGridRoomResult$Type;
+
+class PrepareGridConnectionInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("PrepareGridConnectionInput", [
+      { no: 1, name: "room_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "generation", kind: "scalar", T: 5 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.roomId = 0n;
+    message.generation = 0;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.roomId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.generation = reader.int32();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.roomId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.roomId);
+    if (message.generation !== 0)
+      writer.tag(2, import_runtime.WireType.Varint).int32(message.generation);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var PrepareGridConnectionInput = new PrepareGridConnectionInput$Type;
+
+class PrepareGridConnectionResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("PrepareGridConnectionResult", [
+      { no: 1, name: "connection", kind: "message", T: () => GridConnectionCredentials },
+      { no: 2, name: "unavailable_reason", kind: "enum", T: () => ["GridConnectionUnavailableReason", GridConnectionUnavailableReason, "GRID_CONNECTION_UNAVAILABLE_REASON_"] }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.unavailableReason = 0;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.connection = GridConnectionCredentials.internalBinaryRead(reader, reader.uint32(), options, message.connection);
+          break;
+        case 2:
+          message.unavailableReason = reader.int32();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.connection)
+      GridConnectionCredentials.internalBinaryWrite(message.connection, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.unavailableReason !== 0)
+      writer.tag(2, import_runtime.WireType.Varint).int32(message.unavailableReason);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var PrepareGridConnectionResult = new PrepareGridConnectionResult$Type;
+
+class SetGridAvatarMicrophoneEnabledInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SetGridAvatarMicrophoneEnabledInput", [
+      { no: 1, name: "expected_room_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "enabled", kind: "scalar", T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.expectedRoomId = 0n;
+    message.enabled = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.expectedRoomId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.enabled = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.expectedRoomId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.expectedRoomId);
+    if (message.enabled !== false)
+      writer.tag(2, import_runtime.WireType.Varint).bool(message.enabled);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SetGridAvatarMicrophoneEnabledInput = new SetGridAvatarMicrophoneEnabledInput$Type;
+
+class SetGridAvatarMicrophoneEnabledResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SetGridAvatarMicrophoneEnabledResult", [
+      { no: 1, name: "enabled", kind: "scalar", T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.enabled = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.enabled = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.enabled !== false)
+      writer.tag(1, import_runtime.WireType.Varint).bool(message.enabled);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SetGridAvatarMicrophoneEnabledResult = new SetGridAvatarMicrophoneEnabledResult$Type;
+
+class GridEvent$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GridEvent", [
+      { no: 1, name: "changed", kind: "message", oneof: "event", T: () => GridChanged },
+      { no: 2, name: "connection_ready", kind: "message", oneof: "event", T: () => GridConnectionReady },
+      { no: 3, name: "avatar_state_changed", kind: "message", oneof: "event", T: () => GridAvatarStateChanged },
+      { no: 4, name: "access_revoked", kind: "message", oneof: "event", T: () => GridAccessRevoked }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.event = { oneofKind: undefined };
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.event = {
+            oneofKind: "changed",
+            changed: GridChanged.internalBinaryRead(reader, reader.uint32(), options, message.event.changed)
+          };
+          break;
+        case 2:
+          message.event = {
+            oneofKind: "connectionReady",
+            connectionReady: GridConnectionReady.internalBinaryRead(reader, reader.uint32(), options, message.event.connectionReady)
+          };
+          break;
+        case 3:
+          message.event = {
+            oneofKind: "avatarStateChanged",
+            avatarStateChanged: GridAvatarStateChanged.internalBinaryRead(reader, reader.uint32(), options, message.event.avatarStateChanged)
+          };
+          break;
+        case 4:
+          message.event = {
+            oneofKind: "accessRevoked",
+            accessRevoked: GridAccessRevoked.internalBinaryRead(reader, reader.uint32(), options, message.event.accessRevoked)
+          };
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.event.oneofKind === "changed")
+      GridChanged.internalBinaryWrite(message.event.changed, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.event.oneofKind === "connectionReady")
+      GridConnectionReady.internalBinaryWrite(message.event.connectionReady, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.event.oneofKind === "avatarStateChanged")
+      GridAvatarStateChanged.internalBinaryWrite(message.event.avatarStateChanged, writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.event.oneofKind === "accessRevoked")
+      GridAccessRevoked.internalBinaryWrite(message.event.accessRevoked, writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GridEvent = new GridEvent$Type;
+
+class GridChanged$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GridChanged", [
+      { no: 1, name: "space_ids", kind: "scalar", repeat: 1, T: 3, L: 0 },
+      { no: 2, name: "room_id", kind: "scalar", opt: true, T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.spaceIds = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          if (wireType === import_runtime.WireType.LengthDelimited)
+            for (let e = reader.int32() + reader.pos;reader.pos < e; )
+              message.spaceIds.push(reader.int64().toBigInt());
+          else
+            message.spaceIds.push(reader.int64().toBigInt());
+          break;
+        case 2:
+          message.roomId = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.spaceIds.length) {
+      writer.tag(1, import_runtime.WireType.LengthDelimited).fork();
+      for (let i = 0;i < message.spaceIds.length; i++)
+        writer.int64(message.spaceIds[i]);
+      writer.join();
+    }
+    if (message.roomId !== undefined)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.roomId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GridChanged = new GridChanged$Type;
+
+class GridConnectionReady$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GridConnectionReady", [
+      { no: 1, name: "credentials", kind: "message", T: () => GridConnectionCredentials }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.credentials = GridConnectionCredentials.internalBinaryRead(reader, reader.uint32(), options, message.credentials);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.credentials)
+      GridConnectionCredentials.internalBinaryWrite(message.credentials, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GridConnectionReady = new GridConnectionReady$Type;
+
+class GridAvatarStateChanged$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GridAvatarStateChanged", [
+      { no: 1, name: "space_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "room_id", kind: "scalar", T: 3, L: 0 },
+      { no: 3, name: "user_id", kind: "scalar", T: 3, L: 0 },
+      { no: 4, name: "microphone_enabled", kind: "scalar", T: 8 },
+      { no: 5, name: "membership_id", kind: "scalar", T: 9 },
+      { no: 6, name: "microphone_revision", kind: "scalar", T: 5 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.spaceId = 0n;
+    message.roomId = 0n;
+    message.userId = 0n;
+    message.microphoneEnabled = false;
+    message.membershipId = "";
+    message.microphoneRevision = 0;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.spaceId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.roomId = reader.int64().toBigInt();
+          break;
+        case 3:
+          message.userId = reader.int64().toBigInt();
+          break;
+        case 4:
+          message.microphoneEnabled = reader.bool();
+          break;
+        case 5:
+          message.membershipId = reader.string();
+          break;
+        case 6:
+          message.microphoneRevision = reader.int32();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.spaceId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.spaceId);
+    if (message.roomId !== 0n)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.roomId);
+    if (message.userId !== 0n)
+      writer.tag(3, import_runtime.WireType.Varint).int64(message.userId);
+    if (message.microphoneEnabled !== false)
+      writer.tag(4, import_runtime.WireType.Varint).bool(message.microphoneEnabled);
+    if (message.membershipId !== "")
+      writer.tag(5, import_runtime.WireType.LengthDelimited).string(message.membershipId);
+    if (message.microphoneRevision !== 0)
+      writer.tag(6, import_runtime.WireType.Varint).int32(message.microphoneRevision);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GridAvatarStateChanged = new GridAvatarStateChanged$Type;
+
+class GridAccessRevoked$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GridAccessRevoked", [
+      { no: 1, name: "space_id", kind: "scalar", T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.spaceId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.spaceId = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.spaceId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.spaceId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GridAccessRevoked = new GridAccessRevoked$Type;
 
 class SpaceUrlPreviewExclusion$Type extends import_runtime4.MessageType {
   constructor() {
@@ -17420,6 +20320,306 @@ class GetMessagesResult$Type extends import_runtime4.MessageType {
 }
 var GetMessagesResult = new GetMessagesResult$Type;
 
+class ThreadReferenceItem$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("ThreadReferenceItem", [
+      { no: 1, name: "id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "kind", kind: "enum", T: () => ["ThreadReferenceKind", ThreadReferenceKind] },
+      { no: 3, name: "from_chat_id", kind: "scalar", T: 3, L: 0 },
+      { no: 4, name: "from_message_id", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 5, name: "to_chat_id", kind: "scalar", T: 3, L: 0 },
+      { no: 6, name: "date", kind: "scalar", opt: true, T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.id = 0n;
+    message.kind = 0;
+    message.fromChatId = 0n;
+    message.toChatId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.id = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.kind = reader.int32();
+          break;
+        case 3:
+          message.fromChatId = reader.int64().toBigInt();
+          break;
+        case 4:
+          message.fromMessageId = reader.int64().toBigInt();
+          break;
+        case 5:
+          message.toChatId = reader.int64().toBigInt();
+          break;
+        case 6:
+          message.date = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.id !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.id);
+    if (message.kind !== 0)
+      writer.tag(2, import_runtime.WireType.Varint).int32(message.kind);
+    if (message.fromChatId !== 0n)
+      writer.tag(3, import_runtime.WireType.Varint).int64(message.fromChatId);
+    if (message.fromMessageId !== undefined)
+      writer.tag(4, import_runtime.WireType.Varint).int64(message.fromMessageId);
+    if (message.toChatId !== 0n)
+      writer.tag(5, import_runtime.WireType.Varint).int64(message.toChatId);
+    if (message.date !== undefined)
+      writer.tag(6, import_runtime.WireType.Varint).int64(message.date);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var ThreadReferenceItem = new ThreadReferenceItem$Type;
+
+class GetThreadReferencesInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetThreadReferencesInput", [
+      { no: 1, name: "chat_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "offset_id", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 3, name: "limit", kind: "scalar", opt: true, T: 5 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.chatId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.chatId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.offsetId = reader.int64().toBigInt();
+          break;
+        case 3:
+          message.limit = reader.int32();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.chatId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.chatId);
+    if (message.offsetId !== undefined)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.offsetId);
+    if (message.limit !== undefined)
+      writer.tag(3, import_runtime.WireType.Varint).int32(message.limit);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetThreadReferencesInput = new GetThreadReferencesInput$Type;
+
+class GetThreadReferencesResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetThreadReferencesResult", [
+      { no: 1, name: "items", kind: "message", repeat: 1, T: () => ThreadReferenceItem },
+      { no: 2, name: "chats", kind: "message", repeat: 1, T: () => Chat },
+      { no: 3, name: "dialogs", kind: "message", repeat: 1, T: () => Dialog }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.items = [];
+    message.chats = [];
+    message.dialogs = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.items.push(ThreadReferenceItem.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 2:
+          message.chats.push(Chat.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 3:
+          message.dialogs.push(Dialog.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    for (let i = 0;i < message.items.length; i++)
+      ThreadReferenceItem.internalBinaryWrite(message.items[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.chats.length; i++)
+      Chat.internalBinaryWrite(message.chats[i], writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.dialogs.length; i++)
+      Dialog.internalBinaryWrite(message.dialogs[i], writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetThreadReferencesResult = new GetThreadReferencesResult$Type;
+
+class GetThreadSubthreadsInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetThreadSubthreadsInput", [
+      { no: 1, name: "chat_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "offset_id", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 3, name: "limit", kind: "scalar", opt: true, T: 5 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.chatId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.chatId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.offsetId = reader.int64().toBigInt();
+          break;
+        case 3:
+          message.limit = reader.int32();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.chatId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.chatId);
+    if (message.offsetId !== undefined)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.offsetId);
+    if (message.limit !== undefined)
+      writer.tag(3, import_runtime.WireType.Varint).int32(message.limit);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetThreadSubthreadsInput = new GetThreadSubthreadsInput$Type;
+
+class GetThreadSubthreadsResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetThreadSubthreadsResult", [
+      { no: 1, name: "items", kind: "message", repeat: 1, T: () => ThreadReferenceItem },
+      { no: 2, name: "chats", kind: "message", repeat: 1, T: () => Chat },
+      { no: 3, name: "dialogs", kind: "message", repeat: 1, T: () => Dialog }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.items = [];
+    message.chats = [];
+    message.dialogs = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.items.push(ThreadReferenceItem.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 2:
+          message.chats.push(Chat.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 3:
+          message.dialogs.push(Dialog.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    for (let i = 0;i < message.items.length; i++)
+      ThreadReferenceItem.internalBinaryWrite(message.items[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.chats.length; i++)
+      Chat.internalBinaryWrite(message.chats[i], writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.dialogs.length; i++)
+      Dialog.internalBinaryWrite(message.dialogs[i], writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetThreadSubthreadsResult = new GetThreadSubthreadsResult$Type;
+
 class SearchMessagesInput$Type extends import_runtime4.MessageType {
   constructor() {
     super("SearchMessagesInput", [
@@ -17533,12 +20733,12 @@ var SearchMessagesResult = new SearchMessagesResult$Type;
 class InputChatParticipant$Type extends import_runtime4.MessageType {
   constructor() {
     super("InputChatParticipant", [
-      { no: 1, name: "user_id", kind: "scalar", T: 3, L: 0 }
+      { no: 1, name: "user_id", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 2, name: "group_id", kind: "scalar", opt: true, T: 3, L: 0 }
     ]);
   }
   create(value) {
     const message = globalThis.Object.create(this.messagePrototype);
-    message.userId = 0n;
     if (value !== undefined)
       import_runtime3.reflectionMergePartial(this, message, value);
     return message;
@@ -17550,6 +20750,9 @@ class InputChatParticipant$Type extends import_runtime4.MessageType {
       switch (fieldNo) {
         case 1:
           message.userId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.groupId = reader.int64().toBigInt();
           break;
         default:
           let u = options.readUnknownField;
@@ -17563,8 +20766,10 @@ class InputChatParticipant$Type extends import_runtime4.MessageType {
     return message;
   }
   internalBinaryWrite(message, writer, options) {
-    if (message.userId !== 0n)
+    if (message.userId !== undefined)
       writer.tag(1, import_runtime.WireType.Varint).int64(message.userId);
+    if (message.groupId !== undefined)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.groupId);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -18058,6 +21263,404 @@ class GetSpaceMembersResult$Type extends import_runtime4.MessageType {
 }
 var GetSpaceMembersResult = new GetSpaceMembersResult$Type;
 
+class GetUserGroupsInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetUserGroupsInput", [
+      { no: 1, name: "space_id", kind: "scalar", T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.spaceId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.spaceId = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.spaceId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.spaceId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetUserGroupsInput = new GetUserGroupsInput$Type;
+
+class GetUserGroupsResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetUserGroupsResult", [
+      { no: 1, name: "groups", kind: "message", repeat: 1, T: () => UserGroup },
+      { no: 2, name: "users", kind: "message", repeat: 1, T: () => User }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.groups = [];
+    message.users = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.groups.push(UserGroup.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 2:
+          message.users.push(User.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    for (let i = 0;i < message.groups.length; i++)
+      UserGroup.internalBinaryWrite(message.groups[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.users.length; i++)
+      User.internalBinaryWrite(message.users[i], writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetUserGroupsResult = new GetUserGroupsResult$Type;
+
+class CreateUserGroupInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("CreateUserGroupInput", [
+      { no: 1, name: "space_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "name", kind: "scalar", T: 9 },
+      { no: 3, name: "description", kind: "scalar", opt: true, T: 9 },
+      { no: 4, name: "user_ids", kind: "scalar", repeat: 1, T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.spaceId = 0n;
+    message.name = "";
+    message.userIds = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.spaceId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.name = reader.string();
+          break;
+        case 3:
+          message.description = reader.string();
+          break;
+        case 4:
+          if (wireType === import_runtime.WireType.LengthDelimited)
+            for (let e = reader.int32() + reader.pos;reader.pos < e; )
+              message.userIds.push(reader.int64().toBigInt());
+          else
+            message.userIds.push(reader.int64().toBigInt());
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.spaceId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.spaceId);
+    if (message.name !== "")
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.name);
+    if (message.description !== undefined)
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.description);
+    if (message.userIds.length) {
+      writer.tag(4, import_runtime.WireType.LengthDelimited).fork();
+      for (let i = 0;i < message.userIds.length; i++)
+        writer.int64(message.userIds[i]);
+      writer.join();
+    }
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var CreateUserGroupInput = new CreateUserGroupInput$Type;
+
+class CreateUserGroupResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("CreateUserGroupResult", [
+      { no: 1, name: "group", kind: "message", T: () => UserGroup },
+      { no: 2, name: "users", kind: "message", repeat: 1, T: () => User }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.users = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.group = UserGroup.internalBinaryRead(reader, reader.uint32(), options, message.group);
+          break;
+        case 2:
+          message.users.push(User.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.group)
+      UserGroup.internalBinaryWrite(message.group, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.users.length; i++)
+      User.internalBinaryWrite(message.users[i], writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var CreateUserGroupResult = new CreateUserGroupResult$Type;
+
+class UpdateUserGroupInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("UpdateUserGroupInput", [
+      { no: 1, name: "group_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "name", kind: "scalar", T: 9 },
+      { no: 3, name: "description", kind: "scalar", opt: true, T: 9 },
+      { no: 4, name: "user_ids", kind: "scalar", repeat: 1, T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.groupId = 0n;
+    message.name = "";
+    message.userIds = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.groupId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.name = reader.string();
+          break;
+        case 3:
+          message.description = reader.string();
+          break;
+        case 4:
+          if (wireType === import_runtime.WireType.LengthDelimited)
+            for (let e = reader.int32() + reader.pos;reader.pos < e; )
+              message.userIds.push(reader.int64().toBigInt());
+          else
+            message.userIds.push(reader.int64().toBigInt());
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.groupId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.groupId);
+    if (message.name !== "")
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.name);
+    if (message.description !== undefined)
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.description);
+    if (message.userIds.length) {
+      writer.tag(4, import_runtime.WireType.LengthDelimited).fork();
+      for (let i = 0;i < message.userIds.length; i++)
+        writer.int64(message.userIds[i]);
+      writer.join();
+    }
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var UpdateUserGroupInput = new UpdateUserGroupInput$Type;
+
+class UpdateUserGroupResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("UpdateUserGroupResult", [
+      { no: 1, name: "group", kind: "message", T: () => UserGroup },
+      { no: 2, name: "users", kind: "message", repeat: 1, T: () => User }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.users = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.group = UserGroup.internalBinaryRead(reader, reader.uint32(), options, message.group);
+          break;
+        case 2:
+          message.users.push(User.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.group)
+      UserGroup.internalBinaryWrite(message.group, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.users.length; i++)
+      User.internalBinaryWrite(message.users[i], writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var UpdateUserGroupResult = new UpdateUserGroupResult$Type;
+
+class DeleteUserGroupInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("DeleteUserGroupInput", [
+      { no: 1, name: "group_id", kind: "scalar", T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.groupId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.groupId = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.groupId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.groupId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var DeleteUserGroupInput = new DeleteUserGroupInput$Type;
+
+class DeleteUserGroupResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("DeleteUserGroupResult", []);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    return target ?? this.create();
+  }
+  internalBinaryWrite(message, writer, options) {
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var DeleteUserGroupResult = new DeleteUserGroupResult$Type;
+
 class Update$Type extends import_runtime4.MessageType {
   constructor() {
     super("Update", [
@@ -18099,7 +21702,11 @@ class Update$Type extends import_runtime4.MessageType {
       { no: 37, name: "clear_chat_history", kind: "message", oneof: "update", T: () => UpdateClearChatHistory },
       { no: 38, name: "bot_presence", kind: "message", oneof: "update", T: () => UpdateBotPresence },
       { no: 39, name: "dialog_follow_mode", kind: "message", oneof: "update", T: () => UpdateDialogFollowMode },
-      { no: 40, name: "updated_user", kind: "message", oneof: "update", T: () => UpdateUpdatedUser }
+      { no: 40, name: "updated_user", kind: "message", oneof: "update", T: () => UpdateUpdatedUser },
+      { no: 41, name: "participant_group_add", kind: "message", oneof: "update", T: () => UpdateChatParticipantGroupAdd },
+      { no: 42, name: "participant_group_delete", kind: "message", oneof: "update", T: () => UpdateChatParticipantGroupDelete },
+      { no: 43, name: "space_settings", kind: "message", oneof: "update", T: () => UpdateSpaceSettings },
+      { no: 44, name: "chat_permissions", kind: "message", oneof: "update", T: () => UpdateChatPermissions }
     ]);
   }
   create(value) {
@@ -18342,6 +21949,30 @@ class Update$Type extends import_runtime4.MessageType {
             updatedUser: UpdateUpdatedUser.internalBinaryRead(reader, reader.uint32(), options, message.update.updatedUser)
           };
           break;
+        case 41:
+          message.update = {
+            oneofKind: "participantGroupAdd",
+            participantGroupAdd: UpdateChatParticipantGroupAdd.internalBinaryRead(reader, reader.uint32(), options, message.update.participantGroupAdd)
+          };
+          break;
+        case 42:
+          message.update = {
+            oneofKind: "participantGroupDelete",
+            participantGroupDelete: UpdateChatParticipantGroupDelete.internalBinaryRead(reader, reader.uint32(), options, message.update.participantGroupDelete)
+          };
+          break;
+        case 43:
+          message.update = {
+            oneofKind: "spaceSettings",
+            spaceSettings: UpdateSpaceSettings.internalBinaryRead(reader, reader.uint32(), options, message.update.spaceSettings)
+          };
+          break;
+        case 44:
+          message.update = {
+            oneofKind: "chatPermissions",
+            chatPermissions: UpdateChatPermissions.internalBinaryRead(reader, reader.uint32(), options, message.update.chatPermissions)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -18432,6 +22063,14 @@ class Update$Type extends import_runtime4.MessageType {
       UpdateDialogFollowMode.internalBinaryWrite(message.update.dialogFollowMode, writer.tag(39, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.update.oneofKind === "updatedUser")
       UpdateUpdatedUser.internalBinaryWrite(message.update.updatedUser, writer.tag(40, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.update.oneofKind === "participantGroupAdd")
+      UpdateChatParticipantGroupAdd.internalBinaryWrite(message.update.participantGroupAdd, writer.tag(41, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.update.oneofKind === "participantGroupDelete")
+      UpdateChatParticipantGroupDelete.internalBinaryWrite(message.update.participantGroupDelete, writer.tag(42, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.update.oneofKind === "spaceSettings")
+      UpdateSpaceSettings.internalBinaryWrite(message.update.spaceSettings, writer.tag(43, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.update.oneofKind === "chatPermissions")
+      UpdateChatPermissions.internalBinaryWrite(message.update.chatPermissions, writer.tag(44, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -18700,6 +22339,55 @@ class UpdateChatInfo$Type extends import_runtime4.MessageType {
 }
 var UpdateChatInfo = new UpdateChatInfo$Type;
 
+class UpdateChatPermissions$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("UpdateChatPermissions", [
+      { no: 1, name: "chat_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "permissions", kind: "message", T: () => ChatPermissions }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.chatId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.chatId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.permissions = ChatPermissions.internalBinaryRead(reader, reader.uint32(), options, message.permissions);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.chatId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.chatId);
+    if (message.permissions)
+      ChatPermissions.internalBinaryWrite(message.permissions, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var UpdateChatPermissions = new UpdateChatPermissions$Type;
+
 class UpdatePinnedMessages$Type extends import_runtime4.MessageType {
   constructor() {
     super("UpdatePinnedMessages", [
@@ -18901,6 +22589,55 @@ class UpdateUserSettings$Type extends import_runtime4.MessageType {
   }
 }
 var UpdateUserSettings = new UpdateUserSettings$Type;
+
+class UpdateSpaceSettings$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("UpdateSpaceSettings", [
+      { no: 1, name: "space_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "settings", kind: "message", T: () => SpaceSettings }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.spaceId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.spaceId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.settings = SpaceSettings.internalBinaryRead(reader, reader.uint32(), options, message.settings);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.spaceId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.spaceId);
+    if (message.settings)
+      SpaceSettings.internalBinaryWrite(message.settings, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var UpdateSpaceSettings = new UpdateSpaceSettings$Type;
 
 class UpdateUpdatedUser$Type extends import_runtime4.MessageType {
   constructor() {
@@ -20348,6 +24085,56 @@ class ChatParticipant$Type extends import_runtime4.MessageType {
 }
 var ChatParticipant = new ChatParticipant$Type;
 
+class ChatParticipantGroup$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("ChatParticipantGroup", [
+      { no: 1, name: "group_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "date", kind: "scalar", T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.groupId = 0n;
+    message.date = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.groupId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.date = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.groupId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.groupId);
+    if (message.date !== 0n)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.date);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var ChatParticipantGroup = new ChatParticipantGroup$Type;
+
 class UpdateChatParticipantAdd$Type extends import_runtime4.MessageType {
   constructor() {
     super("UpdateChatParticipantAdd", [
@@ -20446,6 +24233,105 @@ class UpdateChatParticipantDelete$Type extends import_runtime4.MessageType {
   }
 }
 var UpdateChatParticipantDelete = new UpdateChatParticipantDelete$Type;
+
+class UpdateChatParticipantGroupAdd$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("UpdateChatParticipantGroupAdd", [
+      { no: 1, name: "chat_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "group_participant", kind: "message", T: () => ChatParticipantGroup }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.chatId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.chatId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.groupParticipant = ChatParticipantGroup.internalBinaryRead(reader, reader.uint32(), options, message.groupParticipant);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.chatId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.chatId);
+    if (message.groupParticipant)
+      ChatParticipantGroup.internalBinaryWrite(message.groupParticipant, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var UpdateChatParticipantGroupAdd = new UpdateChatParticipantGroupAdd$Type;
+
+class UpdateChatParticipantGroupDelete$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("UpdateChatParticipantGroupDelete", [
+      { no: 1, name: "chat_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "group_id", kind: "scalar", T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.chatId = 0n;
+    message.groupId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.chatId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.groupId = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.chatId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.chatId);
+    if (message.groupId !== 0n)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.groupId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var UpdateChatParticipantGroupDelete = new UpdateChatParticipantGroupDelete$Type;
 
 class UserStatus$Type extends import_runtime4.MessageType {
   constructor() {
@@ -20906,13 +24792,17 @@ class GetChatParticipantsResult$Type extends import_runtime4.MessageType {
   constructor() {
     super("GetChatParticipantsResult", [
       { no: 1, name: "participants", kind: "message", repeat: 1, T: () => ChatParticipant },
-      { no: 2, name: "users", kind: "message", repeat: 1, T: () => User }
+      { no: 2, name: "users", kind: "message", repeat: 1, T: () => User },
+      { no: 3, name: "group_participants", kind: "message", repeat: 1, T: () => ChatParticipantGroup },
+      { no: 4, name: "groups", kind: "message", repeat: 1, T: () => UserGroup }
     ]);
   }
   create(value) {
     const message = globalThis.Object.create(this.messagePrototype);
     message.participants = [];
     message.users = [];
+    message.groupParticipants = [];
+    message.groups = [];
     if (value !== undefined)
       import_runtime3.reflectionMergePartial(this, message, value);
     return message;
@@ -20927,6 +24817,12 @@ class GetChatParticipantsResult$Type extends import_runtime4.MessageType {
           break;
         case 2:
           message.users.push(User.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 3:
+          message.groupParticipants.push(ChatParticipantGroup.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 4:
+          message.groups.push(UserGroup.internalBinaryRead(reader, reader.uint32(), options));
           break;
         default:
           let u = options.readUnknownField;
@@ -20944,6 +24840,10 @@ class GetChatParticipantsResult$Type extends import_runtime4.MessageType {
       ChatParticipant.internalBinaryWrite(message.participants[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
     for (let i = 0;i < message.users.length; i++)
       User.internalBinaryWrite(message.users[i], writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.groupParticipants.length; i++)
+      ChatParticipantGroup.internalBinaryWrite(message.groupParticipants[i], writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.groups.length; i++)
+      UserGroup.internalBinaryWrite(message.groups[i], writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -20956,13 +24856,13 @@ class AddChatParticipantInput$Type extends import_runtime4.MessageType {
   constructor() {
     super("AddChatParticipantInput", [
       { no: 1, name: "chat_id", kind: "scalar", T: 3, L: 0 },
-      { no: 2, name: "user_id", kind: "scalar", T: 3, L: 0 }
+      { no: 2, name: "user_id", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 3, name: "group_id", kind: "scalar", opt: true, T: 3, L: 0 }
     ]);
   }
   create(value) {
     const message = globalThis.Object.create(this.messagePrototype);
     message.chatId = 0n;
-    message.userId = 0n;
     if (value !== undefined)
       import_runtime3.reflectionMergePartial(this, message, value);
     return message;
@@ -20978,6 +24878,9 @@ class AddChatParticipantInput$Type extends import_runtime4.MessageType {
         case 2:
           message.userId = reader.int64().toBigInt();
           break;
+        case 3:
+          message.groupId = reader.int64().toBigInt();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -20992,8 +24895,10 @@ class AddChatParticipantInput$Type extends import_runtime4.MessageType {
   internalBinaryWrite(message, writer, options) {
     if (message.chatId !== 0n)
       writer.tag(1, import_runtime.WireType.Varint).int64(message.chatId);
-    if (message.userId !== 0n)
+    if (message.userId !== undefined)
       writer.tag(2, import_runtime.WireType.Varint).int64(message.userId);
+    if (message.groupId !== undefined)
+      writer.tag(3, import_runtime.WireType.Varint).int64(message.groupId);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -21005,11 +24910,15 @@ var AddChatParticipantInput = new AddChatParticipantInput$Type;
 class AddChatParticipantResult$Type extends import_runtime4.MessageType {
   constructor() {
     super("AddChatParticipantResult", [
-      { no: 1, name: "participant", kind: "message", T: () => ChatParticipant }
+      { no: 1, name: "participant", kind: "message", T: () => ChatParticipant },
+      { no: 2, name: "group_participant", kind: "message", T: () => ChatParticipantGroup },
+      { no: 3, name: "group", kind: "message", T: () => UserGroup },
+      { no: 4, name: "users", kind: "message", repeat: 1, T: () => User }
     ]);
   }
   create(value) {
     const message = globalThis.Object.create(this.messagePrototype);
+    message.users = [];
     if (value !== undefined)
       import_runtime3.reflectionMergePartial(this, message, value);
     return message;
@@ -21021,6 +24930,15 @@ class AddChatParticipantResult$Type extends import_runtime4.MessageType {
       switch (fieldNo) {
         case 1:
           message.participant = ChatParticipant.internalBinaryRead(reader, reader.uint32(), options, message.participant);
+          break;
+        case 2:
+          message.groupParticipant = ChatParticipantGroup.internalBinaryRead(reader, reader.uint32(), options, message.groupParticipant);
+          break;
+        case 3:
+          message.group = UserGroup.internalBinaryRead(reader, reader.uint32(), options, message.group);
+          break;
+        case 4:
+          message.users.push(User.internalBinaryRead(reader, reader.uint32(), options));
           break;
         default:
           let u = options.readUnknownField;
@@ -21036,6 +24954,12 @@ class AddChatParticipantResult$Type extends import_runtime4.MessageType {
   internalBinaryWrite(message, writer, options) {
     if (message.participant)
       ChatParticipant.internalBinaryWrite(message.participant, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.groupParticipant)
+      ChatParticipantGroup.internalBinaryWrite(message.groupParticipant, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.group)
+      UserGroup.internalBinaryWrite(message.group, writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.users.length; i++)
+      User.internalBinaryWrite(message.users[i], writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -21048,13 +24972,13 @@ class RemoveChatParticipantInput$Type extends import_runtime4.MessageType {
   constructor() {
     super("RemoveChatParticipantInput", [
       { no: 1, name: "chat_id", kind: "scalar", T: 3, L: 0 },
-      { no: 2, name: "user_id", kind: "scalar", T: 3, L: 0 }
+      { no: 2, name: "user_id", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 3, name: "group_id", kind: "scalar", opt: true, T: 3, L: 0 }
     ]);
   }
   create(value) {
     const message = globalThis.Object.create(this.messagePrototype);
     message.chatId = 0n;
-    message.userId = 0n;
     if (value !== undefined)
       import_runtime3.reflectionMergePartial(this, message, value);
     return message;
@@ -21070,6 +24994,9 @@ class RemoveChatParticipantInput$Type extends import_runtime4.MessageType {
         case 2:
           message.userId = reader.int64().toBigInt();
           break;
+        case 3:
+          message.groupId = reader.int64().toBigInt();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -21084,8 +25011,10 @@ class RemoveChatParticipantInput$Type extends import_runtime4.MessageType {
   internalBinaryWrite(message, writer, options) {
     if (message.chatId !== 0n)
       writer.tag(1, import_runtime.WireType.Varint).int64(message.chatId);
-    if (message.userId !== 0n)
+    if (message.userId !== undefined)
       writer.tag(2, import_runtime.WireType.Varint).int64(message.userId);
+    if (message.groupId !== undefined)
+      writer.tag(3, import_runtime.WireType.Varint).int64(message.groupId);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -21551,6 +25480,1555 @@ class DraftMessage$Type extends import_runtime4.MessageType {
 }
 var DraftMessage = new DraftMessage$Type;
 
+class BotCapability$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BotCapability", [
+      { no: 1, name: "kind", kind: "enum", T: () => ["BotCapability.Kind", BotCapability_Kind] },
+      { no: 2, name: "version", kind: "scalar", T: 13 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.kind = 0;
+    message.version = 0;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.kind = reader.int32();
+          break;
+        case 2:
+          message.version = reader.uint32();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.kind !== 0)
+      writer.tag(1, import_runtime.WireType.Varint).int32(message.kind);
+    if (message.version !== 0)
+      writer.tag(2, import_runtime.WireType.Varint).uint32(message.version);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BotCapability = new BotCapability$Type;
+
+class PeerBot$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("PeerBot", [
+      { no: 1, name: "bot", kind: "message", T: () => User },
+      { no: 2, name: "capabilities", kind: "message", repeat: 1, T: () => BotCapability }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.capabilities = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.bot = User.internalBinaryRead(reader, reader.uint32(), options, message.bot);
+          break;
+        case 2:
+          message.capabilities.push(BotCapability.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.bot)
+      User.internalBinaryWrite(message.bot, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.capabilities.length; i++)
+      BotCapability.internalBinaryWrite(message.capabilities[i], writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var PeerBot = new PeerBot$Type;
+
+class GetPeerBotsInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetPeerBotsInput", [
+      { no: 1, name: "peer_id", kind: "message", T: () => InputPeer }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.peerId)
+      InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetPeerBotsInput = new GetPeerBotsInput$Type;
+
+class GetPeerBotsResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetPeerBotsResult", [
+      { no: 1, name: "bots", kind: "message", repeat: 1, T: () => PeerBot },
+      { no: 2, name: "suggested_bot_user_id", kind: "scalar", opt: true, T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.bots = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.bots.push(PeerBot.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 2:
+          message.suggestedBotUserId = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    for (let i = 0;i < message.bots.length; i++)
+      PeerBot.internalBinaryWrite(message.bots[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.suggestedBotUserId !== undefined)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.suggestedBotUserId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetPeerBotsResult = new GetPeerBotsResult$Type;
+
+class GetMyBotCapabilitiesInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetMyBotCapabilitiesInput", []);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    return target ?? this.create();
+  }
+  internalBinaryWrite(message, writer, options) {
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetMyBotCapabilitiesInput = new GetMyBotCapabilitiesInput$Type;
+
+class GetMyBotCapabilitiesResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetMyBotCapabilitiesResult", [
+      { no: 1, name: "capabilities", kind: "message", repeat: 1, T: () => BotCapability }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.capabilities = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.capabilities.push(BotCapability.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    for (let i = 0;i < message.capabilities.length; i++)
+      BotCapability.internalBinaryWrite(message.capabilities[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetMyBotCapabilitiesResult = new GetMyBotCapabilitiesResult$Type;
+
+class SetMyBotCapabilitiesInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SetMyBotCapabilitiesInput", [
+      { no: 1, name: "capabilities", kind: "message", repeat: 1, T: () => BotCapability }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.capabilities = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.capabilities.push(BotCapability.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    for (let i = 0;i < message.capabilities.length; i++)
+      BotCapability.internalBinaryWrite(message.capabilities[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SetMyBotCapabilitiesInput = new SetMyBotCapabilitiesInput$Type;
+
+class SetMyBotCapabilitiesResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SetMyBotCapabilitiesResult", [
+      { no: 1, name: "capabilities", kind: "message", repeat: 1, T: () => BotCapability }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.capabilities = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.capabilities.push(BotCapability.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    for (let i = 0;i < message.capabilities.length; i++)
+      BotCapability.internalBinaryWrite(message.capabilities[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SetMyBotCapabilitiesResult = new SetMyBotCapabilitiesResult$Type;
+
+class BotChatSettingsDocument$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BotChatSettingsDocument", [
+      { no: 1, name: "version", kind: "scalar", T: 13 },
+      { no: 2, name: "revision", kind: "scalar", T: 9 },
+      { no: 3, name: "sections", kind: "message", repeat: 1, T: () => BotChatSettingsSection }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.version = 0;
+    message.revision = "";
+    message.sections = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.version = reader.uint32();
+          break;
+        case 2:
+          message.revision = reader.string();
+          break;
+        case 3:
+          message.sections.push(BotChatSettingsSection.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.version !== 0)
+      writer.tag(1, import_runtime.WireType.Varint).uint32(message.version);
+    if (message.revision !== "")
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.revision);
+    for (let i = 0;i < message.sections.length; i++)
+      BotChatSettingsSection.internalBinaryWrite(message.sections[i], writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BotChatSettingsDocument = new BotChatSettingsDocument$Type;
+
+class BotChatSettingsSection$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BotChatSettingsSection", [
+      { no: 1, name: "id", kind: "scalar", T: 9 },
+      { no: 2, name: "title", kind: "scalar", opt: true, T: 9 },
+      { no: 3, name: "description", kind: "scalar", opt: true, T: 9 },
+      { no: 4, name: "items", kind: "message", repeat: 1, T: () => BotChatSettingsItem }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.id = "";
+    message.items = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.id = reader.string();
+          break;
+        case 2:
+          message.title = reader.string();
+          break;
+        case 3:
+          message.description = reader.string();
+          break;
+        case 4:
+          message.items.push(BotChatSettingsItem.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.id !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.id);
+    if (message.title !== undefined)
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.title);
+    if (message.description !== undefined)
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.description);
+    for (let i = 0;i < message.items.length; i++)
+      BotChatSettingsItem.internalBinaryWrite(message.items[i], writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BotChatSettingsSection = new BotChatSettingsSection$Type;
+
+class BotChatSettingsItem$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BotChatSettingsItem", [
+      { no: 1, name: "id", kind: "scalar", T: 9 },
+      { no: 2, name: "label", kind: "scalar", opt: true, T: 9 },
+      { no: 3, name: "description", kind: "scalar", opt: true, T: 9 },
+      { no: 4, name: "disabled", kind: "scalar", T: 8 },
+      { no: 5, name: "disabled_reason", kind: "scalar", opt: true, T: 9 },
+      { no: 6, name: "toggle", kind: "message", oneof: "control", T: () => BotChatSettingsToggle },
+      { no: 7, name: "select", kind: "message", oneof: "control", T: () => BotChatSettingsSelect },
+      { no: 8, name: "info", kind: "message", oneof: "control", T: () => BotChatSettingsInfo },
+      { no: 9, name: "button", kind: "message", oneof: "control", T: () => BotChatSettingsButton },
+      { no: 10, name: "folder", kind: "message", oneof: "control", T: () => BotChatSettingsFolder }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.id = "";
+    message.disabled = false;
+    message.control = { oneofKind: undefined };
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.id = reader.string();
+          break;
+        case 2:
+          message.label = reader.string();
+          break;
+        case 3:
+          message.description = reader.string();
+          break;
+        case 4:
+          message.disabled = reader.bool();
+          break;
+        case 5:
+          message.disabledReason = reader.string();
+          break;
+        case 6:
+          message.control = {
+            oneofKind: "toggle",
+            toggle: BotChatSettingsToggle.internalBinaryRead(reader, reader.uint32(), options, message.control.toggle)
+          };
+          break;
+        case 7:
+          message.control = {
+            oneofKind: "select",
+            select: BotChatSettingsSelect.internalBinaryRead(reader, reader.uint32(), options, message.control.select)
+          };
+          break;
+        case 8:
+          message.control = {
+            oneofKind: "info",
+            info: BotChatSettingsInfo.internalBinaryRead(reader, reader.uint32(), options, message.control.info)
+          };
+          break;
+        case 9:
+          message.control = {
+            oneofKind: "button",
+            button: BotChatSettingsButton.internalBinaryRead(reader, reader.uint32(), options, message.control.button)
+          };
+          break;
+        case 10:
+          message.control = {
+            oneofKind: "folder",
+            folder: BotChatSettingsFolder.internalBinaryRead(reader, reader.uint32(), options, message.control.folder)
+          };
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.id !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.id);
+    if (message.label !== undefined)
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.label);
+    if (message.description !== undefined)
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.description);
+    if (message.disabled !== false)
+      writer.tag(4, import_runtime.WireType.Varint).bool(message.disabled);
+    if (message.disabledReason !== undefined)
+      writer.tag(5, import_runtime.WireType.LengthDelimited).string(message.disabledReason);
+    if (message.control.oneofKind === "toggle")
+      BotChatSettingsToggle.internalBinaryWrite(message.control.toggle, writer.tag(6, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.control.oneofKind === "select")
+      BotChatSettingsSelect.internalBinaryWrite(message.control.select, writer.tag(7, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.control.oneofKind === "info")
+      BotChatSettingsInfo.internalBinaryWrite(message.control.info, writer.tag(8, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.control.oneofKind === "button")
+      BotChatSettingsButton.internalBinaryWrite(message.control.button, writer.tag(9, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.control.oneofKind === "folder")
+      BotChatSettingsFolder.internalBinaryWrite(message.control.folder, writer.tag(10, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BotChatSettingsItem = new BotChatSettingsItem$Type;
+
+class BotChatSettingsToggle$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BotChatSettingsToggle", [
+      { no: 1, name: "value", kind: "scalar", T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.value = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.value = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.value !== false)
+      writer.tag(1, import_runtime.WireType.Varint).bool(message.value);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BotChatSettingsToggle = new BotChatSettingsToggle$Type;
+
+class BotChatSettingsSelect$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BotChatSettingsSelect", [
+      { no: 1, name: "value", kind: "scalar", T: 9 },
+      { no: 2, name: "options", kind: "message", repeat: 1, T: () => BotChatSettingsSelectOption }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.value = "";
+    message.options = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.value = reader.string();
+          break;
+        case 2:
+          message.options.push(BotChatSettingsSelectOption.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.value !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.value);
+    for (let i = 0;i < message.options.length; i++)
+      BotChatSettingsSelectOption.internalBinaryWrite(message.options[i], writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BotChatSettingsSelect = new BotChatSettingsSelect$Type;
+
+class BotChatSettingsSelectOption$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BotChatSettingsSelectOption", [
+      { no: 1, name: "value", kind: "scalar", T: 9 },
+      { no: 2, name: "label", kind: "scalar", T: 9 },
+      { no: 3, name: "description", kind: "scalar", opt: true, T: 9 },
+      { no: 4, name: "disabled", kind: "scalar", T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.value = "";
+    message.label = "";
+    message.disabled = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.value = reader.string();
+          break;
+        case 2:
+          message.label = reader.string();
+          break;
+        case 3:
+          message.description = reader.string();
+          break;
+        case 4:
+          message.disabled = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.value !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.value);
+    if (message.label !== "")
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.label);
+    if (message.description !== undefined)
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.description);
+    if (message.disabled !== false)
+      writer.tag(4, import_runtime.WireType.Varint).bool(message.disabled);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BotChatSettingsSelectOption = new BotChatSettingsSelectOption$Type;
+
+class BotChatSettingsInfo$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BotChatSettingsInfo", [
+      { no: 1, name: "text", kind: "scalar", T: 9 },
+      { no: 2, name: "tone", kind: "enum", T: () => ["BotChatSettingsInfo.Tone", BotChatSettingsInfo_Tone] }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.text = "";
+    message.tone = 0;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.text = reader.string();
+          break;
+        case 2:
+          message.tone = reader.int32();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.text !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.text);
+    if (message.tone !== 0)
+      writer.tag(2, import_runtime.WireType.Varint).int32(message.tone);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BotChatSettingsInfo = new BotChatSettingsInfo$Type;
+
+class BotChatSettingsButton$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BotChatSettingsButton", []);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    return target ?? this.create();
+  }
+  internalBinaryWrite(message, writer, options) {
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BotChatSettingsButton = new BotChatSettingsButton$Type;
+
+class BotChatSettingsFolder$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BotChatSettingsFolder", [
+      { no: 1, name: "value", kind: "scalar", T: 9 },
+      { no: 2, name: "recent_folders", kind: "message", repeat: 1, T: () => BotChatSettingsFolderOption },
+      { no: 3, name: "host_installation_id", kind: "scalar", T: 9 },
+      { no: 4, name: "host_label", kind: "scalar", T: 9 },
+      { no: 5, name: "allows_local_picker", kind: "scalar", T: 8 },
+      { no: 6, name: "local_picker_port", kind: "scalar", opt: true, T: 13 },
+      { no: 7, name: "local_picker_capability", kind: "scalar", opt: true, T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.value = "";
+    message.recentFolders = [];
+    message.hostInstallationId = "";
+    message.hostLabel = "";
+    message.allowsLocalPicker = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.value = reader.string();
+          break;
+        case 2:
+          message.recentFolders.push(BotChatSettingsFolderOption.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 3:
+          message.hostInstallationId = reader.string();
+          break;
+        case 4:
+          message.hostLabel = reader.string();
+          break;
+        case 5:
+          message.allowsLocalPicker = reader.bool();
+          break;
+        case 6:
+          message.localPickerPort = reader.uint32();
+          break;
+        case 7:
+          message.localPickerCapability = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.value !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.value);
+    for (let i = 0;i < message.recentFolders.length; i++)
+      BotChatSettingsFolderOption.internalBinaryWrite(message.recentFolders[i], writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.hostInstallationId !== "")
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.hostInstallationId);
+    if (message.hostLabel !== "")
+      writer.tag(4, import_runtime.WireType.LengthDelimited).string(message.hostLabel);
+    if (message.allowsLocalPicker !== false)
+      writer.tag(5, import_runtime.WireType.Varint).bool(message.allowsLocalPicker);
+    if (message.localPickerPort !== undefined)
+      writer.tag(6, import_runtime.WireType.Varint).uint32(message.localPickerPort);
+    if (message.localPickerCapability !== undefined)
+      writer.tag(7, import_runtime.WireType.LengthDelimited).string(message.localPickerCapability);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BotChatSettingsFolder = new BotChatSettingsFolder$Type;
+
+class BotChatSettingsFolderOption$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BotChatSettingsFolderOption", [
+      { no: 1, name: "value", kind: "scalar", T: 9 },
+      { no: 2, name: "label", kind: "scalar", T: 9 },
+      { no: 3, name: "parent_hint", kind: "scalar", opt: true, T: 9 },
+      { no: 4, name: "disabled", kind: "scalar", T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.value = "";
+    message.label = "";
+    message.disabled = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.value = reader.string();
+          break;
+        case 2:
+          message.label = reader.string();
+          break;
+        case 3:
+          message.parentHint = reader.string();
+          break;
+        case 4:
+          message.disabled = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.value !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.value);
+    if (message.label !== "")
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.label);
+    if (message.parentHint !== undefined)
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.parentHint);
+    if (message.disabled !== false)
+      writer.tag(4, import_runtime.WireType.Varint).bool(message.disabled);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BotChatSettingsFolderOption = new BotChatSettingsFolderOption$Type;
+
+class BotChatSettingsValue$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BotChatSettingsValue", [
+      { no: 1, name: "bool_value", kind: "scalar", oneof: "value", T: 8 },
+      { no: 2, name: "string_value", kind: "scalar", oneof: "value", T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.value = { oneofKind: undefined };
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.value = {
+            oneofKind: "boolValue",
+            boolValue: reader.bool()
+          };
+          break;
+        case 2:
+          message.value = {
+            oneofKind: "stringValue",
+            stringValue: reader.string()
+          };
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.value.oneofKind === "boolValue")
+      writer.tag(1, import_runtime.WireType.Varint).bool(message.value.boolValue);
+    if (message.value.oneofKind === "stringValue")
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.value.stringValue);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BotChatSettingsValue = new BotChatSettingsValue$Type;
+
+class BotChatSettingsProblem$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BotChatSettingsProblem", [
+      { no: 1, name: "code", kind: "enum", T: () => ["BotChatSettingsProblem.Code", BotChatSettingsProblem_Code] },
+      { no: 2, name: "message", kind: "scalar", T: 9 },
+      { no: 3, name: "current_document", kind: "message", T: () => BotChatSettingsDocument }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.code = 0;
+    message.message = "";
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.code = reader.int32();
+          break;
+        case 2:
+          message.message = reader.string();
+          break;
+        case 3:
+          message.currentDocument = BotChatSettingsDocument.internalBinaryRead(reader, reader.uint32(), options, message.currentDocument);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.code !== 0)
+      writer.tag(1, import_runtime.WireType.Varint).int32(message.code);
+    if (message.message !== "")
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.message);
+    if (message.currentDocument)
+      BotChatSettingsDocument.internalBinaryWrite(message.currentDocument, writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BotChatSettingsProblem = new BotChatSettingsProblem$Type;
+
+class BotChatSettingsResponse$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BotChatSettingsResponse", [
+      { no: 1, name: "document", kind: "message", oneof: "result", T: () => BotChatSettingsDocument },
+      { no: 2, name: "problem", kind: "message", oneof: "result", T: () => BotChatSettingsProblem }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.result = { oneofKind: undefined };
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.result = {
+            oneofKind: "document",
+            document: BotChatSettingsDocument.internalBinaryRead(reader, reader.uint32(), options, message.result.document)
+          };
+          break;
+        case 2:
+          message.result = {
+            oneofKind: "problem",
+            problem: BotChatSettingsProblem.internalBinaryRead(reader, reader.uint32(), options, message.result.problem)
+          };
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.result.oneofKind === "document")
+      BotChatSettingsDocument.internalBinaryWrite(message.result.document, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "problem")
+      BotChatSettingsProblem.internalBinaryWrite(message.result.problem, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BotChatSettingsResponse = new BotChatSettingsResponse$Type;
+
+class RequestBotChatSettingsInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("RequestBotChatSettingsInput", [
+      { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+      { no: 2, name: "bot_user_id", kind: "scalar", T: 3, L: 0 },
+      { no: 3, name: "version", kind: "scalar", T: 13 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.botUserId = 0n;
+    message.version = 0;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+          break;
+        case 2:
+          message.botUserId = reader.int64().toBigInt();
+          break;
+        case 3:
+          message.version = reader.uint32();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.peerId)
+      InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.botUserId !== 0n)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.botUserId);
+    if (message.version !== 0)
+      writer.tag(3, import_runtime.WireType.Varint).uint32(message.version);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var RequestBotChatSettingsInput = new RequestBotChatSettingsInput$Type;
+
+class RequestBotChatSettingsResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("RequestBotChatSettingsResult", [
+      { no: 1, name: "response", kind: "message", T: () => BotChatSettingsResponse }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.response = BotChatSettingsResponse.internalBinaryRead(reader, reader.uint32(), options, message.response);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.response)
+      BotChatSettingsResponse.internalBinaryWrite(message.response, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var RequestBotChatSettingsResult = new RequestBotChatSettingsResult$Type;
+
+class InvokeBotChatSettingsItemInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("InvokeBotChatSettingsItemInput", [
+      { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+      { no: 2, name: "bot_user_id", kind: "scalar", T: 3, L: 0 },
+      { no: 3, name: "version", kind: "scalar", T: 13 },
+      { no: 4, name: "item_id", kind: "scalar", T: 9 },
+      { no: 5, name: "value", kind: "message", T: () => BotChatSettingsValue },
+      { no: 6, name: "document_revision", kind: "scalar", T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.botUserId = 0n;
+    message.version = 0;
+    message.itemId = "";
+    message.documentRevision = "";
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+          break;
+        case 2:
+          message.botUserId = reader.int64().toBigInt();
+          break;
+        case 3:
+          message.version = reader.uint32();
+          break;
+        case 4:
+          message.itemId = reader.string();
+          break;
+        case 5:
+          message.value = BotChatSettingsValue.internalBinaryRead(reader, reader.uint32(), options, message.value);
+          break;
+        case 6:
+          message.documentRevision = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.peerId)
+      InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.botUserId !== 0n)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.botUserId);
+    if (message.version !== 0)
+      writer.tag(3, import_runtime.WireType.Varint).uint32(message.version);
+    if (message.itemId !== "")
+      writer.tag(4, import_runtime.WireType.LengthDelimited).string(message.itemId);
+    if (message.value)
+      BotChatSettingsValue.internalBinaryWrite(message.value, writer.tag(5, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.documentRevision !== "")
+      writer.tag(6, import_runtime.WireType.LengthDelimited).string(message.documentRevision);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var InvokeBotChatSettingsItemInput = new InvokeBotChatSettingsItemInput$Type;
+
+class InvokeBotChatSettingsItemResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("InvokeBotChatSettingsItemResult", [
+      { no: 1, name: "response", kind: "message", T: () => BotChatSettingsResponse }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.response = BotChatSettingsResponse.internalBinaryRead(reader, reader.uint32(), options, message.response);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.response)
+      BotChatSettingsResponse.internalBinaryWrite(message.response, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var InvokeBotChatSettingsItemResult = new InvokeBotChatSettingsItemResult$Type;
+
+class AnswerBotChatSettingsInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("AnswerBotChatSettingsInput", [
+      { no: 1, name: "request_id", kind: "scalar", T: 4, L: 0 },
+      { no: 2, name: "response", kind: "message", T: () => BotChatSettingsResponse }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.requestId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.requestId = reader.uint64().toBigInt();
+          break;
+        case 2:
+          message.response = BotChatSettingsResponse.internalBinaryRead(reader, reader.uint32(), options, message.response);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.requestId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).uint64(message.requestId);
+    if (message.response)
+      BotChatSettingsResponse.internalBinaryWrite(message.response, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var AnswerBotChatSettingsInput = new AnswerBotChatSettingsInput$Type;
+
+class AnswerBotChatSettingsResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("AnswerBotChatSettingsResult", []);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    return target ?? this.create();
+  }
+  internalBinaryWrite(message, writer, options) {
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var AnswerBotChatSettingsResult = new AnswerBotChatSettingsResult$Type;
+
+class BotChatSettingsRequested$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BotChatSettingsRequested", [
+      { no: 1, name: "request_id", kind: "scalar", T: 4, L: 0 },
+      { no: 2, name: "chat_id", kind: "scalar", T: 3, L: 0 },
+      { no: 3, name: "actor_user_id", kind: "scalar", T: 3, L: 0 },
+      { no: 4, name: "version", kind: "scalar", T: 13 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.requestId = 0n;
+    message.chatId = 0n;
+    message.actorUserId = 0n;
+    message.version = 0;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.requestId = reader.uint64().toBigInt();
+          break;
+        case 2:
+          message.chatId = reader.int64().toBigInt();
+          break;
+        case 3:
+          message.actorUserId = reader.int64().toBigInt();
+          break;
+        case 4:
+          message.version = reader.uint32();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.requestId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).uint64(message.requestId);
+    if (message.chatId !== 0n)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.chatId);
+    if (message.actorUserId !== 0n)
+      writer.tag(3, import_runtime.WireType.Varint).int64(message.actorUserId);
+    if (message.version !== 0)
+      writer.tag(4, import_runtime.WireType.Varint).uint32(message.version);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BotChatSettingsRequested = new BotChatSettingsRequested$Type;
+
+class BotChatSettingsItemInvoked$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BotChatSettingsItemInvoked", [
+      { no: 1, name: "request_id", kind: "scalar", T: 4, L: 0 },
+      { no: 2, name: "chat_id", kind: "scalar", T: 3, L: 0 },
+      { no: 3, name: "actor_user_id", kind: "scalar", T: 3, L: 0 },
+      { no: 4, name: "version", kind: "scalar", T: 13 },
+      { no: 5, name: "item_id", kind: "scalar", T: 9 },
+      { no: 6, name: "value", kind: "message", T: () => BotChatSettingsValue },
+      { no: 7, name: "document_revision", kind: "scalar", T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.requestId = 0n;
+    message.chatId = 0n;
+    message.actorUserId = 0n;
+    message.version = 0;
+    message.itemId = "";
+    message.documentRevision = "";
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.requestId = reader.uint64().toBigInt();
+          break;
+        case 2:
+          message.chatId = reader.int64().toBigInt();
+          break;
+        case 3:
+          message.actorUserId = reader.int64().toBigInt();
+          break;
+        case 4:
+          message.version = reader.uint32();
+          break;
+        case 5:
+          message.itemId = reader.string();
+          break;
+        case 6:
+          message.value = BotChatSettingsValue.internalBinaryRead(reader, reader.uint32(), options, message.value);
+          break;
+        case 7:
+          message.documentRevision = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.requestId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).uint64(message.requestId);
+    if (message.chatId !== 0n)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.chatId);
+    if (message.actorUserId !== 0n)
+      writer.tag(3, import_runtime.WireType.Varint).int64(message.actorUserId);
+    if (message.version !== 0)
+      writer.tag(4, import_runtime.WireType.Varint).uint32(message.version);
+    if (message.itemId !== "")
+      writer.tag(5, import_runtime.WireType.LengthDelimited).string(message.itemId);
+    if (message.value)
+      BotChatSettingsValue.internalBinaryWrite(message.value, writer.tag(6, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.documentRevision !== "")
+      writer.tag(7, import_runtime.WireType.LengthDelimited).string(message.documentRevision);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BotChatSettingsItemInvoked = new BotChatSettingsItemInvoked$Type;
+
 // ../sdk/dist/ids.js
 class InlineIdError extends Error {
   constructor(message) {
@@ -21891,6 +27369,8 @@ class ProtocolClient {
       case "message":
         if (message.body.message.payload.oneofKind === "update") {
           await this.events.send({ type: "updates", updates: message.body.message.payload.update });
+        } else if (message.body.message.payload.oneofKind === "bot") {
+          await this.events.send({ type: "bot", bot: message.body.message.payload.bot });
         }
         break;
       case "pong":
@@ -22429,7 +27909,13 @@ var rpcInputKindByMethod = {
   61: "getSessions",
   62: "checkUsername",
   63: "changeUsername",
-  64: "updateProfile"
+  64: "updateProfile",
+  76: "getPeerBots",
+  77: "getMyBotCapabilities",
+  78: "setMyBotCapabilities",
+  79: "requestBotChatSettings",
+  80: "invokeBotChatSettingsItem",
+  81: "answerBotChatSettings"
 };
 var rpcResultKindByMethod = {
   0: undefined,
@@ -22481,7 +27967,13 @@ var rpcResultKindByMethod = {
   61: "getSessions",
   62: "checkUsername",
   63: "changeUsername",
-  64: "updateProfile"
+  64: "updateProfile",
+  76: "getPeerBots",
+  77: "getMyBotCapabilities",
+  78: "setMyBotCapabilities",
+  79: "requestBotChatSettings",
+  80: "invokeBotChatSettingsItem",
+  81: "answerBotChatSettings"
 };
 
 // ../sdk/dist/sdk/logger.js
@@ -22572,6 +28064,10 @@ class InlineSdkClient {
   catchUpInFlightBySpaceId = new Map;
   catchUpRequestedBySpaceId = new Map;
   userCatchUpInFlight = null;
+  desiredBotCapabilities = null;
+  desiredBotCapabilitiesRevision = 0;
+  registeredBotCapabilitiesRevision = -1;
+  botCapabilitiesRegistrationInFlight = null;
   constructor(options) {
     this.options = options;
     this.log = options.logger ?? noopLogger;
@@ -22898,6 +28394,100 @@ class InlineSdkClient {
       }
     });
   }
+  async getPeerBots(params) {
+    const result = await this.invoke(Method.GET_PEER_BOTS, {
+      oneofKind: "getPeerBots",
+      getPeerBots: { peerId: this.inputPeerFromTarget(params, "getPeerBots") }
+    });
+    return result.getPeerBots;
+  }
+  async getMyBotCapabilities() {
+    const result = await this.invoke(Method.GET_MY_BOT_CAPABILITIES, {
+      oneofKind: "getMyBotCapabilities",
+      getMyBotCapabilities: {}
+    });
+    return { capabilities: result.getMyBotCapabilities.capabilities };
+  }
+  async setMyBotCapabilities(params) {
+    this.desiredBotCapabilities = params.capabilities.map((capability) => ({ ...capability }));
+    this.desiredBotCapabilitiesRevision += 1;
+    return await this.registerDesiredBotCapabilities();
+  }
+  async registerDesiredBotCapabilities() {
+    if (this.botCapabilitiesRegistrationInFlight) {
+      const result2 = await this.botCapabilitiesRegistrationInFlight;
+      return this.registeredBotCapabilitiesRevision < this.desiredBotCapabilitiesRevision ? await this.registerDesiredBotCapabilities() : result2;
+    }
+    const capabilities = this.desiredBotCapabilities;
+    if (capabilities == null)
+      return { capabilities: [] };
+    const revision = this.desiredBotCapabilitiesRevision;
+    const registration = this.invoke(Method.SET_MY_BOT_CAPABILITIES, {
+      oneofKind: "setMyBotCapabilities",
+      setMyBotCapabilities: { capabilities }
+    }).then((result2) => {
+      this.registeredBotCapabilitiesRevision = Math.max(this.registeredBotCapabilitiesRevision, revision);
+      return { capabilities: result2.setMyBotCapabilities.capabilities };
+    });
+    this.botCapabilitiesRegistrationInFlight = registration;
+    let result;
+    try {
+      result = await registration;
+    } finally {
+      if (this.botCapabilitiesRegistrationInFlight === registration) {
+        this.botCapabilitiesRegistrationInFlight = null;
+      }
+    }
+    return this.registeredBotCapabilitiesRevision < this.desiredBotCapabilitiesRevision ? await this.registerDesiredBotCapabilities() : result;
+  }
+  async deleteMyBotCapabilities() {
+    await this.setMyBotCapabilities({ capabilities: [] });
+  }
+  async requestBotChatSettings(params) {
+    const result = await this.invoke(Method.REQUEST_BOT_CHAT_SETTINGS, {
+      oneofKind: "requestBotChatSettings",
+      requestBotChatSettings: {
+        peerId: this.inputPeerFromTarget(params, "requestBotChatSettings"),
+        botUserId: asInlineId(params.botUserId, "botUserId"),
+        version: params.version ?? 1
+      }
+    });
+    const response = result.requestBotChatSettings.response;
+    if (!response)
+      throw new Error("requestBotChatSettings: missing response");
+    return { response };
+  }
+  async invokeBotChatSettingsItem(params) {
+    const itemId = params.itemId.trim();
+    const documentRevision = params.documentRevision.trim();
+    if (!itemId || !documentRevision) {
+      throw new Error("invokeBotChatSettingsItem: `itemId` and `documentRevision` must be non-empty");
+    }
+    const result = await this.invoke(Method.INVOKE_BOT_CHAT_SETTINGS_ITEM, {
+      oneofKind: "invokeBotChatSettingsItem",
+      invokeBotChatSettingsItem: {
+        peerId: this.inputPeerFromTarget(params, "invokeBotChatSettingsItem"),
+        botUserId: asInlineId(params.botUserId, "botUserId"),
+        version: params.version ?? 1,
+        itemId,
+        value: params.value,
+        documentRevision
+      }
+    });
+    const response = result.invokeBotChatSettingsItem.response;
+    if (!response)
+      throw new Error("invokeBotChatSettingsItem: missing response");
+    return { response };
+  }
+  async answerBotChatSettings(params) {
+    await this.invoke(Method.ANSWER_BOT_CHAT_SETTINGS, {
+      oneofKind: "answerBotChatSettings",
+      answerBotChatSettings: {
+        requestId: asInlineId(params.requestId, "requestId"),
+        response: params.response
+      }
+    });
+  }
   async invokeRaw(method, input = { oneofKind: undefined }, options) {
     if (hasMethodMapping(method)) {
       this.assertMethodInputMatch(method, input);
@@ -22951,6 +28541,9 @@ class InlineSdkClient {
           case "updates":
             await this.onUpdates(event.updates.updates);
             break;
+          case "bot":
+            await this.onBotEvent(event.bot);
+            break;
           case "rpcError":
           case "rpcResult":
           case "ack":
@@ -22969,6 +28562,42 @@ class InlineSdkClient {
     this.openRejecter = null;
     this.initializeDateCursor();
     this.requestCatchUpUser();
+    if (this.desiredBotCapabilities != null) {
+      this.registerDesiredBotCapabilities().catch((error) => {
+        this.log.warn?.("Failed to restore bot capabilities after reconnect", error);
+      });
+    }
+  }
+  async onBotEvent(event) {
+    switch (event.event.oneofKind) {
+      case "chatSettingsRequested": {
+        const request = event.event.chatSettingsRequested;
+        await this.eventStream.send({
+          kind: "bot.chatSettings.request",
+          requestId: request.requestId,
+          chatId: request.chatId,
+          actorUserId: request.actorUserId,
+          version: request.version
+        });
+        return;
+      }
+      case "chatSettingsItemInvoked": {
+        const request = event.event.chatSettingsItemInvoked;
+        await this.eventStream.send({
+          kind: "bot.chatSettings.item.invoke",
+          requestId: request.requestId,
+          chatId: request.chatId,
+          actorUserId: request.actorUserId,
+          version: request.version,
+          itemId: request.itemId,
+          value: request.value,
+          documentRevision: request.documentRevision
+        });
+        return;
+      }
+      default:
+        return;
+    }
   }
   async initializeDateCursor() {
     const date = this.state.dateCursor ?? nowSeconds();
@@ -23810,6 +29439,25 @@ var resolveUploadFileUrl = (baseUrl) => {
   return url;
 };
 var hasMethodMapping = (method) => Object.prototype.hasOwnProperty.call(rpcInputKindByMethod, method) && Object.prototype.hasOwnProperty.call(rpcResultKindByMethod, method);
+// ../sdk/dist/sdk/bot-capabilities.js
+async function registerBotCapabilitiesWithRetry(params) {
+  const retryDelaysMs = params.retryDelaysMs ?? [500, 2000, 5000];
+  const wait = params.wait ?? ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)));
+  for (let attempt = 0;; attempt += 1) {
+    if (params.isCancelled?.())
+      return false;
+    try {
+      await params.register();
+      return true;
+    } catch (error) {
+      const willRetry = attempt < retryDelaysMs.length;
+      params.onFailure?.(error, willRetry);
+      if (!willRetry)
+        return false;
+      await wait(retryDelaysMs[attempt]);
+    }
+  }
+}
 // ../sdk/dist/state/json-file-state-store.js
 import { readFile, rename, writeFile } from "node:fs/promises";
 
@@ -23873,7 +29521,7 @@ class JsonFileStateStore {
     try {
       const raw = await readFile(this.path, "utf8");
       return deserializeStateV1(raw);
-    } catch (error) {
+    } catch {
       return null;
     }
   }
@@ -24328,6 +29976,13 @@ async function connectClientLoop() {
       await client.connect();
       const me = await client.getMe();
       meId = String(me.userId);
+      registerBotCapabilitiesWithRetry({
+        register: () => client.setMyBotCapabilities({
+          capabilities: [{ kind: BotCapability_Kind.CHAT_SETTINGS, version: 1 }]
+        }),
+        isCancelled: () => stopping,
+        onFailure: (error, willRetry) => console.error(`inline-sidecar: capability registration failed: ${redactError(error)}${willRetry ? "; retrying" : ""}`)
+      });
       connected = true;
       connecting = false;
       connectError = null;
@@ -24459,6 +30114,9 @@ async function handleRequest(req, res) {
       return;
     case "/answer-action":
       await endpointAnswerAction(res, body);
+      return;
+    case "/answer-bot-settings":
+      await endpointAnswerBotSettings(res, body);
       return;
     case "/shutdown":
       writeJson(res, 200, { ok: true, result: {} });
@@ -24915,6 +30573,13 @@ async function endpointAnswerAction(res, body) {
   });
   writeJson(res, 200, { ok: true, result: {} });
 }
+async function endpointAnswerBotSettings(res, body) {
+  const record = asRecord(body);
+  const requestId = readRequiredString(record, "requestId");
+  const response = asRecord(record.response);
+  await client.answerBotChatSettings({ requestId: BigInt(requestId), response });
+  writeJson(res, 200, { ok: true, result: {} });
+}
 function createClient(options) {
   if (testMockEnabled(options)) {
     return new MockInlineClient;
@@ -25074,6 +30739,13 @@ class MockInlineClient {
   }
   async answerMessageAction(params) {
     this.record("answerMessageAction", params);
+  }
+  async setMyBotCapabilities(params) {
+    this.record("setMyBotCapabilities", params);
+    return params;
+  }
+  async answerBotChatSettings(params) {
+    this.record("answerBotChatSettings", params);
   }
   async invoke(method, input) {
     this.record(`invoke:${methodName(method)}`, input);
