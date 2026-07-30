@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 import math
@@ -15,6 +16,7 @@ import mimetypes
 import os
 import re
 import secrets
+import shlex
 import shutil
 import signal
 import socket
@@ -56,6 +58,7 @@ _DEDUP_MAX_SIZE = 5000
 _DEDUP_WINDOW_SECONDS = 48 * 3600
 _CHAT_INFO_CACHE_SECONDS = 10 * 60
 _CHAT_INFO_CACHE_MAX_SIZE = 512
+_BOT_SETTINGS_MODEL_CATALOG_CACHE_SECONDS = 60
 _DEFAULT_CONTEXT_BACKFILL = "selective"
 _CONTEXT_BACKFILL_MODES = {"off", "selective", "always"}
 _DEFAULT_THREAD_CONTEXT_LIMIT = 30
@@ -115,6 +118,13 @@ _INLINE_REPLY_THREAD_INTENT_RE = re.compile(
     re.IGNORECASE,
 )
 _INLINE_SETTINGS_VERSION = 1
+_INLINE_BOT_SETTINGS_VERSION = 1
+_INLINE_BOT_SETTINGS_UNAVAILABLE = 1
+_INLINE_BOT_SETTINGS_INVALID_VALUE = 2
+_INLINE_BOT_SETTINGS_STALE = 3
+_INLINE_BOT_SETTINGS_FAILED = 4
+_INLINE_BOT_SETTINGS_TONE_NEUTRAL = 1
+_INLINE_BOT_SETTINGS_TONE_WARNING = 3
 _INLINE_ENTITY_LIMIT = 12
 _INLINE_ENTITY_TEXT_LIMIT = 120
 
@@ -816,6 +826,10 @@ class InlineAdapter(BasePlatformAdapter):
         self._sidecar_supervisor_task: Optional[asyncio.Task] = None
         self._command_sync_task: Optional[asyncio.Task] = None
         self._inbound_task: Optional[asyncio.Task] = None
+        self._bot_settings_tasks: set[asyncio.Task] = set()
+        self._bot_settings_locks: Dict[str, asyncio.Lock] = {}
+        self._bot_settings_lock_users: Dict[str, int] = {}
+        self._bot_settings_model_catalog_cache: Optional[tuple[float, List[Dict[str, Any]]]] = None
         self._inbound_running = False
         self._http_client: Optional[httpx.AsyncClient] = None
         self._me_id: Optional[str] = None
@@ -930,6 +944,479 @@ class InlineAdapter(BasePlatformAdapter):
         else:
             self._reply_thread_overrides[key] = _reply_thread_mode(value, "auto")
         self._save_reply_thread_overrides()
+
+    @staticmethod
+    def _bot_settings_chat_type(info: Dict[str, Any]) -> str:
+        peer = info.get("peer")
+        if peer is None and isinstance(info.get("chat"), dict):
+            peer = info["chat"].get("peerId")
+        if isinstance(peer, dict):
+            peer_type = peer.get("peer") or peer.get("type") or {}
+            if isinstance(peer_type, dict) and peer_type.get("oneofKind") == "user":
+                return "dm"
+        return "group"
+
+    def _bot_settings_runner(self) -> Any:
+        runner = getattr(self, "gateway_runner", None)
+        if runner is not None:
+            return runner
+        try:
+            from gateway.run import _gateway_runner_ref
+            return _gateway_runner_ref()
+        except Exception:
+            return None
+
+    async def _bot_settings_context(
+        self,
+        event: Dict[str, Any],
+        *,
+        model_catalog: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        chat_id = self._chat_key(event.get("chatId"))
+        actor_id = str(event.get("actorUserId") or "").strip()
+        if not chat_id or not actor_id:
+            return {"access": "guideOnly", "scope_id": chat_id or "unknown", "reply_threads": "auto"}
+
+        info = await self._get_chat_info(chat_id)
+        if not info:
+            return {
+                "access": "guideOnly",
+                "scope_id": chat_id,
+                "reply_threads": "auto",
+                "unavailable_reason": "chat_metadata",
+            }
+        parent_chat_id = self._chat_info_id(info, "parentChatId")
+        scope_chat_id = parent_chat_id or chat_id
+        is_reply_thread = bool(parent_chat_id)
+        chat_type = self._bot_settings_chat_type(info)
+        can_inspect = self._allowed(chat_type, actor_id) and self._chat_allowed(
+            chat_id,
+            chat_id if is_reply_thread else None,
+            parent_chat_id,
+        )
+        if not can_inspect:
+            return {"access": "guideOnly", "scope_id": scope_chat_id, "reply_threads": "auto"}
+
+        source = self.build_source(
+            chat_id=chat_id,
+            chat_name=self._chat_title_from_info(info) or chat_id,
+            chat_type=chat_type,
+            user_id=actor_id,
+            thread_id=chat_id if is_reply_thread else None,
+            parent_chat_id=parent_chat_id,
+        )
+        runner = self._bot_settings_runner()
+        can_modify = self._actor_authorized(chat_type, actor_id)
+        context: Dict[str, Any] = {
+            "access": "full" if can_modify else "readOnly",
+            "scope_id": scope_chat_id,
+            "chat_id": chat_id,
+            "actor_id": actor_id,
+            "chat_type": chat_type,
+            "is_reply_thread": is_reply_thread,
+            "following": self._chat_follow_mode_following(info),
+            "reply_threads": self._reply_thread_mode_for_chat(scope_chat_id),
+            "can_set_default_model": can_modify,
+            "source": source,
+            "runner": runner,
+            "model_options": [],
+            "model_map": {},
+            "reasoning_options": [],
+        }
+        if runner is None:
+            return context
+
+        try:
+            from gateway.run import _load_gateway_config
+            from hermes_cli.model_switch import list_picker_providers
+
+            cfg = _load_gateway_config() or {}
+            model_cfg = cfg.get("model") if isinstance(cfg, dict) else {}
+            if not isinstance(model_cfg, dict):
+                model_cfg = {"default": str(model_cfg or "")}
+            default_model = str(model_cfg.get("default") or model_cfg.get("model") or "").strip()
+            default_provider = str(model_cfg.get("provider") or "openrouter").strip()
+            session_key = runner._session_key_for_source(source)
+            override = (getattr(runner, "_session_model_overrides", {}) or {}).get(session_key) or {}
+            current_model = str(override.get("model") or default_model).strip()
+            current_provider = str(override.get("provider") or default_provider).strip()
+            providers = None
+            if model_catalog is None:
+                cached_catalog = self._bot_settings_model_catalog_cache
+                if cached_catalog and time.monotonic() - cached_catalog[0] < _BOT_SETTINGS_MODEL_CATALOG_CACHE_SECONDS:
+                    providers = cached_catalog[1]
+                    logger.info("[inline] AGENT_SETTINGS_TRACE phase=model_catalog cache=hit")
+                else:
+                    catalog_started = time.monotonic()
+                    providers = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            list_picker_providers,
+                            current_provider=current_provider,
+                            current_base_url=str(override.get("base_url") or model_cfg.get("base_url") or ""),
+                            current_model=current_model,
+                            user_providers=cfg.get("providers") if isinstance(cfg, dict) else None,
+                            custom_providers=cfg.get("custom_providers") if isinstance(cfg, dict) else None,
+                            max_models=100,
+                            include_moa=True,
+                            excluded_providers=(cfg.get("model_catalog") or {}).get("excluded_providers")
+                            if isinstance(cfg.get("model_catalog"), dict) else None,
+                        ),
+                        timeout=5.0,
+                    )
+                    self._bot_settings_model_catalog_cache = (time.monotonic(), providers)
+                    logger.info(
+                        "[inline] AGENT_SETTINGS_TRACE phase=model_catalog cache=miss elapsed_ms=%d",
+                        int((time.monotonic() - catalog_started) * 1000),
+                    )
+            model_options: List[Dict[str, str]] = []
+            model_map: Dict[str, tuple[str, str]] = {}
+
+            def add_model(provider: str, model: str) -> Optional[str]:
+                provider = str(provider or "").strip()
+                model = str(model or "").strip()
+                if not provider or not model:
+                    return None
+                value = f"{provider}\t{model}"
+                if value not in model_map and len(model_options) < 100:
+                    label = model if model.startswith(f"{provider}/") else f"{provider}/{model}"
+                    model_map[value] = (provider, model)
+                    model_options.append({"value": value, "label": label})
+                return value
+
+            current_value = add_model(current_provider, current_model)
+            if providers is not None:
+                for provider in providers:
+                    provider_slug = str(provider.get("slug") or "").strip()
+                    if not provider_slug:
+                        continue
+                    for model in provider.get("models") or []:
+                        add_model(provider_slug, str(model).strip())
+            else:
+                previous_map = model_catalog.get("model_map") if isinstance(model_catalog, dict) else None
+                previous_options = model_catalog.get("model_options") if isinstance(model_catalog, dict) else None
+                if isinstance(previous_map, dict) and isinstance(previous_options, list):
+                    for option in previous_options:
+                        if not isinstance(option, dict):
+                            continue
+                        selected = previous_map.get(option.get("value"))
+                        if isinstance(selected, (list, tuple)) and len(selected) == 2:
+                            add_model(str(selected[0]), str(selected[1]))
+            default_value = add_model(default_provider, default_model)
+            context.update({"session_key": session_key})
+            if current_value:
+                context.update({
+                    "current_model": current_value,
+                    "default_model": default_value,
+                    "model_options": model_options,
+                    "model_map": model_map,
+                })
+
+            reasoning = runner._resolve_session_reasoning_config(
+                source=source,
+                session_key=session_key,
+                model=current_model,
+            )
+            if reasoning is None:
+                current_reasoning = "medium"
+            elif reasoning.get("enabled") is False:
+                current_reasoning = "none"
+            else:
+                current_reasoning = str(reasoning.get("effort") or "medium")
+            from hermes_constants import VALID_REASONING_EFFORTS
+            reasoning_values = ["none", *[str(value) for value in VALID_REASONING_EFFORTS]]
+            if current_reasoning not in reasoning_values:
+                reasoning_values.insert(0, current_reasoning)
+            context.update({
+                "reasoning": current_reasoning,
+                "reasoning_options": [
+                    {"value": value, "label": value.capitalize()} for value in dict.fromkeys(reasoning_values)
+                ],
+            })
+        except Exception as exc:
+            logger.debug("[inline] Hermes runtime settings unavailable: %s", exc)
+        return context
+
+    @staticmethod
+    def _bot_settings_revision(context: Dict[str, Any]) -> str:
+        visible = {
+            key: value for key, value in context.items()
+            if key not in {"runner", "source", "model_map"}
+        }
+        encoded = json.dumps(visible, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+        return f"hermes-v1-{hashlib.sha256(encoded).hexdigest()[:12]}"
+
+    def _bot_settings_document(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        if context.get("access") == "guideOnly":
+            unavailable_text = (
+                "Hermes could not verify this chat. Try again when the bot is reachable."
+                if context.get("unavailable_reason") == "chat_metadata"
+                else "This chat is not allowed by Hermes' access policy."
+            )
+            return {
+                "version": _INLINE_BOT_SETTINGS_VERSION,
+                "revision": self._bot_settings_revision(context),
+                "sections": [{
+                    "id": "access",
+                    "items": [{
+                        "id": "access-guide",
+                        "label": "Hermes unavailable",
+                        "disabled": False,
+                        "control": {"oneofKind": "info", "info": {
+                            "text": unavailable_text,
+                            "tone": _INLINE_BOT_SETTINGS_TONE_WARNING,
+                        }},
+                    }],
+                }],
+            }
+
+        disabled = context.get("access") != "full"
+        disabled_reason = "Only an authorized Hermes controller can change this."
+        common = {"disabled": disabled, **({"disabledReason": disabled_reason} if disabled else {})}
+        runtime_items: List[Dict[str, Any]] = []
+        model_options = context.get("model_options") or []
+        current_model = context.get("current_model")
+        if current_model and model_options:
+            runtime_items.append({
+                "id": "model", "label": "Model", "description": "This session.", **common,
+                "control": {"oneofKind": "select", "select": {
+                    "value": current_model,
+                    "options": [{**option, "disabled": False} for option in model_options],
+                }},
+            })
+            if context.get("can_set_default_model") and current_model != context.get("default_model"):
+                runtime_items.append({
+                    "id": "model-default", "label": "Use as default", "description": "For new sessions.", **common,
+                    "control": {"oneofKind": "button", "button": {}},
+                })
+        reasoning_options = context.get("reasoning_options") or []
+        if context.get("reasoning") and reasoning_options:
+            runtime_items.append({
+                "id": "reasoning", "label": "Reasoning", **common,
+                "control": {"oneofKind": "select", "select": {
+                    "value": context["reasoning"],
+                    "options": [{**option, "disabled": False} for option in reasoning_options],
+                }},
+            })
+        if not runtime_items:
+            runtime_items.append({
+                "id": "runtime-unavailable", "label": "Runtime", "disabled": False,
+                "control": {"oneofKind": "info", "info": {
+                    "text": "Runtime options are not available for this session.",
+                    "tone": _INLINE_BOT_SETTINGS_TONE_NEUTRAL,
+                }},
+            })
+
+        sections: List[Dict[str, Any]] = [
+            {"id": "runtime", "items": runtime_items},
+            {"id": "attention", "items": [{
+                "id": "following", "label": "Following", "description": "Wake on eligible activity.", **common,
+                "control": {"oneofKind": "toggle", "toggle": {"value": bool(context.get("following"))}},
+            }]},
+            {"id": "replies", "items": [{
+                "id": "reply-threads", "label": "Reply in threads", **common,
+                "control": {"oneofKind": "select", "select": {
+                    "value": context.get("reply_threads") or "auto",
+                    "options": [
+                        {"value": "auto", "label": "Auto", "description": "Agent decides.", "disabled": False},
+                        {"value": "on", "label": "On", "description": "Always use threads.", "disabled": False},
+                        {"value": "off", "label": "Off", "description": "Stay in chat.", "disabled": False},
+                    ],
+                }},
+            }]},
+        ]
+        if disabled:
+            sections.append({"id": "access", "items": [{
+                "id": "read-only", "label": "Read-only", "disabled": False,
+                "control": {"oneofKind": "info", "info": {
+                    "text": "Access and reply mode inherit from the parent chat. Model, reasoning, and following stay with this thread."
+                    if context.get("is_reply_thread") else "A Hermes owner controls who can make changes.",
+                    "tone": _INLINE_BOT_SETTINGS_TONE_WARNING,
+                }},
+            }]})
+        return {
+            "version": _INLINE_BOT_SETTINGS_VERSION,
+            "revision": self._bot_settings_revision(context),
+            "sections": sections,
+        }
+
+    @staticmethod
+    def _bot_settings_problem(code: int, message: str, document: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        problem = {"code": code, "message": message}
+        if document is not None:
+            problem["currentDocument"] = document
+        return {"result": {"oneofKind": "problem", "problem": problem}}
+
+    @staticmethod
+    def _bot_settings_result_kind(response: Dict[str, Any]) -> str:
+        result = response.get("result") if isinstance(response, dict) else None
+        if not isinstance(result, dict):
+            return "invalid"
+        kind = str(result.get("oneofKind") or "invalid")
+        if kind == "problem" and isinstance(result.get("problem"), dict):
+            return f"problem:{result['problem'].get('code', 'unknown')}"
+        return kind
+
+    async def _answer_bot_settings(self, request_id: str, response: Dict[str, Any]) -> bool:
+        try:
+            await self._sidecar_call("/answer-bot-settings", {
+                "requestId": request_id,
+                "response": response,
+            })
+            return True
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("[inline] agent settings answer expired: %s", exc)
+            return False
+
+    async def _handle_bot_settings_request(self, event: Dict[str, Any]) -> None:
+        request_id = str(event.get("requestId") or "").strip()
+        if not request_id:
+            return
+        started_at = time.monotonic()
+        logger.info(
+            "[inline] AGENT_SETTINGS_TRACE request=%s phase=request_start chat=%s",
+            request_id,
+            self._chat_key(event.get("chatId")),
+        )
+        try:
+            if int(event.get("version") or 0) != _INLINE_BOT_SETTINGS_VERSION:
+                response = self._bot_settings_problem(
+                    _INLINE_BOT_SETTINGS_UNAVAILABLE,
+                    "This Hermes version supports agent settings V1 only.",
+                )
+            else:
+                context = await self._bot_settings_context(event)
+                response = {"result": {"oneofKind": "document", "document": self._bot_settings_document(context)}}
+        except Exception as exc:
+            logger.warning("[inline] failed to load Hermes agent settings: %s", exc)
+            response = self._bot_settings_problem(_INLINE_BOT_SETTINGS_FAILED, "Hermes could not load settings.")
+        answered = await self._answer_bot_settings(request_id, response)
+        logger.info(
+            "[inline] AGENT_SETTINGS_TRACE request=%s phase=request_answer result=%s answered=%d elapsed_ms=%d",
+            request_id,
+            self._bot_settings_result_kind(response),
+            1 if answered else 0,
+            int((time.monotonic() - started_at) * 1000),
+        )
+
+    async def _apply_bot_setting(self, event: Dict[str, Any], context: Dict[str, Any]) -> None:
+        item_id = str(event.get("itemId") or "")
+        value = event.get("value") if isinstance(event.get("value"), dict) else {}
+        value_body = value.get("value") if isinstance(value.get("value"), dict) else {}
+        runner = context.get("runner")
+        source = context.get("source")
+        if item_id == "following" and value_body.get("oneofKind") == "boolValue":
+            enabled = bool(value_body.get("boolValue"))
+            target = (
+                {"userId": context["actor_id"]}
+                if context.get("chat_type") == "dm"
+                else {"chatId": context["chat_id"]}
+            )
+            await self._sidecar_call("/follow-mode", {
+                "target": target,
+                "mode": "following" if enabled else "unfollowed",
+            })
+            self._invalidate_chat_info(context["chat_id"])
+            return
+        if item_id == "reply-threads" and value_body.get("oneofKind") == "stringValue":
+            mode = str(value_body.get("stringValue") or "")
+            if mode not in {"auto", "on", "off"}:
+                raise ValueError("invalid reply mode")
+            self._set_reply_threads_for_chat(context["scope_id"], mode)
+            return
+        if runner is None or source is None:
+            raise ValueError("runtime unavailable")
+        if item_id in {"model", "model-default"}:
+            if item_id == "model-default" and not context.get("can_set_default_model"):
+                raise ValueError("default model unavailable")
+            selection = context.get("current_model") if item_id == "model-default" else value_body.get("stringValue")
+            selected = (context.get("model_map") or {}).get(selection)
+            if not selected:
+                raise ValueError("model unavailable")
+            provider, model = selected
+            command = (
+                f"/model {shlex.quote(model)} --provider {shlex.quote(provider)} "
+                f"{'--global' if item_id == 'model-default' else '--session'}"
+            )
+            result = await runner._handle_model_command(MessageEvent(
+                text=command,
+                message_type=MessageType.TEXT,
+                source=source,
+                raw_message=event,
+            ))
+            if result and re.search(r"(?:error|confirm|failed|could not)", str(result), re.IGNORECASE):
+                raise RuntimeError(str(result))
+            return
+        if item_id == "reasoning" and value_body.get("oneofKind") == "stringValue":
+            selected = str(value_body.get("stringValue") or "")
+            if selected not in {option.get("value") for option in context.get("reasoning_options") or []}:
+                raise ValueError("reasoning unavailable")
+            runner._apply_reasoning_selection(context["session_key"], "inline", selected)
+            return
+        raise ValueError("setting unavailable")
+
+    async def _handle_bot_settings_item(self, event: Dict[str, Any]) -> None:
+        lock_key = self._chat_key(event.get("chatId")) or "unknown"
+        lock = self._bot_settings_locks.setdefault(lock_key, asyncio.Lock())
+        self._bot_settings_lock_users[lock_key] = self._bot_settings_lock_users.get(lock_key, 0) + 1
+        try:
+            async with lock:
+                await self._handle_bot_settings_item_serialized(event)
+        finally:
+            remaining = self._bot_settings_lock_users.get(lock_key, 1) - 1
+            if remaining <= 0:
+                self._bot_settings_lock_users.pop(lock_key, None)
+                if self._bot_settings_locks.get(lock_key) is lock:
+                    self._bot_settings_locks.pop(lock_key, None)
+            else:
+                self._bot_settings_lock_users[lock_key] = remaining
+
+    async def _handle_bot_settings_item_serialized(self, event: Dict[str, Any]) -> None:
+        request_id = str(event.get("requestId") or "").strip()
+        if not request_id:
+            return
+        started_at = time.monotonic()
+        item_id = str(event.get("itemId") or "")
+        logger.info(
+            "[inline] AGENT_SETTINGS_TRACE request=%s phase=mutation_start chat=%s item=%s",
+            request_id,
+            self._chat_key(event.get("chatId")),
+            item_id,
+        )
+        try:
+            context = await self._bot_settings_context(event)
+            document = self._bot_settings_document(context)
+            if str(event.get("documentRevision") or "") != document["revision"]:
+                response = self._bot_settings_problem(
+                    _INLINE_BOT_SETTINGS_STALE,
+                    "Settings changed. Try again.",
+                    document,
+                )
+            elif context.get("access") != "full":
+                response = self._bot_settings_problem(
+                    _INLINE_BOT_SETTINGS_FAILED,
+                    "You do not have access to change this.",
+                    document,
+                )
+            else:
+                await self._apply_bot_setting(event, context)
+                next_context = await self._bot_settings_context(event, model_catalog=context)
+                response = {"result": {"oneofKind": "document", "document": self._bot_settings_document(next_context)}}
+        except ValueError as exc:
+            response = self._bot_settings_problem(_INLINE_BOT_SETTINGS_INVALID_VALUE, str(exc).capitalize())
+        except Exception as exc:
+            logger.warning("[inline] failed to update Hermes agent settings: %s", exc)
+            response = self._bot_settings_problem(_INLINE_BOT_SETTINGS_FAILED, "Hermes could not update this setting.")
+        answered = await self._answer_bot_settings(request_id, response)
+        logger.info(
+            "[inline] AGENT_SETTINGS_TRACE request=%s phase=mutation_answer item=%s result=%s answered=%d elapsed_ms=%d",
+            request_id,
+            item_id,
+            self._bot_settings_result_kind(response),
+            1 if answered else 0,
+            int((time.monotonic() - started_at) * 1000),
+        )
 
     @staticmethod
     def _has_reply_thread_intent(text: str) -> bool:
@@ -1241,6 +1728,11 @@ class InlineAdapter(BasePlatformAdapter):
             except Exception:
                 pass
             self._inbound_task = None
+        for task in list(self._bot_settings_tasks):
+            task.cancel()
+        if self._bot_settings_tasks:
+            await asyncio.gather(*self._bot_settings_tasks, return_exceptions=True)
+            self._bot_settings_tasks.clear()
         await self._stop_sidecar()
         if self._http_client is not None:
             await self._http_client.aclose()
@@ -1465,6 +1957,21 @@ class InlineAdapter(BasePlatformAdapter):
     def _is_bot_commands_too_much(error: Exception) -> bool:
         return bool(re.search(r"\bBOT_COMMANDS_TOO_MUCH\b", str(error), re.IGNORECASE))
 
+    def _schedule_bot_settings_task(self, operation: Any) -> None:
+        task = asyncio.get_event_loop().create_task(operation)
+        self._bot_settings_tasks.add(task)
+
+        def finished(completed: asyncio.Task) -> None:
+            self._bot_settings_tasks.discard(completed)
+            if completed.cancelled():
+                return
+            try:
+                completed.result()
+            except Exception as exc:
+                logger.warning("[inline] agent settings task failed: %s", exc)
+
+        task.add_done_callback(finished)
+
     async def _inbound_loop(self) -> None:
         if self._http_client is None:
             return
@@ -1504,6 +2011,12 @@ class InlineAdapter(BasePlatformAdapter):
         # owns a coherent client-state cache.
         self._invalidate_chat_info(event.get("chatId"))
         kind = event.get("kind")
+        if kind == "bot.chatSettings.request":
+            self._schedule_bot_settings_task(self._handle_bot_settings_request(event))
+            return
+        if kind == "bot.chatSettings.item.invoke":
+            self._schedule_bot_settings_task(self._handle_bot_settings_item(event))
+            return
         if kind == "message.action.invoke":
             if await self._handle_action(event):
                 return

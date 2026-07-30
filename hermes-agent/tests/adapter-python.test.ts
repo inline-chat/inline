@@ -3105,6 +3105,105 @@ async def assert_disconnect_cleans_after_inbound_cancel():
 
 asyncio.run(assert_disconnect_cleans_after_inbound_cancel())
 
+async def assert_bot_settings_document_and_mutation():
+    adapter = InlineAdapter(PlatformConfig(extra=base_extra))
+    context = {
+        "access": "full",
+        "scope_id": "42",
+        "chat_id": "42",
+        "actor_id": "7",
+        "chat_type": "group",
+        "is_reply_thread": False,
+        "following": True,
+        "reply_threads": "auto",
+        "runner": None,
+        "source": None,
+        "model_options": [],
+        "model_map": {},
+        "reasoning_options": [],
+    }
+    document = adapter._bot_settings_document(context)
+    assert [section["id"] for section in document["sections"]] == ["runtime", "attention", "replies"]
+    assert document["sections"][2]["items"][0]["control"]["select"]["value"] == "auto"
+    assert [option["label"] for option in document["sections"][2]["items"][0]["control"]["select"]["options"]] == ["Auto", "On", "Off"]
+
+    calls = []
+    async def fake_sidecar(path, body):
+        calls.append((path, body))
+        return {"ok": True, "result": {}}
+    adapter._sidecar_call = fake_sidecar
+    await adapter._apply_bot_setting({
+        "itemId": "reply-threads",
+        "value": {"value": {"oneofKind": "stringValue", "stringValue": "on"}},
+    }, context)
+    assert adapter._reply_thread_mode_for_chat("42") == "on"
+
+    await adapter._apply_bot_setting({
+        "itemId": "following",
+        "value": {"value": {"oneofKind": "boolValue", "boolValue": False}},
+    }, context)
+    assert calls[-1] == ("/follow-mode", {"target": {"chatId": "42"}, "mode": "unfollowed"})
+
+    context["chat_type"] = "dm"
+    await adapter._apply_bot_setting({
+        "itemId": "following",
+        "value": {"value": {"oneofKind": "boolValue", "boolValue": True}},
+    }, context)
+    assert calls[-1] == ("/follow-mode", {"target": {"userId": "7"}, "mode": "following"})
+
+asyncio.run(assert_bot_settings_document_and_mutation())
+
+async def assert_bot_settings_fail_closed_and_serialized():
+    adapter = InlineAdapter(PlatformConfig(extra=base_extra))
+
+    async def missing_chat_info(chat_id):
+        return {}
+
+    adapter._get_chat_info = missing_chat_info
+    context = await adapter._bot_settings_context({"chatId": "42", "actorUserId": "u1"})
+    assert context["access"] == "guideOnly"
+    assert context["unavailable_reason"] == "chat_metadata"
+    guide = adapter._bot_settings_document(context)
+    assert "could not verify this chat" in guide["sections"][0]["items"][0]["control"]["info"]["text"]
+
+    async def allowed_chat_info(chat_id):
+        return {"id": chat_id, "peer": {"type": {"oneofKind": "chat"}}}
+
+    adapter._get_chat_info = allowed_chat_info
+    adapter._allowed = lambda chat_type, actor_id: True
+    adapter._chat_allowed = lambda chat_id, thread_id, parent_chat_id=None: True
+    adapter._actor_authorized = lambda chat_type, actor_id: False
+    context = await adapter._bot_settings_context({"chatId": "42", "actorUserId": "u1"})
+    assert context["access"] == "readOnly"
+    readonly = adapter._bot_settings_document(context)
+    assert all(
+        item.get("disabled") is True
+        for section in readonly["sections"][:3]
+        for item in section["items"]
+        if item["id"] not in {"runtime-unavailable"}
+    )
+
+    active = 0
+    max_active = 0
+
+    async def fake_serialized(event):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+
+    adapter._handle_bot_settings_item_serialized = fake_serialized
+    await asyncio.gather(
+        adapter._handle_bot_settings_item({"chatId": "42", "requestId": "1"}),
+        adapter._handle_bot_settings_item({"chatId": "42", "requestId": "2"}),
+    )
+    assert max_active == 1
+    assert adapter._bot_settings_locks == {}
+    assert adapter._bot_settings_lock_users == {}
+
+asyncio.run(assert_bot_settings_fail_closed_and_serialized())
+
 print("adapter python smoke ok")
 `
 

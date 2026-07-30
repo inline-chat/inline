@@ -290,6 +290,18 @@ describe("sidecar runtime", () => {
       expect(invalidFollowMode.status).toBe(400)
       expect(invalidFollowMode.body).toMatchObject({ ok: false, errorKind: "bad_format" })
 
+      const answerBotSettings = await post(port, "/answer-bot-settings", {
+        requestId: "7001",
+        response: {
+          result: {
+            oneofKind: "problem",
+            problem: { code: 4, message: "test response" },
+          },
+        },
+      }, auth)
+      expect(answerBotSettings.status).toBe(200)
+      expect(resultOf(answerBotSettings.body)).toEqual({})
+
       const messages = await post(port, "/messages", {
         target: { chatId: "123" },
         messageIds: ["9001"],
@@ -403,6 +415,8 @@ describe("sidecar runtime", () => {
       expect(callsJson).toContain("getChat")
       expect(callsJson).toContain("getMessages")
       expect(callsJson).toContain("answerMessageAction")
+      expect(callsJson).toContain("setMyBotCapabilities")
+      expect(callsJson).toContain("answerBotChatSettings")
       expect(callsJson).toContain("invoke:GET_CHAT")
       expect(callsJson).toContain("invoke:GET_CHAT_HISTORY")
       expect(callsJson).toContain("invokeUncheckedRaw:SEARCH_MESSAGES")

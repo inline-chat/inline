@@ -4,12 +4,14 @@ import { timingSafeEqual } from "node:crypto"
 import { mkdir, readFile, stat } from "node:fs/promises"
 import path from "node:path"
 import {
+  BotCapability_Kind,
   DialogFollowMode,
   InlineSdkClient,
   JsonFileStateStore,
   GetChatInput,
   Method,
   InputPeer,
+  registerBotCapabilitiesWithRetry,
   MessageAction,
   MessageActionCallback,
   MessageActionCopyText,
@@ -24,6 +26,7 @@ import {
   type InlineSdkSetBotPresenceStateParams,
   type InlineSdkUploadFileParams,
   type InlineSdkUploadFileResult,
+  type BotChatSettingsResponse,
 } from "@inline-chat/realtime-sdk"
 
 // The server contract defines UNFOLLOWED = 2, but the currently published
@@ -128,6 +131,15 @@ async function connectClientLoop() {
       await client.connect()
       const me = await client.getMe()
       meId = String(me.userId)
+      void registerBotCapabilitiesWithRetry({
+        register: () => client.setMyBotCapabilities({
+          capabilities: [{ kind: BotCapability_Kind.CHAT_SETTINGS, version: 1 }],
+        }),
+        isCancelled: () => stopping,
+        onFailure: (error, willRetry) => console.error(
+          `inline-sidecar: capability registration failed: ${redactError(error)}${willRetry ? "; retrying" : ""}`,
+        ),
+      })
       connected = true
       connecting = false
       connectError = null
@@ -267,6 +279,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return
     case "/answer-action":
       await endpointAnswerAction(res, body)
+      return
+    case "/answer-bot-settings":
+      await endpointAnswerBotSettings(res, body)
       return
     case "/shutdown":
       writeJson(res, 200, { ok: true, result: {} })
@@ -798,6 +813,14 @@ async function endpointAnswerAction(res: ServerResponse, body: unknown) {
   writeJson(res, 200, { ok: true, result: {} })
 }
 
+async function endpointAnswerBotSettings(res: ServerResponse, body: unknown) {
+  const record = asRecord(body)
+  const requestId = readRequiredString(record, "requestId")
+  const response = asRecord(record.response) as unknown as BotChatSettingsResponse
+  await client.answerBotChatSettings({ requestId: BigInt(requestId), response })
+  writeJson(res, 200, { ok: true, result: {} })
+}
+
 type SidecarClient = {
   connect(): Promise<void>
   close(): Promise<void>
@@ -823,6 +846,8 @@ type SidecarClient = {
   sendTyping(params: { chatId: bigint; typing: boolean }): Promise<void>
   setBotPresenceState(params: InlineSdkSetBotPresenceStateParams): Promise<void>
   answerMessageAction(params: { interactionId: bigint; ui?: unknown }): Promise<void>
+  setMyBotCapabilities(params: { capabilities: Array<{ kind: BotCapability_Kind; version: number }> }): Promise<unknown>
+  answerBotChatSettings(params: { requestId: bigint; response: BotChatSettingsResponse }): Promise<void>
   invoke(method: Method, input: unknown): Promise<unknown>
   invokeUncheckedRaw(method: Method, input: unknown): Promise<unknown>
 }
@@ -1009,6 +1034,15 @@ class MockInlineClient implements SidecarClient {
 
   async answerMessageAction(params: { interactionId: bigint; ui?: unknown }): Promise<void> {
     this.record("answerMessageAction", params)
+  }
+
+  async setMyBotCapabilities(params: { capabilities: Array<{ kind: BotCapability_Kind; version: number }> }): Promise<unknown> {
+    this.record("setMyBotCapabilities", params)
+    return params
+  }
+
+  async answerBotChatSettings(params: { requestId: bigint; response: BotChatSettingsResponse }): Promise<void> {
+    this.record("answerBotChatSettings", params)
   }
 
   async invoke(method: Method, input: unknown): Promise<unknown> {
