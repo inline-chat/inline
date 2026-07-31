@@ -355,7 +355,7 @@ public struct TransactionSendMessage: Transaction {
     let input: SendMessageInput = .with {
       $0.peerID = peerId.toInputPeer()
       $0.randomID = randomId
-      $0.temporarySendDate = Int64(date.timeIntervalSince1970.rounded())
+      $0.temporarySendDate = optimisticMessageTimestamp(for: date)
       $0.isSticker = isSticker ?? false
 
       if let text { $0.message = text }

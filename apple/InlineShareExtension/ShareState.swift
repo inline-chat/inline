@@ -1613,7 +1613,7 @@ class ShareState: ObservableObject {
 
     let inputPeer = try inputPeer(for: selectedChat)
     let randomId = Int64.random(in: 0 ... Int64.max)
-    let sendDate = Int64(Date().timeIntervalSince1970.rounded())
+    let sendDate = optimisticMessageTimestamp()
 
     let input: SendMessageInput = .with {
       $0.peerID = inputPeer
