@@ -1,0 +1,37 @@
+{
+  "name": "amp-acp",
+  "version": "0.8.1",
+  "private": false,
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "amp-acp": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "description": "ACP adapter that bridges Amp Code to Agent Client Protocol (Zed external agent)",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tao12345666333/amp-acp"
+  },
+  "scripts": {
+    "build": "bun build src/index.ts --target=node --outdir=dist --entry-naming=[dir]/[name].js",
+    "build:binary": "bun build src/index.ts --target=node --outdir=dist --entry-naming=[dir]/[name].js && bun build dist/index.js --compile --outfile dist/amp-acp",
+    "start": "bun dist/index.js",
+    "lint": "tsc --noEmit",
+    "test": "bun test src/",
+    "test:binary": "bun build src/index.ts --target=node --outdir=dist --entry-naming=[dir]/[name].js && bun build dist/index.js --compile --outfile dist/amp-acp-test && bun test test/",
+    "test:e2e:real": "bun build src/index.ts --target=node --outdir=dist --entry-naming=[dir]/[name].js && bun build dist/index.js --compile --outfile dist/amp-acp-test && bun test test/acp-real-cli-e2e.test.ts",
+    "test:all": "bun run test && bun run test:binary"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "1.2.1",
+    "@ampcode/sdk": "0.1.0-20260717152646-g22b5e58"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.5",
+    "typescript": "^7.0.2"
+  }
+}

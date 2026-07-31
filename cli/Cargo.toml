@@ -3,7 +3,7 @@ name = "inline-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-build = false
+build = "build.rs"
 default-run = "inline"
 publish = false
 
@@ -11,10 +11,17 @@ publish = false
 chrono = "0.4"
 clap = { version = "4.5.23", features = ["derive"] }
 dialoguer = "0.11.0"
+env_logger.workspace = true
 futures-util = "0.3.30"
 flate2 = "1.0.30"
+inline-agent-bridge = { path = "../crates/agent-bridge" }
+inline-agent-driver-acp = { path = "../crates/agent-driver-acp" }
+inline-agent-driver-codex = { path = "../crates/agent-driver-codex" }
+inline-client = { path = "../crates/client" }
 inline-protocol = { path = "../crates/protocol" }
 inline-sdk = { path = "../crates/sdk" }
+libc = "0.2"
+log.workspace = true
 mime_guess = "2.0.5"
 rand = "0.8.5"
 regex = "1.10"
@@ -29,18 +36,26 @@ serde_json = "1.0.135"
 sha2 = "0.10.8"
 semver = "1.0.25"
 thiserror = "1.0.69"
+toml = { workspace = true }
 tar = "0.4.41"
 tokio = { version = "1.43.0", features = [
   "fs",
   "io-util",
   "macros",
+  "net",
   "rt-multi-thread",
+  "signal",
+  "sync",
   "time",
 ] }
 unicode-width = "0.1.11"
+url = { workspace = true }
 walkdir = "2.5.0"
 zip = "0.6.6"
 
 [[bin]]
 name = "inline"
 path = "src/main.rs"
+
+[dev-dependencies]
+tempfile = "3"

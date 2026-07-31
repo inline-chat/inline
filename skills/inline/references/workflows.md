@@ -1,4 +1,4 @@
-# Inline workflows
+# Inline MCP workflows
 
 ## Resolve a target
 
@@ -61,4 +61,4 @@
 - Missing scope: request reauthorization; do not switch identities or contexts.
 - Unknown session: reconnect the MCP session and repeat only read operations automatically.
 - Uncertain write result: inspect the target before retrying to avoid duplicates.
-- Missing tools: ask the user to connect Inline MCP rather than fabricating output.
+- Missing selected access path: use another already available and authorized Inline path when it fits; otherwise ask the user to connect MCP or install or authenticate the CLI as appropriate for the environment.

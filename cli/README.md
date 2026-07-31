@@ -20,10 +20,28 @@ curl -fsSL https://inline.chat/cli/install.sh | sh
 Supports macOS and Linux (x86_64/aarch64, glibc and musl). Set
 `INLINE_INSTALL_DIR` to choose a custom install directory.
 
-## (Optional) Add the skill to Claude/Codex
+## (Optional) Install the Inline skill for Codex
 
-Use the skill markdown at `cli/skill/SKILL.md`. Ask your agent to "create a skill"
-and paste the markdown.
+The CLI bundles the complete skill directory from `skills/inline/`, including
+its references and OpenAI metadata. Installation is local and does not require
+Node.js or a network request:
+
+```bash
+inline skill install
+```
+
+The command installs to `$CODEX_HOME/skills/inline` when `CODEX_HOME` is set,
+otherwise `~/.codex/skills/inline`. It is idempotent when the installed files
+match. If an existing skill differs, review it before using
+`inline skill install --force`; force overwrites only bundled Inline files and
+preserves extra files.
+
+For other supported agents, the broader Skills ecosystem installer can install
+the public source directly:
+
+```bash
+npx skills add https://github.com/inline-chat/inline/tree/main/skills/inline --global --yes
+```
 
 ## Login
 
@@ -31,8 +49,29 @@ and paste the markdown.
 inline login
 ```
 
-`inline login` is an interactive terminal flow. For agents, CI, or other
-non-interactive environments, pass an existing token with `INLINE_TOKEN`:
+`inline login` without phase flags remains an interactive terminal flow.
+On macOS, if a supporting Inline app is installed, the CLI offers to continue
+with the signed-in app or use email/phone. App login opens a local approval
+prompt with a verification code; approval creates a separate revocable CLI
+session and returns its credential over an ephemeral loopback connection.
+Agents and other non-interactive sessions can start and finish login explicitly:
+
+```bash
+# 1. Send a code. Email flows return challengeToken in the JSON result.
+inline login --email you@example.com --send-code --json --compact
+
+# 2. Verify the code and save the token without printing it.
+inline login --email you@example.com --code 123456 --challenge-token TOKEN --json --compact
+
+# Avoid putting the code in argv when it is available on stdin.
+printf '%s\n' "$LOGIN_CODE" | inline login --email you@example.com --code-stdin --challenge-token TOKEN --json --compact
+```
+
+Phone login uses `--phone` in both steps and does not normally need a challenge
+token. The successful JSON result reports `status: "authenticated"`, `userId`,
+and whether the profile loaded; it never includes the bearer token.
+
+Agents and CI may also pass an existing token with `INLINE_TOKEN`:
 
 ```bash
 INLINE_TOKEN=... inline me --json
@@ -41,6 +80,35 @@ INLINE_TOKEN=... inline me --json
 `inline me` verifies the current auth state. `inline logout` clears the saved
 local token. It cannot unset a token provided by the parent environment, so
 commands remain authenticated while `INLINE_TOKEN` is set.
+
+## Local coding agents
+
+Inline can keep Codex and ACP agents available as private, local-first bots in
+your chats. Setup is persistent; you do not run a new bridge per thread.
+
+```bash
+inline setup codex --folder /path/to/project
+inline setup opencode --folder /path/to/another-project
+inline setup claude --folder /path/to/project
+inline setup amp --folder /path/to/project
+inline bridge status
+```
+
+Exactly Codex 0.146.0 on macOS is the intended invite-beta target. Agent
+directions work in the bot DM, direct mentions, replies, and followed threads,
+but only for the owner by default. Other stable Inline user IDs must be added
+locally with `inline bridge operators add USER_ID`; provider-specific overrides
+use `--provider`. OpenCode, Claude, and Amp are experimental provider paths for
+developers. Amp setup installs Inline's source-revision-pinned ACP adapter and
+uses the exact authenticated host Amp CLI accepted during setup. All configured
+providers can coexist under one supervised background service. See
+[Local coding-agent bridge](../docs/local-agent-bridge.md) for provider support,
+folder switching, lifecycle, and security details.
+
+During a turn the bot silently edits one progress message, leaves it as a short
+terminal status, then sends the final answer as a separate normally-notifying
+message. Its persisted send identity is reused across retries and service
+restarts so an ambiguous response does not create another final answer.
 
 ## Output
 

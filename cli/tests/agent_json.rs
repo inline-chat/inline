@@ -87,7 +87,7 @@ fn parse_errors_emit_structured_json_on_stderr() {
 }
 
 #[test]
-fn json_login_emits_interactive_required_without_creating_auth_files() {
+fn json_login_requires_an_explicit_phase_without_creating_auth_files() {
     let (root, secrets, state) = isolated_paths("json-login");
     let output = run_inline_isolated(
         &[
@@ -112,7 +112,16 @@ fn json_login_emits_interactive_required_without_creating_auth_files() {
         payload["error"]["message"]
             .as_str()
             .unwrap_or_default()
-            .contains("auth login does not support JSON/non-interactive verification yet")
+            .contains("choose an explicit non-interactive login phase")
+    );
+    assert!(
+        payload["error"]["examples"]
+            .as_array()
+            .is_some_and(|examples| examples.iter().any(|example| {
+                example
+                    .as_str()
+                    .is_some_and(|example| example.contains("--send-code --json"))
+            }))
     );
 
     assert!(!root.exists());

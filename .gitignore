@@ -9,12 +9,14 @@ build/
 **/build/
 coverage/
 **/coverage/
+**/.tmp-coverage/
 *.tsbuildinfo
 
 # Rust
 target/
 cli/target/
 cli/dist/
+**/.cargo-ok
 
 # Python
 __pycache__/

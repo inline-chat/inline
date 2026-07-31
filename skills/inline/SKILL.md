@@ -1,6 +1,6 @@
 ---
 name: inline
-description: Find, read, summarize, and act in Inline work chats through the connected Inline MCP server. Use for requests involving Inline spaces, people, DMs, threads, unread messages, conversation history, search, files, creating conversations, or sending messages. Do not use for developing the Inline codebase, administering production infrastructure, or unrelated chat services.
+description: Find, read, summarize, and act in Inline work chats through Inline MCP, the Inline CLI, or a local-agent bridge. Use for Inline spaces, people, DMs, threads, unread messages, history, search, files, creating conversations, sending messages, or installing, authenticating, and operating the Inline CLI. Do not use for developing the Inline codebase, administering production infrastructure, or unrelated chat services.
 ---
 
 # Inline
@@ -9,16 +9,22 @@ Use Inline as a thread-first work chat system. Find the exact conversation, read
 
 ## Start here
 
-1. Use the connected Inline MCP tools for normal chat work.
-2. Call `account.me` when scopes or allowed contexts are unclear.
-3. Resolve names to stable IDs before reading or writing:
+1. Select an access path from what the environment exposes and the user has authorized:
+   - Inline MCP in MCP-capable apps or agents, including hosts without shell access.
+   - Inline CLI in shell-capable environments when it is available or the user asks to install or authenticate it.
+   - The host's `inline` tools inside an Inline local-agent bridge.
+2. Do not treat MCP or the CLI as the universal default. Choose based on available capabilities, authentication, granted access, and the requested workflow. Do not install or reconfigure another path merely to replace one that already fits.
+3. When using MCP, call `account.me` when scopes or allowed contexts are unclear, then resolve names to stable IDs before reading or writing:
    - Use `people.search` for a person or DM.
    - Use `spaces.list` for a team or workspace.
    - Use `conversations.list` for a thread, chat, or recent DM.
-4. Use `conversations.get` to verify an ambiguous or write-sensitive target.
-5. Read the smallest useful message window, then answer or act.
+4. When using MCP, use `conversations.get` to verify an ambiguous or write-sensitive target.
+5. When using the CLI, read the [Inline CLI reference](references/inline-cli.md) before installing, authenticating, or operating it.
+6. Read the smallest useful message window, then answer or act.
 
-If Inline tools are unavailable, state that the Inline connection is missing and ask the user to connect or reauthorize `https://mcp.inline.chat/mcp/v2`. Do not invent results or silently substitute another chat service. The unversioned `/mcp` endpoint exists only for older clients using the legacy argument contract.
+If no usable Inline path is available, state what is missing and ask the user to connect or reauthorize MCP, or install or authenticate the CLI, as appropriate for that environment. Do not invent results or silently substitute another chat service. The unversioned `/mcp` endpoint exists only for older clients using the legacy argument contract.
+
+When running inside an Inline local-agent bridge, use the host's `inline` tool namespace instead of the hosted OAuth MCP names above. Start with `inline.get_current_context`; use `inline.search_chats`, `inline.search_messages`, `inline.get_history`, and the exact-ID tools to resolve context. Normal assistant replies must still be returned to the bridge, not sent through a tool. Durable writes such as creating a chat or reply thread, pinning, editing, or updating the bot profile require clear user intent and the tool's confirmation flag. These tools are bot-scoped: never assume access outside the chats returned by them.
 
 ## Operating rules
 
@@ -33,20 +39,21 @@ If Inline tools are unavailable, state that the Inline connection is missing and
 - Prefer canonical Inline URIs returned by tools when referring to people, chats, or messages.
 - Report partial coverage when limits, time windows, authorization, or search scope prevent a complete answer.
 
-## Choose the workflow
+## Workflow map
 
-| Goal | Preferred path |
-| --- | --- |
-| Understand authorization | `account.me` |
-| Find a person or DM | `people.search` → `conversations.list` |
-| Find a thread or chat | `spaces.list` when useful → `conversations.list` → `conversations.get` |
-| Summarize recent discussion | `messages.list` with a bounded time window |
-| Investigate a specific result | `messages.search` or `messages.unread` → `messages.context` |
-| Find links or media | `messages.list` with a content filter → `files.get` when metadata is needed |
-| Create a new thread | Resolve the parent space → `conversations.create` |
-| Send text | Verify target → `messages.send` |
-| Send media | Verify target → `files.upload` → `messages.send_media` |
-| Post a structured multi-part update | Verify target → `messages.send_batch` |
+Use only columns for access paths the environment actually provides. MCP entries are tool names, not shell commands. CLI entries require a shell plus an installed and authenticated `inline` executable. Do not mention or simulate an unavailable path, and do not install or configure one unless the user asks. If no available path can complete the task, explain the missing capability and offer the relevant setup.
+
+| Goal | MCP path | CLI path |
+| --- | --- | --- |
+| Understand access | `account.me` | `inline me --json --compact` |
+| Find a person or DM | `people.search` → `conversations.list` | `inline users list --filter NAME --json --compact`, then `inline chats get --user-id USER_ID --json --compact` |
+| Find a thread or chat | `spaces.list` when useful → `conversations.list` → `conversations.get` | `inline chats list --filter QUERY --json --compact`, then `inline chats get --chat-id CHAT_ID --json --compact` |
+| Triage unread work | `messages.unread` → `messages.context` | `inline chats list --json --compact`, then `inline messages list --chat-id CHAT_ID --limit 50 --json --compact` |
+| Read or summarize | `messages.list` with a bounded time window | `inline messages list --chat-id CHAT_ID --since TIME --limit 50 --json --compact` |
+| Search and inspect context | `messages.search` → `messages.context` | `inline messages search --chat-id CHAT_ID --query QUERY --json --compact`, then `inline messages get --chat-id CHAT_ID --message-id MESSAGE_ID --json --compact` |
+| Create a thread or chat | Resolve the parent and participants → `conversations.create` | Resolve IDs, then `inline chats create --title TITLE --json --compact` with the required space, visibility, and participant flags |
+| Send text or a reply | Verify target → `messages.send` | `inline messages send --chat-id CHAT_ID --text TEXT` with `--reply-to MESSAGE_ID` when needed |
+| Send files or media | Verify target → `files.upload` → `messages.send_media` | `inline messages send --chat-id CHAT_ID --attach PATH --text CAPTION` |
 
 ## Read results well
 
@@ -61,6 +68,6 @@ If Inline tools are unavailable, state that the Inline connection is missing and
 Read only the reference needed for the current task:
 
 - [Inline concepts](references/concepts.md): spaces, conversations, threads, DMs, IDs, scope, and visibility.
-- [Workflows](references/workflows.md): reliable read, search, triage, create, send, and media procedures.
-- [Recipes](references/recipes.md): compact tool-call sequences for common requests.
-- [Inline CLI](references/inline-cli.md): advanced local workflows. Read this only in Codex or another shell-capable environment after confirming the `inline` CLI is installed and authenticated.
+- [Workflows](references/workflows.md): reliable MCP read, search, triage, create, send, and media procedures.
+- [Recipes](references/recipes.md): compact MCP tool-call sequences for common requests.
+- [Inline CLI](references/inline-cli.md): install, authenticate, and operate the CLI for local, agent, and bulk workflows. Read this only in a shell-capable environment.

@@ -1,6 +1,7 @@
 mod attachments;
 mod auth;
 mod auth_flow;
+mod bridge;
 mod chat_output;
 mod config;
 mod dates;
@@ -8,6 +9,7 @@ mod doctor;
 mod downloads;
 mod errors;
 mod identity;
+mod mac_app_auth;
 mod media;
 mod message_export;
 mod message_output;
@@ -15,6 +17,7 @@ mod message_selectors;
 mod notifications;
 mod output;
 mod peer;
+mod skill;
 mod state;
 mod update;
 mod validation;
@@ -48,7 +51,7 @@ use crate::downloads::{
     download_message_media, resolve_batch_download_path, resolve_download_path,
 };
 use crate::errors::{
-    CliError, JsonCliError, JsonErrorEnvelope, human_cli_error_from_error,
+    CliError, JsonCliError, JsonErrorEnvelope, human_cli_error_from_error, is_reported_cli_failure,
     json_cli_error_from_error,
 };
 use crate::identity::connect_realtime;
@@ -119,9 +122,12 @@ fn detect_global_flags(argv: &[OsString]) -> DetectedGlobalFlags {
     after_help = r#"Common workflows:
   Start:
     inline login [--email you@example.com | --phone +15551234567]
+    inline login --email you@example.com --send-code --json
+    inline login --email you@example.com --code 123456 --challenge-token TOKEN --json
     inline me
     inline logout
     inline doctor
+    inline skill install
 
   Review a thread:
     inline chats list --filter "launch"
@@ -181,7 +187,7 @@ fn detect_global_flags(argv: &[OsString]) -> DetectedGlobalFlags {
 
 Docs:
   https://github.com/inline-chat/inline/blob/main/cli/README.md
-  https://github.com/inline-chat/inline/blob/main/cli/skill/SKILL.md
+  https://github.com/inline-chat/inline/tree/main/skills/inline
 "#
 )]
 struct Cli {
@@ -230,6 +236,21 @@ enum Command {
     Update,
     #[command(about = "Print diagnostic information about this CLI")]
     Doctor,
+    #[command(about = "Install or update Inline's agent skill", alias = "skills")]
+    Skill {
+        #[command(subcommand)]
+        command: SkillCommand,
+    },
+    #[command(about = "Set up a local coding agent in Inline")]
+    Setup {
+        #[command(subcommand)]
+        command: SetupCommand,
+    },
+    #[command(about = "Manage the local coding-agent bridge")]
+    Bridge {
+        #[command(subcommand)]
+        command: BridgeCommand,
+    },
     #[command(
         about = "List chats and threads",
         alias = "chat",
@@ -307,6 +328,189 @@ One-pass review:
 }
 
 #[derive(Subcommand)]
+enum SetupCommand {
+    #[command(about = "Set up Codex as a personal Inline bot (external beta: macOS only)")]
+    Codex(SetupAgentArgs),
+    #[command(about = "Set up OpenCode as an experimental personal Inline bot")]
+    Opencode(SetupAgentArgs),
+    #[command(about = "Set up Claude as an experimental personal Inline bot")]
+    Claude(SetupAgentArgs),
+    #[command(about = "Set up Amp as an experimental personal Inline bot")]
+    Amp(SetupAgentArgs),
+}
+
+#[derive(Subcommand)]
+enum SkillCommand {
+    #[command(about = "Install the bundled Inline skill for Codex")]
+    Install {
+        #[arg(
+            long,
+            help = "Overwrite Inline skill files that differ from this CLI's bundled version"
+        )]
+        force: bool,
+    },
+}
+
+#[derive(Args)]
+struct SetupAgentArgs {
+    #[arg(long, value_name = "PATH")]
+    folder: Option<PathBuf>,
+    #[arg(long, value_name = "NAME")]
+    name: Option<String>,
+}
+
+#[derive(Subcommand)]
+enum BridgeCommand {
+    #[command(about = "Show bridge and provider health")]
+    Status,
+    #[command(about = "Start the background bridge")]
+    Start,
+    #[command(about = "Stop the background bridge")]
+    Stop,
+    #[command(about = "Restart the background bridge")]
+    Restart,
+    #[command(about = "Check the bridge installation")]
+    Doctor,
+    #[command(about = "Show recent bounded bridge logs")]
+    Logs {
+        #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u16).range(1..=500))]
+        lines: u16,
+    },
+    #[command(
+        about = "Remove the background service while preserving bots, credentials, and state"
+    )]
+    Uninstall,
+    #[command(about = "Register or list local project folders without exposing paths to Inline")]
+    Workspace {
+        #[command(subcommand)]
+        command: BridgeWorkspaceCommand,
+    },
+    #[command(about = "Manage the strict user-ID allowlist for agent requests")]
+    Operators {
+        #[command(subcommand)]
+        command: BridgeOperatorsCommand,
+    },
+    #[command(hide = true)]
+    Run(BridgeRunArgs),
+    #[command(hide = true)]
+    ProviderHost(BridgeProviderHostArgs),
+    #[command(hide = true)]
+    InlineToolsMcp,
+    #[command(hide = true)]
+    Dev {
+        #[command(subcommand)]
+        command: BridgeDevCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum BridgeWorkspaceCommand {
+    #[command(about = "Register a local project folder for one configured agent")]
+    Add {
+        #[arg(value_name = "PATH")]
+        path: PathBuf,
+        #[arg(long, value_name = "PROVIDER")]
+        provider: Option<String>,
+    },
+    #[command(about = "List registered project folders as opaque IDs")]
+    List {
+        #[arg(long, value_name = "PROVIDER")]
+        provider: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum BridgeOperatorsCommand {
+    #[command(about = "Show the global or provider-specific operator allowlist")]
+    List {
+        #[arg(long, value_name = "PROVIDER")]
+        provider: Option<String>,
+    },
+    #[command(about = "Allow one Inline user ID to send agent requests")]
+    Add {
+        #[arg(value_name = "USER_ID", value_parser = clap::value_parser!(i64).range(1..))]
+        user_id: i64,
+        #[arg(long, value_name = "PROVIDER")]
+        provider: Option<String>,
+    },
+    #[command(about = "Remove one Inline user ID from the agent allowlist")]
+    Remove {
+        #[arg(value_name = "USER_ID", value_parser = clap::value_parser!(i64).range(1..))]
+        user_id: i64,
+        #[arg(long, value_name = "PROVIDER")]
+        provider: Option<String>,
+    },
+}
+
+#[derive(Args)]
+struct BridgeRunArgs {
+    #[arg(long, value_name = "PATH")]
+    config: PathBuf,
+    #[arg(long, hide = true)]
+    trace: bool,
+}
+
+#[derive(Args)]
+struct BridgeProviderHostArgs {
+    #[arg(long, value_name = "PATH")]
+    lock_file: PathBuf,
+    #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+    command: Vec<OsString>,
+}
+
+#[derive(Subcommand)]
+enum BridgeDevCommand {
+    #[command(hide = true)]
+    Codex(BridgeDevCodexArgs),
+    #[command(hide = true)]
+    Settings(BridgeDevSettingsArgs),
+    #[command(hide = true)]
+    WorkspacePicker(BridgeDevWorkspacePickerArgs),
+    #[command(hide = true)]
+    ObserveTyping(BridgeDevObserveTypingArgs),
+}
+
+#[derive(Args)]
+struct BridgeDevCodexArgs {
+    #[arg(long, value_name = "PATH")]
+    folder: PathBuf,
+}
+
+#[derive(Args)]
+struct BridgeDevSettingsArgs {
+    #[arg(long)]
+    bot_user_id: i64,
+    #[arg(long)]
+    chat_id: i64,
+    #[arg(long, requires = "revision")]
+    item: Option<String>,
+    #[arg(long, requires = "item")]
+    revision: Option<String>,
+    #[arg(long, conflicts_with = "bool_value", requires = "item")]
+    string_value: Option<String>,
+    #[arg(long, conflicts_with = "string_value", requires = "item")]
+    bool_value: Option<bool>,
+}
+
+#[derive(Args)]
+struct BridgeDevWorkspacePickerArgs {
+    #[arg(long)]
+    bot_user_id: i64,
+    #[arg(long)]
+    chat_id: i64,
+    #[arg(long, value_name = "PATH")]
+    folder: Option<PathBuf>,
+}
+
+#[derive(Args)]
+struct BridgeDevObserveTypingArgs {
+    #[arg(long)]
+    bot_user_id: i64,
+    #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u64).range(1..=60))]
+    timeout_seconds: u64,
+}
+
+#[derive(Subcommand)]
 enum AuthCommand {
     #[command(about = "Log in via email or phone code")]
     Login(AuthLoginArgs),
@@ -331,6 +535,43 @@ pub(crate) struct AuthLoginArgs {
         conflicts_with = "email"
     )]
     phone: Option<String>,
+
+    #[arg(
+        long,
+        help = "Send a login code and exit (for two-step non-interactive login)",
+        conflicts_with_all = ["code", "code_stdin"]
+    )]
+    send_code: bool,
+
+    #[arg(
+        long,
+        value_name = "CODE",
+        help = "Verify a login code and save the resulting token",
+        conflicts_with_all = ["send_code", "code_stdin"]
+    )]
+    code: Option<String>,
+
+    #[arg(
+        long,
+        help = "Read the login code from piped stdin",
+        conflicts_with_all = ["send_code", "code"]
+    )]
+    code_stdin: bool,
+
+    #[arg(
+        long,
+        value_name = "TOKEN",
+        help = "Email challenge token returned by --send-code",
+        conflicts_with = "send_code"
+    )]
+    challenge_token: Option<String>,
+
+    #[arg(
+        long,
+        hide = true,
+        conflicts_with_all = ["email", "phone", "send_code", "code", "code_stdin", "challenge_token"]
+    )]
+    mac_app_bootstrap: bool,
 }
 
 #[derive(Subcommand)]
@@ -1407,6 +1648,9 @@ async fn main() {
     };
 
     if let Err(error) = run(cli, started_at).await {
+        if is_reported_cli_failure(error.as_ref()) {
+            std::process::exit(1);
+        }
         if flags.json {
             let payload = JsonErrorEnvelope {
                 error: json_cli_error_from_error(error.as_ref()),
@@ -1458,6 +1702,9 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
             }
             | Command::Update
             | Command::Doctor
+            | Command::Skill { .. }
+            | Command::Setup { .. }
+            | Command::Bridge { .. }
     );
     let update_handle = if skip_update_check || cli.json || !io::stdout().is_terminal() {
         None
@@ -1467,6 +1714,169 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
 
     let result = async {
         match cli.command {
+            Command::Skill { command } => match command {
+                SkillCommand::Install { force } => {
+                    skill::install_for_codex(force, cli.json, json_format)?;
+                }
+            },
+            Command::Setup { command } => {
+                let (provider_id, args) = match command {
+                    SetupCommand::Codex(args) => ("codex", args),
+                    SetupCommand::Opencode(args) => ("opencode", args),
+                    SetupCommand::Claude(args) => ("claude", args),
+                    SetupCommand::Amp(args) => ("amp", args),
+                };
+                let owner_token = match auth_store.load_token()? {
+                    Some(token) => token,
+                    None => {
+                        handle_login(
+                            AuthLoginArgs {
+                                email: None,
+                                phone: None,
+                                send_code: false,
+                                code: None,
+                                code_stdin: false,
+                                challenge_token: None,
+                                mac_app_bootstrap: false,
+                            },
+                            &api,
+                            &auth_store,
+                            &config.realtime_url,
+                            &local_db,
+                            cli.json,
+                            json_format,
+                        )
+                        .await?;
+                        require_token(&auth_store)?
+                    }
+                };
+                bridge::setup_provider(
+                    &config,
+                    owner_token,
+                    provider_id,
+                    args.folder,
+                    args.name,
+                    cli.json,
+                    json_format,
+                )
+                .await?;
+            }
+            Command::Bridge { command } => match command {
+                BridgeCommand::Status => {
+                    bridge::status(&config, cli.json, json_format).await?;
+                }
+                BridgeCommand::Start => {
+                    bridge::start(&config, cli.json, json_format).await?;
+                }
+                BridgeCommand::Stop => {
+                    bridge::stop(&config, cli.json, json_format).await?;
+                }
+                BridgeCommand::Restart => {
+                    bridge::restart(&config, cli.json, json_format).await?;
+                }
+                BridgeCommand::Doctor => {
+                    bridge::doctor(&config, cli.json, json_format).await?;
+                }
+                BridgeCommand::Logs { lines } => {
+                    bridge::logs(&config, lines as usize, cli.json, json_format)?;
+                }
+                BridgeCommand::Uninstall => {
+                    bridge::uninstall(&config, cli.json, json_format).await?;
+                }
+                BridgeCommand::Workspace { command } => match command {
+                    BridgeWorkspaceCommand::Add { path, provider } => {
+                        bridge::workspace_add(&config, provider.as_deref(), path, cli.json, json_format)?;
+                    }
+                    BridgeWorkspaceCommand::List { provider } => {
+                        bridge::workspace_list(&config, provider.as_deref(), cli.json, json_format)?;
+                    }
+                },
+                BridgeCommand::Operators { command } => match command {
+                    BridgeOperatorsCommand::List { provider } => {
+                        bridge::operators_list(
+                            &config,
+                            provider.as_deref(),
+                            cli.json,
+                            json_format,
+                        )?;
+                    }
+                    BridgeOperatorsCommand::Add { user_id, provider } => {
+                        bridge::operators_mutate(
+                            &config,
+                            provider.as_deref(),
+                            user_id,
+                            bridge::OperatorMutation::Add,
+                            cli.json,
+                            json_format,
+                        )
+                        .await?;
+                    }
+                    BridgeOperatorsCommand::Remove { user_id, provider } => {
+                        bridge::operators_mutate(
+                            &config,
+                            provider.as_deref(),
+                            user_id,
+                            bridge::OperatorMutation::Remove,
+                            cli.json,
+                            json_format,
+                        )
+                        .await?;
+                    }
+                },
+                BridgeCommand::Run(args) => {
+                    bridge::run_service(args.config, args.trace || cfg!(debug_assertions)).await?;
+                }
+                BridgeCommand::ProviderHost(args) => {
+                    inline_agent_bridge::run_process_host(&args.lock_file, &args.command)?;
+                }
+                BridgeCommand::InlineToolsMcp => {
+                    inline_agent_driver_acp::run_inline_tools_mcp().await?;
+                }
+                BridgeCommand::Dev { command } => match command {
+                    BridgeDevCommand::Codex(args) => {
+                        let owner_token = require_token(&auth_store)?;
+                        bridge::run_codex_dev(&config, owner_token, args.folder).await?;
+                    }
+                    BridgeDevCommand::Settings(args) => {
+                        let owner_token = require_token(&auth_store)?;
+                        bridge::debug_request_settings(
+                            &config,
+                            &owner_token,
+                            bridge::DebugSettingsRequest {
+                                bot_user_id: args.bot_user_id,
+                                chat_id: args.chat_id,
+                                item_id: args.item,
+                                document_revision: args.revision,
+                                string_value: args.string_value,
+                                bool_value: args.bool_value,
+                            },
+                            json_format,
+                        )
+                        .await?;
+                    }
+                    BridgeDevCommand::WorkspacePicker(args) => {
+                        let owner_token = require_token(&auth_store)?;
+                        bridge::debug_probe_workspace_picker(
+                            &config,
+                            &owner_token,
+                            args.bot_user_id,
+                            args.chat_id,
+                            args.folder,
+                        )
+                        .await?;
+                    }
+                    BridgeDevCommand::ObserveTyping(args) => {
+                        let owner_token = require_token(&auth_store)?;
+                        bridge::debug_observe_typing(
+                            &config,
+                            &owner_token,
+                            args.bot_user_id,
+                            Duration::from_secs(args.timeout_seconds),
+                        )
+                        .await?;
+                    }
+                },
+            },
             Command::Login(args) => {
                 handle_login(
                     args,
@@ -1475,6 +1885,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     &config.realtime_url,
                     &local_db,
                     cli.json,
+                    json_format,
                 )
                 .await?;
             }
@@ -1498,6 +1909,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         &config.realtime_url,
                         &local_db,
                         cli.json,
+                        json_format,
                     )
                     .await?;
                 }
@@ -1526,7 +1938,9 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 }
             },
             Command::Update => {
-                update::run_update(&config, cli.json).await?;
+                if let Some(updated_binary) = update::run_update(&config, cli.json).await? {
+                    bridge::refresh_after_update(&config, &updated_binary).await?;
+                }
             }
             Command::Doctor => {
                 let output = build_doctor_output(&config, &auth_store, &local_db);
@@ -4315,6 +4729,115 @@ mod cli_parsing_tests {
     }
 
     #[test]
+    fn parses_non_interactive_login_phases() {
+        let cli = Cli::try_parse_from([
+            "inline",
+            "login",
+            "--email",
+            "agent@example.com",
+            "--send-code",
+            "--json",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Login(args) => {
+                assert!(args.send_code);
+                assert!(args.code.is_none());
+                assert!(!args.code_stdin);
+            }
+            _ => panic!("expected login shortcut"),
+        }
+
+        let cli = Cli::try_parse_from([
+            "inline",
+            "auth",
+            "login",
+            "--phone",
+            "+15551234567",
+            "--code-stdin",
+            "--json",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Auth {
+                command: AuthCommand::Login(args),
+            } => assert!(args.code_stdin),
+            _ => panic!("expected auth login command"),
+        }
+
+        let error = Cli::try_parse_from([
+            "inline",
+            "login",
+            "--email",
+            "agent@example.com",
+            "--send-code",
+            "--code",
+            "123456",
+        ])
+        .err()
+        .expect("send and verify phases must conflict");
+        assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+
+        let error = Cli::try_parse_from([
+            "inline",
+            "login",
+            "--email",
+            "agent@example.com",
+            "--send-code",
+            "--challenge-token",
+            "unused-token",
+        ])
+        .err()
+        .expect("send phase must reject a verification challenge token");
+        assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn parses_hidden_mac_app_bootstrap_without_exposing_it_in_help() {
+        let cli = Cli::try_parse_from([
+            "inline",
+            "auth",
+            "login",
+            "--mac-app-bootstrap",
+            "--json",
+            "--compact",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Auth {
+                command: AuthCommand::Login(args),
+            } => assert!(args.mac_app_bootstrap),
+            _ => panic!("expected auth login command"),
+        }
+
+        use clap::CommandFactory;
+        let mut command = Cli::command();
+        let mut output = Vec::new();
+        command.write_long_help(&mut output).unwrap();
+        let help = String::from_utf8(output).unwrap();
+        assert!(!help.contains("mac-app-bootstrap"));
+    }
+
+    #[test]
+    fn parses_skill_install_and_plural_alias() {
+        let cli = Cli::try_parse_from(["inline", "skill", "install"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Skill {
+                command: SkillCommand::Install { force: false }
+            }
+        ));
+
+        let cli = Cli::try_parse_from(["inline", "skills", "install", "--force"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Skill {
+                command: SkillCommand::Install { force: true }
+            }
+        ));
+    }
+
+    #[test]
     fn help_and_version_exit_successfully() {
         let help_err = Cli::try_parse_from(["inline", "--help"]).err().unwrap();
         assert_eq!(help_err.kind(), clap::error::ErrorKind::DisplayHelp);
@@ -4343,8 +4866,7 @@ mod cli_parsing_tests {
         assert!(help_text.contains("inline transcript"));
         assert!(help_text.contains("JSON mode:"));
         assert!(
-            help_text
-                .contains("https://github.com/inline-chat/inline/blob/main/cli/skill/SKILL.md")
+            help_text.contains("https://github.com/inline-chat/inline/tree/main/skills/inline")
         );
     }
 
@@ -4392,12 +4914,18 @@ mod cli_parsing_tests {
             AuthLoginArgs {
                 email: Some("agent@example.com".to_string()),
                 phone: None,
+                send_code: false,
+                code: None,
+                code_stdin: false,
+                challenge_token: None,
+                mac_app_bootstrap: false,
             },
             &api,
             &auth_store,
             "ws://127.0.0.1:9/realtime",
             &local_db,
             true,
+            output::JsonFormat::Compact,
         )
         .await
         .unwrap_err();
@@ -4414,6 +4942,11 @@ mod cli_parsing_tests {
         let args = AuthLoginArgs {
             email: Some("a@example.com".to_string()),
             phone: Some("+15551234567".to_string()),
+            send_code: false,
+            code: None,
+            code_stdin: false,
+            challenge_token: None,
+            mac_app_bootstrap: false,
         };
         let err = auth_flow::contact_from_args(args)
             .err()
@@ -4914,6 +5447,267 @@ mod cli_parsing_tests {
                 command: BotsCommand::RevealToken(_)
             }
         ));
+    }
+
+    #[test]
+    fn parses_hidden_codex_bridge_dev_command() {
+        let cli = Cli::try_parse_from([
+            "inline",
+            "bridge",
+            "dev",
+            "codex",
+            "--folder",
+            "/tmp/project",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Bridge {
+                command:
+                    BridgeCommand::Dev {
+                        command: BridgeDevCommand::Codex(args),
+                    },
+            } => assert_eq!(args.folder, PathBuf::from("/tmp/project")),
+            _ => panic!("expected hidden Codex bridge development command"),
+        }
+    }
+
+    #[test]
+    fn parses_hidden_workspace_picker_probe_without_exposing_endpoint_fields() {
+        let cli = Cli::try_parse_from([
+            "inline",
+            "bridge",
+            "dev",
+            "workspace-picker",
+            "--bot-user-id",
+            "17",
+            "--chat-id",
+            "42",
+            "--folder",
+            "/tmp/project",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Bridge {
+                command:
+                    BridgeCommand::Dev {
+                        command: BridgeDevCommand::WorkspacePicker(args),
+                    },
+            } => {
+                assert_eq!(args.bot_user_id, 17);
+                assert_eq!(args.chat_id, 42);
+                assert_eq!(args.folder, Some(PathBuf::from("/tmp/project")));
+            }
+            _ => panic!("expected hidden workspace picker development command"),
+        }
+    }
+
+    #[test]
+    fn parses_hidden_typing_observer() {
+        let cli = Cli::try_parse_from([
+            "inline",
+            "bridge",
+            "dev",
+            "observe-typing",
+            "--bot-user-id",
+            "17",
+            "--timeout-seconds",
+            "12",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Bridge {
+                command:
+                    BridgeCommand::Dev {
+                        command: BridgeDevCommand::ObserveTyping(args),
+                    },
+            } => {
+                assert_eq!(args.bot_user_id, 17);
+                assert_eq!(args.timeout_seconds, 12);
+            }
+            _ => panic!("expected hidden typing observer development command"),
+        }
+    }
+
+    #[test]
+    fn parses_all_provider_setup_and_bridge_lifecycle_commands() {
+        for provider in ["codex", "opencode", "claude", "amp"] {
+            let cli = Cli::try_parse_from([
+                "inline",
+                "setup",
+                provider,
+                "--folder",
+                "/tmp/project",
+                "--name",
+                "Mo's Builder",
+            ])
+            .unwrap();
+            let args = match cli.command {
+                Command::Setup {
+                    command: SetupCommand::Codex(args),
+                }
+                | Command::Setup {
+                    command: SetupCommand::Opencode(args),
+                }
+                | Command::Setup {
+                    command: SetupCommand::Claude(args),
+                }
+                | Command::Setup {
+                    command: SetupCommand::Amp(args),
+                } => args,
+                _ => panic!("expected provider setup command"),
+            };
+            assert_eq!(args.folder, Some(PathBuf::from("/tmp/project")));
+            assert_eq!(args.name.as_deref(), Some("Mo's Builder"));
+        }
+        for (argument, expected) in [
+            ("status", "status"),
+            ("start", "start"),
+            ("stop", "stop"),
+            ("restart", "restart"),
+            ("doctor", "doctor"),
+            ("uninstall", "uninstall"),
+        ] {
+            let cli = Cli::try_parse_from(["inline", "bridge", argument]).unwrap();
+            let actual = match cli.command {
+                Command::Bridge {
+                    command: BridgeCommand::Status,
+                } => "status",
+                Command::Bridge {
+                    command: BridgeCommand::Start,
+                } => "start",
+                Command::Bridge {
+                    command: BridgeCommand::Stop,
+                } => "stop",
+                Command::Bridge {
+                    command: BridgeCommand::Restart,
+                } => "restart",
+                Command::Bridge {
+                    command: BridgeCommand::Doctor,
+                } => "doctor",
+                Command::Bridge {
+                    command: BridgeCommand::Uninstall,
+                } => "uninstall",
+                _ => panic!("expected bridge lifecycle command"),
+            };
+            assert_eq!(actual, expected);
+        }
+
+        let cli = Cli::try_parse_from(["inline", "bridge", "run", "--config", "/tmp/config.json"])
+            .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Bridge {
+                command: BridgeCommand::Run(BridgeRunArgs { .. })
+            }
+        ));
+
+        let cli = Cli::try_parse_from([
+            "inline",
+            "bridge",
+            "provider-host",
+            "--lock-file",
+            "/tmp/provider.lock",
+            "--",
+            "/opt/provider",
+            "--agent-mode",
+        ])
+        .unwrap();
+        let Command::Bridge {
+            command: BridgeCommand::ProviderHost(args),
+        } = cli.command
+        else {
+            panic!("expected hidden provider host command");
+        };
+        assert_eq!(args.lock_file, PathBuf::from("/tmp/provider.lock"));
+        assert_eq!(
+            args.command,
+            [
+                OsString::from("/opt/provider"),
+                OsString::from("--agent-mode")
+            ]
+        );
+
+        let cli = Cli::try_parse_from(["inline", "bridge", "inline-tools-mcp"])
+            .expect("hidden Inline tools MCP command parses");
+        assert!(matches!(
+            cli.command,
+            Command::Bridge {
+                command: BridgeCommand::InlineToolsMcp
+            }
+        ));
+    }
+
+    #[test]
+    fn parses_workspace_add_and_list_without_exposing_a_path_flag() {
+        let add = Cli::try_parse_from([
+            "inline",
+            "bridge",
+            "workspace",
+            "add",
+            "/tmp/project",
+            "--provider",
+            "codex",
+        ])
+        .expect("workspace add parses");
+        assert!(matches!(
+            add.command,
+            Command::Bridge {
+                command: BridgeCommand::Workspace {
+                    command: BridgeWorkspaceCommand::Add { path, provider: Some(provider) }
+                }
+            } if path.as_path() == std::path::Path::new("/tmp/project") && provider == "codex"
+        ));
+        let list = Cli::try_parse_from(["inline", "bridge", "workspace", "list"])
+            .expect("workspace list parses");
+        assert!(matches!(
+            list.command,
+            Command::Bridge {
+                command: BridgeCommand::Workspace {
+                    command: BridgeWorkspaceCommand::List { provider: None }
+                }
+            }
+        ));
+    }
+
+    #[test]
+    fn parses_global_and_provider_operator_allowlist_commands() {
+        let global = Cli::try_parse_from(["inline", "bridge", "operators", "add", "123"])
+            .expect("global operator add parses");
+        assert!(matches!(
+            global.command,
+            Command::Bridge {
+                command: BridgeCommand::Operators {
+                    command: BridgeOperatorsCommand::Add {
+                        user_id: 123,
+                        provider: None
+                    }
+                }
+            }
+        ));
+
+        let provider = Cli::try_parse_from([
+            "inline",
+            "bridge",
+            "operators",
+            "remove",
+            "456",
+            "--provider",
+            "claude",
+        ])
+        .expect("provider operator remove parses");
+        assert!(matches!(
+            provider.command,
+            Command::Bridge {
+                command: BridgeCommand::Operators {
+                    command: BridgeOperatorsCommand::Remove {
+                        user_id: 456,
+                        provider: Some(provider)
+                    }
+                }
+            } if provider == "claude"
+        ));
+
+        assert!(Cli::try_parse_from(["inline", "bridge", "operators", "add", "0"]).is_err());
     }
 
     #[test]

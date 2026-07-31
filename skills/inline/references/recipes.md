@@ -1,5 +1,7 @@
 # Inline recipes
 
+These recipes use Inline MCP. In a shell-capable environment, use the [Inline CLI reference](inline-cli.md) to install or authenticate the CLI and for CLI equivalents or bulk workflows.
+
 ## “What needs my attention?”
 
 1. `messages.unread({ limit: 50 })`

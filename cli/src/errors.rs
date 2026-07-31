@@ -30,6 +30,26 @@ pub(crate) struct JsonCliError {
     pub(crate) examples: Vec<String>,
 }
 
+/// Signals a non-success command result that has already been rendered.
+///
+/// Health and diagnostic commands print their complete result before deciding
+/// whether the process should exit successfully. The top-level error handler
+/// must not append a second human or JSON error document in that case.
+#[derive(Debug)]
+pub(crate) struct ReportedCliFailure;
+
+impl std::fmt::Display for ReportedCliFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("command reported an unhealthy result")
+    }
+}
+
+impl std::error::Error for ReportedCliFailure {}
+
+pub(crate) fn is_reported_cli_failure(error: &(dyn std::error::Error + 'static)) -> bool {
+    find_error_in_chain::<ReportedCliFailure>(error).is_some()
+}
+
 impl JsonCliError {
     pub(crate) fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
@@ -268,6 +288,15 @@ impl CliError {
                 "inline auth login".to_string(),
                 "INLINE_TOKEN=... inline auth me --json".to_string(),
             ],
+        }
+    }
+
+    pub(crate) fn mac_app_auth_cancelled(detail: Option<String>) -> Self {
+        Self {
+            code: "mac_app_auth_cancelled",
+            message: detail.unwrap_or_else(|| "Inline for Mac cancelled CLI sign-in.".to_string()),
+            hint: Some("Try again from Inline for Mac or use email/phone login.".to_string()),
+            examples: vec!["inline login".to_string()],
         }
     }
 
@@ -661,6 +690,15 @@ mod tests {
         fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
             Some(&self.source)
         }
+    }
+
+    #[test]
+    fn already_reported_failures_are_detected_through_error_sources() {
+        assert!(is_reported_cli_failure(&ReportedCliFailure));
+        assert!(is_reported_cli_failure(&SourceWrapper {
+            source: ReportedCliFailure,
+        }));
+        assert!(!is_reported_cli_failure(&io::Error::other("unreported")));
     }
 
     #[test]

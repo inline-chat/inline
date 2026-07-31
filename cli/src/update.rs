@@ -62,7 +62,7 @@ struct UpdateTarget {
     size: Option<u64>,
 }
 
-pub async fn run_update(config: &Config, json: bool) -> Result<(), UpdateError> {
+pub async fn run_update(config: &Config, json: bool) -> Result<Option<PathBuf>, UpdateError> {
     let mut install_url_hint = config.release_install_url.clone();
     let result = run_update_inner(config, json, &mut install_url_hint).await;
     if result.is_err() && !json {
@@ -75,7 +75,7 @@ async fn run_update_inner(
     config: &Config,
     json: bool,
     install_url_hint: &mut Option<String>,
-) -> Result<(), UpdateError> {
+) -> Result<Option<PathBuf>, UpdateError> {
     let manifest_url = config
         .release_manifest_url
         .clone()
@@ -89,7 +89,7 @@ async fn run_update_inner(
         if !json {
             eprintln!("Auto-update is not supported on this OS yet.");
         }
-        return Ok(());
+        return Ok(None);
     }
 
     let latest = Version::parse(&manifest.version)?;
@@ -98,7 +98,7 @@ async fn run_update_inner(
         if !json {
             println!("inline is up to date (v{current}).");
         }
-        return Ok(());
+        return Ok(None);
     }
 
     let target_manifest = manifest
@@ -150,7 +150,7 @@ async fn run_update_inner(
             println!("Updated inline to v{latest}.");
         }
     }
-    Ok(())
+    Ok(Some(install_outcome.install_path))
 }
 
 pub fn spawn_update_check(

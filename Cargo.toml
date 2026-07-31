@@ -1,10 +1,14 @@
 [workspace]
 members = [
   "cli",
+  "crates/agent-bridge",
+  "crates/agent-driver-acp",
+  "crates/agent-driver-codex",
   "crates/client",
   "crates/protocol",
   "crates/sdk",
 ]
+exclude = ["vendor/agent-client-protocol"]
 resolver = "3"
 
 [workspace.package]
@@ -16,6 +20,7 @@ repository = "https://github.com/inline-chat/inline"
 homepage = "https://inline.chat"
 
 [workspace.dependencies]
+agent-client-protocol = "=2.0.0"
 axum = { version = "0.8.9", features = ["multipart", "ws"] }
 env_logger = "0.11.11"
 futures-util = "0.3.30"
@@ -29,14 +34,18 @@ reqwest = { version = "0.12.12", default-features = false, features = [
   "rustls-tls",
   "stream",
 ] }
-rusqlite = "0.40.1"
+rusqlite = { version = "0.40.1", features = ["bundled"] }
 serde = { version = "1.0.217", features = ["derive"] }
 serde_json = "1.0.135"
 thiserror = "1.0.69"
+toml = "0.8.19"
 tokio = { version = "1.43.0", features = [
   "fs",
+  "io-std",
   "io-util",
   "macros",
+  "net",
+  "process",
   "rt-multi-thread",
   "sync",
   "time",
@@ -46,6 +55,7 @@ tokio-tungstenite = { version = "0.29.0", features = [
 ] }
 tower = { version = "0.5.3", features = ["util"] }
 url = "2.5.4"
+uuid = { version = "1.24.0", features = ["v4"] }
 
 [profile.release]
 lto = "fat"
@@ -56,3 +66,6 @@ codegen-units = 1
 debug = 1
 inherits = "test"
 opt-level = 0
+
+[patch.crates-io]
+agent-client-protocol = { path = "vendor/agent-client-protocol" }

@@ -1,13 +1,16 @@
 use dialoguer::{Input, Select};
 use serde::Serialize;
+use std::io::{self, IsTerminal, Read};
 
 use crate::auth::AuthStore;
 use crate::errors::CliError;
 use crate::identity as client_info;
+use crate::mac_app_auth::{self, LoginOutcome};
+use crate::output::{self, JsonFormat};
 use crate::state::LocalDb;
 use crate::{AuthLoginArgs, fetch_me, is_interactive_terminal, user_display_name};
 use inline_protocol::proto;
-use inline_sdk::api::{ApiClient, ApiError};
+use inline_sdk::api::{ApiClient, ApiError, SendCodeResult, VerifyCodeResult};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -16,6 +19,30 @@ pub(crate) struct AuthLogoutOutput {
     pub(crate) effective_token_present: bool,
     pub(crate) effective_token_source: Option<String>,
     pub(crate) warning: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthCodeSentOutput {
+    status: &'static str,
+    delivery: &'static str,
+    existing_user: bool,
+    needs_invite_code: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    challenge_token: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthLoginOutput {
+    status: &'static str,
+    user_id: i64,
+    token_saved: bool,
+    profile_loaded: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    user: Option<proto::User>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    warning: Option<String>,
 }
 
 #[derive(Clone)]
@@ -31,13 +58,105 @@ pub(crate) async fn handle_login(
     realtime_url: &str,
     local_db: &LocalDb,
     json: bool,
+    json_format: JsonFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let send_code_only = args.send_code;
+    let supplied_code = args.code.clone();
+    let code_stdin = args.code_stdin;
+    let challenge_token = args.challenge_token.clone();
+    let mac_app_bootstrap = args.mac_app_bootstrap;
     let mut contact = contact_from_args(args)?;
+
+    if mac_app_bootstrap {
+        if !json {
+            return Err(CliError::invalid_args("--mac-app-bootstrap requires --json").into());
+        }
+
+        let device_name = client_info::device_name();
+        let device_id = auth_store.device_id()?;
+        match mac_app_auth::login_from_parent_app(
+            &device_id,
+            device_name.as_deref(),
+            client_info::client_version(),
+            client_info::current_os_version().as_deref(),
+        )
+        .await?
+        {
+            LoginOutcome::Token { token, user_id } => {
+                finish_login_with_token(
+                    &token,
+                    user_id,
+                    auth_store,
+                    realtime_url,
+                    local_db,
+                    true,
+                    json_format,
+                )
+                .await?;
+                return Ok(());
+            }
+            LoginOutcome::Cancelled(detail) => {
+                return Err(CliError::mac_app_auth_cancelled(detail).into());
+            }
+        }
+    }
+
+    if challenge_token.is_some() && (send_code_only || (supplied_code.is_none() && !code_stdin)) {
+        return Err(
+            CliError::invalid_args("--challenge-token requires --code or --code-stdin").into(),
+        );
+    }
+
+    if send_code_only {
+        let current = require_contact(contact.take(), "--send-code")?;
+        let device_name = client_info::device_name();
+        let device_id = auth_store.device_id()?;
+        let auth_metadata = client_info::auth_metadata(&device_id, device_name.as_deref());
+        let result = send_code(api, &current, &auth_metadata).await?;
+        print_code_sent(&current, result, json, json_format)?;
+        return Ok(());
+    }
+
+    if supplied_code.is_some() || code_stdin {
+        let current = require_contact(contact.take(), "--code/--code-stdin")?;
+        if challenge_token.is_some() && !matches!(current, Contact::Email(_)) {
+            return Err(
+                CliError::invalid_args("--challenge-token can only be used with --email").into(),
+            );
+        }
+        let code = match supplied_code {
+            Some(code) => normalize_code(code)?,
+            None => read_code_from_stdin()?,
+        };
+        let device_name = client_info::device_name();
+        let device_id = auth_store.device_id()?;
+        let auth_metadata = client_info::auth_metadata(&device_id, device_name.as_deref());
+        let result = verify_code(
+            api,
+            &current,
+            &code,
+            challenge_token.as_deref(),
+            &auth_metadata,
+        )
+        .await?;
+        finish_login(
+            result,
+            auth_store,
+            realtime_url,
+            local_db,
+            json,
+            json_format,
+        )
+        .await?;
+        return Ok(());
+    }
+
     if json {
         return Err(CliError::interactive_required(
-            "auth login does not support JSON/non-interactive verification yet",
+            "choose an explicit non-interactive login phase",
             vec![
-                "inline auth login".to_string(),
+                "inline auth login --email you@example.com --send-code --json".to_string(),
+                "inline auth login --email you@example.com --code 123456 --challenge-token TOKEN --json".to_string(),
                 "INLINE_TOKEN=... inline auth me --json".to_string(),
             ],
         )
@@ -52,7 +171,8 @@ pub(crate) async fn handle_login(
         return Err(CliError::interactive_required(
             action,
             vec![
-                "inline auth login --email you@example.com".to_string(),
+                "inline auth login --email you@example.com --send-code --json".to_string(),
+                "inline auth login --email you@example.com --code 123456 --challenge-token TOKEN --json".to_string(),
                 "INLINE_TOKEN=... inline auth me --json".to_string(),
             ],
         )
@@ -63,55 +183,81 @@ pub(crate) async fn handle_login(
     let device_id = auth_store.device_id()?;
     let auth_metadata = client_info::auth_metadata(&device_id, device_name.as_deref());
 
+    if contact.is_none() && mac_app_auth::supporting_app_available() {
+        let options = ["Continue with Inline for Mac", "Use email or phone"];
+        let selection = Select::new().items(&options).default(0).interact()?;
+        if selection == 0 {
+            println!("Opening Inline for Mac for approval…");
+            match mac_app_auth::login(
+                &device_id,
+                device_name.as_deref(),
+                client_info::client_version(),
+                client_info::current_os_version().as_deref(),
+            )
+            .await
+            {
+                Ok(LoginOutcome::Token { token, user_id }) => {
+                    finish_login_with_token(
+                        &token,
+                        user_id,
+                        auth_store,
+                        realtime_url,
+                        local_db,
+                        false,
+                        json_format,
+                    )
+                    .await?;
+                    return Ok(());
+                }
+                Ok(LoginOutcome::Cancelled(detail)) => {
+                    eprintln!(
+                        "Inline for Mac did not approve the request.{}",
+                        detail
+                            .filter(|value| !value.trim().is_empty())
+                            .map(|value| format!(" {value}"))
+                            .unwrap_or_default()
+                    );
+                }
+                Err(error) => {
+                    eprintln!("Could not use Inline for Mac: {error}");
+                }
+            }
+            println!("Continue with email or phone instead.");
+        }
+    }
+
     loop {
         let current = match contact.take() {
             Some(value) => value,
             None => prompt_contact()?,
         };
 
-        let email_challenge_token = match &current {
-            Contact::Email(email) => {
-                api.send_email_code(email, &auth_metadata)
-                    .await?
-                    .challenge_token
-            }
-            Contact::Phone(phone) => {
-                api.send_sms_code(phone, &auth_metadata).await?;
-                None
-            }
-        };
+        let email_challenge_token = send_code(api, &current, &auth_metadata)
+            .await?
+            .challenge_token;
 
         loop {
             let code = prompt_code()?;
-            let result = match &current {
-                Contact::Email(email) => {
-                    api.verify_email_code(
-                        email,
-                        &code,
-                        email_challenge_token.as_deref(),
-                        &auth_metadata,
-                    )
-                    .await
-                }
-                Contact::Phone(phone) => api.verify_sms_code(phone, &code, &auth_metadata).await,
-            };
+            let result = verify_code(
+                api,
+                &current,
+                &code,
+                email_challenge_token.as_deref(),
+                &auth_metadata,
+            )
+            .await;
 
             match result {
                 Ok(result) => {
-                    auth_store.store_token(&result.token)?;
-                    let mut realtime =
-                        client_info::connect_realtime(realtime_url, &result.token).await?;
-                    match fetch_me(&mut realtime).await {
-                        Ok(me) => {
-                            local_db.set_current_user(me.clone())?;
-                            let name = user_display_name(&me);
-                            println!("Welcome, {}.", name);
-                        }
-                        Err(error) => {
-                            eprintln!("Logged in, but failed to load profile: {error}");
-                            println!("Logged in as user {}.", result.user_id);
-                        }
-                    }
+                    finish_login(
+                        result,
+                        auth_store,
+                        realtime_url,
+                        local_db,
+                        false,
+                        json_format,
+                    )
+                    .await?;
                     return Ok(());
                 }
                 Err(error) => {
@@ -129,6 +275,194 @@ pub(crate) async fn handle_login(
             }
         }
     }
+}
+
+fn require_contact(
+    contact: Option<Contact>,
+    phase: &str,
+) -> Result<Contact, Box<dyn std::error::Error>> {
+    contact.ok_or_else(|| {
+        CliError::invalid_args(format!(
+            "{phase} requires exactly one of --email or --phone"
+        ))
+        .into()
+    })
+}
+
+async fn send_code(
+    api: &ApiClient,
+    contact: &Contact,
+    auth_metadata: &inline_sdk::client_info::AuthMetadata,
+) -> Result<SendCodeResult, ApiError> {
+    match contact {
+        Contact::Email(email) => api.send_email_code(email, auth_metadata).await,
+        Contact::Phone(phone) => api.send_sms_code(phone, auth_metadata).await,
+    }
+}
+
+async fn verify_code(
+    api: &ApiClient,
+    contact: &Contact,
+    code: &str,
+    challenge_token: Option<&str>,
+    auth_metadata: &inline_sdk::client_info::AuthMetadata,
+) -> Result<VerifyCodeResult, ApiError> {
+    match contact {
+        Contact::Email(email) => {
+            api.verify_email_code(email, code, challenge_token, auth_metadata)
+                .await
+        }
+        Contact::Phone(phone) => api.verify_sms_code(phone, code, auth_metadata).await,
+    }
+}
+
+fn print_code_sent(
+    contact: &Contact,
+    result: SendCodeResult,
+    json: bool,
+    json_format: JsonFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let delivery = match contact {
+        Contact::Email(_) => "email",
+        Contact::Phone(_) => "phone",
+    };
+    let output = AuthCodeSentOutput {
+        status: "code_sent",
+        delivery,
+        existing_user: result.existing_user,
+        needs_invite_code: result.needs_invite_code,
+        challenge_token: result.challenge_token,
+    };
+    if json {
+        output::print_json(&output, json_format)?;
+        return Ok(());
+    }
+
+    println!("Login code sent by {delivery}.");
+    if let Some(challenge_token) = output.challenge_token.as_deref() {
+        println!("Email challenge token: {challenge_token}");
+    }
+    println!(
+        "Complete login with --code CODE{}.",
+        if output.challenge_token.is_some() {
+            " --challenge-token TOKEN"
+        } else {
+            ""
+        }
+    );
+    Ok(())
+}
+
+async fn finish_login(
+    result: VerifyCodeResult,
+    auth_store: &AuthStore,
+    realtime_url: &str,
+    local_db: &LocalDb,
+    json: bool,
+    json_format: JsonFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    finish_login_with_token(
+        &result.token,
+        result.user_id,
+        auth_store,
+        realtime_url,
+        local_db,
+        json,
+        json_format,
+    )
+    .await
+}
+
+async fn finish_login_with_token(
+    token: &str,
+    user_id: i64,
+    auth_store: &AuthStore,
+    realtime_url: &str,
+    local_db: &LocalDb,
+    json: bool,
+    json_format: JsonFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    auth_store.store_token(token)?;
+
+    let mut warnings = Vec::new();
+    if let Err(error) = local_db.clear_current_user() {
+        warnings.push(format!(
+            "Authenticated, but failed to clear the previously cached profile: {error}"
+        ));
+    }
+
+    let user = match client_info::connect_realtime(realtime_url, token).await {
+        Ok(mut realtime) => match fetch_me(&mut realtime).await {
+            Ok(me) => match local_db.set_current_user(me.clone()) {
+                Ok(()) => {
+                    warnings.clear();
+                    Some(me)
+                }
+                Err(error) => {
+                    warnings.push(format!(
+                        "Authenticated, but failed to cache profile: {error}"
+                    ));
+                    Some(me)
+                }
+            },
+            Err(error) => {
+                warnings.push(format!(
+                    "Authenticated, but failed to load profile: {error}"
+                ));
+                None
+            }
+        },
+        Err(error) => {
+            warnings.push(format!(
+                "Authenticated, but failed to connect for profile loading: {error}"
+            ));
+            None
+        }
+    };
+    let warning = (!warnings.is_empty()).then(|| warnings.join(" "));
+
+    let output = AuthLoginOutput {
+        status: "authenticated",
+        user_id,
+        token_saved: true,
+        profile_loaded: user.is_some(),
+        user,
+        warning,
+    };
+
+    if json {
+        output::print_json(&output, json_format)?;
+    } else if let Some(user) = output.user.as_ref() {
+        println!("Welcome, {}.", user_display_name(user));
+        if let Some(warning) = output.warning.as_deref() {
+            eprintln!("{warning}");
+        }
+    } else {
+        println!("Logged in as user {}.", output.user_id);
+        if let Some(warning) = output.warning.as_deref() {
+            eprintln!("{warning}");
+        }
+    }
+    Ok(())
+}
+
+fn normalize_code(code: String) -> Result<String, Box<dyn std::error::Error>> {
+    let code = code.trim().to_string();
+    if code.is_empty() {
+        return Err(CliError::invalid_args("Login code cannot be empty").into());
+    }
+    Ok(code)
+}
+
+fn read_code_from_stdin() -> Result<String, Box<dyn std::error::Error>> {
+    if io::stdin().is_terminal() {
+        return Err(
+            CliError::invalid_args("--code-stdin requires a pipe or redirected stdin").into(),
+        );
+    }
+    let mut code = String::new();
+    io::stdin().read_to_string(&mut code)?;
+    normalize_code(code)
 }
 
 fn prompt_code() -> Result<String, Box<dyn std::error::Error>> {
@@ -151,11 +485,19 @@ pub(crate) fn contact_from_args(
     }
 
     if let Some(email) = args.email {
-        return Ok(Some(Contact::Email(email.trim().to_string())));
+        let email = email.trim().to_string();
+        if email.is_empty() {
+            return Err(CliError::invalid_args("--email cannot be empty").into());
+        }
+        return Ok(Some(Contact::Email(email)));
     }
 
     if let Some(phone) = args.phone {
-        return Ok(Some(Contact::Phone(phone.trim().to_string())));
+        let phone = phone.trim().to_string();
+        if phone.is_empty() {
+            return Err(CliError::invalid_args("--phone cannot be empty").into());
+        }
+        return Ok(Some(Contact::Phone(phone)));
     }
 
     Ok(None)
@@ -286,5 +628,138 @@ fn print_auth_error(error: &ApiError) {
         _ => {
             eprintln!("Could not verify code: {error}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+    use std::fs;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn non_interactive_email_login_sends_then_verifies_without_printing_token() {
+        let root = tempfile::tempdir().unwrap();
+        let secrets_path = root.path().join("secrets.json");
+        let state_path = root.path().join("state.json");
+
+        let (api_url, send_request) = serve_json(
+            r#"{"ok":true,"result":{"existingUser":true,"needsInviteCode":false,"challengeToken":"challenge-123"}}"#,
+        )
+        .await;
+        let auth_store = AuthStore::new(secrets_path.clone(), api_url.clone());
+        let local_db = LocalDb::new(state_path.clone(), api_url.clone());
+        handle_login(
+            AuthLoginArgs {
+                email: Some("agent@example.com".to_string()),
+                phone: None,
+                send_code: true,
+                code: None,
+                code_stdin: false,
+                challenge_token: None,
+                mac_app_bootstrap: false,
+            },
+            &ApiClient::try_new(api_url).unwrap(),
+            &auth_store,
+            "ws://127.0.0.1:9/realtime",
+            &local_db,
+            true,
+            JsonFormat::Compact,
+        )
+        .await
+        .unwrap();
+        let send_request = send_request.await.unwrap();
+        assert!(send_request.starts_with("POST /v1/sendEmailCode "));
+        assert!(send_request.contains("agent@example.com"));
+
+        let (api_url, verify_request) =
+            serve_json(r#"{"ok":true,"result":{"userId":42,"token":"test-bearer-token"}}"#).await;
+        let auth_store = AuthStore::new(secrets_path.clone(), api_url.clone());
+        let local_db = LocalDb::new(state_path.clone(), api_url.clone());
+        handle_login(
+            AuthLoginArgs {
+                email: Some("agent@example.com".to_string()),
+                phone: None,
+                send_code: false,
+                code: Some("123456".to_string()),
+                code_stdin: false,
+                challenge_token: Some("challenge-123".to_string()),
+                mac_app_bootstrap: false,
+            },
+            &ApiClient::try_new(api_url).unwrap(),
+            &auth_store,
+            "ws://127.0.0.1:9/realtime",
+            &local_db,
+            true,
+            JsonFormat::Compact,
+        )
+        .await
+        .unwrap();
+        let verify_request = verify_request.await.unwrap();
+        assert!(verify_request.starts_with("POST /v1/verifyEmailCode "));
+        assert!(verify_request.contains("challenge-123"));
+        assert!(verify_request.contains("123456"));
+
+        let secrets: Value =
+            serde_json::from_str(&fs::read_to_string(secrets_path).unwrap()).unwrap();
+        assert_eq!(secrets["token"], "test-bearer-token");
+        let state: Value = serde_json::from_str(&fs::read_to_string(state_path).unwrap()).unwrap();
+        assert!(state["currentUser"].is_null());
+
+        let output = AuthLoginOutput {
+            status: "authenticated",
+            user_id: 42,
+            token_saved: true,
+            profile_loaded: false,
+            user: None,
+            warning: None,
+        };
+        let output = serde_json::to_value(output).unwrap();
+        assert!(output.get("token").is_none());
+        assert_eq!(output["status"], "authenticated");
+    }
+
+    async fn serve_json(response_body: &'static str) -> (String, tokio::task::JoinHandle<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let request = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            loop {
+                let mut chunk = [0_u8; 1024];
+                let read = stream.read(&mut chunk).await.unwrap();
+                assert!(read > 0, "client closed before completing request");
+                request.extend_from_slice(&chunk[..read]);
+                if let Some(header_end) = request
+                    .windows(4)
+                    .position(|window| window == b"\r\n\r\n")
+                    .map(|position| position + 4)
+                {
+                    let headers = String::from_utf8_lossy(&request[..header_end]);
+                    let content_length = headers
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .and_then(|value| value.trim().parse::<usize>().ok())
+                        })
+                        .unwrap_or(0);
+                    if request.len() >= header_end + content_length {
+                        break;
+                    }
+                }
+            }
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+            String::from_utf8(request).unwrap()
+        });
+        (format!("http://{address}/v1"), request)
     }
 }
