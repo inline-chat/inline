@@ -35,6 +35,7 @@
 		CD0240C42EA439D400976FDE /* Invite in Frameworks */ = {isa = PBXBuildFile; productRef = CD0240C32EA439D400976FDE /* Invite */; };
 		CD0240C62EA439DA00976FDE /* Invite in Frameworks */ = {isa = PBXBuildFile; productRef = CD0240C52EA439DA00976FDE /* Invite */; };
 		CD092C4D2EDC6F4A00E867E5 /* InlineMacUI in Frameworks */ = {isa = PBXBuildFile; productRef = CD092C4C2EDC6F4A00E867E5 /* InlineMacUI */; };
+		F17C11012F9A000100000001 /* InlineCLIInstaller in Frameworks */ = {isa = PBXBuildFile; productRef = F17C11002F9A000100000000 /* InlineCLIInstaller */; };
 		CD092C4F2EDC6F4A00E867E5 /* MacTheme in Frameworks */ = {isa = PBXBuildFile; productRef = CD092C4E2EDC6F4A00E867E5 /* MacTheme */; };
 		CD0A3CDA2CD536DF0081AD69 /* GRDBQuery in Frameworks */ = {isa = PBXBuildFile; productRef = CD0A3CD92CD536DF0081AD69 /* GRDBQuery */; };
 		CD27856F2CFB053C008A0EEF /* InlineConfig in Frameworks */ = {isa = PBXBuildFile; productRef = CD27856E2CFB053C008A0EEF /* InlineConfig */; };
@@ -269,6 +270,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D7A0C0022F50000100000001 /* InlineRTC in Frameworks */,
+				F17C11012F9A000100000001 /* InlineCLIInstaller in Frameworks */,
 				CD092C4D2EDC6F4A00E867E5 /* InlineMacUI in Frameworks */,
 				E95DD2F1FC76F473B6D31EB6 /* InlineMacWindow in Frameworks */,
 				CDB123D52D3E8066001AFC1A /* Nuke in Frameworks */,
@@ -500,6 +502,7 @@
 				CD7C6F122E5847CD00C89032 /* RealtimeV2 */,
 				CD4CAEEF2E5E14AA00698C43 /* Sentry */,
 				CD0240C52EA439DA00976FDE /* Invite */,
+				F17C11002F9A000100000000 /* InlineCLIInstaller */,
 				CD092C4C2EDC6F4A00E867E5 /* InlineMacUI */,
 				7BABF642C785B35DB0C34BF2 /* InlineMacWindow */,
 				D4ACD0022F1B000000000001 /* MacDevtools */,
@@ -1885,6 +1888,10 @@
 		CD092C4C2EDC6F4A00E867E5 /* InlineMacUI */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineMacUI;
+		};
+		F17C11002F9A000100000000 /* InlineCLIInstaller */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineCLIInstaller;
 		};
 		CD092C4E2EDC6F4A00E867E5 /* MacTheme */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -1,5 +1,6 @@
 import Auth
 import Foundation
+import InlineCLIInstaller
 import InlineKit
 import Logger
 import Observation
@@ -13,6 +14,7 @@ public struct AppDependencies {
   let auth = Auth.shared
   let viewModel = MainWindowViewModel()
   var overlay = OverlayManager()
+  let cliInstaller = CLIInstallerController()
 #if SPARKLE
   let updates = UpdateController()
 #endif

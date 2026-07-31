@@ -64,6 +64,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     setupAppearanceSetting()
     setupThemeSetting()
     setupMainMenu()
+    Task { @MainActor in
+      await dependencies.cliInstaller.refresh()
+    }
     presentInstallLocationPromptIfNeeded()
     registerMainWindowCoordinator()
     setupRealtimeConnectionFailureObserver()
