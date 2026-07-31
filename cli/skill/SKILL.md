@@ -29,9 +29,18 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 
 - `inline login [--email you@x.com | --phone +15551234567]`
   - Shortcut for `inline auth login`.
-  - Run an interactive login flow.
-  - Requires an interactive terminal. In agent/CI/non-interactive flows, use an existing token via `INLINE_TOKEN`.
+  - Without phase flags, run an interactive login flow.
+  - On macOS, a compatible signed-in Inline app is offered first; approval creates a separate revocable CLI session over an ephemeral loopback handoff.
   - If code is wrong, prompt to try again or edit email/phone (no hard exit).
+- `inline login --email you@x.com --send-code --json --compact`
+  - Start a non-interactive login. Email JSON may include a `challengeToken` needed for verification.
+- `inline login --email you@x.com --code 123456 [--challenge-token TOKEN] --json --compact`
+  - Finish non-interactive login, save the token, and return structured success without printing the token.
+  - Use `--code-stdin` instead of `--code` to read the code from piped stdin.
+- `inline login --phone +15551234567 --send-code --json --compact`
+  - Start phone login; finish it with the same `--phone` and `--code`/`--code-stdin`.
+- `INLINE_TOKEN=... inline me --json`
+  - Use an existing token without persisting it.
 - `inline me`
   - Shortcut for `inline auth me`.
   - Fetch and print the current user (verifies your token is still valid).
@@ -39,6 +48,14 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
   - Shortcut for `inline auth logout`.
   - Clear the stored token and current user.
   - If `INLINE_TOKEN` is set, the CLI remains authenticated from the environment; JSON output reports this as `effectiveTokenSource: "INLINE_TOKEN"`.
+
+### skill
+
+- `inline skill install`
+  - Install the complete bundled Inline skill to `$CODEX_HOME/skills/inline` or `~/.codex/skills/inline`.
+  - The command is non-interactive and idempotent when current.
+  - If an existing skill differs, review it before using `--force`; extra files are preserved.
+- For other agents, use `npx skills add https://github.com/inline-chat/inline/tree/main/skills/inline --global --yes`.
 
 ### shortcuts and aliases
 
