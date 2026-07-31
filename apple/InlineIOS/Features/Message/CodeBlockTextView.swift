@@ -3,6 +3,9 @@ import TextProcessing
 import UIKit
 
 final class CodeBlockTextView: UITextView {
+  // Keep this as a presentation option, but inline code is currently text-only.
+  private static let drawsInlineCodeBackground = false
+
   var codeBlockStyle = CodeBlockStyle.block
   var inlineCodeStyle = CodeBlockStyle.inline
 
@@ -67,6 +70,8 @@ final class CodeBlockTextView: UITextView {
   }
 
   private func drawInlineCode(in rect: CGRect) {
+    guard Self.drawsInlineCodeBackground else { return }
+
     let textStorage = self.textStorage
     guard textStorage.length > 0 else { return }
     let fullRange = NSRange(location: 0, length: textStorage.length)

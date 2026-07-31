@@ -10,12 +10,19 @@ private let dateFormatter: DateFormatter = {
 class MessageTimeAndStatus: UIView {
   private let symbolSize: CGFloat = 11
 
-  lazy var editedLabel: UILabel = {
-    let label = UILabel()
-    label.font = .systemFont(ofSize: 11)
-    label.translatesAutoresizingMaskIntoConstraints = false
-    return label
-  }()
+  override var intrinsicContentSize: CGSize {
+    CGSize(
+      width: Self.measuredWidth(for: fullMessage),
+      height: symbolSize
+    )
+  }
+
+  static func measuredWidth(for message: FullMessage) -> CGFloat {
+    let font = UIFont.systemFont(ofSize: 11)
+    let dateText = dateFormatter.string(from: message.message.date)
+    let dateWidth = ceil((dateText as NSString).size(withAttributes: [.font: font]).width)
+    return message.message.out == true ? dateWidth + 2 + 11 : dateWidth
+  }
 
   private let dateLabel: UILabel = {
     let label = UILabel()
@@ -65,10 +72,6 @@ class MessageTimeAndStatus: UIView {
   }
 
   private func setupViews() {
-    if message.isEdited {
-      addSubview(editedLabel)
-    }
-
     addSubview(dateLabel)
     addSubview(statusImageView)
 
@@ -77,27 +80,10 @@ class MessageTimeAndStatus: UIView {
   }
 
   func setupConstraints() {
-    var constraints: [NSLayoutConstraint] = []
-
-    // edited outgoing
-    // edited incoming
-    // not edited outgoing
-    // not edited incoming
-
-    if message.isEdited {
-      constraints += [
-        editedLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-        editedLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
-        editedLabel.trailingAnchor.constraint(equalTo: dateLabel.leadingAnchor, constant: -4),
-
-        dateLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-      ]
-    } else {
-      constraints += [
-        dateLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-        dateLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
-      ]
-    }
+    var constraints: [NSLayoutConstraint] = [
+      dateLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+      dateLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
+    ]
 
     if outgoing {
       constraints += [
@@ -118,11 +104,6 @@ class MessageTimeAndStatus: UIView {
   func setupAppearance() {
     dateLabel.text = dateFormatter.string(from: message.date)
     dateLabel.textColor = textColor
-
-    if message.isEdited {
-      editedLabel.text = "edited"
-      editedLabel.textColor = textColor
-    }
 
     let imageName: String
     let symbolConfig = UIImage.SymbolConfiguration(pointSize: symbolSize)
