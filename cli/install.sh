@@ -10,10 +10,10 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-log() { echo -e "${BLUE}[INFO]${NC} $1" >&2; }
-warn() { echo -e "${YELLOW}[WARN]${NC} $1" >&2; }
-error() { echo -e "${RED}[ERROR]${NC} $1" >&2; exit 1; }
-success() { echo -e "${GREEN}[OK]${NC} $1" >&2; }
+log() { printf '%b%s%b %s\n' "$BLUE" '[INFO]' "$NC" "$1" >&2; }
+warn() { printf '%b%s%b %s\n' "$YELLOW" '[WARN]' "$NC" "$1" >&2; }
+error() { printf '%b%s%b %s\n' "$RED" '[ERROR]' "$NC" "$1" >&2; exit 1; }
+success() { printf '%b%s%b %s\n' "$GREEN" '[OK]' "$NC" "$1" >&2; }
 
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 
@@ -102,6 +102,20 @@ install_with_sudo() {
   sudo install -m 0755 "$TMPDIR_CLEANUP/inline" "$dir/inline"
 }
 
+existing_inline_dir() {
+  local existing_path
+  existing_path="$(command -v inline 2>/dev/null || true)"
+  case "$existing_path" in
+    /*/inline)
+      if [ -f "$existing_path" ] && [ ! -L "$existing_path" ]; then
+        dirname "$existing_path"
+        return 0
+      fi
+      ;;
+  esac
+  return 1
+}
+
 install_binary() {
   local requested_dir="${INLINE_INSTALL_DIR:-}"
   local install_dir
@@ -113,6 +127,14 @@ install_binary() {
       return 0
     fi
     error "Failed to install into $install_dir"
+  fi
+
+  if install_dir="$(existing_inline_dir)"; then
+    if install_user_writable "$install_dir" || install_with_sudo "$install_dir"; then
+      echo "$install_dir/inline"
+      return 0
+    fi
+    warn "Could not update the existing inline binary in $install_dir; trying a standard install location."
   fi
 
   install_dir="/usr/local/bin"
