@@ -10,6 +10,7 @@ import { createInlineBotCommandsTool } from "./inline/bot-commands-tool.js"
 import { syncInlineNativeCommands } from "./inline/bot-commands-sync.js"
 import { createInlineFollowCommands } from "./inline/follow-command.js"
 import { createInlineThreadReplyCommand } from "./inline/threadreply-command.js"
+import { createInlineUpdateCommand } from "./inline/update-command.js"
 
 export function registerInlinePluginFull(api: OpenClawPluginApi): void {
   api.registerTool((ctx) => createInlineMembersTool(ctx) as AnyAgentTool, {
@@ -37,6 +38,7 @@ export function registerInlinePluginFull(api: OpenClawPluginApi): void {
     for (const command of createInlineFollowCommands(api)) {
       registerCommand(command)
     }
+    registerCommand(createInlineUpdateCommand(api))
   }
   api.on("message_sending", (event, ctx) => {
     if (ctx.channelId !== "inline") return

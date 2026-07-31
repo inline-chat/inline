@@ -66,6 +66,7 @@ describe("inline/bot-commands-sync", () => {
     expect(names).toContain("threadreply")
     expect(names).toContain("follow")
     expect(names).toContain("unfollow")
+    expect(names).toContain("inline_update")
     expect(names.indexOf("tools")).toBeLessThan(names.indexOf("model"))
     expect(setBody.commands).toContainEqual({
       command: "reasoning",
@@ -384,8 +385,8 @@ describe("inline/bot-commands-sync", () => {
       commands: Array<{ command: string }>
     })
     expect(bodies.map((body) => body.commands.map((entry) => entry.command))).toEqual([
-      ["main_skill", "follow", "unfollow", "threadreply"],
-      ["ops_skill", "follow", "unfollow", "threadreply"],
+      ["main_skill", "follow", "unfollow", "threadreply", "inline_update"],
+      ["ops_skill", "follow", "unfollow", "threadreply", "inline_update"],
     ])
   })
 
@@ -531,6 +532,7 @@ describe("inline/bot-commands-sync", () => {
     expect(names).toContain("threadreply")
     expect(names).toContain("follow")
     expect(names).toContain("unfollow")
+    expect(names).toContain("inline_update")
     expect(names).not.toContain("bad-cmd")
     expect(setBody.commands.find((entry) => entry.command === "long_desc")?.description).toHaveLength(256)
     expect(logger.warn).toHaveBeenCalledWith(
@@ -641,15 +643,17 @@ describe("inline/bot-commands-sync", () => {
     }
     expect(firstBody.commands).toHaveLength(100)
     expect(secondBody.commands).toHaveLength(80)
-    expect(firstBody.commands.slice(0, 3).map((command) => command.command)).toEqual([
+    expect(firstBody.commands.slice(0, 4).map((command) => command.command)).toEqual([
       "follow",
       "unfollow",
       "threadreply",
+      "inline_update",
     ])
-    expect(secondBody.commands.slice(0, 3).map((command) => command.command)).toEqual([
+    expect(secondBody.commands.slice(0, 4).map((command) => command.command)).toEqual([
       "follow",
       "unfollow",
       "threadreply",
+      "inline_update",
     ])
     expect(logger.warn).toHaveBeenCalledWith(
       '[inline] bot command sync rejected 100 commands for account "default" (BOT_COMMANDS_TOO_MUCH); retrying with 80',

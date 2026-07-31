@@ -15,6 +15,7 @@ import { callInlineBotApi, type InlineBotCommand } from "./bot-commands-api.js"
 import { adaptInlineVisibleCopy } from "./message-formatting.js"
 import { listInlineFollowCommandSpecs } from "./follow-command.js"
 import { listInlineBuiltinCommandSpecs } from "./threadreply-command.js"
+import { listInlineUpdateCommandSpecs } from "./update-command.js"
 
 type InlineCommandsSyncLogger = {
   info?: (message: string) => void
@@ -31,7 +32,7 @@ const INLINE_COMMAND_LIMIT = 100
 const INLINE_COMMAND_DESCRIPTION_LIMIT = 256
 const INLINE_COMMAND_RETRY_RATIO = 0.8
 const INLINE_NATIVE_COMMAND_PROVIDER = "inline"
-const INLINE_REQUIRED_COMMAND_NAMES = new Set(["follow", "unfollow", "threadreply"])
+const INLINE_REQUIRED_COMMAND_NAMES = new Set(["follow", "unfollow", "threadreply", "inline_update"])
 
 function resolveInlineChannelCommands(cfg: OpenClawConfig): InlineCommandsConfig | undefined {
   const inline = cfg.channels?.inline
@@ -195,6 +196,7 @@ async function buildInlineNativeCommandsForConfig(params: {
     ...getPluginCommandSpecs("inline", { config: params.cfg }),
     ...listInlineFollowCommandSpecs(),
     ...listInlineBuiltinCommandSpecs(),
+    ...listInlineUpdateCommandSpecs(),
   ]
   const seen = new Set<string>()
 
