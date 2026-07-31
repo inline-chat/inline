@@ -13,6 +13,7 @@
   ],
   "scripts": {
     "release:npm": "bun run ./scripts/release-npm.ts",
+    "check:codex-plugin": "bun run ./scripts/check-codex-plugin.mjs",
     "build": "bun run --cwd packages/protocol build && bun run --cwd packages/oauth-core build && bun run --cwd sdk build && bun run --cwd packages/bot-api-types build && bun run --cwd packages/bot-api build && bun run --cwd mcp build && bun run --cwd openclaw build && bun run --cwd hermes-agent build",
     "ci:cli": "bun run --cwd cli ci",
     "precommit:cli": "bun run --cwd cli precommit",
