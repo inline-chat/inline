@@ -157,16 +157,7 @@ public class MessagesSectionedViewModel {
   }
 
   private static func isNewerMessage(_ lhs: FullMessage, than rhs: FullMessage) -> Bool {
-    let lhsKey = MessagesProgressiveViewModel.messageKey(for: lhs)
-    let rhsKey = MessagesProgressiveViewModel.messageKey(for: rhs)
-
-    if lhsKey.date != rhsKey.date {
-      return lhsKey.date > rhsKey.date
-    }
-    if lhsKey.globalId != rhsKey.globalId {
-      return lhsKey.globalId > rhsKey.globalId
-    }
-    return lhsKey.messageId > rhsKey.messageId
+    MessagesProgressiveViewModel.isNewerMessage(lhs, than: rhs)
   }
 
   private static func orderedNewMessages(

@@ -5,18 +5,18 @@ import Testing
 
 @Suite("MessagesSectionedViewModel Ordering Tests")
 struct MessagesSectionedViewModelOrderingTests {
-  @Test("section sort uses date + globalId + messageId tie-breakers")
+  @Test("section sort keeps persisted same-second messages in server order")
   func testSectionSortUsesStableTieBreakers() async throws {
     let date = Date(timeIntervalSince1970: 1_700_000_000)
-    let message3 = makeSectionTestFullMessage(messageId: 3, globalId: 30, date: date)
-    let message1 = makeSectionTestFullMessage(messageId: 1, globalId: 10, date: date)
+    let message3 = makeSectionTestFullMessage(messageId: 3, globalId: 10, date: date)
+    let message1 = makeSectionTestFullMessage(messageId: 1, globalId: 30, date: date)
     let message2 = makeSectionTestFullMessage(messageId: 2, globalId: 20, date: date)
 
     let sorted = await MainActor.run {
       MessagesSectionedViewModel.sortMessagesForSection([message3, message1, message2])
     }
 
-    #expect(sorted.map { $0.message.globalId } == [30, 20, 10])
+    #expect(sorted.map { $0.message.messageId } == [3, 2, 1])
   }
 
   @Test("section sort falls back to messageId when globalId is missing")

@@ -319,26 +319,7 @@ actor ChatOpenPreloader {
   }
 
   private static func sortMessages(_ batch: [FullMessage]) -> [FullMessage] {
-    guard batch.count > 1 else { return batch }
-
-    return batch
-      .enumerated()
-      .sorted { lhs, rhs in
-        let left = lhs.element.message
-        let right = rhs.element.message
-
-        if left.date != right.date {
-          return left.date < right.date
-        }
-        if (left.globalId ?? 0) != (right.globalId ?? 0) {
-          return (left.globalId ?? 0) < (right.globalId ?? 0)
-        }
-        if left.messageId != right.messageId {
-          return left.messageId < right.messageId
-        }
-        return lhs.offset < rhs.offset
-      }
-      .map(\.element)
+    MessagesProgressiveViewModel.stableSortedMessages(batch, reversed: false)
   }
 
   private static func fetchThreadAnchorMessage(

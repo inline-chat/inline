@@ -5,11 +5,11 @@ import Testing
 
 @Suite("MessagesProgressiveViewModel Ordering Tests")
 struct MessagesProgressiveViewModelOrderingTests {
-  @Test("stable sort uses date + globalId tie-break")
+  @Test("stable sort uses persisted message ID before local insertion ID")
   func testStableSortTieBreak() async throws {
     let date = Date(timeIntervalSince1970: 1_700_000_000)
-    let message3 = makeFullMessage(messageId: 3, globalId: 30, date: date)
-    let message1 = makeFullMessage(messageId: 1, globalId: 10, date: date)
+    let message3 = makeFullMessage(messageId: 3, globalId: 10, date: date)
+    let message1 = makeFullMessage(messageId: 1, globalId: 30, date: date)
     let message2 = makeFullMessage(messageId: 2, globalId: 20, date: date)
 
     let batch = [message3, message1, message2]
@@ -17,12 +17,25 @@ struct MessagesProgressiveViewModelOrderingTests {
     let sorted = await MainActor.run {
       MessagesProgressiveViewModel.stableSortedMessages(batch, reversed: false)
     }
-    #expect(sorted.map { $0.message.globalId } == [10, 20, 30])
+    #expect(sorted.map { $0.message.messageId } == [1, 2, 3])
 
     let reversed = await MainActor.run {
       MessagesProgressiveViewModel.stableSortedMessages(batch, reversed: true)
     }
-    #expect(reversed.map { $0.message.globalId } == [30, 20, 10])
+    #expect(reversed.map { $0.message.messageId } == [3, 2, 1])
+  }
+
+  @Test("optimistic message keeps local insertion order within the same second")
+  func testOptimisticMessageUsesLocalInsertionOrder() async throws {
+    let date = Date(timeIntervalSince1970: 1_700_000_000)
+    let persisted = makeFullMessage(messageId: 20, globalId: 100, date: date)
+    let optimistic = makeFullMessage(messageId: -1_234, globalId: 200, date: date)
+
+    let reversed = await MainActor.run {
+      MessagesProgressiveViewModel.stableSortedMessages([persisted, optimistic], reversed: true)
+    }
+
+    #expect(reversed.map { $0.message.messageId } == [-1_234, 20])
   }
 
   @Test("cursor dedupe removes only overlapping messages at cursor boundary")

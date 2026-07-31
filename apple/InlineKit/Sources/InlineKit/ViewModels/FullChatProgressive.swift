@@ -400,7 +400,7 @@ public class MessagesProgressiveViewModel {
     let messageId: Int64
   }
 
-  static func messageKey(for message: FullMessage) -> MessageSortKey {
+  nonisolated static func messageKey(for message: FullMessage) -> MessageSortKey {
     MessageSortKey(
       date: message.message.date,
       globalId: message.message.globalId ?? 0,
@@ -408,30 +408,54 @@ public class MessagesProgressiveViewModel {
     )
   }
 
-  static func stableSortedMessages(_ batch: [FullMessage], reversed: Bool) -> [FullMessage] {
+  nonisolated static func compareMessages(_ lhs: FullMessage, _ rhs: FullMessage) -> ComparisonResult {
+    let lhsKey = messageKey(for: lhs)
+    let rhsKey = messageKey(for: rhs)
+
+    if lhsKey.date != rhsKey.date {
+      return lhsKey.date < rhsKey.date ? .orderedAscending : .orderedDescending
+    }
+
+    // Server message IDs are the causal order within a chat. A local database
+    // row ID depends on fetch/insert order and can therefore invert same-second
+    // messages after a refetch. Keep the row ID first only when an optimistic
+    // message is involved, because temporary message IDs are negative/random.
+    if lhsKey.messageId > 0, rhsKey.messageId > 0, lhsKey.messageId != rhsKey.messageId {
+      return lhsKey.messageId < rhsKey.messageId ? .orderedAscending : .orderedDescending
+    }
+
+    if lhsKey.globalId != rhsKey.globalId {
+      return lhsKey.globalId < rhsKey.globalId ? .orderedAscending : .orderedDescending
+    }
+
+    if lhsKey.messageId != rhsKey.messageId {
+      return lhsKey.messageId < rhsKey.messageId ? .orderedAscending : .orderedDescending
+    }
+
+    return .orderedSame
+  }
+
+  /// Sorts a chat timeline without letting local insertion order override persisted server order.
+  public nonisolated static func stableSortedMessages(
+    _ batch: [FullMessage],
+    reversed: Bool
+  ) -> [FullMessage] {
     guard batch.count > 1 else { return batch }
 
     return batch
       .enumerated()
       .sorted { lhs, rhs in
-        let lhsKey = messageKey(for: lhs.element)
-        let rhsKey = messageKey(for: rhs.element)
-
-        if lhsKey.date != rhsKey.date {
-          return reversed ? lhsKey.date > rhsKey.date : lhsKey.date < rhsKey.date
+        let comparison = compareMessages(lhs.element, rhs.element)
+        if comparison == .orderedSame {
+          return lhs.offset < rhs.offset
         }
-
-        if lhsKey.globalId != rhsKey.globalId {
-          return reversed ? lhsKey.globalId > rhsKey.globalId : lhsKey.globalId < rhsKey.globalId
-        }
-
-        if lhsKey.messageId != rhsKey.messageId {
-          return reversed ? lhsKey.messageId > rhsKey.messageId : lhsKey.messageId < rhsKey.messageId
-        }
-
-        return lhs.offset < rhs.offset
+        return reversed ? comparison == .orderedDescending : comparison == .orderedAscending
       }
       .map(\.element)
+  }
+
+  nonisolated static func isNewerMessage(_ lhs: FullMessage, than rhs: FullMessage) -> Bool {
+    compareMessages(lhs, rhs) == .orderedDescending
   }
 
   private func stableSorted(_ batch: [FullMessage]) -> [FullMessage] {
