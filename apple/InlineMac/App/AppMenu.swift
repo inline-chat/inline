@@ -1,4 +1,5 @@
 import AppKit
+import Auth
 import InlineCLIInstaller
 import InlineKit
 import MacDevtools
@@ -42,6 +43,9 @@ final class AppMenu: NSObject {
     setupFileMenu()
     setupEditMenu()
     setupViewMenu()
+#if DEBUG || DEBUG_BUILD
+    setupDebugMenu()
+#endif
     setupWindowMenu()
     setupHelpMenu()
   }
@@ -618,6 +622,27 @@ final class AppMenu: NSObject {
     NSApp.windowsMenu = windowMenu
   }
 
+#if DEBUG || DEBUG_BUILD
+  private func setupDebugMenu() {
+    let debugMenu = NSMenu(title: "Debug")
+    let debugMenuItem = NSMenuItem(title: "Debug", action: nil, keyEquivalent: "")
+    debugMenuItem.submenu = debugMenu
+    mainMenu.addItem(debugMenuItem)
+
+    let onboardingItem = NSMenuItem(
+      title: "Open Onboarding",
+      action: #selector(openOnboardingForDebug(_:)),
+      keyEquivalent: ""
+    )
+    onboardingItem.target = self
+    onboardingItem.image = NSImage(
+      systemSymbolName: "person.crop.circle.badge.plus",
+      accessibilityDescription: nil
+    )
+    debugMenu.addItem(onboardingItem)
+  }
+#endif
+
   private func setupHelpMenu() {
     let helpMenu = NSMenu(title: "Help")
     let helpMenuItem = NSMenuItem(title: "Help", action: nil, keyEquivalent: "")
@@ -815,6 +840,15 @@ final class AppMenu: NSObject {
   @objc private func openMacDevtools(_ sender: Any?) {
     MacDevtoolsWindowController.show(sender: sender)
   }
+
+#if DEBUG || DEBUG_BUILD
+  @objc private func openOnboardingForDebug(_ sender: Any?) {
+    guard let dependencies, dependencies.auth.currentUserId != nil else { return }
+    dependencies.viewModel.openOnboardingForDebug()
+    activeWindow()?.makeKeyAndOrderFront(sender)
+    NSApp.activate()
+  }
+#endif
 
   @objc private func showAllTabs(_ sender: Any?) {
     guard let window = tabOverviewWindow() else { return }
@@ -1150,6 +1184,12 @@ extension AppMenu: NSMenuItemValidation {
     if menuItem.action == #selector(newThread(_:)) {
       return dependencies.auth.currentUserId != nil && dependencies.viewModel.topLevelRoute == .main
     }
+
+#if DEBUG || DEBUG_BUILD
+    if menuItem.action == #selector(openOnboardingForDebug(_:)) {
+      return dependencies.auth.currentUserId != nil && dependencies.viewModel.topLevelRoute == .main
+    }
+#endif
 
     if menuItem.action == #selector(goBack(_:)) {
       let coordinator = MainWindowOpenCoordinator.shared

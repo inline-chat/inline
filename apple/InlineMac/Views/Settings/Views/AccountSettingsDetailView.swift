@@ -2,6 +2,7 @@ import InlineKit
 import InlineProtocol
 import InlineUI
 import Logger
+import MemojiKit
 import MultipartFormDataKit
 import RealtimeV2
 import SwiftUI
@@ -54,12 +55,7 @@ final class AccountSettingsPhotoViewModel: ObservableObject {
     let suggestion: String?
   }
 
-  func uploadImage(from url: URL) async {
-    guard !isUploading else { return }
-
-    isUploading = true
-    showUploadSheet = true
-
+  func uploadImage(from url: URL, realtimeV2: RealtimeV2) async {
     do {
       guard url.startAccessingSecurityScopedResource() else {
         throw UploadFileError.permissionDenied(url.lastPathComponent)
@@ -92,10 +88,7 @@ final class AccountSettingsPhotoViewModel: ObservableObject {
         throw UploadFileError.permissionDenied(url.lastPathComponent)
       }
 
-      try await uploadImageToServer(data, fileType: fileType)
-
-      // Close sheet on success
-      showUploadSheet = false
+      _ = await uploadImage(data: data, realtimeV2: realtimeV2, showsProgressSheet: true)
     } catch let error as UploadFileError {
       Log.shared.error("Failed to upload image", error: error)
       showError(error)
@@ -103,36 +96,60 @@ final class AccountSettingsPhotoViewModel: ObservableObject {
       Log.shared.error("Failed to upload image", error: error)
       showError(UploadFileError.unknown(error))
     }
-
-    isUploading = false
   }
 
-  private func uploadImageToServer(_ data: Data, fileType: UTType) async throws {
-    let mimeType = switch fileType {
-    case .jpeg:
-      MIMEType.imageJpeg
-    case .png:
-      MIMEType.imagePng
-    default:
-      MIMEType.imageJpeg
-    }
+  @discardableResult
+  func uploadImage(
+    data: Data,
+    realtimeV2: RealtimeV2,
+    showsProgressSheet: Bool = false
+  ) async -> Bool {
+    guard !isUploading else { return false }
+    isUploading = true
+    showUploadSheet = showsProgressSheet
+    defer { isUploading = false }
 
-    let fileName = "profile_photo.\(fileType.preferredFilenameExtension ?? "jpg")"
-
-    let result = try await ApiClient.shared
-      .uploadFile(
+    do {
+      let prepared = try await Task.detached(priority: .userInitiated) {
+        try ProfilePhotoProcessor.prepare(data)
+      }.value
+      let upload = try await ApiClient.shared.uploadFile(
         type: .photo,
-        data: data,
-        filename: fileName,
-        mimeType: mimeType,
+        data: prepared,
+        filename: "profile-photo.png",
+        mimeType: .imagePng,
         progress: { _ in }
       )
+      let result = try await realtimeV2.setProfilePhoto(fileUniqueID: upload.fileUniqueId)
+      await realtimeV2.applyUpdates(result.updates)
+      try await save(result.user)
+      showUploadSheet = false
+      return true
+    } catch {
+      Log.shared.error("Failed to set account profile photo", error: error)
+      showError(UploadFileError.unknown(error))
+      return false
+    }
+  }
 
-    // call update profile photo method
-    let result2 = try await ApiClient.shared.updateProfilePhoto(fileUniqueId: result.fileUniqueId)
+  func removePhoto(realtimeV2: RealtimeV2) async {
+    guard !isUploading else { return }
+    isUploading = true
+    defer { isUploading = false }
 
+    do {
+      let result = try await realtimeV2.setProfilePhoto(fileUniqueID: nil)
+      await realtimeV2.applyUpdates(result.updates)
+      try await save(result.user)
+    } catch {
+      Log.shared.error("Failed to remove account profile photo", error: error)
+      showError(UploadFileError.unknown(error))
+    }
+  }
+
+  private func save(_ user: InlineProtocol.User) async throws {
     _ = try await AppDatabase.shared.dbWriter.write { db in
-      try result2.user.saveFull(db)
+      try User.save(db, user: user)
     }
   }
 
@@ -149,15 +166,16 @@ final class AccountSettingsPhotoViewModel: ObservableObject {
 // MARK: - Account Settings Detail View
 
 struct AccountSettingsDetailView: View {
+  @Environment(\.dependencies) private var dependencies
   @EnvironmentObject private var root: RootData
   @Environment(\.logOut) private var logOut
   @Environment(\.realtimeV2) private var realtimeV2
   @StateObject private var photoViewModel = AccountSettingsPhotoViewModel()
   @StateObject private var viewModel = AccountSettingsViewModel()
-  @State private var showImagePicker = false
   @State private var showLogoutConfirmation = false
   @State private var editingProfileUser: InlineKit.User?
   @State private var editingUsernameUser: InlineKit.User?
+  private let memojiLog = Log.scoped("AccountSettings.Memoji")
 
   var body: some View {
     Form {
@@ -165,7 +183,14 @@ struct AccountSettingsDetailView: View {
         AccountProfileSection(
           user: user,
           isUploadingPhoto: photoViewModel.isUploading,
-          onChangePhoto: { showImagePicker = true },
+          showsMemoji: showsMemojiPickerOption,
+          onPickFile: handlePhotoFile,
+          onFilePickerFailure: handleFilePickerFailure,
+          onUsePhotoData: { data in
+            await photoViewModel.uploadImage(data: data, realtimeV2: realtimeV2)
+          },
+          onMemojiFailure: handleMemojiFailure,
+          onRemovePhoto: removePhoto,
           onEditProfile: { editingProfileUser = user }
         )
 
@@ -191,15 +216,6 @@ struct AccountSettingsDetailView: View {
     }
     .settingsFormStyle()
     .environmentObject(root)
-    .fileImporter(
-      isPresented: $showImagePicker,
-      allowedContentTypes: [.image],
-      allowsMultipleSelection: false
-    ) { result in
-      Task {
-        await handleImageSelection(result)
-      }
-    }
     .sheet(isPresented: $photoViewModel.showUploadSheet) {
       UploadProgressSheet()
         .environmentObject(photoViewModel)
@@ -286,17 +302,39 @@ struct AccountSettingsDetailView: View {
     }
   }
 
-  private func handleImageSelection(_ result: Result<[URL], Error>) async {
-    do {
-      let urls = try result.get()
-      guard let url = urls.first else { return }
-      await photoViewModel.uploadImage(from: url)
-    } catch {
-      // Handle file selection error
-      photoViewModel.errorState = AccountSettingsPhotoViewModel.ErrorState(
-        title: "Selection Error",
-        message: "Could not select the image file.",
-        suggestion: "Please try selecting a different image."
+  private func handlePhotoFile(_ url: URL) {
+    Task {
+      await photoViewModel.uploadImage(from: url, realtimeV2: realtimeV2)
+    }
+  }
+
+  private func handleFilePickerFailure(_: Error) {
+    photoViewModel.errorState = AccountSettingsPhotoViewModel.ErrorState(
+      title: "Selection Error",
+      message: "Could not select the image file.",
+      suggestion: "Please try selecting a different image."
+    )
+  }
+
+  private func removePhoto() {
+    Task { await photoViewModel.removePhoto(realtimeV2: realtimeV2) }
+  }
+
+  private var showsMemojiPickerOption: Bool {
+    MemojiBetaRollout.isEnabled(dependencies: dependencies)
+  }
+
+  private func handleMemojiFailure(_ error: MemojiError) {
+    let message = "Memoji beta failure [\(error.diagnosticCode.rawValue)]: \(error.diagnosticSummary)"
+    if error.diagnosticCode == .noSavedMemoji {
+      memojiLog.info(message)
+    } else {
+      memojiLog.error(
+        message,
+        error: MemojiBetaDiagnosticError(
+          code: error.diagnosticCode,
+          summary: error.diagnosticSummary
+        )
       )
     }
   }
@@ -305,22 +343,31 @@ struct AccountSettingsDetailView: View {
 private struct AccountProfileSection: View {
   let user: InlineKit.User
   let isUploadingPhoto: Bool
-  let onChangePhoto: () -> Void
+  let showsMemoji: Bool
+  let onPickFile: @MainActor (URL) -> Void
+  let onFilePickerFailure: @MainActor (Error) -> Void
+  let onUsePhotoData: @MainActor (Data) async -> Bool
+  let onMemojiFailure: @MainActor (MemojiError) -> Void
+  let onRemovePhoto: () -> Void
   let onEditProfile: () -> Void
 
   var body: some View {
     Section {
       HStack(alignment: .center, spacing: 16) {
-        Button(action: onChangePhoto) {
-          UserAvatar(user: user, size: 64)
-            .overlay {
-              Circle()
-                .stroke(.primary.opacity(0.16), lineWidth: 1)
-            }
-        }
-        .buttonStyle(.plain)
-        .disabled(isUploadingPhoto)
-        .help("Change Profile Photo")
+        EditableProfileAvatar(
+          size: 64,
+          hasPhoto: hasPhoto,
+          showsMemoji: showsMemoji,
+          isBusy: isUploadingPhoto,
+          onPickFile: onPickFile,
+          onFilePickerFailure: onFilePickerFailure,
+          onUsePhotoData: onUsePhotoData,
+          onMemojiFailure: onMemojiFailure,
+          onRemove: onRemovePhoto,
+          avatar: { size in
+            UserAvatar(user: user, size: size)
+          }
+        )
 
         VStack(alignment: .leading, spacing: 4) {
           Text(displayName)
@@ -340,15 +387,6 @@ private struct AccountProfileSection: View {
           Button("Edit Profile...") {
             onEditProfile()
           }
-
-          if isUploadingPhoto {
-            ProgressView()
-              .controlSize(.small)
-          } else {
-            Button("Change Photo...") {
-              onChangePhoto()
-            }
-          }
         }
       }
       .padding(.vertical, 4)
@@ -358,6 +396,10 @@ private struct AccountProfileSection: View {
         subtitle: "Your profile is visible to people you chat with."
       )
     }
+  }
+
+  private var hasPhoto: Bool {
+    user.profileFileUniqueId != nil || user.profileCdnUrl != nil || user.profileLocalPath != nil
   }
 
   private var displayName: String {

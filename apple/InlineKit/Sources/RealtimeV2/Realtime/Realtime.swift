@@ -652,6 +652,40 @@ public actor RealtimeV2 {
     return profileResult
   }
 
+  public func setProfilePhoto(fileUniqueID: String?) async throws -> InlineProtocol.SetProfilePhotoResult {
+    let result = try await callRpcDirect(
+      method: .setProfilePhoto,
+      input: .setProfilePhoto(.with {
+        $0.fileUniqueID = fileUniqueID ?? ""
+      })
+    )
+
+    guard case let .setProfilePhoto(profileResult)? = result else {
+      throw RealtimeDirectRpcError.rpcError(message: "Unexpected setProfilePhoto response", code: 500)
+    }
+
+    return profileResult
+  }
+
+  public func getExternalProfilePhoto(
+    provider: InlineProtocol.ExternalProfileProvider,
+    username: String
+  ) async throws -> InlineProtocol.GetExternalProfilePhotoResult {
+    let result = try await callRpcDirect(
+      method: .getExternalProfilePhoto,
+      input: .getExternalProfilePhoto(.with {
+        $0.provider = provider
+        $0.username = username
+      })
+    )
+
+    guard case let .getExternalProfilePhoto(profilePhotoResult)? = result else {
+      throw RealtimeDirectRpcError.rpcError(message: "Unexpected getExternalProfilePhoto response", code: 500)
+    }
+
+    return profilePhotoResult
+  }
+
   public func cancelTransaction(where predicate: @escaping @Sendable (TransactionWrapper) -> Bool) {
     Task { [predicate] in
       await transactions.cancel(where: predicate)

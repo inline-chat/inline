@@ -362,11 +362,14 @@ public extension User {
 
     if let existing {
       // Check if we need to clear local cache due to profile photo change
-      let shouldClearCache = existing.shouldInvalidateLocalCache(newFileUniqueId: user.profileFileUniqueId)
       let preservesOmittedFields = protocolUser.hasMin && protocolUser.min
+      let removesProfilePhoto = !preservesOmittedFields && !protocolUser.hasProfilePhoto
+      let shouldClearCache = removesProfilePhoto
+        ? existing.stableAvatarIdentity != nil
+        : existing.shouldInvalidateLocalCache(newFileUniqueId: user.profileFileUniqueId)
 
       // keep existing values
-      user.profileFileId = existing.profileFileId
+      user.profileFileId = removesProfilePhoto ? nil : existing.profileFileId
       user.date = existing.date
       if preservesOmittedFields {
         user.firstName = user.firstName ?? existing.firstName
@@ -377,9 +380,9 @@ public extension User {
         user.email = user.email ?? existing.email
         user.timeZone = user.timeZone ?? existing.timeZone
       }
-      user.profileCdnUrl = user.profileCdnUrl ?? existing.profileCdnUrl
+      user.profileCdnUrl = removesProfilePhoto ? nil : user.profileCdnUrl ?? existing.profileCdnUrl
       user.profileLocalPath = shouldClearCache ? nil : existing.profileLocalPath
-      user.profileFileUniqueId = user.profileFileUniqueId ?? existing.profileFileUniqueId
+      user.profileFileUniqueId = removesProfilePhoto ? nil : user.profileFileUniqueId ?? existing.profileFileUniqueId
       // Preserve bot flag if not present in the update payload.
       if protocolUser.hasBot == false {
         user.bot = existing.bot

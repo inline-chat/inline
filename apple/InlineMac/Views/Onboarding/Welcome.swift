@@ -61,25 +61,46 @@ struct OnboardingWelcome: View {
   }
 
   struct Footer: View {
+    @Environment(\.openURL) private var openURL
+
     var body: some View {
       HStack(alignment: .bottom) {
         Spacer()
 
-        Text(
-          "By continuing, you acknowledge that you understand and agree to the [Terms of Service](https://inline.chat/legal/terms) and [Privacy Policy](https://inline.chat/legal/privacy)."
-        )
+        VStack(spacing: 2) {
+          Text("By continuing, you acknowledge that you understand and agree to the")
+          HStack(spacing: 3) {
+            Button("Terms of Service") {
+              if let url = URL(string: "https://inline.chat/legal/terms") {
+                openURL(url)
+              }
+            }
+            Text("and")
+            Button("Privacy Policy") {
+              if let url = URL(string: "https://inline.chat/legal/privacy") {
+                openURL(url)
+              }
+            }
+          }
+        }
+        .buttonStyle(.link)
         .font(.footnote)
-        .tint(Color.secondary)
+        .tint(.secondary)
         .foregroundStyle(.tertiary)
         .multilineTextAlignment(.center)
-        .frame(maxWidth: 300)
+        .frame(maxWidth: 360)
 
         Spacer()
       }
       .overlay(alignment: .bottomLeading) {
-        Text("[inline.chat](https://inline.chat)")
-          .font(.footnote)
-          .tint(Color.secondary)
+        Button("inline.chat") {
+          if let url = URL(string: "https://inline.chat") {
+            openURL(url)
+          }
+        }
+        .buttonStyle(.link)
+        .font(.footnote)
+        .tint(Color.secondary)
       }
     }
   }

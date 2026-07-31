@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A9E100042F50000100000001 /* MemojiKit in Frameworks */ = {isa = PBXBuildFile; productRef = A9E100022F50000100000001 /* MemojiKit */; };
+		A9E100052F50000100000001 /* MemojiPickerUI in Frameworks */ = {isa = PBXBuildFile; productRef = A9E100032F50000100000001 /* MemojiPickerUI */; };
 		B7020C4C2DCE1534007099D9 /* InlineShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B7020C422DCE1534007099D9 /* InlineShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B7020C542DCE157F007099D9 /* InlineConfig in Frameworks */ = {isa = PBXBuildFile; productRef = B7020C532DCE157F007099D9 /* InlineConfig */; };
 		B7020C562DCE157F007099D9 /* InlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = B7020C552DCE157F007099D9 /* InlineKit */; };
@@ -97,6 +99,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A9E100012F50000100000001 /* MemojiKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = MemojiKit; sourceTree = "<group>"; };
 		B7020C422DCE1534007099D9 /* InlineShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = InlineShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		B7C0674E2DB7F2BA00EAADA4 /* iMessageUI.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = iMessageUI.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = InlineIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -269,6 +272,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A9E100042F50000100000001 /* MemojiKit in Frameworks */,
+				A9E100052F50000100000001 /* MemojiPickerUI in Frameworks */,
 				D7A0C0022F50000100000001 /* InlineRTC in Frameworks */,
 				F17C11012F9A000100000001 /* InlineCLIInstaller in Frameworks */,
 				CD092C4D2EDC6F4A00E867E5 /* InlineMacUI in Frameworks */,
@@ -315,6 +320,7 @@
 			isa = PBXGroup;
 			children = (
 				CDBF277B2EC87E4D0082B11D /* Icons */,
+				A9E100012F50000100000001 /* MemojiKit */,
 				C3CC99172CCE9A7E007F7F77 /* InlineUI */,
 				C3AA8E4E2CB942BF00800A03 /* InlineKit */,
 				CD092C4B2EDC6D8200E867E5 /* InlineMacUI */,
@@ -486,6 +492,8 @@
 			);
 			name = InlineMac;
 			packageProductDependencies = (
+				A9E100022F50000100000001 /* MemojiKit */,
+				A9E100032F50000100000001 /* MemojiPickerUI */,
 				D7A0C0012F50000100000001 /* InlineRTC */,
 				C38C905F2CB9432200B78B8A /* InlineKit */,
 				CDE960152CB94C4F004C541C /* SwiftUIIntrospect */,
@@ -1146,7 +1154,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = InlineAppIconDev;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
-				CODE_SIGN_ENTITLEMENTS = InlineMac/InlineMac.entitlements;
+				CODE_SIGN_ENTITLEMENTS = InlineMac/InlineMacDebug.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -1411,7 +1419,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = InlineAppIconDev;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
-				CODE_SIGN_ENTITLEMENTS = InlineMac/InlineMac.entitlements;
+				CODE_SIGN_ENTITLEMENTS = InlineMac/InlineMacDebug.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -1744,6 +1752,14 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		A9E100022F50000100000001 /* MemojiKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MemojiKit;
+		};
+		A9E100032F50000100000001 /* MemojiPickerUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MemojiPickerUI;
+		};
 		E12407240000000100000000 /* InlineIntents */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineIntents;

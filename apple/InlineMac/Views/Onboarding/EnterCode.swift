@@ -19,12 +19,12 @@ struct OnboardingEnterCode: View {
 
   var buttonLabel: String {
     switch onboardingViewModel.existingUser {
-      case .none:
-        "Continue"
-      case .some(true):
-        "Log In"
-      case .some(false):
-        "Sign Up"
+    case .none:
+      "Continue"
+    case .some(true):
+      "Log In"
+    case .some(false):
+      "Sign Up"
     }
   }
 
@@ -136,7 +136,7 @@ struct OnboardingEnterCode: View {
 
         // Save user
         do {
-          let _ = try await AppDatabase.shared.dbWriter.write { db in
+          _ = try await AppDatabase.shared.dbWriter.write { db in
             try result.user.saveFull(db)
           }
         } catch {
@@ -144,12 +144,7 @@ struct OnboardingEnterCode: View {
         }
 
         DispatchQueue.main.async {
-          // Navigate
-          if result.user.firstName == nil {
-            onboardingViewModel.navigate(to: .profile)
-          } else {
-            onboardingViewModel.navigateAfterLogin()
-          }
+          onboardingViewModel.navigateAfterLogin(pendingSetup: result.user.pendingSetup == true)
         }
       } catch {
         formState.failed(error: error.localizedDescription)

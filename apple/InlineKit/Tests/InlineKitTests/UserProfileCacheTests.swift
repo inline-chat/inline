@@ -1,8 +1,33 @@
 import Testing
 @testable import InlineKit
+import InlineProtocol
 
 @Suite("User profile cache")
 struct UserProfileCacheTests {
+  @Test("full user without a profile photo clears cached photo fields")
+  func clearsPhotoForFullUser() async throws {
+    let database = AppDatabase.empty()
+    var existing = User(id: 1, email: "user@example.com", firstName: "User")
+    existing.profileCdnUrl = "https://example.com/avatar.jpg"
+    existing.profileFileUniqueId = "old-unique"
+    existing.profileLocalPath = "cached.jpg"
+    let storedExisting = existing
+    try await database.dbWriter.write { db in try storedExisting.save(db) }
+
+    let protocolUser = InlineProtocol.User.with {
+      $0.id = 1
+      $0.firstName = "User"
+      $0.min = false
+    }
+    let saved = try await database.dbWriter.write { db in
+      try User.save(db, user: protocolUser)
+    }
+
+    #expect(saved.profileCdnUrl == nil)
+    #expect(saved.profileFileUniqueId == nil)
+    #expect(saved.profileLocalPath == nil)
+  }
+
   @Test("invalidates local cache when unique photo id changes")
   func invalidatesForUniqueIdChange() {
     var user = User(id: 1, email: "user@example.com", firstName: "User")

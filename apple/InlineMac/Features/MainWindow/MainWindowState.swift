@@ -24,6 +24,7 @@ class MainWindowViewModel: ObservableObject {
   @Published var topLevelRoute: TopLevelRoute
   @Published var showsAlphaWelcome = false
   @Published var alphaWelcomeFirstName: String?
+  private(set) var onboardingInitialRoute: OnboardingRoute = .welcome
 
   private var cancellables: Set<AnyCancellable> = []
   private var transitionTask: Task<Void, Never>?
@@ -46,8 +47,18 @@ class MainWindowViewModel: ObservableObject {
   func navigate(_ route: TopLevelRoute) {
     transitionTask?.cancel()
     transitionTask = nil
+    onboardingInitialRoute = .welcome
     topLevelRoute = route
   }
+
+#if DEBUG || DEBUG_BUILD
+  func openOnboardingForDebug() {
+    transitionTask?.cancel()
+    transitionTask = nil
+    onboardingInitialRoute = .profile
+    topLevelRoute = .onboarding
+  }
+#endif
 
   func navigateAfterSignup(firstName: String?) {
     if let trimmed = firstName?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {

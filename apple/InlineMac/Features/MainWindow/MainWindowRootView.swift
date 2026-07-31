@@ -136,7 +136,10 @@ struct MainWindowRootView: View {
       MainWindowLoadingView()
 
     case .onboarding:
-      Onboarding(allowsBackgroundWindowDrag: true)
+      Onboarding(
+        allowsBackgroundWindowDrag: true,
+        initialRoute: viewModel.onboardingInitialRoute
+      )
 
     case .main:
       MainWindowRoot(

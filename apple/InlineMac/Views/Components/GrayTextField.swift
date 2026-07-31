@@ -10,12 +10,14 @@ struct GrayTextField: View {
   var titleKey: LocalizedStringKey
   var value: Binding<String>
   var prompt: Text?
+  var prefix: LocalizedStringKey?
   var size: Size = .large
 
   init(_ titleKey: LocalizedStringKey, text value: Binding<String>) {
     self.titleKey = titleKey
     self.value = value
     prompt = nil
+    prefix = nil
   }
 
   init(
@@ -25,6 +27,20 @@ struct GrayTextField: View {
     self.titleKey = titleKey
     self.value = value
     self.prompt = prompt
+    prefix = nil
+    self.size = size
+  }
+
+  init(
+    _ titleKey: LocalizedStringKey,
+    text value: Binding<String>,
+    prefix: LocalizedStringKey,
+    size: Size = .large
+  ) {
+    self.titleKey = titleKey
+    self.value = value
+    prompt = nil
+    self.prefix = prefix
     self.size = size
   }
 
@@ -32,51 +48,59 @@ struct GrayTextField: View {
 
   var font: Font {
     switch size {
-      case .small:
-        Font.body
-      case .medium:
-        Font.system(size: 16, weight: .regular)
-      case .large:
-        Font.system(size: 17, weight: .regular)
+    case .small:
+      Font.body
+    case .medium:
+      Font.system(size: 16, weight: .regular)
+    case .large:
+      Font.system(size: 17, weight: .regular)
     }
   }
 
   var height: CGFloat {
     switch size {
-      case .small:
-        28
-      case .medium:
-        32
-      case .large:
-        36
+    case .small:
+      28
+    case .medium:
+      32
+    case .large:
+      36
     }
   }
 
   var cornerRadius: CGFloat {
     switch size {
-      case .small:
-        10
-      case .medium:
-        12
-      case .large:
-        12
+    case .small:
+      10
+    case .medium:
+      12
+    case .large:
+      12
     }
   }
 
   var body: some View {
-    TextField(titleKey, text: value, prompt: prompt)
-      .multilineTextAlignment(.center)
-      .textFieldStyle(.plain)
-      .font(font)
-      .frame(height: height)
-      .focused($isFocused)
-      .cornerRadius(cornerRadius)
-      .background(
-        RoundedRectangle(cornerRadius: cornerRadius)
-          .foregroundStyle(.primary.opacity(isFocused ? 0.1 : 0.06))
-          .animation(.snappy, value: isFocused)
-          .frame(height: height)
-      )
+    HStack(spacing: 4) {
+      if let prefix {
+        Text(prefix)
+          .foregroundStyle(.secondary)
+      }
+
+      TextField(titleKey, text: value, prompt: prompt)
+        .multilineTextAlignment(prefix == nil ? .center : .leading)
+        .textFieldStyle(.plain)
+        .focused($isFocused)
+    }
+    .padding(.horizontal, prefix == nil ? 0 : 12)
+    .font(font)
+    .frame(height: height)
+    .cornerRadius(cornerRadius)
+    .background(
+      RoundedRectangle(cornerRadius: cornerRadius)
+        .foregroundStyle(.primary.opacity(isFocused ? 0.1 : 0.06))
+        .animation(.snappy, value: isFocused)
+        .frame(height: height)
+    )
   }
 }
 

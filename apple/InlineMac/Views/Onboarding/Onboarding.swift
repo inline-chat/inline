@@ -1,26 +1,35 @@
 import SwiftUI
 
 struct Onboarding: View {
-  @EnvironmentObject var windowViewModel: MainWindowViewModel
-  @StateObject var viewModel = OnboardingViewModel()
+  @EnvironmentObject private var windowViewModel: MainWindowViewModel
+  @StateObject private var viewModel: OnboardingViewModel
+  @State private var profileSetup = OnboardingProfileSetupModel()
 
-  var allowsBackgroundWindowDrag = false
+  let allowsBackgroundWindowDrag: Bool
 
-  var routeTransition1: AnyTransition = .asymmetric(
+  init(
+    allowsBackgroundWindowDrag: Bool = false,
+    initialRoute: OnboardingRoute = .welcome
+  ) {
+    self.allowsBackgroundWindowDrag = allowsBackgroundWindowDrag
+    _viewModel = StateObject(wrappedValue: OnboardingViewModel(initialRoute: initialRoute))
+  }
+
+  private let forwardTransition: AnyTransition = .asymmetric(
     insertion: .push(from: .trailing),
     removal: .push(from: .trailing)
   )
 
-  var routeTransition2: AnyTransition = .asymmetric(
+  private let backwardTransition: AnyTransition = .asymmetric(
     insertion: .push(from: .leading),
     removal: .push(from: .leading)
   )
 
-  var routeTransition: AnyTransition {
+  private var routeTransition: AnyTransition {
     if viewModel.goingBack {
-      routeTransition2
+      backwardTransition
     } else {
-      routeTransition1
+      forwardTransition
     }
   }
 
@@ -29,25 +38,28 @@ struct Onboarding: View {
       background
 
       switch viewModel.path.last {
-        case .welcome:
-          OnboardingWelcome().transition(routeTransition)
-        case .getStarted:
-          OnboardingGetStarted().transition(routeTransition)
-        case .enterPhone:
-          OnboardingEnterPhone().transition(routeTransition)
-        case .enterEmail:
-          OnboardingEnterEmail().transition(routeTransition)
-        case .enterCode:
-          OnboardingEnterCode().transition(routeTransition)
-        case .inviteCode:
-          OnboardingInviteCode().transition(routeTransition)
-        case .profile:
-          OnboardingProfile().transition(routeTransition)
-        case .none:
-          OnboardingWelcome().transition(routeTransition)
+      case .welcome:
+        OnboardingWelcome().transition(routeTransition)
+      case .getStarted:
+        OnboardingGetStarted().transition(routeTransition)
+      case .enterPhone:
+        OnboardingEnterPhone().transition(routeTransition)
+      case .enterEmail:
+        OnboardingEnterEmail().transition(routeTransition)
+      case .enterCode:
+        OnboardingEnterCode().transition(routeTransition)
+      case .inviteCode:
+        OnboardingInviteCode().transition(routeTransition)
+      case .profile:
+        OnboardingProfile().transition(routeTransition)
+      case .username:
+        OnboardingUsername().transition(routeTransition)
+      case .appearance:
+        OnboardingAppearance().transition(routeTransition)
+      case .none:
+        OnboardingWelcome().transition(routeTransition)
       }
     }
-//    .animation(.snappy.speed(1.5), value: self.viewModel.path)
     .animation(.smoothSnappy, value: viewModel.path)
     .toolbar(content: {
       if viewModel.canGoBack {
@@ -68,6 +80,7 @@ struct Onboarding: View {
       }
     })
     .environmentObject(viewModel)
+    .environment(profileSetup)
     .task {
       viewModel.setMainWindowViewModel(windowViewModel)
     }
@@ -110,21 +123,22 @@ enum OnboardingRoute {
   case enterCode
   case inviteCode
   case profile
+  case username
+  case appearance
 }
 
 @MainActor
-class OnboardingViewModel: ObservableObject {
-  //    @Published fileprivate var path: NavigationPath = .init()
-  @Published fileprivate var path: [OnboardingRoute] = [.welcome]
+final class OnboardingViewModel: ObservableObject {
+  @Published fileprivate var path: [OnboardingRoute]
 
   // Email entered in the onboarding
   @Published var email: String = ""
-  @Published var emailChallengeToken: String? = nil
+  @Published var emailChallengeToken: String?
   @Published var phoneNumber: String = ""
   @Published var inviteCode: String = ""
 
   // nil = server provided no data, true = login, false = sign up
-  @Published var existingUser: Bool? = nil
+  @Published var existingUser: Bool?
 
   // Becomes berifly true when we're navigating
   @Published var navigatingToMainView = false
@@ -142,13 +156,20 @@ class OnboardingViewModel: ObservableObject {
 
   // Special navigate that decides next step after user is verified and logged in
   // i.e. we have token and current user id, should we open profile or main view?
-  func navigateAfterLogin() {
-    if existingUser == false {
-      // new user -> go to profile page
+  func navigateAfterLogin(pendingSetup: Bool) {
+    if pendingSetup {
       navigate(to: .profile)
     } else {
       navigatingToMainView = true
+      mainWindowViewModel?.navigate(.main)
+    }
+  }
 
+  func finishSetup(firstName: String?) {
+    navigatingToMainView = true
+    if existingUser == false {
+      mainWindowViewModel?.navigateAfterSignup(firstName: firstName)
+    } else {
       mainWindowViewModel?.navigate(.main)
     }
   }
@@ -166,6 +187,10 @@ class OnboardingViewModel: ObservableObject {
   }
 
   weak var mainWindowViewModel: MainWindowViewModel?
+
+  init(initialRoute: OnboardingRoute = .welcome) {
+    path = [initialRoute]
+  }
 
   func setMainWindowViewModel(_ mvm: MainWindowViewModel) {
     mainWindowViewModel = mvm
