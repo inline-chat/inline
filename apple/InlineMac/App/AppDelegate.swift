@@ -259,7 +259,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   func application(_: NSApplication, open urls: [URL]) {
     // Handle URLs when app is already running
     for url in urls {
-      log.debug("Received URL via application:open: \(url)")
+      if Self.isCLIAuthURL(url) {
+        log.debug("Received local CLI auth request via application:open")
+      } else {
+        log.debug("Received URL via application:open: \(url)")
+      }
       handleCustomURL(url)
     }
   }
@@ -277,6 +281,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
       // Handle different URL patterns
       switch url.host?.lowercased() {
+      case "cli-auth":
+        await handleCLIAuthURL(url)
       case "user":
         handleUserURL(url)
       case "chat", "thread":
@@ -288,6 +294,67 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         log.warning("Unhandled URL host: \(url.host ?? "nil")")
       }
     }
+  }
+
+  @MainActor private func handleCLIAuthURL(_ url: URL) async {
+    guard let endpoint = LocalCLIAuthBroker.Endpoint(url: url) else {
+      presentCLIAuthAlert(
+        title: "Invalid CLI sign-in request",
+        message: "Inline could not verify this local sign-in request. Start login again from the Inline CLI."
+      )
+      return
+    }
+
+    guard Auth.shared.getIsLoggedIn(), dependencies.viewModel.topLevelRoute == .main else {
+      await LocalCLIAuthBroker.cancel(endpoint, detail: "Inline for Mac is not signed in.")
+      presentCLIAuthAlert(
+        title: "Sign in to Inline first",
+        message: "Sign in to Inline for Mac, then start CLI login again."
+      )
+      return
+    }
+
+    do {
+      let client = try await LocalCLIAuthBroker.probe(endpoint)
+      guard approveCLIAuth(client) else {
+        await LocalCLIAuthBroker.cancel(endpoint, detail: "The request was declined in Inline for Mac.")
+        return
+      }
+
+      _ = try await LocalCLIAuthBroker.createAndDeliverSession(
+        endpoint,
+        client: client,
+        realtime: dependencies.realtimeV2
+      )
+    } catch {
+      await LocalCLIAuthBroker.cancel(endpoint, detail: "Inline for Mac could not complete the request.")
+      log.error("Local CLI auth handoff failed: \(error.localizedDescription)")
+      presentCLIAuthAlert(
+        title: "Could not sign in to the CLI",
+        message: "\(error.localizedDescription) Start login again from the Inline CLI."
+      )
+    }
+  }
+
+  @MainActor private func approveCLIAuth(_ client: LocalCLIAuthBroker.ClientMetadata) -> Bool {
+    let deviceName = client.deviceName?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let displayName = deviceName.flatMap { $0.isEmpty ? nil : $0 } ?? "this Mac"
+    let alert = NSAlert()
+    alert.alertStyle = .informational
+    alert.messageText = "Allow Inline CLI to sign in?"
+    alert.informativeText = "A CLI on \(displayName) is requesting access. Verify that the CLI shows code \(client.verificationCode)."
+    alert.addButton(withTitle: "Allow")
+    alert.addButton(withTitle: "Cancel")
+    return alert.runModal() == .alertFirstButtonReturn
+  }
+
+  @MainActor private func presentCLIAuthAlert(title: String, message: String) {
+    let alert = NSAlert()
+    alert.alertStyle = .warning
+    alert.messageText = title
+    alert.informativeText = message
+    alert.addButton(withTitle: "OK")
+    alert.runModal()
   }
 
   @MainActor private func handleUserURL(_ url: URL) {
@@ -338,6 +405,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     guard let host else { return true }
     return url.host?.lowercased() == host
+  }
+
+  private static func isCLIAuthURL(_ url: URL) -> Bool {
+    isInlineURL(url, host: "cli-auth")
   }
 
   private func inlineId(from url: URL, queryNames: Set<String>) -> Int64? {
@@ -761,7 +832,11 @@ extension AppDelegate {
       return
     }
 
-    log.debug("Received URL: \(url)")
+    if Self.isCLIAuthURL(url) {
+      log.debug("Received local CLI auth request")
+    } else {
+      log.debug("Received URL: \(url)")
+    }
     handleCustomURL(url)
   }
 }
