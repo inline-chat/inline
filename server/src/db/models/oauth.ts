@@ -28,6 +28,7 @@ export type OauthAuthRequest = {
   deviceId: string
   inlineUserId: number | null
   email: string | null
+  phoneNumber: string | null
   challengeToken: string | null
   inlineTokenEncrypted: Buffer | null
   createdAtMs: number
@@ -111,6 +112,7 @@ function mapAuthRequest(row: typeof oauthAuthRequests.$inferSelect): OauthAuthRe
     deviceId: row.deviceId,
     inlineUserId: row.inlineUserId,
     email: row.email,
+    phoneNumber: row.phoneNumber,
     challengeToken: row.challengeToken,
     inlineTokenEncrypted: row.inlineTokenEncrypted,
     createdAtMs: row.date.getTime(),
@@ -255,7 +257,14 @@ export const OauthModel = {
   async setAuthRequestEmail(id: string, email: string, challengeToken: string): Promise<void> {
     await db
       .update(oauthAuthRequests)
-      .set({ email, challengeToken })
+      .set({ email, phoneNumber: null, challengeToken })
+      .where(eq(oauthAuthRequests.id, id))
+  },
+
+  async setAuthRequestPhoneNumber(id: string, phoneNumber: string): Promise<void> {
+    await db
+      .update(oauthAuthRequests)
+      .set({ email: null, phoneNumber, challengeToken: null })
       .where(eq(oauthAuthRequests.id, id))
   },
 

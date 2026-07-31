@@ -87,6 +87,13 @@ const OAuthEmailPayload = Schema.Struct({
   identifier: "OAuthEmailCodeForm",
 })
 
+const OAuthPhonePayload = Schema.Struct({
+  csrf: OptionalString,
+  phone_number: OptionalString,
+}).annotate({
+  identifier: "OAuthPhoneCodeForm",
+})
+
 const OAuthVerificationPayload = Schema.Struct({
   csrf: OptionalString,
   code: OptionalString,
@@ -433,6 +440,52 @@ const OAuthEndpointGroup = HttpApiGroup.make("oauth")
   )
   .add(
     HttpApiEndpoint.post(
+      "oauthSendSmsCode",
+      "/oauth/authorize/send-sms-code",
+      {
+        payload: oauthPayloads(OAuthPhonePayload),
+        success: OAuthHtml,
+        error: oauthHtmlErrors,
+      },
+    ).annotateMerge(
+      oauthOperationDocs({
+        responseHeaders: {
+          "200": {
+            "Cache-Control": cacheControlHeader,
+          },
+          "429": {
+            "Retry-After": retryAfterHeader,
+          },
+        },
+      }),
+    ),
+  )
+  .add(
+    HttpApiEndpoint.post(
+      "oauthVerifySmsCode",
+      "/oauth/authorize/verify-sms-code",
+      {
+        payload: oauthPayloads(
+          OAuthVerificationPayload,
+        ),
+        success: OAuthHtml,
+        error: oauthHtmlErrors,
+      },
+    ).annotateMerge(
+      oauthOperationDocs({
+        responseHeaders: {
+          "200": {
+            "Cache-Control": cacheControlHeader,
+          },
+          "429": {
+            "Retry-After": retryAfterHeader,
+          },
+        },
+      }),
+    ),
+  )
+  .add(
+    HttpApiEndpoint.post(
       "oauthConsent",
       "/oauth/authorize/consent",
       {
@@ -643,6 +696,16 @@ const oauthResponseContracts: Readonly<
     ...oauthHtmlErrorVariants,
   ],
   verifyEmailCode: [
+    htmlVariant(200, ["cache-control"]),
+    badRequestVariant,
+    ...oauthHtmlErrorVariants,
+  ],
+  sendSmsCode: [
+    htmlVariant(200, ["cache-control"]),
+    badRequestVariant,
+    ...oauthHtmlErrorVariants,
+  ],
+  verifySmsCode: [
     htmlVariant(200, ["cache-control"]),
     badRequestVariant,
     ...oauthHtmlErrorVariants,

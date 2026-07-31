@@ -3,7 +3,9 @@ import {
   handleAuthorizationServerMetadata,
   handleAuthorizeConsent,
   handleAuthorizeSendEmailCode,
+  handleAuthorizeSendSmsCode,
   handleAuthorizeVerifyEmailCode,
+  handleAuthorizeVerifySmsCode,
   handleIntrospect,
   handleRegister,
   handleRevoke,
@@ -88,6 +90,24 @@ export const oauth = new Elysia({ name: "oauth" })
   .post("/oauth/authorize/verify-email-code", ({ request, body }) =>
     executeLegacyOAuth(() =>
       handleAuthorizeVerifyEmailCode(
+        request,
+        body,
+        legacyOAuthClientIp(request),
+      ),
+    ),
+  )
+  .post("/oauth/authorize/send-sms-code", ({ request, body }) =>
+    executeLegacyOAuth(() =>
+      handleAuthorizeSendSmsCode(
+        request,
+        body,
+        legacyOAuthClientIp(request),
+      ),
+    ),
+  )
+  .post("/oauth/authorize/verify-sms-code", ({ request, body }) =>
+    executeLegacyOAuth(() =>
+      handleAuthorizeVerifySmsCode(
         request,
         body,
         legacyOAuthClientIp(request),

@@ -7,6 +7,8 @@ import { sha256Base64Url, sha256Hex } from "@inline-chat/oauth-core"
 import { db } from "@in/server/db"
 import { oauthAuthRequests } from "@in/server/db/schema"
 import { inArray } from "drizzle-orm"
+import { InMemoryRateLimiter } from "@in/server/modules/oauth/rateLimiter"
+import { handleAuthorizeSendSmsCode } from "@in/server/modules/oauth/httpHandlers"
 
 function extractSetCookieValue(setCookie: string | null): string {
   if (!setCookie) throw new Error("missing set-cookie")
@@ -62,7 +64,7 @@ describe("OAuth controller", () => {
     expect(remaining).toEqual([{ id: liveId }])
   })
 
-  it("stores challenge token on send-email-code", async () => {
+  it("renders branded email and phone sign-in and stores one active challenge", async () => {
     const registerRes = await app.handle(
       new Request("http://localhost/oauth/register", {
         method: "POST",
@@ -91,7 +93,27 @@ describe("OAuth controller", () => {
     expect(authorizeRes.status).toBe(200)
 
     const cookie = extractSetCookieValue(authorizeRes.headers.get("set-cookie"))
-    const csrf = extractHidden(await authorizeRes.text(), "csrf")
+    const authorizeHtml = await authorizeRes.text()
+    const csrf = extractHidden(authorizeHtml, "csrf")
+
+    expect(authorizeHtml).toContain("Use the email address or phone number linked to your Inline account.")
+    expect(authorizeHtml).toContain('action="/oauth/authorize/send-sms-code"')
+    expect(authorizeHtml).toContain('class="brand"')
+    expect(authorizeHtml).not.toContain("<script")
+    expect(authorizeHtml).not.toContain("https://")
+
+    const invalidPhoneForm = new FormData()
+    invalidPhoneForm.set("csrf", csrf)
+    invalidPhoneForm.set("phone_number", "not-a-phone-number")
+    const invalidPhoneRes = await app.handle(
+      new Request("http://localhost/oauth/authorize/send-sms-code", {
+        method: "POST",
+        headers: { cookie },
+        body: invalidPhoneForm,
+      }),
+    )
+    expect(invalidPhoneRes.status).toBe(400)
+    expect(await invalidPhoneRes.text()).toContain("Enter a valid phone number with country code.")
 
     const sendForm = new FormData()
     sendForm.set("csrf", csrf)
@@ -110,7 +132,35 @@ describe("OAuth controller", () => {
     const authRequestId = cookie.split("=", 2)[1]!
     const authRequest = await OauthModel.getAuthRequest(authRequestId, Date.now())
     expect(authRequest?.email).toBe("oauth-user@example.com")
+    expect(authRequest?.phoneNumber).toBeNull()
     expect(typeof authRequest?.challengeToken).toBe("string")
+
+    const phoneForm = new FormData()
+    phoneForm.set("csrf", csrf)
+    phoneForm.set("phone_number", "+1 202 555 0123")
+    const phoneRes = await handleAuthorizeSendSmsCode(
+      new Request("http://localhost/oauth/authorize/send-sms-code", {
+        method: "POST",
+        headers: { cookie },
+        body: phoneForm,
+      }),
+      phoneForm,
+      "127.0.0.1",
+      new InMemoryRateLimiter(),
+      async () => ({
+        existingUser: true,
+        needsInviteCode: false,
+        phoneNumber: "+12025550123",
+        formattedPhoneNumber: "+1 202 555 0123",
+      }),
+    )
+    expect(phoneRes.status).toBe(200)
+    expect(await phoneRes.text()).toContain('action="/oauth/authorize/verify-sms-code"')
+
+    const phoneAuthRequest = await OauthModel.getAuthRequest(authRequestId, Date.now())
+    expect(phoneAuthRequest?.email).toBeNull()
+    expect(phoneAuthRequest?.phoneNumber).toBe("+12025550123")
+    expect(phoneAuthRequest?.challengeToken).toBeNull()
   })
 
   it("issues two-hour access and 180-day refresh tokens without requiring offline_access", async () => {

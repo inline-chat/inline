@@ -644,6 +644,8 @@ describe("Effect OAuth routes", () => {
         authorize: async () => response(),
         sendEmailCode: async () => response(),
         verifyEmailCode: async () => response(),
+        sendSmsCode: async () => response(),
+        verifySmsCode: async () => response(),
         consent: async () => response(),
         token: async () => response(),
         revoke: async (body) => {
@@ -711,7 +713,9 @@ describe("Effect OAuth routes", () => {
       "/oauth/authorize",
       "/oauth/authorize/consent",
       "/oauth/authorize/send-email-code",
+      "/oauth/authorize/send-sms-code",
       "/oauth/authorize/verify-email-code",
+      "/oauth/authorize/verify-sms-code",
       "/oauth/introspect",
       "/oauth/register",
       "/oauth/revoke",

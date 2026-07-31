@@ -58,6 +58,8 @@ export const AuthApiGroup = HttpApiGroup.make("auth").add(
   OAuthEndpoints.oauthAuthorizeAlias,
   OAuthEndpoints.oauthSendEmailCode,
   OAuthEndpoints.oauthVerifyEmailCode,
+  OAuthEndpoints.oauthSendSmsCode,
+  OAuthEndpoints.oauthVerifySmsCode,
   OAuthEndpoints.oauthConsent,
   OAuthEndpoints.oauthToken,
   OAuthEndpoints.oauthTokenAlias,
@@ -244,6 +246,22 @@ export const makeAuthRouteGroup = () => {
           execute(
             executeOAuth(
               "verifyEmailCode",
+              request,
+            ),
+          ),
+        )
+        .handleRaw("oauthSendSmsCode", ({ request }) =>
+          execute(
+            executeOAuth(
+              "sendSmsCode",
+              request,
+            ),
+          ),
+        )
+        .handleRaw("oauthVerifySmsCode", ({ request }) =>
+          execute(
+            executeOAuth(
+              "verifySmsCode",
               request,
             ),
           ),

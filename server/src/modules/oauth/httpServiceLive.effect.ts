@@ -6,7 +6,9 @@ import {
   handleAuthorizationServerMetadata,
   handleAuthorizeConsent,
   handleAuthorizeSendEmailCode,
+  handleAuthorizeSendSmsCode,
   handleAuthorizeVerifyEmailCode,
+  handleAuthorizeVerifySmsCode,
   handleIntrospect,
   handleRegister,
   handleRevoke,
@@ -47,6 +49,20 @@ export const OAuthHttpServiceLive = Layer.effect(
           ),
         verifyEmailCode: (request, body, clientIp) =>
           handleAuthorizeVerifyEmailCode(
+            request,
+            body,
+            clientIp,
+            rateLimiter,
+          ),
+        sendSmsCode: (request, body, clientIp) =>
+          handleAuthorizeSendSmsCode(
+            request,
+            body,
+            clientIp,
+            rateLimiter,
+          ),
+        verifySmsCode: (request, body, clientIp) =>
+          handleAuthorizeVerifySmsCode(
             request,
             body,
             clientIp,

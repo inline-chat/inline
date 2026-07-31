@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "count": 181,
+  "count": 189,
   "methodCounts": {
     "ALL": 3,
-    "GET": 81,
+    "GET": 83,
     "OPTIONS": 14,
-    "POST": 82,
+    "POST": 88,
     "WS": 1
   },
-  "sha256": "2ba70800148d76b98fb8103a4a656d99de36106c75e9ebb45a595137dc1d30ea",
+  "sha256": "ba1ab4a7e4230af3afa1f492cc1da169d7da19f1c0ccf789efbc593d2d63afe8",
   "routes": [
     {
       "method": "ALL",
@@ -104,6 +104,10 @@
     },
     {
       "method": "GET",
+      "path": "/bot/getMyCapabilities"
+    },
+    {
+      "method": "GET",
       "path": "/bot/getMyCommands"
     },
     {
@@ -117,6 +121,10 @@
     {
       "method": "GET",
       "path": "/bot:token/getMe"
+    },
+    {
+      "method": "GET",
+      "path": "/bot:token/getMyCapabilities"
     },
     {
       "method": "GET",
@@ -456,6 +464,10 @@
     },
     {
       "method": "POST",
+      "path": "/bot/deleteMyCapabilities"
+    },
+    {
+      "method": "POST",
       "path": "/bot/deleteMyCommands"
     },
     {
@@ -472,11 +484,19 @@
     },
     {
       "method": "POST",
+      "path": "/bot/setMyCapabilities"
+    },
+    {
+      "method": "POST",
       "path": "/bot/setMyCommands"
     },
     {
       "method": "POST",
       "path": "/bot:token/deleteMessage"
+    },
+    {
+      "method": "POST",
+      "path": "/bot:token/deleteMyCapabilities"
     },
     {
       "method": "POST",
@@ -496,6 +516,10 @@
     },
     {
       "method": "POST",
+      "path": "/bot:token/setMyCapabilities"
+    },
+    {
+      "method": "POST",
       "path": "/bot:token/setMyCommands"
     },
     {
@@ -508,7 +532,15 @@
     },
     {
       "method": "POST",
+      "path": "/oauth/authorize/send-sms-code"
+    },
+    {
+      "method": "POST",
       "path": "/oauth/authorize/verify-email-code"
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/authorize/verify-sms-code"
     },
     {
       "method": "POST",

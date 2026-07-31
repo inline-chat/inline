@@ -10,6 +10,8 @@ export type OAuthHttpOperation =
   | "authorize"
   | "sendEmailCode"
   | "verifyEmailCode"
+  | "sendSmsCode"
+  | "verifySmsCode"
   | "consent"
   | "token"
   | "revoke"

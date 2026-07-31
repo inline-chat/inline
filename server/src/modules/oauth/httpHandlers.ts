@@ -1,4 +1,4 @@
-import { OauthModel } from "@in/server/db/models/oauth"
+import { OauthModel, type OauthAuthRequest } from "@in/server/db/models/oauth"
 import { InMemoryRateLimiter } from "@in/server/modules/oauth/rateLimiter"
 import { oauthConfig } from "@in/server/modules/oauth/config"
 import {
@@ -23,6 +23,16 @@ import {
   Input as VerifyEmailCodeInput,
   Response as VerifyEmailCodeResponse,
 } from "@in/server/methods/verifyEmailCode"
+import {
+  handler as sendSmsCodeHandler,
+  Input as SendSmsCodeInput,
+  Response as SendSmsCodeResponse,
+} from "@in/server/methods/sendSmsCode"
+import {
+  handler as verifySmsCodeHandler,
+  Input as VerifySmsCodeInput,
+  Response as VerifySmsCodeResponse,
+} from "@in/server/methods/verifySmsCode"
 import { handler as getSpacesHandler } from "@in/server/methods/getSpaces"
 import {
   getUserIdFromToken,
@@ -33,6 +43,7 @@ import { timingSafeEqual } from "node:crypto"
 import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { OAuthHandlerFailure } from "./httpHandlerFailure"
+import parsePhoneNumber from "libphonenumber-js"
 
 const config = oauthConfig()
 // TODO(effect-cutover): remove this oracle-only limiter with legacyServer.ts
@@ -73,24 +84,72 @@ function renderPage(title: string, body: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${escapeHtml(title)}</title>
   <style>
-    body { font-family: ui-sans-serif, system-ui; margin: 40px; color: #111; }
-    .card { max-width: 560px; border: 1px solid #e5e5e5; border-radius: 12px; padding: 20px; }
-    label { display: block; margin-top: 12px; font-weight: 600; }
-    input { width: 100%; padding: 10px; margin-top: 6px; border-radius: 8px; border: 1px solid #ccc; }
-    button { margin-top: 16px; padding: 10px 14px; border-radius: 10px; border: 1px solid #111; background: #111; color: #fff; cursor: pointer; }
-    .muted { color: #666; font-size: 13px; margin-top: 10px; }
-    .error { color: #b00020; margin-top: 10px; }
-    .spaces { margin-top: 12px; }
-    .spaces label { font-weight: 500; display: flex; gap: 10px; align-items: center; }
-    .spaces input { width: auto; margin: 0; }
-    code { background: #f5f5f5; padding: 2px 6px; border-radius: 6px; }
+    :root { color-scheme: light dark; font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 28px 20px; color: #171717; background: #f7f7f5; }
+    .shell { width: 100%; max-width: 440px; }
+    .brand { display: flex; align-items: center; justify-content: center; gap: 9px; margin-bottom: 22px; font-size: 17px; font-weight: 700; letter-spacing: -0.02em; }
+    .brand svg { width: 27px; height: 27px; }
+    .card { border: 1px solid #dededb; border-radius: 18px; padding: 30px; background: #fff; box-shadow: 0 12px 40px rgba(21, 21, 19, 0.06); }
+    h1 { margin: 0; font-size: 25px; line-height: 1.2; letter-spacing: -0.035em; }
+    .intro { margin: 9px 0 24px; color: #666661; font-size: 14px; line-height: 1.5; }
+    label { display: block; margin-top: 16px; font-size: 13px; font-weight: 650; }
+    input[type="email"], input[type="tel"], input[name="code"] { width: 100%; min-height: 46px; padding: 11px 13px; margin-top: 7px; border-radius: 10px; border: 1px solid #cececa; background: #fff; color: #171717; font: inherit; font-size: 15px; outline: none; transition: border-color 120ms ease, box-shadow 120ms ease; }
+    input[type="email"]:focus, input[type="tel"]:focus, input[name="code"]:focus { border-color: #343431; box-shadow: 0 0 0 3px rgba(30, 30, 28, 0.1); }
+    input[name="code"] { letter-spacing: 0.16em; font-variant-numeric: tabular-nums; }
+    button { width: 100%; min-height: 46px; margin-top: 20px; padding: 11px 16px; border-radius: 11px; border: 1px solid #171717; background: #171717; color: #fff; font: inherit; font-size: 14px; font-weight: 650; cursor: pointer; transition: background 120ms ease, transform 120ms ease; }
+    button:hover { background: #30302d; }
+    button:active { transform: translateY(1px); }
+    .muted { color: #777771; font-size: 12px; line-height: 1.45; margin-top: 11px; }
+    .error { padding: 12px 14px; border: 1px solid #edc9c5; border-radius: 10px; background: #fff6f5; color: #9d2d23; font-size: 14px; line-height: 1.45; }
+    .method-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; margin-bottom: 20px; border-radius: 11px; background: #f0f0ed; }
+    .method-tabs label { margin: 0; padding: 8px 10px; border-radius: 8px; color: #6b6b66; text-align: center; cursor: pointer; }
+    .method-tabs input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+    .method-tabs label:has(input:checked) { background: #fff; color: #171717; box-shadow: 0 1px 3px rgba(20, 20, 18, 0.1); }
+    .method-tabs label:has(input:focus-visible) { outline: 2px solid currentColor; outline-offset: 2px; }
+    .sign-in-method { display: none; }
+    .card:has(#method-email:checked) .email-method, .card:has(#method-phone:checked) .phone-method { display: block; }
+    .scope { padding: 12px 14px; margin: 18px 0; border: 1px solid #e4e4e0; border-radius: 10px; background: #fafaf8; }
+    .scope .muted { margin: 0 0 5px; }
+    .spaces { max-height: 290px; overflow-y: auto; margin: 0 -6px; padding: 0 6px; }
+    .spaces label { display: flex; align-items: center; gap: 11px; min-height: 39px; margin: 0; border-bottom: 1px solid #eeeeeb; font-size: 14px; font-weight: 500; }
+    .spaces label:last-child { border-bottom: 0; }
+    .spaces input { width: 17px; height: 17px; margin: 0; accent-color: #171717; }
+    code { padding: 2px 5px; border-radius: 5px; background: #efefec; font-size: 11px; overflow-wrap: anywhere; }
+    .trust { margin: 18px 4px 0; color: #85857f; font-size: 11px; line-height: 1.5; text-align: center; }
+    @media (max-width: 520px) { body { align-items: start; padding: 22px 14px; } .brand { margin-bottom: 18px; } .card { padding: 24px 20px; border-radius: 16px; } }
+    @media (prefers-color-scheme: dark) {
+      body { color: #f3f3f0; background: #111210; }
+      .card { border-color: #343532; background: #1b1c19; box-shadow: none; }
+      .intro, .muted { color: #a7a8a1; }
+      input[type="email"], input[type="tel"], input[name="code"] { border-color: #464742; background: #22231f; color: #f3f3f0; }
+      input[type="email"]:focus, input[type="tel"]:focus, input[name="code"]:focus { border-color: #d0d0ca; box-shadow: 0 0 0 3px rgba(240, 240, 235, 0.1); }
+      button { border-color: #f1f1ed; background: #f1f1ed; color: #181916; }
+      button:hover { background: #dcdcd7; }
+      .method-tabs { background: #252622; }
+      .method-tabs label { color: #a1a29b; }
+      .method-tabs label:has(input:checked) { background: #3a3b36; color: #f3f3f0; box-shadow: none; }
+      .scope { border-color: #363732; background: #21221f; }
+      .spaces label { border-color: #30312d; }
+      .spaces input { accent-color: #f1f1ed; }
+      code { background: #30312d; }
+      .error { border-color: #663e39; background: #2d1d1b; color: #f1aaa2; }
+      .trust { color: #878881; }
+    }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h1>${escapeHtml(title)}</h1>
-    ${body}
-  </div>
+  <main class="shell">
+    <div class="brand">
+      <svg viewBox="0 0 54 54" fill="none" aria-hidden="true"><rect x="5" y="5" width="44" height="44" rx="16" stroke="currentColor" stroke-width="10"/><rect x="17" y="17" width="10" height="20" rx="4" fill="currentColor"/></svg>
+      <span>Inline</span>
+    </div>
+    <div class="card">
+      <h1>${escapeHtml(title)}</h1>
+      ${body}
+    </div>
+    <div class="trust">Secure sign-in · Verification codes stay between you and Inline.</div>
+  </main>
 </body>
 </html>`
 }
@@ -243,6 +302,88 @@ async function getSpacesForToken(token: string): Promise<Array<{ id: number; nam
   return spaces.spaces.map((space) => ({ id: space.id, name: space.name }))
 }
 
+async function completeAuthorizeSignIn(
+  authRequest: OauthAuthRequest,
+  verifyResult: unknown,
+  method: "email" | "phone",
+): Promise<Response> {
+  const token = String((verifyResult as Record<string, unknown>)["token"] ?? "")
+  const userId = Number((verifyResult as Record<string, unknown>)["userId"] ?? 0)
+
+  if (!token || !Number.isInteger(userId) || userId <= 0) {
+    const response = html(500, renderPage("Error", `<div class="error">Invalid login session.</div>`))
+    throw new OAuthHandlerFailure(
+      `OAuth ${method} verification returned an invalid login session.`,
+      {
+        cause: new Error(`${method} verification returned an invalid login session`),
+        response,
+      },
+    )
+  }
+
+  let encryptedToken: Buffer
+  try {
+    encryptedToken = Encryption2.encrypt(Buffer.from(token, "utf8"))
+  } catch (cause) {
+    const response = html(500, renderPage("Error", `<div class="error">Server misconfigured.</div>`))
+    throw new OAuthHandlerFailure(
+      "OAuth session token encryption failed.",
+      { cause, response },
+    )
+  }
+
+  await OauthModel.setAuthRequestInlineSession({
+    id: authRequest.id,
+    inlineUserId: userId,
+    inlineTokenEncrypted: encryptedToken,
+  })
+
+  let spaces: Array<{ id: number; name: string }> = []
+  try {
+    spaces = await getSpacesForToken(token)
+  } catch (cause) {
+    const response = html(502, renderPage("Error", `<div class="error">Failed to load spaces.</div>`))
+    throw new OAuthHandlerFailure(
+      "OAuth space loading failed.",
+      {
+        cause: privateCause(cause),
+        response,
+      },
+    )
+  }
+
+  const spacesList = spaces
+    .map((space) => {
+      return `<label><input type="checkbox" name="space_id" value="${String(space.id)}" checked /> <span>${escapeHtml(space.name)}</span></label>`
+    })
+    .join("")
+  const client = await OauthModel.getClient(authRequest.clientId)
+  const clientName = client?.clientName?.trim() || "the connected app"
+
+  return html(
+    200,
+    renderPage(
+      "Choose what to share",
+      `
+<p class="intro">Select where ${escapeHtml(clientName)} can act on your behalf. You can revoke access later.</p>
+<form method="post" action="/oauth/authorize/consent">
+  <input type="hidden" name="csrf" value="${escapeHtml(authRequest.csrfToken)}" />
+  <div class="scope">
+    <div class="muted">Requested permissions</div>
+    <code>${escapeHtml(authRequest.scope)}</code>
+  </div>
+  <div class="spaces">
+    ${spacesList}
+    <label><input type="checkbox" name="allow_dms" value="1" checked /> <span>Direct messages</span></label>
+    <label><input type="checkbox" name="allow_home_threads" value="1" checked /> <span>Home threads shared with you</span></label>
+  </div>
+  <button type="submit">Allow access</button>
+</form>`,
+    ),
+    { "cache-control": "no-store" },
+  )
+}
+
 export async function handleRegister(
   req: Request,
   body: unknown,
@@ -348,19 +489,35 @@ export async function handleAuthorizeGet(url: URL): Promise<Response> {
   })
 
   const cookie = setCookieHeader(authRequestCookieName(), authRequestId)
+  const signInDescription = client.clientName?.trim()
+    ? `Continue to <strong>${escapeHtml(client.clientName.trim())}</strong> using the email address or phone number linked to your Inline account.`
+    : "Use the email address or phone number linked to your Inline account."
 
   return html(
     200,
     renderPage(
       "Sign in to Inline",
       `
-<form method="post" action="/oauth/authorize/send-email-code">
+<p class="intro">${signInDescription}</p>
+<div class="method-tabs" role="radiogroup" aria-label="Sign-in method">
+  <label><input id="method-email" type="radio" name="sign-in-method" checked />Email</label>
+  <label><input id="method-phone" type="radio" name="sign-in-method" />Phone</label>
+</div>
+<form class="sign-in-method email-method" method="post" action="/oauth/authorize/send-email-code">
   <input type="hidden" name="csrf" value="${escapeHtml(csrfToken)}" />
-  <label>Email</label>
-  <input name="email" type="email" autocomplete="email" required />
-  <button type="submit">Send code</button>
-  <div class="muted">You will receive a 6-digit code.</div>
-</form>`,
+  <label>Email address
+    <input name="email" type="email" autocomplete="email" placeholder="you@example.com" required autofocus />
+  </label>
+  <button type="submit">Continue with email</button>
+</form>
+<form class="sign-in-method phone-method" method="post" action="/oauth/authorize/send-sms-code">
+  <input type="hidden" name="csrf" value="${escapeHtml(csrfToken)}" />
+  <label>Phone number
+    <input name="phone_number" type="tel" inputmode="tel" autocomplete="tel" placeholder="+1 202 555 0123" required />
+  </label>
+  <button type="submit">Continue with phone</button>
+</form>
+<div class="muted">We’ll send you a 6-digit verification code.</div>`,
     ),
     {
       "set-cookie": cookie,
@@ -429,7 +586,7 @@ export async function handleAuthorizeSendEmailCode(
       email,
       deviceId: authRequest.deviceId,
       clientType: "web",
-      deviceName: "ChatGPT MCP",
+      deviceName: "OAuth",
     })
     sendResult = await sendEmailCodeHandler(input, { ip: clientIp, source: "/oauth/authorize/send-email-code" })
     if (!Value.Check(SendEmailCodeResponse, sendResult)) {
@@ -471,14 +628,15 @@ export async function handleAuthorizeSendEmailCode(
   return html(
     200,
     renderPage(
-      "Enter code",
+      "Check your email",
       `
+<p class="intro">Enter the verification code sent to <strong>${escapeHtml(email)}</strong>.</p>
 <form method="post" action="/oauth/authorize/verify-email-code">
   <input type="hidden" name="csrf" value="${escapeHtml(authRequest.csrfToken)}" />
-  <label>Code</label>
-  <input name="code" inputmode="numeric" autocomplete="one-time-code" required />
-  <button type="submit">Verify</button>
-  <div class="muted">Sent to <code>${escapeHtml(email)}</code>.</div>
+  <label>Verification code
+    <input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="000000" minlength="6" required autofocus />
+  </label>
+  <button type="submit">Verify and continue</button>
 </form>`,
     ),
     { "cache-control": "no-store" },
@@ -552,7 +710,7 @@ export async function handleAuthorizeVerifyEmailCode(
       challengeToken: authRequest.challengeToken,
       deviceId: authRequest.deviceId,
       clientType: "web",
-      deviceName: "ChatGPT MCP",
+      deviceName: "OAuth",
     })
     verifyResult = await verifyEmailCodeHandler(input, { ip: clientIp })
     if (!Value.Check(VerifyEmailCodeResponse, verifyResult)) {
@@ -572,77 +730,193 @@ export async function handleAuthorizeVerifyEmailCode(
     )
   }
 
-  const token = String((verifyResult as Record<string, unknown>)["token"] ?? "")
-  const userId = Number((verifyResult as Record<string, unknown>)["userId"] ?? 0)
+  return completeAuthorizeSignIn(authRequest, verifyResult, "email")
+}
 
-  if (!token || !Number.isInteger(userId) || userId <= 0) {
-    const response = html(500, renderPage("Error", `<div class="error">Invalid login session.</div>`))
-    throw new OAuthHandlerFailure(
-      "OAuth email verification returned an invalid login session.",
-      {
-        cause: new Error(
-          "verifyEmailCode returned an invalid login session",
-        ),
-        response,
-      },
-    )
-  }
-
-  let encryptedToken: Buffer
-  try {
-    encryptedToken = Encryption2.encrypt(Buffer.from(token, "utf8"))
-  } catch (cause) {
-    const response = html(500, renderPage("Error", `<div class="error">Server misconfigured.</div>`))
-    throw new OAuthHandlerFailure(
-      "OAuth session token encryption failed.",
-      { cause, response },
-    )
-  }
-
-  await OauthModel.setAuthRequestInlineSession({
-    id: authRequest.id,
-    inlineUserId: userId,
-    inlineTokenEncrypted: encryptedToken,
+export async function handleAuthorizeSendSmsCode(
+  req: Request,
+  body: unknown,
+  clientIpOverride?: string,
+  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  sendCode: typeof sendSmsCodeHandler = sendSmsCodeHandler,
+): Promise<Response> {
+  const nowMs = Date.now()
+  const clientIp = resolveClientIp(clientIpOverride)
+  const endpointRate = rateLimiter.consume({
+    key: `oauth:endpoint:send-sms-code:${clientIp}`,
+    nowMs,
+    rule: config.endpointRateLimits.sendSmsCode,
   })
 
-  let spaces: Array<{ id: number; name: string }> = []
+  if (!endpointRate.allowed) {
+    return rateLimitedHtml(endpointRate.retryAfterSeconds, "Too many phone-code requests. Try again shortly.")
+  }
+
+  const authRequest = await getAuthRequestFromCookie(req)
+  if (!authRequest) {
+    return html(400, renderPage("Error", `<div class="error">Session expired. Please try again.</div>`))
+  }
+
+  const csrf = readParam(body, "csrf")
+  if (!constantTimeEqual(csrf, authRequest.csrfToken)) {
+    return html(400, renderPage("Error", `<div class="error">Invalid CSRF token.</div>`))
+  }
+  const parsedPhoneNumber = parsePhoneNumber(readParam(body, "phone_number"))
+  if (!parsedPhoneNumber?.isValid()) {
+    return html(400, renderPage("Error", `<div class="error">Enter a valid phone number with country code.</div>`))
+  }
+
+  const phoneNumber = parsedPhoneNumber.number
+  const phoneHash = await sha256Hex(phoneNumber)
+  const perPhone = rateLimiter.consume({
+    key: `oauth:abuse:send-sms:phone:${phoneHash}`,
+    nowMs,
+    rule: config.phoneAbuseRateLimits.sendPerPhone,
+  })
+  if (!perPhone.allowed) {
+    return rateLimitedHtml(perPhone.retryAfterSeconds, "Too many attempts for this phone number. Try again later.")
+  }
+
+  const perContext = rateLimiter.consume({
+    key: `oauth:abuse:send-sms:context:${phoneHash}:${normalizeRateLimitKeyPart(authRequest.clientId)}:${normalizeRateLimitKeyPart(authRequest.deviceId)}:${clientIp}`,
+    nowMs,
+    rule: config.phoneAbuseRateLimits.sendPerContext,
+  })
+  if (!perContext.allowed) {
+    return rateLimitedHtml(perContext.retryAfterSeconds, "Too many attempts from this client context. Try again later.")
+  }
+
+  let sendResult: unknown
   try {
-    spaces = await getSpacesForToken(token)
+    const input = Value.Decode(SendSmsCodeInput, {
+      phoneNumber,
+      deviceId: authRequest.deviceId,
+      clientType: "web",
+      deviceName: "OAuth",
+    })
+    sendResult = await sendCode(input, { ip: clientIp, source: "/oauth/authorize/send-sms-code" })
+    if (!Value.Check(SendSmsCodeResponse, sendResult)) {
+      throw new Error("invalid sendSmsCode response")
+    }
   } catch (cause) {
-    const response = html(502, renderPage("Error", `<div class="error">Failed to load spaces.</div>`))
+    const response = html(502, renderPage("Error", `<div class="error">Failed to send code.</div>`))
+    if (cause instanceof InlineError && cause.code < 500) {
+      return response
+    }
     throw new OAuthHandlerFailure(
-      "OAuth space loading failed.",
-      {
-        cause: privateCause(cause),
-        response,
-      },
+      "OAuth phone-code delivery failed.",
+      { cause: privateCause(cause), response },
     )
   }
 
-  const spacesList = spaces
-    .map((space) => {
-      return `<label><input type="checkbox" name="space_id" value="${String(space.id)}" checked /> ${escapeHtml(space.name)}</label>`
-    })
-    .join("")
+  const normalizedPhoneNumber = String((sendResult as Record<string, unknown>)["phoneNumber"] ?? "")
+  const formattedPhoneNumber = String((sendResult as Record<string, unknown>)["formattedPhoneNumber"] ?? phoneNumber)
+  if (!normalizedPhoneNumber) {
+    const response = html(500, renderPage("Error", `<div class="error">Login challenge unavailable.</div>`))
+    throw new OAuthHandlerFailure(
+      "OAuth phone-code delivery returned no phone number.",
+      { cause: new Error("sendSmsCode returned no phone number"), response },
+    )
+  }
+
+  await OauthModel.setAuthRequestPhoneNumber(authRequest.id, normalizedPhoneNumber)
 
   return html(
     200,
     renderPage(
-      "Choose access",
+      "Check your phone",
       `
-<form method="post" action="/oauth/authorize/consent">
+<p class="intro">Enter the verification code sent to <strong>${escapeHtml(formattedPhoneNumber)}</strong>.</p>
+<form method="post" action="/oauth/authorize/verify-sms-code">
   <input type="hidden" name="csrf" value="${escapeHtml(authRequest.csrfToken)}" />
-  <div class="muted">Requested scopes: <code>${escapeHtml(authRequest.scope)}</code></div>
-  <div class="spaces">
-    ${spacesList}
-    <label><input type="checkbox" name="allow_dms" value="1" checked /> DMs</label>
-    <label><input type="checkbox" name="allow_home_threads" value="1" checked /> Home threads (threads shared with you)</label>
-  </div>
-  <button type="submit">Allow</button>
+  <label>Verification code
+    <input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="000000" minlength="6" required autofocus />
+  </label>
+  <button type="submit">Verify and continue</button>
 </form>`,
     ),
     { "cache-control": "no-store" },
   )
+}
+
+export async function handleAuthorizeVerifySmsCode(
+  req: Request,
+  body: unknown,
+  clientIpOverride?: string,
+  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+): Promise<Response> {
+  const nowMs = Date.now()
+  const clientIp = resolveClientIp(clientIpOverride)
+  const endpointRate = rateLimiter.consume({
+    key: `oauth:endpoint:verify-sms-code:${clientIp}`,
+    nowMs,
+    rule: config.endpointRateLimits.verifySmsCode,
+  })
+  if (!endpointRate.allowed) {
+    return rateLimitedHtml(endpointRate.retryAfterSeconds, "Too many verification attempts. Try again shortly.")
+  }
+
+  const authRequest = await getAuthRequestFromCookie(req)
+  if (!authRequest) {
+    return html(400, renderPage("Error", `<div class="error">Session expired. Please try again.</div>`))
+  }
+  if (!authRequest.phoneNumber) {
+    return html(400, renderPage("Error", `<div class="error">Missing phone challenge. Start over.</div>`))
+  }
+
+  const csrf = readParam(body, "csrf")
+  const code = readParam(body, "code").trim()
+  if (!constantTimeEqual(csrf, authRequest.csrfToken)) {
+    return html(400, renderPage("Error", `<div class="error">Invalid CSRF token.</div>`))
+  }
+  if (!code || code.length < 6) {
+    return html(400, renderPage("Error", `<div class="error">Invalid code.</div>`))
+  }
+
+  const phoneHash = await sha256Hex(authRequest.phoneNumber)
+  const perPhone = rateLimiter.consume({
+    key: `oauth:abuse:verify-sms:phone:${phoneHash}`,
+    nowMs,
+    rule: config.phoneAbuseRateLimits.verifyPerPhone,
+  })
+  if (!perPhone.allowed) {
+    return rateLimitedHtml(perPhone.retryAfterSeconds, "Too many verification attempts for this phone number. Try again later.")
+  }
+
+  const perContext = rateLimiter.consume({
+    key: `oauth:abuse:verify-sms:context:${phoneHash}:${normalizeRateLimitKeyPart(authRequest.clientId)}:${normalizeRateLimitKeyPart(authRequest.deviceId)}:${clientIp}`,
+    nowMs,
+    rule: config.phoneAbuseRateLimits.verifyPerContext,
+  })
+  if (!perContext.allowed) {
+    return rateLimitedHtml(perContext.retryAfterSeconds, "Too many attempts from this client context. Try again later.")
+  }
+
+  let verifyResult: unknown
+  try {
+    const input = Value.Decode(VerifySmsCodeInput, {
+      phoneNumber: authRequest.phoneNumber,
+      code,
+      deviceId: authRequest.deviceId,
+      clientType: "web",
+      deviceName: "OAuth",
+    })
+    verifyResult = await verifySmsCodeHandler(input, { ip: clientIp })
+    if (!Value.Check(VerifySmsCodeResponse, verifyResult)) {
+      throw new Error("invalid verifySmsCode response")
+    }
+  } catch (cause) {
+    const response = html(401, renderPage("Error", `<div class="error">Code verification failed.</div>`))
+    if (cause instanceof InlineError && cause.code < 500) {
+      return response
+    }
+    throw new OAuthHandlerFailure(
+      "OAuth phone-code verification failed unexpectedly.",
+      { cause: privateCause(cause), response },
+    )
+  }
+
+  return completeAuthorizeSignIn(authRequest, verifyResult, "phone")
 }
 
 export async function handleAuthorizeConsent(req: Request, body: unknown): Promise<Response> {

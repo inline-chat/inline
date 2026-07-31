@@ -13,12 +13,20 @@ export type OauthServerConfig = {
     register: RateLimitRule
     sendEmailCode: RateLimitRule
     verifyEmailCode: RateLimitRule
+    sendSmsCode: RateLimitRule
+    verifySmsCode: RateLimitRule
     token: RateLimitRule
   }
   emailAbuseRateLimits: {
     sendPerEmail: RateLimitRule
     sendPerContext: RateLimitRule
     verifyPerEmail: RateLimitRule
+    verifyPerContext: RateLimitRule
+  }
+  phoneAbuseRateLimits: {
+    sendPerPhone: RateLimitRule
+    sendPerContext: RateLimitRule
+    verifyPerPhone: RateLimitRule
     verifyPerContext: RateLimitRule
   }
   internalSharedSecret: string | null
@@ -71,6 +79,8 @@ export function oauthConfig(): OauthServerConfig {
       register: parseRateLimitRuleEnv("MCP_OAUTH_RATE_LIMIT_REGISTER", { max: 30, windowMs: 60_000 }),
       sendEmailCode: parseRateLimitRuleEnv("MCP_OAUTH_RATE_LIMIT_SEND_EMAIL_CODE", { max: 10, windowMs: 10 * 60_000 }),
       verifyEmailCode: parseRateLimitRuleEnv("MCP_OAUTH_RATE_LIMIT_VERIFY_EMAIL_CODE", { max: 20, windowMs: 10 * 60_000 }),
+      sendSmsCode: parseRateLimitRuleEnv("MCP_OAUTH_RATE_LIMIT_SEND_SMS_CODE", { max: 10, windowMs: 10 * 60_000 }),
+      verifySmsCode: parseRateLimitRuleEnv("MCP_OAUTH_RATE_LIMIT_VERIFY_SMS_CODE", { max: 20, windowMs: 10 * 60_000 }),
       token: parseRateLimitRuleEnv("MCP_OAUTH_RATE_LIMIT_TOKEN", { max: 60, windowMs: 60_000 }),
     },
     emailAbuseRateLimits: {
@@ -78,6 +88,12 @@ export function oauthConfig(): OauthServerConfig {
       sendPerContext: parseRateLimitRuleEnv("MCP_OAUTH_EMAIL_ABUSE_SEND_PER_CONTEXT", { max: 6, windowMs: 10 * 60_000 }),
       verifyPerEmail: parseRateLimitRuleEnv("MCP_OAUTH_EMAIL_ABUSE_VERIFY_PER_EMAIL", { max: 10, windowMs: 10 * 60_000 }),
       verifyPerContext: parseRateLimitRuleEnv("MCP_OAUTH_EMAIL_ABUSE_VERIFY_PER_CONTEXT", { max: 12, windowMs: 10 * 60_000 }),
+    },
+    phoneAbuseRateLimits: {
+      sendPerPhone: parseRateLimitRuleEnv("MCP_OAUTH_PHONE_ABUSE_SEND_PER_PHONE", { max: 4, windowMs: 10 * 60_000 }),
+      sendPerContext: parseRateLimitRuleEnv("MCP_OAUTH_PHONE_ABUSE_SEND_PER_CONTEXT", { max: 6, windowMs: 10 * 60_000 }),
+      verifyPerPhone: parseRateLimitRuleEnv("MCP_OAUTH_PHONE_ABUSE_VERIFY_PER_PHONE", { max: 10, windowMs: 10 * 60_000 }),
+      verifyPerContext: parseRateLimitRuleEnv("MCP_OAUTH_PHONE_ABUSE_VERIFY_PER_CONTEXT", { max: 12, windowMs: 10 * 60_000 }),
     },
     internalSharedSecret: process.env["MCP_INTERNAL_SHARED_SECRET"] || null,
   }

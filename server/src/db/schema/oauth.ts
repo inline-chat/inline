@@ -40,6 +40,7 @@ export const oauthAuthRequests = pgTable(
     csrfToken: text("csrf_token").notNull(),
     deviceId: varchar("device_id", { length: 128 }).notNull(),
     email: varchar("email", { length: 256 }),
+    phoneNumber: varchar("phone_number", { length: 15 }),
     challengeToken: varchar("challenge_token", { length: 128 }),
     inlineUserId: integer("inline_user_id").references(() => users.id),
     inlineTokenEncrypted: bytea("inline_token_encrypted"),

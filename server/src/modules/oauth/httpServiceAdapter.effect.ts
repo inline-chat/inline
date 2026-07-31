@@ -29,6 +29,16 @@ export interface OAuthHttpHandlers {
     body: unknown,
     clientIp?: string,
   ) => Promise<Response>
+  readonly sendSmsCode: (
+    request: Request,
+    body: unknown,
+    clientIp?: string,
+  ) => Promise<Response>
+  readonly verifySmsCode: (
+    request: Request,
+    body: unknown,
+    clientIp?: string,
+  ) => Promise<Response>
   readonly consent: (
     request: Request,
     body: unknown,
@@ -89,6 +99,10 @@ const execute = async (
         body,
         clientIp,
       )
+    case "sendSmsCode":
+      return handlers.sendSmsCode(request, body, clientIp)
+    case "verifySmsCode":
+      return handlers.verifySmsCode(request, body, clientIp)
     case "consent":
       return handlers.consent(request, body)
     case "token":
