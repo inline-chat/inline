@@ -3,7 +3,7 @@
 
 import * as stylex from "@stylexjs/stylex"
 import { useEffect, useRef, useState } from "react"
-import { AnimatePresence, motion } from "motion/react"
+import { motion } from "motion/react"
 import { SUPPORT_EMAIL, emailValue } from "~/lib/email"
 
 //import "./styles/style.css"
@@ -34,13 +34,7 @@ const COPY = {
     // { text: "Messaging for focused work" },
   ],
   description: "A fast, lightweight and powerful chat app for teams that makes sharing ideas an absolute joy.",
-  cta: {
-    default: "Join the Waitlist",
-    submitting: "Submitting...",
-    success: "You're on the waitlist 🎉",
-    failed: "Failed to submit",
-    inputPlaceholder: "What's your work email?",
-  },
+  cta: "Download Inline",
   features: [
     {
       title: "Fast",
@@ -68,7 +62,7 @@ const COPY = {
     },
   ],
   footer: {
-    availability: "Available for macOS and iOS in alpha • Web coming soon",
+    availability: "Available for macOS and iOS in beta • Web coming soon",
     links: {
       twitter: "X",
       github: "GitHub",
@@ -82,7 +76,6 @@ const COPY = {
 }
 
 const messagesLength = COPY.headlines.length
-const apiEndpoint = process.env.NODE_ENV == "production" ? "https://api.inline.chat" : "http://localhost:8000"
 const centerWidth = 983
 const centerHeight = 735
 const cardRadius = 22
@@ -90,16 +83,8 @@ const firstContentRowHeight = 445
 const buttonHeight = 44
 export function Landing() {
   const footerEmail = emailValue(SUPPORT_EMAIL)
-  const [focused, setFocused] = useState(false)
-  const [email, setEmail] = useState("")
-  const [submitting, setSubmitting] = useState(false)
-  const [failed, setFailed] = useState(false)
-  const [subscribed, setSubscribed] = useState(false)
   const [isntInitialRender, setIsntInitialRender] = useState(false)
   const [hasInteracted, setHasInteracted] = useState(false)
-
-  const [formActive, setFormActive] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     setIsntInitialRender(true)
@@ -169,10 +154,6 @@ export function Landing() {
       <motion.div {...stylex.props(styles.centerBox, styles.center)} id="center">
         <motion.div
           {...stylex.props(styles.centerBox, styles.bg)}
-          initial={{ filter: "brightness(1)" }}
-          animate={{
-            filter: formActive ? "brightness(1.15)" : undefined,
-          }}
           style={{
             position: "absolute",
             transform: hasInteracted
@@ -309,153 +290,34 @@ export function Landing() {
             transition={{ delay: 0.4, duration: 0.3 }}
             animate={fontAvailable ? { opacity: 1, y: 0, scale: 1 } : undefined}
           >
-            <AnimatePresence>
-              {formActive ? (
-                <motion.form
-                  key="form"
-                  initial={{ opacity: 0, width: 0, scale: 0.6 }}
-                  animate={{
-                    opacity: 1,
-                    width: 300,
-                    scale: 1,
-                  }}
-                  exit={{ opacity: 0, width: 0, scale: 0.6 }}
-                  onSubmit={(e) => {
-                    e.preventDefault()
-                    setFormActive(false)
-                    setSubmitting(true)
-
-                    const revert = () => {
-                      setTimeout(() => {
-                        setFormActive(false)
-                        setSubmitting(false)
-                        setSubscribed(false)
-                        setFailed(false)
-                      }, 1500)
-                    }
-
-                    // submit
-                    fetch(`${apiEndpoint}/waitlist/subscribe`, {
-                      method: "POST",
-                      headers: {
-                        "Content-Type": "application/json",
-                      },
-                      body: JSON.stringify({
-                        email,
-                        userAgent: navigator.userAgent,
-                        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-                      }),
-                    })
-                      .then(() => {
-                        setFormActive(false)
-                        setSubmitting(false)
-                        setSubscribed(true)
-                        setEmail("")
-                        revert()
-                      })
-                      .catch(() => {
-                        setFailed(true)
-                        setFormActive(false)
-                        setSubmitting(false)
-                        setSubscribed(false)
-                        revert()
-                      })
-                  }}
-                  {...stylex.props(styles.emailForm, focused ? styles.emailFormActive : null)}
-                  style={{
-                    top: 0,
-                    overflow: "hidden",
-                    position: "absolute",
-                    transform: hasInteracted
-                      ? `translate(${parallaxOffset.x * 0.2 * -1}px, ${parallaxOffset.y * 0.1 * -1}px)`
-                      : undefined,
-                  }}
-                >
-                  <motion.input
-                    key="input"
-                    type="email"
-                    ref={inputRef}
-                    placeholder={COPY.cta.inputPlaceholder}
-                    {...stylex.props(styles.emailInput)}
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    onFocus={() => {
-                      setFocused(true)
-                    }}
-                    onBlur={() => {
-                      setFocused(false)
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Escape") {
-                        setFormActive(false)
-                      }
-                    }}
-                  />
-
-                  <motion.button {...stylex.props(styles.emailButton)}>
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="24"
-                      height="24"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <line x1="5" y1="12" x2="19" y2="12"></line>
-                      <polyline points="12 5 19 12 12 19"></polyline>
-                    </svg>
-                  </motion.button>
-                </motion.form>
-              ) : (
-                <motion.div
-                  key="btn"
-                  {...stylex.props(styles.button)}
-                  initial={isntInitialRender ? { opacity: 0, width: 0, scale: 0.6 } : undefined}
-                  animate={{
-                    opacity: 1,
-                    width: 300,
-                    scale: 1,
-                  }}
-                  exit={{ opacity: 0, scale: 0.6, width: 0 }}
-                  style={{
-                    top: 0,
-                    position: "absolute",
-                    transform: hasInteracted
-                      ? `translate(${parallaxOffset.x * 0.2 * -1}px, ${parallaxOffset.y * 0.1 * -1}px)`
-                      : undefined,
-                  }}
-                  onClick={(e) => {
-                    e.preventDefault()
-                    setFormActive(true)
-                    requestAnimationFrame(() => {
-                      // focus input
-                      inputRef.current?.focus()
-                      inputRef.current?.select()
-                    })
-                  }}
-                  whileTap={{ scale: formActive ? 1 : 0.95 }}
-                >
-                  <span
-                    style={{
-                      display: "block",
-                      transform: applyDynamicEffects ? `translate(${parallaxOffset.x * 0.08 * -1}px, 0px)` : undefined,
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {failed
-                      ? COPY.cta.failed
-                      : submitting
-                      ? COPY.cta.submitting
-                      : subscribed
-                      ? COPY.cta.success
-                      : COPY.cta.default}
-                  </span>
-                </motion.div>
-              )}
-            </AnimatePresence>
+            <motion.a
+              href="/download"
+              {...stylex.props(styles.button)}
+              initial={isntInitialRender ? { opacity: 0, width: 0, scale: 0.6 } : undefined}
+              animate={{
+                opacity: 1,
+                width: 300,
+                scale: 1,
+              }}
+              style={{
+                top: 0,
+                position: "absolute",
+                transform: hasInteracted
+                  ? `translate(${parallaxOffset.x * 0.2 * -1}px, ${parallaxOffset.y * 0.1 * -1}px)`
+                  : undefined,
+              }}
+              whileTap={{ scale: 0.95 }}
+            >
+              <span
+                style={{
+                  display: "block",
+                  transform: applyDynamicEffects ? `translate(${parallaxOffset.x * 0.08 * -1}px, 0px)` : undefined,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {COPY.cta}
+              </span>
+            </motion.a>
           </motion.div>
         </div>
 
@@ -766,79 +628,6 @@ const styles = stylex.create({
     fontSize: { default: 18, "@media (max-width: 500px)": 15 },
     fontWeight: "700",
     transition: "background-color 0.15s ease-out, transform 0.18s ease-out, box-shadow 0.15s ease-out",
-  },
-
-  emailForm: {
-    height: buttonHeight,
-    paddingLeft: 4,
-    paddingRight: 4,
-    userSelect: "none",
-    cursor: "pointer",
-    backgroundColor: {
-      default: "rgba(255,255,255,0.24)",
-      ":hover": "rgba(255,255,255,0.32)",
-      ":active": "rgba(255,255,255,0.35)",
-    },
-    boxShadow: {
-      default: "inset 0 1px 0 0 rgba(255, 255, 255, 0.2), 0 -1px 2px 2px rgba(255, 255, 255, 0.05)",
-      ":hover":
-        "inset 0 1px 0 0 rgba(255, 255, 255, 0.5), 0 -1px 2px 2px rgba(255, 255, 255, 0.1), 0 -3px 6px 5px rgba(255, 255, 255, 0.06)",
-    },
-    textShadow: "0 1px 1px rgba(0,0,0,0.1)",
-    transform: {
-      default: "scale(1)",
-      ":active": "scale(0.95)",
-    },
-    display: "flex",
-    alignItems: "center",
-    flexDirection: "row",
-    backdropFilter: "blur(25px)",
-    color: "white",
-    borderRadius: 40,
-    textDecoration: "none",
-    fontSize: { default: 18, "@media (max-width: 500px)": 15 },
-    fontWeight: "700",
-    transition: "background-color 0.15s ease-out, transform 0.18s ease-out, box-shadow 0.15s ease-out",
-  },
-
-  emailFormActive: {
-    backgroundColor: "rgba(255,255,255,0.35)",
-    boxShadow:
-      "inset 0 1px 0 0 rgba(255, 255, 255, 0.5), 0 -1px 2px 2px rgba(255, 255, 255, 0.1), 0 -3px 6px 5px rgba(255, 255, 255, 0.06)",
-  },
-
-  emailInput: {
-    height: buttonHeight - 8,
-    backgroundColor: "none",
-    width: "100%",
-    minWidth: 0,
-    flexShrink: 1,
-    color: "white",
-    fontWeight: 700,
-    textAlign: "center",
-    fontSize: 18,
-    "::placeholder": {
-      color: "rgba(255,255,255,0.9)",
-      fontWeight: 400,
-    },
-    borderColor: "none",
-    outline: "none",
-  },
-
-  emailButton: {
-    flexShrink: 0,
-    height: buttonHeight - 8,
-    width: buttonHeight - 8,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: 18,
-    backgroundColor: {
-      default: "rgba(255,255,255,0.2)",
-      ":hover": "rgba(255,255,255,0.3)",
-    },
-    transition: "background-color 0.15s ease-out",
-    borderRadius: 25,
   },
 
   footer: {

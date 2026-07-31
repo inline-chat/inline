@@ -2,7 +2,7 @@ import * as stylex from "@stylexjs/stylex"
 import { PageContainer } from "./Page"
 import { SUPPORT_EMAIL, emailValue } from "~/lib/email"
 
-const AVAILABILITY = "Available for macOS and iOS in alpha • Web coming soon"
+const AVAILABILITY = "Available for macOS and iOS in beta • Web coming soon"
 const COPYRIGHT = "© 2026 Inline Chat"
 
 export const PageFooter = () => {
@@ -14,9 +14,6 @@ export const PageFooter = () => {
         <div {...stylex.props(styles.footerContent)}>
           <div>{AVAILABILITY}</div>
           <div {...stylex.props(styles.links)}>
-            <a href="/waitlist" {...stylex.props(styles.link)}>
-              Join Waitlist
-            </a>
             <a href="/download" {...stylex.props(styles.link)}>
               Downloads
             </a>

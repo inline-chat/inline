@@ -13,8 +13,8 @@ export const PageMenu = () => {
             </div>
           </a>
           <div {...stylex.props(styles.links)}>
-            <a href="/" {...stylex.props(styles.link)}>
-              Join Waitlist
+            <a href="/download" {...stylex.props(styles.link)}>
+              Download
             </a>
           </div>
         </div>

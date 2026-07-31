@@ -44,7 +44,7 @@ function Download() {
               Docs
             </a>
             <a href="/" {...stylex.props(styles.navLink)}>
-              Join the Waitlist
+              Home
             </a>
             <a href="https://x.com/inline_chat" target="_blank" rel="noopener noreferrer" {...stylex.props(styles.navLink)}>
               X
@@ -73,7 +73,7 @@ function Download() {
           <p {...stylex.props(styles.hint)}>
             Supports macOS 15+ and iOS 18+
             <br />
-            Alpha • Currently invite-only
+            Beta
           </p>
         </section>
 
