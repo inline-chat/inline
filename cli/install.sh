@@ -165,7 +165,7 @@ detect_target() {
     Darwin)
       case "$arch" in
         arm64) echo "aarch64-apple-darwin" ;;
-        x86_64) echo "x86_64-apple-darwin" ;;
+        x86_64) error "Intel macOS is no longer supported; Inline CLI requires Apple silicon" ;;
         *) error "Unsupported architecture: $arch" ;;
       esac
       ;;
