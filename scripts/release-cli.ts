@@ -1,0 +1,877 @@
+import { S3Client } from "bun";
+import { createHash } from "crypto";
+import { copyFile, mkdir, readFile, realpath, rm, stat, writeFile } from "fs/promises";
+import { basename, dirname, join, resolve } from "path";
+
+const rootDir = resolve(import.meta.dir, "..");
+const cliDir = join(rootDir, "cli");
+const distDir = join(cliDir, "dist");
+const tempAssetsDir = join(rootDir, "scripts", ".release-tmp");
+const githubRepo = process.env.INLINE_CLI_GITHUB_REPO ?? "inline-chat/inline";
+const githubTagPrefix = process.env.INLINE_CLI_GITHUB_TAG_PREFIX ?? "cli-v";
+const githubRemote = process.env.INLINE_CLI_GIT_REMOTE ?? "origin";
+const githubReleaseTarget = process.env.INLINE_CLI_GITHUB_TARGET;
+const homebrewTapPath =
+  process.env.INLINE_HOMEBREW_TAP_PATH ?? resolve(rootDir, "..", "homebrew-inline");
+const homebrewTapRemote = process.env.INLINE_HOMEBREW_TAP_REMOTE ?? "origin";
+const signingIdentity = process.env.APPLE_SIGNING_IDENTITY ?? process.env.MACOS_CERTIFICATE_NAME;
+const appleId = process.env.APPLE_ID;
+const applePassword = process.env.APPLE_PASSWORD;
+const appleTeamId = process.env.APPLE_TEAM_ID;
+const appleNotarizationKey = process.env.APPLE_NOTARIZATION_KEY;
+const appleNotarizationKeyId = process.env.APPLE_NOTARIZATION_KEY_ID;
+const appleNotarizationIssuer = process.env.APPLE_NOTARIZATION_ISSUER;
+const skipNotarize =
+  isTruthy(process.env.INLINE_SKIP_NOTARIZE) || isTruthy(process.env.SKIP_NOTARIZE);
+const resumeRelease = isTruthy(process.env.INLINE_CLI_RELEASE_RESUME);
+const defaultTargets = [
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-musl",
+  "x86_64-unknown-linux-musl",
+] as const;
+const supportedTargets = [...defaultTargets] as const;
+
+async function main() {
+  const command = process.argv[2] ?? "release";
+
+  if (command === "release") {
+    const { r2, publicBaseUrl, prefix } = getR2Context();
+    await runRelease(r2, publicBaseUrl, prefix);
+  } else if (command === "build") {
+    await runBuildArtifacts();
+  } else if (command === "publish") {
+    const { r2, publicBaseUrl, prefix } = getR2Context();
+    await runPublish(r2, publicBaseUrl, prefix);
+  } else {
+    throw new Error(
+      `Unknown command: ${command}. Supported commands: release, build, publish.`,
+    );
+  }
+}
+
+if (import.meta.main) {
+  await main();
+}
+
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Missing required env var: ${name}`);
+  }
+  return value;
+}
+
+function trimSlash(value: string): string {
+  return value.replace(/^\/+|\/+$/g, "");
+}
+
+function isTruthy(value: string | undefined): boolean {
+  return ["1", "true", "yes"].includes(value?.toLowerCase() ?? "");
+}
+
+function getR2Context() {
+  const accessKeyId = requireEnv("PUBLIC_RELEASES_R2_ACCESS_KEY_ID");
+  const secretAccessKey = requireEnv("PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY");
+  const bucket = requireEnv("PUBLIC_RELEASES_R2_BUCKET");
+  const endpoint = requireEnv("PUBLIC_RELEASES_R2_ENDPOINT");
+  const publicBaseUrl = trimSlash(requireEnv("PUBLIC_RELEASES_R2_PUBLIC_BASE_URL"));
+  const prefix = "cli";
+
+  const r2 = new S3Client({
+    accessKeyId,
+    secretAccessKey,
+    bucket,
+    endpoint,
+  });
+
+  return { r2, publicBaseUrl, prefix };
+}
+
+async function readCargoVersion(path: string): Promise<string> {
+  const contents = await readFile(path, "utf8");
+  const match = contents.match(/^version\s*=\s*"([^"]+)"/m);
+  if (!match) {
+    throw new Error("Failed to read version from Cargo.toml");
+  }
+  return match[1];
+}
+
+export function isPrereleaseVersion(version: string): boolean {
+  return version.includes("-");
+}
+
+export function manifestObjectKey(prefix: string, version: string): string {
+  return isPrereleaseVersion(version)
+    ? `${prefix}/v${version}/manifest.json`
+    : `${prefix}/manifest.json`;
+}
+
+function manifestPublicUrl(publicBaseUrl: string, prefix: string, version: string): string {
+  return `${publicBaseUrl}/${manifestObjectKey(prefix, version)}`;
+}
+
+function logPublishedRelease(publicBaseUrl: string, prefix: string, context: ReleaseContext) {
+  console.log(`Uploaded Inline CLI v${context.version}`);
+  console.log(`Manifest: ${manifestPublicUrl(publicBaseUrl, prefix, context.version)}`);
+  if (isPrereleaseVersion(context.version)) {
+    console.log("Prerelease: stable manifest, install script, and Homebrew cask were not advanced.");
+    return;
+  }
+  console.log(`Install: ${publicBaseUrl}/${prefix}/install.sh`);
+  console.log(`Install command: curl -fsSL ${publicBaseUrl}/${prefix}/install.sh | sh`);
+}
+
+async function sha256File(path: string): Promise<string> {
+  const data = await readFile(path);
+  return createHash("sha256").update(data).digest("hex");
+}
+
+async function runCommand(command: string, args: string[], options: { cwd?: string } = {}) {
+  const proc = Bun.spawn([command, ...args], {
+    cwd: options.cwd,
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  const exitCode = await proc.exited;
+  if (exitCode !== 0) {
+    throw new Error(`Command failed: ${command} ${redactArgs(args).join(" ")}`);
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function redactArgs(args: string[]): string[] {
+  const out = [...args];
+  for (let i = 0; i < out.length; i += 1) {
+    const current = out[i];
+    if (current === "--password" && i + 1 < out.length) {
+      out[i + 1] = "<redacted>";
+    }
+  }
+  return out;
+}
+
+async function runCommandCapture(
+  command: string,
+  args: string[],
+  options: { cwd?: string } = {},
+) {
+  const proc = Bun.spawn([command, ...args], {
+    cwd: options.cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const stdout = await new Response(proc.stdout).text();
+  const stderr = await new Response(proc.stderr).text();
+  const exitCode = await proc.exited;
+  return { stdout, stderr, exitCode };
+}
+
+function shouldRetryNotarize(output: string): boolean {
+  // Observed: "Error: HTTPClientError.connectTimeout"
+  return /(connecttimeout|econnreset|enotfound|timed out|tls|network)/i.test(output);
+}
+
+async function uploadFile(
+  r2: S3Client,
+  key: string,
+  path: string,
+  contentType: string,
+) {
+  const file = r2.file(key);
+  await file.write(Bun.file(path), { type: contentType });
+}
+
+type ReleaseContext = {
+  version: string;
+  targets: readonly string[];
+  releaseDir: string;
+};
+
+type HomebrewHashes = {
+  arm: string;
+  intel: string;
+  linuxArm: string;
+  linuxIntel: string;
+};
+
+type GitHubReleaseAsset = {
+  name: string;
+  digest?: string | null;
+};
+
+async function runRelease(r2: S3Client, publicBaseUrl: string, prefix: string) {
+  const context = await getReleaseContext();
+  await assertNoDuplicateVersion(context);
+  await runBuild(context);
+  await signAndNotarize(context);
+  await publishArtifacts(r2, publicBaseUrl, prefix, context);
+
+  logPublishedRelease(publicBaseUrl, prefix, context);
+}
+
+async function runBuildArtifacts() {
+  const context = await getReleaseContext();
+  await runBuild(context);
+  await signAndNotarize(context);
+  console.log(`Built Inline CLI v${context.version} for ${context.targets.join(", ")}`);
+}
+
+async function runPublish(r2: S3Client, publicBaseUrl: string, prefix: string) {
+  const context = await getReleaseContext();
+  if (resumeRelease && (await resumePublishedRelease(context))) {
+    console.log(`Resumed Inline CLI v${context.version}`);
+    logPublishedRelease(publicBaseUrl, prefix, context);
+    return;
+  }
+
+  if (!resumeRelease) {
+    await assertNoDuplicateVersion(context);
+  }
+  await assertBuiltArtifacts(context);
+  await publishArtifacts(r2, publicBaseUrl, prefix, context);
+
+  logPublishedRelease(publicBaseUrl, prefix, context);
+}
+
+async function publishArtifacts(
+  r2: S3Client,
+  publicBaseUrl: string,
+  prefix: string,
+  context: ReleaseContext,
+) {
+  await runPackageManifest(r2, publicBaseUrl, prefix, context);
+  if (!isPrereleaseVersion(context.version)) {
+    await uploadInstall(r2, prefix);
+  }
+  await createBundle(context);
+  await publishGitHubRelease(context);
+  if (isPrereleaseVersion(context.version)) {
+    console.log("Skipping Homebrew cask update for prerelease.");
+  } else {
+    await updateHomebrewCask(context);
+  }
+}
+
+async function resumePublishedRelease(context: ReleaseContext): Promise<boolean> {
+  const tag = releaseTag(context.version);
+  const assets = await githubReleaseAssets(tag);
+  if (!assets) {
+    return false;
+  }
+
+  const expected = githubReleaseAssetPaths(context).map((asset) => basename(asset));
+  const names = new Set(assets.map((asset) => asset.name));
+  const missing = expected.filter((name) => !names.has(name));
+  if (missing.length > 0) {
+    console.log(`GitHub release ${tag} exists but is missing assets: ${missing.join(", ")}`);
+    return false;
+  }
+
+  if (!isPrereleaseVersion(context.version)) {
+    await updateHomebrewCask(context, homebrewHashesFromReleaseAssets(context, assets));
+  }
+  console.log(`GitHub release ${tag} already exists with all expected assets.`);
+  return true;
+}
+
+function isLinuxTarget(target: string): boolean {
+  return target.includes("-unknown-linux-");
+}
+
+async function ensureRustTargetsInstalled(targets: readonly string[]) {
+  const result = await runCommandCapture("rustup", ["target", "list", "--installed"]);
+  if (result.exitCode !== 0) {
+    throw new Error(`Failed to read installed Rust targets: ${result.stderr || result.stdout}`);
+  }
+
+  const installed = new Set(
+    result.stdout
+      .split("\n")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0),
+  );
+  const missing = targets.filter((target) => !installed.has(target));
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing Rust targets: ${missing.join(", ")}. Install with: rustup target add ${missing.join(" ")}`,
+    );
+  }
+}
+
+async function hasCargoZigbuild(): Promise<boolean> {
+  const result = await runCommandCapture("cargo", ["zigbuild", "--help"], { cwd: cliDir });
+  return result.exitCode === 0;
+}
+
+async function rustHostTarget(): Promise<string | null> {
+  const result = await runCommandCapture("rustc", ["-vV"]);
+  if (result.exitCode !== 0) {
+    return null;
+  }
+  return result.stdout.match(/^host:\s*(\S+)/m)?.[1] ?? null;
+}
+
+async function buildArgsForTarget(
+  target: string,
+  canZigbuild: boolean,
+  hostTarget: string | null,
+): Promise<string[]> {
+  if (!isLinuxTarget(target) || target === hostTarget) {
+    return ["build", "--release", "--locked", "--target", target];
+  }
+  if (!canZigbuild) {
+    throw new Error(
+      `Cross-building ${target} requires cargo-zigbuild. Install with: cargo install cargo-zigbuild --locked`,
+    );
+  }
+  return ["zigbuild", "--release", "--locked", "--target", target];
+}
+
+async function runBuild(context: ReleaseContext) {
+  await ensureRustTargetsInstalled(context.targets);
+  const canZigbuild = await hasCargoZigbuild();
+  const hostTarget = await rustHostTarget();
+
+  for (const target of context.targets) {
+    const args = await buildArgsForTarget(target, canZigbuild, hostTarget);
+    await runCommand("cargo", args, { cwd: cliDir });
+  }
+  console.log("Build complete.");
+}
+
+async function runPackageManifest(
+  r2: S3Client,
+  publicBaseUrl: string,
+  prefix: string,
+  context: ReleaseContext,
+) {
+  const manifest = await buildManifest(context, publicBaseUrl, prefix, r2);
+  const manifestPath = join(distDir, "manifest.json");
+  await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+  await uploadFile(
+    r2,
+    manifestObjectKey(prefix, context.version),
+    manifestPath,
+    "application/json",
+  );
+  console.log("Manifest packaged and uploaded.");
+}
+
+async function uploadInstall(r2: S3Client, prefix: string) {
+  const installPath = join(cliDir, "install.sh");
+  await uploadFile(r2, `${prefix}/install.sh`, installPath, "text/x-shellscript");
+}
+
+async function buildManifest(
+  context: ReleaseContext,
+  publicBaseUrl: string,
+  prefix: string,
+  r2: S3Client,
+): Promise<UpdateManifest> {
+  const manifest: UpdateManifest = {
+    version: context.version,
+    publishedAt: new Date().toISOString(),
+    installUrl: `${publicBaseUrl}/${prefix}/install.sh`,
+    targets: {},
+  };
+
+  for (const target of context.targets) {
+    const binaryPath = join(cliDir, "target", target, "release", "inline");
+    const artifactName = `inline-cli-${context.version}-${target}.tar.gz`;
+    const artifactPath = join(context.releaseDir, artifactName);
+
+    await runCommand("tar", ["-czf", artifactPath, "-C", dirname(binaryPath), "inline"]);
+
+    const sha256 = await sha256File(artifactPath);
+    const shaPath = `${artifactPath}.sha256`;
+    await writeFile(shaPath, `${sha256}  ${artifactName}\n`);
+
+    const size = (await stat(artifactPath)).size;
+    const publicUrl = `${publicBaseUrl}/${prefix}/v${context.version}/${artifactName}`;
+
+    manifest.targets[target] = {
+      url: publicUrl,
+      sha256,
+      size,
+    };
+
+    await uploadFile(
+      r2,
+      `${prefix}/v${context.version}/${artifactName}`,
+      artifactPath,
+      "application/gzip",
+    );
+    await uploadFile(
+      r2,
+      `${prefix}/v${context.version}/${artifactName}.sha256`,
+      shaPath,
+      "text/plain",
+    );
+  }
+
+  return manifest;
+}
+
+async function assertBuiltArtifacts(context: ReleaseContext) {
+  const missing: string[] = [];
+  for (const target of context.targets) {
+    const binaryPath = join(cliDir, "target", target, "release", "inline");
+    await stat(binaryPath).catch(() => {
+      missing.push(`${target} (${binaryPath})`);
+    });
+  }
+
+  if (missing.length > 0) {
+    throw new Error(`Missing built CLI artifact(s): ${missing.join(", ")}`);
+  }
+}
+
+async function signAndNotarize(context: ReleaseContext) {
+  const macTargets = context.targets.filter((target) => target.endsWith("-apple-darwin"));
+  if (macTargets.length === 0) {
+    console.log("Skipping sign/notarize (no macOS targets selected).");
+    return;
+  }
+
+  if (!signingIdentity) {
+    throw new Error("Missing signing env var: APPLE_SIGNING_IDENTITY");
+  }
+  const hasApiKey =
+    Boolean(appleNotarizationKey) &&
+    Boolean(appleNotarizationKeyId) &&
+    Boolean(appleNotarizationIssuer);
+  const hasAppleId = Boolean(appleId) && Boolean(applePassword) && Boolean(appleTeamId);
+  if (!skipNotarize && !hasApiKey && !hasAppleId) {
+    throw new Error(
+      "Missing notarization env vars: provide APPLE_NOTARIZATION_KEY, APPLE_NOTARIZATION_KEY_ID, APPLE_NOTARIZATION_ISSUER or APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID",
+    );
+  }
+
+  const notarizeRetries = Number.parseInt(process.env.INLINE_NOTARY_RETRIES ?? "4", 10);
+  const notarizeMaxAttempts = Number.isFinite(notarizeRetries)
+    ? Math.max(1, notarizeRetries + 1)
+    : 5;
+  const notarizeBaseDelayMs = Number.parseInt(
+    process.env.INLINE_NOTARY_RETRY_BASE_DELAY_MS ?? "30000",
+    10,
+  );
+  const notarizeMaxDelayMs = Number.parseInt(
+    process.env.INLINE_NOTARY_RETRY_MAX_DELAY_MS ?? "300000",
+    10,
+  );
+
+  const keyPath =
+    !skipNotarize && hasApiKey ? join(context.releaseDir, "notarization-key.p8") : null;
+  if (keyPath && appleNotarizationKey) {
+    await writeFile(keyPath, appleNotarizationKey, { mode: 0o600 });
+  }
+
+  try {
+    for (const target of macTargets) {
+      const binaryPath = join(cliDir, "target", target, "release", "inline");
+      const zipName = `inline-cli-${context.version}-${target}-notarize.zip`;
+      const zipPath = join(context.releaseDir, zipName);
+
+      await runCommand(
+        "codesign",
+        [
+          "--force",
+          "--identifier",
+          "chat.inline.cli",
+          "--options",
+          "runtime",
+          "--timestamp",
+          "--sign",
+          signingIdentity,
+          binaryPath,
+        ],
+        { cwd: cliDir },
+      );
+
+      await runCommand("codesign", ["--verify", "--strict", "--verbose=2", binaryPath], {
+        cwd: cliDir,
+      });
+
+      if (skipNotarize) {
+        console.log(`Skipping notarization for ${target} (INLINE_SKIP_NOTARIZE=1).`);
+        continue;
+      }
+
+      await runCommand("zip", ["-j", "-X", zipPath, binaryPath], { cwd: cliDir });
+
+      const args = notarytoolSubmitArgs(zipPath, keyPath);
+
+      for (let attempt = 1; attempt <= notarizeMaxAttempts; attempt += 1) {
+        const { stdout, stderr, exitCode } = await runCommandCapture("xcrun", args, {
+          cwd: cliDir,
+        });
+        if (stdout) process.stdout.write(stdout);
+        if (stderr) process.stderr.write(stderr);
+
+        if (exitCode === 0) {
+          break;
+        }
+
+        const combined = `${stdout}\n${stderr}`;
+        const retryable = shouldRetryNotarize(combined);
+        const isLastAttempt = attempt === notarizeMaxAttempts;
+
+        if (!retryable || isLastAttempt) {
+          throw new Error(`Command failed: xcrun ${redactArgs(args).join(" ")}`);
+        }
+
+        const exp = attempt - 1;
+        const baseDelay = Number.isFinite(notarizeBaseDelayMs) ? notarizeBaseDelayMs : 30000;
+        const maxDelay = Number.isFinite(notarizeMaxDelayMs) ? notarizeMaxDelayMs : 300000;
+        const delay = Math.min(maxDelay, baseDelay * 2 ** exp);
+        console.warn(
+          `Notarization upload failed (attempt ${attempt}/${notarizeMaxAttempts}); retrying in ${Math.round(
+            delay / 1000,
+          )}s...`,
+        );
+        await sleep(delay);
+      }
+
+    }
+  } finally {
+    if (keyPath) {
+      await rm(keyPath, { force: true });
+    }
+  }
+}
+
+function notarytoolSubmitArgs(zipPath: string, keyPath: string | null): string[] {
+  const args = ["notarytool", "submit", zipPath];
+  if (keyPath) {
+    args.push("--key", keyPath);
+    args.push("--key-id", appleNotarizationKeyId ?? "");
+    args.push("--issuer", appleNotarizationIssuer ?? "");
+  } else {
+    args.push("--apple-id", appleId ?? "");
+    args.push("--password", applePassword ?? "");
+    args.push("--team-id", appleTeamId ?? "");
+  }
+  args.push("--wait", "--timeout", "60m", "--no-s3-acceleration");
+  return args;
+}
+
+async function createBundle(context: ReleaseContext) {
+  const bundleWorkDir = join(tempAssetsDir, `bundle-v${context.version}-${Date.now()}`);
+  await mkdir(bundleWorkDir, { recursive: true });
+
+  const manifestPath = join(distDir, "manifest.json");
+  await copyFile(manifestPath, join(bundleWorkDir, "manifest.json"));
+  await copyFile(join(cliDir, "install.sh"), join(bundleWorkDir, "install.sh"));
+
+  for (const target of context.targets) {
+    const artifactName = `inline-cli-${context.version}-${target}.tar.gz`;
+    const artifactPath = join(context.releaseDir, artifactName);
+    await copyFile(artifactPath, join(bundleWorkDir, artifactName));
+    await copyFile(`${artifactPath}.sha256`, join(bundleWorkDir, `${artifactName}.sha256`));
+  }
+
+  const bundleName = `inline-cli-v${context.version}-bundle.tar.gz`;
+  const bundlePath = join(context.releaseDir, bundleName);
+  await runCommand("tar", ["-czf", bundlePath, "-C", bundleWorkDir, "."]);
+  console.log(`Bundle created: ${bundlePath}`);
+}
+
+async function updateHomebrewCask(context: ReleaseContext, hashes?: HomebrewHashes) {
+  if (process.env.INLINE_SKIP_HOMEBREW === "1") {
+    console.log("Skipping Homebrew cask update (INLINE_SKIP_HOMEBREW=1).");
+    return;
+  }
+
+  const armTarget = "aarch64-apple-darwin";
+  const intelTarget = "x86_64-apple-darwin";
+  const linuxArmTarget = "aarch64-unknown-linux-gnu";
+  const linuxIntelTarget = "x86_64-unknown-linux-gnu";
+  if (
+    !context.targets.includes(armTarget) ||
+    !context.targets.includes(intelTarget) ||
+    !context.targets.includes(linuxArmTarget) ||
+    !context.targets.includes(linuxIntelTarget)
+  ) {
+    console.log(
+      "Skipping Homebrew cask update (required targets not present: macOS arm/intel + Linux gnu arm/intel).",
+    );
+    return;
+  }
+
+  const caskPath = join(homebrewTapPath, "Casks", "inline.rb");
+  const caskRelativePath = join("Casks", "inline.rb");
+  await stat(caskPath).catch(() => {
+    throw new Error(
+      `Homebrew tap not found at ${caskPath}. Set INLINE_HOMEBREW_TAP_PATH if needed.`,
+    );
+  });
+
+  const status = await runCommandCapture("git", ["status", "--porcelain"], {
+    cwd: homebrewTapPath,
+  });
+  if (status.exitCode !== 0) {
+    throw new Error(`Failed to check Homebrew tap status: ${status.stderr || status.stdout}`);
+  }
+  if (status.stdout.trim()) {
+    throw new Error("Homebrew tap has uncommitted changes. Commit/stash before release.");
+  }
+
+  const artifact = (target: string) =>
+    join(context.releaseDir, `inline-cli-${context.version}-${target}.tar.gz`);
+  const armSha = hashes?.arm ?? (await sha256File(artifact(armTarget)));
+  const intelSha = hashes?.intel ?? (await sha256File(artifact(intelTarget)));
+  const linuxArmSha = hashes?.linuxArm ?? (await sha256File(artifact(linuxArmTarget)));
+  const linuxIntelSha = hashes?.linuxIntel ?? (await sha256File(artifact(linuxIntelTarget)));
+
+  const contents = await readFile(caskPath, "utf8");
+  const versionPattern = /version\s+"[^"]+"/;
+  const shaPattern = /sha256[\s\S]*?\n\n  url /m;
+
+  if (!versionPattern.test(contents) || !shaPattern.test(contents)) {
+    throw new Error(`Failed to locate version/sha256 entries in ${caskPath}`);
+  }
+
+  const shaBlock = [
+    `sha256 arm:          "${armSha}",`,
+    `       intel:        "${intelSha}",`,
+    `       arm64_linux:  "${linuxArmSha}",`,
+    `       x86_64_linux: "${linuxIntelSha}"`,
+  ].join("\n");
+
+  const updated = contents
+    .replace(versionPattern, `version "${context.version}"`)
+    .replace(shaPattern, `${shaBlock}\n\n  url `);
+
+  if (updated === contents) {
+    console.log("Homebrew cask already up to date.");
+    return;
+  }
+
+  await writeFile(caskPath, updated);
+
+  const branch = await runCommandCapture("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+    cwd: homebrewTapPath,
+  });
+  if (branch.exitCode !== 0) {
+    throw new Error(`Failed to read Homebrew tap branch: ${branch.stderr || branch.stdout}`);
+  }
+
+  await runCommand("git", ["add", caskRelativePath], { cwd: homebrewTapPath });
+  await runCommand(
+    "git",
+    ["commit", "-m", `cask: bump inline to v${context.version}`],
+    { cwd: homebrewTapPath },
+  );
+  await runCommand("git", ["push", homebrewTapRemote, branch.stdout.trim()], {
+    cwd: homebrewTapPath,
+  });
+  console.log("Homebrew cask updated and pushed.");
+}
+
+export function releaseTag(version: string): string {
+  return `${githubTagPrefix}${version}`;
+}
+
+async function assertNoDuplicateVersion(context: ReleaseContext) {
+  const tag = releaseTag(context.version);
+
+  const localTag = await runCommandCapture("git", ["tag", "--list", tag], { cwd: rootDir });
+  if (localTag.exitCode !== 0) {
+    throw new Error(`Failed to check local tags: ${localTag.stderr || localTag.stdout}`);
+  }
+  if (localTag.stdout.trim()) {
+    throw new Error(`Tag ${tag} already exists locally. Bump CLI version before releasing.`);
+  }
+
+  const remoteUrl = `https://github.com/${githubRepo}.git`;
+  const remoteTag = await runCommandCapture(
+    "git",
+    ["ls-remote", "--tags", remoteUrl, tag],
+    { cwd: rootDir },
+  );
+  if (remoteTag.exitCode !== 0) {
+    throw new Error(`Failed to check remote tags: ${remoteTag.stderr || remoteTag.stdout}`);
+  }
+  if (remoteTag.stdout.trim()) {
+    throw new Error(`Tag ${tag} already exists on ${githubRepo}. Bump CLI version.`);
+  }
+}
+
+async function publishGitHubRelease(context: ReleaseContext) {
+  const tag = releaseTag(context.version);
+  const assets = githubReleaseAssetPaths(context);
+  const names = assets.map((asset) => basename(asset));
+
+  if (resumeRelease) {
+    const existing = await githubReleaseAssets(tag);
+    if (existing) {
+      const existingNames = new Set(existing.map((asset) => asset.name));
+      const missing = names.filter((name) => !existingNames.has(name));
+      if (missing.length === 0) {
+        console.log(`GitHub release ${tag} already exists with all expected assets.`);
+        return;
+      }
+    }
+  }
+
+  const createArgs = [
+    "release",
+    "create",
+    tag,
+    "--repo",
+    githubRepo,
+    "--title",
+    `Inline CLI v${context.version}`,
+    "--notes",
+    `Automated release for Inline CLI v${context.version}.`,
+  ];
+
+  if (githubReleaseTarget) {
+    createArgs.push("--target", githubReleaseTarget);
+  } else {
+    if (!(await localTagExists(tag))) {
+      await runCommand("git", ["tag", "-a", tag, "-m", `Inline CLI v${context.version}`], {
+        cwd: rootDir,
+      });
+    }
+    if (!(await remoteTagExists(tag))) {
+      await runCommand("git", ["push", githubRemote, tag], { cwd: rootDir });
+    }
+  }
+
+  if (isPrereleaseVersion(context.version)) {
+    createArgs.push("--prerelease");
+  }
+
+  await runCommand(
+    "gh",
+    [...createArgs, ...assets],
+    { cwd: rootDir },
+  );
+}
+
+function githubReleaseAssetPaths(context: ReleaseContext): string[] {
+  const assets: string[] = [];
+  for (const target of context.targets) {
+    const artifactName = `inline-cli-${context.version}-${target}.tar.gz`;
+    const artifactPath = join(context.releaseDir, artifactName);
+    assets.push(artifactPath, `${artifactPath}.sha256`);
+  }
+
+  assets.push(join(context.releaseDir, `inline-cli-v${context.version}-bundle.tar.gz`));
+  return assets;
+}
+
+async function githubReleaseAssets(tag: string): Promise<GitHubReleaseAsset[] | null> {
+  const result = await runCommandCapture(
+    "gh",
+    ["release", "view", tag, "--repo", githubRepo, "--json", "assets"],
+    { cwd: rootDir },
+  );
+  if (result.exitCode !== 0) {
+    const output = `${result.stdout}\n${result.stderr}`;
+    if (/release not found|not found|404/i.test(output)) {
+      return null;
+    }
+    throw new Error(`Failed to check GitHub release ${tag}: ${result.stderr || result.stdout}`);
+  }
+
+  const data = JSON.parse(result.stdout) as { assets: GitHubReleaseAsset[] };
+  return data.assets;
+}
+
+function homebrewHashesFromReleaseAssets(
+  context: ReleaseContext,
+  assets: readonly GitHubReleaseAsset[],
+): HomebrewHashes {
+  const byName = new Map(assets.map((asset) => [asset.name, asset]));
+  const digestFor = (target: string): string => {
+    const name = `inline-cli-${context.version}-${target}.tar.gz`;
+    const digest = byName.get(name)?.digest;
+    const sha = digest?.replace(/^sha256:/, "");
+    if (!sha || !/^[a-f0-9]{64}$/i.test(sha)) {
+      throw new Error(`Missing sha256 digest for GitHub release asset: ${name}`);
+    }
+    return sha;
+  };
+
+  return {
+    arm: digestFor("aarch64-apple-darwin"),
+    intel: digestFor("x86_64-apple-darwin"),
+    linuxArm: digestFor("aarch64-unknown-linux-gnu"),
+    linuxIntel: digestFor("x86_64-unknown-linux-gnu"),
+  };
+}
+
+async function localTagExists(tag: string): Promise<boolean> {
+  const result = await runCommandCapture("git", ["tag", "--list", tag], { cwd: rootDir });
+  if (result.exitCode !== 0) {
+    throw new Error(`Failed to check local tags: ${result.stderr || result.stdout}`);
+  }
+  return Boolean(result.stdout.trim());
+}
+
+async function remoteTagExists(tag: string): Promise<boolean> {
+  const remoteUrl = `https://github.com/${githubRepo}.git`;
+  const result = await runCommandCapture("git", ["ls-remote", "--tags", remoteUrl, tag], {
+    cwd: rootDir,
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(`Failed to check remote tags: ${result.stderr || result.stdout}`);
+  }
+  return Boolean(result.stdout.trim());
+}
+
+async function getReleaseContext(): Promise<ReleaseContext> {
+  const publicWorkspaceRoot = dirname(await realpath(cliDir));
+  const version = await readCargoVersion(join(publicWorkspaceRoot, "Cargo.toml"));
+  const targets = getReleaseTargets();
+
+  await mkdir(distDir, { recursive: true });
+  const releaseDir = join(distDir, `v${version}`);
+  await mkdir(releaseDir, { recursive: true });
+
+  await mkdir(tempAssetsDir, { recursive: true });
+
+  return { version, targets, releaseDir };
+}
+
+function getReleaseTargets(): string[] {
+  const raw = process.env.INLINE_CLI_TARGETS?.trim();
+  if (!raw) {
+    return [...defaultTargets];
+  }
+
+  const targets = raw
+    .split(",")
+    .map((target) => target.trim())
+    .filter((target) => target.length > 0);
+  if (targets.length === 0) {
+    throw new Error("INLINE_CLI_TARGETS is set but empty.");
+  }
+
+  const supported = new Set<string>(supportedTargets);
+  const invalid = targets.filter((target) => !supported.has(target));
+  if (invalid.length > 0) {
+    throw new Error(
+      `Unsupported target(s): ${invalid.join(", ")}. Supported targets: ${supportedTargets.join(
+        ", ",
+      )}`,
+    );
+  }
+
+  return [...new Set(targets)];
+}
+
+type UpdateManifest = {
+  version: string;
+  publishedAt: string;
+  installUrl: string;
+  targets: Record<string, { url: string; sha256: string; size: number }>;
+};

@@ -18,6 +18,7 @@ Key paths:
 - `openclaw/` - canonical OpenClaw plugin.
 - `hermes-agent/` - canonical Hermes Agent adapter.
 - `cli/` - canonical Inline CLI source.
+- `scripts/release-cli.ts` and `.github/workflows/cli-release.yml` - canonical local and CI CLI release implementation.
 
 ## Working Rules
 
