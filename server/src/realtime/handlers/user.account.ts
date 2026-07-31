@@ -8,10 +8,16 @@ import {
   type CheckUsernameResult,
   type UpdateProfileInput,
   type UpdateProfileResult,
+  type SetProfilePhotoInput,
+  type SetProfilePhotoResult,
+  type GetExternalProfilePhotoInput,
+  type GetExternalProfilePhotoResult,
+  ExternalProfilePhotoStatus,
 } from "@inline-chat/protocol/core"
 import type { ServerUpdate } from "@in/server/protocol/server"
 import { db } from "@in/server/db"
-import { lower, users, type DbNewUser, type DbUser } from "@in/server/db/schema"
+import { files, lower, users, type DbFile, type DbNewUser, type DbUser } from "@in/server/db/schema"
+import { getFileByUniqueId } from "@in/server/db/models/files"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { encodeUser } from "@in/server/realtime/encoders/encodeUser"
@@ -21,9 +27,16 @@ import { RealtimeUpdates } from "@in/server/realtime/message"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { isReservedUsername } from "@in/server/modules/users/reservedUsernames"
 import { normalizeUsername } from "@in/server/utils/normalize"
+import {
+  externalProfilePhotoResolver,
+  normalizeExternalUsername,
+} from "@in/server/modules/users/externalProfilePhoto"
+import { InMemoryRateLimiter } from "@in/server/modules/oauth/rateLimiter"
 import { eq } from "drizzle-orm"
 
 const USERNAME_UNIQUE_CONSTRAINT = "users_username_unique"
+const externalProfilePhotoRateLimiter = new InMemoryRateLimiter()
+const EXTERNAL_PROFILE_PHOTO_RATE_LIMIT = { max: 10, windowMs: 10 * 60_000 }
 
 export const checkUsernameHandler = async (
   input: CheckUsernameInput,
@@ -104,6 +117,52 @@ export const updateProfileHandler = async (
   return { user: encodeUser({ user }), updates: [update] }
 }
 
+export const setProfilePhotoHandler = async (
+  input: SetProfilePhotoInput,
+  context: HandlerContext,
+): Promise<SetProfilePhotoResult> => {
+  const fileUniqueId = input.fileUniqueId.trim()
+  let photoFile: DbFile | undefined
+
+  if (fileUniqueId) {
+    photoFile = await getFileByUniqueId(fileUniqueId)
+    if (!photoFile || photoFile.userId !== context.userId || photoFile.fileType !== "photo") {
+      throw RealtimeRpcError.BadRequest()
+    }
+  }
+
+  const { user, update } = await updateUserAndPush(
+    context,
+    { photoFileId: photoFile?.id ?? null },
+  )
+  return { user: encodeUser({ user, photoFile }), updates: [update] }
+}
+
+export const getExternalProfilePhotoHandler = async (
+  input: GetExternalProfilePhotoInput,
+  context: HandlerContext,
+): Promise<GetExternalProfilePhotoResult> => {
+  const username = normalizeExternalUsername(input.provider, input.username)
+  if (!username) {
+    throw RealtimeRpcError.BadRequest()
+  }
+
+  const rateLimit = externalProfilePhotoRateLimiter.consume({
+    key: `external-profile-photo:${context.userId}`,
+    nowMs: Date.now(),
+    rule: EXTERNAL_PROFILE_PHOTO_RATE_LIMIT,
+  })
+  if (!rateLimit.allowed) {
+    return {
+      status: ExternalProfilePhotoStatus.EXTERNAL_PROFILE_PHOTO_UNAVAILABLE,
+      photo: new Uint8Array(),
+      mimeType: "",
+    }
+  }
+
+  return externalProfilePhotoResolver.resolve(input.provider, username)
+}
+
 async function usernameAvailability(username: string, currentUserId: number): Promise<UsernameAvailability> {
   if (username.length < 2) {
     return UsernameAvailability.USERNAME_INVALID
@@ -128,14 +187,20 @@ async function usernameAvailability(username: string, currentUserId: number): Pr
   return UsernameAvailability.USERNAME_AVAILABLE
 }
 
-async function updateUserAndPush(context: HandlerContext, props: DbNewUser): Promise<{ user: DbUser; update: Update }> {
+async function updateUserAndPush(
+  context: HandlerContext,
+  props: DbNewUser,
+): Promise<{ user: DbUser; update: Update }> {
   const { user, update } = await db.transaction(async (tx) => {
     const [user] = await tx.update(users).set(props).where(eq(users.id, context.userId)).returning()
     if (!user) {
       throw RealtimeRpcError.UserIdInvalid()
     }
 
-    const protocolUser = encodeUser({ user })
+    const currentPhotoFile = user.photoFileId
+      ? await tx.select().from(files).where(eq(files.id, user.photoFileId)).limit(1).then((rows) => rows[0])
+      : undefined
+    const protocolUser = encodeUser({ user, photoFile: currentPhotoFile })
     const serverUpdate: ServerUpdate["update"] = {
       oneofKind: "updatedUser",
       updatedUser: {

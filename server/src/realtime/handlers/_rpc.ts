@@ -71,6 +71,8 @@ import { createCliSessionHandler } from "@in/server/realtime/handlers/user.creat
 import {
   changeUsernameHandler,
   checkUsernameHandler,
+  getExternalProfilePhotoHandler,
+  setProfilePhotoHandler,
   updateProfileHandler,
 } from "@in/server/realtime/handlers/user.account"
 import { showInChatList } from "@in/server/realtime/handlers/messages.showInChatList"
@@ -806,6 +808,20 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       const result = await updateProfileHandler(call.input.updateProfile, handlerContext)
       return { oneofKind: "updateProfile", updateProfile: result }
+    }
+    case Method.SET_PROFILE_PHOTO: {
+      if (call.input.oneofKind !== "setProfilePhoto") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await setProfilePhotoHandler(call.input.setProfilePhoto, handlerContext)
+      return { oneofKind: "setProfilePhoto", setProfilePhoto: result }
+    }
+    case Method.GET_EXTERNAL_PROFILE_PHOTO: {
+      if (call.input.oneofKind !== "getExternalProfilePhoto") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await getExternalProfilePhotoHandler(call.input.getExternalProfilePhoto, handlerContext)
+      return { oneofKind: "getExternalProfilePhoto", getExternalProfilePhoto: result }
     }
     default:
       throw RealtimeRpcError.UnsupportedRpcMethod(call.method)

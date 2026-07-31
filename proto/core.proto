@@ -1038,6 +1038,8 @@ enum Method {
   SET_GRID_AVATAR_MICROPHONE_ENABLED = 91;
   GET_GRID_HOME = 92;
   CREATE_CLI_SESSION = 93;
+  SET_PROFILE_PHOTO = 94;
+  GET_EXTERNAL_PROFILE_PHOTO = 95;
 }
 
 message RpcCall {
@@ -1136,6 +1138,8 @@ message RpcCall {
     SetGridAvatarMicrophoneEnabledInput setGridAvatarMicrophoneEnabled = 92;
     GetGridHomeInput getGridHome = 93;
     CreateCliSessionInput createCliSession = 94;
+    SetProfilePhotoInput setProfilePhoto = 95;
+    GetExternalProfilePhotoInput getExternalProfilePhoto = 96;
   }
 }
 
@@ -1236,6 +1240,8 @@ message RpcResult {
     SetGridAvatarMicrophoneEnabledResult setGridAvatarMicrophoneEnabled = 92;
     GetGridHomeResult getGridHome = 93;
     CreateCliSessionResult createCliSession = 94;
+    SetProfilePhotoResult setProfilePhoto = 95;
+    GetExternalProfilePhotoResult getExternalProfilePhoto = 96;
   }
 }
 
@@ -1809,6 +1815,39 @@ message UpdateProfileInput {
 message UpdateProfileResult {
   User user = 1;
   repeated Update updates = 2;
+}
+
+message SetProfilePhotoInput {
+  // Empty clears the current profile photo.
+  string file_unique_id = 1;
+}
+
+message SetProfilePhotoResult {
+  User user = 1;
+  repeated Update updates = 2;
+}
+
+enum ExternalProfileProvider {
+  EXTERNAL_PROFILE_PROVIDER_UNSPECIFIED = 0;
+  EXTERNAL_PROFILE_PROVIDER_X = 1;
+}
+
+enum ExternalProfilePhotoStatus {
+  EXTERNAL_PROFILE_PHOTO_STATUS_UNSPECIFIED = 0;
+  EXTERNAL_PROFILE_PHOTO_FOUND = 1;
+  EXTERNAL_PROFILE_PHOTO_NOT_FOUND = 2;
+  EXTERNAL_PROFILE_PHOTO_UNAVAILABLE = 3;
+}
+
+message GetExternalProfilePhotoInput {
+  ExternalProfileProvider provider = 1;
+  string username = 2;
+}
+
+message GetExternalProfilePhotoResult {
+  ExternalProfilePhotoStatus status = 1;
+  bytes photo = 2;
+  string mime_type = 3;
 }
 
 message BotCommand {

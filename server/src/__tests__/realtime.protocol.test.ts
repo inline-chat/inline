@@ -10,6 +10,7 @@ import {
 import { sendMessageToRealtimeSession } from "@in/server/realtime/message"
 import {
   ConnectionError_Reason,
+  ExternalProfileProvider,
   MessageEntity_Type,
   Method,
   PushNotificationProvider,
@@ -17,7 +18,7 @@ import {
   UsernameAvailability,
 } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
-import { sessions, users } from "@in/server/db/schema"
+import { files, sessions, users } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
 import { afterAll, beforeAll, describe, expect, it, mock, spyOn } from "bun:test"
 import Elysia from "elysia"
@@ -981,6 +982,91 @@ describe("realtime protocol safety", () => {
     expect(response.body.oneofKind).toBe("rpcError")
     if (response.body.oneofKind === "rpcError") {
       expect(response.body.rpcError.errorCode).toBe(RpcError_Code.FIRST_NAME_INVALID)
+      expect(response.body.rpcError.code).toBe(400)
+    }
+
+    await wsClosed(ws)
+  })
+
+  it("sets and clears an owned profile photo via RPC", async () => {
+    const { ws, userId } = await authenticateSocket()
+    const [photo] = await db
+      .insert(files)
+      .values({
+        fileUniqueId: `profile-photo-${userId}`,
+        userId,
+        fileType: "photo",
+        mimeType: "image/jpeg",
+        fileSize: 123,
+      })
+      .returning()
+    if (!photo) throw new Error("Expected profile photo file")
+
+    const setPhoto = async (id: bigint, fileUniqueId: string) => {
+      wsSendClientProtocolMessage(ws, {
+        id,
+        seq: Number(id),
+        body: {
+          oneofKind: "rpcCall",
+          rpcCall: {
+            method: Method.SET_PROFILE_PHOTO,
+            input: {
+              oneofKind: "setProfilePhoto",
+              setProfilePhoto: { fileUniqueId },
+            },
+          },
+        },
+      })
+
+      const response = await wsServerProtocolMessage(ws)
+      expect(response.body.oneofKind).toBe("rpcResult")
+      if (response.body.oneofKind !== "rpcResult") throw new Error("Expected rpcResult")
+      expect(response.body.rpcResult.result.oneofKind).toBe("setProfilePhoto")
+      if (response.body.rpcResult.result.oneofKind !== "setProfilePhoto") {
+        throw new Error("Expected setProfilePhoto result")
+      }
+      return response.body.rpcResult.result.setProfilePhoto
+    }
+
+    const setResult = await setPhoto(635n, photo.fileUniqueId)
+    expect(setResult.user?.id).toBe(BigInt(userId))
+    expect(setResult.updates).toHaveLength(1)
+    const [storedWithPhoto] = await db.select().from(users).where(eq(users.id, userId))
+    expect(storedWithPhoto?.photoFileId).toBe(photo.id)
+
+    const clearResult = await setPhoto(636n, "")
+    expect(clearResult.user?.profilePhoto).toBeUndefined()
+    const [storedWithoutPhoto] = await db.select().from(users).where(eq(users.id, userId))
+    expect(storedWithoutPhoto?.photoFileId).toBeNull()
+
+    await wsClosed(ws)
+  })
+
+  it("rejects an invalid external profile photo lookup via RPC", async () => {
+    const { ws } = await authenticateSocket()
+
+    wsSendClientProtocolMessage(ws, {
+      id: 637n,
+      seq: 637,
+      body: {
+        oneofKind: "rpcCall",
+        rpcCall: {
+          method: Method.GET_EXTERNAL_PROFILE_PHOTO,
+          input: {
+            oneofKind: "getExternalProfilePhoto",
+            getExternalProfilePhoto: {
+              provider: ExternalProfileProvider.EXTERNAL_PROFILE_PROVIDER_X,
+              username: "not valid!",
+            },
+          },
+        },
+      },
+    })
+
+    const response = await wsServerProtocolMessage(ws)
+    expect(response.body.oneofKind).toBe("rpcError")
+    if (response.body.oneofKind === "rpcError") {
+      expect(response.body.rpcError.errorCode).toBe(RpcError_Code.BAD_REQUEST)
       expect(response.body.rpcError.code).toBe(400)
     }
 
