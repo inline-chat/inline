@@ -114,4 +114,23 @@ struct SlashCommandDetectorTests {
     #expect(result.newAttributedText.attribute(.botCommand, at: 0, effectiveRange: nil) as? String == "/help")
     #expect(result.newAttributedText.attribute(.botCommand, at: 5, effectiveRange: nil) == nil)
   }
+
+  @Test("replace preserves the selected bot target as structured metadata")
+  func replacePreservesBotTarget() {
+    let detector = SlashCommandDetector()
+    let result = detector.replaceSlashCommand(
+      in: NSAttributedString(string: "/he"),
+      range: NSRange(location: 0, length: 3),
+      with: "/help@agent_bot",
+      targetBotUserId: 42
+    )
+
+    let target = result.newAttributedText.attribute(
+      .botCommandTargetUserId,
+      at: 0,
+      effectiveRange: nil
+    ) as? NSNumber
+    #expect(target?.int64Value == 42)
+    #expect(result.newAttributedText.attribute(.botCommandTargetUserId, at: 15, effectiveRange: nil) == nil)
+  }
 }

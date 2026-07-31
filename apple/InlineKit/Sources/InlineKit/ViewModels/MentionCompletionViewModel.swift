@@ -218,6 +218,11 @@ public final class MentionCompletionViewModel {
   }
 
   public nonisolated static func mentionText(for user: UserInfo) -> String {
+    if user.user.bot,
+       let botName = user.user.firstName?.trimmingCharacters(in: .whitespacesAndNewlines),
+       !botName.isEmpty {
+      return "@\(botName)"
+    }
     let displayName = user.user.displayName
     let firstName = displayName.split(separator: " ").first.map(String.init) ?? displayName
     return "@\(firstName)"

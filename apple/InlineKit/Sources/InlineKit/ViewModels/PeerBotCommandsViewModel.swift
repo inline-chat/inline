@@ -23,7 +23,7 @@ public struct PeerBotCommandSuggestion: Identifiable, Equatable, Sendable {
   }
 
   public var insertionText: String {
-    if isAmbiguous, let botUsername, !botUsername.isEmpty {
+    if let botUsername, !botUsername.isEmpty {
       return "/\(command)@\(botUsername) "
     }
     return "/\(command) "

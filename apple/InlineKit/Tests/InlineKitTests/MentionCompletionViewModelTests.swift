@@ -102,6 +102,16 @@ struct MentionCompletionViewModelTests {
     #expect(!MentionCompletionViewModel.query("jos", exactlyMatches: jose))
   }
 
+  @Test("bot mentions use the complete first-name field while human mentions stay short")
+  func botMentionsUseCompleteName() {
+    var bot = user(1, firstName: "Mo's Codex")
+    bot.user.bot = true
+    let human = user(2, firstName: "Mary", lastName: "Jane")
+
+    #expect(MentionCompletionViewModel.mentionText(for: bot) == "@Mo's Codex")
+    #expect(MentionCompletionViewModel.mentionText(for: human) == "@Mary")
+  }
+
   private func user(
     _ id: Int64,
     firstName: String,

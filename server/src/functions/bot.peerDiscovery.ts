@@ -56,7 +56,7 @@ async function getTopLevelBotUserIds(chat: DbChat, currentUserId: number): Promi
   return getParticipantBotUserIds(chat.id)
 }
 
-async function getBotUserIdsForChatScope(
+export async function getBotUserIdsForChatScope(
   chat: DbChat,
   currentUserId: number,
   visitedChatIds = new Set<number>(),

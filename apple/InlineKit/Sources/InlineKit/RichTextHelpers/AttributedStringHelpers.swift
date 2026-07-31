@@ -294,6 +294,7 @@ public extension NSAttributedString.Key {
   static let mentionGroupId = NSAttributedString.Key("mentionGroupId")
   static let threadLink = NSAttributedString.Key("threadLink")
   static let botCommand = NSAttributedString.Key("botCommand")
+  static let botCommandTargetUserId = NSAttributedString.Key("botCommandTargetUserId")
   static let emailAddress = NSAttributedString.Key("emailAddress")
   static let phoneNumber = NSAttributedString.Key("phoneNumber")
   static let inlineCode = NSAttributedString.Key("inlineCode")

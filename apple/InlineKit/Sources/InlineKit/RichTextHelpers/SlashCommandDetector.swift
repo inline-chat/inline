@@ -77,6 +77,7 @@ public final class SlashCommandDetector {
     in attributedText: NSAttributedString,
     range: NSRange,
     with commandText: String,
+    targetBotUserId: Int64? = nil,
     trailingText: String = " "
   ) -> (newAttributedText: NSAttributedString, newCursorPosition: Int) {
     let replacement = commandText + trailingText
@@ -90,6 +91,13 @@ public final class SlashCommandDetector {
         value: commandText,
         range: NSRange(location: range.location, length: commandLength)
       )
+      if let targetBotUserId, targetBotUserId > 0 {
+        mutable.addAttribute(
+          .botCommandTargetUserId,
+          value: NSNumber(value: targetBotUserId),
+          range: NSRange(location: range.location, length: commandLength)
+        )
+      }
     }
 
     let newCursorPosition = range.location + replacement.utf16.count

@@ -2585,7 +2585,8 @@ extension GlassComposeAppKit: CommandCompletionMenuDelegate {
     let result = slashCommandDetector.replaceSlashCommand(
       in: currentAttributedText,
       range: currentSlashCommandRange.range,
-      with: commandText
+      with: commandText,
+      targetBotUserId: suggestion.botId
     )
 
     ignoreNextHeightChange = true

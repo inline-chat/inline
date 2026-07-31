@@ -366,6 +366,10 @@ public class ProcessEntities {
             .foregroundColor: configuration.linkColor,
             .underlineStyle: 0,
           ]
+          if case let .botCommand(botCommand)? = entity.entity,
+             botCommand.botUserID > 0 {
+            attributes[.botCommandTargetUserId] = NSNumber(value: botCommand.botUserID)
+          }
 
           #if os(macOS)
           attributes[.cursor] = NSCursor.pointingHand
@@ -667,6 +671,16 @@ public class ProcessEntities {
       entity.type = .botCommand
       entity.offset = Int64(range.location)
       entity.length = Int64(range.length)
+      if let target = attributedString.attribute(
+        .botCommandTargetUserId,
+        at: range.location,
+        effectiveRange: nil
+      ) as? NSNumber,
+        target.int64Value > 0 {
+        entity.botCommand = MessageEntity.MessageEntityBotCommand.with {
+          $0.botUserID = target.int64Value
+        }
+      }
       entities.append(entity)
     }
 

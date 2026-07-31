@@ -858,6 +858,24 @@ struct ProcessEntitiesTests {
     #expect(entity?.length == Int64(commandRange.length))
   }
 
+  @Test("Extract structured bot command target from attributed string")
+  func testExtractTargetedBotCommandFromAttributedString() {
+    let text = "/help@agent_bot"
+    let attributedString = NSMutableAttributedString(string: text)
+    attributedString.addAttributes([
+      .botCommand: text,
+      .botCommandTargetUserId: NSNumber(value: Int64(42)),
+    ], range: NSRange(location: 0, length: (text as NSString).length))
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+    let entity = result.entities.entities.first {
+      if case .botCommand? = $0.entity { return true }
+      return false
+    }
+
+    #expect(entity?.botCommand.botUserID == 42)
+  }
+
   @Test("Detect bot command from plain text")
   func testDetectBotCommandFromPlainText() {
     let text = "Run /start@jobs_bot now"

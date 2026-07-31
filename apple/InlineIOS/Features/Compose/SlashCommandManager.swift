@@ -144,7 +144,8 @@ final class SlashCommandManager: NSObject {
     let result = slashCommandDetector.replaceSlashCommand(
       in: currentAttributedText,
       range: currentSlashRange.range,
-      with: commandText
+      with: commandText,
+      targetBotUserId: suggestion.botId
     )
 
     textView.attributedText = result.newAttributedText

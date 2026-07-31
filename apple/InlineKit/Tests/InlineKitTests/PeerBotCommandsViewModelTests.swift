@@ -68,6 +68,21 @@ struct PeerBotCommandsViewModelTests {
     #expect(suggestions.map(\.insertionText) == ["/help@alpha ", "/help@beta "])
   }
 
+  @Test("targets an unambiguous selected command for old clients and transports")
+  func targetsUnambiguousSuggestion() async {
+    let viewModel = PeerBotCommandsViewModel(
+      peer: .thread(id: 100),
+      fetcher: { _ in
+        [Self.makeGroup(botId: 1, username: "alpha", commands: [("help", "Show help")])]
+      },
+      userInfoResolver: Self.makeResolver()
+    )
+
+    await viewModel.ensureLoaded()
+    #expect(viewModel.suggestions.first?.isAmbiguous == false)
+    #expect(viewModel.suggestions.first?.insertionText == "/help@alpha ")
+  }
+
   @Test("filters by command, description, and bot username fragments")
   func filtersSuggestions() async {
     let peer = Peer.thread(id: 100)

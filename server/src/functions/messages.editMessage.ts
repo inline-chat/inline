@@ -14,6 +14,7 @@ import { normalizeAndValidateMessageActions } from "@in/server/modules/message/m
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { queueMessageThreadLinkMaterialization } from "@in/server/modules/threadGraph"
 import { resolveThreadTitleLinks } from "@in/server/modules/message/resolveThreadTitleLinks"
+import { resolveBotCommandTargets } from "@in/server/modules/message/resolveBotCommandTargets"
 
 type Input = {
   messageId: bigint
@@ -54,9 +55,15 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
     entities: input.entities,
     parseMarkdown: input.parseMarkdown,
   })
-  const entities = await resolveThreadTitleLinks({
+  let entities = await resolveThreadTitleLinks({
     entities: outgoingText.entities,
     context,
+  })
+  entities = await resolveBotCommandTargets({
+    text: outgoingText.text,
+    entities,
+    chat,
+    currentUserId,
   })
 
   const { message, update } = await MessageModel.editMessage({

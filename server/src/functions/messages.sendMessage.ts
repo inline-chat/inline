@@ -73,6 +73,7 @@ import { queueMessageThreadLinkMaterialization } from "@in/server/modules/thread
 import { resolveThreadTitleLinks } from "@in/server/modules/message/resolveThreadTitleLinks"
 import { resolveMentionedGroupUserIds } from "@in/server/modules/userGroups"
 import { resolveThreadAutoFollowUserIds } from "@in/server/modules/threadAutoFollow"
+import { resolveBotCommandTargets } from "@in/server/modules/message/resolveBotCommandTargets"
 
 type Input = {
   peerId: InputPeer
@@ -142,8 +143,16 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       entities: outgoingText?.entities,
       context,
     })
+    if (text) {
+      entities = await resolveBotCommandTargets({
+        text,
+        entities,
+        chat,
+        currentUserId,
+      })
+    }
   } catch (error) {
-    log.error("sendMessage failed to resolve thread title links", { chatId, currentUserId, error })
+    log.error("sendMessage failed to resolve outgoing entities", { chatId, currentUserId, error })
     if (RealtimeRpcError.is(error)) {
       throw error
     }
