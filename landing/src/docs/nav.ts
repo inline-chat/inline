@@ -10,7 +10,7 @@ export type DocsNavGroup = {
 
 export const DOCS_NAV: DocsNavGroup[] = DOCS_NAV_GROUPS.map((group) => ({
   title: group.title,
-  items: DOCS_PAGES.filter((page) => page.navGroup === group.id).map((page) => ({
+  items: DOCS_PAGES.filter((page) => page.navGroup === group.id && !("navHidden" in page && page.navHidden)).map((page) => ({
     title: ("navTitle" in page ? page.navTitle : undefined) ?? page.title,
     to: page.route,
   })),

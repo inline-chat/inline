@@ -2,18 +2,18 @@
 
 Release notes for Inline apps, developer tools, and integrations.
 
-> 🍬 Inline is available in private beta. [Join the waitlist](https://inline.chat) or [download the apps](/download) if you have an invite code.
+> [Download the latest Inline apps](/download).
 
 ## July 8, 2026
 
-[macOS beta 0.2, build 4495](https://public-assets.inline.chat/mac/beta/4495/Inline.dmg) · [iOS beta on TestFlight](https://testflight.apple.com/join/FkC3f7fz)
+[macOS 0.2, build 4495](https://public-assets.inline.chat/mac/beta/4495/Inline.dmg) · [iOS on TestFlight](https://testflight.apple.com/join/FkC3f7fz)
 
 ### Better tools and APIs for agents and hackers
 
 - Released new plugins for [OpenClaw](/docs/openclaw) and [Hermes Agent](/docs/hermes) with improved thread support.
 - Released an [open-source Matrix bridge](https://github.com/inline-chat/matrix-inline), so you can use Inline in Beeper if that's your thing.
 - Released a new version of the [Inline CLI](/docs/cli) with new commands for agentic usage. The new `transcript` command gives agents a complete thread as Markdown, including files and media.
-- Released alpha versions of `inline-sdk` and `inline-client` in Rust.
+- Released `inline-sdk` and `inline-client` for Rust.
 - Published `llms.txt` and made the docs more agent-friendly.
 - Improved our MCP server so it is more capable at finding and summarizing things.
 
@@ -21,11 +21,11 @@ Release notes for Inline apps, developer tools, and integrations.
 
 ## June 29, 2026
 
-[macOS beta 0.2, build 4354](https://public-assets.inline.chat/mac/beta/4354/Inline.dmg) · [iOS beta on TestFlight](https://testflight.apple.com/join/FkC3f7fz)
+[macOS 0.2, build 4354](https://public-assets.inline.chat/mac/beta/4354/Inline.dmg) · [iOS on TestFlight](https://testflight.apple.com/join/FkC3f7fz)
 
 ### New
 
-- 🎙️ Voice messages are out of experimental!
+- 🎙️ Added voice messages on macOS and iOS.
 - 💫 Added a smooth new iOS send-message animation.
 
   [Watch the iOS send-message animation](/changelog/2026-06-29/ios-send-message.mp4)
@@ -59,7 +59,7 @@ Release notes for Inline apps, developer tools, and integrations.
 
   ![The Inline macOS dock icon showing two unread messages](/changelog/2026-06-29/dock-badge.png)
 
-- Added **Copy Link** for threads. These are internal deep links for other Inline users; public links will come later.
+- Added **Copy Link** for sharing threads with other Inline users.
 
   ![Copy Link in the macOS thread menu](/changelog/2026-06-29/copy-link.png)
 

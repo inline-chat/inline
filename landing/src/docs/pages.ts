@@ -1,4 +1,6 @@
 import botApi from "./content/bot-api.md?raw"
+import addInline from "./content/add-inline.md?raw"
+import agents from "./content/agents.md?raw"
 import changelog from "./content/changelog.md?raw"
 import cli from "./content/cli.md?raw"
 import creatingABot from "./content/creating-a-bot.md?raw"
@@ -16,8 +18,8 @@ import whatsInline from "./content/whats-inline.md?raw"
 
 export const DOCS_NAV_GROUPS = [
   { id: "getting-started", title: "Getting Started" },
+  { id: "agents", title: "Agents" },
   { id: "developers", title: "Developers" },
-  { id: "integrations", title: "Integrations" },
   { id: "policies", title: "Policies" },
 ] as const
 
@@ -27,6 +29,7 @@ type DocsPageDefinition = {
   slug: string
   title: string
   navTitle?: string
+  navHidden?: boolean
   route: "/docs" | `/docs/${string}`
   markdownPath: `/docs/${string}.md`
   summary: string
@@ -37,10 +40,10 @@ type DocsPageDefinition = {
 export const DOCS_PAGES = [
   {
     slug: "index",
-    title: "Welcome",
+    title: "Get Started",
     route: "/docs",
     markdownPath: "/docs/index.md",
-    summary: "Start here for Inline docs and product status.",
+    summary: "Install Inline and connect your first agent.",
     navGroup: "getting-started",
     markdown: welcome,
   },
@@ -50,6 +53,7 @@ export const DOCS_PAGES = [
     route: "/docs/whats-inline",
     markdownPath: "/docs/whats-inline.md",
     summary: "Product goals and design principles.",
+    navHidden: true,
     navGroup: "getting-started",
     markdown: whatsInline,
   },
@@ -59,8 +63,29 @@ export const DOCS_PAGES = [
     route: "/docs/roadmap",
     markdownPath: "/docs/roadmap.md",
     summary: "Current product roadmap status.",
+    navHidden: true,
     navGroup: "getting-started",
     markdown: roadmap,
+  },
+  {
+    slug: "agents",
+    title: "Agents",
+    navTitle: "Overview",
+    route: "/docs/agents",
+    markdownPath: "/docs/agents.md",
+    summary: "Connect coding agents and agent platforms to Inline.",
+    navGroup: "agents",
+    markdown: agents,
+  },
+  {
+    slug: "add-inline",
+    title: "Add Inline to Your Agent",
+    navTitle: "Add Inline",
+    route: "/docs/add-inline",
+    markdownPath: "/docs/add-inline.md",
+    summary: "Install the Inline plugin or skill for ChatGPT, Codex, Claude, and other agents.",
+    navGroup: "agents",
+    markdown: addInline,
   },
   {
     slug: "changelog",
@@ -128,7 +153,7 @@ export const DOCS_PAGES = [
   },
   {
     slug: "creating-a-bot",
-    title: "Creating a Bot",
+    title: "Create a Bot",
     route: "/docs/creating-a-bot",
     markdownPath: "/docs/creating-a-bot.md",
     summary: "Create or reveal an Inline bot token.",
@@ -141,7 +166,7 @@ export const DOCS_PAGES = [
     route: "/docs/mcp",
     markdownPath: "/docs/mcp.md",
     summary: "Connect MCP-compatible agents to Inline with OAuth consent.",
-    navGroup: "integrations",
+    navGroup: "agents",
     markdown: mcp,
   },
   {
@@ -150,7 +175,7 @@ export const DOCS_PAGES = [
     route: "/docs/openclaw",
     markdownPath: "/docs/openclaw.md",
     summary: "Configure the official Inline OpenClaw plugin.",
-    navGroup: "integrations",
+    navGroup: "agents",
     markdown: openclaw,
   },
   {
@@ -159,7 +184,7 @@ export const DOCS_PAGES = [
     route: "/docs/hermes",
     markdownPath: "/docs/hermes.md",
     summary: "Run Hermes Agent from Inline chats.",
-    navGroup: "integrations",
+    navGroup: "agents",
     markdown: hermes,
   },
   {

@@ -1,30 +1,24 @@
-# Creating a Bot
+# Create a Bot
 
-## macOS App
+## macOS app
 
-1. Open Inline for macOS.
-2. Open `Inline -> Settings…` (`Cmd+,`).
-3. Select `Bots`.
-4. Enter `Name` and `Username` (must end with `bot`).
-5. Click `Create Bot`.
-6. Copy the `New Token`.
+1. Open **Inline → Settings → Bots**.
+2. Enter a name and a username ending in `bot`.
+3. Select **Create Bot**.
+4. Copy the new token and store it securely.
 
 ## CLI
 
+Sign in:
+
 ```bash
 inline auth login
+```
+
+Create the bot:
+
+```bash
 inline bots create --name "My Inline Bot" --username myinlinebot
-inline bots list
-inline bots reveal-token --bot-user-id <BOT_USER_ID>
 ```
 
-## Use Token in OpenClaw
-
-```yaml
-channels:
-  inline:
-    enabled: true
-    token: "<INLINE_BOT_TOKEN>"
-```
-
-Continue with [OpenClaw](/docs/openclaw).
+Use the token with [OpenClaw](/docs/openclaw), [Hermes Agent](/docs/hermes), or your own [Bot API](/docs/bot-api) integration.

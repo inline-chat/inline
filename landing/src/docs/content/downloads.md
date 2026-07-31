@@ -1,19 +1,14 @@
 # Downloads
 
-## Current Links
+## Apps
 
-- macOS beta (.dmg): [Download for macOS](/download/mac/beta)
-- iOS beta: [Join TestFlight](https://testflight.apple.com/join/FkC3f7fz)
-- Hermes Agent adapter: [Install](/docs/hermes#install)
+- [Download Inline for macOS](/download/mac/beta) (`.dmg`)
+- [Join Inline for iOS on TestFlight](https://testflight.apple.com/join/FkC3f7fz)
 
-## Switching from TestFlight to DMG (macOS)
+Already using an older macOS build? [View previous versions](/docs/downloads/previous).
 
-If you previously installed Inline via TestFlight and now want to use the `.dmg` build:
+## Developer tools
 
-1. Open TestFlight and click **Stop Testing** for Inline.
-2. In `Applications`, delete the existing Inline app.
-3. Install Inline from the `.dmg`.
-
-If Finder shows a replace prompt while copying from the `.dmg`, click **Replace**.
-
-Need an older macOS build? See [previous versions](/docs/downloads/previous).
+- [Install the Inline CLI](/docs/cli)
+- [Set up agents](/docs/agents)
+- [Connect Inline MCP](/docs/mcp)

@@ -2,8 +2,6 @@
 
 Last updated: February 11, 2026.
 
-Inline is in alpha and this page is still evolving. We're actively tightening security as we build.
-
 ## TL;DR
 
 - We do not sell your data.

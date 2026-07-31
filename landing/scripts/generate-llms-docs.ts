@@ -18,18 +18,11 @@ type DocPage = {
 
 const pages: DocPage[] = [
   {
-    title: "Welcome",
+    title: "Get Started",
     source: "welcome.md",
     route: "/docs",
     markdownPath: "/docs/index.md",
-    summary: "Start here for Inline docs and product status.",
-  },
-  {
-    title: "What's Inline",
-    source: "whats-inline.md",
-    route: "/docs/whats-inline",
-    markdownPath: "/docs/whats-inline.md",
-    summary: "Product goals and design principles.",
+    summary: "Install Inline and connect your first agent.",
   },
   {
     title: "Downloads",
@@ -37,13 +30,6 @@ const pages: DocPage[] = [
     route: "/docs/downloads",
     markdownPath: "/docs/downloads.md",
     summary: "Current app download links.",
-  },
-  {
-    title: "Roadmap",
-    source: "roadmap.md",
-    route: "/docs/roadmap",
-    markdownPath: "/docs/roadmap.md",
-    summary: "Current product roadmap status.",
   },
   {
     title: "What's New",
@@ -60,6 +46,20 @@ const pages: DocPage[] = [
     summary: "Install and authenticate the Inline command line tool.",
   },
   {
+    title: "Agents",
+    source: "agents.md",
+    route: "/docs/agents",
+    markdownPath: "/docs/agents.md",
+    summary: "Connect coding agents and agent platforms to Inline.",
+  },
+  {
+    title: "Add Inline to Your Agent",
+    source: "add-inline.md",
+    route: "/docs/add-inline",
+    markdownPath: "/docs/add-inline.md",
+    summary: "Install the Inline plugin or skill for ChatGPT, Codex, Claude, and other agents.",
+  },
+  {
     title: "Developers",
     source: "developers.md",
     route: "/docs/developers",
@@ -74,6 +74,13 @@ const pages: DocPage[] = [
     summary: "WebSocket API and TypeScript SDK quick start.",
   },
   {
+    title: "Rust SDK",
+    source: "rust-sdk.md",
+    route: "/docs/rust-sdk",
+    markdownPath: "/docs/rust-sdk.md",
+    summary: "Rust SDK quick start for API calls, uploads, and realtime RPC.",
+  },
+  {
     title: "Bot API",
     source: "bot-api.md",
     route: "/docs/bot-api",
@@ -81,7 +88,7 @@ const pages: DocPage[] = [
     summary: "HTTP API for bot integrations and automations.",
   },
   {
-    title: "Creating a Bot",
+    title: "Create a Bot",
     source: "creating-a-bot.md",
     route: "/docs/creating-a-bot",
     markdownPath: "/docs/creating-a-bot.md",
