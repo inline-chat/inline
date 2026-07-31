@@ -44,11 +44,14 @@ struct InviteCode: View {
           .frame(width: 34, height: 34)
           .foregroundColor(.primary)
 
-        Text(NSLocalizedString("Enter invite code", comment: "Invite code input title"))
+        Text("Enter access invite code", comment: "Access invite code input title")
           .font(.system(size: 21.0, weight: .semibold))
           .foregroundStyle(.primary)
 
-        Text(NSLocalizedString("You need an invite to sign up for the alpha. You can get one from a user of Inline alpha or by joining the waitlist.", comment: "Invite code signup requirement description"))
+        Text(
+          "Your access invite code is separate from the verification code sent to your email or phone.",
+          comment: "Distinguishes an access invite from contact verification"
+        )
           .font(.subheadline)
           .foregroundStyle(.secondary)
           .multilineTextAlignment(.center)
@@ -87,7 +90,7 @@ struct InviteCode: View {
 
   @ViewBuilder
   var codeInput: some View {
-    TextField(NSLocalizedString("Invite Code", comment: "Invite code input placeholder"), text: $code)
+    TextField("Access invite code", text: $code)
       .focused($isFocused)
       .textInputAutocapitalization(.characters)
       .autocorrectionDisabled(true)
@@ -121,7 +124,10 @@ struct InviteCode: View {
 
   func submit() {
     guard isInputValid, !isChecking else {
-      errorMsg = NSLocalizedString("Enter the 8-character invite code.", comment: "Invite code validation error")
+      errorMsg = String(
+        localized: "Enter the 8-character access invite code.",
+        comment: "Access invite code validation error"
+      )
       return
     }
 
@@ -133,10 +139,10 @@ struct InviteCode: View {
         _ = try await api.checkInviteCode(normalizedCode)
         isChecking = false
         switch destination {
-          case let .email(email, challengeToken):
-            nav.push(.code(email: email, challengeToken: challengeToken, inviteCode: normalizedCode))
-          case let .phone(phoneNumber):
-            nav.push(.phoneNumberCode(phoneNumber: phoneNumber, inviteCode: normalizedCode))
+        case let .email(email, challengeToken):
+          nav.push(.code(email: email, challengeToken: challengeToken, inviteCode: normalizedCode))
+        case let .phone(phoneNumber):
+          nav.push(.phoneNumberCode(phoneNumber: phoneNumber, inviteCode: normalizedCode))
         }
       } catch let error as APIError {
         isChecking = false

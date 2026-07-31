@@ -29,11 +29,11 @@ struct OnboardingInviteCode: View {
         .foregroundColor(.primary)
         .padding(.bottom, 4)
 
-      Text("Enter invite code")
+      Text("Enter access invite code")
         .font(.system(size: 21.0, weight: .semibold))
         .foregroundStyle(.primary)
 
-      Text("You need an invite to sign up for the alpha. You can get one from a user of Inline alpha or by joining the waitlist.")
+      Text("Your access invite code is separate from the verification code sent to your email or phone.")
         .font(.subheadline)
         .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
@@ -83,7 +83,7 @@ struct OnboardingInviteCode: View {
   }
 
   @ViewBuilder var inviteField: some View {
-    GrayTextField("Invite Code", text: $code, prompt: Text("A7K2PQ9X"))
+    GrayTextField("Access invite code", text: $code, prompt: Text("A7K2PQ9X"))
       .frame(width: 260)
       .textContentType(.oneTimeCode)
   }

@@ -23,6 +23,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
   const normalizedEmail = email.trim().toLowerCase()
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)
   const codeValid = code.trim().length >= 6
+  const inviteCodeValid = !needsInviteCode || inviteCode.trim().length === 8
 
   async function submitEmail() {
     if (!emailValid || busy) return
@@ -41,7 +42,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
   }
 
   async function submitCode() {
-    if (!codeValid || busy) return
+    if (!codeValid || !inviteCodeValid || busy) return
 
     setBusy(true)
     try {
@@ -70,7 +71,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
         <View style={styles.icon}>
           <MaterialIcons name="alternate-email" size={26} color={colors.accent} />
         </View>
-        <Text style={styles.title}>{stage === "email" ? "Sign in to Inline" : "Enter your code"}</Text>
+        <Text style={styles.title}>{stage === "email" ? "Sign in to Inline" : "Enter verification code"}</Text>
         <Text style={styles.subtitle}>
           {stage === "email" ? "Use your Inline email to enable Android notifications." : `Sent to ${normalizedEmail}`}
         </Text>
@@ -110,15 +111,22 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
               value={code}
             />
             {needsInviteCode ? (
-              <TextInput
-                autoCapitalize="characters"
-                autoCorrect={false}
-                editable={!busy}
-                onChangeText={setInviteCode}
-                placeholder="Invite code"
-                style={styles.input}
-                value={inviteCode}
-              />
+              <View style={styles.inviteSection}>
+                <Text style={styles.fieldLabel}>Access invite code</Text>
+                <Text style={styles.helperText}>
+                  This is separate from the verification code sent to your email.
+                </Text>
+                <TextInput
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  editable={!busy}
+                  maxLength={8}
+                  onChangeText={setInviteCode}
+                  placeholder="Access invite code"
+                  style={styles.input}
+                  value={inviteCode}
+                />
+              </View>
             ) : null}
           </>
         )}
@@ -130,7 +138,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
         ) : null}
         <NativeButton
           title={stage === "email" ? (busy ? "Sending..." : "Continue") : busy ? "Signing in..." : "Sign in"}
-          disabled={busy || (stage === "email" ? !emailValid : !codeValid)}
+          disabled={busy || (stage === "email" ? !emailValid : !codeValid || !inviteCodeValid)}
           onPress={stage === "email" ? submitEmail : submitCode}
         />
       </View>
@@ -170,6 +178,20 @@ const styles = StyleSheet.create({
   },
   form: {
     gap: 12,
+  },
+  inviteSection: {
+    gap: 8,
+    marginTop: 4,
+  },
+  fieldLabel: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  helperText: {
+    color: colors.secondaryText,
+    fontSize: 14,
+    lineHeight: 20,
   },
   input: {
     minHeight: 54,

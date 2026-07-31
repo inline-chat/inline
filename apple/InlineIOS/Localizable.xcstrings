@@ -623,11 +623,11 @@
     "Email" : {
 
     },
-    "Enter invite code" : {
-      "comment" : "Invite code input title"
+    "Enter access invite code" : {
+      "comment" : "Access invite code input title"
     },
-    "Enter the 8-character invite code." : {
-      "comment" : "Invite code validation error"
+    "Enter the 8-character access invite code." : {
+      "comment" : "Access invite code validation error"
     },
     "Enter the code" : {
       "comment" : "Code input title",
@@ -747,8 +747,7 @@
     "Integrations" : {
 
     },
-    "Invite Code" : {
-      "comment" : "Invite code input placeholder"
+    "Access invite code" : {
     },
     "Invite Member" : {
 
@@ -1317,8 +1316,8 @@
         }
       }
     },
-    "You need an invite to sign up for the alpha. You can get one from a user of Inline alpha or by joining the waitlist." : {
-      "comment" : "Invite code signup requirement description"
+    "Your access invite code is separate from the verification code sent to your email or phone." : {
+      "comment" : "Distinguishes an access invite from contact verification"
     },
     "Your archived chats will appear here" : {
 
