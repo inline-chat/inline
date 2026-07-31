@@ -266,6 +266,37 @@ describe("editMessage function", () => {
     expect(editedMessage?.actions?.rows).toEqual([])
   })
 
+  test("rejects editing another user's message", async () => {
+    const otherUser = (await testUtils.createUser(nextEmail("edit-other")))!
+    const sharedChat = (await testUtils.createPrivateChat(currentUser, otherUser))!
+    const peer: InputPeer = {
+      type: { oneofKind: "chat", chat: { chatId: BigInt(sharedChat.id) } },
+    }
+    const otherContext = testUtils.functionContext({ userId: otherUser.id, sessionId: 2 })
+    const sent = await sendMessage({ peerId: peer, message: "other user's message" }, otherContext)
+    const messageId = extractSentMessageId(sent)
+    expect(messageId).toBeTruthy()
+
+    await expect(
+      editMessage(
+        {
+          messageId: messageId!,
+          peer,
+          text: "forged terminal result",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ codeName: "BAD_REQUEST" })
+
+    const [stored] = await db
+      .select()
+      .from(messages)
+      .where(and(eq(messages.chatId, sharedChat.id), eq(messages.messageId, Number(messageId))))
+      .limit(1)
+    expect(stored?.fromId).toBe(otherUser.id)
+    expect(stored?.rev).toBe(0)
+  })
+
   test("preserves voice media when editing voice message text", async () => {
     const voice = await createVoiceForUser(currentUser.id)
     const sent = await sendMessage(

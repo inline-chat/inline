@@ -29,9 +29,19 @@ type Output = {
 }
 
 export const editMessage = async (input: Input, context: FunctionContext): Promise<Output> => {
-  const chatId = await ChatModel.getChatIdFromInputPeer(input.peer, context)
+  const chat = await ChatModel.getChatFromInputPeer(input.peer, context)
+  const chatId = chat.id
   const currentUserId = context.currentUserId
   const fullMessage = await MessageModel.getMessage(Number(input.messageId), chatId)
+  if (!fullMessage || fullMessage.fromId !== currentUserId) {
+    Log.shared.warn("editMessage blocked: message author mismatch", {
+      chatId,
+      messageId: Number(input.messageId),
+      fromId: fullMessage?.fromId,
+      currentUserId,
+    })
+    throw RealtimeRpcError.BadRequest()
+  }
   const normalizedActions = normalizeAndValidateMessageActions(input.actions)
   if (normalizedActions !== undefined) {
     const sender = await UsersModel.getUserById(currentUserId)
