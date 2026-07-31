@@ -5,6 +5,7 @@ import { basename, dirname, join, resolve } from "path";
 
 const rootDir = resolve(import.meta.dir, "..");
 const cliDir = join(rootDir, "cli");
+const targetDir = join(rootDir, "target");
 const distDir = join(cliDir, "dist");
 const tempAssetsDir = join(rootDir, "scripts", ".release-tmp");
 const githubRepo = process.env.INLINE_CLI_GITHUB_REPO ?? "inline-chat/inline";
@@ -382,7 +383,7 @@ async function buildManifest(
   };
 
   for (const target of context.targets) {
-    const binaryPath = join(cliDir, "target", target, "release", "inline");
+    const binaryPath = join(targetDir, target, "release", "inline");
     const artifactName = `inline-cli-${context.version}-${target}.tar.gz`;
     const artifactPath = join(context.releaseDir, artifactName);
 
@@ -421,7 +422,7 @@ async function buildManifest(
 async function assertBuiltArtifacts(context: ReleaseContext) {
   const missing: string[] = [];
   for (const target of context.targets) {
-    const binaryPath = join(cliDir, "target", target, "release", "inline");
+    const binaryPath = join(targetDir, target, "release", "inline");
     await stat(binaryPath).catch(() => {
       missing.push(`${target} (${binaryPath})`);
     });
@@ -474,7 +475,7 @@ async function signAndNotarize(context: ReleaseContext) {
 
   try {
     for (const target of macTargets) {
-      const binaryPath = join(cliDir, "target", target, "release", "inline");
+      const binaryPath = join(targetDir, target, "release", "inline");
       const zipName = `inline-cli-${context.version}-${target}-notarize.zip`;
       const zipPath = join(context.releaseDir, zipName);
 
