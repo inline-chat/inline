@@ -1,6 +1,11 @@
 import { describe, expect, it } from "bun:test"
 import { PUSH_CONTENT_ALGORITHM, PUSH_CONTENT_VERSION } from "./pushContentEncryption"
-import { buildApnNotification, buildExpoPushMessage, shouldPlayNotificationSound } from "./sendToUser"
+import {
+  buildApnNotification,
+  buildExpoPushMessage,
+  shouldClearApplePushTokenForFailures,
+  shouldPlayNotificationSound,
+} from "./sendToUser"
 
 const unencryptedSession = {
   pushContentKeyPublic: null,
@@ -20,6 +25,28 @@ describe("sendToUser notification sound", () => {
 
   it("keeps urgent nudges audible", () => {
     expect(shouldPlayNotificationSound({ silent: true, isUrgentNudge: true })).toBe(true)
+  })
+})
+
+describe("sendToUser invalid APN tokens", () => {
+  it("clears tokens only when every APN failure proves the token is invalid", () => {
+    expect(shouldClearApplePushTokenForFailures([{ status: 410 }])).toBe(true)
+    expect(shouldClearApplePushTokenForFailures([{ response: { reason: "BadDeviceToken" } }])).toBe(true)
+    expect(
+      shouldClearApplePushTokenForFailures([
+        { response: { reason: "Unregistered" } },
+        { response: { reason: "DeviceTokenNotForTopic" } },
+      ]),
+    ).toBe(true)
+
+    expect(shouldClearApplePushTokenForFailures([])).toBe(false)
+    expect(shouldClearApplePushTokenForFailures([{ status: 500 }])).toBe(false)
+    expect(
+      shouldClearApplePushTokenForFailures([
+        { response: { reason: "BadDeviceToken" } },
+        { status: 500, response: { reason: "InternalServerError" } },
+      ]),
+    ).toBe(false)
   })
 })
 
@@ -156,15 +183,17 @@ describe("sendToUser APN payloads", () => {
       nowSeconds: 500,
     })
 
-    expect(notification?.topic).toBe("chat.inline.Inline")
-    expect((notification?.aps as Record<string, unknown>)["thread-id"]).toBe("chat_34")
-    expect(notification?.payload).toMatchObject({
+    expect(notification).toBeDefined()
+    if (!notification) throw new Error("expected APN notification")
+    expect(notification.topic).toBe("chat.inline.Inline")
+    expect((notification.aps as Record<string, unknown>)["thread-id"]).toBe("chat_34")
+    expect(notification.payload).toMatchObject({
       userId: 12,
       threadId: "chat_34",
       messageId: "90",
     })
-    expect(notification?.aps.sound).toBe("default")
-    expect((notification?.aps as unknown as Record<string, unknown>)["interruption-level"]).toBe("time-sensitive")
+    expect(notification.aps.sound).toBe("default")
+    expect((notification.aps as unknown as Record<string, unknown>)["interruption-level"]).toBe("time-sensitive")
   })
 
   it("reports encryption failure and falls back to plaintext", () => {

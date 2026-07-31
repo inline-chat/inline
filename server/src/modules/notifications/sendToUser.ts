@@ -351,7 +351,7 @@ export const sendPushNotificationToUser = async ({ userId, payload }: SendPushTo
             const suppressed = summaries.filter((s) => isSuppressedApnFailure(s))
             const important = summaries.filter((s) => !isSuppressedApnFailure(s))
 
-            if (important.length) {
+            if (!shouldClearApplePushTokenForFailures(result.failed)) {
               log.warn("Failed to send push notification", {
                 failures: important,
                 suppressedFailureCount: suppressed.length,
@@ -366,6 +366,7 @@ export const sendPushNotificationToUser = async ({ userId, payload }: SendPushTo
                 sessionId: session.id,
                 threadId: payload.threadId,
               })
+              await SessionsModel.clearApplePushToken(session.id)
             }
 
           } else {
@@ -383,7 +384,7 @@ export const sendPushNotificationToUser = async ({ userId, payload }: SendPushTo
         }
       }
 
-      sendPush()
+      void sendPush()
     }
   } catch (error) {
     log.error("Error sending push notification", {
@@ -392,6 +393,10 @@ export const sendPushNotificationToUser = async ({ userId, payload }: SendPushTo
       threadId: payload.threadId,
     })
   }
+}
+
+export function shouldClearApplePushTokenForFailures(failures: readonly unknown[]): boolean {
+  return failures.length > 0 && failures.every((failure) => isSuppressedApnFailure(summarizeApnFailure(failure)))
 }
 
 async function sendExpoPush({
