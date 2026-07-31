@@ -1,5 +1,5 @@
 import { createFileRoute, Link, Outlet, useRouterState } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { DOCS_NAV } from "~/docs/nav"
 import { MoonIcon, SunIcon } from "~/docs/lucide"
@@ -8,6 +8,32 @@ import { SUPPORT_EMAIL, emailValue, useHydratedEmail } from "~/lib/email"
 import styleCssUrl from "../../landing/styles/style.css?url"
 import docsCssUrl from "../../landing/styles/docs.css?url"
 import "../../landing/styles/page-content.css"
+
+const normalizePath = (path: string) => (path.length > 1 ? path.replace(/\/+$/g, "") : path)
+
+function DocsNavLinks({ activePath, onNavigate }: { activePath: string; onNavigate?: () => void }) {
+  return DOCS_NAV.map((group) => (
+    <div className="docs-sidebar-group" key={group.title}>
+      <div className="docs-sidebar-title">{group.title}</div>
+      {group.items.map((item) => {
+        const isActive = activePath === normalizePath(item.to)
+        const className = `docs-sidebar-link${isActive ? " docs-sidebar-link-active" : ""}`
+        return (
+          <Link
+            key={item.to}
+            to={item.to}
+            activeOptions={{ exact: true }}
+            className={className}
+            aria-current={isActive ? "page" : undefined}
+            onClick={onNavigate}
+          >
+            {item.title}
+          </Link>
+        )
+      })}
+    </div>
+  ))
+}
 
 export const Route = createFileRoute("/docs")({
   component: DocsLayout,
@@ -21,12 +47,15 @@ export const Route = createFileRoute("/docs")({
 })
 
 function DocsLayout() {
+  const mobileNavRef = useRef<HTMLDetailsElement>(null)
   const { pathname, hash } = useRouterState({
     select: (s) => ({ pathname: s.location.pathname, hash: s.location.hash }),
   })
 
-  const normalizePath = (p: string) => (p.length > 1 ? p.replace(/\/+$/g, "") : p)
   const activePath = normalizePath(pathname)
+  const activeTitle = DOCS_NAV.flatMap((group) => group.items).find(
+    (item) => normalizePath(item.to) === activePath,
+  )?.title
 
   const [theme, setTheme] = useState<"light" | "dark" | null>(null)
   const [isFooterEmailCopied, setIsFooterEmailCopied] = useState(false)
@@ -98,21 +127,23 @@ function DocsLayout() {
         <div className="docs-container">
           <div className="docs-layout">
             <aside className="docs-sidebar" aria-label="Docs navigation">
-              {DOCS_NAV.map((group) => (
-                <div className="docs-sidebar-group" key={group.title}>
-                  <div className="docs-sidebar-title">{group.title}</div>
-                  {group.items.map((item) => {
-                    const isActive = activePath === normalizePath(item.to)
-                    const className = `docs-sidebar-link${isActive ? " docs-sidebar-link-active" : ""}`
-                    return (
-                      <Link key={item.to} to={item.to} className={className} aria-current={isActive ? "page" : undefined}>
-                        {item.title}
-                      </Link>
-                    )
-                  })}
-                </div>
-              ))}
+              <DocsNavLinks activePath={activePath} />
             </aside>
+
+            <details ref={mobileNavRef} className="docs-mobile-nav">
+              <summary>
+                <span>Docs</span>
+                <strong>{activeTitle ?? "Navigation"}</strong>
+              </summary>
+              <nav aria-label="Mobile docs navigation">
+                <DocsNavLinks
+                  activePath={activePath}
+                  onNavigate={() => {
+                    if (mobileNavRef.current) mobileNavRef.current.open = false
+                  }}
+                />
+              </nav>
+            </details>
 
             <main className="docs-main">
               <Outlet />

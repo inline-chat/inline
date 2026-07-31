@@ -1,10 +1,30 @@
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { Link } from "@tanstack/react-router"
-import type { ReactNode } from "react"
-import { useEffect, useRef, useState } from "react"
+import hljs from "highlight.js/lib/core"
+import bash from "highlight.js/lib/languages/bash"
+import javascript from "highlight.js/lib/languages/javascript"
+import json from "highlight.js/lib/languages/json"
+import plaintext from "highlight.js/lib/languages/plaintext"
+import rust from "highlight.js/lib/languages/rust"
+import toml from "highlight.js/lib/languages/ini"
+import typescript from "highlight.js/lib/languages/typescript"
+import xml from "highlight.js/lib/languages/xml"
+import yaml from "highlight.js/lib/languages/yaml"
+import { Children, isValidElement, type ReactNode } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { CheckIcon, CopyIcon } from "~/docs/lucide"
 import { emailFallback, emailParts } from "~/lib/email"
+
+hljs.registerLanguage("bash", bash)
+hljs.registerLanguage("javascript", javascript)
+hljs.registerLanguage("json", json)
+hljs.registerLanguage("plaintext", plaintext)
+hljs.registerLanguage("rust", rust)
+hljs.registerLanguage("toml", toml)
+hljs.registerLanguage("typescript", typescript)
+hljs.registerLanguage("xml", xml)
+hljs.registerLanguage("yaml", yaml)
 
 type DocsMarkdownProps = {
   markdown: string
@@ -20,6 +40,84 @@ type TocItem = {
   id: string
   level: 2 | 3
   text: string
+}
+
+type MarkdownNode = {
+  type: string
+  depth?: number
+  value?: string
+  children?: MarkdownNode[]
+  data?: {
+    hName?: string
+    hProperties?: Record<string, string>
+  }
+}
+
+const LANGUAGE_ALIASES: Record<string, string> = {
+  html: "xml",
+  js: "javascript",
+  jsx: "javascript",
+  sh: "bash",
+  shell: "bash",
+  text: "plaintext",
+  ts: "typescript",
+  tsx: "typescript",
+  yml: "yaml",
+}
+
+const LANGUAGE_LABELS: Record<string, string> = {
+  bash: "Terminal",
+  javascript: "JavaScript",
+  json: "JSON",
+  plaintext: "Text",
+  rust: "Rust",
+  toml: "TOML",
+  typescript: "TypeScript",
+  xml: "HTML",
+  yaml: "YAML",
+}
+
+function remarkCodeTabs() {
+  return (tree: MarkdownNode) => {
+    const children = tree.children
+    if (!children) return
+
+    for (let index = 0; index < children.length; index += 1) {
+      const labels: string[] = []
+      const codeNodes: MarkdownNode[] = []
+      let cursor = index
+
+      while (
+        children[cursor]?.type === "heading" &&
+        children[cursor]?.depth === 4 &&
+        children[cursor + 1]?.type === "code"
+      ) {
+        const heading = children[cursor]
+        labels.push(nodeTextFromMarkdown(heading))
+        codeNodes.push(children[cursor + 1])
+        cursor += 2
+      }
+
+      if (codeNodes.length < 2) continue
+
+      children.splice(index, cursor - index, {
+        type: "blockquote",
+        children: codeNodes,
+        data: {
+          hName: "div",
+          hProperties: {
+            className: "docs-code-tabs",
+            "data-labels": JSON.stringify(labels),
+          },
+        },
+      })
+    }
+  }
+}
+
+function nodeTextFromMarkdown(node: MarkdownNode): string {
+  if (typeof node.value === "string") return node.value
+  return node.children?.map(nodeTextFromMarkdown).join("") ?? ""
 }
 
 function createSlugger(): Slugger {
@@ -78,6 +176,23 @@ function nodeText(node: ReactNode): string {
   return nodeText(node.props?.children)
 }
 
+function hastText(node: unknown): string {
+  if (!node || typeof node !== "object") return ""
+  const candidate = node as { value?: unknown; children?: unknown[] }
+  if (typeof candidate.value === "string") return candidate.value
+  return candidate.children?.map(hastText).join("") ?? ""
+}
+
+function codeLanguage(node: unknown): string {
+  if (!node || typeof node !== "object") return "plaintext"
+  const children = (node as { children?: Array<{ properties?: { className?: unknown } }> }).children
+  const className = children?.[0]?.properties?.className
+  const classes = Array.isArray(className) ? className : typeof className === "string" ? className.split(" ") : []
+  const languageClass = classes.find((value) => typeof value === "string" && value.startsWith("language-"))
+  const requested = typeof languageClass === "string" ? languageClass.slice("language-".length) : "plaintext"
+  return LANGUAGE_ALIASES[requested] ?? requested
+}
+
 function isExternalHref(href: string) {
   return /^(https?:)?\/\//i.test(href) || href.startsWith("mailto:") || href.startsWith("tel:")
 }
@@ -86,17 +201,18 @@ function isVideoHref(href: string) {
   return /\.mp4(?:[?#].*)?$/i.test(href)
 }
 
-function PreWithCopy({ children, ...props }: { children?: ReactNode; [key: string]: unknown }) {
+function PreWithCopy({ children, code, language, ...props }: { children?: ReactNode; code: string; language: string }) {
   const [copied, setCopied] = useState(false)
-
-  const codeText = nodeText(children).replace(/\n$/, "")
+  const codeText = code.replace(/\n$/, "")
+  const label = LANGUAGE_LABELS[language] ?? language.toUpperCase()
 
   return (
     <div className="docs-codeblock">
+      <div className="docs-codeblock-language">{label}</div>
       <button
         type="button"
         className="docs-codeblock-copy"
-        aria-label="Copy code"
+        aria-label={copied ? "Code copied" : "Copy code"}
         onClick={async () => {
           try {
             await navigator.clipboard.writeText(codeText)
@@ -108,8 +224,69 @@ function PreWithCopy({ children, ...props }: { children?: ReactNode; [key: strin
         }}
       >
         {copied ? <CheckIcon size={16} /> : <CopyIcon size={16} />}
+        <span aria-live="polite">{copied ? "Copied" : "Copy"}</span>
       </button>
       <pre {...props}>{children}</pre>
+    </div>
+  )
+}
+
+function CodeTabs({ children, labelsJson }: { children?: ReactNode; labelsJson: string }) {
+  const [selected, setSelected] = useState(0)
+  const id = useId().replace(/:/g, "")
+  const panels = Children.toArray(children).filter(isValidElement)
+  const labels = (() => {
+    try {
+      const value = JSON.parse(labelsJson)
+      return Array.isArray(value) && value.every((label) => typeof label === "string") ? value : []
+    } catch {
+      return []
+    }
+  })()
+
+  if (labels.length !== panels.length || labels.length < 2) return <>{children}</>
+
+  const active = Math.min(selected, panels.length - 1)
+  const selectTab = (index: number) => {
+    const next = (index + panels.length) % panels.length
+    setSelected(next)
+    requestAnimationFrame(() => document.getElementById(`${id}-tab-${next}`)?.focus())
+  }
+
+  return (
+    <div className="docs-code-tabs">
+      <div className="docs-code-tabs-list" role="tablist" aria-label="Installation options">
+        {labels.map((label, index) => (
+          <button
+            key={`${label}-${index}`}
+            id={`${id}-tab-${index}`}
+            type="button"
+            role="tab"
+            aria-selected={active === index}
+            aria-controls={`${id}-panel-${index}`}
+            tabIndex={active === index ? 0 : -1}
+            onClick={() => setSelected(index)}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowRight") selectTab(active + 1)
+              else if (event.key === "ArrowLeft") selectTab(active - 1)
+              else if (event.key === "Home") selectTab(0)
+              else if (event.key === "End") selectTab(panels.length - 1)
+              else return
+              event.preventDefault()
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div
+        id={`${id}-panel-${active}`}
+        className="docs-code-tabs-panel"
+        role="tabpanel"
+        aria-labelledby={`${id}-tab-${active}`}
+      >
+        {panels[active]}
+      </div>
     </div>
   )
 }
@@ -148,7 +325,7 @@ export function DocsMarkdown({ markdown, className, renderVideoLinks = false }: 
 
   const content = (
     <Markdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[remarkGfm, remarkCodeTabs]}
       className={className}
       components={{
         h1: heading("h1"),
@@ -234,7 +411,45 @@ export function DocsMarkdown({ markdown, className, renderVideoLinks = false }: 
         img: ({ src, alt, node: _node, ...props }) => {
           return <img src={src} alt={alt ?? ""} loading="lazy" {...props} />
         },
-        pre: ({ children, node: _node, ...props }) => <PreWithCopy {...props}>{children}</PreWithCopy>,
+        code: ({ children, className, node: _node, ...props }) => {
+          const languageClass = className?.match(/language-([\w-]+)/)?.[1]
+          if (!languageClass) {
+            return (
+              <code className={className} {...props}>
+                {children}
+              </code>
+            )
+          }
+
+          const requested = LANGUAGE_ALIASES[languageClass] ?? languageClass
+          const language = hljs.getLanguage(requested) ? requested : "plaintext"
+          const highlighted = hljs.highlight(nodeText(children).replace(/\n$/, ""), {
+            language,
+            ignoreIllegals: true,
+          }).value
+
+          return <code className={`${className} hljs`} dangerouslySetInnerHTML={{ __html: highlighted }} {...props} />
+        },
+        div: ({ children, node: _node, className, ...props }) => {
+          if (className === "docs-code-tabs") {
+            const dataProps = props as typeof props & { "data-labels"?: unknown }
+            const labelsJson = typeof dataProps["data-labels"] === "string" ? dataProps["data-labels"] : "[]"
+            return <CodeTabs labelsJson={labelsJson}>{children}</CodeTabs>
+          }
+          return (
+            <div className={className} {...props}>
+              {children}
+            </div>
+          )
+        },
+        pre: ({ children, node, ...props }) => {
+          const language = codeLanguage(node)
+          return (
+            <PreWithCopy {...props} code={hastText(node)} language={language}>
+              {children}
+            </PreWithCopy>
+          )
+        },
       }}
     >
       {markdown}
