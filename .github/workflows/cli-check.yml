@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "cli/**"
+      - "scripts/ci/public-workspaces-ref"
       - "scripts/release-cli.ts"
       - ".github/workflows/cli-check.yml"
       - ".github/workflows/cli-release.yml"
@@ -14,6 +15,7 @@ on:
       - main
     paths:
       - "cli/**"
+      - "scripts/ci/public-workspaces-ref"
       - "scripts/release-cli.ts"
       - ".github/workflows/cli-check.yml"
       - ".github/workflows/cli-release.yml"

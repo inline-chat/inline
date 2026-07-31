@@ -446,6 +446,8 @@ async function signAndNotarize(context: ReleaseContext) {
         "codesign",
         [
           "--force",
+          "--identifier",
+          "chat.inline.cli",
           "--options",
           "runtime",
           "--timestamp",
