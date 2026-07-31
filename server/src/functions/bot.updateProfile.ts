@@ -22,6 +22,7 @@ export const updateBotProfile = async (
       throw RealtimeRpcError.BadRequest()
     }
     updates.firstName = trimmed
+    updates.lastName = null
   }
 
   if (input.photoFileUniqueId !== undefined) {

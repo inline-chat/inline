@@ -46,6 +46,25 @@ describe("bot profile", () => {
     expect(listed.bots.some((b) => b.id === (created.bot?.id ?? 0n) && b.firstName === "New Bot Name")).toBe(true)
   })
 
+  test("updateBotProfile stores the complete bot name in firstName and clears legacy lastName", async () => {
+    const created = await createBot({ name: "Mo's", username: "legacynamebot" }, creatorContext)
+    const botUserId = Number(created.bot?.id ?? 0n)
+    await db.update(schema.users).set({ lastName: "Codex" }).where(eq(schema.users.id, botUserId))
+
+    const updated = await updateBotProfile(
+      { botUserId: BigInt(botUserId), name: "Mo's Codex" },
+      creatorContext,
+    )
+    const [stored] = await db
+      .select({ firstName: schema.users.firstName, lastName: schema.users.lastName })
+      .from(schema.users)
+      .where(eq(schema.users.id, botUserId))
+      .limit(1)
+
+    expect(updated.bot?.firstName).toBe("Mo's Codex")
+    expect(stored).toEqual({ firstName: "Mo's Codex", lastName: null })
+  })
+
   test("updateBotProfile rejects non-creator", async () => {
     const created = await createBot({ name: "Private Bot", username: "privateprofilebot" }, creatorContext)
 
