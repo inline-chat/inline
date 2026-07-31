@@ -2938,6 +2938,12 @@ export interface RpcCall {
          */
         getGridHome: GetGridHomeInput;
     } | {
+        oneofKind: "createCliSession";
+        /**
+         * @generated from protobuf field: CreateCliSessionInput createCliSession = 94;
+         */
+        createCliSession: CreateCliSessionInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -3498,6 +3504,12 @@ export interface RpcResult {
          * @generated from protobuf field: GetGridHomeResult getGridHome = 93;
          */
         getGridHome: GetGridHomeResult;
+    } | {
+        oneofKind: "createCliSession";
+        /**
+         * @generated from protobuf field: CreateCliSessionResult createCliSession = 94;
+         */
+        createCliSession: CreateCliSessionResult;
     } | {
         oneofKind: undefined;
     };
@@ -4871,6 +4883,48 @@ export interface GetSessionsResult {
      * @generated from protobuf field: repeated AccountSession sessions = 1;
      */
     sessions: AccountSession[];
+}
+/**
+ * Creates a separate CLI credential from an authenticated first-party macOS
+ * session after the user approves a host-local handoff. The returned token is
+ * sensitive and must only be delivered to the requesting local CLI process.
+ *
+ * @generated from protobuf message CreateCliSessionInput
+ */
+export interface CreateCliSessionInput {
+    /**
+     * @generated from protobuf field: string device_id = 1;
+     */
+    deviceId: string;
+    /**
+     * @generated from protobuf field: optional string device_name = 2;
+     */
+    deviceName?: string;
+    /**
+     * @generated from protobuf field: string client_version = 3;
+     */
+    clientVersion: string;
+    /**
+     * @generated from protobuf field: optional string os_version = 4;
+     */
+    osVersion?: string;
+}
+/**
+ * @generated from protobuf message CreateCliSessionResult
+ */
+export interface CreateCliSessionResult {
+    /**
+     * @generated from protobuf field: string token = 1;
+     */
+    token: string;
+    /**
+     * @generated from protobuf field: int64 session_id = 2;
+     */
+    sessionId: bigint;
+    /**
+     * @generated from protobuf field: int64 user_id = 3;
+     */
+    userId: bigint;
 }
 /**
  * @generated from protobuf message CheckUsernameInput
@@ -9013,7 +9067,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: GET_GRID_HOME = 92;
      */
-    GET_GRID_HOME = 92
+    GET_GRID_HOME = 92,
+    /**
+     * @generated from protobuf enum value: CREATE_CLI_SESSION = 93;
+     */
+    CREATE_CLI_SESSION = 93
 }
 /**
  * @generated from protobuf enum GridConnectionUnavailableReason
@@ -14445,7 +14503,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 90, name: "deleteGridRoom", kind: "message", oneof: "input", T: () => DeleteGridRoomInput },
             { no: 91, name: "prepareGridConnection", kind: "message", oneof: "input", T: () => PrepareGridConnectionInput },
             { no: 92, name: "setGridAvatarMicrophoneEnabled", kind: "message", oneof: "input", T: () => SetGridAvatarMicrophoneEnabledInput },
-            { no: 93, name: "getGridHome", kind: "message", oneof: "input", T: () => GetGridHomeInput }
+            { no: 93, name: "getGridHome", kind: "message", oneof: "input", T: () => GetGridHomeInput },
+            { no: 94, name: "createCliSession", kind: "message", oneof: "input", T: () => CreateCliSessionInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -15010,6 +15069,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getGridHome: GetGridHomeInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getGridHome)
                     };
                     break;
+                case /* CreateCliSessionInput createCliSession */ 94:
+                    message.input = {
+                        oneofKind: "createCliSession",
+                        createCliSession: CreateCliSessionInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).createCliSession)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -15298,6 +15363,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetGridHomeInput getGridHome = 93; */
         if (message.input.oneofKind === "getGridHome")
             GetGridHomeInput.internalBinaryWrite(message.input.getGridHome, writer.tag(93, WireType.LengthDelimited).fork(), options).join();
+        /* CreateCliSessionInput createCliSession = 94; */
+        if (message.input.oneofKind === "createCliSession")
+            CreateCliSessionInput.internalBinaryWrite(message.input.createCliSession, writer.tag(94, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -15403,7 +15471,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 90, name: "deleteGridRoom", kind: "message", oneof: "result", T: () => DeleteGridRoomResult },
             { no: 91, name: "prepareGridConnection", kind: "message", oneof: "result", T: () => PrepareGridConnectionResult },
             { no: 92, name: "setGridAvatarMicrophoneEnabled", kind: "message", oneof: "result", T: () => SetGridAvatarMicrophoneEnabledResult },
-            { no: 93, name: "getGridHome", kind: "message", oneof: "result", T: () => GetGridHomeResult }
+            { no: 93, name: "getGridHome", kind: "message", oneof: "result", T: () => GetGridHomeResult },
+            { no: 94, name: "createCliSession", kind: "message", oneof: "result", T: () => CreateCliSessionResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -15968,6 +16037,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getGridHome: GetGridHomeResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getGridHome)
                     };
                     break;
+                case /* CreateCliSessionResult createCliSession */ 94:
+                    message.result = {
+                        oneofKind: "createCliSession",
+                        createCliSession: CreateCliSessionResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).createCliSession)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -16256,6 +16331,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetGridHomeResult getGridHome = 93; */
         if (message.result.oneofKind === "getGridHome")
             GetGridHomeResult.internalBinaryWrite(message.result.getGridHome, writer.tag(93, WireType.LengthDelimited).fork(), options).join();
+        /* CreateCliSessionResult createCliSession = 94; */
+        if (message.result.oneofKind === "createCliSession")
+            CreateCliSessionResult.internalBinaryWrite(message.result.createCliSession, writer.tag(94, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -20955,6 +21033,138 @@ class GetSessionsResult$Type extends MessageType<GetSessionsResult> {
  * @generated MessageType for protobuf message GetSessionsResult
  */
 export const GetSessionsResult = new GetSessionsResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CreateCliSessionInput$Type extends MessageType<CreateCliSessionInput> {
+    constructor() {
+        super("CreateCliSessionInput", [
+            { no: 1, name: "device_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "device_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "client_version", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "os_version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<CreateCliSessionInput>): CreateCliSessionInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.deviceId = "";
+        message.clientVersion = "";
+        if (value !== undefined)
+            reflectionMergePartial<CreateCliSessionInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CreateCliSessionInput): CreateCliSessionInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string device_id */ 1:
+                    message.deviceId = reader.string();
+                    break;
+                case /* optional string device_name */ 2:
+                    message.deviceName = reader.string();
+                    break;
+                case /* string client_version */ 3:
+                    message.clientVersion = reader.string();
+                    break;
+                case /* optional string os_version */ 4:
+                    message.osVersion = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CreateCliSessionInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string device_id = 1; */
+        if (message.deviceId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.deviceId);
+        /* optional string device_name = 2; */
+        if (message.deviceName !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.deviceName);
+        /* string client_version = 3; */
+        if (message.clientVersion !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.clientVersion);
+        /* optional string os_version = 4; */
+        if (message.osVersion !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.osVersion);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message CreateCliSessionInput
+ */
+export const CreateCliSessionInput = new CreateCliSessionInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CreateCliSessionResult$Type extends MessageType<CreateCliSessionResult> {
+    constructor() {
+        super("CreateCliSessionResult", [
+            { no: 1, name: "token", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "session_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<CreateCliSessionResult>): CreateCliSessionResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.token = "";
+        message.sessionId = 0n;
+        message.userId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<CreateCliSessionResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CreateCliSessionResult): CreateCliSessionResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string token */ 1:
+                    message.token = reader.string();
+                    break;
+                case /* int64 session_id */ 2:
+                    message.sessionId = reader.int64().toBigInt();
+                    break;
+                case /* int64 user_id */ 3:
+                    message.userId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CreateCliSessionResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string token = 1; */
+        if (message.token !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.token);
+        /* int64 session_id = 2; */
+        if (message.sessionId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.sessionId);
+        /* int64 user_id = 3; */
+        if (message.userId !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.userId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message CreateCliSessionResult
+ */
+export const CreateCliSessionResult = new CreateCliSessionResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class CheckUsernameInput$Type extends MessageType<CheckUsernameInput> {
     constructor() {

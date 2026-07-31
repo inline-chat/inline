@@ -67,6 +67,7 @@ import { answerMessageAction } from "@in/server/realtime/handlers/messages.answe
 import { createSubthread } from "@in/server/realtime/handlers/messages.createSubthread"
 import { revokeSessionHandler } from "@in/server/realtime/handlers/user.revokeSession"
 import { getSessionsHandler } from "@in/server/realtime/handlers/user.getSessions"
+import { createCliSessionHandler } from "@in/server/realtime/handlers/user.createCliSession"
 import {
   changeUsernameHandler,
   checkUsernameHandler,
@@ -778,6 +779,13 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       const result = await getSessionsHandler(call.input.getSessions, handlerContext)
       return { oneofKind: "getSessions", getSessions: result }
     }
+    case Method.CREATE_CLI_SESSION: {
+      if (call.input.oneofKind !== "createCliSession") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await createCliSessionHandler(call.input.createCliSession, handlerContext)
+      return { oneofKind: "createCliSession", createCliSession: result }
+    }
     case Method.CHECK_USERNAME: {
       if (call.input.oneofKind !== "checkUsername") {
         throw RealtimeRpcError.BadRequest()
@@ -799,7 +807,6 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       const result = await updateProfileHandler(call.input.updateProfile, handlerContext)
       return { oneofKind: "updateProfile", updateProfile: result }
     }
-
     default:
       throw RealtimeRpcError.UnsupportedRpcMethod(call.method)
   }

@@ -572,6 +572,29 @@ public actor RealtimeV2 {
     return sessionsResult
   }
 
+  public func createCliSession(
+    deviceID: String,
+    deviceName: String?,
+    clientVersion: String,
+    osVersion: String?
+  ) async throws -> InlineProtocol.CreateCliSessionResult {
+    let result = try await callRpcDirect(
+      method: .createCliSession,
+      input: .createCliSession(.with {
+        $0.deviceID = deviceID
+        if let deviceName { $0.deviceName = deviceName }
+        $0.clientVersion = clientVersion
+        if let osVersion { $0.osVersion = osVersion }
+      })
+    )
+
+    guard case let .createCliSession(createResult)? = result else {
+      throw RealtimeDirectRpcError.rpcError(message: "Unexpected createCliSession response", code: 500)
+    }
+
+    return createResult
+  }
+
   public func checkUsername(_ username: String) async throws -> InlineProtocol.CheckUsernameResult {
     let result = try await callRpcDirect(
       method: .checkUsername,
