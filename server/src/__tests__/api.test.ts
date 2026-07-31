@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { app } from "../legacyServer"
 import { db } from "@in/server/db"
 import { inviteCodes, loginCodes, members, sessions, spaces, users } from "@in/server/db/schema"
@@ -9,6 +9,21 @@ import { setupTestLifecycle } from "./setup"
 describe("API Endpoints", () => {
   // Setup test lifecycle
   setupTestLifecycle()
+
+  let previousInviteCodesRequired: string | undefined
+
+  beforeEach(() => {
+    previousInviteCodesRequired = process.env["INVITE_CODES_REQUIRED"]
+    process.env["INVITE_CODES_REQUIRED"] = "true"
+  })
+
+  afterEach(() => {
+    if (previousInviteCodesRequired === undefined) {
+      delete process.env["INVITE_CODES_REQUIRED"]
+    } else {
+      process.env["INVITE_CODES_REQUIRED"] = previousInviteCodesRequired
+    }
+  })
 
   const testServer = app
 
@@ -570,7 +585,65 @@ describe("API Endpoints", () => {
         ok: false,
         error: "INVITE_CODE_REQUIRED",
         errorCode: 400,
-        description: "Enter an invite code to sign up.",
+        description: "Enter an access invite code to create an account.",
+      })
+    })
+
+    it("does not require an invite code for an existing user", async () => {
+      const email = "invite-existing-user@example.com"
+      const code = "123456"
+      const [existingUser] = await db
+        .insert(users)
+        .values({ email, emailVerified: true, pendingSetup: false })
+        .returning()
+
+      if (!existingUser) {
+        throw new Error("Failed to seed existing user")
+      }
+
+      const sendRequest = new Request("http://localhost/v1/sendEmailCode", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email }),
+      })
+      const sendResponse = await testServer.handle(sendRequest)
+      expect(sendResponse.status).toBe(200)
+      expect(await sendResponse.json()).toMatchObject({
+        ok: true,
+        result: {
+          existingUser: true,
+          needsInviteCode: false,
+        },
+      })
+
+      await db.insert(loginCodes).values({
+        email,
+        code: null,
+        codeHash: await hashLoginCode(code),
+        challengeId: "lc_invite_existing_user",
+        expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
+      })
+
+      const verifyRequest = new Request("http://localhost/v1/verifyEmailCode", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email,
+          code,
+          challengeToken: "lc_invite_existing_user",
+        }),
+      })
+      const verifyResponse = await testServer.handle(verifyRequest)
+      expect(verifyResponse.status).toBe(200)
+      expect(await verifyResponse.json()).toMatchObject({
+        ok: true,
+        result: {
+          userId: existingUser.id,
+        },
       })
     })
 
@@ -604,7 +677,7 @@ describe("API Endpoints", () => {
         ok: false,
         error: "INVITE_CODE_INVALID",
         errorCode: 400,
-        description: "Invite code must be 8 letters or numbers.",
+        description: "Access invite code must be 8 letters or numbers.",
       })
     })
 
