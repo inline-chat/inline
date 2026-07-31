@@ -74,8 +74,8 @@ We think of friend groups and communities as first-class citizens. At this point
 
 | Platform | Status                    |
 | -------- | ------------------------- |
-| macOS    | Alpha, actively developed |
-| iOS      | Alpha, actively developed |
+| macOS    | Beta, actively developed  |
+| iOS      | Beta, actively developed  |
 | Web      | Not started               |
 | Android  | Not started               |
 | Windows  | Not started               |
@@ -83,11 +83,10 @@ We think of friend groups and communities as first-class citizens. At this point
 
 ## Download
 
-Inline is currently invite-only. If you have access, you can use the alpha builds here:
+Inline is in beta:
 
 - [Download for macOS](https://inline.chat/download/mac/beta)
 - [Join the iOS TestFlight](https://testflight.apple.com/join/FkC3f7fz)
-- [Join the waitlist](https://inline.chat)
 - [Install the Hermes Agent adapter](docs/hermes.md)
 
 ## Support the project
@@ -109,10 +108,21 @@ Start with the [developer docs](https://inline.chat/docs), or jump directly to a
 | `@inline-chat/protocol` | Generated TypeScript protocol types | [Docs](https://inline.chat/docs/realtime-api#protocol-buffers) · [Source](packages/protocol/) |
 | `@inline-chat/bot-api-types` | Generated TypeScript Bot API types | [Docs](https://inline.chat/docs/bot-api) · [Source](packages/bot-api-types/) |
 | `@inline-chat/oauth-core` | Shared OAuth helpers used by hosted integrations | [Docs](https://inline.chat/docs/mcp) · [Source](packages/oauth-core/) |
-| Inline agent skill | Reusable ChatGPT and Codex workflows for Inline chats, threads, and messages | [Source](skills/inline/) |
+| Inline skill | Official agent workflows for Inline through MCP, the CLI, and local agents | [Source](skills/inline/) |
 | `inline-client` | Stateful Rust client foundation | [Docs](https://docs.rs/inline-client) · [Source](crates/client/) |
 | `inline-sdk` | Rust SDK for API calls, uploads, and realtime RPC | [Docs](https://inline.chat/docs/rust-sdk) · [Source](crates/sdk/) |
 | `inline-protocol` | Generated Rust protocol types | [Docs](https://inline.chat/docs/rust-sdk#packages) · [Source](crates/protocol/) |
+
+## Codex plugin
+
+Until Inline is available in the official Codex plugin marketplace, add the public Inline marketplace and install the plugin manually:
+
+```sh
+codex plugin marketplace add inline-chat/inline
+codex plugin add inline@inline
+```
+
+Start a new Codex session after installation. See the [plugin documentation](plugins/inline/) for authentication, capabilities, and privacy details.
 
 ## Contributing
 
@@ -123,7 +133,7 @@ Start with the [developer docs](https://inline.chat/docs), or jump directly to a
 
 ### What stage are you at?
 
-We currently have an invite-only alpha with a few teams. Our native macOS and iOS apps are in production and our web app is in very early stages (not usable yet). Once those reach a stable point, we plan to ship desktop clients for Windows and Linux, and an Android app.
+Inline is in beta. Our native macOS and iOS apps are available now, and our web app is in development. We plan to expand support for Android, Windows, and Linux as they become ready.
 
 ### Is it paid?
 
