@@ -273,7 +273,9 @@ jobs:
   build-macos:
     needs: preflight
     runs-on: macos-26
-    timeout-minutes: 60
+    # The release script allows notarytool to wait up to 60 minutes after the
+    # Rust build, so the job needs headroom for compilation and packaging.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
