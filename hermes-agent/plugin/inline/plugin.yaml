@@ -63,7 +63,7 @@ optional_env:
     prompt: "Allowed group sender ids"
     password: false
   - name: INLINE_REQUIRE_MENTION
-    description: "Require a mention/wake word in group chats. Replies to the bot and followed eligible reply/fresh threads can continue without one unless strict mention is enabled (default true)."
+    description: "Require a mention/wake word in group chats. Replies to the bot and dialogs already marked FOLLOWING can continue without one unless strict mention is enabled (default true)."
     prompt: "Require group mention? (true/false)"
     password: false
   - name: INLINE_STRICT_MENTION

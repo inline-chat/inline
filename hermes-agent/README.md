@@ -27,7 +27,7 @@ Supported:
 - Realtime inbound messages, catch-up, replies to bot messages, and action callbacks.
 - Outbound text, Markdown parsing, opt-in edit-message streaming, long-message splitting, edits, deletes, typing, and presence.
 - Inline reply-thread routing, explicit-request auto mode, `/threads` controls, explicit `/follow` and `/unfollow` dialog relevance controls, parent chat metadata, parent/thread prompt fallback, and thread-specific skill bindings.
-- Native Hermes `inline` tool for current-chat/thread reads, bounded history and search, exact message lookup, editing/deleting bot-owned messages, reactions, pin/unpin/list pins, reply-thread creation, and avatar presence/status.
+- Native Hermes `inline` tool for current-chat/thread reads, bounded history and search, exact message lookup, editing/deleting bot-owned messages, reactions, pin/unpin/list pins, reply-thread creation, top-level thread/chat creation outside the current conversation, and avatar presence/status.
 - Cached, privacy-safe sender names/usernames plus chat/thread IDs, selective reply/thread/observed context, and parent-thread context, with first-name/username Markdown mention guidance and current chat/thread links.
 - OpenClaw-style entity summaries for live turns and tool-fetched history, including mentions, text links, thread links, thread-title links, code/pre blocks, bot commands, and group mentions as untrusted Hermes context.
 - DM and group policies, user allowlists, group sender allowlists, mention requirements, strict mention mode, allowed chats, and free-response chats.
@@ -262,7 +262,7 @@ Access control follows Hermes' native platform model:
 | `INLINE_DM_POLICY=open|allowlist|disabled` | Controls direct-message intake. `allowlist` requires `INLINE_ALLOWED_USERS` or config `allow_from`. |
 | `INLINE_GROUP_POLICY=open|allowlist|disabled` | Controls group intake. `allowlist` requires `INLINE_GROUP_ALLOW_FROM`. |
 | `INLINE_GROUP_ALLOW_FROM` | Comma-separated Inline user ids allowed to invoke the bot from group chats. |
-| `INLINE_REQUIRE_MENTION` | Requires a mention or wake word in groups by default. Replies to the bot and followed eligible reply/fresh threads are accepted without the wake word. |
+| `INLINE_REQUIRE_MENTION` | Requires a mention or wake word in groups by default. Replies to the bot and dialogs already marked `FOLLOWING` are accepted without the wake word. |
 | `INLINE_STRICT_MENTION` | Requires a mention or wake word on every group turn, including replies to the bot and followed threads. Defaults to `false`. |
 | `INLINE_ALLOWED_CHATS` | Comma-separated group/thread chat ids where the bot may respond. Parent chat ids also match their Inline reply threads. DMs are not filtered. Empty means no chat restriction. |
 | `INLINE_FREE_RESPONSE_CHATS` | Comma-separated group/thread chat ids where no mention is required. Parent chat ids also match their Inline reply threads. Useful for dedicated agent rooms. |
@@ -332,7 +332,11 @@ normalizes names to Inline Bot API constraints
 (`^[a-z0-9_]+$`, max 32 characters), and calls `setMyCommands`. If Inline
 rejects the full list with `BOT_COMMANDS_TOO_MUCH`, the adapter retries with a
 smaller prefix. Menu sync failures are logged as warnings and do not prevent
-message transport; `/commands` remains the full fallback list.
+message transport; `/commands` remains the full fallback list. In chats with
+multiple bots, Inline may insert `/command@botusername` to disambiguate a menu
+choice. Hermes accepts that form only when the suffix matches its own username,
+then removes the suffix before command dispatch; commands addressed to another
+bot are ignored.
 
 Run `/inline_update` to install the newest adapter from the plugin's current
 npm release channel. Stable installs continue following `latest`, while
@@ -349,7 +353,18 @@ marker, so `hermes logs` and Hermes debug reports can surface the root cause.
 Run `/follow` in an Inline DM, group, or reply thread to explicitly opt into
 eligible unmentioned activity waking Hermes. Run `/unfollow` to explicitly opt
 out; server auto-follow heuristics will not turn following back on, while
-mentions and replies retain their normal relevance behavior.
+mentions and replies retain their normal relevance behavior. If an otherwise
+implicit follow/reply wake begins with a concrete mention of another person,
+Hermes treats that explicit address as higher priority and does not respond
+unless the bot is also explicitly mentioned.
+
+The model-callable `inline` tool keeps reply and top-level creation separate:
+`create_thread` creates a reply subthread under the current or explicit parent
+chat, while `create_chat` creates a new top-level destination. `create_chat`
+requires a title, defaults to private, accepts optional participant user IDs or
+a parent space ID, and requires both `space_id` and explicit `is_public: true`
+for space-wide visibility. It returns the new chat ID so Hermes can link it in
+the normal reply.
 
 The plugin id is `inline`, which is intentionally the same id an eventual
 bundled Hermes adapter should use.
