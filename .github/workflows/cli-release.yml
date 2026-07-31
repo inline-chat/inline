@@ -16,6 +16,11 @@ on:
         required: false
         default: false
         type: boolean
+      build_only:
+        description: "Build and upload workflow artifacts without publishing a release"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: ${{ github.workflow }}
@@ -57,6 +62,7 @@ jobs:
           APPLE_NOTARIZATION_KEY_ID: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
           APPLE_NOTARIZATION_ISSUER: ${{ secrets.APPLE_NOTARIZATION_ISSUER }}
           INLINE_SKIP_NOTARIZE: ${{ github.event.inputs.skip_notarize }}
+          BUILD_ONLY: ${{ github.event.inputs.build_only }}
         run: |
           set -euo pipefail
           release_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
@@ -94,13 +100,21 @@ jobs:
             done
           fi
 
-          required=(
-            PUBLIC_RELEASES_R2_ACCESS_KEY_ID
-            PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY
-            PUBLIC_RELEASES_R2_BUCKET
-            PUBLIC_RELEASES_R2_ENDPOINT
-            PUBLIC_RELEASES_R2_PUBLIC_BASE_URL
-          )
+          build_only=false
+          if [[ "${BUILD_ONLY}" == "true" || "${BUILD_ONLY}" == "1" ]]; then
+            build_only=true
+          fi
+
+          required=()
+          if [[ "${build_only}" != "true" ]]; then
+            required+=(
+              PUBLIC_RELEASES_R2_ACCESS_KEY_ID
+              PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY
+              PUBLIC_RELEASES_R2_BUCKET
+              PUBLIC_RELEASES_R2_ENDPOINT
+              PUBLIC_RELEASES_R2_PUBLIC_BASE_URL
+            )
+          fi
           if [[ -z "${TARGETS_OVERRIDE}" || "${TARGETS_OVERRIDE}" == *apple-darwin* ]]; then
             required+=(
               MACOS_CERTIFICATE
@@ -108,7 +122,7 @@ jobs:
               MACOS_CERTIFICATE_NAME
               MACOS_CI_KEYCHAIN_PWD
             )
-            if [[ "${prerelease}" != "true" ]]; then
+            if [[ "${build_only}" != "true" && "${prerelease}" != "true" ]]; then
               required+=(INLINE_HOMEBREW_TAP_TOKEN)
             fi
           fi
@@ -414,7 +428,7 @@ jobs:
       - preflight
       - build-linux
       - build-macos
-    if: ${{ always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    if: ${{ always() && github.event.inputs.build_only != 'true' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
