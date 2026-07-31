@@ -26,7 +26,11 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
   private func makeSession() -> URLSession {
     let configuration = URLSessionConfiguration.default
     configuration.shouldUseExtendedBackgroundIdleMode = true
-    configuration.timeoutIntervalForResource = 300
+    // `timeoutIntervalForResource` is an absolute lifetime for a WebSocket,
+    // not an idle timeout. Five minutes caused healthy realtime connections
+    // to be torn down mid-RPC. Keep the task long-lived and let the receive
+    // loop, delegate errors, and connection supervisor own recovery.
+    configuration.timeoutIntervalForResource = 7 * 24 * 60 * 60
     configuration.timeoutIntervalForRequest = 30
     configuration.waitsForConnectivity = false
     configuration.httpMaximumConnectionsPerHost = 1
