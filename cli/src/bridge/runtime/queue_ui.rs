@@ -26,14 +26,14 @@ pub(super) fn coordinator_acknowledgement(
     })
 }
 
-pub(super) fn queue_acknowledgement(disposition: DirectionDisposition) -> Acknowledgement {
+pub(super) fn queue_acknowledgement(disposition: DirectionDisposition) -> Option<Acknowledgement> {
     match disposition {
-        DirectionDisposition::Queued => Acknowledgement::Queued,
+        DirectionDisposition::Queued => Some(Acknowledgement::Queued),
         DirectionDisposition::QueuedBecauseSteeringUnsupported => {
-            Acknowledgement::QueuedBecauseSteeringUnsupported
+            Some(Acknowledgement::QueuedBecauseSteeringUnsupported)
         }
-        DirectionDisposition::Started => Acknowledgement::Working,
-        DirectionDisposition::Steered => Acknowledgement::Steering,
+        DirectionDisposition::Started => Some(Acknowledgement::Working),
+        DirectionDisposition::Steered => None,
     }
 }
 
@@ -120,5 +120,14 @@ mod tests {
             .expect("started");
         assert_eq!(started.event_id, record.event_id);
         assert!(!accept_or_resume_queued_confirmation(&store, &record).expect("started replay"));
+    }
+
+    #[test]
+    fn native_steering_is_silent_but_queue_fallbacks_are_visible() {
+        assert_eq!(queue_acknowledgement(DirectionDisposition::Steered), None);
+        assert_eq!(
+            queue_acknowledgement(DirectionDisposition::QueuedBecauseSteeringUnsupported),
+            Some(Acknowledgement::QueuedBecauseSteeringUnsupported)
+        );
     }
 }

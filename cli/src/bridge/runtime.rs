@@ -2431,12 +2431,10 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + 'static>(
                             queue_id.clone(),
                         );
                         if store.accept_inbound(&record)? {
-                            send_queue_confirmation(
-                                bot,
-                                &record,
-                                queue_acknowledgement(disposition).message(),
-                            )
-                            .await?;
+                            if let Some(acknowledgement) = queue_acknowledgement(disposition) {
+                                send_queue_confirmation(bot, &record, acknowledgement.message())
+                                    .await?;
+                            }
                         } else {
                             reconcile_replayed_queue_delivery(
                                 store,
@@ -2530,12 +2528,14 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + 'static>(
                                 queue_id.clone(),
                             );
                             if store.accept_inbound(&record)? {
-                                send_queue_confirmation(
-                                    bot,
-                                    &record,
-                                    queue_acknowledgement(disposition).message(),
-                                )
-                                .await?;
+                                if let Some(acknowledgement) = queue_acknowledgement(disposition) {
+                                    send_queue_confirmation(
+                                        bot,
+                                        &record,
+                                        acknowledgement.message(),
+                                    )
+                                    .await?;
+                                }
                             } else {
                                 reconcile_replayed_queue_delivery(
                                     store,
@@ -2566,12 +2566,10 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + 'static>(
                     DirectionDisposition::Queued
                     | DirectionDisposition::QueuedBecauseSteeringUnsupported => {
                         if store.accept_inbound(&record)? {
-                            send_queue_confirmation(
-                                bot,
-                                &record,
-                                queue_acknowledgement(disposition).message(),
-                            )
-                            .await?;
+                            if let Some(acknowledgement) = queue_acknowledgement(disposition) {
+                                send_queue_confirmation(bot, &record, acknowledgement.message())
+                                    .await?;
+                            }
                         } else {
                             reconcile_replayed_queue_delivery(
                                 store,
@@ -2586,21 +2584,6 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + 'static>(
                         let accepted = store.accept_inbound(&record)?;
                         if accepted && store.start_inbound(&record.event_id, now_seconds())? {
                             store.attach_inbound_turn(&record.event_id, turn_id, None)?;
-                            if let Err(error) = send_text_reply(
-                                bot,
-                                binding.chat_id,
-                                record.message_id,
-                                "Got it — I’m checking whether I can steer the current run.",
-                                &format!("{}-steering-received", record.event_id),
-                                BridgeNotificationClass::RoutineStatus,
-                            )
-                            .await
-                            {
-                                eprintln!(
-                                    "Could not acknowledge a steering attempt: {}",
-                                    safe_diagnostic(&error.to_string())
-                                );
-                            }
                             let steered = sessions
                                 .driver()
                                 .steer_turn(
@@ -2615,6 +2598,8 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + 'static>(
                                 .await;
                             match steered {
                                 Ok(()) => {
+                                    // Native steering is intentionally silent. The running
+                                    // agent's updated output is the acknowledgement.
                                     store.complete_inbound(&record.event_id)?;
                                 }
                                 Err(error) => {
