@@ -1,25 +1,28 @@
-# Welcome
+# Get Started
 
 Source: https://inline.chat/docs
 
-Inline is a fast, lightweight work chat for high-performance teams.
+Inline is a fast work chat for teams and agents.
 
-## Status
+## Start with Inline
 
-- Closed alpha.
-- macOS and iOS are live for early teams.
-- Web is in active development.
+- **[Download Inline](https://inline.chat/download)**
 
-## Pages
+  Install the macOS app or join the iOS TestFlight.
+- **[Install the CLI](https://inline.chat/docs/cli)**
 
-- [What's Inline](https://inline.chat/docs/whats-inline)
-- [Roadmap](https://inline.chat/docs/roadmap)
-- [What's New](https://inline.chat/docs/changelog)
-- [Downloads](https://inline.chat/docs/downloads)
-- [CLI](https://inline.chat/docs/cli)
-- [Developers](https://inline.chat/docs/developers)
-- [Realtime API](https://inline.chat/docs/realtime-api)
-- [Bot API](https://inline.chat/docs/bot-api)
-- [Legal](https://inline.chat/legal)
-- [Security](https://inline.chat/docs/security)
-- [GitHub Repository](https://github.com/inline-chat/inline)
+  Use Inline from a terminal, script, or coding agent.
+- **[Connect an agent](https://inline.chat/docs/agents)**
+
+  Bring Codex, Claude, OpenCode, OpenClaw, or Hermes into your chats.
+- **[Build with Inline](https://inline.chat/docs/developers)**
+
+  Use the Bot API, Realtime API, or an official SDK.
+
+## Next steps
+
+1. [Set up a local coding agent](https://inline.chat/docs/agents#local-coding-agents) as a private Inline bot.
+2. [Connect Inline MCP](https://inline.chat/docs/mcp) to give an agent access with OAuth consent.
+3. [Add Inline to your agent](https://inline.chat/docs/add-inline) with the official plugin or skill.
+
+Looking for source or deeper technical detail? Visit [inline-chat/inline on GitHub](https://github.com/inline-chat/inline).

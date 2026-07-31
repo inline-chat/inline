@@ -2,31 +2,15 @@
 
 Source: https://inline.chat/docs/openclaw
 
-Need a bot token first? See [Creating a Bot](https://inline.chat/docs/creating-a-bot).
+Add Inline as an OpenClaw channel. You need an [Inline bot token](https://inline.chat/docs/creating-a-bot) first.
 
-## Setup
-
-### Install
+## Install
 
 ```bash
 openclaw plugins install @inline-openclaw/inline
 ```
 
-### Keep It Updated
-
-Set the plugin spec to latest:
-
-```bash
-openclaw config set plugins.installs.inline.spec '"@inline-openclaw/inline@latest"'
-```
-
-Then update the installed plugin:
-
-```bash
-openclaw plugins update inline
-```
-
-## Config
+## Configure
 
 ```yaml
 channels:
@@ -35,25 +19,22 @@ channels:
     token: "<INLINE_BOT_TOKEN>"
 ```
 
-Plugin entry id is `inline`:
-
-```yaml
-plugins:
-  entries:
-    inline:
-      enabled: true
-```
-
-## Run / Verify
+## Run
 
 ```bash
 openclaw gateway
-openclaw plugins list
+```
+
+Verify that the Inline channel is available:
+
+```bash
 openclaw status --deep
 ```
 
-If a stale config appears, keep `plugins.entries.inline`.
+## Update
 
-## Report Issues
+```bash
+openclaw plugins update inline
+```
 
-Report issues here: [inline-chat/inline issues](https://github.com/inline-chat/inline/issues).
+For access controls, troubleshooting, and the complete feature reference, see the [Inline OpenClaw plugin](https://github.com/inline-chat/inline/tree/main/openclaw).

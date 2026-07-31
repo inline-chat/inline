@@ -5,9 +5,9 @@ Source: https://inline.chat/docs/bot-api
 Inline Bot API is a simple HTTP API for bot integrations.
 It is intended for simpler bot workflows and alerts.
 
-## Status
+## Compatibility
 
-Alpha. Endpoints may change.
+Bot API endpoints may evolve. Pin generated types and review the changelog when upgrading.
 
 ## Base URL
 
@@ -33,7 +33,7 @@ Use either:
 ## Targeting Chats
 
 - Use exactly one target per request: `chat_id` or `user_id`.
-- For compatibility in alpha, `peer_thread_id` and `peer_user_id` are still accepted.
+- Legacy `peer_thread_id` and `peer_user_id` targets are also accepted.
 
 ## When To Use This API
 

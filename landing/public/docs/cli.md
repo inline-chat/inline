@@ -2,47 +2,53 @@
 
 Source: https://inline.chat/docs/cli
 
-Inline CLI is in alpha.
-In this version, it is primarily optimized for AI and agent workflows. A more polished UX for regular users is coming.
+Use the Inline CLI from a terminal, script, or coding agent.
 
 ## Install
 
-### macOS
+Choose one installation method.
 
-#### Homebrew
-
-```bash
-brew tap inline-chat/homebrew-inline
-brew install --cask inline
-```
-
-#### Manual
+#### macOS · Homebrew
 
 ```bash
-curl -fsSL https://inline.chat/cli/install.sh | sh
+brew tap inline-chat/homebrew-inline && brew install --cask inline
 ```
 
-### Linux
+#### macOS · Install script
 
 ```bash
 curl -fsSL https://inline.chat/cli/install.sh | sh
 ```
 
-The installer supports x86_64 and ARM64 Linux systems using glibc or musl.
+#### Linux · Install script
 
-## Login
+```bash
+curl -fsSL https://inline.chat/cli/install.sh | sh
+```
+
+The Linux installer supports x86_64 and ARM64 systems using glibc or musl.
+
+## Sign in
 
 ```bash
 inline auth login
 ```
 
-## Useful Commands
+## Install the Inline skill
+
+Install the official skill for Codex and other compatible agent environments:
+
+```bash
+inline skill install
+```
+
+Restart your agent after installation so it discovers the skill.
+
+## Common commands
 
 - `inline chats list`
 - `inline messages send --chat-id <id> --text "hello"`
 - `inline search --chat-id <id> --query "<text>"`
+- `inline --help`
 
-## References
-
-- Source: `cli/`
-- CLI README: `cli/README.md`
+For automation, full command coverage, and output formats, see the [CLI reference on GitHub](https://github.com/inline-chat/inline/tree/main/cli).
