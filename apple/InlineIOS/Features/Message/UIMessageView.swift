@@ -30,6 +30,7 @@ class UIMessageView: UIView {
   let fullMessage: FullMessage
   let spaceId: Int64?
   let displayMode: MessageDisplayMode
+  private let maximumBubbleContentWidth: CGFloat
   private var bubbleTailSide: MessageBubbleTailSide
   private var translationCancellable: AnyCancellable?
   private var messageActionLoadingCancellable: AnyCancellable?
@@ -62,6 +63,11 @@ class UIMessageView: UIView {
 
   static let attributedCache: NSCache<NSString, NSAttributedString> = {
     let cache = NSCache<NSString, NSAttributedString>()
+    cache.countLimit = 1_000
+    return cache
+  }()
+  private static let singleLineWidthCache: NSCache<NSString, NSNumber> = {
+    let cache = NSCache<NSString, NSNumber>()
     cache.countLimit = 1_000
     return cache
   }()
@@ -287,43 +293,48 @@ class UIMessageView: UIView {
   }
 
   var isMultiline: Bool {
-    if fullMessage.reactions.count > 0 {
-      return true
-    }
-
-    if shouldShowVoiceMessage {
-      return true
-    }
-    if fullMessage.message.documentId != nil {
-      return true
-    }
-    if fullMessage.file != nil {
-      return true
-    }
-
-    if fullMessage.photoInfo != nil {
-      return true
-    }
-    if fullMessage.videoInfo != nil {
-      return true
-    }
-
-    if !fullMessage.attachments.isEmpty {
-      return true
-    }
+    if requiresMultilineContentLayout { return true }
     guard let text = fullMessage.displayText else { return false }
 
-    // Check if text contains Chinese characters
-    let containsChinese = text.unicodeScalars.contains { scalar in
-      (0x4E00 ... 0x9FFF).contains(scalar.value) || // CJK Unified Ideographs
-        (0x3400 ... 0x4DBF).contains(scalar.value) || // CJK Unified Ideographs Extension A
-        (0x2_0000 ... 0x2_A6DF).contains(scalar.value) // CJK Unified Ideographs Extension B
+    if text.contains("\n") || text.containsEmoji {
+      return true
     }
 
-    // Use lower threshold for Chinese text
-    let characterThreshold = containsChinese ? 16 : 24
+    return textMetadataLayoutMode != .inline
+  }
 
-    return text.count > characterThreshold || text.contains("\n") || text.containsEmoji
+  private var requiresMultilineContentLayout: Bool {
+    !fullMessage.reactions.isEmpty ||
+      shouldShowVoiceMessage ||
+      fullMessage.message.documentId != nil ||
+      fullMessage.file != nil ||
+      fullMessage.photoInfo != nil ||
+      fullMessage.videoInfo != nil ||
+      !fullMessage.attachments.isEmpty
+  }
+
+  private lazy var textMetadataLayoutMode: MessageTextLayoutMode = {
+    guard let text = fullMessage.displayText,
+          !text.contains("\n"),
+          !text.containsEmoji
+    else { return .multiline }
+
+    return MessageTextLayoutPolicy.mode(
+      textWidth: singleLineTextWidth,
+      metadataWidth: MessageTimeAndStatus.measuredWidth(for: fullMessage),
+      maximumBubbleContentWidth: maximumBubbleContentWidth,
+      horizontalPadding: StackPadding.leading,
+      spacing: StackPadding.inlineTextMetadataSpacing
+    )
+  }()
+
+  private var usesPlainTextMultilineLayout: Bool {
+    guard !requiresMultilineContentLayout,
+          let text = fullMessage.displayText,
+          !text.containsEmoji
+    else { return false }
+
+    return text.contains("\n") || textMetadataLayoutMode != .inline
   }
 
   private var shouldUseTransparentOutgoingReactions: Bool {
@@ -422,12 +433,14 @@ class UIMessageView: UIView {
     fullMessage: FullMessage,
     spaceId: Int64?,
     displayMode: MessageDisplayMode = .normal,
-    bubbleTailSide: MessageBubbleTailSide = .none
+    bubbleTailSide: MessageBubbleTailSide = .none,
+    maximumBubbleContentWidth: CGFloat
   ) {
     self.fullMessage = fullMessage
     self.spaceId = spaceId
     self.displayMode = displayMode
     self.bubbleTailSide = bubbleTailSide
+    self.maximumBubbleContentWidth = maximumBubbleContentWidth
 
     super.init(frame: .zero)
 
@@ -1447,6 +1460,10 @@ class UIMessageView: UIView {
     }
     metadataContainerView = metadataContainer
     multiLineContainer.addArrangedSubview(metadataContainer)
+
+    if usesPlainTextMultilineLayout {
+      multiLineContainer.setCustomSpacing(StackPadding.plainTextMetadataSpacing, after: messageLabel)
+    }
   }
 
   func setupSingleLineMessage() {
@@ -2016,6 +2033,8 @@ class UIMessageView: UIView {
     static let leading: CGFloat = 12
     static let bottom: CGFloat = 8
     static let trailing: CGFloat = 12
+    static let inlineTextMetadataSpacing: CGFloat = 6
+    static let plainTextMetadataSpacing: CGFloat = 6
     static let replyInset: CGFloat = 6
     static let replyBottomSpacing: CGFloat = 0
     static let reactionMetadataExtraSpacing: CGFloat = 4
@@ -2026,10 +2045,21 @@ class UIMessageView: UIView {
   }
 
   func setupConstraints() {
+    let bottomPadding: CGFloat
+    if isEmojiOnlyMessage {
+      bottomPadding = 6
+    } else if usesPlainTextMultilineLayout {
+      bottomPadding = StackPadding.bottom
+    } else if isMultiline {
+      bottomPadding = 14
+    } else {
+      bottomPadding = StackPadding.bottom
+    }
+
     let padding = NSDirectionalEdgeInsets(
       top: isEmojiOnlyMessage ? 6 : StackPadding.top,
       leading: isEmojiOnlyMessage ? 0 : StackPadding.leading,
-      bottom: isEmojiOnlyMessage ? 6 : isMultiline ? 14 : StackPadding.bottom,
+      bottom: bottomPadding,
       trailing: isEmojiOnlyMessage ? 0 : StackPadding.trailing
     )
 
@@ -2052,6 +2082,9 @@ class UIMessageView: UIView {
     let baseConstraints: [NSLayoutConstraint] = [
       bubbleView.topAnchor.constraint(equalTo: topAnchor),
       bubbleWidthConstraint,
+      bubbleView.contentView.heightAnchor.constraint(
+        greaterThanOrEqualToConstant: MessageBubbleView.minimumBodyHeight
+      ),
     ]
 
     let withoutFileConstraints: [NSLayoutConstraint] = [
@@ -2144,24 +2177,56 @@ class UIMessageView: UIView {
   }
 
   func setupAppearance() {
-    let entities = fullMessage.translationEntities ?? fullMessage.message.entities
-    let cacheKey = [
-      "\(entities)",
-      "\(message.stableId)",
-      fullMessage.displayText ?? "",
-      MessageRichTextRenderer.cacheKey(for: outgoing),
-    ].joined(separator: "-")
     bubbleView.backgroundColor = bubbleColor
     updateBubbleShape()
 
-    guard let text = fullMessage.displayText else { return }
+    messageLabel.attributedText = attributedMessageText()
+  }
 
-    /// Use cache if available
-    if let cachedString = Self.attributedCache.object(forKey: NSString(string: cacheKey)) {
-      messageLabel.attributedText = cachedString
-      return
+  private lazy var singleLineTextWidth: CGFloat = {
+    guard let cacheKey = attributedMessageCacheKey,
+          let attributedString = attributedMessageText(),
+          attributedString.length > 0
+    else {
+      return 0
     }
 
+    if let cachedWidth = Self.singleLineWidthCache.object(forKey: cacheKey) {
+      return CGFloat(cachedWidth.doubleValue)
+    }
+
+    let width = ceil(attributedString.boundingRect(
+      with: CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude),
+      options: [.usesLineFragmentOrigin, .usesFontLeading],
+      context: nil
+    ).width)
+    Self.singleLineWidthCache.setObject(NSNumber(value: Double(width)), forKey: cacheKey)
+    return width
+  }()
+
+  private lazy var attributedMessageCacheKey: NSString? = {
+    guard let text = fullMessage.displayText else { return nil }
+
+    let entities = fullMessage.translationEntities ?? fullMessage.message.entities
+    return [
+      "\(entities)",
+      "\(message.stableId)",
+      text,
+      MessageRichTextRenderer.cacheKey(for: outgoing),
+    ].joined(separator: "-") as NSString
+  }()
+
+  private func attributedMessageText() -> NSAttributedString? {
+    guard let text = fullMessage.displayText,
+          let cacheKey = attributedMessageCacheKey
+    else { return nil }
+
+    /// Use cache if available
+    if let cachedString = Self.attributedCache.object(forKey: cacheKey) {
+      return cachedString
+    }
+
+    let entities = fullMessage.translationEntities ?? fullMessage.message.entities
     let font = UIFont
       .systemFont(ofSize: isSingleEmojiMessage ? 80 : isTripleEmojiMessage ? 70 : isEmojiOnlyMessage ? 32 : 17)
 
@@ -2182,9 +2247,8 @@ class UIMessageView: UIView {
 
     detectAndStyleLinks(in: text, attributedString: attributedString)
 
-    Self.attributedCache.setObject(attributedString, forKey: cacheKey as NSString)
-
-    messageLabel.attributedText = attributedString
+    Self.attributedCache.setObject(attributedString, forKey: cacheKey)
+    return attributedString
   }
 
   private func updateBubbleShape() {

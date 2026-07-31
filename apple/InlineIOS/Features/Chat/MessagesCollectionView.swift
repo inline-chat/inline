@@ -499,9 +499,12 @@ final class MessagesCollectionView: UICollectionView {
 
   @objc func orientationDidChange(_ notification: Notification) {
     coordinator.clearSizeCache()
-    guard !isKeyboardVisible else { return }
 //    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
     DispatchQueue.main.async {
+      self.layoutIfNeeded()
+      self.coordinator.reconfigureVisibleItemsForCurrentWidth()
+      guard !self.isKeyboardVisible else { return }
+
       UIView.animate(withDuration: 0.3) {
         self.updateContentInsets()
         if self.shouldScrollToBottom, !self.itemsEmpty {
@@ -2011,6 +2014,7 @@ private extension MessagesCollectionView {
             firstInGroup: firstInGroup,
             lastInGroup: lastInGroup,
             spaceId: currentSpaceId,
+            collectionWidth: self.currentCollectionView?.bounds.width ?? 0,
             displayMode: displayMode,
             animateTail: true
           )
@@ -2557,10 +2561,19 @@ private extension MessagesCollectionView {
           firstInGroup: firstInGroup,
           lastInGroup: lastInGroup,
           spaceId: spaceId,
+          collectionWidth: collectionView.bounds.width,
           displayMode: displayMode,
           animateTail: animateTail
         )
       }
+    }
+
+    func reconfigureVisibleItemsForCurrentWidth() {
+      guard let collectionView = currentCollectionView else { return }
+      let visibleItems = collectionView.indexPathsForVisibleItems.compactMap {
+        dataSource.itemIdentifier(for: $0)
+      }
+      reconfigureVisibleItems(visibleItems, animateTail: false)
     }
 
     func attachAvatarOverlay(over collectionView: UICollectionView, parent: UIViewController?) {

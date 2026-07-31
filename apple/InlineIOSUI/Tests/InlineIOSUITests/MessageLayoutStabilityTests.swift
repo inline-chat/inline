@@ -15,6 +15,62 @@ struct MessageLayoutStabilityTests {
     #expect(MessageBubbleWidthPolicy.mode(hasLargeURLPreview: false) == .contentSizedUpToMaximum)
   }
 
+  @Test("one rendered line keeps metadata beside the text")
+  func oneRenderedLineKeepsInlineMetadata() {
+    let mode = MessageTextLayoutPolicy.mode(
+      textWidth: 220,
+      metadataWidth: 40,
+      maximumBubbleContentWidth: 300,
+      horizontalPadding: 12,
+      spacing: 6
+    )
+
+    #expect(mode == .inline)
+  }
+
+  @Test("metadata moves below text only when the combined row does not fit")
+  func overflowingInlineMetadataUsesMultilineLayout() {
+    let mode = MessageTextLayoutPolicy.mode(
+      textWidth: 240,
+      metadataWidth: 40,
+      maximumBubbleContentWidth: 300,
+      horizontalPadding: 12,
+      spacing: 6
+    )
+
+    #expect(mode == .metadataBelowSingleLine)
+  }
+
+  @Test("metadata-below mode requires text itself to fit on one line")
+  func metadataBelowModeRequiresSingleLineText() {
+    #expect(MessageTextLayoutPolicy.mode(
+      textWidth: 240,
+      metadataWidth: 40,
+      maximumBubbleContentWidth: 300,
+      horizontalPadding: 12,
+      spacing: 6
+    ) == .metadataBelowSingleLine)
+
+    #expect(MessageTextLayoutPolicy.mode(
+      textWidth: 300,
+      metadataWidth: 40,
+      maximumBubbleContentWidth: 300,
+      horizontalPadding: 12,
+      spacing: 6
+    ) == .multiline)
+  }
+
+  @Test("unknown width safely uses multiline layout")
+  func unknownWidthUsesMultilineLayout() {
+    #expect(MessageTextLayoutPolicy.mode(
+      textWidth: 100,
+      metadataWidth: 40,
+      maximumBubbleContentWidth: 0,
+      horizontalPadding: 12,
+      spacing: 6
+    ) == .multiline)
+  }
+
   @Test("stable repeated measurements pass through unchanged")
   func stableRepeatedMeasurementsPassThrough() {
     var stabilizer = SelfSizingHeightStabilizer()

@@ -20,6 +20,7 @@ final class MessageBubbleView: UIView {
   private static let sourceBubbleEdgeX: CGFloat = 19.5183
   private static let sourceTailBottomY: CGFloat = 51.2853
   static let cornerRadius: CGFloat = 18
+  static let minimumBodyHeight: CGFloat = cornerRadius * 2
 
   private static var tailDrawScale: CGFloat {
     cornerRadius / sourceTailBottomY
@@ -195,11 +196,45 @@ final class MessageBubbleView: UIView {
       return UIBezierPath()
     }
 
-    let path = UIBezierPath(roundedRect: contentRect, cornerRadius: Self.cornerRadius)
+    let path = roundedBodyPath(in: contentRect)
     guard side != .none else { return path }
     guard let tailRect = tailRect(for: side, contentRect: contentRect) else { return path }
 
     path.append(tailPath(for: side, in: tailRect))
+    return path
+  }
+
+  private func roundedBodyPath(in rect: CGRect) -> UIBezierPath {
+    let radius = min(Self.cornerRadius, rect.width / 2, rect.height / 2)
+    let control = radius * 0.552_284_749_8
+    let path = UIBezierPath()
+
+    path.move(to: CGPoint(x: rect.minX + radius, y: rect.minY))
+    path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
+    path.addCurve(
+      to: CGPoint(x: rect.maxX, y: rect.minY + radius),
+      controlPoint1: CGPoint(x: rect.maxX - radius + control, y: rect.minY),
+      controlPoint2: CGPoint(x: rect.maxX, y: rect.minY + radius - control)
+    )
+    path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - radius))
+    path.addCurve(
+      to: CGPoint(x: rect.maxX - radius, y: rect.maxY),
+      controlPoint1: CGPoint(x: rect.maxX, y: rect.maxY - radius + control),
+      controlPoint2: CGPoint(x: rect.maxX - radius + control, y: rect.maxY)
+    )
+    path.addLine(to: CGPoint(x: rect.minX + radius, y: rect.maxY))
+    path.addCurve(
+      to: CGPoint(x: rect.minX, y: rect.maxY - radius),
+      controlPoint1: CGPoint(x: rect.minX + radius - control, y: rect.maxY),
+      controlPoint2: CGPoint(x: rect.minX, y: rect.maxY - radius + control)
+    )
+    path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + radius))
+    path.addCurve(
+      to: CGPoint(x: rect.minX + radius, y: rect.minY),
+      controlPoint1: CGPoint(x: rect.minX, y: rect.minY + radius - control),
+      controlPoint2: CGPoint(x: rect.minX + radius - control, y: rect.minY)
+    )
+    path.close()
     return path
   }
 
@@ -218,6 +253,8 @@ final class MessageBubbleView: UIView {
       width: Self.sourceSize.width * Self.tailDrawScale,
       height: Self.sourceSize.height * Self.tailDrawScale
     )
+    // The source tail's top edge is scaled to the shared corner radius, so this
+    // lands its shoulder exactly on the rounded body's vertical tangent.
     let tailY = contentRect.maxY - Self.sourceTailBottomY * Self.tailDrawScale
 
     let tailRect: CGRect
@@ -319,7 +356,7 @@ extension UIMessageView {
   func createSingleLineStack() -> UIStackView {
     let stack = UIStackView()
     stack.axis = .horizontal
-    stack.spacing = 6
+    stack.spacing = StackPadding.inlineTextMetadataSpacing
     stack.alignment = .center
     stack.distribution = .fill
     stack.isUserInteractionEnabled = true

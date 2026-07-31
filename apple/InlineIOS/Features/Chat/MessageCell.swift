@@ -37,6 +37,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   private(set) var isPreparedForSendAnimationTarget = false
   private var selfSizingHeightStabilizer = SelfSizingHeightStabilizer()
   private var selfSizingTraitSignature: SelfSizingTraitSignature?
+  private var collectionWidth: CGFloat = 0
 
   // MARK: - Props
 
@@ -114,6 +115,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     firstInGroup: Bool,
     lastInGroup: Bool,
     spaceId: Int64?,
+    collectionWidth: CGFloat,
     displayMode: MessageDisplayMode = .normal,
     animateTail: Bool = true
   ) {
@@ -122,12 +124,14 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     if self.message != nil {
       if prevText == message.displayText, self.message == message,
          self.firstInGroup == firstInGroup, self.lastInGroup == lastInGroup,
-         self.spaceId == spaceId, outgoing == newOutgoing, self.displayMode == displayMode {
-        // skip only if everything is exact match including outgoing state
+         self.spaceId == spaceId, outgoing == newOutgoing, self.displayMode == displayMode,
+         abs(self.collectionWidth - collectionWidth) <= 0.5 {
+        // skip only if everything is exact match including outgoing state and layout width
         return
       }
 
-      if canUpdateBubbleTailOnly(
+      if abs(self.collectionWidth - collectionWidth) <= 0.5,
+         canUpdateBubbleTailOnly(
         with: message,
         firstInGroup: firstInGroup,
         lastInGroup: lastInGroup,
@@ -151,6 +155,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     self.firstInGroup = firstInGroup
     self.lastInGroup = lastInGroup
     self.spaceId = spaceId
+    self.collectionWidth = collectionWidth
     self.displayMode = displayMode
     isThread = message.peerId.isThread
     outgoing = newOutgoing
@@ -479,6 +484,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     displayMode = .normal
     isThread = false
     outgoing = false
+    collectionWidth = 0
     firstInGroup = true
     lastInGroup = true
 
@@ -975,7 +981,8 @@ extension MessageCollectionViewCell {
       fullMessage: message,
       spaceId: spaceId,
       displayMode: displayMode,
-      bubbleTailSide: bubbleTailSide
+      bubbleTailSide: bubbleTailSide,
+      maximumBubbleContentWidth: maximumBubbleContentWidth
     )
     newMessageView.translatesAutoresizingMaskIntoConstraints = false
     newMessageView.onPhotoTap = { [weak self] message, sourceView, sourceImage, url in
@@ -1014,6 +1021,21 @@ extension MessageCollectionViewCell {
     ])
 
     messageView = newMessageView
+  }
+
+  private var maximumBubbleContentWidth: CGFloat {
+    let leadingInset: CGFloat
+    let trailingInset: CGFloat
+    if usesThreadLayout, !outgoing {
+      leadingInset = horizontalPadding + avatarSize + 3
+      trailingInset = firstInGroup ? 10 + horizontalPadding : horizontalPadding
+    } else {
+      leadingInset = horizontalPadding
+      trailingInset = horizontalPadding
+    }
+
+    let messageViewWidth = max(0, collectionWidth - leadingInset - trailingInset)
+    return messageViewWidth * MessageBubbleWidthPolicy.maximumWidthFraction
   }
 
   // Add avatar if we have user info

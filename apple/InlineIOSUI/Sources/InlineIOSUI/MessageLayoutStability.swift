@@ -13,6 +13,34 @@ public enum MessageBubbleWidthPolicy {
   }
 }
 
+public enum MessageTextLayoutMode: Equatable, Sendable {
+  case inline
+  case metadataBelowSingleLine
+  case multiline
+}
+
+public enum MessageTextLayoutPolicy {
+  public static func mode(
+    textWidth: CGFloat,
+    metadataWidth: CGFloat,
+    maximumBubbleContentWidth: CGFloat,
+    horizontalPadding: CGFloat,
+    spacing: CGFloat
+  ) -> MessageTextLayoutMode {
+    guard textWidth.isFinite,
+          metadataWidth.isFinite,
+          maximumBubbleContentWidth.isFinite,
+          maximumBubbleContentWidth > 0
+    else { return .multiline }
+
+    let availableWidth = max(0, maximumBubbleContentWidth - horizontalPadding * 2)
+    guard textWidth <= availableWidth else { return .multiline }
+    return textWidth + spacing + metadataWidth > availableWidth
+      ? .metadataBelowSingleLine
+      : .inline
+  }
+}
+
 public struct SelfSizingHeightStabilizer: Sendable {
   public struct Instability: Equatable, Sendable {
     public let previousHeight: CGFloat
