@@ -628,7 +628,7 @@ async function updateHomebrewCask(context: ReleaseContext, hashes?: HomebrewHash
   const contents = await readFile(caskPath, "utf8");
   const versionPattern = /version\s+"[^"]+"/;
   const macShaPattern = /(on_macos do[\s\S]*?sha256 )"[^"]+"/m;
-  const linuxShaPattern = /sha256 arm:[\s\S]*?\n\n    url /m;
+  const linuxShaPattern = /sha256 arm:[\s\S]*?\n    url /m;
 
   if (
     !versionPattern.test(contents) ||
@@ -646,7 +646,7 @@ async function updateHomebrewCask(context: ReleaseContext, hashes?: HomebrewHash
   const updated = contents
     .replace(versionPattern, `version "${context.version}"`)
     .replace(macShaPattern, `$1"${armSha}"`)
-    .replace(linuxShaPattern, `${linuxShaBlock}\n\n    url `);
+    .replace(linuxShaPattern, `${linuxShaBlock}\n    url `);
 
   if (updated === contents) {
     console.log("Homebrew cask already up to date.");
