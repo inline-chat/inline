@@ -72,9 +72,13 @@ this order:
    message when server follow state is unavailable.
 7. Otherwise, retain the message only as observed context and do not respond.
 
-Explicit addressing exclusions, such as a leading mention of another person or
-a command suffixed for another bot, are a separate precedence layer and should
-be checked before accepting an implicit signal.
+Explicit addressing is a separate precedence layer checked before accepting an
+implicit signal. When the first entity begins after whitespace only and is a
+concrete mention of another user, follow/reply inference does not wake the bot
+unless the bot is also explicitly mentioned. A `/command@botusername` suffix
+likewise targets only that bot; a matching bot removes the suffix before command
+dispatch, while other bots ignore it. Username-mention entities without a
+resolved user ID are not used for the leading-person exclusion.
 
 Explicit mention always wakes the agent when the group/user policy allows it.
 Free-response rooms continue to bypass mention gating by configuration.
@@ -100,3 +104,6 @@ where server follow mode is unavailable.
 | Reply thread, message 500, dialog `FOLLOWING` | The unmentioned message may wake the bot. |
 | Any thread, dialog `UNFOLLOWED` | Follow mode does not wake the bot, and automatic following does not turn itself back on. |
 | Any followed thread with strict mention mode enabled | A bot mention is still required by explicit configuration. |
+| Followed/reply-relevant thread, message starts with a mention of another person, bot not mentioned | The explicit human address wins; do not respond. |
+| Mention-gated group, `/status@thisbot` | Treat as explicit bot attention and dispatch `/status`. |
+| Any chat, `/status@otherbot` | Ignore it. |

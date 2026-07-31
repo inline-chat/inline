@@ -20,6 +20,9 @@ openclaw plugins list
 openclaw channels status
 ```
 
+After the first install, an OpenClaw owner can run `/inline_update` in Inline
+and then `/restart`; routine plugin updates do not require host shell access.
+
 ## 2) Configure Inline Channel
 
 Minimal config (token-only):
@@ -44,7 +47,7 @@ Notes:
 - `replyToId` is still a message reply id. Inline reply-thread behavior does not replace ordinary message replies.
 - Legacy `capabilities.replyThreads` settings are ignored; use `replyThreadMode` to control automatic routing.
 - In an Inline group, authorized users can run `/threadreply` to choose this chat's automatic reply-thread mode with buttons.
-- Bot-participated reply threads and followed fresh Inline threads continue without an explicit mention by default, matching Slack. Reply threads also persist recent participation so sparse follow-ups still route. Set `replyThreadRequireExplicitMention: true` globally, per account, or per group if a chat should require `@bot` on every thread message.
+- Bot-participated reply threads and Inline dialogs already marked `FOLLOWING` continue without an explicit mention by default, matching Slack. Reply threads also persist recent participation so sparse follow-ups still route. Set `replyThreadRequireExplicitMention: true` globally, per account, or per group if a chat should require `@bot` on every thread message.
 - Reply-thread context defaults to nearby parent-chat messages, the anchor message, and child-thread history. Set `replyThreadParentHistoryLimit: 0` only when a chat should stay strictly thread-local.
 - Use `inline_parent_context` from a reply-thread session when the agent needs more complete parent-chat history than the automatic context window.
 - Inline current-message media is attached like native channels. Reply-thread anchor media is summarized as context and is not promoted to current-message media on every child-thread turn.
