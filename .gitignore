@@ -28,6 +28,7 @@ __pycache__/
 
 # Local files
 .DS_Store
+.codex-attachments/
 .tmp/
 **/.tmp/
 .env
