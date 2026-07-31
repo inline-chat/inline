@@ -123,8 +123,8 @@ export async function updateInlineFollowMode(params: {
 
 export function inlineFollowCommandSuccessText(command: InlineFollowCommand): string {
   return command === "follow"
-    ? "Now explicitly following this Inline chat or thread. Eligible activity can wake OpenClaw without an @mention."
-    : "Explicitly unfollowed this Inline chat or thread. Automatic follow and reply wakes are disabled; explicit mentions and authorized commands can still wake OpenClaw."
+    ? "Following this chat—eligible messages can wake OpenClaw without an @mention."
+    : "Unfollowed this chat—automatic follow and reply wakes are off."
 }
 
 export function inlineFollowCommandUsageText(command: InlineFollowCommand): string {

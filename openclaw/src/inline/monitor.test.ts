@@ -256,6 +256,7 @@ type MonitorSetup = {
   payloadInfoKinds?: Array<"final" | "partial" | "error">
   skipInfos?: Array<{ reason?: string }>
   dispatchErrorInfos?: Array<{ kind?: string }>
+  dispatchReplyErrors?: Error[]
   resolveControlCommandGate?: (params: any) => { shouldBlock: boolean; commandAuthorized: boolean }
   dispatchReplyBlocker?: (params: {
     ctx: unknown
@@ -486,6 +487,8 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
   const enqueueSystemEvent = vi.fn(() => true)
   const dispatchReply = vi.fn(async ({ ctx, dispatcherOptions, replyOptions }: any) => {
     await setup.dispatchReplyBlocker?.({ ctx, dispatcherOptions, replyOptions })
+    const dispatchError = setup.dispatchReplyErrors?.shift()
+    if (dispatchError) throw dispatchError
     if (setup.dispatchTypingLifecycle) {
       await (dispatcherOptions.onReplyStart ?? dispatcherOptions.typingCallbacks?.onReplyStart)?.()
     }
@@ -3018,6 +3021,135 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("does not let followed-thread inference override a leading mention of another user", async () => {
+    const runtime = { log: vi.fn(), error: vi.fn() }
+    const harness = await setupMonitorHarness({
+      me: {
+        userId: 777n,
+        username: "inlinebot",
+      },
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7202n,
+          message: {
+            id: 13n,
+            date: 1_700_000_012n,
+            fromId: 51n,
+            message: "  @Ada please review",
+            mentioned: false,
+            entities: {
+              entities: [{
+                type: 1,
+                offset: 2n,
+                length: 4n,
+                entity: {
+                  oneofKind: "mention",
+                  mention: { userId: 42n },
+                },
+              }],
+            },
+          },
+        },
+      ],
+      chats: {
+        "7202": {
+          kind: "group",
+          title: "Followed thread",
+          dialogFollowMode: 1,
+        },
+      },
+      dispatchReplyPayload: {
+        text: "should not send",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: true, replyThreads: true }),
+      runtime: runtime as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(runtime.log).toHaveBeenCalledWith(
+        expect.stringContaining("inline: drop group chat 7202 (no mention)"),
+      )
+    })
+    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+
+    await handle.stop()
+  })
+
+  it("keeps inferred attention when the bot is also explicitly mentioned", async () => {
+    const harness = await setupMonitorHarness({
+      me: {
+        userId: 777n,
+        username: "inlinebot",
+      },
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7203n,
+          message: {
+            id: 14n,
+            date: 1_700_000_013n,
+            fromId: 51n,
+            message: "@Ada ask @inlinebot too",
+            mentioned: true,
+            entities: {
+              entities: [
+                {
+                  type: 1,
+                  offset: 0n,
+                  length: 4n,
+                  entity: { oneofKind: "mention", mention: { userId: 42n } },
+                },
+                {
+                  type: 1,
+                  offset: 9n,
+                  length: 10n,
+                  entity: { oneofKind: "mention", mention: { userId: 777n } },
+                },
+              ],
+            },
+          },
+        },
+      ],
+      chats: {
+        "7203": {
+          kind: "group",
+          title: "Followed thread",
+          dialogFollowMode: 1,
+        },
+      },
+      dispatchReplyPayload: {
+        text: "bot was explicitly addressed",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: true, replyThreads: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ExplicitlyMentionedBot: true,
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
   it("handles /follow in a group and immediately uses the updated cached mode", async () => {
     const harness = await setupMonitorHarness({
       events: [
@@ -3093,7 +3225,7 @@ describe("inline/monitor", () => {
       expect(harness.calls.sendMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           chatId: 7300n,
-          text: expect.stringContaining("wake OpenClaw without an @mention"),
+          text: "Following this chat—eligible messages can wake OpenClaw without an @mention.",
           replyToMsgId: 20n,
         }),
       )
@@ -3199,7 +3331,7 @@ describe("inline/monitor", () => {
       expect(harness.calls.sendMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           chatId: 7401n,
-          text: expect.stringContaining("Automatic follow and reply wakes are disabled"),
+          text: "Unfollowed this chat—automatic follow and reply wakes are off.",
           replyToMsgId: 30n,
         }),
       )
@@ -7240,6 +7372,51 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("retries a transient reply session initialization conflict", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 676n,
+          message: {
+            id: 5707n,
+            date: 1_700_000_016n,
+            fromId: 42n,
+            message: "dm",
+          },
+        },
+      ],
+      chats: {
+        "676": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyErrors: [
+        new Error("reply session initialization conflicted for agent:main:inline:direct:42"),
+      ],
+      dispatchReplyPayload: { text: "Recovered reply" },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(2)
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(1)
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 676n,
+          text: "Recovered reply",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
   it("suppresses reasoning-only final payloads without fallback chat text", async () => {
     const harness = await setupMonitorHarness({
       events: [
@@ -8950,6 +9127,57 @@ describe("inline/monitor", () => {
         }),
       )
     })
+
+    await handle.stop()
+  })
+
+  it("ignores commands targeted at another bot even in a followed thread", async () => {
+    const runtime = { log: vi.fn(), error: vi.fn() }
+    const harness = await setupMonitorHarness({
+      me: {
+        userId: 777n,
+        username: "inlinebot",
+      },
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 6003n,
+            date: 1_700_000_007n,
+            fromId: 51n,
+            message: "/status@otherbot now",
+            mentioned: false,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room", dialogFollowMode: 1 },
+      },
+      dispatchReplyPayload: {
+        text: "should not send",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+        groupAllowFrom: ["51"],
+      }),
+      runtime: runtime as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(runtime.log).toHaveBeenCalledWith(
+        expect.stringContaining("inline: drop command targeted at another bot chat=88"),
+      )
+    })
+    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
 
     await handle.stop()
   })

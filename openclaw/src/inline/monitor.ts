@@ -104,7 +104,10 @@ import {
 } from "./policy.js"
 import { getInlineRuntime } from "../runtime.js"
 import { uploadInlineMediaFromUrl } from "./media.js"
-import { summarizeInlineMessageContent } from "./message-content.js"
+import {
+  summarizeInlineMessageContent,
+  type InlineMessageEntitySummary,
+} from "./message-content.js"
 import {
   sanitizeInlineActionCallbackData,
   sanitizeInlineActionCopyText,
@@ -180,6 +183,8 @@ const INLINE_REQUEST_ERROR_FALLBACK =
   "OpenClaw could not process that request. Please try again."
 const INLINE_DEBOUNCE_ERROR_FALLBACK =
   "OpenClaw could not process those messages. Please try again."
+const INLINE_REPLY_SESSION_INIT_CONFLICT_RE = /reply session initialization conflicted for \S+/u
+const INLINE_REPLY_SESSION_INIT_RETRY_DELAYS_MS = [50, 150, 300, 600] as const
 const DEFAULT_REPLY_THREAD_PARENT_HISTORY_LIMIT = 10
 const DEFAULT_INLINE_VOICE_TRANSCRIPT_WAIT_MS = 8_000
 const MAX_INLINE_VOICE_TRANSCRIPT_WAIT_MS = 60_000
@@ -213,6 +218,32 @@ type InlineBotPresenceSignal = {
 type InlineMonitorHandle = {
   stop: () => Promise<void>
   done: Promise<void>
+}
+
+async function dispatchInlineReplyWithSessionInitRetry(params: {
+  run: () => Promise<unknown>
+  shouldRetry: () => boolean
+  onRetry?: (retry: number, delayMs: number) => void
+}): Promise<number> {
+  let retries = 0
+  while (true) {
+    try {
+      await params.run()
+      return retries
+    } catch (error) {
+      const delayMs = INLINE_REPLY_SESSION_INIT_RETRY_DELAYS_MS[retries]
+      if (
+        delayMs == null ||
+        !params.shouldRetry() ||
+        !INLINE_REPLY_SESSION_INIT_CONFLICT_RE.test(String(error))
+      ) {
+        throw error
+      }
+      retries += 1
+      params.onRetry?.(retries, delayMs)
+      await new Promise<void>((resolve) => setTimeout(resolve, delayMs))
+    }
+  }
 }
 
 type InlineMentionSource =
@@ -1133,17 +1164,28 @@ function normalizeInlineUsername(raw: string | undefined): string | undefined {
   return trimmed.startsWith("@") ? trimmed.slice(1) : trimmed
 }
 
-function normalizeInlineCommandBody(raw: string, botUsername: string | undefined): string {
+function resolveInlineCommandTarget(raw: string, botUsername: string | undefined): {
+  body: string
+  targeted: boolean
+  addressedToMe: boolean
+} {
   const normalized = raw.trim()
-  const normalizedBotUsername = botUsername?.trim().toLowerCase()
-  const mentionMatch = normalizedBotUsername ? normalized.match(/^\/([^\s@]+)@([^\s]+)(.*)$/) : null
-  if (mentionMatch) {
-    const [, command, targetUsername, suffix] = mentionMatch
-    if (targetUsername?.toLowerCase() === normalizedBotUsername) {
-      return `/${command}${suffix ?? ""}`
-    }
+  const match = normalized.match(/^\/([^\s@]+)@([a-z0-9_]+)(?=\s|$)([\s\S]*)$/i)
+  if (!match) return { body: normalized, targeted: false, addressedToMe: false }
+  const [, command, targetUsername, suffix] = match
+  const normalizedBotUsername = normalizeInlineUsername(botUsername)?.toLowerCase()
+  const addressedToMe = Boolean(
+    normalizedBotUsername && targetUsername?.toLowerCase() === normalizedBotUsername,
+  )
+  return {
+    body: addressedToMe ? `/${command}${suffix ?? ""}` : normalized,
+    targeted: true,
+    addressedToMe,
   }
-  return normalized
+}
+
+function normalizeInlineCommandBody(raw: string, botUsername: string | undefined): string {
+  return resolveInlineCommandTarget(raw, botUsername).body
 }
 
 function isInlineAbortRequestMessage(msg: Message, botUsername: string | undefined): boolean {
@@ -1273,6 +1315,25 @@ function collectInlineMentionedUserIds(
     ids.add(entity.userId)
   }
   return [...ids]
+}
+
+function startsWithInlineMentionOfOtherUser(params: {
+  content: ReturnType<typeof summarizeInlineMessageContent> | null
+  messageText: string | undefined
+  meId: bigint
+}): boolean {
+  const firstEntity = params.content?.entities.reduce<InlineMessageEntitySummary | null>(
+    (first, entity) => {
+      if (!Number.isInteger(entity.offset) || entity.offset < 0) return first
+      if (!first || entity.offset < first.offset) return entity
+      return first
+    },
+    null,
+  )
+  if (firstEntity?.type !== "mention" || !firstEntity.userId) return false
+  if (firstEntity.userId === String(params.meId)) return false
+  // Inline entity offsets use UTF-16 code units, which matches JavaScript slice.
+  return (params.messageText ?? "").slice(0, firstEntity.offset).trim().length === 0
 }
 
 function isInlineDialogFollowing(followMode: unknown): boolean {
@@ -3503,6 +3564,7 @@ export async function monitorInlineProvider(params: {
     let currentContent: ReturnType<typeof summarizeInlineMessageContent> | null = null
     let currentAttachmentText: string | null = null
     let currentEntityText: string | null = null
+    let commandTarget = { body: "", targeted: false, addressedToMe: false }
 
     if (!callbackActionEvent) {
       if (rawBodyOverride != null) {
@@ -3514,6 +3576,11 @@ export async function monitorInlineProvider(params: {
         currentEntityText = currentContent.entityText || null
       }
       if (!rawBody) return
+      commandTarget = resolveInlineCommandTarget(rawBody, botUsername)
+      if (commandTarget.targeted && !commandTarget.addressedToMe) {
+        runtime.log?.(`inline: drop command targeted at another bot chat=${String(chatId)}`)
+        return
+      }
     }
 
     const inboundAt = Date.now()
@@ -3650,7 +3717,7 @@ export async function monitorInlineProvider(params: {
       })
     }
     const shouldEditCallbackTargetInPlace = callbackActionEvent != null
-    const normalizedCommandBody = callbackCommandBody ?? normalizeInlineCommandBody(rawBody, botUsername)
+    const normalizedCommandBody = callbackCommandBody ?? commandTarget.body
     const route = core.channel.routing.resolveAgentRoute({
       cfg,
       channel: CHANNEL_ID,
@@ -3916,10 +3983,21 @@ export async function monitorInlineProvider(params: {
       (account.config.replyToBotWithoutMention ?? false) &&
       msg.replyToMsgId != null &&
       effectiveHistoryContext.repliedToBot
+    const inferredThreadAttention = replyThreadImplicitMention || replyToBotImplicitMention
+    const leadingOtherUserAddress =
+      !wasMentioned &&
+      inferredThreadAttention &&
+      startsWithInlineMentionOfOtherUser({
+        content: currentContent,
+        messageText: msg.message,
+        meId,
+      })
+    // A leading explicit address to another person overwhelmingly means the
+    // turn is for them, so it intentionally overrides inferred follow/reply
+    // attention. Explicitly addressing this bot still wins.
     const implicitMention =
       (callbackActionEvent != null && isGroup) ||
-      replyThreadImplicitMention ||
-      replyToBotImplicitMention
+      (!leadingOtherUserAddress && inferredThreadAttention)
 
     const requireMention = isGroup
       ? resolveInlineGroupRequireMention({
@@ -5195,10 +5273,18 @@ export async function monitorInlineProvider(params: {
       let failedNonSilent = false
       let dispatchError: unknown = null
       try {
-        await core.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
-          ctx: ctxPayload,
-          cfg,
-          dispatcherOptions: {
+        const sessionInitRetries = await dispatchInlineReplyWithSessionInitRetry({
+          shouldRetry: () => !delivered && !skippedNonSilent && !failedNonSilent,
+          onRetry: (retry, delayMs) => {
+            log?.warn(
+              `[${account.accountId}] AGENT_DISPATCH_TRACE phase=session_init_conflict_retry ` +
+              `retry=${retry} delay_ms=${delayMs}`,
+            )
+          },
+          run: () => core.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
+            ctx: ctxPayload,
+            cfg,
+            dispatcherOptions: {
             ...dispatcherPipelineOptions,
             ...buildInlineTypingDispatcherOptions(typingCallbacks),
             deliver: async (
@@ -5398,8 +5484,15 @@ export async function monitorInlineProvider(params: {
               runtime.error?.(`inline ${info?.kind ?? "final"} reply failed: ${String(err)}`)
             },
           },
-          replyOptions,
+            replyOptions,
+          }),
         })
+        if (sessionInitRetries > 0) {
+          log?.info(
+            `[${account.accountId}] AGENT_DISPATCH_TRACE phase=session_init_conflict_recovered ` +
+            `retries=${sessionInitRetries}`,
+          )
+        }
       } catch (error) {
         dispatchError = error
         botPresenceLifecycle.fail()

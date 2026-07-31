@@ -128,8 +128,12 @@ describe("inline/follow-command", () => {
   })
 
   it("uses distinct success and retryable failure copy", () => {
-    expect(inlineFollowCommandSuccessText("follow")).toContain("wake OpenClaw without an @mention")
-    expect(inlineFollowCommandSuccessText("unfollow")).toContain("Automatic follow and reply wakes are disabled")
+    expect(inlineFollowCommandSuccessText("follow")).toBe(
+      "Following this chat—eligible messages can wake OpenClaw without an @mention.",
+    )
+    expect(inlineFollowCommandSuccessText("unfollow")).toBe(
+      "Unfollowed this chat—automatic follow and reply wakes are off.",
+    )
     expect(inlineFollowCommandFailureText("follow")).toBe(
       "Could not update Inline follow mode. Try /follow again.",
     )
