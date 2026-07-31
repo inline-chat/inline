@@ -175,6 +175,7 @@ describe("sidecar runtime", () => {
         result: {
           connected: true,
           meId: "999",
+          meUsername: "mock_inline_bot",
           baseUrl: "http://redacted:redacted@127.0.0.1/mock-inline?token=redacted&safe=1",
         },
       })
@@ -402,6 +403,55 @@ describe("sidecar runtime", () => {
       expect(subthread.status).toBe(200)
       expect(resultOf(subthread.body)).toMatchObject({ chatId: "321" })
 
+      const topLevelChat = await post(port, "/create-chat", {
+        title: "Private planning",
+        description: "Plan privately",
+        isPublic: false,
+        participantUserIds: ["42", "43", "42"],
+      }, auth)
+      expect(topLevelChat.status).toBe(200)
+      expect(resultOf(topLevelChat.body)).toMatchObject({
+        chatId: "322",
+        chat: {
+          id: "322",
+          title: "Private planning",
+          isPublic: false,
+        },
+        dialog: { chatId: "322" },
+      })
+
+      const publicSpaceChat = await post(port, "/create-chat", {
+        title: "Space launch",
+        spaceId: "77",
+        isPublic: true,
+        participantUserIds: [],
+      }, auth)
+      expect(publicSpaceChat.status).toBe(200)
+      expect(resultOf(publicSpaceChat.body)).toMatchObject({
+        chatId: "322",
+        chat: {
+          title: "Space launch",
+          spaceId: "77",
+          isPublic: true,
+        },
+      })
+
+      const publicWithoutSpace = await post(port, "/create-chat", {
+        title: "Invalid public thread",
+        isPublic: true,
+        participantUserIds: [],
+      }, auth)
+      expect(publicWithoutSpace.status).toBe(400)
+      expect(publicWithoutSpace.body).toMatchObject({ ok: false, errorKind: "bad_format" })
+
+      const invalidParticipant = await post(port, "/create-chat", {
+        title: "Invalid participant thread",
+        isPublic: false,
+        participantUserIds: ["not-an-id"],
+      }, auth)
+      expect(invalidParticipant.status).toBe(400)
+      expect(invalidParticipant.body).toMatchObject({ ok: false, errorKind: "bad_format" })
+
       await expectOk(post(port, "/answer-action", {
         interactionId: "77",
         toast: "Recorded",
@@ -424,6 +474,8 @@ describe("sidecar runtime", () => {
       expect(callsJson).toContain("invokeUncheckedRaw:DELETE_REACTION")
       expect(callsJson).toContain("invokeUncheckedRaw:PIN_MESSAGE")
       expect(callsJson).toContain("invokeUncheckedRaw:CREATE_SUBTHREAD")
+      expect(callsJson).toContain("invokeUncheckedRaw:CREATE_CHAT")
+      expect(callsJson).toContain("Private planning")
       expect(callsJson).toContain("invokeUncheckedRaw:UPDATE_DIALOG_FOLLOW_MODE")
       expect(callsJson.match(/invokeUncheckedRaw:GET_CHAT_PARTICIPANTS/g)).toHaveLength(1)
     } finally {

@@ -267,7 +267,7 @@ os.environ["INLINE_SETTINGS_PATH"] = str(test_settings_dir / "adapter-settings.j
 sys.path.insert(0, "plugin")
 
 import inline.adapter as inline_adapter_module
-from inline.adapter import InlineAdapter, _apply_yaml_config, _env_enablement, _inline_menu_commands, _inline_update_lane, _inline_update_log_text, _install_inline_display_defaults, _normalize_inline_plugin_command_text, _standalone_send, _target_from_chat_id
+from inline.adapter import InlineAdapter, _apply_yaml_config, _env_enablement, _inline_menu_commands, _inline_update_lane, _inline_update_log_text, _install_inline_display_defaults, _normalize_inline_plugin_command_text, _resolve_inline_targeted_command, _standalone_send, _target_from_chat_id
 from inline.adapter import register, validate_config
 from inline import cli as inline_cli
 from inline import tools as inline_tools
@@ -306,6 +306,10 @@ assert all("/" not in name and "-" not in name for name in menu_names)
 assert _normalize_inline_plugin_command_text("/inline_update") == "/inline-update"
 assert _normalize_inline_plugin_command_text("/inline_update now") == "/inline-update now"
 assert _normalize_inline_plugin_command_text("/not_a_plugin") == "/not_a_plugin"
+assert _resolve_inline_targeted_command("/status@InlineBot now", "inlinebot") == ("/status now", True, True)
+assert _resolve_inline_targeted_command("/status@otherbot now", "inlinebot") == ("/status@otherbot now", True, False)
+assert _resolve_inline_targeted_command("/status@inlinebot", None) == ("/status@inlinebot", True, False)
+assert _resolve_inline_targeted_command("/status now", "inlinebot") == ("/status now", False, False)
 assert _inline_update_lane("1.2.3") == "latest"
 assert _inline_update_lane("1.2.3-beta.4") == "beta"
 assert _inline_update_lane("1.2.3-canary-edge.2") == "canary-edge"
@@ -384,7 +388,7 @@ assert inline_display["cleanup_progress"] is True
 assert inline_display["streaming"] is False
 assert inline_display["interim_assistant_messages"] is False
 assert ctx.platform["name"] == "inline"
-assert ctx.platform["emoji"] == "💬"
+assert ctx.platform["emoji"] == chr(0x1F4AC)
 assert ctx.platform["label"] == "Inline"
 assert ctx.platform["required_env"] == ["INLINE_TOKEN"]
 assert ctx.platform["cron_deliver_env_var"] == "INLINE_HOME_CHANNEL"
@@ -538,7 +542,7 @@ asyncio.run(assert_inline_update_command())
 assert ctx.cli["name"] == "inline"
 assert ctx.tool["name"] == "inline"
 assert ctx.tool["toolset"] == "inline"
-assert ctx.tool["emoji"] == "💬"
+assert ctx.tool["emoji"] == chr(0x1F4AC)
 assert "participate" not in ctx.tool["description"]
 assert ctx.tool["schema"]["name"] == "inline"
 assert "send_message" not in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
@@ -552,6 +556,9 @@ assert ctx.tool["schema"]["parameters"]["properties"]["kind"]["description"] == 
 assert ctx.tool["schema"]["parameters"]["properties"]["comment"]["description"] == "Optional bot avatar presence/status message."
 assert "get_history" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
 assert "create_thread" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
+assert "create_chat" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
+assert ctx.tool["schema"]["parameters"]["properties"]["participant_user_ids"]["maxItems"] == 50
+assert "requires space_id" in ctx.tool["schema"]["parameters"]["properties"]["is_public"]["description"]
 assert "search_messages" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
 assert "add_reaction" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
 assert "pin_message" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
@@ -622,6 +629,17 @@ def fake_inline_sidecar(path, body):
         }}
     if path == "/create-subthread":
         return {"ok": True, "result": {"chatId": "321", "chat": {"id": "321", "title": "Spec"}}}
+    if path == "/create-chat":
+        return {"ok": True, "result": {
+            "chatId": "322",
+            "chat": {
+                "id": "322",
+                "title": body["title"],
+                "spaceId": body.get("spaceId"),
+                "isPublic": body["isPublic"],
+            },
+            "dialog": {"chatId": "322"},
+        }}
     return {"ok": True, "result": {}}
 
 real_inline_sidecar = inline_tools._sidecar_call
@@ -779,6 +797,55 @@ try:
         "parentMessageId": "5",
         "title": "Spec",
     })
+
+    private_chat_result = json.loads(ctx.tool["handler"]({
+        "action": "create_chat",
+        "title": "Private planning",
+        "participant_user_ids": ["user:42", "42", "user:43"],
+        "description": "Plan privately",
+        "emoji": "lock",
+    }))
+    assert private_chat_result["result"]["chatId"] == "322"
+    assert private_chat_result["result"]["chat"]["title"] == "Private planning"
+    assert private_chat_result["result"]["dialog"] == {"chatId": "322"}
+    assert tool_calls[-1] == ("/create-chat", {
+        "title": "Private planning",
+        "isPublic": False,
+        "participantUserIds": ["42", "43"],
+        "description": "Plan privately",
+        "emoji": "lock",
+    })
+
+    public_chat_result = json.loads(ctx.tool["handler"]({
+        "action": "create_chat",
+        "title": "Space launch",
+        "space_id": "space:77",
+        "is_public": True,
+    }))
+    assert public_chat_result["result"]["chat"]["isPublic"] is True
+    assert tool_calls[-1] == ("/create-chat", {
+        "title": "Space launch",
+        "isPublic": True,
+        "spaceId": "77",
+        "participantUserIds": [],
+    })
+
+    calls_before_invalid_create = len(tool_calls)
+    public_without_space = json.loads(ctx.tool["handler"]({
+        "action": "create_chat",
+        "title": "Unsafe public thread",
+        "is_public": True,
+    }))
+    assert public_without_space["error"] == "public create_chat requires space_id"
+    public_with_participants = json.loads(ctx.tool["handler"]({
+        "action": "create_chat",
+        "title": "Invalid public thread",
+        "space_id": "77",
+        "is_public": True,
+        "participant_user_ids": ["42"],
+    }))
+    assert public_with_participants["error"] == "public create_chat cannot include participant_user_ids"
+    assert len(tool_calls) == calls_before_invalid_create
 
     os.environ["HERMES_SESSION_PLATFORM"] = "inline"
     os.environ["HERMES_SESSION_CHAT_ID"] = "10"
@@ -1844,6 +1911,148 @@ async def assert_observed_context_buffer():
 
 asyncio.run(assert_observed_context_buffer())
 
+async def assert_explicit_addressing_precedence():
+    adapter = InlineAdapter(PlatformConfig(extra={
+        **base_extra,
+        "require_mention": True,
+        "reply_threads": False,
+        "context_backfill": "off",
+        "observe_unmentioned_messages": False,
+    }))
+    adapter._me_id = "999"
+    adapter._me_username = "inlinebot"
+    events = []
+    sends = []
+    follow_calls = []
+
+    async def fake_handle_message(event):
+        events.append(event)
+
+    async def fake_get_chat_info(chat_id):
+        return {"chatId": chat_id, "dialogFollowMode": 1}
+
+    async def fake_fetch_message(chat_id, message_id):
+        return {"id": message_id, "chatId": chat_id, "fromId": "999", "message": "bot reply"}
+
+    async def fake_send(chat_id, content, reply_to=None, metadata=None, actions=None):
+        sends.append((chat_id, content, reply_to, metadata, actions))
+        return SendResult(success=True, message_id=f"sent-{len(sends)}")
+
+    async def fake_sidecar_call(path, body):
+        follow_calls.append((path, body))
+        return {"ok": True, "result": {}}
+
+    adapter.handle_message = fake_handle_message
+    adapter._get_chat_info = fake_get_chat_info
+    adapter._fetch_message = fake_fetch_message
+    adapter.send = fake_send
+    adapter._sidecar_call = fake_sidecar_call
+
+    def mention(user_id, offset, length=5):
+        return {
+            "type": 1,
+            "offset": offset,
+            "length": length,
+            "entity": {"oneofKind": "mention", "mention": {"userId": user_id}},
+        }
+
+    def group_message(seq, message_id, text, *, entities=None, mentioned=False, reply_to=None):
+        return {
+            "seq": seq,
+            "chatId": "10",
+            "message": {
+                "id": message_id,
+                "chatId": "10",
+                "fromId": "u1",
+                "message": text,
+                "mentioned": mentioned,
+                "peerId": {"peer": {"oneofKind": "chat"}},
+                **({"replyToMsgId": reply_to} if reply_to else {}),
+                **({"entities": {"entities": entities}} if entities else {}),
+            },
+        }
+
+    # Follow inference must not override an explicit leading address to a person.
+    await adapter._dispatch_message(group_message(
+        201,
+        "address-other-follow",
+        "  @Ada please review",
+        entities=[mention("42", 2, 4)],
+    ))
+    assert events == []
+
+    # The same exclusion applies when a reply to the bot is the inferred wake source.
+    await adapter._dispatch_message(group_message(
+        202,
+        "address-other-reply",
+        "@Ada please answer",
+        entities=[mention("42", 0, 4)],
+        reply_to="90",
+    ))
+    assert events == []
+
+    # Explicitly mentioning this bot anywhere still wins over the inferred-address exclusion.
+    await adapter._dispatch_message(group_message(
+        203,
+        "address-both",
+        "@Ada ask @InlineBot too",
+        entities=[mention("42", 0, 4), mention("999", 9, 10)],
+        mentioned=True,
+    ))
+    assert events[-1].text == "@Ada ask @InlineBot too"
+
+    # Inline entity offsets are UTF-16: an emoji before the mention means it is not leading.
+    await adapter._dispatch_message(group_message(
+        204,
+        "emoji-before-address",
+        "😀 @Ada update",
+        entities=[mention("42", 3, 4)],
+    ))
+    assert events[-1].text == "😀 @Ada update"
+
+    # A matching target is explicit bot attention and is stripped before Hermes dispatch.
+    await adapter._dispatch_message(group_message(
+        205,
+        "targeted-command",
+        "/status@InlineBot now",
+    ))
+    assert events[-1].text == "/status now"
+
+    event_count = len(events)
+    await adapter._dispatch_message(group_message(
+        206,
+        "other-target-command",
+        "/status@otherbot now",
+    ))
+    assert len(events) == event_count
+
+    adapter._me_username = None
+    await adapter._dispatch_message(group_message(
+        207,
+        "unknown-target-command",
+        "/status@inlinebot now",
+    ))
+    assert len(events) == event_count
+
+    adapter._me_username = "inlinebot"
+    await adapter._dispatch_message(group_message(
+        208,
+        "targeted-follow",
+        "/follow@inlinebot",
+    ))
+    assert follow_calls[-1] == ("/follow-mode", {"target": {"chatId": "10"}, "mode": "following"})
+    assert sends[-1][2] == "targeted-follow"
+
+    follow_count = len(follow_calls)
+    await adapter._dispatch_message(group_message(
+        209,
+        "other-target-follow",
+        "/follow@otherbot",
+    ))
+    assert len(follow_calls) == follow_count
+
+asyncio.run(assert_explicit_addressing_precedence())
+
 async def assert_reply_thread_slash_command():
     with tempfile.TemporaryDirectory() as tmp:
         settings_path = Path(tmp) / "settings.json"
@@ -1935,7 +2144,7 @@ async def assert_reply_thread_slash_command():
         })
         assert "10" not in adapter._chat_info_cache
         assert sends[-1][2] == "cmd-follow"
-        assert "explicitly following" in sends[-1][1]
+        assert sends[-1][1] == "Following this chat—eligible messages can wake Hermes without an @mention."
 
         await adapter._dispatch_message({
             "seq": 1301,
@@ -1954,7 +2163,7 @@ async def assert_reply_thread_slash_command():
         })
         assert sends[-1][2] == "cmd-unfollow"
         assert sends[-1][3] == {"thread_id": "99"}
-        assert "Explicitly unfollowed" in sends[-1][1]
+        assert sends[-1][1] == "Unfollowed this chat—mentions and replies can still wake Hermes."
 
         assert auto_action.startswith("th:")
         assert await adapter._handle_action({
@@ -2354,6 +2563,41 @@ async def assert_action_thread_targets():
         assert body["target"] == {"chatId": "99"}
         assert body["actions"]["rows"][0]["actions"]
 
+    approval_rows = calls[1][1]["actions"]["rows"]
+    assert [[action["text"] for action in row["actions"]] for row in approval_rows] == [
+        ["Allow Once", "Allow for Session"],
+        ["Always Allow", "Deny"],
+    ]
+
+    calls.clear()
+    await adapter.send_exec_approval(
+        "chat:10",
+        "echo session",
+        "session-4",
+        allow_permanent=False,
+        allow_session=True,
+    )
+    session_rows = calls[-1][1]["actions"]["rows"]
+    assert [[action["text"] for action in row["actions"]] for row in session_rows] == [
+        ["Allow Once", "Allow for Session"],
+        ["Deny"],
+    ]
+
+    calls.clear()
+    await adapter.send_exec_approval(
+        "chat:10",
+        "echo smart-denied",
+        "session-5",
+        allow_permanent=False,
+        allow_session=False,
+        smart_denied=True,
+    )
+    smart_rows = calls[-1][1]["actions"]["rows"]
+    assert [[action["text"] for action in row["actions"]] for row in smart_rows] == [
+        ["Allow Once", "Deny"],
+    ]
+    assert "one operation only" in calls[-1][1]["text"]
+
 asyncio.run(assert_action_thread_targets())
 
 async def assert_upload_size_cap():
@@ -2651,72 +2895,94 @@ asyncio.run(assert_action_authorization())
 async def assert_callback_state_lifecycle():
     adapter = InlineAdapter(PlatformConfig(extra=base_extra))
     answers = []
-    sends = []
+    edits = []
 
     async def fake_answer_action(interaction_id, toast):
         answers.append((interaction_id, toast))
 
-    async def fake_send(chat_id, content, reply_to=None, metadata=None):
-        sends.append((chat_id, content, reply_to, metadata))
-        return SendResult(success=True, message_id=str(len(sends)))
+    async def fake_edit_action_message(event, text, actions=None):
+        edits.append((event, text, actions))
+        return SendResult(success=True, message_id=str(event.get("messageId") or ""))
+
+    def action_event(action_id, interaction_id):
+        return {
+            "actionId": action_id,
+            "chatId": "10",
+            "messageId": "20",
+            "interactionId": interaction_id,
+        }
 
     adapter._answer_action = fake_answer_action
-    adapter.send = fake_send
+    adapter._edit_action_message = fake_edit_action_message
 
     adapter._approval_sessions["approval-2"] = "session-2"
     approval_state["fail"] = True
-    assert await adapter._handle_approval_action("appr:approval-2:approve", "chat:10", "interaction-7")
+    assert await adapter._handle_approval_action(action_event("appr:approval-2:once", "interaction-7"))
     assert adapter._approval_sessions["approval-2"] == "session-2"
     assert answers == []
+    assert edits == []
 
     approval_state["fail"] = False
     approval_state["count"] = 1
-    assert await adapter._handle_approval_action("appr:approval-2:approve", "chat:10", "interaction-8")
+    assert await adapter._handle_approval_action(action_event("appr:approval-2:session", "interaction-8"))
     assert "approval-2" not in adapter._approval_sessions
-    assert answers[-1] == ("interaction-8", "Approved")
-    assert sends[-1][1] == "Approved."
+    assert approval_state["calls"][-1] == ("session-2", "session")
+    assert answers[-1] == ("interaction-8", "Approved for session")
+    assert edits[-1][1:] == ("Approved for this session.", {"rows": []})
 
     adapter._approval_sessions["approval-expired"] = "session-expired"
     approval_state["count"] = 0
-    assert await adapter._handle_approval_action("appr:approval-expired:deny", "chat:10", "interaction-9")
+    assert await adapter._handle_approval_action(action_event("appr:approval-expired:deny", "interaction-9"))
     assert "approval-expired" not in adapter._approval_sessions
     assert answers[-1] == ("interaction-9", "Approval expired")
+    assert edits[-1][1:] == ("Approval expired; the command was not run.", {"rows": []})
     approval_state["count"] = 1
 
     adapter._slash_sessions["confirm-2"] = "session-3"
     slash_state["fail"] = True
-    assert await adapter._handle_slash_action("sc:once:confirm-2", "chat:10", "interaction-10")
+    assert await adapter._handle_slash_action(action_event("sc:once:confirm-2", "interaction-10"))
     assert adapter._slash_sessions["confirm-2"] == "session-3"
 
     slash_state["fail"] = False
     slash_state["result"] = "slash done"
-    assert await adapter._handle_slash_action("sc:once:confirm-2", "chat:10", "interaction-11")
+    assert await adapter._handle_slash_action(action_event("sc:once:confirm-2", "interaction-11"))
     assert "confirm-2" not in adapter._slash_sessions
     assert answers[-1] == ("interaction-11", "Recorded")
-    assert sends[-1][1] == "slash done"
+    assert edits[-1][1:] == ("slash done", {"rows": []})
 
     adapter._slash_sessions["confirm-cancel"] = "session-4"
     slash_state["result"] = None
-    send_count = len(sends)
-    assert await adapter._handle_slash_action("sc:cancel:confirm-cancel", "chat:10", "interaction-12")
+    assert await adapter._handle_slash_action(action_event("sc:cancel:confirm-cancel", "interaction-12"))
     assert "confirm-cancel" not in adapter._slash_sessions
-    assert len(sends) == send_count
+    assert edits[-1][1:] == ("Cancelled.", {"rows": []})
 
     adapter._clarify_sessions["clarify-2"] = "session-5"
     adapter._clarify_choices["clarify-2"] = ["A", "B"]
     clarify_state["resolve"] = False
-    assert await adapter._handle_clarify_action("cl:clarify-2:0", "chat:10", "interaction-13")
+    assert await adapter._handle_clarify_action(action_event("cl:clarify-2:0", "interaction-13"))
     assert "clarify-2" not in adapter._clarify_sessions
     assert "clarify-2" not in adapter._clarify_choices
     assert answers[-1] == ("interaction-13", "Prompt expired")
+    assert edits[-1][1:] == ("Clarification expired.", {"rows": []})
 
     adapter._clarify_sessions["clarify-3"] = "session-6"
     adapter._clarify_choices["clarify-3"] = ["A"]
     clarify_state["mark"] = False
-    assert await adapter._handle_clarify_action("cl:clarify-3:other", "chat:10", "interaction-14")
+    assert await adapter._handle_clarify_action(action_event("cl:clarify-3:other", "interaction-14"))
     assert "clarify-3" not in adapter._clarify_sessions
     assert "clarify-3" not in adapter._clarify_choices
     assert answers[-1] == ("interaction-14", "Prompt expired")
+    assert edits[-1][1:] == ("Clarification expired.", {"rows": []})
+
+    clarify_state["mark"] = True
+    adapter._clarify_sessions["clarify-4"] = "session-7"
+    adapter._clarify_choices["clarify-4"] = ["A"]
+    assert await adapter._handle_clarify_action(action_event("cl:clarify-4:other", "interaction-15"))
+    assert edits[-1][1:] == ("Type your answer:", {"rows": []})
+
+    assert await adapter._handle_approval_action(action_event("appr:already-resolved:once", "interaction-16"))
+    assert answers[-1] == ("interaction-16", "Approval expired")
+    assert edits[-1][1:] == ("Approval expired; the command was not run.", {"rows": []})
 
 asyncio.run(assert_callback_state_lifecycle())
 

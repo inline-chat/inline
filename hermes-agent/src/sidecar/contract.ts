@@ -98,6 +98,7 @@ export function normalizeInboundEvent(
   event: GenericInboundEvent,
   meId?: string | null,
   sender?: GenericSenderProfile,
+  meUsername?: string | null,
 ): Json {
   if (event.kind === "message.new" || event.kind === "message.edit") {
     const message = asOptionalRecord(event.message)
@@ -107,6 +108,7 @@ export function normalizeInboundEvent(
       seq: event.seq,
       date: event.date,
       meId,
+      meUsername,
       ...(sender ? { sender } : {}),
       message: message ? normalizeMessage(message) : null,
     })
@@ -116,6 +118,7 @@ export function normalizeInboundEvent(
     return safeJson({
       ...event,
       meId,
+      meUsername,
       ...(sender ? { sender } : {}),
       dataBase64: event.data instanceof Uint8Array
         ? Buffer.from(event.data).toString("base64")
@@ -125,7 +128,7 @@ export function normalizeInboundEvent(
     })
   }
 
-  return safeJson({ ...event, meId, ...(sender ? { sender } : {}) })
+  return safeJson({ ...event, meId, meUsername, ...(sender ? { sender } : {}) })
 }
 
 export function normalizeMessage(message: Record<string, unknown>): Record<string, unknown> {

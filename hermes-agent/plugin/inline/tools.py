@@ -75,6 +75,7 @@ _ACTION_MANIFEST = [
     ("unpin_message", "(chat_id?|user_id?, message_id?)", "Unpin an Inline message for the conversation."),
     ("list_pins", "(chat_id?)", "List pinned Inline message IDs for a chat or reply thread."),
     ("create_thread", "(parent_chat_id?, parent_message_id?, title?)", "Create an Inline reply thread."),
+    ("create_chat", "(title, space_id?, participant_user_ids?, is_public?)", "Create a top-level Inline thread/chat."),
     ("set_presence", "(chat_id?|user_id?, kind, comment?)", "Set the bot avatar presence/status message."),
 ]
 _ACTIONS = [name for name, _, _ in _ACTION_MANIFEST]
@@ -145,6 +146,7 @@ def tool_context_prompt(
         lines.append(f"- Triggering Inline message: `{message_id}`. Use it as `message_id` or `parent_message_id` when creating a reply thread.")
     if parent_message_id:
         lines.append(f"- Parent Inline message for this thread: `{parent_message_id}`.")
+    lines.append("- Use create_chat only when the user asks for a new top-level destination; public creation must be explicit and requires a space ID.")
     lines.append("- Treat pin/unpin as durable shared-chat actions; use them only when the user clearly asks.")
     return "\n".join(lines)
 
@@ -159,6 +161,7 @@ INLINE_TOOL_SCHEMA = {
         "When chat_id is omitted, the tool uses the current Inline reply thread if present, otherwise the current chat. "
         "Do not use this tool to send the normal assistant reply; return text normally and Hermes will deliver it. "
         "Use create_thread with the current triggering message as parent_message_id to move large top-level discussions into a reply thread. "
+        "Use create_chat to create a new top-level destination outside the current conversation; it defaults to private, and public creation must explicitly set is_public with a space_id. "
         "Use search_messages for exact catch-up across older chat history. "
         "Use pin_message/unpin_message only when the user explicitly asks because pins are durable shared-chat state. "
         "Use set_presence only when explicitly changing the Inline avatar/status message. "
@@ -183,9 +186,20 @@ INLINE_TOOL_SCHEMA = {
                 "type": "string",
                 "description": "Parent message ID for create_thread. Defaults to the triggering message when available.",
             },
-            "title": {"type": "string", "description": "Optional reply thread title for create_thread."},
-            "description": {"type": "string", "description": "Optional reply thread description for create_thread."},
-            "emoji": {"type": "string", "description": "Optional reply thread emoji for create_thread, or reaction emoji for reaction actions."},
+            "title": {"type": "string", "description": "Thread title. Required for create_chat and optional for create_thread."},
+            "description": {"type": "string", "description": "Optional thread description for create_thread or create_chat."},
+            "emoji": {"type": "string", "description": "Optional thread emoji for create_thread/create_chat, or reaction emoji for reaction actions."},
+            "space_id": {"type": "string", "description": "Optional parent space ID for create_chat."},
+            "participant_user_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": 50,
+                "description": "User IDs for a private create_chat destination. Omit for a private bot-only thread.",
+            },
+            "is_public": {
+                "type": "boolean",
+                "description": "Whether create_chat is visible to the parent space. Defaults to false and requires space_id when true.",
+            },
             "query": {"type": "string", "description": "Search query for search_messages."},
             "text": {"type": "string", "description": "Message text for edit_message."},
             "parse_markdown": {"type": "boolean", "description": "Whether Inline should parse Markdown. Defaults to true."},
@@ -320,6 +334,27 @@ def _request_for_action(action: str, args: Dict[str, Any]) -> tuple[str, Dict[st
             if value:
                 body[key] = value
         return "/create-subthread", body
+
+    if action == "create_chat":
+        body = {
+            "title": _required_str(args, "title", max_chars=200),
+            "isPublic": _bool(args.get("is_public"), False),
+        }
+        space_id = _inline_id(args.get("space_id"))
+        if space_id:
+            body["spaceId"] = space_id
+        participant_user_ids = _id_list(args.get("participant_user_ids"), max_items=50)
+        if body["isPublic"]:
+            if not space_id:
+                raise InlineToolError("public create_chat requires space_id", "bad_format")
+            if participant_user_ids:
+                raise InlineToolError("public create_chat cannot include participant_user_ids", "bad_format")
+        body["participantUserIds"] = participant_user_ids
+        for key, limit in (("description", 1000), ("emoji", 16)):
+            value = _str(args.get(key))
+            if value:
+                body[key] = _truncate(value, limit)
+        return "/create-chat", body
 
     if action == "set_presence":
         kind = _str(args.get("kind"))
@@ -474,10 +509,11 @@ def _compact_result(action: str, result: Dict[str, Any]) -> Dict[str, Any]:
             "pinnedMessageIds": pins if isinstance(pins, list) else [],
             "anchorMessage": _compact_message(result.get("anchorMessage")) if isinstance(result, dict) and result.get("anchorMessage") else None,
         }
-    if action == "create_thread":
+    if action in {"create_thread", "create_chat"}:
         return {
             "chatId": _str(result.get("chatId")),
             "chat": _compact_chat(result.get("chat") if isinstance(result.get("chat"), dict) else {}),
+            "dialog": _summarize_value(result.get("dialog")) if result.get("dialog") is not None else None,
         }
     return result
 
@@ -708,9 +744,26 @@ def _inline_id(value: Any) -> str:
         return ""
     if ":" in text:
         prefix, rest = text.split(":", 1)
-        if prefix.lower() in {"chat", "thread", "user", "message", "msg"}:
+        if prefix.lower() in {"chat", "thread", "user", "space", "message", "msg"}:
             text = rest.strip()
     return text
+
+
+def _id_list(value: Any, *, max_items: int) -> list[str]:
+    if value is None:
+        return []
+    items = value if isinstance(value, (list, tuple, set)) else [value]
+    ids: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        inline_id = _inline_id(item)
+        if not inline_id or inline_id in seen:
+            continue
+        seen.add(inline_id)
+        ids.append(inline_id)
+        if len(ids) > max_items:
+            raise InlineToolError(f"too many IDs (max {max_items})", "bad_format")
+    return ids
 
 
 def _limit(value: Any) -> int:

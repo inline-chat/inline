@@ -119,12 +119,13 @@ describe("sidecar contract helpers", () => {
       firstName: "Ada",
       lastName: "Lovelace",
       username: "ada",
-    })).toEqual({
+    }, "inlinebot")).toEqual({
       kind: "message.new",
       chatId: "10",
       seq: 7,
       date: "123",
       meId: "1600",
+      meUsername: "inlinebot",
       sender: {
         id: "42",
         firstName: "Ada",
@@ -176,7 +177,7 @@ describe("sidecar contract helpers", () => {
       data: new Uint8Array([99, 108]),
       seq: 8,
       date: 9n,
-    }, "1600")).toEqual({
+    }, "1600", undefined, "inlinebot")).toEqual({
       kind: "message.action.invoke",
       interactionId: "1",
       chatId: "2",
@@ -188,6 +189,7 @@ describe("sidecar contract helpers", () => {
       seq: 8,
       date: "9",
       meId: "1600",
+      meUsername: "inlinebot",
     })
   })
 

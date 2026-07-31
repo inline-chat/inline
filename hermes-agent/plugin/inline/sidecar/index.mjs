@@ -29616,7 +29616,7 @@ function statusForErrorKind(errorKind) {
       return 500;
   }
 }
-function normalizeInboundEvent(event, meId, sender) {
+function normalizeInboundEvent(event, meId, sender, meUsername) {
   if (event.kind === "message.new" || event.kind === "message.edit") {
     const message = asOptionalRecord(event.message);
     return safeJson({
@@ -29625,6 +29625,7 @@ function normalizeInboundEvent(event, meId, sender) {
       seq: event.seq,
       date: event.date,
       meId,
+      meUsername,
       ...sender ? { sender } : {},
       message: message ? normalizeMessage(message) : null
     });
@@ -29633,11 +29634,12 @@ function normalizeInboundEvent(event, meId, sender) {
     return safeJson({
       ...event,
       meId,
+      meUsername,
       ...sender ? { sender } : {},
       dataBase64: event.data instanceof Uint8Array ? Buffer.from(event.data).toString("base64") : typeof event.data === "string" ? event.data : ""
     });
   }
-  return safeJson({ ...event, meId, ...sender ? { sender } : {} });
+  return safeJson({ ...event, meId, meUsername, ...sender ? { sender } : {} });
 }
 function normalizeMessage(message) {
   return {
@@ -29949,6 +29951,7 @@ var connected = false;
 var connecting = false;
 var stopping = false;
 var meId = null;
+var meUsername = null;
 var connectError = null;
 var connectAttempts = 0;
 var nextConnectRetryAt = null;
@@ -29974,8 +29977,15 @@ async function connectClientLoop() {
     nextConnectRetryAt = null;
     try {
       await client.connect();
-      const me = await client.getMe();
-      meId = String(me.userId);
+      const meResult = asOptionalRecord(await client.invoke(Method.GET_ME, {
+        oneofKind: "getMe",
+        getMe: GetMeInput.create({})
+      }));
+      const me = asOptionalRecord(asOptionalRecord(meResult?.getMe)?.user);
+      if (me?.id == null)
+        throw new Error("getMe: missing user");
+      meId = String(me.id);
+      meUsername = normalizeOwnUsername(me.username);
       registerBotCapabilitiesWithRetry({
         register: () => client.setMyBotCapabilities({
           capabilities: [{ kind: BotCapability_Kind.CHAT_SETTINGS, version: 1 }]
@@ -30008,7 +30018,7 @@ async function consumeEvents() {
   try {
     for await (const event of client.events()) {
       const sender = await resolveInboundSender(event);
-      await deliver(normalizeInboundEvent(event, meId, sender));
+      await deliver(normalizeInboundEvent(event, meId, sender, meUsername));
     }
   } catch (error) {
     if (!stopping) {
@@ -30029,6 +30039,7 @@ async function handleRequest(req, res) {
         connected,
         connecting,
         meId,
+        meUsername,
         baseUrl: redactUrl(baseUrl),
         statePath,
         version: await packageVersion(),
@@ -30111,6 +30122,9 @@ async function handleRequest(req, res) {
       return;
     case "/create-subthread":
       await endpointCreateSubthread(res, body);
+      return;
+    case "/create-chat":
+      await endpointCreateChat(res, body);
       return;
     case "/answer-action":
       await endpointAnswerAction(res, body);
@@ -30476,6 +30490,86 @@ async function endpointCreateSubthread(res, body) {
     }
   });
 }
+async function endpointCreateChat(res, body) {
+  const record = asRecord(body);
+  const title = readRequiredString(record, "title");
+  const description = readOptionalString(record, "description");
+  const emoji = readOptionalString(record, "emoji");
+  const spaceId = readOptionalPositiveId(record, "spaceId");
+  const isPublic = readOptionalBoolean(record, "isPublic") ?? false;
+  const participantUserIds = readPositiveIdArray(record, "participantUserIds", 50);
+  if (title.length > 200)
+    throw new SidecarError("create-chat title is too long", "bad_format");
+  if (description && description.length > 1000) {
+    throw new SidecarError("create-chat description is too long", "bad_format");
+  }
+  if (emoji && emoji.length > 16)
+    throw new SidecarError("create-chat emoji is too long", "bad_format");
+  if (isPublic && spaceId == null) {
+    throw new SidecarError("public create-chat requires spaceId", "bad_format");
+  }
+  if (isPublic && participantUserIds.length > 0) {
+    throw new SidecarError("public create-chat cannot include participantUserIds", "bad_format");
+  }
+  const result = await client.invokeUncheckedRaw(Method.CREATE_CHAT, {
+    oneofKind: "createChat",
+    createChat: {
+      title,
+      ...spaceId != null ? { spaceId } : {},
+      ...description ? { description } : {},
+      ...emoji ? { emoji } : {},
+      isPublic,
+      participants: participantUserIds.map((userId) => ({ userId }))
+    }
+  });
+  const typed = result;
+  if (typed.oneofKind !== "createChat" || typed.createChat?.chat?.id == null) {
+    throw new SidecarError("create-chat returned no chat", "unknown");
+  }
+  writeJson(res, 200, {
+    ok: true,
+    result: {
+      chat: safeJson(typed.createChat.chat),
+      chatId: String(typed.createChat.chat.id),
+      dialog: safeJson(typed.createChat.dialog ?? null)
+    }
+  });
+}
+function readOptionalPositiveId(record, key) {
+  const value = readOptionalString(record, key);
+  if (!value)
+    return;
+  try {
+    const parsed = BigInt(value);
+    if (parsed <= 0n)
+      throw new Error("not positive");
+    return parsed;
+  } catch {
+    throw new SidecarError(`${key} must be a positive integer`, "bad_format");
+  }
+}
+function readPositiveIdArray(record, key, maxItems) {
+  const value = record[key];
+  if (value == null)
+    return [];
+  if (!Array.isArray(value))
+    throw new SidecarError(`${key} must be an array`, "bad_format");
+  if (value.length > maxItems)
+    throw new SidecarError(`${key} supports at most ${maxItems} items`, "bad_format");
+  const ids = [];
+  const seen = new Set;
+  for (const item of value) {
+    const itemRecord = { [key]: item };
+    const id = readOptionalPositiveId(itemRecord, key);
+    if (id == null)
+      throw new SidecarError(`${key} items must be positive integers`, "bad_format");
+    if (seen.has(id.toString()))
+      continue;
+    seen.add(id.toString());
+    ids.push(id);
+  }
+  return ids;
+}
 async function getRawChatSnapshot(chatId) {
   const result = await client.invoke(Method.GET_CHAT, {
     oneofKind: "getChat",
@@ -30603,6 +30697,12 @@ function isLoopbackBaseUrl(value) {
 function readEnv(name) {
   return process.env[name] || "";
 }
+function normalizeOwnUsername(value) {
+  if (typeof value !== "string")
+    return null;
+  const username = value.trim().replace(/^@/, "");
+  return username || null;
+}
 function normalizeSidecarBind(value) {
   const host = (value || "").trim() || "127.0.0.1";
   if (host === "127.0.0.1" || host === "localhost" || host === "::1")
@@ -30651,9 +30751,12 @@ class MockInlineClient {
     this.closed = true;
     this.record("close");
   }
-  async getMe() {
-    this.record("getMe");
-    return { userId: 999n };
+  async setMyBotCapabilities(params) {
+    this.record("setMyBotCapabilities", params);
+    return params;
+  }
+  async answerBotChatSettings(params) {
+    this.record("answerBotChatSettings", params);
   }
   getDiagnostics() {
     return {
@@ -30740,15 +30843,15 @@ class MockInlineClient {
   async answerMessageAction(params) {
     this.record("answerMessageAction", params);
   }
-  async setMyBotCapabilities(params) {
-    this.record("setMyBotCapabilities", params);
-    return params;
-  }
-  async answerBotChatSettings(params) {
-    this.record("answerBotChatSettings", params);
-  }
   async invoke(method, input) {
     this.record(`invoke:${methodName(method)}`, input);
+    if (method === Method.GET_ME) {
+      return {
+        getMe: {
+          user: { id: 999n, username: "mock_inline_bot" }
+        }
+      };
+    }
     if (method === Method.GET_CHAT) {
       const inputRecord = asOptionalRecord(input);
       const getChat = asOptionalRecord(inputRecord?.getChat);
@@ -30813,6 +30916,22 @@ class MockInlineClient {
             id: 321n,
             title: "Mock subthread"
           }
+        }
+      };
+    }
+    if (method === Method.CREATE_CHAT) {
+      const inputRecord = asOptionalRecord(input);
+      const createChat = asOptionalRecord(inputRecord?.createChat);
+      return {
+        oneofKind: "createChat",
+        createChat: {
+          chat: {
+            id: 322n,
+            title: String(createChat?.title ?? "Mock top-level thread"),
+            ...createChat?.spaceId != null ? { spaceId: createChat.spaceId } : {},
+            isPublic: Boolean(createChat?.isPublic)
+          },
+          dialog: { chatId: 322n }
         }
       };
     }

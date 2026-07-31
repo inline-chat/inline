@@ -434,6 +434,26 @@ def _normalize_inline_command_name(raw: str) -> str:
     return name.strip("_")
 
 
+def _normalize_inline_username(raw: Any) -> Optional[str]:
+    username = str(raw or "").strip().lstrip("@").lower()
+    return username or None
+
+
+def _resolve_inline_targeted_command(text: str, bot_username: Optional[str]) -> tuple[str, bool, bool]:
+    match = re.match(
+        r"^/([a-z0-9_][a-z0-9_-]*)@([a-z0-9_]+)(\s.*)?$",
+        str(text or ""),
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        return text, False, False
+    target_username = _normalize_inline_username(match.group(2))
+    own_username = _normalize_inline_username(bot_username)
+    if not own_username or target_username != own_username:
+        return text, True, False
+    return f"/{match.group(1)}{match.group(3) or ''}", True, True
+
+
 def _normalize_inline_plugin_command_text(text: str) -> str:
     match = re.match(r"^/([a-z0-9_]+)(@[A-Za-z0-9_]+)?(\s.*)?$", str(text or ""), re.IGNORECASE | re.DOTALL)
     if not match or "_" not in match.group(1):
@@ -833,6 +853,7 @@ class InlineAdapter(BasePlatformAdapter):
         self._inbound_running = False
         self._http_client: Optional[httpx.AsyncClient] = None
         self._me_id: Optional[str] = None
+        self._me_username: Optional[str] = None
         self._seen_messages: Dict[str, float] = {}
         self._clarify_choices: "OrderedDict[str, List[str]]" = OrderedDict()
         self._clarify_sessions: "OrderedDict[str, str]" = OrderedDict()
@@ -1663,15 +1684,9 @@ class InlineAdapter(BasePlatformAdapter):
 
         self._chat_info_cache.pop(self._chat_key(chat_id), None)
         if command == "follow":
-            body = (
-                "Now explicitly following this Inline chat or thread. "
-                "Eligible activity can wake Hermes without an @mention."
-            )
+            body = "Following this chat—eligible messages can wake Hermes without an @mention."
         else:
-            body = (
-                "Explicitly unfollowed this Inline chat or thread. Automatic follow heuristics "
-                "will not turn following back on; mentions and replies can still wake Hermes."
-            )
+            body = "Unfollowed this chat—mentions and replies can still wake Hermes."
         await self.send(chat_id, body, reply_to=msg_id, metadata=metadata)
         return True
 
@@ -1779,6 +1794,7 @@ class InlineAdapter(BasePlatformAdapter):
                         result = data.get("result") or {}
                         if result.get("connected"):
                             self._me_id = str(result.get("meId") or "") or None
+                            self._me_username = _normalize_inline_username(result.get("meUsername"))
                             return
                         if result.get("connectError"):
                             last_error = RuntimeError(str(result.get("connectError")))
@@ -2004,6 +2020,8 @@ class InlineAdapter(BasePlatformAdapter):
             event = json.loads(line)
         except json.JSONDecodeError:
             return
+        self._me_id = str(event.get("meId") or self._me_id or "") or None
+        self._me_username = _normalize_inline_username(event.get("meUsername") or self._me_username)
         # Chat snapshots include mutable dialog and routing fields such as
         # followMode and lastMsgId. Invalidating here intentionally makes the
         # next group-message dispatch perform an extra GET_CHAT; correctness
@@ -2077,7 +2095,8 @@ class InlineAdapter(BasePlatformAdapter):
         sender_profile = _inline_sender_profile(event, msg)
         sender_name, sender_first_name, sender_username = _inline_sender_identity(sender_profile)
 
-        text = str(msg.get("message") or "").strip()
+        raw_message_text = str(msg.get("message") or "")
+        text = raw_message_text.strip()
         media_text, media_urls, media_types, message_type = await self._normalize_media(msg)
         if media_text:
             text = f"{text}\n{media_text}".strip() if text else media_text
@@ -2105,6 +2124,12 @@ class InlineAdapter(BasePlatformAdapter):
         if not self._allowed(chat_type, from_id):
             return
         if chat_type == "group" and not self._chat_allowed(chat_id, thread_id, parent_chat_id):
+            return
+        text, has_command_target, command_addressed_to_me = _resolve_inline_targeted_command(
+            text,
+            self._me_username,
+        )
+        if has_command_target and not command_addressed_to_me:
             return
         if await self._handle_thread_command(
             chat_id=chat_id,
@@ -2143,7 +2168,7 @@ class InlineAdapter(BasePlatformAdapter):
             and not self._free_response_chat(chat_id, thread_id, parent_chat_id)
         )
         if mention_gate_active:
-            mentioned = bool(msg.get("mentioned")) or self._matches_mention(text)
+            mentioned = command_addressed_to_me or bool(msg.get("mentioned")) or self._matches_mention(text)
             reply_wakes_thread = reply_to_is_own and not self._strict_mention
             # Freshness only controls whether the server auto-follows a thread.
             # Once this dialog is FOLLOWING, it remains relevant until unfollowed.
@@ -2152,6 +2177,16 @@ class InlineAdapter(BasePlatformAdapter):
                 and not self._strict_mention
             )
             if not mentioned and not reply_wakes_thread and not follow_mode_wakes_thread:
+                self._remember_observed_context(chat_id, msg, text)
+                return
+            # A leading explicit address to another person overwhelmingly means
+            # the turn is for them. It overrides only inferred follow/reply
+            # attention; an explicit address to this bot still wins.
+            if (
+                not mentioned
+                and (reply_wakes_thread or follow_mode_wakes_thread)
+                and self._starts_with_other_user_mention(msg, raw_message_text)
+            ):
                 self._remember_observed_context(chat_id, msg, text)
                 return
             if mentioned:
@@ -2657,6 +2692,29 @@ class InlineAdapter(BasePlatformAdapter):
             return None
         text = str(value).strip()
         return text or None
+
+    def _starts_with_other_user_mention(self, msg: Dict[str, Any], message_text: str) -> bool:
+        if not self._me_id:
+            return False
+        candidates: List[tuple[int, int, Dict[str, Any]]] = []
+        for index, entity in enumerate(self._message_entities(msg)):
+            offset = _to_int(entity.get("offset"))
+            if offset is not None and offset >= 0:
+                candidates.append((offset, index, entity))
+        if not candidates:
+            return False
+        offset, _, first_entity = min(candidates, key=lambda item: (item[0], item[1]))
+        if self._entity_kind(first_entity) != "mention":
+            return False
+        payload = self._entity_payload(first_entity, "mention")
+        mentioned_user_id = self._entity_id(payload, "userId")
+        if not mentioned_user_id or mentioned_user_id == self._me_id:
+            return False
+        try:
+            utf16_prefix = message_text.encode("utf-16-le")[: offset * 2].decode("utf-16-le")
+        except UnicodeDecodeError:
+            return False
+        return not utf16_prefix.strip()
 
     def _format_entity_summary(self, entity: Dict[str, Any], message_text: str) -> Optional[str]:
         kind = self._entity_kind(entity)
@@ -3240,8 +3298,6 @@ class InlineAdapter(BasePlatformAdapter):
 
     async def _handle_action(self, event: Dict[str, Any]) -> bool:
         action_id = str(event.get("actionId") or "")
-        chat_id = str(event.get("chatId") or "")
-        interaction_id = str(event.get("interactionId") or "")
         if self._is_model_picker_action(action_id):
             if not await self._action_allowed(event):
                 return True
@@ -3249,15 +3305,15 @@ class InlineAdapter(BasePlatformAdapter):
         if action_id.startswith("cl:"):
             if not await self._action_allowed(event):
                 return True
-            return await self._handle_clarify_action(action_id, chat_id, interaction_id)
+            return await self._handle_clarify_action(event)
         if action_id.startswith("appr:"):
             if not await self._action_allowed(event):
                 return True
-            return await self._handle_approval_action(action_id, chat_id, interaction_id)
+            return await self._handle_approval_action(event)
         if action_id.startswith("sc:"):
             if not await self._action_allowed(event):
                 return True
-            return await self._handle_slash_action(action_id, chat_id, interaction_id)
+            return await self._handle_slash_action(event)
         if action_id.startswith(_INLINE_THREADS_ACTION_PREFIX):
             return await self._handle_thread_action(event)
         return False
@@ -3303,14 +3359,16 @@ class InlineAdapter(BasePlatformAdapter):
             return None
         return self._chat_type_from_message(msg)
 
-    async def _handle_clarify_action(self, action_id: str, chat_id: str, interaction_id: str) -> bool:
+    async def _handle_clarify_action(self, event: Dict[str, Any]) -> bool:
+        action_id = str(event.get("actionId") or "")
         parts = action_id.split(":", 2)
         if len(parts) != 3:
             return False
         _, clarify_id, choice = parts
         session_key = self._clarify_sessions.get(clarify_id)
         if not session_key:
-            return False
+            await self._finish_action(event, "Prompt expired", "Clarification expired.")
+            return True
         if choice == "other":
             try:
                 from tools.clarify_gateway import mark_awaiting_text
@@ -3318,10 +3376,9 @@ class InlineAdapter(BasePlatformAdapter):
                 if not marked:
                     self._clarify_sessions.pop(clarify_id, None)
                     self._clarify_choices.pop(clarify_id, None)
-                    await self._answer_action(interaction_id, "Prompt expired")
+                    await self._finish_action(event, "Prompt expired", "Clarification expired.")
                     return True
-                await self._answer_action(interaction_id, "Type your answer")
-                await self.send(chat_id, "Type your answer:")
+                await self._finish_action(event, "Type your answer", "Type your answer:")
                 return True
             except Exception:
                 logger.exception("[inline] clarify other failed")
@@ -3335,58 +3392,75 @@ class InlineAdapter(BasePlatformAdapter):
             if resolved:
                 self._clarify_sessions.pop(clarify_id, None)
                 self._clarify_choices.pop(clarify_id, None)
-                await self._answer_action(interaction_id, "Answer recorded")
+                await self._finish_action(event, "Answer recorded", "Answer recorded.")
             else:
                 self._clarify_sessions.pop(clarify_id, None)
                 self._clarify_choices.pop(clarify_id, None)
-                await self._answer_action(interaction_id, "Prompt expired")
+                await self._finish_action(event, "Prompt expired", "Clarification expired.")
             return True
         except Exception:
             logger.exception("[inline] clarify action failed")
             return True
 
-    async def _handle_approval_action(self, action_id: str, chat_id: str, interaction_id: str) -> bool:
+    async def _handle_approval_action(self, event: Dict[str, Any]) -> bool:
+        action_id = str(event.get("actionId") or "")
         parts = action_id.split(":", 2)
         if len(parts) != 3:
             return False
         _, approval_id, choice = parts
+        choice = "once" if choice == "approve" else choice
         session_key = self._approval_sessions.get(approval_id)
-        if not session_key or choice not in {"approve", "deny"}:
+        if choice not in {"once", "session", "always", "deny"}:
             return False
+        if not session_key:
+            await self._finish_action(event, "Approval expired", "Approval expired; the command was not run.")
+            return True
         try:
             from tools.approval import resolve_gateway_approval
             count = resolve_gateway_approval(session_key, choice)
             self._approval_sessions.pop(approval_id, None)
             if not count:
-                await self._answer_action(interaction_id, "Approval expired")
+                await self._finish_action(event, "Approval expired", "Approval expired; the command was not run.")
                 return True
-            label = "Approved" if choice == "approve" else "Denied"
-            await self._answer_action(interaction_id, label)
-            await self.send(chat_id, f"{label}.")
+            labels = {
+                "once": ("Approved once", "Approved once."),
+                "session": ("Approved for session", "Approved for this session."),
+                "always": ("Always allowed", "Always allowed."),
+                "deny": ("Denied", "Denied."),
+            }
+            toast, text = labels[choice]
+            await self._finish_action(event, toast, text)
             return True
         except Exception:
             logger.exception("[inline] approval action failed")
             return True
 
-    async def _handle_slash_action(self, action_id: str, chat_id: str, interaction_id: str) -> bool:
+    async def _handle_slash_action(self, event: Dict[str, Any]) -> bool:
+        action_id = str(event.get("actionId") or "")
         parts = action_id.split(":", 2)
         if len(parts) != 3:
             return False
         _, choice, confirm_id = parts
         session_key = self._slash_sessions.get(confirm_id)
-        if not session_key or choice not in {"once", "always", "cancel"}:
+        if choice not in {"once", "always", "cancel"}:
             return False
+        if not session_key:
+            await self._finish_action(event, "Prompt expired", "Confirmation expired.")
+            return True
         try:
             from tools import slash_confirm as slash_confirm_mod
             result = await slash_confirm_mod.resolve(session_key, confirm_id, choice)
             self._slash_sessions.pop(confirm_id, None)
-            await self._answer_action(interaction_id, "Recorded")
-            if result:
-                await self.send(chat_id, result)
+            text = str(result or ("Cancelled." if choice == "cancel" else "Recorded."))
+            await self._finish_action(event, "Recorded", text)
             return True
         except Exception:
             logger.exception("[inline] slash confirm action failed")
             return True
+
+    async def _finish_action(self, event: Dict[str, Any], toast: str, text: str) -> None:
+        await self._answer_action(str(event.get("interactionId") or ""), toast)
+        await self._edit_action_message(event, text, {"rows": []})
 
     async def _handle_thread_action(self, event: Dict[str, Any]) -> bool:
         action_id = str(event.get("actionId") or "")
@@ -3906,19 +3980,36 @@ class InlineAdapter(BasePlatformAdapter):
             "actions": {"rows": [{"actions": actions}]},
         })
 
-    async def send_exec_approval(self, chat_id: str, command: str, session_key: str, description: str = "dangerous command", metadata: Optional[Dict[str, Any]] = None) -> SendResult:
+    async def send_exec_approval(
+        self,
+        chat_id: str,
+        command: str,
+        session_key: str,
+        description: str = "dangerous command",
+        metadata: Optional[Dict[str, Any]] = None,
+        allow_permanent: bool = True,
+        allow_session: bool = True,
+        smart_denied: bool = False,
+    ) -> SendResult:
         approval_id = secrets.token_hex(6)
-        self._remember(self._approval_sessions, approval_id, session_key)
         text = f"Command approval required\n\n```\n{command[:2000]}\n```\n\nReason: {description}"
-        return await self._send_sidecar("/send", {
+        if smart_denied:
+            text += "\n\nSmart DENY: owner override applies to this one operation only."
+        actions = [self._action(f"appr:{approval_id}:once", "Allow Once")]
+        if not smart_denied and allow_session:
+            actions.append(self._action(f"appr:{approval_id}:session", "Allow for Session"))
+            if allow_permanent:
+                actions.append(self._action(f"appr:{approval_id}:always", "Always Allow"))
+        actions.append(self._action(f"appr:{approval_id}:deny", "Deny"))
+        result = await self._send_sidecar("/send", {
             "target": self._target_for(chat_id, metadata),
             "text": text,
             "parseMarkdown": self._parse_markdown,
-            "actions": {"rows": [{"actions": [
-                {"id": f"appr:{approval_id}:approve", "text": "Approve", "callback": f"appr:{approval_id}:approve"},
-                {"id": f"appr:{approval_id}:deny", "text": "Deny", "callback": f"appr:{approval_id}:deny"},
-            ]}]},
+            "actions": {"rows": self._action_rows(actions)},
         })
+        if result.success:
+            self._remember(self._approval_sessions, approval_id, session_key)
+        return result
 
     async def send_slash_confirm(self, chat_id: str, title: str, message: str, session_key: str, confirm_id: str, metadata: Optional[Dict[str, Any]] = None) -> SendResult:
         self._remember(self._slash_sessions, confirm_id, session_key)
