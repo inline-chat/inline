@@ -344,21 +344,8 @@ enum MemojiBetaRollout {
   ]
 
   @MainActor
-  static func isEnabled(dependencies: AppDependencies?) -> Bool {
-    guard hostCanReachAvatarServices else { return false }
-
-    #if DEBUG || DEBUG_BUILD
-    return true
-    #elseif SPARKLE
-    return isBetaDistribution || dependencies?.updates.channel == .beta
-    #else
-    return false
-    #endif
-  }
-
-  private static var isBetaDistribution: Bool {
-    let feedURL = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String
-    return feedURL?.contains("/beta/") == true
+  static func isEnabled(dependencies _: AppDependencies?) -> Bool {
+    hostCanReachAvatarServices
   }
 
   private static let hostCanReachAvatarServices: Bool = {
