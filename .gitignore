@@ -5,6 +5,9 @@ node_modules/
 # Build outputs
 dist/
 **/dist/
+# This vetted bundle is compiled into the CLI and is release source, not local output.
+!cli/src/bridge/adapter_locks/amp/dist/
+!cli/src/bridge/adapter_locks/amp/dist/index.js
 build/
 **/build/
 coverage/
