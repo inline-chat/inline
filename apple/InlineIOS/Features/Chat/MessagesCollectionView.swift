@@ -2361,7 +2361,7 @@ private extension MessagesCollectionView {
         completion?()
       }
 
-      if !animatingDifferences, let immediateAfterApply {
+      if let immediateAfterApply {
         SendMessageAnimationDiagnostics.debug(
           "snapshot immediate-post-apply sections=\(sectionCount) items=\(itemCount)"
         )
@@ -2729,6 +2729,11 @@ private extension MessagesCollectionView {
             wasAtBottom
           let shouldCoordinateOutgoingInsert = shouldCoordinateSendAnimationScroll ||
             shouldCoordinateDeferredComposeOnly
+          let hasIncomingItems = items.contains { item in
+            guard let addedMessage = message(for: item) else { return false }
+            return addedMessage.message.out != true
+          }
+          let shouldCoordinateIncomingInsertScroll = shouldScroll && hasIncomingItems && wasAtBottom
           let animatesDiffableInsertion = !shouldCoordinateOutgoingInsert
 
           // Convert section index to date
@@ -2801,7 +2806,7 @@ private extension MessagesCollectionView {
             snapshot,
             animatingDifferences: animatesDiffableInsertion,
             withCustomTiming: true,
-            immediateAfterApply: shouldCoordinateOutgoingInsert ? { [weak self, weak collectionView = coordinatedCollectionView] in
+            immediateAfterApply: (shouldCoordinateOutgoingInsert || shouldCoordinateIncomingInsertScroll) ? { [weak self, weak collectionView = coordinatedCollectionView] in
               guard let self, let collectionView else { return }
               if shouldCoordinateSendAnimationScroll {
                 self.beginPendingSendAnimationTargetsAfterApply(
@@ -2810,17 +2815,19 @@ private extension MessagesCollectionView {
                   collectionView: collectionView,
                   contentAnchor: sendAnimationContentAnchor
                 )
-              } else {
+              } else if shouldCoordinateDeferredComposeOnly {
                 self.applyDeferredComposeInsetAfterFallbackInsert(
                   collectionView: collectionView,
                   contentAnchor: sendAnimationContentAnchor
                 )
+              } else {
+                collectionView.safeScrollToTop(animated: true)
               }
             } : nil,
             completion: { [weak self] in
               if shouldScroll,
                  let collectionView = self?.currentCollectionView as? MessagesCollectionView {
-                if !shouldCoordinateOutgoingInsert, wasAtBottom {
+                if !shouldCoordinateOutgoingInsert, !shouldCoordinateIncomingInsertScroll, wasAtBottom {
                   collectionView.safeScrollToTop(animated: true)
                 }
               }
