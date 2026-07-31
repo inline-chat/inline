@@ -202,6 +202,8 @@ pub enum RealtimeEvent {
     Updates(Vec<proto::Update>),
     /// Transient Grid state or connection event pushed by the server.
     Grid(proto::GridEvent),
+    /// Ephemeral bot-owned interaction delivered outside sequenced buckets.
+    Bot(proto::BotEvent),
     /// Server acknowledgement for a previously sent client message.
     Ack {
         /// Client message ID acknowledged by the server.
@@ -798,9 +800,9 @@ impl RealtimeClient {
                 self.send_ack(message_id).await?;
                 Ok(Some(RealtimeEvent::Grid(event)))
             }
-            Some(_) => {
+            Some(proto::server_message::Payload::Bot(event)) => {
                 self.send_ack(message_id).await?;
-                Ok(None)
+                Ok(Some(RealtimeEvent::Bot(event)))
             }
             None => Ok(None),
         }
@@ -1336,6 +1338,41 @@ rpc_requests!(
         SetBotCommands
     ),
     (
+        GetMyBotCapabilitiesInput,
+        GetMyBotCapabilities,
+        GetMyBotCapabilities,
+        GetMyBotCapabilitiesResult,
+        GetMyBotCapabilities
+    ),
+    (
+        SetMyBotCapabilitiesInput,
+        SetMyBotCapabilities,
+        SetMyBotCapabilities,
+        SetMyBotCapabilitiesResult,
+        SetMyBotCapabilities
+    ),
+    (
+        RequestBotChatSettingsInput,
+        RequestBotChatSettings,
+        RequestBotChatSettings,
+        RequestBotChatSettingsResult,
+        RequestBotChatSettings
+    ),
+    (
+        InvokeBotChatSettingsItemInput,
+        InvokeBotChatSettingsItem,
+        InvokeBotChatSettingsItem,
+        InvokeBotChatSettingsItemResult,
+        InvokeBotChatSettingsItem
+    ),
+    (
+        AnswerBotChatSettingsInput,
+        AnswerBotChatSettings,
+        AnswerBotChatSettings,
+        AnswerBotChatSettingsResult,
+        AnswerBotChatSettings
+    ),
+    (
         GetPeerBotCommandsInput,
         GetPeerBotCommands,
         GetPeerBotCommands,
@@ -1777,6 +1814,7 @@ fn realtime_event_kind(event: &RealtimeEvent) -> &'static str {
     match event {
         RealtimeEvent::Updates(_) => "updates",
         RealtimeEvent::Grid(_) => "grid",
+        RealtimeEvent::Bot(_) => "bot",
         RealtimeEvent::Ack { .. } => "ack",
         RealtimeEvent::Pong { .. } => "pong",
     }
@@ -2129,6 +2167,58 @@ mod tests {
                 other => panic!("expected changed Grid event, got {other:?}"),
             },
             other => panic!("expected Grid event, got {other:?}"),
+        }
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn realtime_client_receives_bot_events_and_acks_them() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+
+            let init = read_test_client_message(&mut ws).await;
+            assert!(matches!(
+                init.body,
+                Some(proto::client_message::Body::ConnectionInit(_))
+            ));
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+            send_test_server_message(&mut ws, test_bot_server_message(9, 7)).await;
+
+            let ack = read_test_client_message(&mut ws).await;
+            match ack.body {
+                Some(proto::client_message::Body::Ack(ack)) => assert_eq!(ack.msg_id, 9),
+                other => panic!("expected ack for pushed bot event, got {other:?}"),
+            }
+        });
+
+        let mut client = RealtimeClient::builder(format!("ws://{addr}/realtime"), "token-1")
+            .without_connect_timeout()
+            .without_rpc_timeout()
+            .connect()
+            .await
+            .unwrap();
+        let event = client.next_event().await.unwrap();
+
+        match event {
+            RealtimeEvent::Bot(event) => match event.event {
+                Some(proto::bot_event::Event::ChatSettingsRequested(request)) => {
+                    assert_eq!(request.chat_id, 7);
+                }
+                other => panic!("expected chat settings bot event, got {other:?}"),
+            },
+            other => panic!("expected bot event, got {other:?}"),
         }
         server.await.unwrap();
     }
@@ -2654,6 +2744,34 @@ mod tests {
     }
 
     #[test]
+    fn bot_settings_rpc_requests_map_all_transport_variants() {
+        assert_eq!(
+            <proto::GetMyBotCapabilitiesInput as RpcRequest>::METHOD,
+            proto::Method::GetMyBotCapabilities
+        );
+        assert!(matches!(
+            proto::RequestBotChatSettingsInput::default().into_rpc_input(),
+            proto::rpc_call::Input::RequestBotChatSettings(_)
+        ));
+        assert!(matches!(
+            proto::InvokeBotChatSettingsItemInput::default().into_rpc_input(),
+            proto::rpc_call::Input::InvokeBotChatSettingsItem(_)
+        ));
+        assert!(matches!(
+            proto::AnswerBotChatSettingsInput::default().into_rpc_input(),
+            proto::rpc_call::Input::AnswerBotChatSettings(_)
+        ));
+        assert!(
+            <proto::AnswerBotChatSettingsInput as RpcRequest>::response_from_rpc_result(
+                proto::rpc_result::Result::AnswerBotChatSettings(
+                    proto::AnswerBotChatSettingsResult::default(),
+                ),
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
     fn typed_rpc_request_rejects_unexpected_result_variant() {
         let err = <proto::GetChatsInput as RpcRequest>::response_from_rpc_result(
             proto::rpc_result::Result::GetMe(proto::GetMeResult::default()),
@@ -2789,6 +2907,26 @@ mod tests {
                             space_ids: vec![space_id],
                             room_id: None,
                         })),
+                    })),
+                },
+            )),
+        }
+    }
+
+    fn test_bot_server_message(message_id: u64, chat_id: i64) -> proto::ServerProtocolMessage {
+        proto::ServerProtocolMessage {
+            id: message_id,
+            body: Some(proto::server_protocol_message::Body::Message(
+                proto::ServerMessage {
+                    payload: Some(proto::server_message::Payload::Bot(proto::BotEvent {
+                        event: Some(proto::bot_event::Event::ChatSettingsRequested(
+                            proto::BotChatSettingsRequested {
+                                request_id: 1,
+                                chat_id,
+                                actor_user_id: 42,
+                                version: 1,
+                            },
+                        )),
                     })),
                 },
             )),

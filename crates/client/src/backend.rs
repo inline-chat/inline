@@ -7,7 +7,7 @@
 //! same shape.
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fmt,
     sync::{Arc, Mutex},
     time::Duration,
@@ -17,17 +17,21 @@ use futures_util::future::BoxFuture;
 
 use crate::store::select_history_window;
 use crate::{
-    AccountStateSnapshot, AddChatParticipantRequest, AuthStartRequest, AuthStartResult,
-    AuthVerifyRequest, AuthVerifyResult, ChatParticipantRecord, ChatParticipantsPage,
-    ChatParticipantsRequest, ChatStateSnapshot, ClientErrorCategory, ClientEvent,
-    ClientEventDelivery, ClientFailure, ClientStatus, ClientStatusSnapshot, ConnectRequest,
-    CreateDmRequest, CreateReplyThreadRequest, CreateThreadRequest, CreatedChat, DeleteChatRequest,
-    DeleteMessageRequest, DialogRecord, DialogsOrder, DialogsPage, DialogsRequest,
-    EditMessageRequest, HistoryPage, HistoryRequest, InlineId, MessageContent, MessageMutation,
-    MessageRecord, RandomId, ReactRequest, ReadRequest, RemoveChatParticipantRequest,
-    SendTextRequest, SetMarkedUnreadRequest, TransactionEvent, TransactionId, TransactionIdentity,
-    TransactionState, TypingRequest, UpdateChatInfoRequest, UpdateDialogNotificationsRequest,
-    UploadRequest,
+    AccountStateSnapshot, AddChatParticipantRequest, AnswerBotChatSettingsRequest,
+    AnswerMessageActionRequest, AuthStartRequest, AuthStartResult, AuthVerifyRequest,
+    AuthVerifyResult, BotCapability, BotChatSettingsProblem, BotChatSettingsProblemCode,
+    BotChatSettingsResponse, ChatParticipantRecord, ChatParticipantsPage, ChatParticipantsRequest,
+    ChatStateSnapshot, ClientErrorCategory, ClientEvent, ClientEventDelivery, ClientFailure,
+    ClientStatus, ClientStatusSnapshot, ConnectRequest, CreateDmRequest, CreateReplyThreadRequest,
+    CreateThreadRequest, CreatedChat, DeleteChatRequest, DeleteMessageRequest, DialogRecord,
+    DialogsOrder, DialogsPage, DialogsRequest, EditInteractiveMessageRequest, EditMessageRequest,
+    HistoryPage, HistoryRequest, InlineId, InvokeBotChatSettingsItemRequest, MessageActionKind,
+    MessageActions, MessageContent, MessageMutation, MessageRecord, RandomId, ReactRequest,
+    ReadRequest, RemoveChatParticipantRequest, RequestBotChatSettingsRequest,
+    SendInteractiveTextRequest, SendTextRequest, SetMarkedUnreadRequest, TransactionEvent,
+    TransactionId, TransactionIdentity, TransactionState, TypingRequest, UpdateChatInfoRequest,
+    UpdateDialogFollowModeRequest, UpdateDialogNotificationsRequest, UploadRequest,
+    UploadThumbnail,
 };
 
 /// Result type returned by client backends.
@@ -273,17 +277,30 @@ pub trait ClientBackend: fmt::Debug + Send + Sync + 'static {
         request: SendTextRequest,
     ) -> BoxFuture<'static, BackendResult<SendTextOutcome>>;
 
+    /// Sends text and interactive actions atomically.
+    fn send_interactive_text(
+        &self,
+        request: SendInteractiveTextRequest,
+    ) -> BoxFuture<'static, BackendResult<SendTextOutcome>>;
+
     /// Uploads and sends a media message.
     fn send_media(
         &self,
         request: UploadRequest,
         bytes: Vec<u8>,
+        thumbnail: Option<UploadThumbnail>,
     ) -> BoxFuture<'static, BackendResult<SendTextOutcome>>;
 
     /// Edits a text message.
     fn edit_message(
         &self,
         request: EditMessageRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>>;
+
+    /// Edits text and replaces or clears interactive actions atomically.
+    fn edit_interactive_message(
+        &self,
+        request: EditInteractiveMessageRequest,
     ) -> BoxFuture<'static, BackendResult<OperationOutcome>>;
 
     /// Deletes or unsends a message.
@@ -310,9 +327,48 @@ pub trait ClientBackend: fmt::Debug + Send + Sync + 'static {
         request: UpdateDialogNotificationsRequest,
     ) -> BoxFuture<'static, BackendResult<OperationOutcome>>;
 
+    /// Sets the authenticated user's native reply-thread follow mode.
+    fn update_dialog_follow_mode(
+        &self,
+        request: UpdateDialogFollowModeRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>>;
+
     /// Sends a typing state.
     fn typing(&self, request: TypingRequest)
     -> BoxFuture<'static, BackendResult<OperationOutcome>>;
+
+    /// Answers a previously invoked bot message action.
+    fn answer_message_action(
+        &self,
+        request: AnswerMessageActionRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>>;
+
+    /// Returns capabilities advertised by the authenticated bot account.
+    fn get_bot_capabilities(&self) -> BoxFuture<'static, BackendResult<Vec<BotCapability>>>;
+
+    /// Replaces capabilities advertised by the authenticated bot account.
+    fn set_bot_capabilities(
+        &self,
+        capabilities: Vec<BotCapability>,
+    ) -> BoxFuture<'static, BackendResult<Vec<BotCapability>>>;
+
+    /// Requests one bot's current settings document for a chat.
+    fn request_bot_chat_settings(
+        &self,
+        request: RequestBotChatSettingsRequest,
+    ) -> BoxFuture<'static, BackendResult<BotChatSettingsResponse>>;
+
+    /// Invokes one item from a bot's current settings document.
+    fn invoke_bot_chat_settings_item(
+        &self,
+        request: InvokeBotChatSettingsItemRequest,
+    ) -> BoxFuture<'static, BackendResult<BotChatSettingsResponse>>;
+
+    /// Answers one pending bot chat-settings interaction.
+    fn answer_bot_chat_settings(
+        &self,
+        request: AnswerBotChatSettingsRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>>;
 
     /// Receives the next batch of server-pushed client events.
     fn receive_events(&self) -> BoxFuture<'static, BackendResult<Vec<ClientEvent>>>;
@@ -383,6 +439,7 @@ struct InMemoryBackendState {
     next_message_id: i64,
     next_random_id: i64,
     next_transaction_id: u64,
+    bot_capabilities: Vec<BotCapability>,
 }
 
 impl Default for InMemoryBackendState {
@@ -398,6 +455,7 @@ impl Default for InMemoryBackendState {
             next_message_id: 1,
             next_random_id: 1,
             next_transaction_id: 1,
+            bot_capabilities: Vec::new(),
         }
     }
 }
@@ -661,6 +719,7 @@ impl InMemoryBackend {
             is_outgoing: true,
             content: MessageContent::Text { text: request.text },
             reply_to_message_id: request.reply_to_message_id,
+            metadata: crate::MessageMetadata::default(),
             transaction: Some(transaction.clone()),
         };
         state
@@ -723,6 +782,7 @@ impl InMemoryBackend {
         &self,
         request: UploadRequest,
         bytes: Vec<u8>,
+        _thumbnail: Option<UploadThumbnail>,
     ) -> BackendResult<SendTextOutcome> {
         self.require_connected()?;
         if bytes.is_empty() {
@@ -768,6 +828,7 @@ impl InMemoryBackend {
                 duration_ms: request.duration_ms,
             },
             reply_to_message_id: request.reply_to_message_id,
+            metadata: crate::MessageMetadata::default(),
             transaction: Some(transaction.clone()),
         };
         state
@@ -1127,13 +1188,25 @@ impl ClientBackend for InMemoryBackend {
         Box::pin(async move { backend.send_text_now(request) })
     }
 
+    fn send_interactive_text(
+        &self,
+        request: SendInteractiveTextRequest,
+    ) -> BoxFuture<'static, BackendResult<SendTextOutcome>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            validate_message_actions(&request.actions)?;
+            backend.send_text_now(request.message)
+        })
+    }
+
     fn send_media(
         &self,
         request: UploadRequest,
         bytes: Vec<u8>,
+        thumbnail: Option<UploadThumbnail>,
     ) -> BoxFuture<'static, BackendResult<SendTextOutcome>> {
         let backend = self.clone();
-        Box::pin(async move { backend.send_media_now(request, bytes) })
+        Box::pin(async move { backend.send_media_now(request, bytes, thumbnail) })
     }
 
     fn edit_message(
@@ -1166,6 +1239,17 @@ impl ClientBackend for InMemoryBackend {
                 ClientErrorCategory::InvalidInput,
                 "message not found",
             ))
+        })
+    }
+
+    fn edit_interactive_message(
+        &self,
+        request: EditInteractiveMessageRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            validate_message_actions(&request.actions)?;
+            backend.edit_message(request.message).await
         })
     }
 
@@ -1262,6 +1346,31 @@ impl ClientBackend for InMemoryBackend {
         })
     }
 
+    fn update_dialog_follow_mode(
+        &self,
+        request: UpdateDialogFollowModeRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            backend.require_connected()?;
+            if let Some(dialog) = backend
+                .state
+                .lock()
+                .expect("in-memory backend poisoned")
+                .dialogs
+                .iter_mut()
+                .find(|dialog| dialog.chat_id == request.chat_id)
+            {
+                dialog.follow_mode = Some(request.mode);
+            }
+            Ok(OperationOutcome::with_events(vec![
+                ClientEvent::ChatUpserted {
+                    chat_id: request.chat_id,
+                },
+            ]))
+        })
+    }
+
     fn typing(
         &self,
         request: TypingRequest,
@@ -1274,6 +1383,97 @@ impl ClientBackend for InMemoryBackend {
                 user_id: InlineId::new(0),
                 is_typing: request.is_typing,
             }]))
+        })
+    }
+
+    fn answer_message_action(
+        &self,
+        request: AnswerMessageActionRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            backend.require_connected()?;
+            if request.interaction_id.get() <= 0 {
+                return Err(BackendError::new(
+                    ClientErrorCategory::InvalidInput,
+                    "interaction_id must be positive",
+                ));
+            }
+            validate_action_toast(request.toast.as_deref())?;
+            Ok(OperationOutcome::empty())
+        })
+    }
+
+    fn get_bot_capabilities(&self) -> BoxFuture<'static, BackendResult<Vec<BotCapability>>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            backend.require_connected()?;
+            Ok(backend
+                .state
+                .lock()
+                .expect("in-memory backend poisoned")
+                .bot_capabilities
+                .clone())
+        })
+    }
+
+    fn set_bot_capabilities(
+        &self,
+        capabilities: Vec<BotCapability>,
+    ) -> BoxFuture<'static, BackendResult<Vec<BotCapability>>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            backend.require_connected()?;
+            let mut state = backend.state.lock().expect("in-memory backend poisoned");
+            state.bot_capabilities = capabilities;
+            Ok(state.bot_capabilities.clone())
+        })
+    }
+
+    fn request_bot_chat_settings(
+        &self,
+        request: RequestBotChatSettingsRequest,
+    ) -> BoxFuture<'static, BackendResult<BotChatSettingsResponse>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            backend.require_connected()?;
+            validate_bot_settings_target(request.bot_user_id, request.version)?;
+            Ok(in_memory_settings_unavailable())
+        })
+    }
+
+    fn invoke_bot_chat_settings_item(
+        &self,
+        request: InvokeBotChatSettingsItemRequest,
+    ) -> BoxFuture<'static, BackendResult<BotChatSettingsResponse>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            backend.require_connected()?;
+            validate_bot_settings_target(request.bot_user_id, request.version)?;
+            if request.item_id.trim().is_empty() || request.document_revision.trim().is_empty() {
+                return Err(BackendError::new(
+                    ClientErrorCategory::InvalidInput,
+                    "bot settings item and document revision must not be empty",
+                ));
+            }
+            Ok(in_memory_settings_unavailable())
+        })
+    }
+
+    fn answer_bot_chat_settings(
+        &self,
+        request: AnswerBotChatSettingsRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            backend.require_connected()?;
+            if request.request_id == 0 {
+                return Err(BackendError::new(
+                    ClientErrorCategory::InvalidInput,
+                    "request_id must be positive",
+                ));
+            }
+            Ok(OperationOutcome::empty())
         })
     }
 
@@ -1297,6 +1497,87 @@ impl ClientBackend for InMemoryBackend {
             }
         })
     }
+}
+
+fn validate_bot_settings_target(bot_user_id: InlineId, version: u32) -> BackendResult<()> {
+    if bot_user_id.get() <= 0 || version == 0 {
+        return Err(BackendError::new(
+            ClientErrorCategory::InvalidInput,
+            "bot_user_id and settings version must be positive",
+        ));
+    }
+    Ok(())
+}
+
+fn in_memory_settings_unavailable() -> BotChatSettingsResponse {
+    BotChatSettingsResponse::Problem(BotChatSettingsProblem {
+        code: BotChatSettingsProblemCode::Unavailable,
+        message: "bot settings are unavailable in the in-memory backend".to_owned(),
+        current_document: None,
+    })
+}
+
+pub(crate) fn validate_message_actions(actions: &MessageActions) -> BackendResult<()> {
+    const MAX_ROWS: usize = 8;
+    const MAX_ACTIONS_PER_ROW: usize = 8;
+    const MAX_ACTION_ID_LENGTH: usize = 64;
+    const MAX_BUTTON_TEXT_LENGTH: usize = 64;
+    const MAX_CALLBACK_BYTES: usize = 1024;
+    const MAX_COPY_TEXT_LENGTH: usize = 4096;
+
+    if actions.rows.len() > MAX_ROWS {
+        return Err(invalid_actions("message actions exceed eight rows"));
+    }
+    let mut action_ids = HashSet::new();
+    for row in &actions.rows {
+        if row.actions.len() > MAX_ACTIONS_PER_ROW {
+            return Err(invalid_actions("message action row exceeds eight buttons"));
+        }
+        for action in &row.actions {
+            let action_id = action.action_id.trim();
+            if action_id.is_empty()
+                || action_id.len() > MAX_ACTION_ID_LENGTH
+                || !action_id
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"_.:-".contains(&byte))
+                || !action_ids.insert(action_id)
+            {
+                return Err(invalid_actions(
+                    "message action id is invalid or duplicated",
+                ));
+            }
+            let text = action.text.trim();
+            if text.is_empty() || text.encode_utf16().count() > MAX_BUTTON_TEXT_LENGTH {
+                return Err(invalid_actions("message action label is invalid"));
+            }
+            match &action.kind {
+                MessageActionKind::Callback { data } if data.len() > MAX_CALLBACK_BYTES => {
+                    return Err(invalid_actions("message action callback data is too large"));
+                }
+                MessageActionKind::CopyText { text }
+                    if text.trim().is_empty()
+                        || text.trim().encode_utf16().count() > MAX_COPY_TEXT_LENGTH =>
+                {
+                    return Err(invalid_actions("message action copy text is invalid"));
+                }
+                MessageActionKind::Callback { .. } | MessageActionKind::CopyText { .. } => {}
+            }
+        }
+    }
+    Ok(())
+}
+
+fn invalid_actions(message: &'static str) -> BackendError {
+    BackendError::new(ClientErrorCategory::InvalidInput, message)
+}
+
+pub(crate) fn validate_action_toast(toast: Option<&str>) -> BackendResult<()> {
+    if let Some(toast) = toast
+        && (toast.trim().is_empty() || toast.trim().encode_utf16().count() > 256)
+    {
+        return Err(invalid_actions("message action toast is invalid"));
+    }
+    Ok(())
 }
 
 fn parse_cursor(cursor: Option<&str>) -> BackendResult<usize> {
@@ -1333,9 +1614,40 @@ fn chat_id_for_peer(peer: crate::PeerRef) -> InlineId {
 
 #[cfg(test)]
 mod tests {
-    use crate::{PeerRef, SendTextRequest};
+    use crate::{PeerRef, SendNotificationMode, SendTextRequest};
 
     use super::*;
+
+    #[test]
+    fn message_action_validation_matches_service_limits() {
+        let valid = MessageActions {
+            rows: vec![crate::MessageActionRow {
+                actions: vec![crate::MessageActionButton {
+                    action_id: "approval.accept".to_string(),
+                    text: "Approve".to_string(),
+                    kind: MessageActionKind::Callback {
+                        data: b"approval-1".to_vec(),
+                    },
+                }],
+            }],
+        };
+        validate_message_actions(&valid).expect("valid actions");
+
+        let mut duplicate = valid.clone();
+        duplicate.rows.push(duplicate.rows[0].clone());
+        assert_eq!(
+            validate_message_actions(&duplicate)
+                .expect_err("duplicate action id")
+                .category,
+            ClientErrorCategory::InvalidInput
+        );
+        assert_eq!(
+            validate_action_toast(Some(" "))
+                .expect_err("blank toast")
+                .category,
+            ClientErrorCategory::InvalidInput
+        );
+    }
 
     fn token_connect() -> ConnectRequest {
         ConnectRequest::new(crate::AuthCredential::AccessToken {
@@ -1454,6 +1766,24 @@ mod tests {
             .unwrap();
         assert_eq!(history.messages.len(), 1);
         assert_eq!(history.messages[0].message_id, InlineId::new(1));
+    }
+
+    #[tokio::test]
+    async fn in_memory_backend_accepts_explicit_silent_text_send() {
+        let backend = InMemoryBackend::new();
+        backend.connect(token_connect()).await.unwrap();
+        let mut request = SendTextRequest::new(
+            PeerRef::Chat {
+                chat_id: InlineId::new(7),
+            },
+            "quiet update",
+        );
+        request.notification_mode = SendNotificationMode::Silent;
+
+        let outcome = backend.send_text(request).await.unwrap();
+
+        assert_eq!(outcome.chat_id, InlineId::new(7));
+        assert_eq!(outcome.message_id, Some(InlineId::new(1)));
     }
 
     #[tokio::test]

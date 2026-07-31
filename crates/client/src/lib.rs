@@ -10,6 +10,9 @@ use thiserror::Error;
 /// Backend/store boundary for client runtime operations.
 pub mod backend;
 
+/// Bot capability and chat-settings contracts.
+pub mod bot_settings;
+
 /// Async client facade and runner.
 pub mod runtime;
 
@@ -31,6 +34,13 @@ pub mod types;
 pub use backend::{
     BackendError, BackendResult, ClientBackend, InMemoryBackend, OperationOutcome, SendTextOutcome,
 };
+pub use bot_settings::{
+    AnswerBotChatSettingsRequest, BotCapability, BotCapabilityKind, BotChatSettingsControl,
+    BotChatSettingsDocument, BotChatSettingsFolder, BotChatSettingsFolderOption,
+    BotChatSettingsInfoTone, BotChatSettingsItem, BotChatSettingsProblem,
+    BotChatSettingsProblemCode, BotChatSettingsResponse, BotChatSettingsSection,
+    BotChatSettingsSelectOption, InvokeBotChatSettingsItemRequest, RequestBotChatSettingsRequest,
+};
 pub use inline_sdk::ClientIdentity;
 pub use realtime::{
     FakeRealtimeAttempt, FakeRealtimeConnector, RealtimeConnectRequest, RealtimeConnectionInfo,
@@ -50,16 +60,21 @@ pub use store::{
 };
 pub use sync::SyncConfig;
 pub use types::{
-    AddChatParticipantRequest, AuthContactKind, AuthCredential, AuthStartRequest, AuthStartResult,
-    AuthToken, AuthVerifyRequest, AuthVerifyResult, ChatCreateParticipant, ChatParticipantRecord,
-    ChatParticipantsPage, ChatParticipantsRequest, ClientStatusSnapshot, ConnectRequest,
-    CreateDmRequest, CreateReplyThreadRequest, CreateThreadRequest, CreatedChat, DeleteChatRequest,
-    DeleteMessageRequest, DialogFollowMode, DialogNotificationMode, DialogRecord, DialogsOrder,
-    DialogsPage, DialogsRequest, EditMessageRequest, HistoryPage, HistoryRequest, MediaKind,
-    MessageContent, MessageMutation, MessageRecord, NotificationMode, PeerRef, ReactRequest,
-    ReadRequest, RemoveChatParticipantRequest, SendTextRequest, SetMarkedUnreadRequest,
-    SpaceMemberRecord, SpaceMemberRole, SpaceRecord, TypingRequest, UpdateChatInfoRequest,
-    UpdateDialogNotificationsRequest, UploadHandle, UploadRequest, UserRecord, UserSettingsRecord,
+    AddChatParticipantRequest, AnswerMessageActionRequest, AuthContactKind, AuthCredential,
+    AuthStartRequest, AuthStartResult, AuthToken, AuthVerifyRequest, AuthVerifyResult,
+    ChatCreateParticipant, ChatParticipantRecord, ChatParticipantsPage, ChatParticipantsRequest,
+    ClientStatusSnapshot, ConnectRequest, CreateDmRequest, CreateReplyThreadRequest,
+    CreateThreadRequest, CreatedChat, DeleteChatRequest, DeleteMessageRequest, DialogFollowMode,
+    DialogNotificationMode, DialogRecord, DialogsOrder, DialogsPage, DialogsRequest,
+    EditInteractiveMessageRequest, EditMessageRequest, HistoryPage, HistoryRequest,
+    InitialEventPolicy, MediaKind, MessageActionButton, MessageActionKind, MessageActionRecord,
+    MessageActionRow, MessageActions, MessageAttachmentRecord, MessageContent, MessageEntityRecord,
+    MessageMetadata, MessageMutation, MessageRecord, NotificationMode, PeerRef, ReactRequest,
+    ReadRequest, RemoveChatParticipantRequest, SendInteractiveTextRequest, SendNotificationMode,
+    SendTextRequest, SetMarkedUnreadRequest, SpaceMemberRecord, SpaceMemberRole, SpaceRecord,
+    TypingRequest, UpdateChatInfoRequest, UpdateDialogFollowModeRequest,
+    UpdateDialogNotificationsRequest, UploadHandle, UploadRequest, UploadThumbnail, UserRecord,
+    UserSettingsRecord,
 };
 
 /// Published package version.
@@ -418,6 +433,54 @@ pub enum EventReliability {
     BestEffort,
 }
 
+/// Value supplied by an Inline bot-settings control invocation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum BotSettingsValue {
+    /// Toggle value.
+    Bool(bool),
+    /// Select or other string-backed value.
+    String(String),
+}
+
+/// Ephemeral bot-owned control interaction delivered outside sync buckets.
+///
+/// These requests are routed through the single lossless host stream so they
+/// are not silently dropped under local backpressure, but they have no durable
+/// delivery ID and must be answered within the server broker deadline.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum BotInteractionEvent {
+    /// A client opened the bot settings surface for a chat.
+    ChatSettingsRequested {
+        /// Broker request ID used by the bot's answer RPC.
+        request_id: u64,
+        /// Chat whose bot settings were requested.
+        chat_id: InlineId,
+        /// User who opened the settings surface.
+        actor_user_id: InlineId,
+        /// Settings document version requested by the client.
+        version: u32,
+    },
+    /// A client invoked one item from the current bot settings document.
+    ChatSettingsItemInvoked {
+        /// Broker request ID used by the bot's answer RPC.
+        request_id: u64,
+        /// Chat whose bot setting was invoked.
+        chat_id: InlineId,
+        /// User who invoked the setting.
+        actor_user_id: InlineId,
+        /// Settings document version requested by the client.
+        version: u32,
+        /// Bot-owned stable item identifier.
+        item_id: String,
+        /// Optional new control value.
+        value: Option<BotSettingsValue>,
+        /// Revision the client rendered before invoking the item.
+        document_revision: String,
+    },
+}
+
 /// Committed client event for apps, bridges, agents, and hosts.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -431,6 +494,8 @@ pub enum ClientEvent {
     },
     /// A durable transaction changed state.
     TransactionChanged(TransactionEvent),
+    /// Ephemeral bot settings/control interaction requiring prompt host handling.
+    BotInteraction(BotInteractionEvent),
     /// A chat was inserted or updated in the local store.
     ChatUpserted {
         /// Inline chat ID.
@@ -583,6 +648,7 @@ impl ClientEvent {
             | Self::NewMessageNotification { .. } => EventReliability::BestEffort,
             Self::StatusChanged { .. }
             | Self::TransactionChanged(_)
+            | Self::BotInteraction(_)
             | Self::ChatUpserted { .. }
             | Self::ChatDeleted { .. }
             | Self::ChatParticipantsChanged { .. }
@@ -605,25 +671,32 @@ impl ClientEvent {
 /// Convenient imports for common client consumers.
 pub mod prelude {
     pub use crate::{
-        AddChatParticipantRequest, AuthCredential, AuthToken, BackendError, BackendResult,
-        ClientBackend, ClientCommandError, ClientError, ClientErrorCategory, ClientEvent,
-        ClientEventDelivery, ClientFailure, ClientIdentity, ClientRequestError, ClientRunner,
-        ClientStatus, ClientStore, ConnectRequest, DEFAULT_COMMAND_QUEUE_CAPACITY,
-        DEFAULT_EVENT_QUEUE_CAPACITY, DEFAULT_LOSSLESS_EVENT_QUEUE_CAPACITY, DeleteChatRequest,
-        DeleteMessageRequest, DialogFollowMode, DialogNotificationMode, DialogRecord, DialogsPage,
-        DialogsRequest, EditMessageRequest, EventReliability, ExternalId, FakeRealtimeAttempt,
+        AddChatParticipantRequest, AnswerBotChatSettingsRequest, AuthCredential, AuthToken,
+        BackendError, BackendResult, BotCapability, BotCapabilityKind, BotChatSettingsControl,
+        BotChatSettingsDocument, BotChatSettingsFolder, BotChatSettingsFolderOption,
+        BotChatSettingsInfoTone, BotChatSettingsItem, BotChatSettingsProblem,
+        BotChatSettingsProblemCode, BotChatSettingsResponse, BotChatSettingsSection,
+        BotChatSettingsSelectOption, BotInteractionEvent, BotSettingsValue, ClientBackend,
+        ClientCommandError, ClientError, ClientErrorCategory, ClientEvent, ClientEventDelivery,
+        ClientFailure, ClientIdentity, ClientRequestError, ClientRunner, ClientStatus, ClientStore,
+        ConnectRequest, DEFAULT_COMMAND_QUEUE_CAPACITY, DEFAULT_EVENT_QUEUE_CAPACITY,
+        DEFAULT_LOSSLESS_EVENT_QUEUE_CAPACITY, DeleteChatRequest, DeleteMessageRequest,
+        DialogFollowMode, DialogNotificationMode, DialogRecord, DialogsPage, DialogsRequest,
+        EditMessageRequest, EventReliability, ExternalId, FakeRealtimeAttempt,
         FakeRealtimeConnector, HistoryPage, HistoryRequest, InMemoryBackend, InMemoryStore,
-        InlineClient, InlineClientBuilder, InlineClientRuntime, InlineId, LosslessEventDelivery,
-        LosslessEventReceiver, MessageContent, MessageMutation, MessageRecord, NotificationMode,
-        PeerRef, RandomId, ReactRequest, ReadRequest, RealtimeConnectRequest,
-        RealtimeConnectionInfo, RealtimeConnector, ReconnectPolicy, RemoveChatParticipantRequest,
-        SdkBackend, SdkBackendBuildError, SdkBackendBuilder, SdkRealtimeConnector, SendTextOutcome,
-        SendTextRequest, SetMarkedUnreadRequest, SpaceMemberRecord, SpaceMemberRole, SpaceRecord,
-        SqliteStore, StoreError, StoreResult, StoredReaction, StoredReadState, StoredSession,
-        StoredTransaction, SyncBucketKey, SyncBucketPeer, SyncBucketState, SyncConfig, SyncState,
-        TransactionEvent, TransactionId, TransactionIdentity, TransactionState, TypingRequest,
-        UpdateChatInfoRequest, UpdateDialogNotificationsRequest, UploadHandle, UploadRequest,
-        UserSettingsRecord, VERSION,
+        InlineClient, InlineClientBuilder, InlineClientRuntime, InlineId,
+        InvokeBotChatSettingsItemRequest, LosslessEventDelivery, LosslessEventReceiver,
+        MessageContent, MessageMutation, MessageRecord, NotificationMode, PeerRef, RandomId,
+        ReactRequest, ReadRequest, RealtimeConnectRequest, RealtimeConnectionInfo,
+        RealtimeConnector, ReconnectPolicy, RemoveChatParticipantRequest,
+        RequestBotChatSettingsRequest, SdkBackend, SdkBackendBuildError, SdkBackendBuilder,
+        SdkRealtimeConnector, SendTextOutcome, SendTextRequest, SetMarkedUnreadRequest,
+        SpaceMemberRecord, SpaceMemberRole, SpaceRecord, SqliteStore, StoreError, StoreResult,
+        StoredReaction, StoredReadState, StoredSession, StoredTransaction, SyncBucketKey,
+        SyncBucketPeer, SyncBucketState, SyncConfig, SyncState, TransactionEvent, TransactionId,
+        TransactionIdentity, TransactionState, TypingRequest, UpdateChatInfoRequest,
+        UpdateDialogFollowModeRequest, UpdateDialogNotificationsRequest, UploadHandle,
+        UploadRequest, UserSettingsRecord, VERSION,
     };
 }
 

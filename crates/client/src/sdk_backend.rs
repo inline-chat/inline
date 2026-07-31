@@ -4,6 +4,8 @@
 //! multiplexed realtime session, bucket sync, and transaction state behind the
 //! native client API.
 
+mod bot_settings;
+
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -18,30 +20,41 @@ use futures_util::future::BoxFuture;
 use inline_sdk::{
     ApiClient, ApiError, AuthMetadata, ClientIdentity, RealtimeError, RealtimeEvent,
     RealtimeEventReceiver, RealtimeSession, RpcRequest, UploadFileBytesInput, UploadFileResult,
-    UploadFileType, UploadVideoMetadata, proto,
+    UploadFileType, UploadThumbnailBytesInput, UploadVideoMetadata, proto,
 };
 use serde_json::Value;
 use tokio::sync::{Mutex, Notify};
 
-use crate::backend::retry_after_seconds_from_message;
+use crate::backend::{
+    retry_after_seconds_from_message, validate_action_toast, validate_message_actions,
+};
 use crate::sync::{SyncHost, SyncManager};
 use crate::{
-    AccountStateSnapshot, AddChatParticipantRequest, AuthContactKind, AuthCredential,
-    AuthStartRequest, AuthStartResult, AuthToken, AuthVerifyRequest, AuthVerifyResult,
-    BackendError, BackendResult, ChatCreateParticipant, ChatParticipantRecord,
-    ChatParticipantsPage, ChatParticipantsRequest, ChatStateSnapshot, ClientBackend,
-    ClientErrorCategory, ClientEvent, ClientEventDelivery, ClientStatusSnapshot, ClientStore,
-    ConnectRequest, CreateDmRequest, CreateReplyThreadRequest, CreateThreadRequest, CreatedChat,
-    DeleteChatRequest, DeleteMessageRequest, DialogFollowMode, DialogNotificationMode,
-    DialogRecord, DialogsOrder, DialogsPage, DialogsRequest, EditMessageRequest, HistoryPage,
-    HistoryRequest, InMemoryStore, InlineId, MediaKind, MessageContent, MessageMutation,
-    MessageRecord, NotificationMode, OperationOutcome, PeerRef, RandomId, ReactRequest,
-    ReadRequest, RealtimeConnectRequest, RealtimeConnector, RemoveChatParticipantRequest,
-    SendTextOutcome, SendTextRequest, SetMarkedUnreadRequest, SpaceMemberRecord, SpaceMemberRole,
-    SpaceRecord, StoreError, StoredReaction, StoredReadState, StoredSession, StoredTransaction,
-    SyncConfig, TransactionId, TransactionIdentity, TransactionState, TypingRequest,
-    UpdateChatInfoRequest, UpdateDialogNotificationsRequest, UploadRequest, UserRecord,
+    AccountStateSnapshot, AddChatParticipantRequest, AnswerBotChatSettingsRequest,
+    AnswerMessageActionRequest, AuthContactKind, AuthCredential, AuthStartRequest, AuthStartResult,
+    AuthToken, AuthVerifyRequest, AuthVerifyResult, BackendError, BackendResult, BotCapability,
+    BotChatSettingsResponse, BotInteractionEvent, BotSettingsValue, ChatCreateParticipant,
+    ChatParticipantRecord, ChatParticipantsPage, ChatParticipantsRequest, ChatStateSnapshot,
+    ClientBackend, ClientErrorCategory, ClientEvent, ClientEventDelivery, ClientStatusSnapshot,
+    ClientStore, ConnectRequest, CreateDmRequest, CreateReplyThreadRequest, CreateThreadRequest,
+    CreatedChat, DeleteChatRequest, DeleteMessageRequest, DialogFollowMode, DialogNotificationMode,
+    DialogRecord, DialogsOrder, DialogsPage, DialogsRequest, EditInteractiveMessageRequest,
+    EditMessageRequest, HistoryPage, HistoryRequest, InMemoryStore, InitialEventPolicy, InlineId,
+    InvokeBotChatSettingsItemRequest, MediaKind, MessageActionKind, MessageActions, MessageContent,
+    MessageMutation, MessageRecord, NotificationMode, OperationOutcome, PeerRef, RandomId,
+    ReactRequest, ReadRequest, RealtimeConnectRequest, RealtimeConnector,
+    RemoveChatParticipantRequest, RequestBotChatSettingsRequest, SendInteractiveTextRequest,
+    SendNotificationMode, SendTextOutcome, SendTextRequest, SetMarkedUnreadRequest,
+    SpaceMemberRecord, SpaceMemberRole, SpaceRecord, StoreError, StoredReaction, StoredReadState,
+    StoredSession, StoredTransaction, SyncConfig, TransactionId, TransactionIdentity,
+    TransactionState, TypingRequest, UpdateChatInfoRequest, UpdateDialogFollowModeRequest,
+    UpdateDialogNotificationsRequest, UploadRequest, UploadThumbnail, UserRecord,
     UserSettingsRecord, VERSION,
+};
+
+use self::bot_settings::{
+    capability_from_proto, capability_to_proto, response_from_proto, response_to_proto,
+    value_to_proto,
 };
 
 const DEFAULT_API_BASE_URL: &str = "https://api.inline.chat/v1";
@@ -269,6 +282,128 @@ impl SdkBackend {
             })
     }
 
+    async fn send_text_with_actions(
+        &self,
+        request: SendTextRequest,
+        actions: Option<MessageActions>,
+    ) -> BackendResult<SendTextOutcome> {
+        if request.text.trim().is_empty() {
+            return Err(BackendError::new(
+                ClientErrorCategory::InvalidInput,
+                "message text must not be empty",
+            ));
+        }
+        if let Some(actions) = &actions {
+            validate_message_actions(actions)?;
+        }
+
+        let session = self.require_session().await?;
+        let initial_chat_id = chat_id_for_peer(request.peer);
+        let random_id = request
+            .random_id
+            .unwrap_or_else(|| random_id_for_request(&request));
+        let transaction_id = transaction_id_for_send(&request, random_id);
+        let new_identity = TransactionIdentity::new(
+            transaction_id.clone(),
+            request.external_id.clone(),
+            random_id,
+        );
+        let existing = self
+            .store
+            .transaction(transaction_id.clone())
+            .await
+            .map_err(store_error_to_backend)?;
+        if let Some(existing) = existing.as_ref()
+            && !stored_transaction_needs_retry(existing)
+        {
+            return Ok(outcome_from_stored_transaction(
+                existing.clone(),
+                initial_chat_id,
+            ));
+        }
+        let identity = existing
+            .map(|transaction| transaction.identity)
+            .unwrap_or(new_identity);
+
+        if self
+            .store
+            .transaction(transaction_id)
+            .await
+            .map_err(store_error_to_backend)?
+            .is_none()
+        {
+            self.store
+                .record_transaction(
+                    StoredTransaction::new(identity.clone(), TransactionState::Queued)
+                        .with_chat_id(initial_chat_id),
+                )
+                .await
+                .map_err(store_error_to_backend)?;
+        }
+
+        self.store
+            .record_transaction(
+                StoredTransaction::new(identity.clone(), TransactionState::Sent)
+                    .with_chat_id(initial_chat_id),
+            )
+            .await
+            .map_err(store_error_to_backend)?;
+
+        let input = proto::SendMessageInput {
+            peer_id: Some(input_peer_for_client_peer(request.peer)),
+            message: Some(request.text.clone()),
+            reply_to_msg_id: request.reply_to_message_id.map(InlineId::get),
+            random_id: Some(random_id.get()),
+            media: None,
+            temporary_send_date: Some(now_seconds()),
+            is_sticker: None,
+            has_link: None,
+            entities: None,
+            parse_markdown: Some(request.parse_markdown),
+            send_mode: proto_send_mode(request.notification_mode),
+            actions: actions.map(message_actions_to_proto),
+        };
+        let send_result = match self.call_realtime(&session, input).await {
+            Ok(result) => result,
+            Err(backend_error) => {
+                self.record_transaction_error(
+                    identity,
+                    initial_chat_id,
+                    TransactionState::Sent,
+                    backend_error.clone(),
+                )
+                .await?;
+                return Err(backend_error);
+            }
+        };
+
+        let applied = apply_send_message_updates(&request, identity, initial_chat_id, send_result);
+        if let Some(message) = &applied.message {
+            self.store
+                .record_message(message.clone())
+                .await
+                .map_err(store_error_to_backend)?;
+        }
+        self.store
+            .record_transaction(applied.transaction.clone())
+            .await
+            .map_err(store_error_to_backend)?;
+
+        Ok(SendTextOutcome::with_state(
+            MessageMutation {
+                transaction: applied.transaction.identity,
+                message_id: applied.message_id,
+                state: None,
+                failure: None,
+            },
+            applied.chat_id,
+            applied.message_id,
+            applied.message,
+            applied.transaction.state,
+            applied.transaction.failure,
+        ))
+    }
+
     async fn call_realtime<R>(
         &self,
         session: &StoredSession,
@@ -360,6 +495,7 @@ impl SdkBackend {
         &self,
         request: ConnectRequest,
     ) -> BackendResult<ClientStatusSnapshot> {
+        let initial_event_policy = request.initial_event_policy;
         let existing_session = self
             .store
             .load_session()
@@ -414,9 +550,48 @@ impl SdkBackend {
         if let Some(connected) = connected {
             self.install_realtime(connected).await;
         }
+        if initial_event_policy == InitialEventPolicy::StartAfterCurrent {
+            self.seed_initial_event_cursor().await?;
+        }
         Ok(ClientStatusSnapshot::current(
             crate::ClientStatus::Connected,
         ))
+    }
+
+    async fn seed_initial_event_cursor(&self) -> BackendResult<()> {
+        let deliveries = self.sync.discover(self).await?;
+        self.acknowledge_initial_deliveries(deliveries).await?;
+        self.sync_required.store(false, Ordering::Release);
+        Ok(())
+    }
+
+    async fn acknowledge_initial_deliveries(
+        &self,
+        deliveries: Vec<ClientEventDelivery>,
+    ) -> BackendResult<()> {
+        let mut delivery_ids = deliveries
+            .into_iter()
+            .filter_map(|delivery| delivery.delivery_id)
+            .collect::<HashSet<_>>();
+        delivery_ids.extend(
+            self.store
+                .pending_client_events()
+                .await
+                .map_err(store_error_to_backend)?
+                .into_iter()
+                .filter_map(|delivery| delivery.delivery_id),
+        );
+        for delivery_id in delivery_ids {
+            self.store
+                .acknowledge_client_event(delivery_id)
+                .await
+                .map_err(store_error_to_backend)?;
+        }
+        self.in_flight_deliveries
+            .lock()
+            .expect("client event delivery claims poisoned")
+            .clear();
+        Ok(())
     }
 
     fn auth_metadata(
@@ -562,6 +737,7 @@ impl SdkBackend {
                         return Ok(deliveries);
                     }
                 }
+                RealtimeEvent::Bot(event) => return Ok(vec![bot_event_delivery(event)?]),
                 RealtimeEvent::Ack { .. } | RealtimeEvent::Pong { .. } => {}
                 _ => {}
             }
@@ -1148,6 +1324,8 @@ impl ClientBackend for SdkBackend {
                     last_message_id: None,
                     synced_through_message_id: None,
                     unread_count: Some(0),
+                    parent_chat_id: created.parent_chat_id,
+                    parent_message_id: created.parent_message_id,
                     ..DialogRecord::new(created.chat_id)
                 })
                 .await
@@ -1219,125 +1397,18 @@ impl ClientBackend for SdkBackend {
         request: SendTextRequest,
     ) -> BoxFuture<'static, BackendResult<SendTextOutcome>> {
         let backend = self.clone();
+        Box::pin(async move { backend.send_text_with_actions(request, None).await })
+    }
+
+    fn send_interactive_text(
+        &self,
+        request: SendInteractiveTextRequest,
+    ) -> BoxFuture<'static, BackendResult<SendTextOutcome>> {
+        let backend = self.clone();
         Box::pin(async move {
-            if request.text.trim().is_empty() {
-                return Err(BackendError::new(
-                    ClientErrorCategory::InvalidInput,
-                    "message text must not be empty",
-                ));
-            }
-
-            let session = backend.require_session().await?;
-            let initial_chat_id = chat_id_for_peer(request.peer);
-            let random_id = request
-                .random_id
-                .unwrap_or_else(|| random_id_for_request(&request));
-            let transaction_id = transaction_id_for_send(&request, random_id);
-            let new_identity = TransactionIdentity::new(
-                transaction_id.clone(),
-                request.external_id.clone(),
-                random_id,
-            );
-            let existing = backend
-                .store
-                .transaction(transaction_id.clone())
-                .await
-                .map_err(store_error_to_backend)?;
-            if let Some(existing) = existing.as_ref()
-                && !stored_transaction_needs_retry(existing)
-            {
-                return Ok(outcome_from_stored_transaction(
-                    existing.clone(),
-                    initial_chat_id,
-                ));
-            }
-            let identity = existing
-                .map(|transaction| transaction.identity)
-                .unwrap_or(new_identity);
-
-            if backend
-                .store
-                .transaction(transaction_id)
-                .await
-                .map_err(store_error_to_backend)?
-                .is_none()
-            {
-                backend
-                    .store
-                    .record_transaction(
-                        StoredTransaction::new(identity.clone(), TransactionState::Queued)
-                            .with_chat_id(initial_chat_id),
-                    )
-                    .await
-                    .map_err(store_error_to_backend)?;
-            }
-
             backend
-                .store
-                .record_transaction(
-                    StoredTransaction::new(identity.clone(), TransactionState::Sent)
-                        .with_chat_id(initial_chat_id),
-                )
+                .send_text_with_actions(request.message, Some(request.actions))
                 .await
-                .map_err(store_error_to_backend)?;
-
-            let input = proto::SendMessageInput {
-                peer_id: Some(input_peer_for_client_peer(request.peer)),
-                message: Some(request.text.clone()),
-                reply_to_msg_id: request.reply_to_message_id.map(InlineId::get),
-                random_id: Some(random_id.get()),
-                media: None,
-                temporary_send_date: Some(now_seconds()),
-                is_sticker: None,
-                has_link: None,
-                entities: None,
-                parse_markdown: Some(false),
-                send_mode: None,
-                actions: None,
-            };
-            let send_result = match backend.call_realtime(&session, input).await {
-                Ok(result) => result,
-                Err(backend_error) => {
-                    backend
-                        .record_transaction_error(
-                            identity,
-                            initial_chat_id,
-                            TransactionState::Sent,
-                            backend_error.clone(),
-                        )
-                        .await?;
-                    return Err(backend_error);
-                }
-            };
-
-            let applied =
-                apply_send_message_updates(&request, identity, initial_chat_id, send_result);
-            if let Some(message) = &applied.message {
-                backend
-                    .store
-                    .record_message(message.clone())
-                    .await
-                    .map_err(store_error_to_backend)?;
-            }
-            backend
-                .store
-                .record_transaction(applied.transaction.clone())
-                .await
-                .map_err(store_error_to_backend)?;
-
-            Ok(SendTextOutcome::with_state(
-                MessageMutation {
-                    transaction: applied.transaction.identity,
-                    message_id: applied.message_id,
-                    state: None,
-                    failure: None,
-                },
-                applied.chat_id,
-                applied.message_id,
-                applied.message,
-                applied.transaction.state,
-                applied.transaction.failure,
-            ))
         })
     }
 
@@ -1345,6 +1416,7 @@ impl ClientBackend for SdkBackend {
         &self,
         request: UploadRequest,
         bytes: Vec<u8>,
+        thumbnail: Option<UploadThumbnail>,
     ) -> BoxFuture<'static, BackendResult<SendTextOutcome>> {
         let backend = self.clone();
         Box::pin(async move {
@@ -1400,7 +1472,8 @@ impl ClientBackend for SdkBackend {
                     .map_err(store_error_to_backend)?;
             }
 
-            let upload_input = upload_input_for_request(&request, bytes);
+            let upload_file_type = upload_file_type_for_request(&request);
+            let upload_input = upload_input_for_request(&request, bytes, thumbnail);
             let upload = match backend
                 .api
                 .upload_file_bytes(session.auth.access_token().expose_secret(), upload_input)
@@ -1420,7 +1493,7 @@ impl ClientBackend for SdkBackend {
                     return Err(backend_error);
                 }
             };
-            let media = match input_media_from_upload(&upload) {
+            let media = match input_media_from_upload(&upload, upload_file_type) {
                 Ok(media) => media,
                 Err(error) => {
                     backend
@@ -1517,21 +1590,40 @@ impl ClientBackend for SdkBackend {
                 ));
             }
             let session = backend.require_session().await?;
+            let chat_id = request.chat_id;
+            let result = backend
+                .call_realtime(&session, edit_message_input(request, None))
+                .await?;
+            let events = backend
+                .apply_updates(result.updates, Some(chat_id), None)
+                .await?;
+            Ok(OperationOutcome::with_events(events))
+        })
+    }
+
+    fn edit_interactive_message(
+        &self,
+        request: EditInteractiveMessageRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            if request.message.text.trim().is_empty() {
+                return Err(BackendError::new(
+                    ClientErrorCategory::InvalidInput,
+                    "message text must not be empty",
+                ));
+            }
+            validate_message_actions(&request.actions)?;
+            let session = backend.require_session().await?;
+            let chat_id = request.message.chat_id;
             let result = backend
                 .call_realtime(
                     &session,
-                    proto::EditMessageInput {
-                        message_id: request.message_id.get(),
-                        peer_id: Some(input_peer_for_chat(request.chat_id)),
-                        text: request.text,
-                        entities: None,
-                        parse_markdown: Some(false),
-                        actions: None,
-                    },
+                    edit_message_input(request.message, Some(request.actions)),
                 )
                 .await?;
             let events = backend
-                .apply_updates(result.updates, Some(request.chat_id), None)
+                .apply_updates(result.updates, Some(chat_id), None)
                 .await?;
             Ok(OperationOutcome::with_events(events))
         })
@@ -1744,6 +1836,48 @@ impl ClientBackend for SdkBackend {
         })
     }
 
+    fn update_dialog_follow_mode(
+        &self,
+        request: UpdateDialogFollowModeRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            let session = backend.require_session().await?;
+            let result = backend
+                .call_realtime(
+                    &session,
+                    proto::UpdateDialogFollowModeInput {
+                        peer_id: Some(input_peer_for_chat(request.chat_id)),
+                        follow_mode: Some(match request.mode {
+                            DialogFollowMode::Following => {
+                                proto::DialogFollowMode::Following as i32
+                            }
+                            DialogFollowMode::Unfollowed => {
+                                proto::DialogFollowMode::Unfollowed as i32
+                            }
+                        }),
+                    },
+                )
+                .await?;
+            let mut events = backend
+                .apply_updates(result.updates, Some(request.chat_id), None)
+                .await?;
+            backend
+                .mutate_dialog(request.chat_id, |dialog| {
+                    dialog.follow_mode = Some(request.mode);
+                })
+                .await?;
+            if !events.iter().any(|event| {
+                matches!(event, ClientEvent::ChatUpserted { chat_id } if *chat_id == request.chat_id)
+            }) {
+                events.push(ClientEvent::ChatUpserted {
+                    chat_id: request.chat_id,
+                });
+            }
+            Ok(OperationOutcome::with_events(events))
+        })
+    }
+
     fn typing(
         &self,
         request: TypingRequest,
@@ -1759,6 +1893,164 @@ impl ClientBackend for SdkBackend {
                         action: request
                             .is_typing
                             .then_some(proto::update_compose_action::ComposeAction::Typing as i32),
+                    },
+                )
+                .await?;
+            Ok(OperationOutcome::empty())
+        })
+    }
+
+    fn answer_message_action(
+        &self,
+        request: AnswerMessageActionRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            if request.interaction_id.get() <= 0 {
+                return Err(BackendError::new(
+                    ClientErrorCategory::InvalidInput,
+                    "interaction_id must be positive",
+                ));
+            }
+            validate_action_toast(request.toast.as_deref())?;
+
+            let session = backend.require_session().await?;
+            backend
+                .call_realtime(
+                    &session,
+                    proto::AnswerMessageActionInput {
+                        interaction_id: request.interaction_id.get(),
+                        ui: request.toast.map(|text| proto::MessageActionResponseUi {
+                            kind: Some(proto::message_action_response_ui::Kind::Toast(
+                                proto::MessageActionToast {
+                                    text: text.trim().to_string(),
+                                },
+                            )),
+                        }),
+                    },
+                )
+                .await?;
+            Ok(OperationOutcome::empty())
+        })
+    }
+
+    fn get_bot_capabilities(&self) -> BoxFuture<'static, BackendResult<Vec<BotCapability>>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            let session = backend.require_session().await?;
+            backend
+                .call_realtime(&session, proto::GetMyBotCapabilitiesInput {})
+                .await?
+                .capabilities
+                .into_iter()
+                .map(capability_from_proto)
+                .collect()
+        })
+    }
+
+    fn set_bot_capabilities(
+        &self,
+        capabilities: Vec<BotCapability>,
+    ) -> BoxFuture<'static, BackendResult<Vec<BotCapability>>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            if capabilities
+                .iter()
+                .any(|capability| capability.version == 0)
+            {
+                return Err(BackendError::new(
+                    ClientErrorCategory::InvalidInput,
+                    "bot capability version must be positive",
+                ));
+            }
+            let session = backend.require_session().await?;
+            backend
+                .call_realtime(
+                    &session,
+                    proto::SetMyBotCapabilitiesInput {
+                        capabilities: capabilities.into_iter().map(capability_to_proto).collect(),
+                    },
+                )
+                .await?
+                .capabilities
+                .into_iter()
+                .map(capability_from_proto)
+                .collect()
+        })
+    }
+
+    fn request_bot_chat_settings(
+        &self,
+        request: RequestBotChatSettingsRequest,
+    ) -> BoxFuture<'static, BackendResult<BotChatSettingsResponse>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            validate_bot_settings_target(request.bot_user_id, request.version)?;
+            let session = backend.require_session().await?;
+            let result = backend
+                .call_realtime(
+                    &session,
+                    proto::RequestBotChatSettingsInput {
+                        peer_id: Some(input_peer_for_client_peer(request.peer)),
+                        bot_user_id: request.bot_user_id.get(),
+                        version: request.version,
+                    },
+                )
+                .await?;
+            response_from_proto(result.response)
+        })
+    }
+
+    fn invoke_bot_chat_settings_item(
+        &self,
+        request: InvokeBotChatSettingsItemRequest,
+    ) -> BoxFuture<'static, BackendResult<BotChatSettingsResponse>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            validate_bot_settings_target(request.bot_user_id, request.version)?;
+            if request.item_id.trim().is_empty() || request.document_revision.trim().is_empty() {
+                return Err(BackendError::new(
+                    ClientErrorCategory::InvalidInput,
+                    "bot settings item and document revision must not be empty",
+                ));
+            }
+            let session = backend.require_session().await?;
+            let result = backend
+                .call_realtime(
+                    &session,
+                    proto::InvokeBotChatSettingsItemInput {
+                        peer_id: Some(input_peer_for_client_peer(request.peer)),
+                        bot_user_id: request.bot_user_id.get(),
+                        version: request.version,
+                        item_id: request.item_id,
+                        value: request.value.map(value_to_proto),
+                        document_revision: request.document_revision,
+                    },
+                )
+                .await?;
+            response_from_proto(result.response)
+        })
+    }
+
+    fn answer_bot_chat_settings(
+        &self,
+        request: AnswerBotChatSettingsRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            if request.request_id == 0 {
+                return Err(BackendError::new(
+                    ClientErrorCategory::InvalidInput,
+                    "request_id must be positive",
+                ));
+            }
+            let session = backend.require_session().await?;
+            backend
+                .call_realtime(
+                    &session,
+                    proto::AnswerBotChatSettingsInput {
+                        request_id: request.request_id,
+                        response: Some(response_to_proto(request.response)),
                     },
                 )
                 .await?;
@@ -2382,6 +2674,8 @@ impl SdkBackend {
                         .or(chat.space_id)
                         .map(InlineId::new)
                         .or_else(|| existing.as_ref().and_then(|dialog| dialog.space_id)),
+                    parent_chat_id: chat.parent_chat_id.map(InlineId::new),
+                    parent_message_id: chat.parent_message_id.map(InlineId::new),
                     is_public: chat
                         .is_public
                         .or_else(|| existing.as_ref().and_then(|dialog| dialog.is_public)),
@@ -2505,6 +2799,8 @@ impl SdkBackend {
                 .or(chat.space_id)
                 .map(InlineId::new)
                 .or_else(|| existing.as_ref().and_then(|dialog| dialog.space_id)),
+            parent_chat_id: chat.parent_chat_id.map(InlineId::new),
+            parent_message_id: chat.parent_message_id.map(InlineId::new),
             is_public: chat
                 .is_public
                 .or_else(|| existing.as_ref().and_then(|dialog| dialog.is_public)),
@@ -2634,7 +2930,13 @@ impl SdkBackend {
         transaction: Option<TransactionIdentity>,
     ) -> BackendResult<MessageRecord> {
         let reaction_snapshot = reaction_snapshot_from_proto_message(&message, fallback_chat_id);
-        let record = message_record_from_proto_message(message, fallback_chat_id, transaction);
+        let mut record = message_record_from_proto_message(message, fallback_chat_id, transaction);
+        record.metadata.sender_is_bot = self
+            .store
+            .user(record.sender_id)
+            .await
+            .map_err(store_error_to_backend)?
+            .and_then(|user| user.is_bot);
         self.store
             .record_message(record.clone())
             .await
@@ -3255,8 +3557,14 @@ impl SdkBackend {
                 }
                 Some(proto::update::Update::NewMessageNotification(update)) => {
                     if let Some(message) = update.message {
-                        let message =
+                        let mut message =
                             message_record_from_proto_message(message, fallback_chat_id, None);
+                        message.metadata.sender_is_bot = self
+                            .store
+                            .user(message.sender_id)
+                            .await
+                            .map_err(store_error_to_backend)?
+                            .and_then(|user| user.is_bot);
                         let reason =
                             proto::update_new_message_notification::Reason::try_from(update.reason)
                                 .map(|reason| reason.as_str_name().to_owned())
@@ -3342,6 +3650,86 @@ fn update_kind(update: &proto::update::Update) -> &'static str {
     }
 }
 
+fn bot_event_delivery(event: proto::BotEvent) -> BackendResult<ClientEventDelivery> {
+    use proto::bot_chat_settings_value::Value as ProtoValue;
+    use proto::bot_event::Event;
+
+    let event = match event.event.ok_or_else(|| {
+        BackendError::new(
+            ClientErrorCategory::ProtocolMismatch,
+            "bot event did not include an interaction",
+        )
+    })? {
+        Event::ChatSettingsRequested(request) => {
+            validate_bot_interaction_ids(
+                request.request_id,
+                request.chat_id,
+                request.actor_user_id,
+            )?;
+            BotInteractionEvent::ChatSettingsRequested {
+                request_id: request.request_id,
+                chat_id: InlineId::new(request.chat_id),
+                actor_user_id: InlineId::new(request.actor_user_id),
+                version: request.version,
+            }
+        }
+        Event::ChatSettingsItemInvoked(request) => {
+            validate_bot_interaction_ids(
+                request.request_id,
+                request.chat_id,
+                request.actor_user_id,
+            )?;
+            if request.item_id.trim().is_empty() || request.document_revision.trim().is_empty() {
+                return Err(BackendError::new(
+                    ClientErrorCategory::ProtocolMismatch,
+                    "bot settings invocation omitted its item or document revision",
+                ));
+            }
+            let value = request
+                .value
+                .map(|value| {
+                    value.value.ok_or_else(|| {
+                        BackendError::new(
+                            ClientErrorCategory::ProtocolMismatch,
+                            "bot settings invocation contained an empty value",
+                        )
+                    })
+                })
+                .transpose()?
+                .map(|value| match value {
+                    ProtoValue::BoolValue(value) => BotSettingsValue::Bool(value),
+                    ProtoValue::StringValue(value) => BotSettingsValue::String(value),
+                });
+            BotInteractionEvent::ChatSettingsItemInvoked {
+                request_id: request.request_id,
+                chat_id: InlineId::new(request.chat_id),
+                actor_user_id: InlineId::new(request.actor_user_id),
+                version: request.version,
+                item_id: request.item_id,
+                value,
+                document_revision: request.document_revision,
+            }
+        }
+    };
+    Ok(ClientEventDelivery::ephemeral(ClientEvent::BotInteraction(
+        event,
+    )))
+}
+
+fn validate_bot_interaction_ids(
+    request_id: u64,
+    chat_id: i64,
+    actor_user_id: i64,
+) -> BackendResult<()> {
+    if request_id == 0 || chat_id <= 0 || actor_user_id <= 0 {
+        return Err(BackendError::new(
+            ClientErrorCategory::ProtocolMismatch,
+            "bot interaction contained an invalid request, chat, or actor ID",
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 fn dialogs_page_from_get_chats(
     result: &proto::GetChatsResult,
@@ -3403,6 +3791,8 @@ fn dialog_records_from_get_chats(result: &proto::GetChatsResult) -> Vec<DialogRe
                     .and_then(|dialog| dialog.space_id)
                     .or(chat.space_id)
                     .map(InlineId::new),
+                parent_chat_id: chat.parent_chat_id.map(InlineId::new),
+                parent_message_id: chat.parent_message_id.map(InlineId::new),
                 is_public: chat.is_public,
                 archived: dialog.and_then(|dialog| dialog.archived),
                 pinned: dialog.and_then(|dialog| dialog.pinned),
@@ -3879,6 +4269,11 @@ fn realtime_error_to_backend(error: RealtimeError) -> BackendError {
         } if error_name == "UNAUTHENTICATED" => {
             BackendError::new(ClientErrorCategory::AuthExpired, friendly)
         }
+        RealtimeError::RpcError {
+            message, friendly, ..
+        } if message.starts_with("Unsupported RPC method:") => {
+            BackendError::new(ClientErrorCategory::Unsupported, friendly)
+        }
         RealtimeError::RpcError { friendly, .. } => {
             BackendError::new(ClientErrorCategory::Internal, friendly)
         }
@@ -3956,6 +4351,39 @@ fn is_rate_limit_error_name(name: &str) -> bool {
     )
 }
 
+fn message_actions_to_proto(actions: MessageActions) -> proto::MessageActions {
+    proto::MessageActions {
+        rows: actions
+            .rows
+            .into_iter()
+            .map(|row| proto::MessageActionRow {
+                actions: row
+                    .actions
+                    .into_iter()
+                    .map(|action| proto::MessageAction {
+                        action_id: action.action_id.trim().to_string(),
+                        text: action.text.trim().to_string(),
+                        action: Some(match action.kind {
+                            MessageActionKind::Callback { data } => {
+                                proto::message_action::Action::Callback(
+                                    proto::MessageActionCallback { data },
+                                )
+                            }
+                            MessageActionKind::CopyText { text } => {
+                                proto::message_action::Action::CopyText(
+                                    proto::MessageActionCopyText {
+                                        text: text.trim().to_string(),
+                                    },
+                                )
+                            }
+                        }),
+                    })
+                    .collect(),
+            })
+            .collect(),
+    }
+}
+
 fn input_peer_for_client_peer(peer: PeerRef) -> proto::InputPeer {
     proto::InputPeer {
         r#type: Some(match peer {
@@ -3970,6 +4398,16 @@ fn input_peer_for_client_peer(peer: PeerRef) -> proto::InputPeer {
             }),
         }),
     }
+}
+
+fn validate_bot_settings_target(bot_user_id: InlineId, version: u32) -> BackendResult<()> {
+    if bot_user_id.get() <= 0 || version == 0 {
+        return Err(BackendError::new(
+            ClientErrorCategory::InvalidInput,
+            "bot_user_id and settings version must be positive",
+        ));
+    }
+    Ok(())
 }
 
 fn input_peer_for_chat(chat_id: InlineId) -> proto::InputPeer {
@@ -4100,7 +4538,11 @@ fn random_id_for_upload_request(request: &UploadRequest, size_bytes: usize) -> R
     RandomId::new((stable_hash(&seed) & 0x7fff_ffff_ffff_ffff) as i64)
 }
 
-fn upload_input_for_request(request: &UploadRequest, bytes: Vec<u8>) -> UploadFileBytesInput {
+fn upload_input_for_request(
+    request: &UploadRequest,
+    bytes: Vec<u8>,
+    thumbnail: Option<UploadThumbnail>,
+) -> UploadFileBytesInput {
     let file_name = request
         .file_name
         .as_deref()
@@ -4122,6 +4564,13 @@ fn upload_input_for_request(request: &UploadRequest, bytes: Vec<u8>) -> UploadFi
         && let Some(metadata) = upload_video_metadata_for_request(request)
     {
         input = input.with_video_metadata(metadata);
+    }
+    if let Some(thumbnail) = thumbnail {
+        input = input.with_thumbnail(UploadThumbnailBytesInput::new(
+            thumbnail.bytes,
+            thumbnail.file_name,
+            thumbnail.mime_type,
+        ));
     }
     input
 }
@@ -4182,22 +4631,31 @@ fn extension_for_mime(mime_type: Option<&str>, fallback: &'static str) -> &'stat
     }
 }
 
-fn input_media_from_upload(upload: &UploadFileResult) -> BackendResult<proto::InputMedia> {
-    if let Some(photo_id) = upload.photo_id {
+fn input_media_from_upload(
+    upload: &UploadFileResult,
+    expected_type: UploadFileType,
+) -> BackendResult<proto::InputMedia> {
+    if expected_type == UploadFileType::Photo
+        && let Some(photo_id) = upload.photo_id
+    {
         return Ok(proto::InputMedia {
             media: Some(proto::input_media::Media::Photo(proto::InputMediaPhoto {
                 photo_id,
             })),
         });
     }
-    if let Some(video_id) = upload.video_id {
+    if expected_type == UploadFileType::Video
+        && let Some(video_id) = upload.video_id
+    {
         return Ok(proto::InputMedia {
             media: Some(proto::input_media::Media::Video(proto::InputMediaVideo {
                 video_id,
             })),
         });
     }
-    if let Some(document_id) = upload.document_id {
+    if expected_type == UploadFileType::Document
+        && let Some(document_id) = upload.document_id
+    {
         return Ok(proto::InputMedia {
             media: Some(proto::input_media::Media::Document(
                 proto::InputMediaDocument { document_id },
@@ -4363,6 +4821,7 @@ fn message_record_from_proto_message(
         fallback_chat_id.unwrap_or(InlineId::new(0))
     };
     let content = content_from_proto_message(&message);
+    let metadata = message_metadata_from_proto(&message);
     MessageRecord {
         chat_id,
         message_id: InlineId::new(message.id),
@@ -4371,7 +4830,130 @@ fn message_record_from_proto_message(
         is_outgoing: message.out,
         content,
         reply_to_message_id: message.reply_to_msg_id.map(InlineId::new),
+        metadata,
         transaction,
+    }
+}
+
+fn message_metadata_from_proto(message: &proto::Message) -> crate::MessageMetadata {
+    crate::MessageMetadata {
+        mentioned: message.mentioned,
+        edit_timestamp: message.edit_date,
+        revision: message.rev,
+        sender_is_bot: None,
+        entities: message
+            .entities
+            .as_ref()
+            .map(|entities| {
+                entities
+                    .entities
+                    .iter()
+                    .map(message_entity_from_proto)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        attachments: message
+            .attachments
+            .as_ref()
+            .map(|attachments| {
+                attachments
+                    .attachments
+                    .iter()
+                    .map(message_attachment_from_proto)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        actions: message
+            .actions
+            .as_ref()
+            .map(|actions| {
+                actions
+                    .rows
+                    .iter()
+                    .flat_map(|row| row.actions.iter())
+                    .map(message_action_from_proto)
+                    .collect()
+            })
+            .unwrap_or_default(),
+    }
+}
+
+fn message_entity_from_proto(entity: &proto::MessageEntity) -> crate::MessageEntityRecord {
+    use proto::message_entity::Entity;
+
+    let kind = proto::message_entity::Type::try_from(entity.r#type)
+        .map(|kind| kind.as_str_name().to_string())
+        .unwrap_or_else(|_| format!("TYPE_UNKNOWN_{}", entity.r#type));
+    let (user_id, group_id, chat_id, value) = match entity.entity.as_ref() {
+        Some(Entity::Mention(mention)) => (Some(InlineId::new(mention.user_id)), None, None, None),
+        Some(Entity::GroupMention(mention)) => {
+            (None, Some(InlineId::new(mention.group_id)), None, None)
+        }
+        Some(Entity::TextUrl(link)) => (None, None, None, trimmed_option(Some(link.url.clone()))),
+        Some(Entity::Pre(pre)) => (None, None, None, trimmed_option(Some(pre.language.clone()))),
+        Some(Entity::Thread(thread)) => (None, None, Some(InlineId::new(thread.chat_id)), None),
+        Some(Entity::ThreadTitle(thread)) => {
+            (None, None, None, trimmed_option(Some(thread.title.clone())))
+        }
+        Some(Entity::BotCommand(command)) => (
+            (command.bot_user_id > 0).then(|| InlineId::new(command.bot_user_id)),
+            None,
+            None,
+            None,
+        ),
+        None => (None, None, None, None),
+    };
+    crate::MessageEntityRecord {
+        kind,
+        offset: entity.offset,
+        length: entity.length,
+        user_id,
+        group_id,
+        chat_id,
+        value,
+    }
+}
+
+fn message_attachment_from_proto(
+    attachment: &proto::MessageAttachment,
+) -> crate::MessageAttachmentRecord {
+    use proto::message_attachment::Attachment;
+
+    let (kind, title, url, provider) = match attachment.attachment.as_ref() {
+        Some(Attachment::ExternalTask(task)) => (
+            "external_task",
+            trimmed_option(Some(task.title.clone())),
+            trimmed_option(Some(task.url.clone())),
+            trimmed_option(Some(task.application.clone())),
+        ),
+        Some(Attachment::UrlPreview(preview)) => (
+            "url_preview",
+            trimmed_option(preview.title.clone()),
+            trimmed_option(preview.url.clone()),
+            trimmed_option(preview.provider.clone())
+                .or_else(|| trimmed_option(preview.site_name.clone())),
+        ),
+        None => ("unknown", None, None, None),
+    };
+    crate::MessageAttachmentRecord {
+        attachment_id: InlineId::new(attachment.id),
+        kind: kind.to_string(),
+        title,
+        url,
+        provider,
+    }
+}
+
+fn message_action_from_proto(action: &proto::MessageAction) -> crate::MessageActionRecord {
+    let kind = match action.action {
+        Some(proto::message_action::Action::Callback(_)) => "callback",
+        Some(proto::message_action::Action::CopyText(_)) => "copy_text",
+        None => "unknown",
+    };
+    crate::MessageActionRecord {
+        action_id: action.action_id.clone(),
+        label: action.text.clone(),
+        kind: kind.to_string(),
     }
 }
 
@@ -4625,6 +5207,27 @@ fn now_seconds() -> i64 {
         .unwrap_or_default()
 }
 
+fn proto_send_mode(notification_mode: SendNotificationMode) -> Option<i32> {
+    match notification_mode {
+        SendNotificationMode::Normal => None,
+        SendNotificationMode::Silent => Some(proto::MessageSendMode::ModeSilent as i32),
+    }
+}
+
+fn edit_message_input(
+    request: EditMessageRequest,
+    actions: Option<MessageActions>,
+) -> proto::EditMessageInput {
+    proto::EditMessageInput {
+        message_id: request.message_id.get(),
+        peer_id: Some(input_peer_for_chat(request.chat_id)),
+        text: request.text,
+        entities: None,
+        parse_markdown: Some(request.parse_markdown),
+        actions: actions.map(message_actions_to_proto),
+    }
+}
+
 fn redacted_url_for_debug(url: &str) -> String {
     let without_fragment = url.split('#').next().unwrap_or(url);
     let without_query = without_fragment
@@ -4666,6 +5269,43 @@ mod tests {
         .with_account_namespace("team")
     }
 
+    #[test]
+    fn text_notification_mode_maps_to_existing_wire_send_mode() {
+        assert_eq!(proto_send_mode(SendNotificationMode::Normal), None);
+        assert_eq!(
+            proto_send_mode(SendNotificationMode::Silent),
+            Some(proto::MessageSendMode::ModeSilent as i32)
+        );
+    }
+
+    #[test]
+    fn ordinary_and_interactive_edits_map_markdown_and_actions() {
+        let ordinary = edit_message_input(
+            EditMessageRequest {
+                chat_id: InlineId::new(7),
+                message_id: InlineId::new(8),
+                text: "progress".to_string(),
+                external_id: None,
+                parse_markdown: false,
+            },
+            None,
+        );
+        assert!(ordinary.actions.is_none());
+
+        let terminal = edit_message_input(
+            EditMessageRequest {
+                chat_id: InlineId::new(7),
+                message_id: InlineId::new(8),
+                text: "done".to_string(),
+                external_id: None,
+                parse_markdown: true,
+            },
+            Some(MessageActions::default()),
+        );
+        assert_eq!(terminal.parse_markdown, Some(true));
+        assert!(terminal.actions.is_some());
+    }
+
     fn test_message_record(message_id: i64) -> MessageRecord {
         MessageRecord {
             chat_id: InlineId::new(7),
@@ -4677,8 +5317,181 @@ mod tests {
                 text: format!("message {message_id}"),
             },
             reply_to_message_id: None,
+            metadata: crate::MessageMetadata::default(),
             transaction: None,
         }
+    }
+
+    #[test]
+    fn message_conversion_preserves_addressing_and_visible_interaction_metadata() {
+        let message = proto::Message {
+            id: 9,
+            from_id: 42,
+            chat_id: 7,
+            message: Some("@Codex review this".to_string()),
+            date: 100,
+            mentioned: Some(true),
+            reply_to_msg_id: Some(8),
+            edit_date: Some(101),
+            rev: Some(3),
+            entities: Some(proto::MessageEntities {
+                entities: vec![proto::MessageEntity {
+                    r#type: proto::message_entity::Type::Mention as i32,
+                    offset: 0,
+                    length: 6,
+                    entity: Some(proto::message_entity::Entity::Mention(
+                        proto::message_entity::MessageEntityMention { user_id: 15100 },
+                    )),
+                }],
+            }),
+            attachments: Some(proto::MessageAttachments {
+                attachments: vec![proto::MessageAttachment {
+                    id: 91,
+                    attachment: Some(proto::message_attachment::Attachment::UrlPreview(
+                        proto::UrlPreview {
+                            title: Some("Inline".to_string()),
+                            url: Some("https://inline.chat".to_string()),
+                            provider: Some("inline".to_string()),
+                            ..proto::UrlPreview::default()
+                        },
+                    )),
+                }],
+            }),
+            actions: Some(proto::MessageActions {
+                rows: vec![proto::MessageActionRow {
+                    actions: vec![proto::MessageAction {
+                        action_id: "approval.accept".to_string(),
+                        text: "Approve".to_string(),
+                        action: Some(proto::message_action::Action::Callback(
+                            proto::MessageActionCallback {
+                                data: b"private-callback".to_vec(),
+                            },
+                        )),
+                    }],
+                }],
+            }),
+            ..proto::Message::default()
+        };
+
+        let record = message_record_from_proto_message(message, None, None);
+        assert_eq!(record.reply_to_message_id, Some(InlineId::new(8)));
+        assert_eq!(record.metadata.mentioned, Some(true));
+        assert_eq!(record.metadata.edit_timestamp, Some(101));
+        assert_eq!(record.metadata.revision, Some(3));
+        assert_eq!(
+            record.metadata.entities[0].user_id,
+            Some(InlineId::new(15100))
+        );
+        assert_eq!(record.metadata.attachments[0].kind, "url_preview");
+        assert_eq!(record.metadata.actions[0].kind, "callback");
+        let encoded = serde_json::to_string(&record).expect("message json");
+        assert!(!encoded.contains("private-callback"));
+    }
+
+    #[test]
+    fn bot_settings_events_reach_the_lossless_host_stream_without_a_durable_id() {
+        let requested = bot_event_delivery(proto::BotEvent {
+            event: Some(proto::bot_event::Event::ChatSettingsRequested(
+                proto::BotChatSettingsRequested {
+                    request_id: 91,
+                    chat_id: 7,
+                    actor_user_id: 42,
+                    version: 1,
+                },
+            )),
+        })
+        .unwrap();
+        assert_eq!(requested.delivery_id, None);
+        assert_eq!(
+            requested.event.reliability(),
+            crate::EventReliability::Lossless
+        );
+        assert!(matches!(
+            requested.event,
+            ClientEvent::BotInteraction(BotInteractionEvent::ChatSettingsRequested {
+                request_id: 91,
+                chat_id,
+                actor_user_id,
+                version: 1,
+            }) if chat_id == InlineId::new(7) && actor_user_id == InlineId::new(42)
+        ));
+
+        let invoked = bot_event_delivery(proto::BotEvent {
+            event: Some(proto::bot_event::Event::ChatSettingsItemInvoked(
+                proto::BotChatSettingsItemInvoked {
+                    request_id: 92,
+                    chat_id: 7,
+                    actor_user_id: 42,
+                    version: 1,
+                    item_id: "verbose".to_string(),
+                    value: Some(proto::BotChatSettingsValue {
+                        value: Some(proto::bot_chat_settings_value::Value::BoolValue(true)),
+                    }),
+                    document_revision: "revision-1".to_string(),
+                },
+            )),
+        })
+        .unwrap();
+        assert!(matches!(
+            invoked.event,
+            ClientEvent::BotInteraction(BotInteractionEvent::ChatSettingsItemInvoked {
+                value: Some(BotSettingsValue::Bool(true)),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn malformed_bot_settings_events_fail_closed() {
+        let error = bot_event_delivery(proto::BotEvent {
+            event: Some(proto::bot_event::Event::ChatSettingsRequested(
+                proto::BotChatSettingsRequested {
+                    request_id: 0,
+                    chat_id: 7,
+                    actor_user_id: 42,
+                    version: 1,
+                },
+            )),
+        })
+        .unwrap_err();
+        assert_eq!(error.category, ClientErrorCategory::ProtocolMismatch);
+    }
+
+    #[test]
+    fn unsupported_realtime_methods_use_the_unsupported_category() {
+        let error = realtime_error_to_backend(RealtimeError::RpcError {
+            code: 400,
+            error_code: 1,
+            error_name: "BAD_REQUEST".to_string(),
+            message: "Unsupported RPC method: 82".to_string(),
+            friendly: "Bad request: Unsupported RPC method: 82 (HTTP 400)".to_string(),
+        });
+
+        assert_eq!(error.category, ClientErrorCategory::Unsupported);
+    }
+
+    #[test]
+    fn converts_native_message_actions_to_protocol_shape() {
+        let actions = MessageActions {
+            rows: vec![crate::MessageActionRow {
+                actions: vec![crate::MessageActionButton {
+                    action_id: " approval.accept ".to_string(),
+                    text: " Approve ".to_string(),
+                    kind: MessageActionKind::Callback {
+                        data: b"approval-1".to_vec(),
+                    },
+                }],
+            }],
+        };
+
+        let encoded = message_actions_to_proto(actions);
+        assert_eq!(encoded.rows.len(), 1);
+        assert_eq!(encoded.rows[0].actions[0].action_id, "approval.accept");
+        assert_eq!(encoded.rows[0].actions[0].text, "Approve");
+        assert!(matches!(
+            encoded.rows[0].actions[0].action,
+            Some(proto::message_action::Action::Callback(_))
+        ));
     }
 
     #[test]
@@ -4797,6 +5610,58 @@ mod tests {
         assert_eq!(session.account_namespace.as_deref(), Some("team"));
         let rendered = format!("{session:?}");
         assert!(!rendered.contains("secret-token"));
+    }
+
+    #[tokio::test]
+    async fn initial_cursor_seed_suppresses_history_but_reconnect_preserves_new_work() {
+        let store = InMemoryStore::new();
+        let backend = SdkBackend::builder().store(store.clone()).build().unwrap();
+        let deliveries = store
+            .append_client_events(vec![ClientEvent::MessageStored {
+                message: test_message_record(1),
+            }])
+            .await
+            .unwrap();
+        assert_eq!(store.pending_client_events().await.unwrap().len(), 1);
+
+        backend
+            .acknowledge_initial_deliveries(deliveries)
+            .await
+            .unwrap();
+
+        assert!(store.pending_client_events().await.unwrap().is_empty());
+
+        let post_setup = ClientEvent::MessageStored {
+            message: test_message_record(2),
+        };
+        let post_setup_delivery = store
+            .append_client_events(vec![post_setup.clone()])
+            .await
+            .unwrap();
+        let post_setup_delivery_id = post_setup_delivery[0]
+            .delivery_id
+            .expect("durable post-setup delivery");
+        drop(backend);
+
+        let reconnected = SdkBackend::builder().store(store.clone()).build().unwrap();
+        let caught_up = reconnected.claim_pending_client_events().await.unwrap();
+        assert_eq!(caught_up.len(), 1);
+        assert_eq!(caught_up[0].delivery_id, Some(post_setup_delivery_id));
+        assert_eq!(caught_up[0].event, post_setup);
+        drop(reconnected);
+
+        let reconnected_again = SdkBackend::builder().store(store.clone()).build().unwrap();
+        let redelivered = reconnected_again
+            .claim_pending_client_events()
+            .await
+            .unwrap();
+        assert_eq!(redelivered.len(), 1);
+        assert_eq!(redelivered[0].delivery_id, Some(post_setup_delivery_id));
+        store
+            .acknowledge_client_event(post_setup_delivery_id)
+            .await
+            .unwrap();
+        assert!(store.pending_client_events().await.unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -4993,6 +5858,7 @@ mod tests {
                     text: "cached".to_owned(),
                 },
                 reply_to_message_id: None,
+                metadata: crate::MessageMetadata::default(),
                 transaction: None,
             })
             .await
@@ -6276,6 +7142,8 @@ mod tests {
                 title: "Direct chat fallback".to_owned(),
                 last_msg_id: Some(99),
                 emoji: Some("*".to_owned()),
+                parent_chat_id: Some(5),
+                parent_message_id: Some(6),
                 peer_id: Some(proto::Peer {
                     r#type: Some(proto::peer::Type::User(proto::PeerUser { user_id: 42 })),
                 }),
@@ -6313,6 +7181,8 @@ mod tests {
         assert_eq!(page.dialogs[0].peer_user_id, Some(InlineId::new(42)));
         assert_eq!(page.dialogs[0].last_message_id, Some(InlineId::new(99)));
         assert_eq!(page.dialogs[0].unread_count, Some(3));
+        assert_eq!(page.dialogs[0].parent_chat_id, Some(InlineId::new(5)));
+        assert_eq!(page.dialogs[0].parent_message_id, Some(InlineId::new(6)));
         assert_eq!(page.users.len(), 1);
         assert_eq!(page.users[0].user_id, InlineId::new(42));
         assert_eq!(page.users[0].display_name.as_deref(), Some("Ada Lovelace"));
@@ -6321,6 +7191,77 @@ mod tests {
             Some("https://cdn.inline.test/ada.jpg")
         );
         assert_eq!(page.users[0].is_bot, Some(false));
+    }
+
+    #[tokio::test]
+    async fn realtime_chat_projections_preserve_and_clear_parent_relationships() {
+        let store = InMemoryStore::new();
+        let backend = SdkBackend::builder().store(store.clone()).build().unwrap();
+
+        backend
+            .record_chat_update(
+                proto::Chat {
+                    id: 7,
+                    title: "Reply thread".to_owned(),
+                    parent_chat_id: Some(5),
+                    parent_message_id: Some(6),
+                    ..Default::default()
+                },
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let reply = store
+            .dialog(InlineId::new(7))
+            .await
+            .unwrap()
+            .expect("reply dialog");
+        assert_eq!(reply.parent_chat_id, Some(InlineId::new(5)));
+        assert_eq!(reply.parent_message_id, Some(InlineId::new(6)));
+
+        backend
+            .apply_sidecars(proto::UpdateSidecars {
+                chats: vec![proto::Chat {
+                    id: 8,
+                    title: "Linked subthread".to_owned(),
+                    parent_chat_id: Some(7),
+                    parent_message_id: None,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let linked = store
+            .dialog(InlineId::new(8))
+            .await
+            .unwrap()
+            .expect("linked dialog");
+        assert_eq!(linked.parent_chat_id, Some(InlineId::new(7)));
+        assert_eq!(linked.parent_message_id, None);
+
+        backend
+            .record_chat_update(
+                proto::Chat {
+                    id: 7,
+                    title: "Detached thread".to_owned(),
+                    parent_chat_id: None,
+                    parent_message_id: None,
+                    ..Default::default()
+                },
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let detached = store
+            .dialog(InlineId::new(7))
+            .await
+            .unwrap()
+            .expect("detached dialog");
+        assert_eq!(detached.parent_chat_id, None);
+        assert_eq!(detached.parent_message_id, None);
     }
 
     #[test]
@@ -6379,6 +7320,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sdk_backend_answer_message_action_validates_before_network() {
+        let backend = SdkBackend::builder().build().unwrap();
+
+        let error = backend
+            .answer_message_action(AnswerMessageActionRequest {
+                interaction_id: InlineId::new(0),
+                toast: None,
+            })
+            .await
+            .expect_err("invalid interaction should fail before auth or network");
+
+        assert_eq!(error.category, ClientErrorCategory::InvalidInput);
+    }
+
+    #[tokio::test]
     async fn sdk_backend_send_text_rejects_empty_text_before_network() {
         let backend = SdkBackend::builder().build().unwrap();
 
@@ -6398,14 +7354,17 @@ mod tests {
     #[tokio::test]
     async fn sdk_backend_send_text_returns_existing_transaction_without_network() {
         let store = InMemoryStore::new();
+        let external_id = ExternalId::try_new("host-event", "event-1").unwrap();
         let request = SendTextRequest {
             peer: crate::PeerRef::Chat {
                 chat_id: InlineId::new(7),
             },
             text: "hello".to_owned(),
-            external_id: Some(ExternalId::try_new("host-event", "event-1").unwrap()),
+            external_id: Some(external_id.clone()),
             random_id: Some(RandomId::new(99)),
             reply_to_message_id: None,
+            parse_markdown: false,
+            notification_mode: crate::SendNotificationMode::Normal,
         };
         let transaction_id = transaction_id_for_send(&request, request.random_id.unwrap());
         let identity = TransactionIdentity::new(
@@ -6430,6 +7389,18 @@ mod tests {
         assert_eq!(outcome.message_id, Some(InlineId::new(11)));
         assert_eq!(outcome.state, TransactionState::Completed);
         assert_eq!(outcome.mutation.transaction.transaction_id, transaction_id);
+
+        let mut recovery = SendTextRequest::new(
+            crate::PeerRef::Chat {
+                chat_id: InlineId::new(7),
+            },
+            "recovery copy may differ",
+        );
+        recovery.external_id = Some(external_id);
+        recovery.notification_mode = crate::SendNotificationMode::Silent;
+        let recovered = backend.send_text(recovery).await.unwrap();
+        assert_eq!(recovered.message_id, Some(InlineId::new(11)));
+        assert_eq!(recovered.mutation.transaction.random_id, RandomId::new(99));
     }
 
     #[tokio::test]
@@ -6464,6 +7435,7 @@ mod tests {
                 other => panic!("expected sendMessage retry, got {other:?}"),
             };
             assert_eq!(input.random_id, Some(99));
+            assert_eq!(input.parse_markdown, Some(true));
             send_test_server_message(
                 &mut ws,
                 rpc_result_message(
@@ -6496,6 +7468,8 @@ mod tests {
             external_id: Some(ExternalId::try_new("host-event", "event-1").unwrap()),
             random_id: Some(RandomId::new(99)),
             reply_to_message_id: None,
+            parse_markdown: true,
+            notification_mode: crate::SendNotificationMode::Normal,
         };
         let transaction_id = transaction_id_for_send(&request, RandomId::new(99));
         let identity = TransactionIdentity::new(
@@ -6666,7 +7640,7 @@ mod tests {
             reply_to_message_id: None,
         };
 
-        let input = upload_input_for_request(&request, vec![1, 2, 3, 4]);
+        let input = upload_input_for_request(&request, vec![1, 2, 3, 4], None);
 
         assert_eq!(input.file_type, UploadFileType::Document);
         assert_eq!(input.file_name, "clip.mp4");
@@ -6693,12 +7667,44 @@ mod tests {
             reply_to_message_id: None,
         };
 
-        let input = upload_input_for_request(&request, vec![1, 2, 3, 4]);
+        let thumbnail = UploadThumbnail {
+            bytes: vec![0xff, 0xd8, 0xff, 0xd9],
+            file_name: "clip-thumbnail.jpg".to_string(),
+            mime_type: "image/jpeg".to_string(),
+        };
+        let input = upload_input_for_request(&request, vec![1, 2, 3, 4], Some(thumbnail.clone()));
 
         assert_eq!(input.file_type, UploadFileType::Video);
         assert_eq!(
             input.video_metadata,
             Some(UploadVideoMetadata::new(640, 480, 2))
+        );
+        assert_eq!(
+            input.thumbnail,
+            Some(UploadThumbnailBytesInput::new(
+                thumbnail.bytes,
+                thumbnail.file_name,
+                thumbnail.mime_type,
+            ))
+        );
+    }
+
+    #[test]
+    fn video_upload_response_prefers_video_over_its_thumbnail_photo() {
+        let upload = UploadFileResult {
+            file_unique_id: "video".to_string(),
+            photo_id: Some(9),
+            video_id: Some(10),
+            document_id: None,
+        };
+
+        let media = input_media_from_upload(&upload, UploadFileType::Video).expect("video media");
+
+        assert_eq!(
+            media.media,
+            Some(proto::input_media::Media::Video(proto::InputMediaVideo {
+                video_id: 10,
+            }))
         );
     }
 
@@ -6839,6 +7845,8 @@ mod tests {
             external_id: Some(ExternalId::try_new("host-event", "event-1").unwrap()),
             random_id: Some(RandomId::new(99)),
             reply_to_message_id: None,
+            parse_markdown: false,
+            notification_mode: crate::SendNotificationMode::Normal,
         };
         let identity = TransactionIdentity::new(
             TransactionId::try_new("txn").unwrap(),
@@ -7182,6 +8190,7 @@ mod tests {
                         text: format!("message {message_id}"),
                     },
                     reply_to_message_id: None,
+                    metadata: crate::MessageMetadata::default(),
                     transaction: None,
                 })
                 .await

@@ -43,7 +43,7 @@ pub use api::{
     CreateNotionTaskInput, CreateNotionTaskResult, CreatePrivateChatResult, DEFAULT_API_TIMEOUT,
     PeerId, ReadMessagesInput, ReadMessagesResult, SendCodeResult, UploadFileBytesInput,
     UploadFileInput, UploadFileResult, UploadFileType, UploadFileTypeParseError,
-    UploadVideoMetadata, VerifyCodeResult,
+    UploadThumbnailBytesInput, UploadVideoMetadata, VerifyCodeResult,
 };
 pub use client_info::{AuthMetadata, ClientIdentity, ClientIdentityError};
 pub use inline_protocol::proto;
@@ -65,7 +65,7 @@ pub mod prelude {
         DEFAULT_SESSION_MAX_IN_FLIGHT_RPCS, PeerId, ReadMessagesInput, ReadMessagesResult,
         RealtimeClient, RealtimeClientBuilder, RealtimeError, RealtimeEvent, RealtimeEventReceiver,
         RealtimeSession, RpcRequest, SendCodeResult, UploadFileBytesInput, UploadFileInput,
-        UploadFileResult, UploadFileType, UploadFileTypeParseError, UploadVideoMetadata,
-        VerifyCodeResult, proto,
+        UploadFileResult, UploadFileType, UploadFileTypeParseError, UploadThumbnailBytesInput,
+        UploadVideoMetadata, VerifyCodeResult, proto,
     };
 }

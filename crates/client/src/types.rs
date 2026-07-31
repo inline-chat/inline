@@ -102,6 +102,22 @@ pub struct ConnectRequest {
     pub auth: AuthCredential,
     /// Optional account/store namespace chosen by the host.
     pub account_namespace: Option<String>,
+    /// Controls whether a brand-new durable store exposes existing account
+    /// history to the event consumer during its first synchronization.
+    #[serde(default)]
+    pub initial_event_policy: InitialEventPolicy,
+}
+
+/// First-synchronization delivery policy for a durable client store.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InitialEventPolicy {
+    /// Preserve the normal client behavior and deliver committed history.
+    #[default]
+    ReplayExisting,
+    /// Seed the exact durable cursor without exposing pre-seed history. Once a
+    /// cursor exists, reconnects resume normally and never suppress new work.
+    StartAfterCurrent,
 }
 
 impl ConnectRequest {
@@ -110,12 +126,20 @@ impl ConnectRequest {
         Self {
             auth,
             account_namespace: None,
+            initial_event_policy: InitialEventPolicy::default(),
         }
     }
 
     /// Sets the account/store namespace.
     pub fn with_account_namespace(mut self, namespace: impl Into<String>) -> Self {
         self.account_namespace = Some(namespace.into());
+        self
+    }
+
+    /// Seeds a brand-new store at the current exact server cursor before
+    /// enabling event delivery.
+    pub fn start_after_current(mut self) -> Self {
+        self.initial_event_policy = InitialEventPolicy::StartAfterCurrent;
         self
     }
 }
@@ -128,6 +152,7 @@ impl fmt::Debug for ConnectRequest {
                 "account_namespace",
                 &self.account_namespace.as_ref().map(|_| "[redacted]"),
             )
+            .field("initial_event_policy", &self.initial_event_policy)
             .finish()
     }
 }
@@ -392,6 +417,17 @@ pub struct CreateReplyThreadRequest {
     pub participants: Vec<ChatCreateParticipant>,
 }
 
+/// Notification behavior for one outgoing message.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SendNotificationMode {
+    /// Deliver the message with normal notification behavior.
+    #[default]
+    Normal,
+    /// Deliver the message without notifying participants.
+    Silent,
+}
+
 /// Request to send a text message.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SendTextRequest {
@@ -405,6 +441,12 @@ pub struct SendTextRequest {
     pub random_id: Option<RandomId>,
     /// Optional reply target.
     pub reply_to_message_id: Option<InlineId>,
+    /// Whether the server should parse supported Markdown into message entities.
+    #[serde(default)]
+    pub parse_markdown: bool,
+    /// Notification behavior for this message.
+    #[serde(default)]
+    pub notification_mode: SendNotificationMode,
 }
 
 impl SendTextRequest {
@@ -416,6 +458,8 @@ impl SendTextRequest {
             external_id: None,
             random_id: None,
             reply_to_message_id: None,
+            parse_markdown: false,
+            notification_mode: SendNotificationMode::Normal,
         }
     }
 }
@@ -428,6 +472,8 @@ impl fmt::Debug for SendTextRequest {
             .field("external_id", &self.external_id)
             .field("random_id", &self.random_id)
             .field("reply_to_message_id", &self.reply_to_message_id)
+            .field("parse_markdown", &self.parse_markdown)
+            .field("notification_mode", &self.notification_mode)
             .finish()
     }
 }
@@ -443,6 +489,68 @@ pub struct EditMessageRequest {
     pub text: String,
     /// Optional host-provided idempotency key.
     pub external_id: Option<ExternalId>,
+    /// Whether the server should parse supported Markdown into message entities.
+    #[serde(default)]
+    pub parse_markdown: bool,
+}
+
+/// Bot-authored interactive action attached to a message.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MessageActionButton {
+    /// Stable bot-defined action identifier.
+    pub action_id: String,
+    /// Short label rendered on the button.
+    pub text: String,
+    /// Behavior invoked by the button.
+    pub kind: MessageActionKind,
+}
+
+/// Behavior for an interactive message action.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum MessageActionKind {
+    /// Notify the bot and include opaque callback data.
+    Callback {
+        /// Opaque bot-defined data, bounded by the Inline service.
+        data: Vec<u8>,
+    },
+    /// Copy text locally without invoking the bot.
+    CopyText {
+        /// Text copied by the client.
+        text: String,
+    },
+}
+
+/// One horizontal row of message action buttons.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MessageActionRow {
+    /// Buttons in display order.
+    pub actions: Vec<MessageActionButton>,
+}
+
+/// Interactive actions attached to a message.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MessageActions {
+    /// Rows in display order. An empty list clears actions during an edit.
+    pub rows: Vec<MessageActionRow>,
+}
+
+/// Request to send text with interactive bot actions atomically.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SendInteractiveTextRequest {
+    /// Normal text-send fields and idempotency identity.
+    pub message: SendTextRequest,
+    /// Actions attached to the resulting message.
+    pub actions: MessageActions,
+}
+
+/// Request to edit message text and replace or clear interactive actions.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EditInteractiveMessageRequest {
+    /// Normal text-edit fields.
+    pub message: EditMessageRequest,
+    /// Replacement actions. Empty rows clear all existing actions.
+    pub actions: MessageActions,
 }
 
 impl fmt::Debug for EditMessageRequest {
@@ -452,6 +560,7 @@ impl fmt::Debug for EditMessageRequest {
             .field("message_id", &self.message_id)
             .field("text_len", &self.text.len())
             .field("external_id", &self.external_id)
+            .field("parse_markdown", &self.parse_markdown)
             .finish()
     }
 }
@@ -509,6 +618,15 @@ pub struct UpdateDialogNotificationsRequest {
     pub mode: Option<DialogNotificationMode>,
 }
 
+/// Request to set the authenticated user's native reply-thread follow mode.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateDialogFollowModeRequest {
+    /// Inline chat/thread ID.
+    pub chat_id: InlineId,
+    /// Explicit native follow mode.
+    pub mode: DialogFollowMode,
+}
+
 /// Request to set typing state.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TypingRequest {
@@ -516,6 +634,19 @@ pub struct TypingRequest {
     pub chat_id: InlineId,
     /// Whether the current user is typing.
     pub is_typing: bool,
+}
+
+/// Response to a previously invoked bot message action.
+///
+/// The interaction ID comes from [`crate::ClientEvent::MessageActionInvoked`].
+/// A toast is optional so callers can acknowledge an action without presenting
+/// additional UI.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnswerMessageActionRequest {
+    /// Server interaction ID to answer.
+    pub interaction_id: InlineId,
+    /// Optional short toast shown to the user who invoked the action.
+    pub toast: Option<String>,
 }
 
 /// Request to upload and send media.
@@ -570,6 +701,27 @@ impl fmt::Debug for UploadRequest {
     }
 }
 
+/// Encoded raster thumbnail accompanying a media upload.
+#[derive(Clone, PartialEq, Eq)]
+pub struct UploadThumbnail {
+    /// Encoded raster image bytes.
+    pub bytes: Vec<u8>,
+    /// Safe file name sent to Inline.
+    pub file_name: String,
+    /// Raster image MIME type.
+    pub mime_type: String,
+}
+
+impl fmt::Debug for UploadThumbnail {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("UploadThumbnail")
+            .field("bytes_len", &self.bytes.len())
+            .field("file_name", &self.file_name)
+            .field("mime_type", &self.mime_type)
+            .finish()
+    }
+}
+
 /// Snapshot returned by status APIs.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientStatusSnapshot {
@@ -611,6 +763,12 @@ pub struct DialogRecord {
     /// Parent Inline space ID, when this chat belongs to a space.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub space_id: Option<InlineId>,
+    /// Structural parent chat when this dialog is a linked subthread.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_chat_id: Option<InlineId>,
+    /// Parent message anchor when this dialog is a reply thread.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_message_id: Option<InlineId>,
     /// Whether the chat is visible to all eligible members of its parent space.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_public: Option<bool>,
@@ -655,6 +813,8 @@ impl DialogRecord {
             synced_through_message_id: None,
             unread_count: None,
             space_id: None,
+            parent_chat_id: None,
+            parent_message_id: None,
             is_public: None,
             archived: None,
             pinned: None,
@@ -894,6 +1054,80 @@ impl fmt::Debug for MessageContent {
     }
 }
 
+/// Entity metadata needed to interpret message addressing without reparsing
+/// presentation text.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MessageEntityRecord {
+    /// Stable protobuf entity kind, such as `TYPE_MENTION` or
+    /// `TYPE_BOT_COMMAND`. Unknown numeric kinds use `TYPE_UNKNOWN_<number>`.
+    pub kind: String,
+    /// UTF-16 offset in the message text.
+    pub offset: i64,
+    /// UTF-16 length in the message text.
+    pub length: i64,
+    /// Mentioned user, when this is a direct mention.
+    pub user_id: Option<InlineId>,
+    /// Mentioned group, when this is a group mention.
+    pub group_id: Option<InlineId>,
+    /// Referenced chat/thread, when present.
+    pub chat_id: Option<InlineId>,
+    /// Optional display or link value carried by the entity.
+    pub value: Option<String>,
+}
+
+/// A bounded, provider-neutral summary of one structured message attachment.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MessageAttachmentRecord {
+    /// Inline attachment identity.
+    pub attachment_id: InlineId,
+    /// Stable attachment kind: `external_task`, `url_preview`, or `unknown`.
+    pub kind: String,
+    /// Human-readable title when supplied by Inline.
+    pub title: Option<String>,
+    /// Validated remote URL when supplied by Inline.
+    pub url: Option<String>,
+    /// Provider or application label when supplied by Inline.
+    pub provider: Option<String>,
+}
+
+/// Visible metadata for one bot message action. Opaque callback payloads are
+/// intentionally not copied into history records.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MessageActionRecord {
+    /// Bot-owned stable action identifier.
+    pub action_id: String,
+    /// Visible button label.
+    pub label: String,
+    /// Stable action kind: `callback`, `copy_text`, or `unknown`.
+    pub kind: String,
+}
+
+/// Addressing and presentation metadata retained alongside message content.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MessageMetadata {
+    /// Whether Inline marked the authenticated viewer as mentioned.
+    #[serde(default)]
+    pub mentioned: Option<bool>,
+    /// Unix timestamp of the latest edit, when present.
+    #[serde(default)]
+    pub edit_timestamp: Option<i64>,
+    /// Monotonic server edit revision, when present.
+    #[serde(default)]
+    pub revision: Option<i64>,
+    /// Whether the sender is known to be a bot from the durable user record.
+    #[serde(default)]
+    pub sender_is_bot: Option<bool>,
+    /// Structured text entities with their original UTF-16 ranges.
+    #[serde(default)]
+    pub entities: Vec<MessageEntityRecord>,
+    /// Structured attachment summaries.
+    #[serde(default)]
+    pub attachments: Vec<MessageAttachmentRecord>,
+    /// Visible action metadata without opaque callback bytes.
+    #[serde(default)]
+    pub actions: Vec<MessageActionRecord>,
+}
+
 /// Message record returned by history/detail commands.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageRecord {
@@ -911,6 +1145,9 @@ pub struct MessageRecord {
     pub content: MessageContent,
     /// Optional reply target.
     pub reply_to_message_id: Option<InlineId>,
+    /// Addressing, revision, attachment, action, and sender metadata.
+    #[serde(default)]
+    pub metadata: MessageMetadata,
     /// Optional transaction identity for local/pending sends.
     pub transaction: Option<TransactionIdentity>,
 }
@@ -1013,6 +1250,28 @@ mod tests {
     }
 
     #[test]
+    fn initial_event_policy_is_backward_compatible_and_explicit() {
+        let legacy = serde_json::json!({
+            "auth": { "type": "access_token", "token": "token" },
+            "account_namespace": "bridge"
+        });
+        let decoded: ConnectRequest = serde_json::from_value(legacy).unwrap();
+        assert_eq!(
+            decoded.initial_event_policy,
+            InitialEventPolicy::ReplayExisting
+        );
+
+        let seeded = ConnectRequest::new(AuthCredential::AccessToken {
+            token: AuthToken::try_new("token").unwrap(),
+        })
+        .start_after_current();
+        assert_eq!(
+            seeded.initial_event_policy,
+            InitialEventPolicy::StartAfterCurrent
+        );
+    }
+
+    #[test]
     fn send_text_debug_redacts_body() {
         let req = SendTextRequest::new(
             PeerRef::User {
@@ -1023,7 +1282,55 @@ mod tests {
         let rendered = format!("{req:?}");
 
         assert!(rendered.contains("text_len"));
+        assert!(rendered.contains("notification_mode"));
         assert!(!rendered.contains("hello private world"));
+    }
+
+    #[test]
+    fn send_text_notification_mode_is_backward_compatible_and_explicit() {
+        let normal = SendTextRequest::new(
+            PeerRef::User {
+                user_id: InlineId::new(42),
+            },
+            "hello",
+        );
+        assert_eq!(normal.notification_mode, SendNotificationMode::Normal);
+        assert!(!normal.parse_markdown);
+
+        let mut legacy = serde_json::to_value(&normal).expect("serialize request");
+        legacy
+            .as_object_mut()
+            .expect("request object")
+            .remove("notification_mode");
+        let decoded: SendTextRequest = serde_json::from_value(legacy).expect("legacy request");
+        assert_eq!(decoded.notification_mode, SendNotificationMode::Normal);
+        assert!(!decoded.parse_markdown);
+
+        let mut silent = normal;
+        silent.notification_mode = SendNotificationMode::Silent;
+        assert!(format!("{silent:?}").contains("Silent"));
+    }
+
+    #[test]
+    fn edit_markdown_is_backward_compatible_and_debug_safe() {
+        let request = EditMessageRequest {
+            chat_id: InlineId::new(7),
+            message_id: InlineId::new(8),
+            text: "private terminal result".to_string(),
+            external_id: None,
+            parse_markdown: true,
+        };
+        let rendered = format!("{request:?}");
+        assert!(rendered.contains("parse_markdown"));
+        assert!(!rendered.contains("private terminal result"));
+
+        let mut legacy = serde_json::to_value(&request).expect("serialize request");
+        legacy
+            .as_object_mut()
+            .expect("request object")
+            .remove("parse_markdown");
+        let decoded: EditMessageRequest = serde_json::from_value(legacy).expect("legacy request");
+        assert!(!decoded.parse_markdown);
     }
 
     #[test]
@@ -1038,6 +1345,7 @@ mod tests {
                 text: "private message".to_owned(),
             },
             reply_to_message_id: None,
+            metadata: MessageMetadata::default(),
             transaction: Some(TransactionIdentity::new(
                 TransactionId::try_new("txn-1").unwrap(),
                 None,

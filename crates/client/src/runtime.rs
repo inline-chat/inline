@@ -18,16 +18,19 @@ use tokio::task::{JoinHandle, JoinSet};
 
 use crate::backend::retry_after_seconds_from_message;
 use crate::{
-    AccountStateSnapshot, AddChatParticipantRequest, AuthStartRequest, AuthStartResult,
-    AuthVerifyRequest, AuthVerifyResult, BackendError, BackendResult, ChatParticipantsPage,
-    ChatParticipantsRequest, ChatStateSnapshot, ClientBackend, ClientErrorCategory, ClientEvent,
-    ClientEventDelivery, ClientFailure, ClientStatus, ClientStatusSnapshot, ConnectRequest,
-    CreateDmRequest, CreateReplyThreadRequest, CreateThreadRequest, CreatedChat, DeleteChatRequest,
-    DeleteMessageRequest, DialogsPage, DialogsRequest, EditMessageRequest, HistoryPage,
-    HistoryRequest, InMemoryBackend, InlineId, MessageMutation, OperationOutcome, ReactRequest,
-    ReadRequest, RemoveChatParticipantRequest, SendTextOutcome, SendTextRequest,
-    SetMarkedUnreadRequest, TypingRequest, UpdateChatInfoRequest, UpdateDialogNotificationsRequest,
-    UploadRequest,
+    AccountStateSnapshot, AddChatParticipantRequest, AnswerBotChatSettingsRequest,
+    AnswerMessageActionRequest, AuthStartRequest, AuthStartResult, AuthVerifyRequest,
+    AuthVerifyResult, BackendError, BackendResult, BotCapability, BotChatSettingsResponse,
+    ChatParticipantsPage, ChatParticipantsRequest, ChatStateSnapshot, ClientBackend,
+    ClientErrorCategory, ClientEvent, ClientEventDelivery, ClientFailure, ClientStatus,
+    ClientStatusSnapshot, ConnectRequest, CreateDmRequest, CreateReplyThreadRequest,
+    CreateThreadRequest, CreatedChat, DeleteChatRequest, DeleteMessageRequest, DialogsPage,
+    DialogsRequest, EditInteractiveMessageRequest, EditMessageRequest, HistoryPage, HistoryRequest,
+    InMemoryBackend, InlineId, InvokeBotChatSettingsItemRequest, MessageMutation, OperationOutcome,
+    ReactRequest, ReadRequest, RemoveChatParticipantRequest, RequestBotChatSettingsRequest,
+    SendInteractiveTextRequest, SendTextOutcome, SendTextRequest, SetMarkedUnreadRequest,
+    TypingRequest, UpdateChatInfoRequest, UpdateDialogFollowModeRequest,
+    UpdateDialogNotificationsRequest, UploadRequest, UploadThumbnail,
 };
 
 /// Default bounded command queue capacity.
@@ -576,14 +579,42 @@ impl InlineClient {
         }
     }
 
+    /// Sends text and interactive bot actions atomically.
+    pub async fn send_interactive_text(
+        &self,
+        request: SendInteractiveTextRequest,
+    ) -> Result<MessageMutation, ClientRequestError> {
+        match self
+            .request(ClientRequest::SendInteractiveText(request))
+            .await?
+        {
+            ClientResponse::Message(mutation) => Ok(mutation),
+            other => unreachable!("send_interactive_text returned {other:?}"),
+        }
+    }
+
     /// Uploads and sends a media message.
     pub async fn send_media(
         &self,
         request: UploadRequest,
         bytes: Vec<u8>,
     ) -> Result<MessageMutation, ClientRequestError> {
+        self.send_media_with_thumbnail(request, bytes, None).await
+    }
+
+    /// Uploads and sends a media message with an optional raster thumbnail.
+    pub async fn send_media_with_thumbnail(
+        &self,
+        request: UploadRequest,
+        bytes: Vec<u8>,
+        thumbnail: Option<UploadThumbnail>,
+    ) -> Result<MessageMutation, ClientRequestError> {
         match self
-            .request(ClientRequest::SendMedia { request, bytes })
+            .request(ClientRequest::SendMedia {
+                request,
+                bytes,
+                thumbnail,
+            })
             .await?
         {
             ClientResponse::Message(mutation) => Ok(mutation),
@@ -599,6 +630,20 @@ impl InlineClient {
         match self.request(ClientRequest::EditMessage(request)).await? {
             ClientResponse::Empty => Ok(()),
             other => unreachable!("edit_message returned {other:?}"),
+        }
+    }
+
+    /// Edits message text and replaces or clears interactive bot actions.
+    pub async fn edit_interactive_message(
+        &self,
+        request: EditInteractiveMessageRequest,
+    ) -> Result<(), ClientRequestError> {
+        match self
+            .request(ClientRequest::EditInteractiveMessage(request))
+            .await?
+        {
+            ClientResponse::Empty => Ok(()),
+            other => unreachable!("edit_interactive_message returned {other:?}"),
         }
     }
 
@@ -657,11 +702,103 @@ impl InlineClient {
         }
     }
 
+    /// Sets the authenticated user's native reply-thread follow mode.
+    pub async fn update_dialog_follow_mode(
+        &self,
+        request: UpdateDialogFollowModeRequest,
+    ) -> Result<(), ClientRequestError> {
+        match self
+            .request(ClientRequest::UpdateDialogFollowMode(request))
+            .await?
+        {
+            ClientResponse::Empty => Ok(()),
+            other => unreachable!("update_dialog_follow_mode returned {other:?}"),
+        }
+    }
+
     /// Sends a typing state.
     pub async fn typing(&self, request: TypingRequest) -> Result<(), ClientRequestError> {
         match self.request(ClientRequest::Typing(request)).await? {
             ClientResponse::Empty => Ok(()),
             other => unreachable!("typing returned {other:?}"),
+        }
+    }
+
+    /// Answers a previously invoked bot message action.
+    pub async fn answer_message_action(
+        &self,
+        request: AnswerMessageActionRequest,
+    ) -> Result<(), ClientRequestError> {
+        match self
+            .request(ClientRequest::AnswerMessageAction(request))
+            .await?
+        {
+            ClientResponse::Empty => Ok(()),
+            other => unreachable!("answer_message_action returned {other:?}"),
+        }
+    }
+
+    /// Returns capabilities advertised by the authenticated bot account.
+    pub async fn get_bot_capabilities(&self) -> Result<Vec<BotCapability>, ClientRequestError> {
+        match self.request(ClientRequest::GetBotCapabilities).await? {
+            ClientResponse::BotCapabilities(capabilities) => Ok(capabilities),
+            other => unreachable!("get_bot_capabilities returned {other:?}"),
+        }
+    }
+
+    /// Replaces capabilities advertised by the authenticated bot account.
+    pub async fn set_bot_capabilities(
+        &self,
+        capabilities: Vec<BotCapability>,
+    ) -> Result<Vec<BotCapability>, ClientRequestError> {
+        match self
+            .request(ClientRequest::SetBotCapabilities(capabilities))
+            .await?
+        {
+            ClientResponse::BotCapabilities(capabilities) => Ok(capabilities),
+            other => unreachable!("set_bot_capabilities returned {other:?}"),
+        }
+    }
+
+    /// Requests one bot's current settings document for a chat.
+    pub async fn request_bot_chat_settings(
+        &self,
+        request: RequestBotChatSettingsRequest,
+    ) -> Result<BotChatSettingsResponse, ClientRequestError> {
+        match self
+            .request(ClientRequest::RequestBotChatSettings(request))
+            .await?
+        {
+            ClientResponse::BotChatSettings(response) => Ok(response),
+            other => unreachable!("request_bot_chat_settings returned {other:?}"),
+        }
+    }
+
+    /// Invokes one item from a bot's current settings document.
+    pub async fn invoke_bot_chat_settings_item(
+        &self,
+        request: InvokeBotChatSettingsItemRequest,
+    ) -> Result<BotChatSettingsResponse, ClientRequestError> {
+        match self
+            .request(ClientRequest::InvokeBotChatSettingsItem(request))
+            .await?
+        {
+            ClientResponse::BotChatSettings(response) => Ok(response),
+            other => unreachable!("invoke_bot_chat_settings_item returned {other:?}"),
+        }
+    }
+
+    /// Answers one pending bot chat-settings interaction.
+    pub async fn answer_bot_chat_settings(
+        &self,
+        request: AnswerBotChatSettingsRequest,
+    ) -> Result<(), ClientRequestError> {
+        match self
+            .request(ClientRequest::AnswerBotChatSettings(request))
+            .await?
+        {
+            ClientResponse::Empty => Ok(()),
+            other => unreachable!("answer_bot_chat_settings returned {other:?}"),
         }
     }
 
@@ -1034,14 +1171,29 @@ impl ClientRunner {
                     self.event_emitter.emit_send_outcome(outcome).await?,
                 ))
             }
-            ClientRequest::SendMedia { request, bytes } => {
-                let outcome = self.backend.send_media(request, bytes).await?;
+            ClientRequest::SendInteractiveText(send) => {
+                let outcome = self.backend.send_interactive_text(send).await?;
+                Ok(ClientResponse::Message(
+                    self.event_emitter.emit_send_outcome(outcome).await?,
+                ))
+            }
+            ClientRequest::SendMedia {
+                request,
+                bytes,
+                thumbnail,
+            } => {
+                let outcome = self.backend.send_media(request, bytes, thumbnail).await?;
                 Ok(ClientResponse::Message(
                     self.event_emitter.emit_send_outcome(outcome).await?,
                 ))
             }
             ClientRequest::EditMessage(edit) => {
                 let outcome = self.backend.edit_message(edit).await?;
+                self.event_emitter.emit_operation_events(outcome).await?;
+                Ok(ClientResponse::Empty)
+            }
+            ClientRequest::EditInteractiveMessage(edit) => {
+                let outcome = self.backend.edit_interactive_message(edit).await?;
                 self.event_emitter.emit_operation_events(outcome).await?;
                 Ok(ClientResponse::Empty)
             }
@@ -1070,8 +1222,43 @@ impl ClientRunner {
                 self.event_emitter.emit_operation_events(outcome).await?;
                 Ok(ClientResponse::Empty)
             }
+            ClientRequest::UpdateDialogFollowMode(request) => {
+                let outcome = self.backend.update_dialog_follow_mode(request).await?;
+                self.event_emitter.emit_operation_events(outcome).await?;
+                Ok(ClientResponse::Empty)
+            }
             ClientRequest::Typing(typing) => {
                 let outcome = self.backend.typing(typing).await?;
+                self.event_emitter.emit_operation_events(outcome).await?;
+                Ok(ClientResponse::Empty)
+            }
+            ClientRequest::AnswerMessageAction(request) => {
+                let outcome = self.backend.answer_message_action(request).await?;
+                self.event_emitter.emit_operation_events(outcome).await?;
+                Ok(ClientResponse::Empty)
+            }
+            ClientRequest::GetBotCapabilities => self
+                .backend
+                .get_bot_capabilities()
+                .await
+                .map(ClientResponse::BotCapabilities),
+            ClientRequest::SetBotCapabilities(capabilities) => self
+                .backend
+                .set_bot_capabilities(capabilities)
+                .await
+                .map(ClientResponse::BotCapabilities),
+            ClientRequest::RequestBotChatSettings(request) => self
+                .backend
+                .request_bot_chat_settings(request)
+                .await
+                .map(ClientResponse::BotChatSettings),
+            ClientRequest::InvokeBotChatSettingsItem(request) => self
+                .backend
+                .invoke_bot_chat_settings_item(request)
+                .await
+                .map(ClientResponse::BotChatSettings),
+            ClientRequest::AnswerBotChatSettings(request) => {
+                let outcome = self.backend.answer_bot_chat_settings(request).await?;
                 self.event_emitter.emit_operation_events(outcome).await?;
                 Ok(ClientResponse::Empty)
             }
@@ -1243,8 +1430,18 @@ async fn handle_concurrent_request(
                 events.emit_send_outcome(outcome).await?,
             ))
         }
-        ClientRequest::SendMedia { request, bytes } => {
-            let outcome = backend.send_media(request, bytes).await?;
+        ClientRequest::SendInteractiveText(request) => {
+            let outcome = backend.send_interactive_text(request).await?;
+            Ok(ClientResponse::Message(
+                events.emit_send_outcome(outcome).await?,
+            ))
+        }
+        ClientRequest::SendMedia {
+            request,
+            bytes,
+            thumbnail,
+        } => {
+            let outcome = backend.send_media(request, bytes, thumbnail).await?;
             Ok(ClientResponse::Message(
                 events.emit_send_outcome(outcome).await?,
             ))
@@ -1252,6 +1449,12 @@ async fn handle_concurrent_request(
         ClientRequest::EditMessage(request) => {
             events
                 .emit_operation_events(backend.edit_message(request).await?)
+                .await?;
+            Ok(ClientResponse::Empty)
+        }
+        ClientRequest::EditInteractiveMessage(request) => {
+            events
+                .emit_operation_events(backend.edit_interactive_message(request).await?)
                 .await?;
             Ok(ClientResponse::Empty)
         }
@@ -1285,9 +1488,43 @@ async fn handle_concurrent_request(
                 .await?;
             Ok(ClientResponse::Empty)
         }
+        ClientRequest::UpdateDialogFollowMode(request) => {
+            events
+                .emit_operation_events(backend.update_dialog_follow_mode(request).await?)
+                .await?;
+            Ok(ClientResponse::Empty)
+        }
         ClientRequest::Typing(request) => {
             events
                 .emit_operation_events(backend.typing(request).await?)
+                .await?;
+            Ok(ClientResponse::Empty)
+        }
+        ClientRequest::AnswerMessageAction(request) => {
+            events
+                .emit_operation_events(backend.answer_message_action(request).await?)
+                .await?;
+            Ok(ClientResponse::Empty)
+        }
+        ClientRequest::GetBotCapabilities => backend
+            .get_bot_capabilities()
+            .await
+            .map(ClientResponse::BotCapabilities),
+        ClientRequest::SetBotCapabilities(capabilities) => backend
+            .set_bot_capabilities(capabilities)
+            .await
+            .map(ClientResponse::BotCapabilities),
+        ClientRequest::RequestBotChatSettings(request) => backend
+            .request_bot_chat_settings(request)
+            .await
+            .map(ClientResponse::BotChatSettings),
+        ClientRequest::InvokeBotChatSettingsItem(request) => backend
+            .invoke_bot_chat_settings_item(request)
+            .await
+            .map(ClientResponse::BotChatSettings),
+        ClientRequest::AnswerBotChatSettings(request) => {
+            events
+                .emit_operation_events(backend.answer_bot_chat_settings(request).await?)
                 .await?;
             Ok(ClientResponse::Empty)
         }
@@ -1398,17 +1635,27 @@ enum ClientRequest {
     CreateThread(CreateThreadRequest),
     CreateReplyThread(CreateReplyThreadRequest),
     SendText(SendTextRequest),
+    SendInteractiveText(SendInteractiveTextRequest),
     SendMedia {
         request: UploadRequest,
         bytes: Vec<u8>,
+        thumbnail: Option<UploadThumbnail>,
     },
     EditMessage(EditMessageRequest),
+    EditInteractiveMessage(EditInteractiveMessageRequest),
     DeleteMessage(DeleteMessageRequest),
     React(ReactRequest),
     Read(ReadRequest),
     SetMarkedUnread(SetMarkedUnreadRequest),
     UpdateDialogNotifications(UpdateDialogNotificationsRequest),
+    UpdateDialogFollowMode(UpdateDialogFollowModeRequest),
     Typing(TypingRequest),
+    AnswerMessageAction(AnswerMessageActionRequest),
+    GetBotCapabilities,
+    SetBotCapabilities(Vec<BotCapability>),
+    RequestBotChatSettings(RequestBotChatSettingsRequest),
+    InvokeBotChatSettingsItem(InvokeBotChatSettingsItemRequest),
+    AnswerBotChatSettings(AnswerBotChatSettingsRequest),
 }
 
 impl ClientRequest {
@@ -1445,14 +1692,23 @@ impl ClientRequest {
             Self::CreateThread(_) => "create_thread",
             Self::CreateReplyThread(_) => "create_reply_thread",
             Self::SendText(_) => "send_text",
+            Self::SendInteractiveText(_) => "send_interactive_text",
             Self::SendMedia { .. } => "send_media",
             Self::EditMessage(_) => "edit_message",
+            Self::EditInteractiveMessage(_) => "edit_interactive_message",
             Self::DeleteMessage(_) => "delete_message",
             Self::React(_) => "react",
             Self::Read(_) => "read",
             Self::SetMarkedUnread(_) => "set_marked_unread",
             Self::UpdateDialogNotifications(_) => "update_dialog_notifications",
+            Self::UpdateDialogFollowMode(_) => "update_dialog_follow_mode",
             Self::Typing(_) => "typing",
+            Self::AnswerMessageAction(_) => "answer_message_action",
+            Self::GetBotCapabilities => "get_bot_capabilities",
+            Self::SetBotCapabilities(_) => "set_bot_capabilities",
+            Self::RequestBotChatSettings(_) => "request_bot_chat_settings",
+            Self::InvokeBotChatSettingsItem(_) => "invoke_bot_chat_settings_item",
+            Self::AnswerBotChatSettings(_) => "answer_bot_chat_settings",
         }
     }
 }
@@ -1522,13 +1778,18 @@ enum ClientResponse {
     ChatParticipants(ChatParticipantsPage),
     CreatedChat(CreatedChat),
     Message(MessageMutation),
+    BotCapabilities(Vec<BotCapability>),
+    BotChatSettings(BotChatSettingsResponse),
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        AuthContactKind, AuthCredential, AuthToken, ClientStore, DialogRecord, HistoryRequest,
-        InlineId, MediaKind, MessageContent, PeerRef,
+        AnswerBotChatSettingsRequest, AnswerMessageActionRequest, AuthContactKind, AuthCredential,
+        AuthToken, BotCapability, BotCapabilityKind, BotChatSettingsProblem,
+        BotChatSettingsProblemCode, BotChatSettingsResponse, ClientStore, DialogFollowMode,
+        DialogRecord, HistoryRequest, InlineId, InvokeBotChatSettingsItemRequest, MediaKind,
+        MessageContent, PeerRef, RequestBotChatSettingsRequest,
     };
 
     #[tokio::test]
@@ -1961,6 +2222,7 @@ mod tests {
                 text: "hello".to_owned(),
             },
             reply_to_message_id: None,
+            metadata: crate::MessageMetadata::default(),
             transaction: None,
         });
         let client = InlineClient::builder().backend(backend).build().spawn();
@@ -1981,6 +2243,94 @@ mod tests {
             .unwrap();
         assert_eq!(history.messages.len(), 1);
         assert_eq!(history.messages[0].message_id, InlineId::new(1));
+    }
+
+    #[tokio::test]
+    async fn native_follow_mode_mutation_flows_through_the_runtime() {
+        let backend = InMemoryBackend::new();
+        backend.upsert_dialog(DialogRecord::new(InlineId::new(7)));
+        let client = InlineClient::builder().backend(backend).build().spawn();
+        client.connect(token_connect()).await.unwrap();
+
+        client
+            .update_dialog_follow_mode(UpdateDialogFollowModeRequest {
+                chat_id: InlineId::new(7),
+                mode: DialogFollowMode::Following,
+            })
+            .await
+            .unwrap();
+
+        let dialogs = client.dialogs(DialogsRequest::default()).await.unwrap();
+        assert_eq!(
+            dialogs.dialogs[0].follow_mode,
+            Some(DialogFollowMode::Following)
+        );
+    }
+
+    #[tokio::test]
+    async fn bot_capabilities_and_settings_operations_flow_through_runner() {
+        let client = InlineClient::builder().build().spawn();
+        client.connect(token_connect()).await.unwrap();
+        let capabilities = vec![BotCapability {
+            kind: BotCapabilityKind::ChatSettings,
+            version: 1,
+        }];
+
+        assert_eq!(
+            client
+                .set_bot_capabilities(capabilities.clone())
+                .await
+                .unwrap(),
+            capabilities
+        );
+        assert_eq!(client.get_bot_capabilities().await.unwrap(), capabilities);
+
+        let response = client
+            .request_bot_chat_settings(RequestBotChatSettingsRequest {
+                peer: PeerRef::Chat {
+                    chat_id: InlineId::new(7),
+                },
+                bot_user_id: InlineId::new(42),
+                version: 1,
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            response,
+            BotChatSettingsResponse::Problem(BotChatSettingsProblem {
+                code: BotChatSettingsProblemCode::Unavailable,
+                ..
+            })
+        ));
+
+        let invocation_response = client
+            .invoke_bot_chat_settings_item(InvokeBotChatSettingsItemRequest {
+                peer: PeerRef::Chat {
+                    chat_id: InlineId::new(7),
+                },
+                bot_user_id: InlineId::new(42),
+                version: 1,
+                item_id: "model".to_owned(),
+                value: Some(crate::BotSettingsValue::String("gpt-5".to_owned())),
+                document_revision: "rev-1".to_owned(),
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            invocation_response,
+            BotChatSettingsResponse::Problem(BotChatSettingsProblem {
+                code: BotChatSettingsProblemCode::Unavailable,
+                ..
+            })
+        ));
+
+        client
+            .answer_bot_chat_settings(AnswerBotChatSettingsRequest {
+                request_id: 9,
+                response,
+            })
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -2033,6 +2383,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sends_interactive_text_through_the_runtime() {
+        let client = InlineClient::builder().build().spawn();
+        client.connect(token_connect()).await.unwrap();
+
+        let mutation = client
+            .send_interactive_text(crate::SendInteractiveTextRequest {
+                message: SendTextRequest::new(
+                    PeerRef::Chat {
+                        chat_id: InlineId::new(7),
+                    },
+                    "Approve this command?",
+                ),
+                actions: crate::MessageActions {
+                    rows: vec![crate::MessageActionRow {
+                        actions: vec![crate::MessageActionButton {
+                            action_id: "approval.accept".to_string(),
+                            text: "Approve".to_string(),
+                            kind: crate::MessageActionKind::Callback {
+                                data: b"approval-1".to_vec(),
+                            },
+                        }],
+                    }],
+                },
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(mutation.message_id, Some(InlineId::new(1)));
+    }
+
+    #[tokio::test]
     async fn edit_message_emits_stored_upsert_event() {
         let backend = InMemoryBackend::new();
         backend.insert_message(crate::MessageRecord {
@@ -2045,6 +2426,7 @@ mod tests {
                 text: "old".to_owned(),
             },
             reply_to_message_id: None,
+            metadata: crate::MessageMetadata::default(),
             transaction: None,
         });
         let client = InlineClient::builder().backend(backend).build().spawn();
@@ -2057,6 +2439,7 @@ mod tests {
                 message_id: InlineId::new(1),
                 text: "edited".to_owned(),
                 external_id: None,
+                parse_markdown: false,
             })
             .await
             .unwrap();
@@ -2074,6 +2457,26 @@ mod tests {
             }
             other => panic!("unexpected event: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn answers_message_actions_through_the_runtime() {
+        let backend = InMemoryBackend::new();
+        let client = InlineClient::builder().backend(backend).build().spawn();
+        client
+            .connect(ConnectRequest::new(AuthCredential::AccessToken {
+                token: AuthToken::try_new("bot-token").unwrap(),
+            }))
+            .await
+            .unwrap();
+
+        client
+            .answer_message_action(AnswerMessageActionRequest {
+                interaction_id: InlineId::new(17),
+                toast: Some("Approved".to_string()),
+            })
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

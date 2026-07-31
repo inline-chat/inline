@@ -22,8 +22,8 @@ use crate::{
     AuthCredential, ChatParticipantRecord, ClientErrorCategory, ClientEvent, ClientFailure,
     DialogFollowMode, DialogNotificationMode, DialogRecord, DialogsOrder, DialogsPage,
     DialogsRequest, EventReliability, HistoryPage, HistoryRequest, InlineId, MessageContent,
-    MessageRecord, SpaceMemberRecord, SpaceRecord, TransactionEvent, TransactionId,
-    TransactionIdentity, TransactionState, UserRecord, UserSettingsRecord,
+    MessageMetadata, MessageRecord, SpaceMemberRecord, SpaceRecord, TransactionEvent,
+    TransactionId, TransactionIdentity, TransactionState, UserRecord, UserSettingsRecord,
 };
 
 /// Selects a history page by the monotonic message-ID cursor before applying
@@ -490,6 +490,13 @@ pub trait ClientStore: fmt::Debug + Send + Sync + 'static {
 
     /// Fetches stored history.
     fn history(&self, request: HistoryRequest) -> BoxFuture<'static, StoreResult<HistoryPage>>;
+
+    /// Loads one exact stored message without a pagination heuristic.
+    fn message(
+        &self,
+        chat_id: InlineId,
+        message_id: InlineId,
+    ) -> BoxFuture<'static, StoreResult<Option<MessageRecord>>>;
 
     /// Records a message in stored history.
     fn record_message(&self, message: MessageRecord) -> BoxFuture<'static, StoreResult<()>>;
@@ -1388,6 +1395,28 @@ impl ClientStore for InMemoryStore {
         })
     }
 
+    fn message(
+        &self,
+        chat_id: InlineId,
+        message_id: InlineId,
+    ) -> BoxFuture<'static, StoreResult<Option<MessageRecord>>> {
+        let store = self.clone();
+        Box::pin(async move {
+            Ok(store
+                .state
+                .lock()
+                .expect("in-memory store poisoned")
+                .messages
+                .get(&chat_id.get())
+                .and_then(|messages| {
+                    messages
+                        .iter()
+                        .find(|message| message.message_id == message_id)
+                        .cloned()
+                }))
+        })
+    }
+
     fn record_message(&self, message: MessageRecord) -> BoxFuture<'static, StoreResult<()>> {
         let store = self.clone();
         Box::pin(async move {
@@ -2105,7 +2134,8 @@ impl SqliteStore {
                             (SELECT MAX(m.message_id) FROM messages m WHERE m.chat_id = d.chat_id) AS synced_through_message_id,
                             d.unread_count, d.space_id, d.is_public, d.archived, d.pinned,
                             d.open, d.chat_list_hidden, d.list_order, d.pinned_order,
-                            d.notification_mode, d.follow_mode, d.pinned_message_ids_json
+                            d.notification_mode, d.follow_mode, d.pinned_message_ids_json,
+                            d.parent_chat_id, d.parent_message_id
                      FROM dialogs d
                      ORDER BY COALESCE(last_message_id, 0) DESC, chat_id ASC
                      LIMIT ?1 OFFSET ?2",
@@ -2125,7 +2155,8 @@ impl SqliteStore {
                             (SELECT MAX(m.message_id) FROM messages m WHERE m.chat_id = d.chat_id) AS synced_through_message_id,
                             d.unread_count, d.space_id, d.is_public, d.archived, d.pinned,
                             d.open, d.chat_list_hidden, d.list_order, d.pinned_order,
-                            d.notification_mode, d.follow_mode, d.pinned_message_ids_json
+                            d.notification_mode, d.follow_mode, d.pinned_message_ids_json,
+                            d.parent_chat_id, d.parent_message_id
                      FROM dialogs d
                      WHERE d.chat_id > ?1
                      ORDER BY d.chat_id ASC
@@ -2169,7 +2200,8 @@ impl SqliteStore {
                         (SELECT MAX(m.message_id) FROM messages m WHERE m.chat_id = d.chat_id),
                         d.unread_count, d.space_id, d.is_public, d.archived, d.pinned,
                         d.open, d.chat_list_hidden, d.list_order, d.pinned_order,
-                        d.notification_mode, d.follow_mode, d.pinned_message_ids_json
+                        d.notification_mode, d.follow_mode, d.pinned_message_ids_json,
+                        d.parent_chat_id, d.parent_message_id
                  FROM dialogs d WHERE d.chat_id = ?1",
                 params![chat_id.get()],
                 sqlite_dialog_from_row,
@@ -2241,7 +2273,7 @@ impl SqliteStore {
             let mut stmt = connection
                 .prepare(
                     "SELECT chat_id, message_id, sender_id, timestamp, is_outgoing,
-                            content_json, reply_to_message_id, transaction_json
+                            content_json, reply_to_message_id, transaction_json, metadata_json
                      FROM messages
                      WHERE chat_id = ?1 AND message_id < ?2
                      ORDER BY message_id DESC
@@ -2256,7 +2288,7 @@ impl SqliteStore {
             let mut stmt = connection
                 .prepare(
                     "SELECT chat_id, message_id, sender_id, timestamp, is_outgoing,
-                            content_json, reply_to_message_id, transaction_json
+                            content_json, reply_to_message_id, transaction_json, metadata_json
                      FROM messages
                      WHERE chat_id = ?1 AND message_id > ?2
                      ORDER BY message_id ASC
@@ -2271,7 +2303,7 @@ impl SqliteStore {
             let mut stmt = connection
                 .prepare(
                     "SELECT chat_id, message_id, sender_id, timestamp, is_outgoing,
-                            content_json, reply_to_message_id, transaction_json
+                            content_json, reply_to_message_id, transaction_json, metadata_json
                      FROM messages
                      WHERE chat_id = ?1
                      ORDER BY message_id DESC
@@ -2301,6 +2333,25 @@ impl SqliteStore {
             has_more,
             next_cursor: None,
         })
+    }
+
+    fn message_sync(
+        &self,
+        chat_id: InlineId,
+        message_id: InlineId,
+    ) -> StoreResult<Option<MessageRecord>> {
+        let connection = self.connection.lock().expect("sqlite store poisoned");
+        let mut statement = connection
+            .prepare(
+                "SELECT chat_id, message_id, sender_id, timestamp, is_outgoing,
+                        content_json, reply_to_message_id, transaction_json, metadata_json
+                 FROM messages WHERE chat_id = ?1 AND message_id = ?2",
+            )
+            .map_err(sqlite_error)?;
+        query_message_rows(&mut statement, params![chat_id.get(), message_id.get()])?
+            .pop()
+            .map(raw_sqlite_message_to_record)
+            .transpose()
     }
 
     fn record_users_sync(&self, users: Vec<UserRecord>) -> StoreResult<()> {
@@ -2581,6 +2632,8 @@ impl SqliteStore {
     fn record_message_sync(&self, message: MessageRecord) -> StoreResult<()> {
         let content_json = serde_json::to_string(&message.content)
             .map_err(|error| StoreError::internal(format!("encode message content: {error}")))?;
+        let metadata_json = serde_json::to_string(&message.metadata)
+            .map_err(|error| StoreError::internal(format!("encode message metadata: {error}")))?;
         let transaction_json = message
             .transaction
             .as_ref()
@@ -2594,16 +2647,17 @@ impl SqliteStore {
             .execute(
                 "INSERT INTO messages (
                    chat_id, message_id, sender_id, timestamp, is_outgoing,
-                   content_json, reply_to_message_id, transaction_json
+                   content_json, reply_to_message_id, transaction_json, metadata_json
                  )
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                  ON CONFLICT(chat_id, message_id) DO UPDATE SET
                    sender_id = excluded.sender_id,
                    timestamp = excluded.timestamp,
                    is_outgoing = excluded.is_outgoing,
                    content_json = excluded.content_json,
                    reply_to_message_id = excluded.reply_to_message_id,
-                   transaction_json = excluded.transaction_json",
+                   transaction_json = excluded.transaction_json,
+                   metadata_json = excluded.metadata_json",
                 params![
                     message.chat_id.get(),
                     message.message_id.get(),
@@ -2613,6 +2667,7 @@ impl SqliteStore {
                     content_json,
                     message.reply_to_message_id.map(InlineId::get),
                     transaction_json,
+                    metadata_json,
                 ],
             )
             .map_err(sqlite_error)?;
@@ -3383,6 +3438,15 @@ impl ClientStore for SqliteStore {
         Box::pin(async move { store.history_sync(request) })
     }
 
+    fn message(
+        &self,
+        chat_id: InlineId,
+        message_id: InlineId,
+    ) -> BoxFuture<'static, StoreResult<Option<MessageRecord>>> {
+        let store = self.clone();
+        Box::pin(async move { store.message_sync(chat_id, message_id) })
+    }
+
     fn record_message(&self, message: MessageRecord) -> BoxFuture<'static, StoreResult<()>> {
         let store = self.clone();
         Box::pin(async move { store.record_message_sync(message) })
@@ -3603,6 +3667,8 @@ fn migrate_sqlite(connection: &Connection) -> StoreResult<()> {
                 notification_mode TEXT,
                 follow_mode TEXT,
                 pinned_message_ids_json TEXT NOT NULL DEFAULT '[]',
+                parent_chat_id INTEGER,
+                parent_message_id INTEGER,
                 updated_at INTEGER NOT NULL
             );
 
@@ -3667,6 +3733,7 @@ fn migrate_sqlite(connection: &Connection) -> StoreResult<()> {
                 content_json TEXT NOT NULL,
                 reply_to_message_id INTEGER,
                 transaction_json TEXT,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
                 PRIMARY KEY (chat_id, message_id)
             );
 
@@ -3741,11 +3808,19 @@ fn migrate_sqlite(connection: &Connection) -> StoreResult<()> {
     ensure_sqlite_column(connection, "dialogs", "pinned_order", "TEXT")?;
     ensure_sqlite_column(connection, "dialogs", "notification_mode", "TEXT")?;
     ensure_sqlite_column(connection, "dialogs", "follow_mode", "TEXT")?;
+    ensure_sqlite_column(connection, "dialogs", "parent_chat_id", "INTEGER")?;
+    ensure_sqlite_column(connection, "dialogs", "parent_message_id", "INTEGER")?;
     ensure_sqlite_column(
         connection,
         "dialogs",
         "pinned_message_ids_json",
         "TEXT NOT NULL DEFAULT '[]'",
+    )?;
+    ensure_sqlite_column(
+        connection,
+        "messages",
+        "metadata_json",
+        "TEXT NOT NULL DEFAULT '{}'",
     )?;
     Ok(())
 }
@@ -3913,6 +3988,8 @@ fn sqlite_dialog_from_row(row: &Row<'_>) -> rusqlite::Result<DialogRecord> {
             .get::<_, Option<i64>>(6)?
             .and_then(|value| u32::try_from(value).ok()),
         space_id: row.get::<_, Option<i64>>(7)?.map(InlineId::new),
+        parent_chat_id: row.get::<_, Option<i64>>(18)?.map(InlineId::new),
+        parent_message_id: row.get::<_, Option<i64>>(19)?.map(InlineId::new),
         is_public: row.get::<_, Option<bool>>(8)?,
         archived: row.get::<_, Option<bool>>(9)?,
         pinned: row.get::<_, Option<bool>>(10)?,
@@ -3942,10 +4019,10 @@ fn upsert_sqlite_dialog(connection: &Connection, dialog: DialogRecord) -> StoreR
                chat_id, peer_user_id, title, emoji, last_message_id, unread_count,
                space_id, is_public, archived, pinned, open, chat_list_hidden,
                list_order, pinned_order, notification_mode, follow_mode,
-               pinned_message_ids_json, updated_at
+               pinned_message_ids_json, parent_chat_id, parent_message_id, updated_at
              ) VALUES (
                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-               ?14, ?15, ?16, ?17, ?18
+               ?14, ?15, ?16, ?17, ?18, ?19, ?20
              )
              ON CONFLICT(chat_id) DO UPDATE SET
                peer_user_id = excluded.peer_user_id,
@@ -3964,6 +4041,8 @@ fn upsert_sqlite_dialog(connection: &Connection, dialog: DialogRecord) -> StoreR
                notification_mode = excluded.notification_mode,
                follow_mode = excluded.follow_mode,
                pinned_message_ids_json = excluded.pinned_message_ids_json,
+               parent_chat_id = excluded.parent_chat_id,
+               parent_message_id = excluded.parent_message_id,
                updated_at = excluded.updated_at",
             params![
                 dialog.chat_id.get(),
@@ -3985,6 +4064,8 @@ fn upsert_sqlite_dialog(connection: &Connection, dialog: DialogRecord) -> StoreR
                     .map(dialog_notification_mode_for_store),
                 dialog.follow_mode.map(dialog_follow_mode_for_store),
                 pinned_message_ids_json,
+                dialog.parent_chat_id.map(InlineId::get),
+                dialog.parent_message_id.map(InlineId::get),
                 now_seconds(),
             ],
         )
@@ -4135,6 +4216,7 @@ struct RawSqliteMessage {
     content_json: String,
     reply_to_message_id: Option<i64>,
     transaction_json: Option<String>,
+    metadata_json: String,
 }
 
 fn query_message_rows<P>(
@@ -4154,6 +4236,7 @@ where
             content_json: row.get(5)?,
             reply_to_message_id: row.get(6)?,
             transaction_json: row.get(7)?,
+            metadata_json: row.get(8)?,
         })
     })
     .map_err(sqlite_error)?
@@ -4170,6 +4253,8 @@ fn raw_sqlite_message_to_record(raw: RawSqliteMessage) -> StoreResult<MessageRec
         .map(serde_json::from_str::<TransactionIdentity>)
         .transpose()
         .map_err(|error| StoreError::internal(format!("decode transaction identity: {error}")))?;
+    let metadata = serde_json::from_str::<MessageMetadata>(&raw.metadata_json)
+        .map_err(|error| StoreError::internal(format!("decode message metadata: {error}")))?;
     Ok(MessageRecord {
         chat_id: InlineId::new(raw.chat_id),
         message_id: InlineId::new(raw.message_id),
@@ -4178,6 +4263,7 @@ fn raw_sqlite_message_to_record(raw: RawSqliteMessage) -> StoreResult<MessageRec
         is_outgoing: raw.is_outgoing,
         content,
         reply_to_message_id: raw.reply_to_message_id.map(InlineId::new),
+        metadata,
         transaction,
     })
 }
@@ -4354,6 +4440,7 @@ mod tests {
                 text: format!("message {message_id}"),
             },
             reply_to_message_id: None,
+            metadata: MessageMetadata::default(),
             transaction: None,
         }
     }
@@ -4498,6 +4585,7 @@ mod tests {
                     text: "hello".to_owned(),
                 },
                 reply_to_message_id: None,
+                metadata: MessageMetadata::default(),
                 transaction: None,
             })
             .await
@@ -4735,6 +4823,8 @@ mod tests {
                 synced_through_message_id: None,
                 unread_count: Some(3),
                 space_id: Some(InlineId::new(5)),
+                parent_chat_id: Some(InlineId::new(4)),
+                parent_message_id: Some(InlineId::new(6)),
                 is_public: Some(true),
                 archived: Some(false),
                 pinned: Some(true),
@@ -4770,6 +4860,7 @@ mod tests {
                     text: "persisted".to_owned(),
                 },
                 reply_to_message_id: None,
+                metadata: MessageMetadata::default(),
                 transaction: None,
             })
             .await
@@ -4789,6 +4880,8 @@ mod tests {
         assert_eq!(dialogs.dialogs[0].emoji.as_deref(), Some("🚀"));
         assert_eq!(dialogs.dialogs[0].last_message_id, Some(InlineId::new(10)));
         assert_eq!(dialogs.dialogs[0].space_id, Some(InlineId::new(5)));
+        assert_eq!(dialogs.dialogs[0].parent_chat_id, Some(InlineId::new(4)));
+        assert_eq!(dialogs.dialogs[0].parent_message_id, Some(InlineId::new(6)));
         assert_eq!(dialogs.dialogs[0].is_public, Some(true));
         assert_eq!(dialogs.dialogs[0].archived, Some(false));
         assert_eq!(dialogs.dialogs[0].pinned, Some(true));
@@ -4874,6 +4967,7 @@ mod tests {
                         text: format!("message {message_id}"),
                     },
                     reply_to_message_id: None,
+                    metadata: MessageMetadata::default(),
                     transaction: None,
                 })
                 .await
@@ -5459,6 +5553,7 @@ mod tests {
                     text: "first".to_owned(),
                 },
                 reply_to_message_id: None,
+                metadata: MessageMetadata::default(),
                 transaction: None,
             })
             .await
@@ -5474,6 +5569,7 @@ mod tests {
                     text: "updated".to_owned(),
                 },
                 reply_to_message_id: None,
+                metadata: MessageMetadata::default(),
                 transaction: None,
             })
             .await
@@ -5493,6 +5589,63 @@ mod tests {
             history.messages[0].content,
             MessageContent::Text { ref text } if text == "updated"
         ));
+    }
+
+    #[tokio::test]
+    async fn sqlite_store_round_trips_message_metadata_and_upgrades_legacy_schema() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE messages (
+                    chat_id INTEGER NOT NULL,
+                    message_id INTEGER NOT NULL,
+                    sender_id INTEGER NOT NULL,
+                    timestamp INTEGER NOT NULL,
+                    is_outgoing INTEGER NOT NULL,
+                    content_json TEXT NOT NULL,
+                    reply_to_message_id INTEGER,
+                    transaction_json TEXT,
+                    PRIMARY KEY (chat_id, message_id)
+                );",
+            )
+            .unwrap();
+        let store = SqliteStore::from_connection(connection).unwrap();
+        let mut message = test_message(12);
+        message.metadata = MessageMetadata {
+            mentioned: Some(true),
+            edit_timestamp: Some(13),
+            revision: Some(2),
+            sender_is_bot: Some(false),
+            entities: vec![crate::MessageEntityRecord {
+                kind: "TYPE_MENTION".to_string(),
+                offset: 0,
+                length: 4,
+                user_id: Some(InlineId::new(99)),
+                group_id: None,
+                chat_id: None,
+                value: None,
+            }],
+            attachments: Vec::new(),
+            actions: Vec::new(),
+        };
+        store.record_message(message.clone()).await.unwrap();
+        assert_eq!(
+            store
+                .message(message.chat_id, message.message_id)
+                .await
+                .unwrap(),
+            Some(message.clone())
+        );
+        let history = store
+            .history(HistoryRequest {
+                chat_id: message.chat_id,
+                limit: Some(10),
+                before_message_id: None,
+                after_message_id: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(history.messages, vec![message]);
     }
 
     #[tokio::test]

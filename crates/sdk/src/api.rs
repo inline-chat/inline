@@ -365,6 +365,7 @@ impl ApiClient {
                 mime_type,
                 file_type,
                 video_metadata,
+                thumbnail: None,
             },
         )
         .await
@@ -381,11 +382,12 @@ impl ApiClient {
         let url = format!("{}/uploadFile", self.base_url);
         log::debug!(
             target: "inline_sdk::api",
-            "uploading file bytes type={} size_bytes={} has_mime_type={} has_video_metadata={}",
+            "uploading file bytes type={} size_bytes={} has_mime_type={} has_video_metadata={} has_thumbnail={}",
             input.file_type,
             input.bytes.len(),
             input.mime_type.is_some(),
-            input.video_metadata.is_some()
+            input.video_metadata.is_some(),
+            input.thumbnail.is_some()
         );
         let mut form = reqwest::multipart::Form::new().text("type", input.file_type.as_str());
         let mut file_part = reqwest::multipart::Part::bytes(input.bytes);
@@ -400,6 +402,13 @@ impl ApiClient {
                 .text("width", video.width.to_string())
                 .text("height", video.height.to_string())
                 .text("duration", video.duration.to_string());
+        }
+
+        if let Some(thumbnail) = input.thumbnail {
+            let thumbnail_part = reqwest::multipart::Part::bytes(thumbnail.bytes)
+                .file_name(thumbnail.file_name)
+                .mime_str(&thumbnail.mime_type)?;
+            form = form.part("thumbnail", thumbnail_part);
         }
 
         let response = self
@@ -763,6 +772,8 @@ pub struct UploadFileBytesInput {
     pub file_type: UploadFileType,
     /// Required video details when uploading a video.
     pub video_metadata: Option<UploadVideoMetadata>,
+    /// Optional raster thumbnail uploaded alongside a video or document.
+    pub thumbnail: Option<UploadThumbnailBytesInput>,
 }
 
 impl fmt::Debug for UploadFileBytesInput {
@@ -773,6 +784,7 @@ impl fmt::Debug for UploadFileBytesInput {
             .field("mime_type", &self.mime_type)
             .field("file_type", &self.file_type)
             .field("video_metadata", &self.video_metadata)
+            .field("thumbnail", &self.thumbnail)
             .finish()
     }
 }
@@ -790,6 +802,7 @@ impl UploadFileBytesInput {
             mime_type: None,
             file_type,
             video_metadata: None,
+            thumbnail: None,
         }
     }
 
@@ -825,6 +838,49 @@ impl UploadFileBytesInput {
     pub fn with_video_metadata(mut self, metadata: UploadVideoMetadata) -> Self {
         self.video_metadata = Some(metadata);
         self
+    }
+
+    /// Adds a raster thumbnail to a video or document upload.
+    pub fn with_thumbnail(mut self, thumbnail: UploadThumbnailBytesInput) -> Self {
+        self.thumbnail = Some(thumbnail);
+        self
+    }
+}
+
+/// In-memory thumbnail uploaded alongside a video or document.
+#[must_use]
+#[derive(Clone, PartialEq, Eq)]
+pub struct UploadThumbnailBytesInput {
+    /// Encoded raster image bytes.
+    pub bytes: Vec<u8>,
+    /// File name reported to the server.
+    pub file_name: String,
+    /// Required image MIME type.
+    pub mime_type: String,
+}
+
+impl fmt::Debug for UploadThumbnailBytesInput {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("UploadThumbnailBytesInput")
+            .field("bytes_len", &self.bytes.len())
+            .field("file_name", &self.file_name)
+            .field("mime_type", &self.mime_type)
+            .finish()
+    }
+}
+
+impl UploadThumbnailBytesInput {
+    /// Creates a thumbnail upload from encoded raster bytes.
+    pub fn new(
+        bytes: impl Into<Vec<u8>>,
+        file_name: impl Into<String>,
+        mime_type: impl Into<String>,
+    ) -> Self {
+        Self {
+            bytes: bytes.into(),
+            file_name: file_name.into(),
+            mime_type: mime_type.into(),
+        }
     }
 }
 
@@ -1246,6 +1302,31 @@ fn validate_upload_file_bytes_input(input: &UploadFileBytesInput) -> Result<(), 
         return Err(ApiError::InvalidInput {
             message: "upload file bytes cannot be empty".to_string(),
         });
+    }
+    if let Some(thumbnail) = input.thumbnail.as_ref() {
+        if !matches!(
+            input.file_type,
+            UploadFileType::Video | UploadFileType::Document
+        ) {
+            return Err(ApiError::InvalidInput {
+                message: "thumbnails can only accompany video or document uploads".to_string(),
+            });
+        }
+        if thumbnail.bytes.is_empty() {
+            return Err(ApiError::InvalidInput {
+                message: "upload thumbnail bytes cannot be empty".to_string(),
+            });
+        }
+        if thumbnail.file_name.trim().is_empty() {
+            return Err(ApiError::InvalidInput {
+                message: "upload thumbnail file name cannot be empty".to_string(),
+            });
+        }
+        if !thumbnail.mime_type.trim().starts_with("image/") {
+            return Err(ApiError::InvalidInput {
+                message: "upload thumbnail requires an image MIME type".to_string(),
+            });
+        }
     }
     Ok(())
 }
@@ -1674,11 +1755,13 @@ mod tests {
         assert_eq!(video.file_type, UploadFileType::Video);
         assert_eq!(video.mime_type.as_deref(), Some("video/mp4"));
         assert_eq!(video.video_metadata, Some(metadata));
+        assert!(video.thumbnail.is_none());
 
         let document = UploadFileBytesInput::document(vec![1], "notes.txt").with_mime_type(" ");
         assert_eq!(document.file_type, UploadFileType::Document);
         assert!(document.mime_type.is_none());
         assert!(document.video_metadata.is_none());
+        assert!(document.thumbnail.is_none());
     }
 
     #[test]
@@ -1761,6 +1844,36 @@ mod tests {
             }
             other => panic!("expected invalid input, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn upload_thumbnail_requires_video_or_document_and_valid_image_metadata() {
+        let thumbnail = UploadThumbnailBytesInput::new(
+            vec![0xff, 0xd8, 0xff, 0xd9],
+            "thumbnail.jpg",
+            "image/jpeg",
+        );
+        let video =
+            UploadFileBytesInput::video(vec![1], "clip.mp4", UploadVideoMetadata::new(1, 1, 1))
+                .with_thumbnail(thumbnail.clone());
+        assert!(validate_upload_file_bytes_input(&video).is_ok());
+
+        let photo =
+            UploadFileBytesInput::photo(vec![1], "photo.jpg").with_thumbnail(thumbnail.clone());
+        assert!(matches!(
+            validate_upload_file_bytes_input(&photo),
+            Err(ApiError::InvalidInput { message })
+                if message == "thumbnails can only accompany video or document uploads"
+        ));
+
+        let bad_mime = UploadFileBytesInput::document(vec![1], "report.pdf").with_thumbnail(
+            UploadThumbnailBytesInput::new(vec![1], "thumbnail.bin", "application/octet-stream"),
+        );
+        assert!(matches!(
+            validate_upload_file_bytes_input(&bad_mime),
+            Err(ApiError::InvalidInput { message })
+                if message == "upload thumbnail requires an image MIME type"
+        ));
     }
 
     #[test]
