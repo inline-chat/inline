@@ -1,0 +1,30 @@
+[package]
+name = "inline-agent-driver-acp"
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Stable ACP v1 driver for Inline's local coding-agent bridge."
+readme = "README.md"
+keywords = ["inline", "agent", "acp", "coding-agent"]
+categories = ["development-tools"]
+
+[dependencies]
+agent-client-protocol.workspace = true
+base64 = "0.22.1"
+futures-util.workspace = true
+inline-agent-bridge = { version = "0.6.2", path = "../agent-bridge" }
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10.8"
+thiserror.workspace = true
+tokio.workspace = true
+url.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
