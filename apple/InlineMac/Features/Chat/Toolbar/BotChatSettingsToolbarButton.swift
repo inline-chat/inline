@@ -29,7 +29,31 @@ struct BotChatSettingsToolbarButton: View {
         }
       }
     ), arrowEdge: .bottom) {
-      BotChatSettingsPopover(coordinator: coordinator)
+      BotChatSettingsPopover(coordinator: coordinator) { hostInstallationID, botUserID, port, capability in
+        let panel = NSOpenPanel()
+        panel.title = "Pick a Project Folder"
+        panel.message = "This folder stays on this Mac and is shared only with your selected agent."
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let folderURL = panel.url else {
+          throw CancellationError()
+        }
+        return try await LocalAgentWorkspaceRegistrar.register(
+          folderURL: folderURL,
+          hostInstallationID: hostInstallationID,
+          botUserID: botUserID,
+          port: port,
+          capability: capability
+        )
+      } localFolderPickerAvailable: { hostInstallationID, botUserID, port, capability in
+        await LocalAgentWorkspaceRegistrar.isAvailable(
+          hostInstallationID: hostInstallationID,
+          botUserID: botUserID,
+          port: port,
+          capability: capability
+        )
+      }
     }
   }
 }
