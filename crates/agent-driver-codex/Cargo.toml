@@ -1,0 +1,31 @@
+[package]
+name = "inline-agent-driver-codex"
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Codex app-server driver for Inline's local coding-agent bridge."
+readme = "README.md"
+keywords = ["inline", "agent", "codex", "coding-agent"]
+categories = ["development-tools"]
+
+[dependencies]
+base64 = "0.22.1"
+futures-util.workspace = true
+inline-agent-bridge = { version = "0.6.2", path = "../agent-bridge" }
+libc = "0.2.172"
+log.workspace = true
+reqwest.workspace = true
+semver = "1.0.25"
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10.8"
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+futures-util.workspace = true
+tempfile = "3"
