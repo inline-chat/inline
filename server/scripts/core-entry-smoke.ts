@@ -190,10 +190,10 @@ const main = async (): Promise<void> => {
       )
     }
 
-    const healthResponse = await fetchBounded(
-      `${currentBaseUrl}/health`,
+    const readinessResponse = await fetchBounded(
+      `${currentBaseUrl}/readyz`,
     )
-    const health = await healthResponse.json() as {
+    const readiness = await readinessResponse.json() as {
       readonly checks?: {
         readonly database?: {
           readonly ok?: boolean
@@ -205,13 +205,13 @@ const main = async (): Promise<void> => {
       readonly ok?: boolean
     }
     if (
-      healthResponse.status !== 200 ||
-      health.ok !== true ||
-      health.checks?.database?.ok !== true ||
-      health.checks.lifecycle?.ok !== true
+      readinessResponse.status !== 200 ||
+      readiness.ok !== true ||
+      readiness.checks?.database?.ok !== true ||
+      readiness.checks?.lifecycle?.ok !== true
     ) {
       throw new Error(
-        `The current full-server database health check returned ${healthResponse.status}.`,
+        `The current full-server readiness check returned ${readinessResponse.status}.`,
       )
     }
 
