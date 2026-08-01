@@ -98,6 +98,7 @@ jobs:
         run: |
           echo "DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_db" >> $GITHUB_ENV
           echo "TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/test_db" >> $GITHUB_ENV
+          echo "RESEND_API_KEY=re_ci_placeholder" >> $GITHUB_ENV
 
       - name: Run Effect tests
         run: cd server && bun run test:effect
