@@ -6,6 +6,7 @@ import {
   desc,
   eq,
   gte,
+  inArray,
   isNull,
   or,
   sql,
@@ -15,6 +16,9 @@ import {
 } from "@in/server/db"
 import {
   chats,
+  emailCampaignRecipients,
+  emailCampaigns,
+  emailSuppressions,
   inviteCodes,
   members,
   messages,
@@ -24,8 +28,32 @@ import {
   users,
   waitlist,
 } from "@in/server/db/schema"
+import { isValidEmail } from "@in/server/utils/validate"
+import {
+  createUnsubscribeToken,
+  decryptCampaignString,
+  encryptCampaignString,
+  hashUnsubscribeToken,
+  normalizedCampaignEmail,
+} from "@in/server/modules/emailCampaigns/contactCrypto"
+import { resolveCampaignAudience } from "@in/server/modules/emailCampaigns/audience"
+import {
+  type CampaignFromAddress,
+  createResendBroadcast,
+  createResendCampaignSegment,
+  deliverCampaignTestEmail,
+  deliverSesCampaignBatch,
+  removeResendCampaignRecipients,
+  sendResendBroadcast,
+  syncResendCampaignRecipients,
+} from "@in/server/modules/emailCampaigns/delivery"
+import { renderCampaign } from "@in/server/modules/emailCampaigns/render"
+import { getEmailProviderStatus } from "@in/server/modules/emailCampaigns/providerStatus"
+import { syncProviderSuppressions } from "@in/server/modules/emailCampaigns/providerSuppressions"
+import type { EmailCampaignAudience } from "@in/server/modules/emailCampaigns/types"
 import {
   ADMIN_PUBLIC_API_ORIGIN,
+  EMAIL_PROVIDER,
 } from "@in/server/env"
 import {
   FILES_PATH_PREFIX,
@@ -52,9 +80,6 @@ import {
   Log,
 } from "@in/server/utils/log"
 import {
-  isValidEmail,
-} from "@in/server/utils/validate"
-import {
   normalizeEmail,
 } from "@in/server/utils/normalize"
 import type {
@@ -74,6 +99,13 @@ import {
 
 type ManagementOperationName =
   | "waitlist"
+  | "emailCampaigns"
+  | "emailProviderStatus"
+  | "previewEmailCampaign"
+  | "createEmailCampaign"
+  | "testEmailCampaign"
+  | "sendEmailCampaign"
+  | "pauseEmailCampaign"
   | "spaces"
   | "users"
   | "avatar"
@@ -158,6 +190,595 @@ const waitlistOperation: AdminOperationsShape["waitlist"] =
           date: row.date?.toISOString() ?? null,
         })),
       })
+    })
+
+const campaignSummary = async (campaignId?: number) => {
+  const whereClause = campaignId === undefined
+    ? undefined
+    : eq(emailCampaigns.id, campaignId)
+  const query = db
+    .select({
+      id: emailCampaigns.id,
+      name: emailCampaigns.name,
+      seriesKey: emailCampaigns.seriesKey,
+      subject: emailCampaigns.subject,
+      provider: emailCampaigns.provider,
+      fromAddress: emailCampaigns.fromAddress,
+      status: emailCampaigns.status,
+      recipientCount: emailCampaigns.recipientCount,
+      pendingCount: sql<number>`count(*) filter (where ${emailCampaignRecipients.status} = 'pending')::int`,
+      preparedCount: sql<number>`count(*) filter (where ${emailCampaignRecipients.status} = 'provider_synced')::int`,
+      contactedCount: sql<number>`count(*) filter (where ${emailCampaignRecipients.status} in ('sending', 'provider_accepted', 'unknown'))::int`,
+      suppressedCount: sql<number>`count(*) filter (where ${emailCampaignRecipients.status} = 'suppressed')::int`,
+      testSentAt: emailCampaigns.testSentAt,
+      createdAt: emailCampaigns.createdAt,
+      completedAt: emailCampaigns.completedAt,
+    })
+    .from(emailCampaigns)
+    .leftJoin(
+      emailCampaignRecipients,
+      eq(emailCampaignRecipients.campaignId, emailCampaigns.id),
+    )
+    .groupBy(emailCampaigns.id)
+
+  const rows = whereClause
+    ? await query.where(whereClause).limit(1)
+    : await query.orderBy(desc(emailCampaigns.createdAt)).limit(100)
+  return rows.map((row) => ({
+    ...row,
+    provider: selectedCampaignProvider(row.provider),
+    fromAddress: selectedCampaignFromAddress(row.fromAddress),
+    testSentAt: row.testSentAt?.toISOString() ?? null,
+    createdAt: row.createdAt.toISOString(),
+    completedAt: row.completedAt?.toISOString() ?? null,
+  }))
+}
+
+const selectedCampaignProvider = (provider: string | null): "resend" | "ses" => {
+  if (provider === "resend" || provider === "ses") return provider
+  return EMAIL_PROVIDER === "SES" ? "ses" : "resend"
+}
+
+const selectedCampaignFromAddress = (fromAddress: string): CampaignFromAddress => {
+  if (
+    fromAddress === "team@inline.chat" ||
+    fromAddress === "founders@inline.chat" ||
+    fromAddress === "mo@inline.chat"
+  ) return fromAddress
+  return "team@inline.chat"
+}
+
+const validateAudience = (audience: EmailCampaignAudience): string | null => {
+  if (audience.sources.length === 0 && audience.manualEmails.length === 0) return "empty_audience"
+  if (audience.manualEmails.length > 500) return "too_many_manual_emails"
+  if (audience.limit !== undefined && (!Number.isInteger(audience.limit) || audience.limit < 1 || audience.limit > 10_000)) {
+    return "invalid_limit"
+  }
+  if (
+    audience.activeWithinDays !== undefined &&
+    (!Number.isInteger(audience.activeWithinDays) || audience.activeWithinDays < 1 || audience.activeWithinDays > 3_650)
+  ) {
+    return "invalid_activity_window"
+  }
+  if (audience.sampleSeed.trim().length === 0 || audience.sampleSeed.length > 160) return "invalid_sample_seed"
+  if (audience.excludeCampaignIds.some((id) => !Number.isSafeInteger(id) || id <= 0)) return "invalid_campaign_exclusion"
+  return null
+}
+
+const emailCampaignsOperation: AdminOperationsShape["emailCampaigns"] =
+  () =>
+    attempt("admin.email-campaigns.list", async () =>
+      jsonResult({ ok: true as const, campaigns: await campaignSummary() }),
+    )
+
+const emailProviderStatusOperation: AdminOperationsShape["emailProviderStatus"] =
+  (input) =>
+    attempt("admin.email-provider-status", async () =>
+      jsonResult({ ok: true as const, providerStatus: await getEmailProviderStatus(input.provider) }),
+    )
+
+const previewEmailCampaignOperation: AdminOperationsShape["previewEmailCampaign"] =
+  (input) =>
+    Effect.gen(function* () {
+      const validationError = validateAudience(input.audience as EmailCampaignAudience)
+      if (validationError) return yield* reject(400, validationError)
+      yield* attempt("admin.email-campaigns.preview.suppressions", () =>
+        syncProviderSuppressions(input.provider),
+      )
+      const preview = yield* attempt("admin.email-campaigns.preview", () =>
+        resolveCampaignAudience(input.audience as EmailCampaignAudience),
+      )
+      const sampleRecipient = preview.recipients[0]
+      const variables = {
+        name: input.previewName?.trim() || sampleRecipient?.name || "there",
+        email: sampleRecipient?.email || "preview@inline.chat",
+      }
+      const rendered = yield* attempt("admin.email-campaigns.preview.render", () =>
+        renderCampaign({
+          subject: input.subject || "Your campaign subject",
+          previewText: input.previewText,
+          bodyText: input.bodyText || "Your **Markdown** campaign will appear here.",
+          variables,
+          unsubscribeUrl: "https://api.inline.chat/email/unsubscribe/preview",
+          visibleUnsubscribe: input.visibleUnsubscribe,
+        }),
+      )
+      return jsonResult({
+        ok: true as const,
+        count: preview.recipients.length,
+        sample: preview.recipients.slice(0, 20).map(({ email, name, sources }) => ({ email, name, sources })),
+        excluded: preview.excluded,
+        rendered: {
+          subject: rendered.subject,
+          html: rendered.html,
+          text: rendered.text,
+          variables,
+        },
+      })
+    })
+
+const createEmailCampaignOperation: AdminOperationsShape["createEmailCampaign"] =
+  (input, session, request) =>
+    Effect.gen(function* () {
+      const name = input.name.trim()
+      const subject = input.subject.trim()
+      const previewText = input.previewText?.trim() || null
+      const bodyText = input.bodyText.trim()
+      const validationError = validateAudience(input.audience as EmailCampaignAudience)
+      if (!name || name.length > 160) return yield* reject(400, "invalid_name")
+      if (!subject || subject.length > 240) return yield* reject(400, "invalid_subject")
+      if (previewText && previewText.length > 240) return yield* reject(400, "invalid_preview_text")
+      if (!bodyText || bodyText.length > 20_000) return yield* reject(400, "invalid_body")
+      const unsubscribeOverrideReason = input.unsubscribeOverrideReason?.trim() || null
+      if (!input.visibleUnsubscribe && (!unsubscribeOverrideReason || unsubscribeOverrideReason.length < 20)) {
+        return yield* reject(400, "unsubscribe_override_reason_required")
+      }
+      if (input.confirmation !== `FREEZE ${name}`) return yield* reject(400, "confirmation_mismatch")
+      if (validationError) return yield* reject(400, validationError)
+
+      yield* attempt("admin.email-campaigns.create.suppressions", () =>
+        syncProviderSuppressions(input.provider, { force: true }),
+      )
+      const preview = yield* attempt("admin.email-campaigns.resolve", () =>
+        resolveCampaignAudience(input.audience as EmailCampaignAudience),
+      )
+      if (preview.recipients.length === 0) return yield* reject(400, "empty_audience")
+
+      const created = yield* attempt("admin.email-campaigns.create", () =>
+        db.transaction(async (tx) => {
+          const campaign = (await tx
+            .insert(emailCampaigns)
+            .values({
+              name,
+              provider: input.provider,
+              fromAddress: input.fromAddress,
+              seriesKey: input.seriesKey?.trim() || null,
+              subject,
+              previewText,
+              bodyText,
+              audience: input.audience,
+              recipientCount: preview.recipients.length,
+              createdByUserId: session.userId,
+              visibleUnsubscribe: input.visibleUnsubscribe,
+              unsubscribeOverrideReason: input.visibleUnsubscribe ? null : unsubscribeOverrideReason,
+            })
+            .returning())[0]
+          if (!campaign) throw new Error("Campaign insert returned no row")
+
+          const recipientValues = preview.recipients.map((recipient) => {
+              const token = createUnsubscribeToken()
+              return {
+                campaignId: campaign.id,
+                emailKey: recipient.emailKey,
+                emailEncrypted: encryptCampaignString(recipient.email),
+                nameEncrypted: recipient.name ? encryptCampaignString(recipient.name) : null,
+                unsubscribeTokenHash: hashUnsubscribeToken(token),
+                unsubscribeTokenEncrypted: encryptCampaignString(token),
+                sources: recipient.sources,
+              }
+            })
+          for (let index = 0; index < recipientValues.length; index += 500) {
+            await tx.insert(emailCampaignRecipients).values(
+              recipientValues.slice(index, index + 500),
+            )
+          }
+          return campaign.id
+        }),
+      )
+      yield* attempt("admin.email-campaigns.create.notify", () =>
+        notifyAdminAction({
+          actionTaken: `Froze email campaign ${created} (${preview.recipients.length} recipients)`,
+          actorEmail: session.email,
+          request,
+        }),
+      )
+      const campaign = (yield* attempt("admin.email-campaigns.created", () => campaignSummary(created)))[0]
+      if (!campaign) return yield* reject(500, "server_error")
+      return jsonResult({ ok: true as const, campaign })
+    })
+
+const testEmailCampaignOperation: AdminOperationsShape["testEmailCampaign"] =
+  (campaignId, input, session, request) =>
+    Effect.gen(function* () {
+      const email = normalizedCampaignEmail(input.email)
+      if (!Number.isSafeInteger(campaignId) || campaignId <= 0) return yield* reject(400, "invalid_campaign")
+      if (!isValidEmail(email)) return yield* reject(400, "invalid_email")
+      const campaign = yield* attempt("admin.email-campaigns.test.lookup", async () =>
+        (await db.select().from(emailCampaigns).where(eq(emailCampaigns.id, campaignId)).limit(1))[0],
+      )
+      if (!campaign) return yield* reject(404, "not_found")
+      const token = createUnsubscribeToken()
+      yield* attempt("admin.email-campaigns.test.deliver", () =>
+        deliverCampaignTestEmail({
+          provider: selectedCampaignProvider(campaign.provider),
+          fromAddress: selectedCampaignFromAddress(campaign.fromAddress),
+          to: email,
+          name: input.name?.trim() || undefined,
+          subject: `[TEST] ${campaign.subject}`,
+          previewText: campaign.previewText ?? undefined,
+          bodyText: campaign.bodyText,
+          unsubscribeToken: token,
+          visibleUnsubscribe: campaign.visibleUnsubscribe,
+        }),
+      )
+      yield* attempt("admin.email-campaigns.test.mark", () =>
+        db.update(emailCampaigns).set({ testSentAt: new Date() }).where(eq(emailCampaigns.id, campaignId)),
+      )
+      yield* attempt("admin.email-campaigns.test.notify", () =>
+        notifyAdminAction({
+          actionTaken: `Tested email campaign ${campaignId}`,
+          actorEmail: session.email,
+          request,
+        }),
+      )
+      return jsonResult({ ok: true as const })
+    })
+
+const sendEmailCampaignOperation: AdminOperationsShape["sendEmailCampaign"] =
+  (campaignId, input, session, request) =>
+    Effect.gen(function* () {
+      if (!Number.isSafeInteger(campaignId) || campaignId <= 0) return yield* reject(400, "invalid_campaign")
+      if (!Number.isInteger(input.batchSize) || input.batchSize < 1 || input.batchSize > 50) {
+        return yield* reject(400, "invalid_batch_size")
+      }
+      const campaign = yield* attempt("admin.email-campaigns.send.lookup", async () =>
+        (await db.select().from(emailCampaigns).where(eq(emailCampaigns.id, campaignId)).limit(1))[0],
+      )
+      if (!campaign) return yield* reject(404, "not_found")
+      if (!campaign.testSentAt) return yield* reject(400, "test_send_required")
+      if (!["frozen", "sending", "paused"].includes(campaign.status)) return yield* reject(400, "campaign_not_sendable")
+      if (input.confirmation !== `SEND ${campaign.name}`) return yield* reject(400, "confirmation_mismatch")
+      yield* attempt("admin.email-campaigns.send.suppressions", () =>
+        syncProviderSuppressions(selectedCampaignProvider(campaign.provider), { force: true }),
+      )
+
+      const claimed = yield* attempt("admin.email-campaigns.send.claim", () =>
+        db.transaction(async (tx) => {
+          await tx
+            .update(emailCampaignRecipients)
+            .set({ status: "suppressed" })
+            .where(and(
+              eq(emailCampaignRecipients.campaignId, campaignId),
+              eq(emailCampaignRecipients.status, "pending"),
+              inArray(
+                emailCampaignRecipients.emailKey,
+                tx.select({ emailKey: emailSuppressions.emailKey }).from(emailSuppressions),
+              ),
+            ))
+          const rows = await tx
+            .select()
+            .from(emailCampaignRecipients)
+            .where(and(
+              eq(emailCampaignRecipients.campaignId, campaignId),
+              eq(emailCampaignRecipients.status, "pending"),
+            ))
+            .orderBy(emailCampaignRecipients.id)
+            .limit(input.batchSize)
+            .for("update", { skipLocked: true })
+          if (rows.length > 0) {
+            await tx
+              .update(emailCampaignRecipients)
+              .set({
+                status: "sending",
+                attemptCount: sql`${emailCampaignRecipients.attemptCount} + 1`,
+                lastAttemptAt: new Date(),
+              })
+              .where(inArray(emailCampaignRecipients.id, rows.map((row) => row.id)))
+            await tx.update(emailCampaigns).set({ status: "sending" }).where(eq(emailCampaigns.id, campaignId))
+          }
+          return rows
+        }),
+      )
+
+      const bulkRecipients = claimed.map((recipient) => ({
+        id: recipient.id,
+        email: decryptCampaignString(recipient.emailEncrypted),
+        name: recipient.nameEncrypted ? decryptCampaignString(recipient.nameEncrypted) : null,
+        unsubscribeToken: decryptCampaignString(recipient.unsubscribeTokenEncrypted),
+      }))
+      let accepted = 0
+      let unknown = 0
+      const provider = selectedCampaignProvider(campaign.provider)
+      let phase = provider === "resend" ? "syncing_contacts" : "sending_bulk"
+
+      if (provider === "ses") {
+        const results = yield* attempt("admin.email-campaigns.send.ses-bulk", async () => {
+          try {
+            return await deliverSesCampaignBatch({
+              fromAddress: selectedCampaignFromAddress(campaign.fromAddress),
+              subject: campaign.subject,
+              previewText: campaign.previewText ?? undefined,
+              bodyText: campaign.bodyText,
+              visibleUnsubscribe: campaign.visibleUnsubscribe,
+              recipients: bulkRecipients,
+            })
+          } catch {
+            if (claimed.length > 0) {
+              await db.update(emailCampaignRecipients).set({
+                status: "unknown",
+                provider: "ses",
+                contactedAt: new Date(),
+              }).where(inArray(emailCampaignRecipients.id, claimed.map(({ id }) => id)))
+            }
+            return bulkRecipients.map(({ id }) => ({ id, accepted: false, messageId: null }))
+          }
+        })
+        for (const result of results) {
+          yield* attempt("admin.email-campaigns.send.ses-result", () =>
+            db.update(emailCampaignRecipients).set({
+              status: result.accepted ? "provider_accepted" : "unknown",
+              provider: "ses",
+              providerMessageId: result.messageId,
+              contactedAt: new Date(),
+            }).where(eq(emailCampaignRecipients.id, result.id)),
+          )
+          if (result.accepted) accepted += 1
+          else unknown += 1
+        }
+      } else {
+        let segmentId = campaign.providerSegmentId
+        if (segmentId === "__creating__") {
+          yield* attempt("admin.email-campaigns.send.resend-release-busy", () =>
+            db.update(emailCampaignRecipients).set({ status: "pending" }).where(
+              inArray(emailCampaignRecipients.id, claimed.map(({ id }) => id)),
+            ),
+          )
+          return yield* reject(400, "campaign_busy")
+        }
+        if (!segmentId) {
+          const claimedSegmentSetup = yield* attempt("admin.email-campaigns.send.resend-segment.claim", async () =>
+            (await db.update(emailCampaigns).set({ providerSegmentId: "__creating__" }).where(and(
+              eq(emailCampaigns.id, campaignId),
+              isNull(emailCampaigns.providerSegmentId),
+            )).returning({ id: emailCampaigns.id }))[0],
+          )
+          if (!claimedSegmentSetup) {
+            yield* attempt("admin.email-campaigns.send.resend-release-race", () =>
+              db.update(emailCampaignRecipients).set({ status: "pending" }).where(
+                inArray(emailCampaignRecipients.id, claimed.map(({ id }) => id)),
+              ),
+            )
+            return yield* reject(400, "campaign_busy")
+          }
+          segmentId = yield* attempt("admin.email-campaigns.send.resend-segment", async () => {
+            try {
+              const createdSegmentId = await createResendCampaignSegment(campaign.name)
+              await db.update(emailCampaigns).set({ providerSegmentId: createdSegmentId }).where(and(
+                eq(emailCampaigns.id, campaignId),
+                eq(emailCampaigns.providerSegmentId, "__creating__"),
+              ))
+              return createdSegmentId
+            } catch (error) {
+              await db.update(emailCampaigns).set({ providerSegmentId: null }).where(and(
+                eq(emailCampaigns.id, campaignId),
+                eq(emailCampaigns.providerSegmentId, "__creating__"),
+              ))
+              await db.update(emailCampaignRecipients).set({ status: "pending" }).where(
+                inArray(emailCampaignRecipients.id, claimed.map(({ id }) => id)),
+              )
+              throw error
+            }
+          })
+        }
+        const results = yield* attempt("admin.email-campaigns.send.resend-sync", () =>
+          syncResendCampaignRecipients(bulkRecipients, segmentId),
+        )
+        for (const result of results) {
+          yield* attempt("admin.email-campaigns.send.resend-sync-result", () =>
+            db.update(emailCampaignRecipients).set({
+              status: result.accepted ? "provider_synced" : "pending",
+              provider: result.accepted ? "resend" : null,
+            }).where(eq(emailCampaignRecipients.id, result.id)),
+          )
+          if (result.accepted) accepted += 1
+        }
+      }
+
+      const progressRows = yield* attempt("admin.email-campaigns.send.progress", () =>
+        db.select({
+          pending: sql<number>`count(*) filter (where ${emailCampaignRecipients.status} = 'pending')::int`,
+          sending: sql<number>`count(*) filter (where ${emailCampaignRecipients.status} = 'sending')::int`,
+          synced: sql<number>`count(*) filter (where ${emailCampaignRecipients.status} = 'provider_synced')::int`,
+        }).from(emailCampaignRecipients).where(
+          eq(emailCampaignRecipients.campaignId, campaignId),
+        ),
+      )
+      const pending = progressRows[0]?.pending ?? 0
+      const sending = progressRows[0]?.sending ?? 0
+      const latestCampaign = yield* attempt("admin.email-campaigns.send.latest-status", async () =>
+        (await db.select({ status: emailCampaigns.status }).from(emailCampaigns).where(eq(emailCampaigns.id, campaignId)).limit(1))[0],
+      )
+      let status = pending + sending === 0 && provider === "ses"
+        ? "completed"
+        : latestCampaign?.status === "paused"
+          ? "paused"
+          : "sending"
+
+      if (
+        provider === "resend" &&
+        pending + sending === 0 &&
+        latestCampaign?.status !== "paused"
+      ) {
+        const currentBeforeSuppression = yield* attempt("admin.email-campaigns.send.resend-current-before-suppression", async () =>
+          (await db.select().from(emailCampaigns).where(eq(emailCampaigns.id, campaignId)).limit(1))[0],
+        )
+        const newlySuppressed = yield* attempt("admin.email-campaigns.send.resend-late-suppressions", async () => {
+          const rows = await db.select().from(emailCampaignRecipients).where(and(
+            eq(emailCampaignRecipients.campaignId, campaignId),
+            eq(emailCampaignRecipients.status, "provider_synced"),
+            inArray(
+              emailCampaignRecipients.emailKey,
+              db.select({ emailKey: emailSuppressions.emailKey }).from(emailSuppressions),
+            ),
+          ))
+          return rows
+        })
+        const suppressionSegmentId = currentBeforeSuppression?.providerSegmentId
+        if (newlySuppressed.length > 0 && suppressionSegmentId) {
+          yield* attempt("admin.email-campaigns.send.resend-remove-suppressed", () =>
+            removeResendCampaignRecipients(newlySuppressed.map((recipient) => ({
+              id: recipient.id,
+              email: decryptCampaignString(recipient.emailEncrypted),
+              name: recipient.nameEncrypted ? decryptCampaignString(recipient.nameEncrypted) : null,
+              unsubscribeToken: decryptCampaignString(recipient.unsubscribeTokenEncrypted),
+            })), suppressionSegmentId),
+          )
+          yield* attempt("admin.email-campaigns.send.resend-mark-suppressed", () =>
+            db.update(emailCampaignRecipients).set({ status: "suppressed" }).where(
+              inArray(emailCampaignRecipients.id, newlySuppressed.map(({ id }) => id)),
+            ),
+          )
+        }
+
+        const current = yield* attempt("admin.email-campaigns.send.resend-current", async () =>
+          (await db.select().from(emailCampaigns).where(eq(emailCampaigns.id, campaignId)).limit(1))[0],
+        )
+        if (current?.status !== "paused" && current?.providerSegmentId) {
+          let providerCampaignState = current.providerCampaignId
+          if (providerCampaignState === "__creating__" || providerCampaignState?.startsWith("sending:")) {
+            return yield* reject(400, "campaign_busy")
+          }
+          if (!providerCampaignState) {
+            const claimedBroadcastSetup = yield* attempt("admin.email-campaigns.send.resend-broadcast.claim-create", async () =>
+              (await db.update(emailCampaigns).set({ providerCampaignId: "__creating__" }).where(and(
+                eq(emailCampaigns.id, campaignId),
+                isNull(emailCampaigns.providerCampaignId),
+              )).returning({ id: emailCampaigns.id }))[0],
+            )
+            if (!claimedBroadcastSetup) return yield* reject(400, "campaign_busy")
+            providerCampaignState = yield* attempt("admin.email-campaigns.send.resend-broadcast.create", async () => {
+              try {
+                const createdBroadcastId = await createResendBroadcast({
+                  campaignName: current.name,
+                  fromAddress: selectedCampaignFromAddress(current.fromAddress),
+                  segmentId: current.providerSegmentId!,
+                  subject: current.subject,
+                  previewText: current.previewText ?? undefined,
+                  bodyText: current.bodyText,
+                  visibleUnsubscribe: current.visibleUnsubscribe,
+                })
+                const draftState = `draft:${createdBroadcastId}`
+                await db.update(emailCampaigns).set({ providerCampaignId: draftState }).where(and(
+                  eq(emailCampaigns.id, campaignId),
+                  eq(emailCampaigns.providerCampaignId, "__creating__"),
+                ))
+                return draftState
+              } catch (error) {
+                await db.update(emailCampaigns).set({ providerCampaignId: null }).where(and(
+                  eq(emailCampaigns.id, campaignId),
+                  eq(emailCampaigns.providerCampaignId, "__creating__"),
+                ))
+                throw error
+              }
+            })
+          }
+          const broadcastId = providerCampaignState.replace(/^(draft|sent):/, "")
+          if (!providerCampaignState.startsWith("sent:")) {
+            const sendingState = `sending:${broadcastId}`
+            const claimedBroadcastSend = yield* attempt("admin.email-campaigns.send.resend-broadcast.claim-send", async () =>
+              (await db.update(emailCampaigns).set({ providerCampaignId: sendingState }).where(and(
+                eq(emailCampaigns.id, campaignId),
+                eq(emailCampaigns.providerCampaignId, providerCampaignState),
+              )).returning({ id: emailCampaigns.id }))[0],
+            )
+            if (!claimedBroadcastSend) return yield* reject(400, "campaign_busy")
+            yield* attempt("admin.email-campaigns.send.resend-broadcast.send", async () => {
+              try {
+                await sendResendBroadcast(broadcastId)
+                await db.update(emailCampaigns).set({ providerCampaignId: `sent:${broadcastId}` }).where(and(
+                  eq(emailCampaigns.id, campaignId),
+                  eq(emailCampaigns.providerCampaignId, sendingState),
+                ))
+              } catch (error) {
+                await db.update(emailCampaigns).set({ providerCampaignId: `draft:${broadcastId}` }).where(and(
+                  eq(emailCampaigns.id, campaignId),
+                  eq(emailCampaigns.providerCampaignId, sendingState),
+                ))
+                throw error
+              }
+            })
+          }
+          yield* attempt("admin.email-campaigns.send.resend-broadcast.accepted", () =>
+            db.update(emailCampaignRecipients).set({
+              status: "provider_accepted",
+              provider: "resend",
+              providerMessageId: broadcastId,
+              contactedAt: new Date(),
+            }).where(and(
+              eq(emailCampaignRecipients.campaignId, campaignId),
+              eq(emailCampaignRecipients.status, "provider_synced"),
+            )),
+          )
+          status = "completed"
+          phase = "broadcast_sent"
+        } else {
+          status = "paused"
+          phase = "ready_to_broadcast"
+        }
+      }
+      yield* attempt("admin.email-campaigns.send.finish", () =>
+        db.update(emailCampaigns).set({
+          status,
+          completedAt: status === "completed" ? new Date() : null,
+        }).where(eq(emailCampaigns.id, campaignId)),
+      )
+      yield* attempt("admin.email-campaigns.send.notify", () =>
+        notifyAdminAction({
+          actionTaken: `Sent email campaign ${campaignId} batch (${claimed.length} attempted)`,
+          actorEmail: session.email,
+          request,
+        }),
+      )
+      return jsonResult({
+        ok: true as const,
+        attempted: claimed.length,
+        accepted,
+        unknown,
+        pending,
+        status,
+        phase,
+      })
+    })
+
+const pauseEmailCampaignOperation: AdminOperationsShape["pauseEmailCampaign"] =
+  (campaignId, session, request) =>
+    Effect.gen(function* () {
+      if (!Number.isSafeInteger(campaignId) || campaignId <= 0) return yield* reject(400, "invalid_campaign")
+      const updated = yield* attempt("admin.email-campaigns.pause", async () =>
+        (await db.update(emailCampaigns).set({ status: "paused" }).where(and(
+          eq(emailCampaigns.id, campaignId),
+          inArray(emailCampaigns.status, ["frozen", "sending"]),
+        )).returning({ id: emailCampaigns.id }))[0],
+      )
+      if (!updated) return yield* reject(404, "not_found")
+      yield* attempt("admin.email-campaigns.pause.notify", () =>
+        notifyAdminAction({
+          actionTaken: `Paused email campaign ${campaignId}`,
+          actorEmail: session.email,
+          request,
+        }),
+      )
+      return jsonResult({ ok: true as const })
     })
 
 const spacesOperation: AdminOperationsShape["spaces"] =
@@ -709,6 +1330,13 @@ const validateCount = (
 export const makeAdminManagementOperations =
   (): AdminManagementOperations => ({
     waitlist: waitlistOperation,
+    emailCampaigns: emailCampaignsOperation,
+    emailProviderStatus: emailProviderStatusOperation,
+    previewEmailCampaign: previewEmailCampaignOperation,
+    createEmailCampaign: createEmailCampaignOperation,
+    testEmailCampaign: testEmailCampaignOperation,
+    sendEmailCampaign: sendEmailCampaignOperation,
+    pauseEmailCampaign: pauseEmailCampaignOperation,
     spaces: spacesOperation,
     users: usersOperation,
     avatar: avatarOperation,

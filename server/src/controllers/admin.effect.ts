@@ -79,6 +79,16 @@ import {
   AdminActiveUsersResult,
   AdminAppMetricsResult,
   AdminAvatarBody,
+  AdminCreateEmailCampaignInput,
+  AdminEmailCampaignPreviewInput,
+  AdminEmailCampaignPreviewResult,
+  AdminEmailCampaignResult,
+  AdminEmailCampaignSendInput,
+  AdminEmailCampaignSendResult,
+  AdminEmailCampaignsResult,
+  AdminEmailCampaignTestInput,
+  AdminEmailProviderStatusResult,
+  AdminEmailProviderStatusQuery,
   AdminInviteCodesResult,
   AdminInviteCountInput,
   AdminInvitesQuery,
@@ -284,6 +294,21 @@ const sendEmailCodeEndpoint = publicEndpoint(
   ),
 )
 
+const devLoginEndpoint = publicEndpoint(
+  HttpApiEndpoint.post(
+    "adminDevLogin",
+    "/admin/auth/dev-login",
+    {
+      success: AdminSuccess,
+      error: AdminLoginForbidden,
+    },
+  ).annotateMerge(
+    adminCookieResponseDocs(
+      "Creates a local development-only admin session cookie.",
+    ),
+  ),
+)
+
 const verifyEmailCodeEndpoint = publicEndpoint(
   HttpApiEndpoint.post(
     "adminVerifyEmailCode",
@@ -471,6 +496,87 @@ const waitlistEndpoint = setupEndpoint(
   ),
 )
 
+const emailCampaignsEndpoint = setupEndpoint(
+  HttpApiEndpoint.get(
+    "adminEmailCampaigns",
+    "/admin/email-campaigns",
+    {
+      success: AdminEmailCampaignsResult,
+    },
+  ),
+)
+
+const emailProviderStatusEndpoint = setupEndpoint(
+  HttpApiEndpoint.get(
+    "adminEmailProviderStatus",
+    "/admin/email-provider-status",
+    {
+      payload: AdminEmailProviderStatusQuery.fields,
+      success: AdminEmailProviderStatusResult,
+      error: AdminValidationError,
+    },
+  ),
+)
+
+const previewEmailCampaignEndpoint = setupEndpoint(
+  HttpApiEndpoint.post(
+    "adminPreviewEmailCampaign",
+    "/admin/email-campaigns/preview",
+    {
+      payload: AdminEmailCampaignPreviewInput,
+      success: AdminEmailCampaignPreviewResult,
+      error: [AdminTransportBadRequest, AdminValidationError],
+    },
+  ),
+)
+
+const createEmailCampaignEndpoint = stepUpEndpoint(
+  HttpApiEndpoint.post(
+    "adminCreateEmailCampaign",
+    "/admin/email-campaigns",
+    {
+      payload: AdminCreateEmailCampaignInput,
+      success: AdminEmailCampaignResult,
+      error: [AdminTransportBadRequest, AdminValidationError],
+    },
+  ),
+)
+
+const testEmailCampaignEndpoint = stepUpEndpoint(
+  HttpApiEndpoint.post(
+    "adminTestEmailCampaign",
+    "/admin/email-campaigns/:id/test",
+    {
+      payload: AdminEmailCampaignTestInput,
+      success: AdminSuccess,
+      error: [AdminTransportBadRequest, AdminValidationError, AdminNotFound],
+    },
+  ),
+)
+
+const sendEmailCampaignEndpoint = stepUpEndpoint(
+  HttpApiEndpoint.post(
+    "adminSendEmailCampaign",
+    "/admin/email-campaigns/:id/send",
+    {
+      payload: AdminEmailCampaignSendInput,
+      success: AdminEmailCampaignSendResult,
+      error: [AdminTransportBadRequest, AdminValidationError, AdminNotFound],
+    },
+  ),
+)
+
+const pauseEmailCampaignEndpoint = stepUpEndpoint(
+  HttpApiEndpoint.post(
+    "adminPauseEmailCampaign",
+    "/admin/email-campaigns/:id/pause",
+    {
+      success: AdminSuccess,
+      error: [AdminTransportBadRequest, AdminNotFound],
+    },
+  ),
+)
+
 const spacesEndpoint = setupEndpoint(
   HttpApiEndpoint.get(
     "adminSpaces",
@@ -608,6 +714,7 @@ const updateUserEndpoint = stepUpEndpoint(
 export const AdminApiGroup = HttpApiGroup.make(
   "admin",
 ).add(
+  devLoginEndpoint,
   sendEmailCodeEndpoint,
   verifyEmailCodeEndpoint,
   loginEndpoint,
@@ -622,6 +729,13 @@ export const AdminApiGroup = HttpApiGroup.make(
   overviewMetricsEndpoint,
   activeUsersEndpoint,
   waitlistEndpoint,
+  emailCampaignsEndpoint,
+  emailProviderStatusEndpoint,
+  previewEmailCampaignEndpoint,
+  createEmailCampaignEndpoint,
+  testEmailCampaignEndpoint,
+  sendEmailCampaignEndpoint,
+  pauseEmailCampaignEndpoint,
   spacesEndpoint,
   usersEndpoint,
   userAvatarEndpoint,
@@ -659,6 +773,21 @@ export const makeAdminRouteGroup = () => {
         ) => Effect.provide(effect, services)
 
         return groupHandlers
+          .handleRaw(
+            "adminDevLogin",
+            ({ request }) =>
+              run(
+                complete(
+                  "admin.auth.dev-login",
+                  AdminSuccess,
+                  infoOnly(request).pipe(
+                    Effect.flatMap((info) =>
+                      operations.devLogin(info),
+                    ),
+                  ),
+                ),
+              ),
+          )
           .handleRaw(
             "adminSendEmailCode",
             ({ request }) =>
@@ -914,6 +1043,142 @@ export const makeAdminRouteGroup = () => {
                         operations.waitlist(
                           input,
                           session,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          )
+          .handleRaw(
+            "adminEmailCampaigns",
+            () =>
+              run(
+                complete(
+                  "admin.email-campaigns.list",
+                  AdminEmailCampaignsResult,
+                  withSession((session) =>
+                    operations.emailCampaigns(session),
+                  ),
+                ),
+              ),
+          )
+          .handleRaw(
+            "adminEmailProviderStatus",
+            ({ request }) =>
+              run(
+                complete(
+                  "admin.email-provider-status",
+                  AdminEmailProviderStatusResult,
+                  decodeQuery(request, AdminEmailProviderStatusQuery).pipe(
+                    Effect.flatMap(({ input }) =>
+                      withSession((session) =>
+                        operations.emailProviderStatus(input, session),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          )
+          .handleRaw(
+            "adminPreviewEmailCampaign",
+            ({ request }) =>
+              run(
+                complete(
+                  "admin.email-campaigns.preview",
+                  AdminEmailCampaignPreviewResult,
+                  decodeBody(request, AdminEmailCampaignPreviewInput).pipe(
+                    Effect.flatMap(({ input }) =>
+                      withSession((session) =>
+                        operations.previewEmailCampaign(input, session),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          )
+          .handleRaw(
+            "adminCreateEmailCampaign",
+            ({ request }) =>
+              run(
+                complete(
+                  "admin.email-campaigns.create",
+                  AdminEmailCampaignResult,
+                  decodeBody(request, AdminCreateEmailCampaignInput).pipe(
+                    Effect.flatMap(({ input, info }) =>
+                      withSession((session) =>
+                        operations.createEmailCampaign(input, session, info),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          )
+          .handleRaw(
+            "adminTestEmailCampaign",
+            ({ request }) =>
+              run(
+                complete(
+                  "admin.email-campaigns.test",
+                  AdminSuccess,
+                  decodeBody(request, AdminEmailCampaignTestInput).pipe(
+                    Effect.flatMap(({ input, info }) =>
+                      withSession((session) =>
+                        decodePathParam(request, 2, AdminUserIdParam, {
+                          status: 400,
+                          error: "invalid_campaign",
+                        }).pipe(
+                          Effect.flatMap((campaignId) =>
+                            operations.testEmailCampaign(campaignId, input, session, info),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          )
+          .handleRaw(
+            "adminSendEmailCampaign",
+            ({ request }) =>
+              run(
+                complete(
+                  "admin.email-campaigns.send",
+                  AdminEmailCampaignSendResult,
+                  decodeBody(request, AdminEmailCampaignSendInput).pipe(
+                    Effect.flatMap(({ input, info }) =>
+                      withSession((session) =>
+                        decodePathParam(request, 2, AdminUserIdParam, {
+                          status: 400,
+                          error: "invalid_campaign",
+                        }).pipe(
+                          Effect.flatMap((campaignId) =>
+                            operations.sendEmailCampaign(campaignId, input, session, info),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          )
+          .handleRaw(
+            "adminPauseEmailCampaign",
+            ({ request }) =>
+              run(
+                complete(
+                  "admin.email-campaigns.pause",
+                  AdminSuccess,
+                  infoOnly(request).pipe(
+                    Effect.flatMap((info) =>
+                      withSession((session) =>
+                        decodePathParam(request, 2, AdminUserIdParam, {
+                          status: 400,
+                          error: "invalid_campaign",
+                        }).pipe(
+                          Effect.flatMap((campaignId) =>
+                            operations.pauseEmailCampaign(campaignId, session, info),
+                          ),
                         ),
                       ),
                     ),

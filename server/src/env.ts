@@ -62,6 +62,9 @@ const ENCRYPTION_KEY_HEX_RE = /^[a-fA-F0-9]{64}$/
 // REQUIRED FOR PROD
 export const AMAZON_ACCESS_KEY = process.env["AMAZON_ACCESS_KEY"] as string
 export const AMAZON_SECRET_ACCESS_KEY = process.env["AMAZON_SECRET_ACCESS_KEY"] as string
+export const SES_ACCESS_KEY_ID = process.env["SES_ACCESS_KEY_ID"] as string
+export const SES_SECRET_ACCESS_KEY = process.env["SES_SECRET_ACCESS_KEY"] as string
+export const SES_REGION = process.env["SES_REGION"] ?? "eu-central-1"
 export const TWILIO_AUTH_TOKEN = process.env["TWILIO_AUTH_TOKEN"] as string
 export const TWILIO_SID = process.env["TWILIO_SID"] as string
 export const TWILIO_VERIFY_SERVICE_SID = process.env["TWILIO_VERIFY_SERVICE_SID"] as string
@@ -119,6 +122,8 @@ const requiredProductionVariables = [
   "ENCRYPTION_KEY",
   "AMAZON_ACCESS_KEY",
   "AMAZON_SECRET_ACCESS_KEY",
+  "SES_ACCESS_KEY_ID",
+  "SES_SECRET_ACCESS_KEY",
   "TWILIO_SID",
   "TWILIO_VERIFY_SERVICE_SID",
   "SENTRY_DSN",

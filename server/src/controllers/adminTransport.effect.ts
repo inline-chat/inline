@@ -117,6 +117,7 @@ const requestInfo = (
         context.clientIp === UNRESOLVED_CLIENT_IP
           ? undefined
           : context.clientIp,
+      origin: request.headers["origin"],
       userAgent:
         request.headers["user-agent"] ?? "",
       publicOrigin: new URL(webRequest.url).origin,

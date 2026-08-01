@@ -37,6 +37,9 @@ import {
   WaitlistOperations,
 } from "./extra/waitlist.effect"
 import {
+  EmailUnsubscribeOperations,
+} from "./extra/emailUnsubscribe.effect"
+import {
   HealthOperationFailure,
   HealthOperations,
 } from "./health.effect"
@@ -95,6 +98,8 @@ interface Probe {
   secureCookies: boolean
   thereFailure: boolean
   waitlistFailure: boolean
+  unsubscribeFound: boolean
+  unsubscribeSuppressed: boolean
 }
 
 const healthy = (): HealthHttpResponse => ({
@@ -146,6 +151,8 @@ const makeProbe = (): Probe => ({
   secureCookies: false,
   thereFailure: false,
   waitlistFailure: false,
+  unsubscribeFound: false,
+  unsubscribeSuppressed: false,
 })
 
 const mediaSuccess = () =>
@@ -209,6 +216,16 @@ const makeHandler = (
             )
           : Effect.void
       },
+    }),
+    Layer.succeed(EmailUnsubscribeOperations, {
+      lookup: () => Effect.succeed(
+        probe.unsubscribeFound
+          ? { emailKey: "contact-key", emailEncrypted: Buffer.from("encrypted") }
+          : null,
+      ),
+      suppress: () => Effect.sync(() => {
+        probe.unsubscribeSuppressed = true
+      }),
     }),
     Layer.succeed(ThereOperations, {
       signup: () => {
@@ -386,6 +403,7 @@ describe("AuxiliaryRouteGroup", () => {
     expect(Object.keys(spec.paths).sort()).toEqual([
       "/",
       "/api/there/signup",
+      "/email/unsubscribe/{token}",
       "/file",
       "/health",
       "/healthz",
@@ -518,6 +536,28 @@ describe("AuxiliaryRouteGroup", () => {
       )
       expect(wrongWaitlistMethod.status).toBe(404)
     })
+  })
+
+  it("requires confirmation before applying an email suppression", async () => {
+    const probe = makeProbe()
+    probe.unsubscribeFound = true
+    const token = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUV"
+
+    await withHandler(async ({ handler }) => {
+      const confirmation = await handler(
+        new Request(`http://inline.test/email/unsubscribe/${token}`),
+      )
+      expect(confirmation.status).toBe(200)
+      expect(await confirmation.text()).toContain("Stop receiving campaign emails")
+      expect(probe.unsubscribeSuppressed).toBe(false)
+
+      const submitted = await handler(
+        new Request(`http://inline.test/email/unsubscribe/${token}`, { method: "POST" }),
+      )
+      expect(submitted.status).toBe(200)
+      expect(await submitted.text()).toContain("You are unsubscribed")
+      expect(probe.unsubscribeSuppressed).toBe(true)
+    }, probe)
   })
 
   it("preserves degraded and shutdown health responses", async () => {

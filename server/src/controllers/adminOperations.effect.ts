@@ -6,6 +6,11 @@ import {
 } from "effect"
 import type {
   AdminActiveUsersQuery,
+  AdminCreateEmailCampaignInput,
+  AdminEmailCampaignPreviewInput,
+  AdminEmailProviderStatusQuery,
+  AdminEmailCampaignSendInput,
+  AdminEmailCampaignTestInput,
   AdminInviteCountInput,
   AdminInvitesQuery,
   AdminLoginInput,
@@ -30,6 +35,7 @@ import type {
 
 export interface AdminRequestInfo {
   readonly ip: string | undefined
+  readonly origin: string | undefined
   readonly userAgent: string
   readonly publicOrigin: string
   readonly sessionToken: string | undefined
@@ -86,6 +92,9 @@ type AdminOperation = Effect.Effect<
 >
 
 export interface AdminOperationsShape {
+  readonly devLogin: (
+    request: AdminRequestInfo,
+  ) => AdminOperation
   readonly sendEmailCode: (
     input: BodyOf<typeof AdminSendEmailCodeInput>,
     request: AdminRequestInfo,
@@ -138,6 +147,39 @@ export interface AdminOperationsShape {
   readonly waitlist: (
     query: BodyOf<typeof AdminSearchQuery>,
     session: AdminSessionValue,
+  ) => AdminOperation
+  readonly emailCampaigns: (
+    session: AdminSessionValue,
+  ) => AdminOperation
+  readonly emailProviderStatus: (
+    input: BodyOf<typeof AdminEmailProviderStatusQuery>,
+    session: AdminSessionValue,
+  ) => AdminOperation
+  readonly previewEmailCampaign: (
+    input: BodyOf<typeof AdminEmailCampaignPreviewInput>,
+    session: AdminSessionValue,
+  ) => AdminOperation
+  readonly createEmailCampaign: (
+    input: BodyOf<typeof AdminCreateEmailCampaignInput>,
+    session: AdminSessionValue,
+    request: AdminRequestInfo,
+  ) => AdminOperation
+  readonly testEmailCampaign: (
+    campaignId: number,
+    input: BodyOf<typeof AdminEmailCampaignTestInput>,
+    session: AdminSessionValue,
+    request: AdminRequestInfo,
+  ) => AdminOperation
+  readonly sendEmailCampaign: (
+    campaignId: number,
+    input: BodyOf<typeof AdminEmailCampaignSendInput>,
+    session: AdminSessionValue,
+    request: AdminRequestInfo,
+  ) => AdminOperation
+  readonly pauseEmailCampaign: (
+    campaignId: number,
+    session: AdminSessionValue,
+    request: AdminRequestInfo,
   ) => AdminOperation
   readonly spaces: (
     query: BodyOf<typeof AdminSearchQuery>,

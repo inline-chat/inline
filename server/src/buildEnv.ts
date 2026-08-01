@@ -36,8 +36,11 @@ declare global {
       GIT_COMMIT_SHA?: string
       BUILD_DATE?: string
       DATABASE_URL: string
-      AMAZON_ACCESS_KEY: string
-      AMAZON_SECRET_ACCESS_KEY: string
+      SES_ACCESS_KEY_ID?: string
+      SES_SECRET_ACCESS_KEY?: string
+      SES_REGION?: string
+      AMAZON_ACCESS_KEY?: string
+      AMAZON_SECRET_ACCESS_KEY?: string
       TWILIO_AUTH_TOKEN?: string
       TWILIO_SID: string
       TWILIO_VERIFY_SERVICE_SID: string

@@ -1,12 +1,12 @@
 import { SESv2Client, SendEmailCommand, type SendEmailCommandInput } from "@aws-sdk/client-sesv2"
-import { AMAZON_ACCESS_KEY, AMAZON_SECRET_ACCESS_KEY } from "@in/server/env"
+import { SES_ACCESS_KEY_ID, SES_REGION, SES_SECRET_ACCESS_KEY } from "@in/server/env"
 
 export const sesClient = new SESv2Client({
   credentials: {
-    accessKeyId: AMAZON_ACCESS_KEY,
-    secretAccessKey: AMAZON_SECRET_ACCESS_KEY,
+    accessKeyId: SES_ACCESS_KEY_ID,
+    secretAccessKey: SES_SECRET_ACCESS_KEY,
   },
-  region: "us-east-1",
+  region: SES_REGION,
 })
 
 type SendEmailContent = {

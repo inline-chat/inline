@@ -102,6 +102,7 @@ const makeOperations = (
   }
 
   return {
+    devLogin: () => called("devLogin"),
     sendEmailCode: () => called("sendEmailCode"),
     verifyEmailCode: () =>
       called("verifyEmailCode"),
@@ -150,6 +151,19 @@ const makeOperations = (
         },
       })
     },
+    emailCampaigns: () => {
+      probe.calls.push("emailCampaigns")
+      return Effect.succeed({
+        kind: "json",
+        body: { ok: true, campaigns: [] },
+      })
+    },
+    emailProviderStatus: () => called("emailProviderStatus"),
+    previewEmailCampaign: () => called("previewEmailCampaign"),
+    createEmailCampaign: () => called("createEmailCampaign"),
+    testEmailCampaign: () => called("testEmailCampaign"),
+    sendEmailCampaign: () => called("sendEmailCampaign"),
+    pauseEmailCampaign: () => called("pauseEmailCampaign"),
     spaces: () => called("spaces"),
     users: () => called("users"),
     avatar: () => called("avatar"),
@@ -343,6 +357,8 @@ describe("AdminRouteGroup", () => {
     expect(routes).toEqual(
       [
         "GET /admin/auth/totp/setup",
+        "GET /admin/email-campaigns",
+        "GET /admin/email-provider-status",
         "GET /admin/invites",
         "GET /admin/me",
         "GET /admin/metrics/active-users",
@@ -355,12 +371,18 @@ describe("AdminRouteGroup", () => {
         "GET /admin/users/{id}/avatar",
         "GET /admin/waitlist",
         "POST /admin/auth/login",
+        "POST /admin/auth/dev-login",
         "POST /admin/auth/logout",
         "POST /admin/auth/send-email-code",
         "POST /admin/auth/set-password",
         "POST /admin/auth/step-up",
         "POST /admin/auth/totp/verify",
         "POST /admin/auth/verify-email-code",
+        "POST /admin/email-campaigns",
+        "POST /admin/email-campaigns/preview",
+        "POST /admin/email-campaigns/{id}/pause",
+        "POST /admin/email-campaigns/{id}/send",
+        "POST /admin/email-campaigns/{id}/test",
         "POST /admin/invites/generate",
         "POST /admin/users/{id}/invites",
         "POST /admin/users/{id}/sessions/{sessionId}/revoke",
@@ -714,6 +736,15 @@ describe("AdminRouteGroup", () => {
           entries: [],
         })
 
+        const campaigns = await handler(
+          adminRequest("/admin/email-campaigns"),
+        )
+        expect(campaigns.status).toBe(200)
+        expect(await campaigns.json()).toEqual({
+          ok: true,
+          campaigns: [],
+        })
+
         const generated = await handler(
           adminRequest("/admin/invites/generate", {
             method: "POST",
@@ -731,6 +762,7 @@ describe("AdminRouteGroup", () => {
         expect(probe.calls).toEqual([
           "me",
           "waitlist",
+          "emailCampaigns",
           "generateInvites",
         ])
       },

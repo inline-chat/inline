@@ -1,0 +1,2 @@
+ALTER TABLE "email_campaigns" ADD COLUMN "from_address" varchar(160) DEFAULT 'team@inline.chat' NOT NULL;--> statement-breakpoint
+ALTER TABLE "email_campaigns" ADD CONSTRAINT "email_campaigns_from_address_check" CHECK ("email_campaigns"."from_address" in ('team@inline.chat', 'founders@inline.chat', 'mo@inline.chat'));

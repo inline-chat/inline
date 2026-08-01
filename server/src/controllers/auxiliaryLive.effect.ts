@@ -21,6 +21,9 @@ import {
   WaitlistOperationsLive,
 } from "./extra/waitlistLive.effect"
 import {
+  EmailUnsubscribeOperationsLive,
+} from "./extra/emailUnsubscribeLive.effect"
+import {
   AuxiliaryRouteGroup,
 } from "./auxiliary.effect"
 
@@ -32,6 +35,7 @@ const AuxiliaryOperationsLive = Layer.mergeAll(
   SessionAuthenticationLive,
   ThereOperationsLive,
   WaitlistOperationsLive,
+  EmailUnsubscribeOperationsLive,
 )
 
 export const AuxiliaryRouteGroupLive =

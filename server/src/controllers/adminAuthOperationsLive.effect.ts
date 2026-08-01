@@ -70,6 +70,10 @@ import {
   type AdminEmailChallengeVerifier,
   verifyAdminEmailChallenge,
 } from "./adminEmailChallenge.effect"
+import {
+  DEV_ADMIN_EMAIL,
+  isDevAdminLoginAllowed,
+} from "./adminDevAuth.effect"
 
 const ADMIN_LOGIN_MAX_ATTEMPTS = 5
 const ADMIN_LOGIN_LOCK_MS = 1000 * 60 * 15
@@ -77,8 +81,42 @@ const ADMIN_LOGIN_RESET_MS = 1000 * 60 * 60 * 24
 const ADMIN_LOGIN_IP_MAX_ATTEMPTS = 30
 const ADMIN_LOGIN_IP_WINDOW_MS = 1000 * 60 * 15
 const ADMIN_LOGIN_IP_MAX_KEYS = 10_000
+const provisionDevAdmin = async () =>
+  db.transaction(async (tx) => {
+    const user = (await tx
+      .insert(users)
+      .values({
+        email: DEV_ADMIN_EMAIL,
+        emailVerified: true,
+        firstName: "Local",
+        lastName: "Admin",
+        pendingSetup: false,
+      })
+      .onConflictDoUpdate({
+        target: users.email,
+        set: {
+          emailVerified: true,
+          firstName: "Local",
+          lastName: "Admin",
+          pendingSetup: false,
+          deleted: false,
+        },
+      })
+      .returning())[0]
+    if (!user) throw new Error("Local development admin user was not provisioned")
+
+    await tx
+      .insert(superadminUsers)
+      .values({ email: DEV_ADMIN_EMAIL, userId: user.id })
+      .onConflictDoUpdate({
+        target: superadminUsers.email,
+        set: { userId: user.id, disabledAt: null },
+      })
+    return user
+  })
 
 type AuthOperationName =
+  | "devLogin"
   | "sendEmailCode"
   | "verifyEmailCode"
   | "login"
@@ -140,6 +178,47 @@ export const makeAdminAuthOperations =
     const emailChallengeVerifier =
       adapters.verifyEmailChallenge ??
       verifyEmailLoginChallenge
+
+    const devLogin: AdminOperationsShape["devLogin"] =
+      (request) =>
+        Effect.gen(function* () {
+          if (!isDevAdminLoginAllowed({
+            nodeEnv: process.env.NODE_ENV,
+            origin: request.origin,
+            ip: request.ip,
+          })) {
+            return yield* reject(403, "dev_login_unavailable")
+          }
+
+          const existing = yield* sessionStore.lookup(
+            request.sessionToken,
+            request.userAgent,
+          ).pipe(
+            Effect.mapError((failure) => new AdminOperationFailure({
+              operation: "admin.auth.dev-login.session",
+              cause: failure.cause,
+            })),
+          )
+          if (existing !== null) return jsonResult({ ok: true as const })
+
+          const user = yield* attempt(
+            "admin.auth.dev-login.provision",
+            provisionDevAdmin,
+          )
+          const token = yield* attempt(
+            "admin.auth.dev-login.session.create",
+            () => createAdminSession({
+              userId: user.id,
+              ip: request.ip,
+              userAgent: request.userAgent,
+              stepUpAt: new Date(),
+            }),
+          )
+          return jsonResult(
+            { ok: true as const },
+            adminSessionCookie(token),
+          )
+        })
 
     const sendEmailCode: AdminOperationsShape["sendEmailCode"] =
       (input, request) =>
@@ -920,6 +999,7 @@ export const makeAdminAuthOperations =
       )
 
     return {
+      devLogin,
       sendEmailCode,
       verifyEmailCode,
       login,

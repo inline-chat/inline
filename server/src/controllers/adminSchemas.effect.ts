@@ -328,6 +328,200 @@ export const AdminWaitlistResult = Schema.Struct({
   identifier: "AdminWaitlistResult",
 })
 
+export const AdminEmailCampaignAudience = Schema.Struct({
+  sources: Schema.Array(Schema.Literals(["inline", "waitlist"])),
+  verifiedOnly: Schema.Boolean,
+  platforms: Schema.Array(
+    Schema.Literals([
+      "ios",
+      "macos",
+      "web",
+      "api",
+      "android",
+      "windows",
+      "linux",
+      "cli",
+    ]),
+  ),
+  activeWithinDays: Schema.optionalKey(Schema.Number),
+  joinedAfter: OptionalString,
+  joinedBefore: OptionalString,
+  manualEmails: Schema.Array(Schema.String),
+  excludeCampaignIds: Schema.Array(Schema.Number),
+  limit: Schema.optionalKey(Schema.Number),
+  sampleSeed: Schema.String,
+}).annotate({
+  identifier: "AdminEmailCampaignAudience",
+})
+
+const AdminEmailCampaignExclusions = Schema.Struct({
+  invalid: WireNonNegativeInteger,
+  typo: WireNonNegativeInteger,
+  unverified: WireNonNegativeInteger,
+  inactive: WireNonNegativeInteger,
+  platform: WireNonNegativeInteger,
+  suppressed: WireNonNegativeInteger,
+  priorCampaign: WireNonNegativeInteger,
+  duplicate: WireNonNegativeInteger,
+  limited: WireNonNegativeInteger,
+})
+
+export const AdminEmailProvider = Schema.Literals(["resend", "ses"])
+export const AdminEmailFromAddress = Schema.Literals([
+  "team@inline.chat",
+  "founders@inline.chat",
+  "mo@inline.chat",
+])
+
+export const AdminEmailProviderStatusQuery = Schema.Struct({
+  provider: AdminEmailProvider,
+}).annotate({
+  identifier: "AdminEmailProviderStatusQuery",
+})
+
+export const AdminEmailCampaignPreviewInput = Schema.Struct({
+  provider: AdminEmailProvider,
+  subject: Schema.String,
+  previewText: OptionalString,
+  bodyText: Schema.String,
+  previewName: OptionalString,
+  visibleUnsubscribe: Schema.Boolean,
+  audience: AdminEmailCampaignAudience,
+}).annotate({
+  identifier: "AdminEmailCampaignPreviewInput",
+})
+
+export const AdminEmailCampaignPreviewResult = Schema.Struct({
+  ok: Schema.Literal(true),
+  count: WireNonNegativeInteger,
+  sample: Schema.Array(
+    Schema.Struct({
+      email: Schema.String,
+      name: NullableString,
+      sources: Schema.Array(Schema.String),
+    }),
+  ),
+  excluded: AdminEmailCampaignExclusions,
+  rendered: Schema.Struct({
+    subject: Schema.String,
+    html: Schema.String,
+    text: Schema.String,
+    variables: Schema.Struct({
+      name: Schema.String,
+      email: Schema.String,
+    }),
+  }),
+}).annotate({
+  identifier: "AdminEmailCampaignPreviewResult",
+})
+
+export const AdminCreateEmailCampaignInput = Schema.Struct({
+  name: Schema.String,
+  provider: AdminEmailProvider,
+  fromAddress: AdminEmailFromAddress,
+  seriesKey: OptionalString,
+  subject: Schema.String,
+  previewText: OptionalString,
+  bodyText: Schema.String,
+  visibleUnsubscribe: Schema.Boolean,
+  unsubscribeOverrideReason: OptionalString,
+  audience: AdminEmailCampaignAudience,
+  confirmation: Schema.String,
+}).annotate({
+  identifier: "AdminCreateEmailCampaignInput",
+})
+
+export const AdminEmailCampaignIdParams = Schema.Struct({
+  id: AdminRawUserIdParam,
+}).annotate({
+  identifier: "AdminEmailCampaignIdParams",
+})
+
+export const AdminEmailCampaignTestInput = Schema.Struct({
+  email: Schema.String,
+  name: OptionalString,
+}).annotate({
+  identifier: "AdminEmailCampaignTestInput",
+})
+
+export const AdminEmailCampaignSendInput = Schema.Struct({
+  confirmation: Schema.String,
+  batchSize: Schema.Number,
+}).annotate({
+  identifier: "AdminEmailCampaignSendInput",
+})
+
+const AdminEmailCampaignSummary = Schema.Struct({
+  id: InlineId,
+  name: Schema.String,
+  seriesKey: NullableString,
+  subject: Schema.String,
+  provider: AdminEmailProvider,
+  fromAddress: AdminEmailFromAddress,
+  status: Schema.String,
+  recipientCount: WireNonNegativeInteger,
+  pendingCount: WireNonNegativeInteger,
+  preparedCount: WireNonNegativeInteger,
+  contactedCount: WireNonNegativeInteger,
+  suppressedCount: WireNonNegativeInteger,
+  testSentAt: NullableString,
+  createdAt: Schema.String,
+  completedAt: NullableString,
+})
+
+export const AdminEmailCampaignsResult = Schema.Struct({
+  ok: Schema.Literal(true),
+  campaigns: Schema.Array(AdminEmailCampaignSummary),
+}).annotate({
+  identifier: "AdminEmailCampaignsResult",
+})
+
+export const AdminEmailCampaignResult = Schema.Struct({
+  ok: Schema.Literal(true),
+  campaign: AdminEmailCampaignSummary,
+}).annotate({
+  identifier: "AdminEmailCampaignResult",
+})
+
+export const AdminEmailCampaignSendResult = Schema.Struct({
+  ok: Schema.Literal(true),
+  attempted: WireNonNegativeInteger,
+  accepted: WireNonNegativeInteger,
+  unknown: WireNonNegativeInteger,
+  pending: WireNonNegativeInteger,
+  status: Schema.String,
+  phase: Schema.String,
+}).annotate({
+  identifier: "AdminEmailCampaignSendResult",
+})
+
+export const AdminEmailProviderStatusResult = Schema.Struct({
+  ok: Schema.Literal(true),
+  providerStatus: Schema.Struct({
+    provider: AdminEmailProvider,
+    region: NullableString,
+    refreshedAt: Schema.String,
+    available: Schema.Boolean,
+    statusCode: NullableInteger,
+    sendingEnabled: NullableBoolean,
+    productionAccess: NullableBoolean,
+    requestLimit: NullableInteger,
+    requestRemaining: NullableInteger,
+    requestResetAt: NullableString,
+    retryAfterSeconds: NullableInteger,
+    dailyQuota: NullableString,
+    monthlyQuota: NullableString,
+    max24HourSend: Schema.NullOr(Schema.Number),
+    sentLast24Hours: Schema.NullOr(Schema.Number),
+    remaining24Hours: Schema.NullOr(Schema.Number),
+    maxSendRate: Schema.NullOr(Schema.Number),
+    quotaWindow: Schema.NullOr(Schema.Literals(["fixed", "rolling_24_hours"])),
+    senderIdentityVerified: NullableBoolean,
+  }),
+}).annotate({
+  identifier: "AdminEmailProviderStatusResult",
+})
+
 export const AdminSpacesResult = Schema.Struct({
   ok: Schema.Literal(true),
   spaces: Schema.Array(

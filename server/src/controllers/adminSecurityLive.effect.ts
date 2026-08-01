@@ -35,6 +35,7 @@ import {
 import {
   ADMIN_IDLE_MS,
 } from "./adminSecurityPolicy.effect"
+import { DEV_ADMIN_EMAIL } from "./adminDevAuth.effect"
 
 const lookupSession = async (
   token: string | undefined,
@@ -114,6 +115,10 @@ const lookupSession = async (
     return null
   }
 
+  const isDevAdmin =
+    process.env.NODE_ENV === "development" &&
+    adminUser.email === DEV_ADMIN_EMAIL
+
   const refreshed = await db
     .update(superadminSessions)
     .set({
@@ -146,9 +151,9 @@ const lookupSession = async (
     email: user.email,
     firstName: user.firstName ?? null,
     lastName: user.lastName ?? null,
-    passwordSet: Boolean(adminUser.passwordHash),
-    totpEnabled: Boolean(adminUser.totpEnabledAt),
-    stepUpAt: session.stepUpAt ?? null,
+    passwordSet: isDevAdmin || Boolean(adminUser.passwordHash),
+    totpEnabled: isDevAdmin || Boolean(adminUser.totpEnabledAt),
+    stepUpAt: isDevAdmin ? now : (session.stepUpAt ?? null),
   }
 }
 

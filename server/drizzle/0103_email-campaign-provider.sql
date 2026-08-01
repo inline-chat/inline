@@ -1,0 +1,2 @@
+ALTER TABLE "email_campaigns" ADD COLUMN "provider" varchar(16);--> statement-breakpoint
+ALTER TABLE "email_campaigns" ADD CONSTRAINT "email_campaigns_provider_check" CHECK ("email_campaigns"."provider" is null or "email_campaigns"."provider" in ('resend', 'ses'));

@@ -41,6 +41,13 @@ import {
   executeWaitlistVerify,
 } from "./extra/waitlist.effect"
 import {
+  EmailUnsubscribeEndpoints,
+  EmailUnsubscribeOperationFailure,
+  EmailUnsubscribeOperations,
+  executeEmailUnsubscribeConfirm,
+  executeEmailUnsubscribeSubmit,
+} from "./extra/emailUnsubscribe.effect"
+import {
   HealthEndpoints,
   HealthOperationFailure,
   HealthOperations,
@@ -84,6 +91,8 @@ export const AuxiliaryApiGroup =
     .add(WaitlistEndpoints.count)
     .add(WaitlistEndpoints.subscribe)
     .add(WaitlistEndpoints.verify)
+    .add(EmailUnsubscribeEndpoints.confirm)
+    .add(EmailUnsubscribeEndpoints.submit)
     .add(ThereEndpoints.signup)
     .add(MediaEndpoints.photo)
     .add(IntegrationEndpoints.linearIntegrate)
@@ -99,6 +108,7 @@ type AuxiliaryHandlerFailure =
   | MediaOperationFailure
   | ThereOperationFailure
   | WaitlistOperationFailure
+  | EmailUnsubscribeOperationFailure
 
 const failureCause = (
   failure: Exclude<
@@ -164,6 +174,7 @@ export const makeAuxiliaryRouteGroup = () => {
           | SessionAuthentication
           | ThereOperations
           | WaitlistOperations
+          | EmailUnsubscribeOperations
         >()
         const execute = <E, R>(
           effect: Effect.Effect<
@@ -249,6 +260,26 @@ export const makeAuxiliaryRouteGroup = () => {
           .handleRaw(
             "waitlistVerify",
             () => execute(executeWaitlistVerify),
+          )
+          .handleRaw(
+            "emailUnsubscribeConfirm",
+            ({ request }) =>
+              execute(
+                complete(
+                  "auxiliary.email.unsubscribe.confirm",
+                  executeEmailUnsubscribeConfirm(request),
+                ),
+              ),
+          )
+          .handleRaw(
+            "emailUnsubscribeSubmit",
+            ({ request }) =>
+              execute(
+                complete(
+                  "auxiliary.email.unsubscribe.submit",
+                  executeEmailUnsubscribeSubmit(request),
+                ),
+              ),
           )
           .handleRaw(
             "thereSignup",
