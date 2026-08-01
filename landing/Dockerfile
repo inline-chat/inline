@@ -4,6 +4,7 @@ WORKDIR /usr/src/app
 FROM base AS pruner
 COPY package.json bun.lock bunfig.toml ./
 COPY server ./server
+COPY web/packages ./web/packages
 COPY landing ./landing
 COPY packages ./packages
 COPY scripts ./scripts
