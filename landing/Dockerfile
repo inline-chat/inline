@@ -4,6 +4,7 @@ WORKDIR /usr/src/app
 FROM base AS pruner
 COPY package.json bun.lock bunfig.toml ./
 COPY server ./server
+COPY web/tsconfig.json ./web/tsconfig.json
 COPY web/packages ./web/packages
 COPY landing ./landing
 COPY packages ./packages
@@ -23,6 +24,7 @@ RUN bun install --frozen-lockfile --production
 FROM base AS build
 COPY --from=development-dependencies /usr/src/app/ ./
 COPY --from=pruner /usr/src/app/out/full/ ./
+COPY --from=pruner /usr/src/app/web/tsconfig.json ./web/tsconfig.json
 RUN cd packages/protocol && bun run build && cd /usr/src/app/landing && bun run build
 
 FROM base AS release
