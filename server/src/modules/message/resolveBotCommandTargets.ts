@@ -34,7 +34,7 @@ const parseBotCommandEntity = (text: string, entity: MessageEntity): ParsedBotCo
     return null
   }
 
-  const match = /^\/([a-z0-9_]{1,32})(?:@([a-z0-9_]{2,32}))?$/i.exec(
+  const match = /^\/([a-z0-9_]{1,32})(?:@([a-z0-9_]{2,64}))?$/i.exec(
     text.slice(offset, offset + length),
   )
   if (!match?.[1]) return null

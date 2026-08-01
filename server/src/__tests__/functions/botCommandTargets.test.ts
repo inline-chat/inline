@@ -24,13 +24,16 @@ describe("bot command target resolution", () => {
   let creator: Awaited<ReturnType<typeof testUtils.createUser>>
   let chat: NonNullable<Awaited<ReturnType<typeof testUtils.createChat>>>
   let alphaBotUserId: number
+  let alphaBotUsername: string
   let betaBotUserId: number
 
   beforeEach(async () => {
     creator = await testUtils.createUser(`command-targets-${Date.now()}-${Math.random()}@example.com`)
     const context = { currentUserId: creator.id, currentSessionId: 1 }
+    const alphaBotUsernamePrefix = `inline_codex_${creator.id}_`
+    alphaBotUsername = `${alphaBotUsernamePrefix}${"a".repeat(64 - alphaBotUsernamePrefix.length - 3)}bot`
     const alpha = await createBot(
-      { name: "Alpha Agent", username: `alphaagent${creator.id}bot` },
+      { name: "Alpha Agent", username: alphaBotUsername },
       context,
     )
     const beta = await createBot(
@@ -92,8 +95,10 @@ describe("bot command target resolution", () => {
     expect(entities?.entities[0]?.entity.oneofKind).toBeUndefined()
   })
 
-  test("resolves a textual bot suffix and validates its catalog", async () => {
-    const text = `/help@alphaagent${creator.id}bot`
+  test("resolves a 64-character textual bot suffix and validates its catalog", async () => {
+    expect(alphaBotUsername.length).toBeGreaterThan(32)
+    expect(alphaBotUsername).toHaveLength(64)
+    const text = `/help@${alphaBotUsername}`
     const entities = await resolveBotCommandTargets({
       text,
       entities: commandEntities(text),
@@ -101,6 +106,22 @@ describe("bot command target resolution", () => {
       currentUserId: creator.id,
     })
 
+    expect(entities?.entities[0]?.entity).toEqual({
+      oneofKind: "botCommand",
+      botCommand: { botUserId: BigInt(alphaBotUserId) },
+    })
+  })
+
+  test("accepts a structured bot target without a textual username suffix", async () => {
+    const original = commandEntities("/alpha", alphaBotUserId)
+    const entities = await resolveBotCommandTargets({
+      text: "/alpha",
+      entities: original,
+      chat,
+      currentUserId: creator.id,
+    })
+
+    expect(entities).toBe(original)
     expect(entities?.entities[0]?.entity).toEqual({
       oneofKind: "botCommand",
       botCommand: { botUserId: BigInt(alphaBotUserId) },
