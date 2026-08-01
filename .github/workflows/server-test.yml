@@ -121,4 +121,4 @@ jobs:
         run: cd server && bun run core:smoke
 
       - name: Run tests
-        run: cd server && NODE_ENV=test bun test
+        run: cd server && bun run test:bun

@@ -111,7 +111,7 @@ export interface WaitlistOperationDependencies {
   readonly count: () => Promise<number>
   readonly insert: (
     input: WaitlistSubscription,
-  ) => Promise<unknown>
+  ) => Promise<boolean>
   readonly notify: (
     input: WaitlistSubscription,
     clientIp: string | undefined,
@@ -119,29 +119,6 @@ export interface WaitlistOperationDependencies {
   readonly noteNotificationFailure: (
     cause: unknown,
   ) => void
-}
-
-const WAITLIST_EMAIL_UNIQUE_CONSTRAINT =
-  "waitlist_email_unique"
-
-const isWaitlistEmailUniqueError = (
-  error: unknown,
-): boolean => {
-  if (!error || typeof error !== "object") {
-    return false
-  }
-
-  const record = error as Record<string, unknown>
-  return (
-    record["code"] === "23505" &&
-    (record["constraint"] ===
-      WAITLIST_EMAIL_UNIQUE_CONSTRAINT ||
-      record["constraint_name"] ===
-        WAITLIST_EMAIL_UNIQUE_CONSTRAINT ||
-      String(record["message"] ?? "").includes(
-        WAITLIST_EMAIL_UNIQUE_CONSTRAINT,
-      ))
-  )
 }
 
 export const makeWaitlistOperations = ({
@@ -161,19 +138,12 @@ export const makeWaitlistOperations = ({
   subscribe: (input, clientIp) =>
     Effect.tryPromise({
       try: () => insert(input),
-      catch: (cause) => cause,
+      catch: (cause) =>
+        new WaitlistOperationFailure({
+          operation: "subscribe",
+          cause,
+        }),
     }).pipe(
-      Effect.as(true),
-      Effect.catch((cause) =>
-        isWaitlistEmailUniqueError(cause)
-          ? Effect.succeed(false)
-          : Effect.fail(
-              new WaitlistOperationFailure({
-                operation: "subscribe",
-                cause,
-              }),
-            ),
-      ),
       Effect.flatMap((created) =>
         created
           ? Effect.tryPromise({

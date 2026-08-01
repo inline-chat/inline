@@ -1,53 +1,19 @@
-import { closeDb, db, initDb, schema } from "../db"
-import { migrateDb } from "../../scripts/helpers/migrate-db"
-import postgres from "postgres"
-import { randomUUID } from "node:crypto"
-import { beforeEach, beforeAll, afterAll } from "bun:test"
-import { sql, eq } from "drizzle-orm"
+import { db, schema } from "../db"
+import { eq } from "drizzle-orm"
 import { chats, messages, type DbChat, type DbMessage } from "@in/server/db/schema"
 import { encrypt, encryptBinary } from "@in/server/modules/encryption/encryption"
 import { MessageEntities, MessageEntity_Type } from "@inline-chat/protocol/core"
 import type { FunctionContext } from "@in/server/functions/_types"
-import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 import { generateToken } from "@in/server/utils/auth"
 import { SessionsModel } from "@in/server/db/models/sessions"
 import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 
-// Test database configuration
-const BASE_TEST_DB_NAME = "test_db"
-
-// Bun can execute test files concurrently in isolated module graphs within the same process.
-// Those graphs do not reliably share globalThis, so a process-pid-only DB name can collide and
-// one file's teardown can drop another file's DB. Use one DB per setup module instance; the
-// ref-count still handles repeated setup calls inside that instance.
-//
-// We keep one test DB per shared setup state and reference-count all tests that call setup/teardown.
-type GlobalTestDbState = {
-  refCount: number
-  setupPromise?: Promise<void>
-  teardownPromise?: Promise<void>
-  testDbName: string
-  originalDatabaseUrl?: string
-  provisioningDbUrl?: string
-  testDbUrl?: string
-}
-
-const getGlobalTestDbState = (): GlobalTestDbState => {
-  const key = Symbol.for("inline.testDbState")
-  const globalAny = globalThis as any
-  if (!globalAny[key]) {
-    globalAny[key] = {
-      refCount: 0,
-      testDbName: createTestDbName(),
-    } satisfies GlobalTestDbState
-  }
-  return globalAny[key] as GlobalTestDbState
-}
-
-const createTestDbName = () => {
-  const suffix = randomUUID().replaceAll("-", "").slice(0, 12)
-  return `${BASE_TEST_DB_NAME}_${process.pid}_${suffix}`
-}
+export {
+  cleanDatabase,
+  setupTestDatabase,
+  setupTestLifecycle,
+  teardownTestDatabase,
+} from "./database"
 
 // Test context type
 export interface TestContext {
@@ -61,189 +27,6 @@ export const defaultTestContext: TestContext = {
   userId: 123,
   sessionId: 456,
   connectionId: "connection-123",
-}
-
-// Database setup and teardown functions
-export const setupTestDatabase = async () => {
-  const state = getGlobalTestDbState()
-  state.refCount += 1
-
-  if (state.setupPromise) {
-    return await state.setupPromise
-  }
-
-  state.setupPromise = (async () => {
-    try {
-      const envDbUrl = process.env["TEST_DATABASE_URL"] ?? process.env["DATABASE_URL"]
-      if (!envDbUrl) {
-        throw new Error("TEST_DATABASE_URL (or DATABASE_URL) is required to run DB tests")
-      }
-
-      const parsed = new URL(envDbUrl)
-      const host = parsed.hostname
-      if (host !== "localhost" && host !== "127.0.0.1") {
-        throw new Error(`Refusing to run DB tests against non-local host '${host}'.`)
-      }
-
-      state.originalDatabaseUrl = process.env["DATABASE_URL"]
-      state.provisioningDbUrl = envDbUrl
-
-      const adminUrl = new URL(envDbUrl)
-      adminUrl.pathname = "/postgres"
-
-      const testUrl = new URL(envDbUrl)
-      testUrl.pathname = `/${state.testDbName}`
-      state.testDbUrl = testUrl.toString()
-
-      // Close any existing DB connections before we drop/create the database.
-      await closeDb().catch(() => {})
-
-      // Create admin connection to create/drop the test database
-      const adminDb = postgres(adminUrl.toString(), {
-        max: 1,
-        idle_timeout: 10,
-      })
-
-      // Check if database exists before trying to drop it
-      const dbExists = await adminDb`
-        SELECT 1 FROM pg_database WHERE datname = ${state.testDbName}
-      `
-
-      if (dbExists.length > 0) {
-        // Disconnect all connections to the test database
-        await adminDb.unsafe(`
-          SELECT pg_terminate_backend(pg_stat_activity.pid)
-          FROM pg_stat_activity
-          WHERE pg_stat_activity.datname = '${state.testDbName}'
-          AND pid <> pg_backend_pid()
-        `)
-
-        // Drop existing test database
-        await adminDb.unsafe(`DROP DATABASE IF EXISTS ${state.testDbName} WITH (FORCE)`)
-      }
-
-      // Create fresh test database
-      await adminDb.unsafe(`CREATE DATABASE ${state.testDbName}`)
-
-      // Close admin connection
-      await adminDb.end()
-
-      // Set test database URL for the test run (once per process).
-      process.env.DATABASE_URL = state.testDbUrl
-      initDb(state.testDbUrl)
-
-      // Run migrations on the new database
-      await migrateDb()
-    } catch (error) {
-      console.error("Test database setup failed:", error)
-      throw error
-    }
-  })()
-
-  return await state.setupPromise
-}
-
-export const teardownTestDatabase = async () => {
-  const state = getGlobalTestDbState()
-  state.refCount = Math.max(0, state.refCount - 1)
-
-  if (state.refCount > 0) {
-    return
-  }
-
-  if (state.teardownPromise) {
-    return await state.teardownPromise
-  }
-
-  state.teardownPromise = (async () => {
-    try {
-      await closeDb().catch(() => {})
-
-      const provisioningDbUrl = state.provisioningDbUrl
-      if (!provisioningDbUrl) {
-        return
-      }
-
-      // Create admin connection again for cleanup
-      const adminUrl = new URL(provisioningDbUrl)
-      adminUrl.pathname = "/postgres"
-      const adminDb = postgres(adminUrl.toString(), {
-        max: 1,
-        idle_timeout: 10,
-      })
-
-      // Check if database exists before trying to drop it
-      const dbExists = await adminDb`
-        SELECT 1 FROM pg_database WHERE datname = ${state.testDbName}
-      `
-
-      if (dbExists.length > 0) {
-        // Disconnect all connections to the test database
-        await adminDb.unsafe(`
-          SELECT pg_terminate_backend(pg_stat_activity.pid)
-          FROM pg_stat_activity
-          WHERE pg_stat_activity.datname = '${state.testDbName}'
-          AND pid <> pg_backend_pid()
-        `)
-
-        // Drop test database
-        await adminDb.unsafe(`DROP DATABASE IF EXISTS ${state.testDbName} WITH (FORCE)`)
-      }
-
-      await adminDb.end()
-
-      // Restore original database URL
-      if (state.originalDatabaseUrl) {
-        process.env.DATABASE_URL = state.originalDatabaseUrl
-      } else {
-        process.env.DATABASE_URL = provisioningDbUrl
-      }
-    } catch (error) {
-      console.error("Test cleanup failed:", error)
-    } finally {
-      // Reset so a subsequent test run in the same process can reinitialize.
-      state.setupPromise = undefined
-      state.teardownPromise = undefined
-      state.originalDatabaseUrl = undefined
-      state.provisioningDbUrl = undefined
-      state.testDbUrl = undefined
-    }
-  })()
-
-  return await state.teardownPromise
-}
-
-export const cleanDatabase = async () => {
-  try {
-    AccessGuardsCache.resetAll()
-    // Use raw SQL to truncate all tables in the correct order
-    // This ensures foreign key constraints are respected
-    await db.execute(sql`
-      SET client_min_messages TO WARNING;
-      DO $$ DECLARE
-        r RECORD;
-      BEGIN
-        -- Disable all triggers temporarily
-        FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
-          EXECUTE 'ALTER TABLE ' || quote_ident(r.tablename) || ' DISABLE TRIGGER ALL';
-        END LOOP;
-
-        -- Truncate all tables
-        FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
-          EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' CASCADE';
-        END LOOP;
-
-        -- Re-enable all triggers
-        FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
-          EXECUTE 'ALTER TABLE ' || quote_ident(r.tablename) || ' ENABLE TRIGGER ALL';
-        END LOOP;
-      END $$;
-      SET client_min_messages TO NOTICE;
-    `)
-  } catch (error) {
-    console.error("Failed to clean database before test:", error)
-    throw error
-  }
 }
 
 // Utility functions for tests
@@ -565,11 +348,4 @@ export const testUtils = {
       currentUserId: userId ?? defaultTestContext.userId,
     }
   },
-}
-
-// Export lifecycle hooks
-export const setupTestLifecycle = () => {
-  beforeAll(setupTestDatabase)
-  afterAll(teardownTestDatabase)
-  beforeEach(cleanDatabase)
 }

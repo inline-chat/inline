@@ -18,7 +18,11 @@ export const waitlist = new Elysia({ prefix: "/waitlist" })
   .post(
     "/subscribe",
     async ({ body, request, server }) => {
-      await insertIntoWaitlist(body)
+      const created = await insertIntoWaitlist(body)
+
+      if (!created) {
+        return { ok: true }
+      }
 
       try {
         let location: string | undefined

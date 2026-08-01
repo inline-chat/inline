@@ -1,11 +1,11 @@
-import { beforeAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import {
   InputPeer,
   Message,
   MessageEntity_Type,
   type EditMessageResult,
 } from "@inline-chat/protocol/core"
-import { setupTestDatabase, testUtils } from "../setup"
+import { setupTestDatabase, teardownTestDatabase, testUtils } from "../setup"
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import { editMessage } from "@in/server/functions/messages.editMessage"
 import type { DbChat, DbUser } from "@in/server/db/schema"
@@ -79,6 +79,7 @@ describe("editMessage function", () => {
     }
     context = testUtils.functionContext({ userId: currentUser.id, sessionId: 1 })
   })
+  afterAll(teardownTestDatabase)
 
   test("parses markdown when parseMarkdown is enabled", async () => {
     const sent = await sendMessage(

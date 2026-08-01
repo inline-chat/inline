@@ -57,11 +57,13 @@ if (bunFiles.length === 0) {
 console.info(
   `Running ${bunFiles.length} Bun-owned test files; Vitest and explicit Effect Bun files run in test:effect.`,
 )
+const startedAt = performance.now()
 const child = Bun.spawn({
   cmd: [
     process.execPath,
     "test",
     "--timeout=30000",
+    ...(process.env["CI"] ? ["--only-failures"] : []),
     ...bunFiles,
   ],
   cwd: serverRoot,
@@ -74,5 +76,9 @@ const child = Bun.spawn({
   stderr: "inherit",
 })
 const exitCode = await child.exited
+
+console.info(
+  `Bun-owned suite finished in ${((performance.now() - startedAt) / 1_000).toFixed(2)}s.`,
+)
 
 process.exit(exitCode)

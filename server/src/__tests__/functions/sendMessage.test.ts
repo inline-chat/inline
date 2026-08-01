@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, mock } from "bun:test"
+import { afterAll, describe, test, expect, beforeAll, mock } from "bun:test"
 import {
   DialogNotificationSettings,
   DialogNotificationSettings_Mode,
@@ -8,7 +8,7 @@ import {
   MessageEntity_Type,
   SendMessageResult,
 } from "@inline-chat/protocol/core"
-import { setupTestDatabase, testUtils } from "../setup"
+import { setupTestDatabase, teardownTestDatabase, testUtils } from "../setup"
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import type { DbChat, DbUser } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
@@ -85,6 +85,7 @@ describe("sendMessage", () => {
     }
     context = testUtils.functionContext({ userId: currentUser.id, sessionId: 1 })
   })
+  afterAll(teardownTestDatabase)
 
   test("preserves markdown syntax for normal user RPC when parseMarkdown is omitted", async () => {
     const text = "hello **world** and `code`"

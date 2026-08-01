@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, mock } from "bun:test"
 import { UpdateComposeAction_ComposeAction } from "@inline-chat/protocol/core"
 import { sendComposeAction } from "@in/server/functions/messages.sendComposeAction"
 import { sendTransientUpdateFor } from "@in/server/modules/updates/sendUpdate"
-import { setupTestDatabase, testUtils } from "../setup"
+import { setupTestLifecycle, testUtils } from "../setup"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 
 // Mock RealtimeUpdates.pushToUser to track what updates are sent
@@ -12,8 +12,9 @@ let emailCounter = 0
 const nextEmail = (label: string) => `${label}-${++emailCounter}@example.com`
 
 describe("sendComposeAction", () => {
-  beforeEach(async () => {
-    await setupTestDatabase()
+  setupTestLifecycle()
+
+  beforeEach(() => {
     mockPushToUser.mockClear()
   })
 
