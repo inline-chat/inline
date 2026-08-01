@@ -3475,9 +3475,10 @@ print("adapter python smoke ok")
 
 describe("python adapter smoke", () => {
   it("imports adapter and enforces access policy helpers", () => {
-    const result = spawnSync("python3", ["-c", script], {
+    const result = spawnSync("python3", ["-"], {
       cwd: packageRoot,
       encoding: "utf8",
+      input: script,
       env: {
         ...process.env,
         INLINE_TOKEN: "",
