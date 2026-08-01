@@ -42,6 +42,7 @@ struct Request {
     action: Action,
     capability: String,
     token: Option<String>,
+    #[serde(alias = "userID")]
     user_id: Option<i64>,
     detail: Option<String>,
 }
@@ -60,6 +61,10 @@ struct Response<'a> {
     version: u32,
     status: &'a str,
     device_id: Option<&'a str>,
+    // Protocol v1 shipped with Swift's synthesized acronym spelling. Emit both
+    // keys so released app builds and corrected clients can share this version.
+    #[serde(rename = "deviceID")]
+    legacy_device_id: Option<&'a str>,
     device_name: Option<&'a str>,
     client_version: Option<&'a str>,
     os_version: Option<&'a str>,
@@ -266,6 +271,7 @@ async fn serve_login(
                         version: PROTOCOL_VERSION,
                         status: "available",
                         device_id: Some(client.device_id),
+                        legacy_device_id: Some(client.device_id),
                         device_name: client.device_name,
                         client_version: Some(client.client_version),
                         os_version: client.os_version,
@@ -354,6 +360,7 @@ fn terminal_response<'a>(status: &'a str, detail: Option<&'a str>) -> Response<'
         version: PROTOCOL_VERSION,
         status,
         device_id: None,
+        legacy_device_id: None,
         device_name: None,
         client_version: None,
         os_version: None,
@@ -531,6 +538,8 @@ mod tests {
         )
         .await;
         assert_eq!(probe["status"], "available");
+        assert_eq!(probe["deviceId"], "cli_0123456789abcdef0123456789abcdef");
+        assert_eq!(probe["deviceID"], probe["deviceId"]);
         assert_eq!(probe["verificationCode"], "123456");
 
         let complete = send_test_request(
@@ -553,6 +562,21 @@ mod tests {
             }
             LoginOutcome::Cancelled(_) => panic!("expected token"),
         }
+    }
+
+    #[test]
+    fn accepts_legacy_swift_user_id_key() {
+        let request: Request = serde_json::from_value(serde_json::json!({
+            "version": PROTOCOL_VERSION,
+            "action": "complete",
+            "capability": "opaque-capability",
+            "token": "secret-token",
+            "userID": 42,
+            "detail": null
+        }))
+        .unwrap();
+
+        assert_eq!(request.user_id, Some(42));
     }
 
     #[cfg(target_os = "macos")]
