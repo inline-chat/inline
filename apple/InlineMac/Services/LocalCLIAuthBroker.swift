@@ -101,6 +101,15 @@ enum LocalCLIAuthBroker {
     let token: String?
     let userID: Int64?
     let detail: String?
+
+    private enum CodingKeys: String, CodingKey {
+      case version
+      case action
+      case capability
+      case token
+      case userID = "userId"
+      case detail
+    }
   }
 
   private struct Response: Decodable, Sendable {
@@ -112,6 +121,17 @@ enum LocalCLIAuthBroker {
     let osVersion: String?
     let verificationCode: String?
     let detail: String?
+
+    private enum CodingKeys: String, CodingKey {
+      case version
+      case status
+      case deviceID = "deviceId"
+      case deviceName
+      case clientVersion
+      case osVersion
+      case verificationCode
+      case detail
+    }
   }
 
   private static func request(
