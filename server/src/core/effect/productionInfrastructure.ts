@@ -7,6 +7,11 @@ import {
   ErrorReporter,
   reportUnexpectedError,
 } from "../errors/errorReporter"
+import { Log } from "../../utils/log"
+
+const log = new Log(
+  "effect.productionInfrastructure",
+)
 
 export interface ProductionInfrastructureShape {
   readonly owned: true
@@ -57,7 +62,19 @@ const releaseStep = (
   ErrorReporter
 > =>
   Effect.tryPromise({
-    try: async () => release(),
+    try: async () => {
+      const startedAt = performance.now()
+      log.info("Starting infrastructure release", {
+        operation,
+      })
+      await release()
+      log.info("Completed infrastructure release", {
+        durationMs: Math.round(
+          performance.now() - startedAt,
+        ),
+        operation,
+      })
+    },
     catch: (cause) => cause,
   }).pipe(
     Effect.catchCause((cause) =>

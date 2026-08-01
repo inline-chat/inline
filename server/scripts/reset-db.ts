@@ -15,7 +15,7 @@ try {
   await db.execute(sql`DROP DATABASE IF EXISTS inline_dev `)
   await db.execute(sql`CREATE DATABASE inline_dev`)
   console.info("🚧 Successfully reset db")
-  client.end({ timeout: 5_000 })
+  await client.end({ timeout: 5 })
 } catch (error) {
   console.error("🔥 Error", error)
   process.exit(1)

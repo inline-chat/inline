@@ -44,7 +44,8 @@ import {
   HealthEndpoints,
   HealthOperationFailure,
   HealthOperations,
-  executeHealth,
+  executeLiveness,
+  executeReadiness,
 } from "./health.effect"
 import {
   IntegrationEndpoints,
@@ -78,6 +79,8 @@ export const AuxiliaryApiGroup =
     .add(RootEndpoints.root)
     .add(HealthEndpoints.health)
     .add(HealthEndpoints.healthz)
+    .add(HealthEndpoints.livez)
+    .add(HealthEndpoints.readyz)
     .add(WaitlistEndpoints.count)
     .add(WaitlistEndpoints.subscribe)
     .add(WaitlistEndpoints.verify)
@@ -181,7 +184,7 @@ export const makeAuxiliaryRouteGroup = () => {
               execute(
                 complete(
                   "auxiliary.health",
-                  executeHealth,
+                  executeLiveness,
                 ),
               ),
           )
@@ -191,7 +194,27 @@ export const makeAuxiliaryRouteGroup = () => {
               execute(
                 complete(
                   "auxiliary.healthz",
-                  executeHealth,
+                  executeLiveness,
+                ),
+              ),
+          )
+          .handleRaw(
+            "auxiliaryReadyz",
+            () =>
+              execute(
+                complete(
+                  "auxiliary.readyz",
+                  executeReadiness,
+                ),
+              ),
+          )
+          .handleRaw(
+            "auxiliaryLivez",
+            () =>
+              execute(
+                complete(
+                  "auxiliary.livez",
+                  executeLiveness,
                 ),
               ),
           )

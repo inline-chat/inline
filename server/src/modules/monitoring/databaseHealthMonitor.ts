@@ -155,6 +155,10 @@ export class DatabaseHealthMonitor {
     if (this.downSinceMs !== null) {
       const recoveredAt = this.runtime.now()
       const duration = formatDuration(recoveredAt - this.downSinceMs)
+      log.info("Database health recovered", {
+        consecutiveFailures: this.consecutiveFailures,
+        downtimeMs: recoveredAt - this.downSinceMs,
+      })
       this.notify(`DB RECOVERED on ${NODE_ENV}@${os.hostname()} after ${duration}.`)
     }
 
@@ -174,6 +178,10 @@ export class DatabaseHealthMonitor {
     if (this.downSinceMs === null) {
       this.downSinceMs = now
       this.lastAlertAtMs = now
+      log.error("Database health threshold reached", {
+        consecutiveFailures: this.consecutiveFailures,
+        errorCode,
+      })
       this.notify(
         `DB DOWN on ${NODE_ENV}@${os.hostname()} (failures=${this.consecutiveFailures}, error=${errorCode}).`,
       )
@@ -183,6 +191,11 @@ export class DatabaseHealthMonitor {
     if (this.lastAlertAtMs === null || now - this.lastAlertAtMs >= this.runtime.alertCooldownMs) {
       this.lastAlertAtMs = now
       const duration = formatDuration(now - this.downSinceMs)
+      log.warn("Database remains unhealthy", {
+        consecutiveFailures: this.consecutiveFailures,
+        downtimeMs: now - this.downSinceMs,
+        errorCode,
+      })
       this.notify(
         `DB STILL DOWN on ${NODE_ENV}@${os.hostname()} for ${duration} (error=${errorCode}, failures=${this.consecutiveFailures}).`,
       )

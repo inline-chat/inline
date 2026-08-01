@@ -42,6 +42,7 @@ import {
 } from "./health.effect"
 import type {
   HealthHttpResponse,
+  LivenessHttpResponse,
 } from "./healthCheck"
 import {
   IntegrationAuthorizationRejected,
@@ -89,6 +90,7 @@ interface Probe {
   }
   healthFailure: boolean
   health: HealthHttpResponse
+  liveness: LivenessHttpResponse
   mediaFailure: boolean
   secureCookies: boolean
   thereFailure: boolean
@@ -111,6 +113,18 @@ const healthy = (): HealthHttpResponse => ({
   },
 })
 
+const live = (): LivenessHttpResponse => ({
+  ok: true,
+  status: "ok",
+  timestamp: 1_784_320_000,
+  draining: false,
+  checks: {
+    lifecycle: {
+      ok: true,
+    },
+  },
+})
+
 const makeProbe = (): Probe => ({
   authenticateCalls: 0,
   authorizeCalls: 0,
@@ -127,6 +141,7 @@ const makeProbe = (): Probe => ({
   callbackResult: { ok: true },
   healthFailure: false,
   health: healthy(),
+  liveness: live(),
   mediaFailure: false,
   secureCookies: false,
   thereFailure: false,
@@ -167,6 +182,7 @@ const makeHandler = (
             }),
           )
         : Effect.sync(() => probe.health),
+      live: Effect.sync(() => probe.liveness),
     }),
     Layer.succeed(WaitlistOperations, {
       count: probe.waitlistFailure
@@ -377,6 +393,8 @@ describe("AuxiliaryRouteGroup", () => {
       "/integrations/linear/integrate",
       "/integrations/notion/callback",
       "/integrations/notion/integrate",
+      "/livez",
+      "/readyz",
       "/waitlist/subscribe",
       "/waitlist/super_secret_sub_count",
       "/waitlist/verify",
@@ -434,6 +452,8 @@ describe("AuxiliaryRouteGroup", () => {
           "/health/",
           "/healthz",
           "/healthz/",
+          "/livez",
+          "/livez/",
         ]
       ) {
         const response = await handler(
@@ -444,6 +464,23 @@ describe("AuxiliaryRouteGroup", () => {
           ok: true,
           status: "ok",
           draining: false,
+        })
+      }
+
+      for (const path of ["/readyz", "/readyz/"]) {
+        const response = await handler(
+          new Request(`http://inline.test${path}`),
+        )
+        expect(response.status).toBe(200)
+        expect(await response.json()).toMatchObject({
+          ok: true,
+          status: "ok",
+          draining: false,
+          checks: {
+            database: {
+              ok: true,
+            },
+          },
         })
       }
 
@@ -506,11 +543,43 @@ describe("AuxiliaryRouteGroup", () => {
 
     await withHandler(async ({ handler }) => {
       const response = await handler(
-        new Request("http://inline.test/healthz"),
+        new Request("http://inline.test/readyz"),
       )
       expect(response.status).toBe(503)
       expect(await response.json()).toEqual(
         probe.health,
+      )
+    }, probe)
+  })
+
+  it("serves liveness independently of degraded readiness", async () => {
+    const probe = makeProbe()
+    probe.health = {
+      ...probe.health,
+      ok: false,
+      status: "degraded",
+      checks: {
+        ...probe.health.checks,
+        database: {
+          ok: false,
+          latencyMs: 2_000,
+          error: "database_unavailable",
+        },
+      },
+    }
+
+    await withHandler(async ({ handler }) => {
+      const readiness = await handler(
+        new Request("http://inline.test/readyz"),
+      )
+      expect(readiness.status).toBe(503)
+
+      const liveness = await handler(
+        new Request("http://inline.test/livez"),
+      )
+      expect(liveness.status).toBe(200)
+      expect(await liveness.json()).toEqual(
+        probe.liveness,
       )
     }, probe)
   })
@@ -984,9 +1053,9 @@ describe("AuxiliaryRouteGroup", () => {
         configure: (probe) => {
           probe.healthFailure = true
         },
-        operation: "auxiliary.health",
+        operation: "auxiliary.readyz",
         request: new Request(
-          "http://inline.test/health",
+          "http://inline.test/readyz",
         ),
       },
       {

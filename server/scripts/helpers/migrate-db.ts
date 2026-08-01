@@ -17,5 +17,5 @@ export const migrateDb = async () => {
     migrationsTable: "_migrations",
   })
 
-  await migrationClient.end({ timeout: 5_000 })
+  await migrationClient.end({ timeout: 5 })
 }

@@ -169,7 +169,7 @@ export async function inspectLiveKitCutoverDatabase(
       }
     })
   } finally {
-    await client.end({ timeout: 5_000 })
+    await client.end({ timeout: 5 })
   }
 }
 

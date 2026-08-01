@@ -126,7 +126,11 @@ describeWithBun(
           "            }\n              \n          </style>",
         )
 
-        for (const path of ["/health", "/healthz"]) {
+        for (const path of [
+          "/health",
+          "/healthz",
+          "/livez",
+        ]) {
           const [legacyHealth, effectHealth] =
             await Promise.all([
               legacy.handle(
@@ -153,19 +157,51 @@ describeWithBun(
             status: legacyBody.status,
             draining: legacyBody.draining,
             checks: {
-              database: {
-                ok: legacyBody.checks.database.ok,
-              },
               lifecycle:
                 legacyBody.checks.lifecycle,
             },
           })
-          expect(
-            effectBody.checks.database.error,
-          ).toBe(
-            legacyBody.checks.database.error,
-          )
         }
+
+        const [legacyReadiness, effectReadiness] =
+          await Promise.all([
+            legacy.handle(
+              new Request(
+                "http://localhost/readyz",
+              ),
+            ),
+            live.handler(
+              new Request(
+                "http://localhost/readyz",
+              ),
+            ),
+          ])
+        const legacyReadinessBody =
+          await legacyReadiness.json()
+        const effectReadinessBody =
+          await effectReadiness.json()
+
+        expect(effectReadiness.status).toBe(
+          legacyReadiness.status,
+        )
+        expect(effectReadinessBody).toMatchObject({
+          ok: legacyReadinessBody.ok,
+          status: legacyReadinessBody.status,
+          draining: legacyReadinessBody.draining,
+          checks: {
+            database: {
+              ok:
+                legacyReadinessBody.checks.database.ok,
+            },
+            lifecycle:
+              legacyReadinessBody.checks.lifecycle,
+          },
+        })
+        expect(
+          effectReadinessBody.checks.database.error,
+        ).toBe(
+          legacyReadinessBody.checks.database.error,
+        )
       } finally {
         await live.dispose()
       }

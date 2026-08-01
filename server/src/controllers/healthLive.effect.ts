@@ -1,5 +1,6 @@
 import { Layer } from "effect"
 import {
+  runLivenessCheck,
   runHealthChecks,
   withLifecycleCheck,
 } from "./healthCheck"
@@ -12,5 +13,6 @@ export const HealthOperationsLive = Layer.succeed(
   HealthOperations,
   makeHealthOperations(async () =>
     withLifecycleCheck(await runHealthChecks()),
+    async () => runLivenessCheck(),
   ),
 )

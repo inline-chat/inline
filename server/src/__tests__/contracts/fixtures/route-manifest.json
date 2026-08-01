@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "count": 189,
+  "count": 195,
   "methodCounts": {
     "ALL": 3,
-    "GET": 83,
-    "OPTIONS": 14,
+    "GET": 85,
+    "OPTIONS": 18,
     "POST": 88,
     "WS": 1
   },
-  "sha256": "ba1ab4a7e4230af3afa1f492cc1da169d7da19f1c0ccf789efbc593d2d63afe8",
+  "sha256": "fe313106d408c77f2614111be0bc73f1154ce2db9124146f94a15304f5079de2",
   "routes": [
     {
       "method": "ALL",
@@ -160,7 +160,15 @@
     },
     {
       "method": "GET",
+      "path": "/livez/"
+    },
+    {
+      "method": "GET",
       "path": "/oauth/authorize"
+    },
+    {
+      "method": "GET",
+      "path": "/readyz/"
     },
     {
       "method": "GET",
@@ -393,6 +401,22 @@
     {
       "method": "OPTIONS",
       "path": "/healthz/*"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/livez/"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/livez/*"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/readyz/"
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/readyz/*"
     },
     {
       "method": "OPTIONS",

@@ -17,6 +17,7 @@ import {
 } from "../core/schema/scalars"
 import type {
   HealthHttpResponse,
+  LivenessHttpResponse,
 } from "./healthCheck"
 
 const DatabaseHealth = Schema.Struct({
@@ -60,6 +61,25 @@ export const HealthHttpResponseSchema = Schema.Struct({
   identifier: "AuxiliaryHealthResponse",
 })
 
+export const LivenessHttpResponseSchema = Schema.Struct({
+  ok: Schema.Boolean,
+  status: Schema.Literals(["ok", "degraded"]),
+  timestamp: UnixSeconds,
+  draining: Schema.Boolean,
+  checks: Schema.Struct({
+    lifecycle: LifecycleHealth,
+  }),
+}).annotate({
+  identifier: "AuxiliaryLivenessResponse",
+})
+
+const DegradedLivenessHttpResponse =
+  LivenessHttpResponseSchema.pipe(
+    HttpApiSchema.status(503),
+  ).annotate({
+    identifier: "AuxiliaryDegradedLivenessResponse",
+  })
+
 const DegradedHealthHttpResponse =
   HealthHttpResponseSchema.pipe(
     HttpApiSchema.status(503),
@@ -72,13 +92,29 @@ export const HealthEndpoints = {
     "auxiliaryHealth",
     "/health",
     {
-      success: HealthHttpResponseSchema,
-      error: DegradedHealthHttpResponse,
+      success: LivenessHttpResponseSchema,
+      error: DegradedLivenessHttpResponse,
     },
   ),
   healthz: HttpApiEndpoint.get(
     "auxiliaryHealthz",
     "/healthz",
+    {
+      success: LivenessHttpResponseSchema,
+      error: DegradedLivenessHttpResponse,
+    },
+  ),
+  livez: HttpApiEndpoint.get(
+    "auxiliaryLivez",
+    "/livez",
+    {
+      success: LivenessHttpResponseSchema,
+      error: DegradedLivenessHttpResponse,
+    },
+  ),
+  readyz: HttpApiEndpoint.get(
+    "auxiliaryReadyz",
+    "/readyz",
     {
       success: HealthHttpResponseSchema,
       error: DegradedHealthHttpResponse,
@@ -97,6 +133,10 @@ export interface HealthOperationsShape {
     HealthHttpResponse,
     HealthOperationFailure
   >
+  readonly live: Effect.Effect<
+    LivenessHttpResponse,
+    HealthOperationFailure
+  >
 }
 
 export class HealthOperations extends Context.Service<
@@ -106,17 +146,41 @@ export class HealthOperations extends Context.Service<
 
 export const makeHealthOperations = (
   check: () => Promise<HealthHttpResponse>,
+  live: () => Promise<LivenessHttpResponse>,
 ): HealthOperationsShape => ({
   check: Effect.tryPromise({
     try: check,
     catch: (cause) =>
       new HealthOperationFailure({ cause }),
   }),
+  live: Effect.tryPromise({
+    try: live,
+    catch: (cause) =>
+      new HealthOperationFailure({ cause }),
+  }),
 })
 
-export const executeHealth = HealthOperations.use(
+export const executeReadiness = HealthOperations.use(
   (operations) =>
     operations.check.pipe(
+      Effect.map((result) =>
+        HttpServerResponse.jsonUnsafe(
+          result,
+          {
+            status: result.ok ? 200 : 503,
+            headers: {
+              "content-type":
+                "application/json;charset=utf-8",
+            },
+          },
+        ),
+      ),
+    ),
+)
+
+export const executeLiveness = HealthOperations.use(
+  (operations) =>
+    operations.live.pipe(
       Effect.map((result) =>
         HttpServerResponse.jsonUnsafe(
           result,

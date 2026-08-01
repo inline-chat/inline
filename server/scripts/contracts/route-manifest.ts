@@ -153,6 +153,8 @@ const candidateRawRoutes: ReadonlyArray<Route> = [
   },
   { method: "GET", path: "/health/" },
   { method: "GET", path: "/healthz/" },
+  { method: "GET", path: "/livez/" },
+  { method: "GET", path: "/readyz/" },
   {
     method: "GET",
     path: "/v1/reference",
@@ -207,6 +209,8 @@ const intentionalCandidateOnly =
     "GET\t/",
     "GET\t/health",
     "GET\t/healthz",
+    "GET\t/livez",
+    "GET\t/readyz",
   ])
 
 let coreHandle:

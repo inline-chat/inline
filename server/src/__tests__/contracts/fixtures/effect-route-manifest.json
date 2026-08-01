@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "count": 215,
+  "count": 219,
   "methodCounts": {
-    "GET": 126,
+    "GET": 130,
     "POST": 88,
     "WS": 1
   },
-  "sha256": "f004b97342d313d78829f0cb3bf9c5983310d83e7fdb87c2a258ede218bfaf16",
+  "sha256": "526158681678ce328dd4f74fa8079aded2d1fe4c30595aa030ac9ec7ab16b662",
   "routes": [
     {
       "method": "GET",
@@ -158,7 +158,23 @@
     },
     {
       "method": "GET",
+      "path": "/livez"
+    },
+    {
+      "method": "GET",
+      "path": "/livez/"
+    },
+    {
+      "method": "GET",
       "path": "/oauth/authorize"
+    },
+    {
+      "method": "GET",
+      "path": "/readyz"
+    },
+    {
+      "method": "GET",
+      "path": "/readyz/"
     },
     {
       "method": "GET",

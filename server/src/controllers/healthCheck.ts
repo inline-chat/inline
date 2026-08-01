@@ -1,14 +1,22 @@
-import { db } from "@in/server/db"
+import {
+  checkDatabaseHealth,
+} from "@in/server/db"
 import {
   getServerShutdownState,
   type ShutdownSignal,
 } from "@in/server/lifecycle/shutdownState"
-import { sql } from "drizzle-orm"
 
-type DbExecutor = Pick<typeof db, "execute">
+const DEFAULT_DATABASE_HEALTH_TIMEOUT_MS = 2_000
+
+interface CancellableHealthCheck
+  extends PromiseLike<unknown> {
+  readonly cancel?: () => void
+}
 
 export interface HealthDeps {
-  readonly db: DbExecutor
+  readonly checkDatabase: () =>
+    CancellableHealthCheck
+  readonly timeoutMs?: number
 }
 
 export interface HealthLifecycleDeps {
@@ -39,12 +47,68 @@ export interface HealthHttpResponse extends HealthResponse {
   }
 }
 
+export interface LivenessHttpResponse {
+  readonly ok: boolean
+  readonly status: "ok" | "degraded"
+  readonly timestamp: number
+  readonly draining: boolean
+  readonly checks: {
+    readonly lifecycle: {
+      readonly ok: boolean
+      readonly error?: "shutting_down"
+      readonly signal?: ShutdownSignal
+    }
+  }
+}
+
+const defaultHealthDeps: HealthDeps = {
+  checkDatabase: checkDatabaseHealth,
+}
+
+const runBoundedDatabaseCheck = async (
+  deps: HealthDeps,
+): Promise<void> => {
+  const query = deps.checkDatabase()
+  const timeoutMs =
+    deps.timeoutMs ??
+    DEFAULT_DATABASE_HEALTH_TIMEOUT_MS
+  let timeoutId:
+    | ReturnType<typeof setTimeout>
+    | undefined
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(
+          new Error(
+            `Database health check exceeded ${timeoutMs}ms.`,
+          ),
+        )
+        try {
+          query.cancel?.()
+        } catch {
+          // The bounded readiness result is authoritative even if protocol-level cancellation fails.
+        }
+      }, timeoutMs)
+
+      void Promise.resolve(query).then(
+        () => resolve(),
+        reject,
+      )
+    })
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId)
+    }
+  }
+}
+
 const checkDatabase = async (
-  executor: DbExecutor,
+  deps: HealthDeps,
 ): Promise<HealthResponse["checks"]["database"]> => {
   const startedAt = performance.now()
   try {
-    await executor.execute(sql`SELECT 1`)
+    await runBoundedDatabaseCheck(deps)
     return {
       ok: true,
       latencyMs: Math.round(performance.now() - startedAt),
@@ -60,12 +124,14 @@ const checkDatabase = async (
 
 const resolveHealthDeps = (
   deps?: HealthDeps,
-): HealthDeps => deps ?? { db }
+): HealthDeps => deps ?? defaultHealthDeps
 
 export const runHealthChecks = async (
   deps?: HealthDeps,
 ): Promise<HealthResponse> => {
-  const database = await checkDatabase(resolveHealthDeps(deps).db)
+  const database = await checkDatabase(
+    resolveHealthDeps(deps),
+  )
   const ok = database.ok
 
   return {
@@ -78,22 +144,60 @@ export const runHealthChecks = async (
   }
 }
 
+const lifecycleCheck = (
+  deps?: HealthLifecycleDeps,
+): LivenessHttpResponse => {
+  const shutdownState =
+    deps?.getShutdownState?.() ??
+    getServerShutdownState()
+
+  if (!shutdownState.shuttingDown) {
+    return {
+      ok: true,
+      status: "ok",
+      timestamp: Math.floor(Date.now() / 1000),
+      draining: false,
+      checks: {
+        lifecycle: {
+          ok: true,
+        },
+      },
+    }
+  }
+
+  return {
+    ok: false,
+    status: "degraded",
+    timestamp: Math.floor(Date.now() / 1000),
+    draining: true,
+    checks: {
+      lifecycle: {
+        ok: false,
+        error: "shutting_down",
+        signal:
+          shutdownState.signal ?? undefined,
+      },
+    },
+  }
+}
+
+export const runLivenessCheck = (
+  deps?: HealthLifecycleDeps,
+): LivenessHttpResponse => lifecycleCheck(deps)
+
 export const withLifecycleCheck = (
   result: HealthResponse,
   deps?: HealthLifecycleDeps,
 ): HealthHttpResponse => {
-  const shutdownState =
-    deps?.getShutdownState?.() ?? getServerShutdownState()
+  const liveness = lifecycleCheck(deps)
 
-  if (!shutdownState.shuttingDown) {
+  if (liveness.ok) {
     return {
       ...result,
       draining: false,
       checks: {
         ...result.checks,
-        lifecycle: {
-          ok: true,
-        },
+        lifecycle: liveness.checks.lifecycle,
       },
     }
   }
@@ -106,9 +210,7 @@ export const withLifecycleCheck = (
     checks: {
       ...result.checks,
       lifecycle: {
-        ok: false,
-        error: "shutting_down",
-        signal: shutdownState.signal ?? undefined,
+        ...liveness.checks.lifecycle,
       },
     },
   }
