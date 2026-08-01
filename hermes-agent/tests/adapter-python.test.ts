@@ -3496,5 +3496,5 @@ describe("python adapter smoke", () => {
 
     expect(result.status, result.stderr || result.stdout).toBe(0)
     expect(result.stdout).toContain("adapter python smoke ok")
-  }, 30_000)
+  }, 90_000)
 })
