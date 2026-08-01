@@ -5,6 +5,7 @@ on:
     branches:
       - main
     paths:
+      - ".github/workflows/server-test.yml"
       - "server/**"
       - "proto/**"
       - "scripts/**"
@@ -17,6 +18,7 @@ on:
     branches:
       - main
     paths:
+      - ".github/workflows/server-test.yml"
       - "server/**"
       - "proto/**"
       - "scripts/**"
