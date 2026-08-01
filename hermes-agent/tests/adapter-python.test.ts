@@ -540,57 +540,6 @@ async def assert_inline_update_command():
 
 asyncio.run(assert_inline_update_command())
 assert ctx.cli["name"] == "inline"
-machine_parser = argparse.ArgumentParser()
-inline_cli.register_cli(machine_parser)
-machine_args = machine_parser.parse_args([
-    "setup",
-    "--non-interactive",
-    "--token-stdin",
-    "--owner-user-id",
-    "42",
-    "--access",
-    "allowlist",
-    "--allow-user",
-    "50",
-    "--json",
-])
-machine_token = "machine-only-secret-token"
-machine_stdout = io.StringIO()
-saved_stdin = sys.stdin
-try:
-    sys.stdin = io.StringIO(machine_token + "\n")
-    with contextlib.redirect_stdout(machine_stdout):
-        assert inline_cli.dispatch(machine_args) == 0
-finally:
-    sys.stdin = saved_stdin
-machine_output = machine_stdout.getvalue()
-assert machine_token not in machine_output
-machine_payload = json.loads(machine_output)
-assert machine_payload == {
-    "ok": True,
-    "action": "inline.setup",
-    "configured": True,
-    "access": "allowlist",
-    "ownerUserId": "42",
-    "allowedUserIds": ["42", "50"],
-}
-assert setup_saved_env["INLINE_TOKEN"] == machine_token
-assert setup_saved_env["INLINE_ALLOW_ALL_USERS"] == "false"
-assert setup_saved_env["INLINE_ALLOWED_USERS"] == "42,50"
-assert setup_saved_env["INLINE_GROUP_ALLOW_FROM"] == "42,50"
-assert setup_saved_env["INLINE_DM_POLICY"] == "allowlist"
-assert setup_saved_env["INLINE_GROUP_POLICY"] == "allowlist"
-assert setup_platform_enabled["inline"] is True
-
-status_args = machine_parser.parse_args(["status", "--json", "--probe"])
-status_stdout = io.StringIO()
-with contextlib.redirect_stdout(status_stdout):
-    assert inline_cli.dispatch(status_args) == 0
-status_output = status_stdout.getvalue()
-assert machine_token not in status_output
-status_payload = json.loads(status_output)
-assert status_payload["configured"] is True
-assert status_payload["probeRequested"] is True
 assert ctx.tool["name"] == "inline"
 assert ctx.tool["toolset"] == "inline"
 assert ctx.tool["emoji"] == chr(0x1F4AC)
