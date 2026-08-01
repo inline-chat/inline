@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 
 const sparkleVersion = "2.9.3";
 const macosReleaseArch = "arm64";
+type ReleaseChannel = "stable" | "beta" | "tip";
 
 type TaskStatus = "pending" | "running" | "success" | "failed" | "skipped";
 
@@ -19,7 +20,7 @@ type Task = {
 };
 
 type ReleaseOptions = {
-  channel: "stable" | "beta";
+  channel: ReleaseChannel;
   derivedData: string;
   appPath: string;
   dmgPath: string;
@@ -38,7 +39,7 @@ type ReleaseOptions = {
 };
 
 type ParsedArgs = Omit<ReleaseOptions, "channel" | "releaseTag"> & {
-  channel?: "stable" | "beta";
+  channel?: ReleaseChannel;
   releaseTag?: string;
 };
 
@@ -95,12 +96,12 @@ function usage(): string {
     "Usage: bun run macos/release-app.ts [options]",
     "",
     "Options:",
-    "  --channel stable|beta            Update channel (default: beta; prompts if omitted in an interactive terminal)",
+    "  --channel stable|beta|tip        Update channel (default: beta; prompts if omitted in an interactive terminal)",
     "  --derived-data <path>            Xcode derived data (default: unique <root>/build/InlineMacDirect/release-*)",
     "  --app-path <path>                App path (default: <derived-data>/Build/Products/Release/Inline.app)",
     "  --dmg-path <path>                DMG path (default: <root>/build/macos-direct/Inline.dmg)",
     `  --sparkle-dir <path>             Sparkle tools dir (default: <root>/.action/sparkle/${sparkleVersion})`,
-    "  --release-tag <tag>              Attach DMG to GitHub release/tag (default: beta->tip, stable->empty)",
+    "  --release-tag <tag>              Attach DMG to GitHub release/tag (default: selected channel name)",
     "  --skip-github-release            Skip GitHub release/tag steps",
     "  --allow-dirty                    Allow a stable build from a dirty worktree",
     "  --from <id>                      Resume from a task id without rerunning earlier steps (preflight still runs)",
@@ -130,7 +131,7 @@ function die(message: string): never {
 }
 
 function parseArgs(argv: string[], rootDir: string): ParsedArgs {
-  let channel: "stable" | "beta" | undefined;
+  let channel: ReleaseChannel | undefined;
   let derivedData = resolve(rootDir, "build/InlineMacDirect", `release-${nowIsoCompact()}-${Math.random().toString(16).slice(2, 8)}`);
   let appPath = "";
   let dmgPath = resolve(rootDir, "build/macos-direct/Inline.dmg");
@@ -158,7 +159,7 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
     const arg = argv[i];
     if (arg === "--channel") {
       const v = eat(i);
-      if (v !== "stable" && v !== "beta") die(`Invalid --channel: ${v}`);
+      if (v !== "stable" && v !== "beta" && v !== "tip") die(`Invalid --channel: ${v}`);
       channel = v;
       i++;
       continue;
@@ -491,7 +492,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function promptPickChannel(): Promise<"stable" | "beta"> {
+async function promptPickChannel(): Promise<ReleaseChannel> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   const ask = (q: string) => new Promise<string>((res) => rl.question(q, res));
   try {
@@ -499,10 +500,11 @@ async function promptPickChannel(): Promise<"stable" | "beta"> {
     // Enter defaults to beta (safer default for local runs).
     // We still show the prompt so the operator is aware of the selection.
     while (true) {
-      const answer = (await ask("Select channel: [1] stable  [2] beta (default)  > ")).trim().toLowerCase();
+      const answer = (await ask("Select channel: [1] stable  [2] beta (default)  [3] tip  > ")).trim().toLowerCase();
       if (!answer || answer === "2" || answer === "beta" || answer === "b") return "beta";
       if (answer === "1" || answer === "stable" || answer === "s") return "stable";
-      console.log("Please enter 1/stable or 2/beta.");
+      if (answer === "3" || answer === "tip" || answer === "t") return "tip";
+      console.log("Please enter 1/stable, 2/beta, or 3/tip.");
     }
   } finally {
     rl.close();
@@ -805,13 +807,31 @@ function formatCmd(args: string[]): string {
     .join(" ");
 }
 
+function defaultReleaseTag(channel: ReleaseChannel): string {
+  switch (channel) {
+    case "stable":
+      return "stable";
+    case "beta":
+      return "beta";
+    case "tip":
+      return "tip";
+  }
+}
+
+function validateReleaseTag(channel: ReleaseChannel, releaseTag: string): void {
+  const reservedTags: ReleaseChannel[] = ["stable", "beta", "tip"];
+  if (reservedTags.some((reservedTag) => reservedTag === releaseTag) && releaseTag !== channel) {
+    die(`Release tag ${releaseTag} belongs to the ${releaseTag} channel, not ${channel}.`);
+  }
+}
+
 function buildResumeCommand(ctx: ReleaseContext, fromTask: string): string {
   const args = ["bun", "run", "scripts/macos/release-app.ts", "--channel", ctx.channel, "--from", fromTask];
   const defaultDerivedData = resolve(ctx.rootDir, "build/InlineMacDirect");
   const defaultAppPath = resolve(defaultDerivedData, "Build/Products/Release/Inline.app");
   const defaultDmgPath = resolve(ctx.rootDir, "build/macos-direct/Inline.dmg");
   const defaultSparkleDir = resolve(ctx.rootDir, ".action/sparkle", sparkleVersion);
-  const defaultReleaseTag = ctx.rollback || ctx.dropBuild ? "" : ctx.channel === "beta" ? "tip" : "";
+  const defaultTag = ctx.rollback || ctx.dropBuild ? "" : defaultReleaseTag(ctx.channel);
   const concreteSkipIds = [...ctx.skip]
     .filter((id) => !["upload", "appcast", "github"].includes(id))
     .sort();
@@ -822,7 +842,7 @@ function buildResumeCommand(ctx: ReleaseContext, fromTask: string): string {
     else if (ctx.rollbackStepsBack !== 1) args.push("--rollback-steps-back", String(ctx.rollbackStepsBack));
   } else if (ctx.dropBuild) {
     args.push("--drop-build", ctx.dropBuild);
-  } else if (ctx.releaseTag !== defaultReleaseTag) {
+  } else if (ctx.releaseTag !== defaultTag) {
     args.push("--release-tag", ctx.releaseTag);
   }
 
@@ -860,7 +880,8 @@ async function main() {
       console.log(`Using channel: ${channel}`);
     }
   }
-  const releaseTag = parsed0.rollback || parsed0.dropBuild ? "" : parsed0.releaseTag || (channel === "beta" ? "tip" : "");
+  const releaseTag = parsed0.rollback || parsed0.dropBuild ? "" : parsed0.releaseTag || defaultReleaseTag(channel);
+  if (releaseTag) validateReleaseTag(channel, releaseTag);
   const opts: ReleaseOptions = {
     channel,
     derivedData: parsed0.derivedData,
@@ -1622,11 +1643,12 @@ async function main() {
       });
       await runStreaming(ui, ["git", "-C", ctx.rootDir, "push", "--force", "origin", ctx.releaseTag], { cwd: ctx.rootDir });
 
-      const prereleaseFlag = ctx.channel === "beta" ? ["--prerelease"] : [];
+      const isPrerelease = ctx.channel !== "stable";
+      const prereleaseFlag = isPrerelease ? ["--prerelease"] : [];
       const viewRes = spawnSync({ cmd: ["gh", "release", "view", ctx.releaseTag], stdout: "pipe", stderr: "pipe" });
       if (viewRes.exitCode !== 0) {
         await runStreaming(ui, ["gh", "release", "create", ctx.releaseTag, "--title", ctx.releaseTag, ...prereleaseFlag, "--notes", "Automated macOS direct release."], { cwd: ctx.rootDir });
-      } else if (ctx.channel === "beta") {
+      } else if (isPrerelease) {
         await runStreaming(ui, ["gh", "release", "edit", ctx.releaseTag, "--prerelease"], { cwd: ctx.rootDir });
       }
 

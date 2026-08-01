@@ -32,6 +32,14 @@ PAUSE_BEFORE_NOTARIZE=${PAUSE_BEFORE_NOTARIZE:-0}
 DEBUG_BUILD=${DEBUG_BUILD:-0}
 CREATE_DMG_NODE_BIN_DIR=${CREATE_DMG_NODE_BIN_DIR:-""}
 
+case "${CHANNEL}" in
+  stable|beta|tip) ;;
+  *)
+    echo "Invalid CHANNEL: ${CHANNEL} (expected stable, beta, or tip)" >&2
+    exit 1
+    ;;
+esac
+
 if [[ -z "${CREATE_DMG_NODE_BIN_DIR}" ]]; then
   for candidate in /opt/homebrew/opt/node@20/bin /usr/local/opt/node@20/bin; do
     if [[ -x "${candidate}/node" ]]; then

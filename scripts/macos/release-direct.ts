@@ -40,7 +40,11 @@ async function uploadFile(
   } as never);
 }
 
+const supportedChannels = ["stable", "beta", "tip"] as const;
 const channel = process.env.CHANNEL ?? "stable";
+if (!supportedChannels.some((supportedChannel) => supportedChannel === channel)) {
+  throw new Error(`Invalid CHANNEL: ${channel}`);
+}
 const build = requireEnv("BUILD_NUMBER");
 const dmgPath = resolve(process.env.DMG_PATH ?? "build/macos-direct/Inline.dmg");
 const appcastPath = resolve(process.env.APPCAST_PATH ?? "appcast_new.xml");

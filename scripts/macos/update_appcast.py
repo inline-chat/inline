@@ -28,6 +28,8 @@ from pathlib import Path
 build = os.environ["INLINE_BUILD"]
 version = os.environ.get("INLINE_VERSION", build)
 channel = os.environ.get("INLINE_CHANNEL", "stable")
+if channel not in {"stable", "beta", "tip"}:
+    raise SystemExit(f"Invalid INLINE_CHANNEL: {channel}")
 dmg_url = os.environ["INLINE_DMG_URL"]
 min_macos = os.environ.get("INLINE_MIN_MACOS", "15.0")
 hardware_requirements = os.environ.get("INLINE_HARDWARE_REQUIREMENTS", "arm64").strip()

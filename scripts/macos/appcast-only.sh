@@ -20,7 +20,7 @@ TEMP_ROOT="${ROOT_DIR}/build/macos-release-tmp"
 
 usage() {
   cat <<'EOF'
-Usage: appcast-only.sh [--channel stable|beta] [--app-path <path>] [--dmg-path <path>] [--derived-data <path>]
+Usage: appcast-only.sh [--channel stable|beta|tip] [--app-path <path>] [--dmg-path <path>] [--derived-data <path>]
 EOF
 }
 
@@ -54,10 +54,17 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "${CHANNEL}" ]]; then
-  echo "Missing --channel value" >&2
-  exit 1
-fi
+case "${CHANNEL}" in
+  stable|beta|tip) ;;
+  "")
+    echo "Missing --channel value" >&2
+    exit 1
+    ;;
+  *)
+    echo "Invalid --channel: ${CHANNEL}" >&2
+    exit 1
+    ;;
+esac
 
 if [[ -z "${APP_PATH}" ]]; then
   APP_PATH="${DERIVED_DATA}/Build/Products/Release/Inline.app"

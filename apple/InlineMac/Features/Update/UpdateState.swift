@@ -4,6 +4,7 @@ import Foundation
 enum AutoUpdateChannel: String, CaseIterable, Identifiable {
   case stable
   case beta
+  case tip
 
   var id: String { rawValue }
 
@@ -13,6 +14,8 @@ enum AutoUpdateChannel: String, CaseIterable, Identifiable {
       "Stable"
     case .beta:
       "Beta"
+    case .tip:
+      "Tip"
     }
   }
 }

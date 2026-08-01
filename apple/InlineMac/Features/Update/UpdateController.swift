@@ -319,6 +319,8 @@ final class UpdateController {
       "https://public-assets.inline.chat/mac/stable/appcast.xml"
     case .beta:
       "https://public-assets.inline.chat/mac/beta/appcast.xml"
+    case .tip:
+      "https://public-assets.inline.chat/mac/tip/appcast.xml"
     }
   }
 
@@ -578,7 +580,13 @@ final class UpdateController {
     guard let feedURL = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String else {
       return .stable
     }
-    return feedURL.contains("/beta/") ? .beta : .stable
+    if feedURL.contains("/tip/") {
+      return .tip
+    }
+    if feedURL.contains("/beta/") {
+      return .beta
+    }
+    return .stable
   }
 
   private func updateInfo(for item: SUAppcastItem) -> SoftwareUpdateInfo {

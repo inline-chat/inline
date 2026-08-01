@@ -31,7 +31,7 @@ Builds a local Sparkle-enabled Inline.app for testing without DMG creation,
 notarization, or upload steps. Local post-build signing is enabled by default.
 
 Options:
-  --channel <stable|beta>         Update channel to embed in Info.plist
+  --channel <stable|beta|tip>     Update channel to embed in Info.plist
   --configuration DevBuild        Xcode build configuration (fixed to DevBuild)
   --derived-data <path>           Xcode derived data path
   --app-path <path>               App bundle output path
@@ -66,7 +66,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --channel)
       CHANNEL="${2:-}"
-      if [[ "${CHANNEL}" != "stable" && "${CHANNEL}" != "beta" ]]; then
+      if [[ "${CHANNEL}" != "stable" && "${CHANNEL}" != "beta" && "${CHANNEL}" != "tip" ]]; then
         echo "Invalid --channel: ${CHANNEL}" >&2
         exit 1
       fi
@@ -114,6 +114,14 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+case "${CHANNEL}" in
+  stable|beta|tip) ;;
+  *)
+    echo "Invalid CHANNEL: ${CHANNEL} (expected stable, beta, or tip)" >&2
+    exit 1
+    ;;
+esac
 
 case "${SIGN_BUILD}" in
   auto|always|never) ;;

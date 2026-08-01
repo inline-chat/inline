@@ -11,6 +11,7 @@ on:
         options:
           - stable
           - beta
+          - tip
       sparkle_version:
         description: "Sparkle release version"
         required: true
@@ -216,18 +217,34 @@ jobs:
           if [[ "${{ github.event_name }}" == "push" ]]; then
             tag="${GITHUB_REF_NAME}"
           fi
-          if [[ -z "${tag}" && "${CHANNEL}" == "beta" ]]; then
-            tag="tip"
+          if [[ -z "${tag}" ]]; then
+            tag="${CHANNEL}"
           fi
+          case "${tag}" in
+            stable|beta|tip)
+              if [[ "${tag}" != "${CHANNEL}" ]]; then
+                echo "Release tag ${tag} belongs to the ${tag} channel, not ${CHANNEL}." >&2
+                exit 1
+              fi
+              ;;
+          esac
           echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
 
-      - name: Update Tip Tag
-        if: steps.release_tag.outputs.tag == 'tip'
+      - name: Update Moving Channel Tag
+        if: steps.release_tag.outputs.tag == steps.release_inputs.outputs.channel
+        env:
+          CHANNEL: ${{ steps.release_inputs.outputs.channel }}
+          RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
         run: |
+          set -euo pipefail
+          if [[ "${RELEASE_TAG}" != "${CHANNEL}" ]]; then
+            echo "Refusing to move ${RELEASE_TAG}; expected the ${CHANNEL} channel tag." >&2
+            exit 1
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -fa tip -m "Latest Sparkle beta release" "${GITHUB_SHA}"
-          git push --force origin tip
+          git tag -fa "${RELEASE_TAG}" -m "Latest Sparkle ${CHANNEL} release" "${GITHUB_SHA}"
+          git push --force origin "${RELEASE_TAG}"
 
       - name: Upload DMG to R2
         env:
@@ -326,13 +343,13 @@ jobs:
           set -euo pipefail
           tag="${RELEASE_TAG}"
           prerelease_flag=""
-          if [[ "${CHANNEL}" == "beta" ]]; then
+          if [[ "${CHANNEL}" != "stable" ]]; then
             prerelease_flag="--prerelease"
           fi
           if ! gh release view "${tag}" >/dev/null 2>&1; then
             gh release create "${tag}" --title "${tag}" ${prerelease_flag} --notes "Automated macOS direct release."
           else
-            if [[ "${CHANNEL}" == "beta" ]]; then
+            if [[ "${CHANNEL}" != "stable" ]]; then
               gh release edit "${tag}" --prerelease
             fi
           fi
