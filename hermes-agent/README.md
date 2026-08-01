@@ -129,7 +129,7 @@ uv run ./hermes plugins list --plain --no-bundled
 Expected local output includes:
 
 ```text
-enabled      user     0.0.5    inline-platform
+enabled      user     0.0.6    inline-platform
 ```
 
 ## Update Or Reinstall
@@ -152,10 +152,10 @@ mismatch, rerun the same command after rebuilding or upgrading the package.
 
 - Hermes Agent: requires the external user plugin registry and native platform
   plugin loader available in Hermes Agent `0.17.x`. This package was validated
-  against Hermes Agent `0.18.2` from source commit `9de9c25`.
+  against Hermes Agent `0.19.1` from source commit `cc4cab2`.
 - Node.js: `>=20` is required for the bundled sidecar. Hermes-managed Node 22,
   system Node, or an explicit `INLINE_NODE_BIN` path all work.
-- Inline transport: the sidecar uses `@inline-chat/realtime-sdk@0.0.13` and is
+- Inline transport: the sidecar uses `@inline-chat/realtime-sdk@0.0.14` and is
   bundled into the npm package, so Hermes startup does not run `npm install`.
 - Live sends require a valid Inline user or bot token in `INLINE_TOKEN`,
   `INLINE_BOT_TOKEN`, `platforms.inline.token`, or `inline.token`.

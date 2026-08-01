@@ -70,8 +70,8 @@ describe("packed artifact", () => {
       pluginId: "inline",
       pluginPath: "plugin/inline",
       minHermesVersion: "0.17.0",
-      testedHermesVersion: "0.18.2",
-      testedHermesCommit: "9de9c25",
+      testedHermesVersion: "0.19.1",
+      testedHermesCommit: "cc4cab2",
     })
 
     const installJs = await readFile(path.join(packageRoot, "dist/install.js"), "utf8")
@@ -153,7 +153,7 @@ describe("packed artifact", () => {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       }).trim()
-      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.5")
+      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.6")
 
       const install = execFileSync(bin, ["install", "--hermes-home", hermesHome, "--force", "--json"], {
         cwd: packageRoot,

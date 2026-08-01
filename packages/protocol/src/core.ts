@@ -2938,6 +2938,24 @@ export interface RpcCall {
          */
         getGridHome: GetGridHomeInput;
     } | {
+        oneofKind: "createCliSession";
+        /**
+         * @generated from protobuf field: CreateCliSessionInput createCliSession = 94;
+         */
+        createCliSession: CreateCliSessionInput;
+    } | {
+        oneofKind: "setProfilePhoto";
+        /**
+         * @generated from protobuf field: SetProfilePhotoInput setProfilePhoto = 95;
+         */
+        setProfilePhoto: SetProfilePhotoInput;
+    } | {
+        oneofKind: "getExternalProfilePhoto";
+        /**
+         * @generated from protobuf field: GetExternalProfilePhotoInput getExternalProfilePhoto = 96;
+         */
+        getExternalProfilePhoto: GetExternalProfilePhotoInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -3498,6 +3516,24 @@ export interface RpcResult {
          * @generated from protobuf field: GetGridHomeResult getGridHome = 93;
          */
         getGridHome: GetGridHomeResult;
+    } | {
+        oneofKind: "createCliSession";
+        /**
+         * @generated from protobuf field: CreateCliSessionResult createCliSession = 94;
+         */
+        createCliSession: CreateCliSessionResult;
+    } | {
+        oneofKind: "setProfilePhoto";
+        /**
+         * @generated from protobuf field: SetProfilePhotoResult setProfilePhoto = 95;
+         */
+        setProfilePhoto: SetProfilePhotoResult;
+    } | {
+        oneofKind: "getExternalProfilePhoto";
+        /**
+         * @generated from protobuf field: GetExternalProfilePhotoResult getExternalProfilePhoto = 96;
+         */
+        getExternalProfilePhoto: GetExternalProfilePhotoResult;
     } | {
         oneofKind: undefined;
     };
@@ -4873,6 +4909,48 @@ export interface GetSessionsResult {
     sessions: AccountSession[];
 }
 /**
+ * Creates a separate CLI credential from an authenticated first-party macOS
+ * session after the user approves a host-local handoff. The returned token is
+ * sensitive and must only be delivered to the requesting local CLI process.
+ *
+ * @generated from protobuf message CreateCliSessionInput
+ */
+export interface CreateCliSessionInput {
+    /**
+     * @generated from protobuf field: string device_id = 1;
+     */
+    deviceId: string;
+    /**
+     * @generated from protobuf field: optional string device_name = 2;
+     */
+    deviceName?: string;
+    /**
+     * @generated from protobuf field: string client_version = 3;
+     */
+    clientVersion: string;
+    /**
+     * @generated from protobuf field: optional string os_version = 4;
+     */
+    osVersion?: string;
+}
+/**
+ * @generated from protobuf message CreateCliSessionResult
+ */
+export interface CreateCliSessionResult {
+    /**
+     * @generated from protobuf field: string token = 1;
+     */
+    token: string;
+    /**
+     * @generated from protobuf field: int64 session_id = 2;
+     */
+    sessionId: bigint;
+    /**
+     * @generated from protobuf field: int64 user_id = 3;
+     */
+    userId: bigint;
+}
+/**
  * @generated from protobuf message CheckUsernameInput
  */
 export interface CheckUsernameInput {
@@ -4945,6 +5023,60 @@ export interface UpdateProfileResult {
      * @generated from protobuf field: repeated Update updates = 2;
      */
     updates: Update[];
+}
+/**
+ * @generated from protobuf message SetProfilePhotoInput
+ */
+export interface SetProfilePhotoInput {
+    /**
+     * Empty clears the current profile photo.
+     *
+     * @generated from protobuf field: string file_unique_id = 1;
+     */
+    fileUniqueId: string;
+}
+/**
+ * @generated from protobuf message SetProfilePhotoResult
+ */
+export interface SetProfilePhotoResult {
+    /**
+     * @generated from protobuf field: User user = 1;
+     */
+    user?: User;
+    /**
+     * @generated from protobuf field: repeated Update updates = 2;
+     */
+    updates: Update[];
+}
+/**
+ * @generated from protobuf message GetExternalProfilePhotoInput
+ */
+export interface GetExternalProfilePhotoInput {
+    /**
+     * @generated from protobuf field: ExternalProfileProvider provider = 1;
+     */
+    provider: ExternalProfileProvider;
+    /**
+     * @generated from protobuf field: string username = 2;
+     */
+    username: string;
+}
+/**
+ * @generated from protobuf message GetExternalProfilePhotoResult
+ */
+export interface GetExternalProfilePhotoResult {
+    /**
+     * @generated from protobuf field: ExternalProfilePhotoStatus status = 1;
+     */
+    status: ExternalProfilePhotoStatus;
+    /**
+     * @generated from protobuf field: bytes photo = 2;
+     */
+    photo: Uint8Array;
+    /**
+     * @generated from protobuf field: string mime_type = 3;
+     */
+    mimeType: string;
 }
 /**
  * @generated from protobuf message BotCommand
@@ -9013,7 +9145,19 @@ export enum Method {
     /**
      * @generated from protobuf enum value: GET_GRID_HOME = 92;
      */
-    GET_GRID_HOME = 92
+    GET_GRID_HOME = 92,
+    /**
+     * @generated from protobuf enum value: CREATE_CLI_SESSION = 93;
+     */
+    CREATE_CLI_SESSION = 93,
+    /**
+     * @generated from protobuf enum value: SET_PROFILE_PHOTO = 94;
+     */
+    SET_PROFILE_PHOTO = 94,
+    /**
+     * @generated from protobuf enum value: GET_EXTERNAL_PROFILE_PHOTO = 95;
+     */
+    GET_EXTERNAL_PROFILE_PHOTO = 95
 }
 /**
  * @generated from protobuf enum GridConnectionUnavailableReason
@@ -9060,6 +9204,40 @@ export enum UsernameAvailability {
      * @generated from protobuf enum value: USERNAME_INVALID = 5;
      */
     USERNAME_INVALID = 5
+}
+/**
+ * @generated from protobuf enum ExternalProfileProvider
+ */
+export enum ExternalProfileProvider {
+    /**
+     * @generated from protobuf enum value: EXTERNAL_PROFILE_PROVIDER_UNSPECIFIED = 0;
+     */
+    EXTERNAL_PROFILE_PROVIDER_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: EXTERNAL_PROFILE_PROVIDER_X = 1;
+     */
+    EXTERNAL_PROFILE_PROVIDER_X = 1
+}
+/**
+ * @generated from protobuf enum ExternalProfilePhotoStatus
+ */
+export enum ExternalProfilePhotoStatus {
+    /**
+     * @generated from protobuf enum value: EXTERNAL_PROFILE_PHOTO_STATUS_UNSPECIFIED = 0;
+     */
+    EXTERNAL_PROFILE_PHOTO_STATUS_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: EXTERNAL_PROFILE_PHOTO_FOUND = 1;
+     */
+    EXTERNAL_PROFILE_PHOTO_FOUND = 1,
+    /**
+     * @generated from protobuf enum value: EXTERNAL_PROFILE_PHOTO_NOT_FOUND = 2;
+     */
+    EXTERNAL_PROFILE_PHOTO_NOT_FOUND = 2,
+    /**
+     * @generated from protobuf enum value: EXTERNAL_PROFILE_PHOTO_UNAVAILABLE = 3;
+     */
+    EXTERNAL_PROFILE_PHOTO_UNAVAILABLE = 3
 }
 /**
  * @generated from protobuf enum PushNotificationProvider
@@ -14445,7 +14623,10 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 90, name: "deleteGridRoom", kind: "message", oneof: "input", T: () => DeleteGridRoomInput },
             { no: 91, name: "prepareGridConnection", kind: "message", oneof: "input", T: () => PrepareGridConnectionInput },
             { no: 92, name: "setGridAvatarMicrophoneEnabled", kind: "message", oneof: "input", T: () => SetGridAvatarMicrophoneEnabledInput },
-            { no: 93, name: "getGridHome", kind: "message", oneof: "input", T: () => GetGridHomeInput }
+            { no: 93, name: "getGridHome", kind: "message", oneof: "input", T: () => GetGridHomeInput },
+            { no: 94, name: "createCliSession", kind: "message", oneof: "input", T: () => CreateCliSessionInput },
+            { no: 95, name: "setProfilePhoto", kind: "message", oneof: "input", T: () => SetProfilePhotoInput },
+            { no: 96, name: "getExternalProfilePhoto", kind: "message", oneof: "input", T: () => GetExternalProfilePhotoInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -15010,6 +15191,24 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getGridHome: GetGridHomeInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getGridHome)
                     };
                     break;
+                case /* CreateCliSessionInput createCliSession */ 94:
+                    message.input = {
+                        oneofKind: "createCliSession",
+                        createCliSession: CreateCliSessionInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).createCliSession)
+                    };
+                    break;
+                case /* SetProfilePhotoInput setProfilePhoto */ 95:
+                    message.input = {
+                        oneofKind: "setProfilePhoto",
+                        setProfilePhoto: SetProfilePhotoInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).setProfilePhoto)
+                    };
+                    break;
+                case /* GetExternalProfilePhotoInput getExternalProfilePhoto */ 96:
+                    message.input = {
+                        oneofKind: "getExternalProfilePhoto",
+                        getExternalProfilePhoto: GetExternalProfilePhotoInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getExternalProfilePhoto)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -15298,6 +15497,15 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetGridHomeInput getGridHome = 93; */
         if (message.input.oneofKind === "getGridHome")
             GetGridHomeInput.internalBinaryWrite(message.input.getGridHome, writer.tag(93, WireType.LengthDelimited).fork(), options).join();
+        /* CreateCliSessionInput createCliSession = 94; */
+        if (message.input.oneofKind === "createCliSession")
+            CreateCliSessionInput.internalBinaryWrite(message.input.createCliSession, writer.tag(94, WireType.LengthDelimited).fork(), options).join();
+        /* SetProfilePhotoInput setProfilePhoto = 95; */
+        if (message.input.oneofKind === "setProfilePhoto")
+            SetProfilePhotoInput.internalBinaryWrite(message.input.setProfilePhoto, writer.tag(95, WireType.LengthDelimited).fork(), options).join();
+        /* GetExternalProfilePhotoInput getExternalProfilePhoto = 96; */
+        if (message.input.oneofKind === "getExternalProfilePhoto")
+            GetExternalProfilePhotoInput.internalBinaryWrite(message.input.getExternalProfilePhoto, writer.tag(96, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -15403,7 +15611,10 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 90, name: "deleteGridRoom", kind: "message", oneof: "result", T: () => DeleteGridRoomResult },
             { no: 91, name: "prepareGridConnection", kind: "message", oneof: "result", T: () => PrepareGridConnectionResult },
             { no: 92, name: "setGridAvatarMicrophoneEnabled", kind: "message", oneof: "result", T: () => SetGridAvatarMicrophoneEnabledResult },
-            { no: 93, name: "getGridHome", kind: "message", oneof: "result", T: () => GetGridHomeResult }
+            { no: 93, name: "getGridHome", kind: "message", oneof: "result", T: () => GetGridHomeResult },
+            { no: 94, name: "createCliSession", kind: "message", oneof: "result", T: () => CreateCliSessionResult },
+            { no: 95, name: "setProfilePhoto", kind: "message", oneof: "result", T: () => SetProfilePhotoResult },
+            { no: 96, name: "getExternalProfilePhoto", kind: "message", oneof: "result", T: () => GetExternalProfilePhotoResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -15968,6 +16179,24 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getGridHome: GetGridHomeResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getGridHome)
                     };
                     break;
+                case /* CreateCliSessionResult createCliSession */ 94:
+                    message.result = {
+                        oneofKind: "createCliSession",
+                        createCliSession: CreateCliSessionResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).createCliSession)
+                    };
+                    break;
+                case /* SetProfilePhotoResult setProfilePhoto */ 95:
+                    message.result = {
+                        oneofKind: "setProfilePhoto",
+                        setProfilePhoto: SetProfilePhotoResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).setProfilePhoto)
+                    };
+                    break;
+                case /* GetExternalProfilePhotoResult getExternalProfilePhoto */ 96:
+                    message.result = {
+                        oneofKind: "getExternalProfilePhoto",
+                        getExternalProfilePhoto: GetExternalProfilePhotoResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getExternalProfilePhoto)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -16256,6 +16485,15 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetGridHomeResult getGridHome = 93; */
         if (message.result.oneofKind === "getGridHome")
             GetGridHomeResult.internalBinaryWrite(message.result.getGridHome, writer.tag(93, WireType.LengthDelimited).fork(), options).join();
+        /* CreateCliSessionResult createCliSession = 94; */
+        if (message.result.oneofKind === "createCliSession")
+            CreateCliSessionResult.internalBinaryWrite(message.result.createCliSession, writer.tag(94, WireType.LengthDelimited).fork(), options).join();
+        /* SetProfilePhotoResult setProfilePhoto = 95; */
+        if (message.result.oneofKind === "setProfilePhoto")
+            SetProfilePhotoResult.internalBinaryWrite(message.result.setProfilePhoto, writer.tag(95, WireType.LengthDelimited).fork(), options).join();
+        /* GetExternalProfilePhotoResult getExternalProfilePhoto = 96; */
+        if (message.result.oneofKind === "getExternalProfilePhoto")
+            GetExternalProfilePhotoResult.internalBinaryWrite(message.result.getExternalProfilePhoto, writer.tag(96, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -20956,6 +21194,138 @@ class GetSessionsResult$Type extends MessageType<GetSessionsResult> {
  */
 export const GetSessionsResult = new GetSessionsResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class CreateCliSessionInput$Type extends MessageType<CreateCliSessionInput> {
+    constructor() {
+        super("CreateCliSessionInput", [
+            { no: 1, name: "device_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "device_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "client_version", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "os_version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<CreateCliSessionInput>): CreateCliSessionInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.deviceId = "";
+        message.clientVersion = "";
+        if (value !== undefined)
+            reflectionMergePartial<CreateCliSessionInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CreateCliSessionInput): CreateCliSessionInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string device_id */ 1:
+                    message.deviceId = reader.string();
+                    break;
+                case /* optional string device_name */ 2:
+                    message.deviceName = reader.string();
+                    break;
+                case /* string client_version */ 3:
+                    message.clientVersion = reader.string();
+                    break;
+                case /* optional string os_version */ 4:
+                    message.osVersion = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CreateCliSessionInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string device_id = 1; */
+        if (message.deviceId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.deviceId);
+        /* optional string device_name = 2; */
+        if (message.deviceName !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.deviceName);
+        /* string client_version = 3; */
+        if (message.clientVersion !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.clientVersion);
+        /* optional string os_version = 4; */
+        if (message.osVersion !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.osVersion);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message CreateCliSessionInput
+ */
+export const CreateCliSessionInput = new CreateCliSessionInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CreateCliSessionResult$Type extends MessageType<CreateCliSessionResult> {
+    constructor() {
+        super("CreateCliSessionResult", [
+            { no: 1, name: "token", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "session_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<CreateCliSessionResult>): CreateCliSessionResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.token = "";
+        message.sessionId = 0n;
+        message.userId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<CreateCliSessionResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CreateCliSessionResult): CreateCliSessionResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string token */ 1:
+                    message.token = reader.string();
+                    break;
+                case /* int64 session_id */ 2:
+                    message.sessionId = reader.int64().toBigInt();
+                    break;
+                case /* int64 user_id */ 3:
+                    message.userId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CreateCliSessionResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string token = 1; */
+        if (message.token !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.token);
+        /* int64 session_id = 2; */
+        if (message.sessionId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.sessionId);
+        /* int64 user_id = 3; */
+        if (message.userId !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.userId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message CreateCliSessionResult
+ */
+export const CreateCliSessionResult = new CreateCliSessionResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class CheckUsernameInput$Type extends MessageType<CheckUsernameInput> {
     constructor() {
         super("CheckUsernameInput", [
@@ -21272,6 +21642,225 @@ class UpdateProfileResult$Type extends MessageType<UpdateProfileResult> {
  * @generated MessageType for protobuf message UpdateProfileResult
  */
 export const UpdateProfileResult = new UpdateProfileResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SetProfilePhotoInput$Type extends MessageType<SetProfilePhotoInput> {
+    constructor() {
+        super("SetProfilePhotoInput", [
+            { no: 1, name: "file_unique_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SetProfilePhotoInput>): SetProfilePhotoInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.fileUniqueId = "";
+        if (value !== undefined)
+            reflectionMergePartial<SetProfilePhotoInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SetProfilePhotoInput): SetProfilePhotoInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string file_unique_id */ 1:
+                    message.fileUniqueId = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SetProfilePhotoInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string file_unique_id = 1; */
+        if (message.fileUniqueId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.fileUniqueId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SetProfilePhotoInput
+ */
+export const SetProfilePhotoInput = new SetProfilePhotoInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SetProfilePhotoResult$Type extends MessageType<SetProfilePhotoResult> {
+    constructor() {
+        super("SetProfilePhotoResult", [
+            { no: 1, name: "user", kind: "message", T: () => User },
+            { no: 2, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<SetProfilePhotoResult>): SetProfilePhotoResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<SetProfilePhotoResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SetProfilePhotoResult): SetProfilePhotoResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* User user */ 1:
+                    message.user = User.internalBinaryRead(reader, reader.uint32(), options, message.user);
+                    break;
+                case /* repeated Update updates */ 2:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SetProfilePhotoResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* User user = 1; */
+        if (message.user)
+            User.internalBinaryWrite(message.user, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Update updates = 2; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SetProfilePhotoResult
+ */
+export const SetProfilePhotoResult = new SetProfilePhotoResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetExternalProfilePhotoInput$Type extends MessageType<GetExternalProfilePhotoInput> {
+    constructor() {
+        super("GetExternalProfilePhotoInput", [
+            { no: 1, name: "provider", kind: "enum", T: () => ["ExternalProfileProvider", ExternalProfileProvider] },
+            { no: 2, name: "username", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetExternalProfilePhotoInput>): GetExternalProfilePhotoInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.provider = 0;
+        message.username = "";
+        if (value !== undefined)
+            reflectionMergePartial<GetExternalProfilePhotoInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetExternalProfilePhotoInput): GetExternalProfilePhotoInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* ExternalProfileProvider provider */ 1:
+                    message.provider = reader.int32();
+                    break;
+                case /* string username */ 2:
+                    message.username = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetExternalProfilePhotoInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* ExternalProfileProvider provider = 1; */
+        if (message.provider !== 0)
+            writer.tag(1, WireType.Varint).int32(message.provider);
+        /* string username = 2; */
+        if (message.username !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.username);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetExternalProfilePhotoInput
+ */
+export const GetExternalProfilePhotoInput = new GetExternalProfilePhotoInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetExternalProfilePhotoResult$Type extends MessageType<GetExternalProfilePhotoResult> {
+    constructor() {
+        super("GetExternalProfilePhotoResult", [
+            { no: 1, name: "status", kind: "enum", T: () => ["ExternalProfilePhotoStatus", ExternalProfilePhotoStatus] },
+            { no: 2, name: "photo", kind: "scalar", T: 12 /*ScalarType.BYTES*/ },
+            { no: 3, name: "mime_type", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetExternalProfilePhotoResult>): GetExternalProfilePhotoResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.status = 0;
+        message.photo = new Uint8Array(0);
+        message.mimeType = "";
+        if (value !== undefined)
+            reflectionMergePartial<GetExternalProfilePhotoResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetExternalProfilePhotoResult): GetExternalProfilePhotoResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* ExternalProfilePhotoStatus status */ 1:
+                    message.status = reader.int32();
+                    break;
+                case /* bytes photo */ 2:
+                    message.photo = reader.bytes();
+                    break;
+                case /* string mime_type */ 3:
+                    message.mimeType = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetExternalProfilePhotoResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* ExternalProfilePhotoStatus status = 1; */
+        if (message.status !== 0)
+            writer.tag(1, WireType.Varint).int32(message.status);
+        /* bytes photo = 2; */
+        if (message.photo.length)
+            writer.tag(2, WireType.LengthDelimited).bytes(message.photo);
+        /* string mime_type = 3; */
+        if (message.mimeType !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.mimeType);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetExternalProfilePhotoResult
+ */
+export const GetExternalProfilePhotoResult = new GetExternalProfilePhotoResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class BotCommand$Type extends MessageType<BotCommand> {
     constructor() {

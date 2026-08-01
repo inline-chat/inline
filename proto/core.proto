@@ -1037,6 +1037,9 @@ enum Method {
   PREPARE_GRID_CONNECTION = 90;
   SET_GRID_AVATAR_MICROPHONE_ENABLED = 91;
   GET_GRID_HOME = 92;
+  CREATE_CLI_SESSION = 93;
+  SET_PROFILE_PHOTO = 94;
+  GET_EXTERNAL_PROFILE_PHOTO = 95;
 }
 
 message RpcCall {
@@ -1134,6 +1137,9 @@ message RpcCall {
     PrepareGridConnectionInput prepareGridConnection = 91;
     SetGridAvatarMicrophoneEnabledInput setGridAvatarMicrophoneEnabled = 92;
     GetGridHomeInput getGridHome = 93;
+    CreateCliSessionInput createCliSession = 94;
+    SetProfilePhotoInput setProfilePhoto = 95;
+    GetExternalProfilePhotoInput getExternalProfilePhoto = 96;
   }
 }
 
@@ -1233,6 +1239,9 @@ message RpcResult {
     PrepareGridConnectionResult prepareGridConnection = 91;
     SetGridAvatarMicrophoneEnabledResult setGridAvatarMicrophoneEnabled = 92;
     GetGridHomeResult getGridHome = 93;
+    CreateCliSessionResult createCliSession = 94;
+    SetProfilePhotoResult setProfilePhoto = 95;
+    GetExternalProfilePhotoResult getExternalProfilePhoto = 96;
   }
 }
 
@@ -1758,6 +1767,22 @@ message AccountSession {
 
 message GetSessionsResult { repeated AccountSession sessions = 1; }
 
+// Creates a separate CLI credential from an authenticated first-party macOS
+// session after the user approves a host-local handoff. The returned token is
+// sensitive and must only be delivered to the requesting local CLI process.
+message CreateCliSessionInput {
+  string device_id = 1;
+  optional string device_name = 2;
+  string client_version = 3;
+  optional string os_version = 4;
+}
+
+message CreateCliSessionResult {
+  string token = 1;
+  int64 session_id = 2;
+  int64 user_id = 3;
+}
+
 enum UsernameAvailability {
   USERNAME_AVAILABILITY_UNSPECIFIED = 0;
   USERNAME_AVAILABLE = 1;
@@ -1790,6 +1815,39 @@ message UpdateProfileInput {
 message UpdateProfileResult {
   User user = 1;
   repeated Update updates = 2;
+}
+
+message SetProfilePhotoInput {
+  // Empty clears the current profile photo.
+  string file_unique_id = 1;
+}
+
+message SetProfilePhotoResult {
+  User user = 1;
+  repeated Update updates = 2;
+}
+
+enum ExternalProfileProvider {
+  EXTERNAL_PROFILE_PROVIDER_UNSPECIFIED = 0;
+  EXTERNAL_PROFILE_PROVIDER_X = 1;
+}
+
+enum ExternalProfilePhotoStatus {
+  EXTERNAL_PROFILE_PHOTO_STATUS_UNSPECIFIED = 0;
+  EXTERNAL_PROFILE_PHOTO_FOUND = 1;
+  EXTERNAL_PROFILE_PHOTO_NOT_FOUND = 2;
+  EXTERNAL_PROFILE_PHOTO_UNAVAILABLE = 3;
+}
+
+message GetExternalProfilePhotoInput {
+  ExternalProfileProvider provider = 1;
+  string username = 2;
+}
+
+message GetExternalProfilePhotoResult {
+  ExternalProfilePhotoStatus status = 1;
+  bytes photo = 2;
+  string mime_type = 3;
 }
 
 message BotCommand {
