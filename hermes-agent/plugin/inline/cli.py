@@ -20,6 +20,7 @@ _SIDECAR_ENTRY = Path(__file__).parent / "sidecar" / "index.mjs"
 _MIN_NODE_MAJOR = 20
 _BOT_USERNAME_RE = re.compile(r"^[A-Za-z0-9_]+bot$", re.IGNORECASE)
 _CLI_INSTALL_URL = "https://inline.chat/cli/install.sh"
+_MAX_TOKEN_BYTES = 16 * 1024
 
 
 def gateway_setup() -> None:
@@ -242,25 +243,56 @@ def _configure_access(hermes_gateway, hermes_setup, owner_user_id: str | None) -
             allowed.append(value)
 
     if allowed:
-        value = ",".join(allowed)
-        hermes_gateway.save_env_value("INLINE_ALLOW_ALL_USERS", "false")
-        hermes_gateway.save_env_value("INLINE_ALLOWED_USERS", value)
-        hermes_gateway.save_env_value("INLINE_GROUP_ALLOW_FROM", value)
-        hermes_gateway.save_env_value("INLINE_DM_POLICY", "allowlist")
-        hermes_gateway.save_env_value("INLINE_GROUP_POLICY", "allowlist")
+        _apply_access(hermes_gateway, "allowlist", owner_user_id, allowed)
         hermes_setup.print_success("Only the listed Inline users can invoke Hermes.")
         return
 
     if hermes_setup.prompt_yes_no("Allow any Inline user who can reach the bot?", False):
-        hermes_gateway.save_env_value("INLINE_ALLOW_ALL_USERS", "true")
-        hermes_gateway.save_env_value("INLINE_DM_POLICY", "open")
-        hermes_gateway.save_env_value("INLINE_GROUP_POLICY", "open")
+        _apply_access(hermes_gateway, "open", owner_user_id, [])
         hermes_setup.print_warning("Open access enabled. Any reachable Inline user can invoke Hermes.")
     else:
+        _apply_access(hermes_gateway, "disabled", owner_user_id, [])
+        hermes_setup.print_warning("Messaging is disabled until you add allowed user IDs and re-run setup.")
+
+
+def _apply_access(
+    hermes_gateway,
+    access: str,
+    owner_user_id: str | None,
+    allowed_user_ids: list[str],
+) -> list[str]:
+    normalized: list[str] = []
+    if access in ("owner", "allowlist"):
+        for value in [owner_user_id, *allowed_user_ids]:
+            candidate = str(value or "").strip()
+            if not candidate or not candidate.isdigit() or int(candidate) <= 0:
+                continue
+            if candidate not in normalized:
+                normalized.append(candidate)
+        if not normalized:
+            raise ValueError("owner or allowlist access requires a positive owner user ID")
+        joined = ",".join(normalized)
         hermes_gateway.save_env_value("INLINE_ALLOW_ALL_USERS", "false")
+        hermes_gateway.save_env_value("INLINE_ALLOWED_USERS", joined)
+        hermes_gateway.save_env_value("INLINE_GROUP_ALLOW_FROM", joined)
+        hermes_gateway.save_env_value("INLINE_DM_POLICY", "allowlist")
+        hermes_gateway.save_env_value("INLINE_GROUP_POLICY", "allowlist")
+        return normalized
+    if access == "open":
+        hermes_gateway.save_env_value("INLINE_ALLOW_ALL_USERS", "true")
+        hermes_gateway.save_env_value("INLINE_ALLOWED_USERS", "")
+        hermes_gateway.save_env_value("INLINE_GROUP_ALLOW_FROM", "")
+        hermes_gateway.save_env_value("INLINE_DM_POLICY", "open")
+        hermes_gateway.save_env_value("INLINE_GROUP_POLICY", "open")
+        return normalized
+    if access == "disabled":
+        hermes_gateway.save_env_value("INLINE_ALLOW_ALL_USERS", "false")
+        hermes_gateway.save_env_value("INLINE_ALLOWED_USERS", "")
+        hermes_gateway.save_env_value("INLINE_GROUP_ALLOW_FROM", "")
         hermes_gateway.save_env_value("INLINE_DM_POLICY", "disabled")
         hermes_gateway.save_env_value("INLINE_GROUP_POLICY", "disabled")
-        hermes_setup.print_warning("Messaging is disabled until you add allowed user IDs and re-run setup.")
+        return normalized
+    raise ValueError(f"unsupported Inline access mode: {access}")
 
 
 def _inline_cli_user_id(inline_bin: str | None) -> str | None:
@@ -297,9 +329,24 @@ def _run_inline_json(inline_bin: str, args: list[str]) -> tuple[dict | None, str
 
 def register_cli(parser: argparse.ArgumentParser) -> None:
     subs = parser.add_subparsers(dest="inline_command", required=False)
-    subs.add_parser("setup", help="Configure Inline interactively")
-    subs.add_parser("status", help="Show Inline adapter status")
+    setup = subs.add_parser("setup", help="Configure Inline")
+    setup.add_argument("--non-interactive", action="store_true")
+    setup.add_argument("--token-stdin", action="store_true")
+    setup.add_argument("--owner-user-id")
+    setup.add_argument("--access", choices=["owner", "allowlist", "open", "disabled"], default="owner")
+    setup.add_argument("--allow-user", action="append", default=[], type=_positive_user_id)
+    setup.add_argument("--json", action="store_true")
+    status = subs.add_parser("status", help="Show Inline adapter status")
+    status.add_argument("--json", action="store_true")
+    status.add_argument("--probe", action="store_true")
     parser.set_defaults(func=dispatch)
+
+
+def _positive_user_id(value: str) -> str:
+    value = str(value or "").strip()
+    if not value.isdigit() or int(value) <= 0:
+        raise argparse.ArgumentTypeError("Inline user IDs must be positive integers")
+    return value
 
 
 def dispatch(args) -> int:
@@ -307,18 +354,122 @@ def dispatch(args) -> int:
     if command is None:
         command = "status"
     if command == "setup":
+        if getattr(args, "non_interactive", False):
+            return _machine_setup(args)
         gateway_setup()
         return 0
     if command == "status":
-        configured = _env_token_configured()
+        return _status(args)
+    raise SystemExit(f"unknown inline command: {command}")
+
+
+def _machine_setup(args) -> int:
+    if not getattr(args, "token_stdin", False):
+        raise SystemExit("non-interactive Inline setup requires --token-stdin")
+    owner_user_id = str(getattr(args, "owner_user_id", "") or "").strip()
+    if not owner_user_id.isdigit() or int(owner_user_id) <= 0:
+        raise SystemExit("non-interactive Inline setup requires a positive --owner-user-id")
+    token = sys.stdin.read(_MAX_TOKEN_BYTES + 1)
+    if len(token.encode("utf-8")) > _MAX_TOKEN_BYTES:
+        raise SystemExit("Inline bot token exceeds the input limit")
+    token = token.strip()
+    if not token:
+        raise SystemExit("Inline bot token from stdin is empty")
+    from hermes_cli import gateway as hermes_gateway
+
+    hermes_gateway.save_env_value("INLINE_TOKEN", token)
+    allowed = _apply_access(
+        hermes_gateway,
+        getattr(args, "access", "owner"),
+        owner_user_id,
+        list(getattr(args, "allow_user", []) or []),
+    )
+    hermes_gateway.write_platform_config_field("inline", "enabled", True, raw=True)
+    result = {
+        "ok": True,
+        "action": "inline.setup",
+        "configured": True,
+        "access": getattr(args, "access", "owner"),
+        "ownerUserId": owner_user_id,
+        "allowedUserIds": allowed,
+    }
+    if getattr(args, "json", False):
+        print(json.dumps(result, separators=(",", ":")))
+    else:
+        print("Inline configured: yes")
+    return 0
+
+
+def _status(args) -> int:
+    from hermes_cli import gateway as hermes_gateway
+
+    token = (
+        hermes_gateway.get_env_value("INLINE_TOKEN")
+        or hermes_gateway.get_env_value("INLINE_BOT_TOKEN")
+    )
+    configured = bool(token)
+    probe_requested = bool(getattr(args, "probe", False))
+    probe = _probe_inline_token(token) if configured and probe_requested else None
+    ready = configured and (not probe_requested or bool(probe and probe.get("ok")))
+    result = {
+        "ok": ready,
+        "action": "inline.status",
+        "configured": configured,
+        "sidecarBundled": _SIDECAR_ENTRY.exists(),
+        "node": _node_status(),
+        "probeRequested": probe_requested,
+        **({"probe": probe} if probe is not None else {}),
+    }
+    if getattr(args, "json", False):
+        print(json.dumps(result, separators=(",", ":")))
+    else:
         print(f"Inline configured: {'yes' if configured else 'no'}")
         print(f"Inline sidecar bundled: {'yes' if _SIDECAR_ENTRY.exists() else 'no'}")
         print(f"Node available: {_node_status()}")
         if not configured:
             print("Next: run `hermes inline setup` for guided bot setup.")
+        elif probe_requested:
+            print(f"Inline credential probe: {'ready' if ready else 'failed'}")
         print("Advanced diagnostics: inline-hermes doctor --json")
-        return 0
-    raise SystemExit(f"unknown inline command: {command}")
+    return 0 if not probe_requested or ready else 1
+
+
+def _probe_inline_token(token: str) -> dict:
+    inline_bin = _find_inline_cli()
+    if not inline_bin:
+        return {"ok": False, "error": "Inline CLI was not found for the credential probe."}
+    env = os.environ.copy()
+    for name in ("INLINE_TOKEN", "INLINE_BOT_TOKEN", "INLINE_OWNER_TOKEN", "INLINE_ACCESS_TOKEN"):
+        env.pop(name, None)
+    env["INLINE_TOKEN"] = token
+    try:
+        result = subprocess.run(
+            [inline_bin, "--json", "--compact", "auth", "me"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=30,
+            check=False,
+            env=env,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {"ok": False, "error": "Inline credential probe could not run."}
+    if result.returncode != 0:
+        return {"ok": False, "error": "Inline rejected the configured credential."}
+    try:
+        payload = json.loads(result.stdout)
+    except (json.JSONDecodeError, TypeError):
+        return {"ok": False, "error": "Inline credential probe returned unreadable output."}
+    raw_id = payload.get("id") if isinstance(payload, dict) else None
+    bot_user_id = str(raw_id).strip() if raw_id is not None else ""
+    if not bot_user_id.isdigit() or int(bot_user_id) <= 0:
+        return {"ok": False, "error": "Inline credential probe returned no bot identity."}
+    username = str(payload.get("username") or "").strip().lstrip("@")
+    return {
+        "ok": True,
+        "botUserId": bot_user_id,
+        **({"botUsername": username} if username else {}),
+    }
 
 
 def _env_token_configured() -> bool:

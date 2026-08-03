@@ -72,6 +72,11 @@ pub(crate) async fn handle_login(
             return Err(CliError::invalid_args("--mac-app-bootstrap requires --json").into());
         }
 
+        if let Some(output) = existing_saved_login(auth_store, local_db)? {
+            output::print_json(&output, json_format)?;
+            return Ok(());
+        }
+
         let device_name = client_info::device_name();
         let device_id = auth_store.device_id()?;
         match mac_app_auth::login_from_parent_app(
@@ -275,6 +280,44 @@ pub(crate) async fn handle_login(
             }
         }
     }
+}
+
+fn existing_saved_login(
+    auth_store: &AuthStore,
+    local_db: &LocalDb,
+) -> Result<Option<AuthLoginOutput>, Box<dyn std::error::Error>> {
+    let Some(token) = auth_store.load_saved_token()? else {
+        return Ok(None);
+    };
+    let Some(user_id) = token_user_id(&token) else {
+        return Ok(None);
+    };
+    let user = local_db
+        .load()
+        .ok()
+        .and_then(|state| state.current_user)
+        .filter(|user| user.id == user_id);
+
+    Ok(Some(AuthLoginOutput {
+        status: "authenticated",
+        user_id,
+        token_saved: true,
+        profile_loaded: user.is_some(),
+        user,
+        warning: None,
+    }))
+}
+
+fn token_user_id(token: &str) -> Option<i64> {
+    let (user_id, credential) = token.trim().split_once(':')?;
+    if user_id.is_empty() || !user_id.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let random = credential.strip_prefix("IN")?;
+    if random.len() != 32 || !random.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+        return None;
+    }
+    user_id.parse().ok().filter(|user_id| *user_id > 0)
 }
 
 fn require_contact(
@@ -719,6 +762,52 @@ mod tests {
         let output = serde_json::to_value(output).unwrap();
         assert!(output.get("token").is_none());
         assert_eq!(output["status"], "authenticated");
+    }
+
+    #[test]
+    fn existing_saved_login_skips_bootstrap_without_cached_profile() {
+        let root = tempfile::tempdir().unwrap();
+        let auth_store = AuthStore::new(
+            root.path().join("secrets.json"),
+            "https://api.inline.chat/v1".to_string(),
+        );
+        let local_db = LocalDb::new(
+            root.path().join("state.json"),
+            "https://api.inline.chat/v1".to_string(),
+        );
+        auth_store
+            .store_token("42:IN0123456789abcdefghijklmnopqrstuv")
+            .unwrap();
+
+        let output = existing_saved_login(&auth_store, &local_db)
+            .unwrap()
+            .expect("existing login");
+
+        assert_eq!(output.status, "authenticated");
+        assert_eq!(output.user_id, 42);
+        assert!(output.token_saved);
+        assert!(!output.profile_loaded);
+        assert!(output.user.is_none());
+    }
+
+    #[test]
+    fn malformed_saved_token_continues_to_authentication() {
+        let root = tempfile::tempdir().unwrap();
+        let auth_store = AuthStore::new(
+            root.path().join("secrets.json"),
+            "https://api.inline.chat/v1".to_string(),
+        );
+        let local_db = LocalDb::new(
+            root.path().join("state.json"),
+            "https://api.inline.chat/v1".to_string(),
+        );
+        auth_store.store_token("not-an-inline-token").unwrap();
+
+        assert!(
+            existing_saved_login(&auth_store, &local_db)
+                .unwrap()
+                .is_none()
+        );
     }
 
     async fn serve_json(response_body: &'static str) -> (String, tokio::task::JoinHandle<String>) {

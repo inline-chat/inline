@@ -110,6 +110,23 @@ hermes inline status
 inline-hermes --version
 ```
 
+The Inline CLI can drive Hermes setup without putting the bot token in argv:
+
+```sh
+inline agents setup --target hermes --non-interactive --json
+```
+
+For other orchestrators, the plugin also exposes a token-free machine contract.
+The token is accepted only on stdin and is saved through Hermes's credential
+helper:
+
+```sh
+printf '%s\n' "$INLINE_BOT_TOKEN" | hermes inline setup \
+  --non-interactive --token-stdin --owner-user-id 123 \
+  --access owner --json
+hermes inline status --json --probe
+```
+
 `doctor` verifies required plugin files, the Node executable used for the
 sidecar, the installed sidecar bundle hash, and whether Hermes config enables
 the external plugin with `plugins.enabled: [inline-platform]`. It detects

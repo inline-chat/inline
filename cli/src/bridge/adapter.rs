@@ -58,6 +58,7 @@ pub(super) struct PreparedAdapter {
 pub(super) fn prepare_pinned_adapter(
     paths: &BridgePaths,
     support: &AcpProviderSupport,
+    allow_install: bool,
 ) -> Result<Option<PreparedAdapter>, String> {
     let (version, npm_distribution, embedded_distribution) = match support.distribution {
         AcpDistribution::Native => return Ok(None),
@@ -103,6 +104,13 @@ pub(super) fn prepare_pinned_adapter(
             version,
             installed_now: false,
         }));
+    }
+
+    if !allow_install {
+        return Err(format!(
+            "the verified {} ACP adapter is not installed and --no-install was provided",
+            support.display_name
+        ));
     }
 
     let npm = resolve_executable(Path::new("npm"))

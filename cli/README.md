@@ -83,8 +83,38 @@ commands remain authenticated while `INLINE_TOKEN` is set.
 
 ## Local coding agents
 
-Inline can keep Codex and ACP agents available as private, local-first bots in
-your chats. Setup is persistent; you do not run a new bridge per thread.
+One command can discover an agent already installed on this machine, create or
+reuse its Inline bot, install the Inline integration, configure owner-safe
+access, and start its gateway or bridge:
+
+```bash
+# Interactive picker; only installed agents are shown.
+inline agents setup
+
+# Prompt-free setup for agents and scripts.
+inline agents setup --target openclaw --non-interactive --json
+inline agents setup --target hermes --profile work --non-interactive --json
+inline agents setup --target codex --folder /path/to/project --non-interactive --json
+```
+
+Supported installed targets are OpenClaw, Hermes, Codex, OpenCode, Claude, and
+Amp. Inline does not install those host runtimes. If none are installed, setup
+stops without creating a bot or changing configuration. Use `--dry-run` for a
+read-only discovery check, `--no-install` to forbid integration installation,
+or `--no-restart` to configure without changing the user service. The default
+access mode is owner-only; automation can use `--access allowlist` with repeated
+`--allow-user ID` flags. Codex/ACP bridge targets use the user's home directory
+as their workspace unless `--folder` is provided explicitly.
+
+For gateway targets, `~/.inline/config.toml` stores only the target, profile
+instance, bot user ID, and bot username needed for idempotent reconciliation.
+Tokens stay in OpenClaw or Hermes credential storage. Codex/ACP mappings remain
+in the existing bridge account state instead of being duplicated in this file.
+
+Inline can also keep Codex and ACP agents available as private, local-first bots
+in your chats. The older provider-specific setup commands remain supported and
+use the same setup core. Setup is persistent; you do not run a new bridge per
+thread.
 
 ```bash
 inline setup codex --folder /path/to/project

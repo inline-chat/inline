@@ -167,24 +167,22 @@ fn legacy_secret_debug_output_is_redacted() {
 }
 
 #[test]
-fn setup_defaults_to_last_workspace_but_explicit_folder_wins() {
-    let unique = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let root = PathBuf::from("/tmp").join(format!("inline-workspace-default-{unique}"));
-    let saved = root.join("saved");
-    let explicit = root.join("explicit");
-    fs::create_dir_all(&saved).unwrap();
-    fs::create_dir_all(&explicit).unwrap();
+fn setup_defaults_to_home_but_explicit_folder_wins() {
+    let home = env::var_os("HOME")
+        .or_else(|| env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .expect("test home directory");
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let explicit = directory.path().join("explicit");
+    fs::create_dir(&explicit).expect("explicit workspace");
 
     assert_eq!(
-        resolve_setup_workspace(None, Some(&saved)).unwrap(),
-        fs::canonicalize(&saved).unwrap()
+        resolve_setup_workspace(None).unwrap(),
+        fs::canonicalize(home).unwrap()
     );
     assert_eq!(
-        resolve_setup_workspace(Some(explicit.clone()), Some(&saved)).unwrap(),
-        fs::canonicalize(&explicit).unwrap()
+        resolve_setup_workspace(Some(explicit.clone())).unwrap(),
+        fs::canonicalize(explicit).unwrap()
     );
 }
 

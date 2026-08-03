@@ -40,6 +40,10 @@ impl AuthStore {
             return Ok(Some(token));
         }
 
+        self.load_saved_token()
+    }
+
+    pub fn load_saved_token(&self) -> Result<Option<String>, AuthError> {
         let secrets = match self.read_secrets()? {
             Some(secrets) => secrets,
             None => return Ok(None),

@@ -5857,6 +5857,9 @@ var Method;
   Method2[Method2["PREPARE_GRID_CONNECTION"] = 90] = "PREPARE_GRID_CONNECTION";
   Method2[Method2["SET_GRID_AVATAR_MICROPHONE_ENABLED"] = 91] = "SET_GRID_AVATAR_MICROPHONE_ENABLED";
   Method2[Method2["GET_GRID_HOME"] = 92] = "GET_GRID_HOME";
+  Method2[Method2["CREATE_CLI_SESSION"] = 93] = "CREATE_CLI_SESSION";
+  Method2[Method2["SET_PROFILE_PHOTO"] = 94] = "SET_PROFILE_PHOTO";
+  Method2[Method2["GET_EXTERNAL_PROFILE_PHOTO"] = 95] = "GET_EXTERNAL_PROFILE_PHOTO";
 })(Method || (Method = {}));
 var GridConnectionUnavailableReason;
 (function(GridConnectionUnavailableReason2) {
@@ -5873,6 +5876,18 @@ var UsernameAvailability;
   UsernameAvailability2[UsernameAvailability2["USERNAME_RESERVED"] = 4] = "USERNAME_RESERVED";
   UsernameAvailability2[UsernameAvailability2["USERNAME_INVALID"] = 5] = "USERNAME_INVALID";
 })(UsernameAvailability || (UsernameAvailability = {}));
+var ExternalProfileProvider;
+(function(ExternalProfileProvider2) {
+  ExternalProfileProvider2[ExternalProfileProvider2["EXTERNAL_PROFILE_PROVIDER_UNSPECIFIED"] = 0] = "EXTERNAL_PROFILE_PROVIDER_UNSPECIFIED";
+  ExternalProfileProvider2[ExternalProfileProvider2["EXTERNAL_PROFILE_PROVIDER_X"] = 1] = "EXTERNAL_PROFILE_PROVIDER_X";
+})(ExternalProfileProvider || (ExternalProfileProvider = {}));
+var ExternalProfilePhotoStatus;
+(function(ExternalProfilePhotoStatus2) {
+  ExternalProfilePhotoStatus2[ExternalProfilePhotoStatus2["EXTERNAL_PROFILE_PHOTO_STATUS_UNSPECIFIED"] = 0] = "EXTERNAL_PROFILE_PHOTO_STATUS_UNSPECIFIED";
+  ExternalProfilePhotoStatus2[ExternalProfilePhotoStatus2["EXTERNAL_PROFILE_PHOTO_FOUND"] = 1] = "EXTERNAL_PROFILE_PHOTO_FOUND";
+  ExternalProfilePhotoStatus2[ExternalProfilePhotoStatus2["EXTERNAL_PROFILE_PHOTO_NOT_FOUND"] = 2] = "EXTERNAL_PROFILE_PHOTO_NOT_FOUND";
+  ExternalProfilePhotoStatus2[ExternalProfilePhotoStatus2["EXTERNAL_PROFILE_PHOTO_UNAVAILABLE"] = 3] = "EXTERNAL_PROFILE_PHOTO_UNAVAILABLE";
+})(ExternalProfilePhotoStatus || (ExternalProfilePhotoStatus = {}));
 var PushNotificationProvider;
 (function(PushNotificationProvider2) {
   PushNotificationProvider2[PushNotificationProvider2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
@@ -10683,7 +10698,10 @@ class RpcCall$Type extends import_runtime4.MessageType {
       { no: 90, name: "deleteGridRoom", kind: "message", oneof: "input", T: () => DeleteGridRoomInput },
       { no: 91, name: "prepareGridConnection", kind: "message", oneof: "input", T: () => PrepareGridConnectionInput },
       { no: 92, name: "setGridAvatarMicrophoneEnabled", kind: "message", oneof: "input", T: () => SetGridAvatarMicrophoneEnabledInput },
-      { no: 93, name: "getGridHome", kind: "message", oneof: "input", T: () => GetGridHomeInput }
+      { no: 93, name: "getGridHome", kind: "message", oneof: "input", T: () => GetGridHomeInput },
+      { no: 94, name: "createCliSession", kind: "message", oneof: "input", T: () => CreateCliSessionInput },
+      { no: 95, name: "setProfilePhoto", kind: "message", oneof: "input", T: () => SetProfilePhotoInput },
+      { no: 96, name: "getExternalProfilePhoto", kind: "message", oneof: "input", T: () => GetExternalProfilePhotoInput }
     ]);
   }
   create(value) {
@@ -11248,6 +11266,24 @@ class RpcCall$Type extends import_runtime4.MessageType {
             getGridHome: GetGridHomeInput.internalBinaryRead(reader, reader.uint32(), options, message.input.getGridHome)
           };
           break;
+        case 94:
+          message.input = {
+            oneofKind: "createCliSession",
+            createCliSession: CreateCliSessionInput.internalBinaryRead(reader, reader.uint32(), options, message.input.createCliSession)
+          };
+          break;
+        case 95:
+          message.input = {
+            oneofKind: "setProfilePhoto",
+            setProfilePhoto: SetProfilePhotoInput.internalBinaryRead(reader, reader.uint32(), options, message.input.setProfilePhoto)
+          };
+          break;
+        case 96:
+          message.input = {
+            oneofKind: "getExternalProfilePhoto",
+            getExternalProfilePhoto: GetExternalProfilePhotoInput.internalBinaryRead(reader, reader.uint32(), options, message.input.getExternalProfilePhoto)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -11444,6 +11480,12 @@ class RpcCall$Type extends import_runtime4.MessageType {
       SetGridAvatarMicrophoneEnabledInput.internalBinaryWrite(message.input.setGridAvatarMicrophoneEnabled, writer.tag(92, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.input.oneofKind === "getGridHome")
       GetGridHomeInput.internalBinaryWrite(message.input.getGridHome, writer.tag(93, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "createCliSession")
+      CreateCliSessionInput.internalBinaryWrite(message.input.createCliSession, writer.tag(94, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "setProfilePhoto")
+      SetProfilePhotoInput.internalBinaryWrite(message.input.setProfilePhoto, writer.tag(95, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "getExternalProfilePhoto")
+      GetExternalProfilePhotoInput.internalBinaryWrite(message.input.getExternalProfilePhoto, writer.tag(96, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -11546,7 +11588,10 @@ class RpcResult$Type extends import_runtime4.MessageType {
       { no: 90, name: "deleteGridRoom", kind: "message", oneof: "result", T: () => DeleteGridRoomResult },
       { no: 91, name: "prepareGridConnection", kind: "message", oneof: "result", T: () => PrepareGridConnectionResult },
       { no: 92, name: "setGridAvatarMicrophoneEnabled", kind: "message", oneof: "result", T: () => SetGridAvatarMicrophoneEnabledResult },
-      { no: 93, name: "getGridHome", kind: "message", oneof: "result", T: () => GetGridHomeResult }
+      { no: 93, name: "getGridHome", kind: "message", oneof: "result", T: () => GetGridHomeResult },
+      { no: 94, name: "createCliSession", kind: "message", oneof: "result", T: () => CreateCliSessionResult },
+      { no: 95, name: "setProfilePhoto", kind: "message", oneof: "result", T: () => SetProfilePhotoResult },
+      { no: 96, name: "getExternalProfilePhoto", kind: "message", oneof: "result", T: () => GetExternalProfilePhotoResult }
     ]);
   }
   create(value) {
@@ -12111,6 +12156,24 @@ class RpcResult$Type extends import_runtime4.MessageType {
             getGridHome: GetGridHomeResult.internalBinaryRead(reader, reader.uint32(), options, message.result.getGridHome)
           };
           break;
+        case 94:
+          message.result = {
+            oneofKind: "createCliSession",
+            createCliSession: CreateCliSessionResult.internalBinaryRead(reader, reader.uint32(), options, message.result.createCliSession)
+          };
+          break;
+        case 95:
+          message.result = {
+            oneofKind: "setProfilePhoto",
+            setProfilePhoto: SetProfilePhotoResult.internalBinaryRead(reader, reader.uint32(), options, message.result.setProfilePhoto)
+          };
+          break;
+        case 96:
+          message.result = {
+            oneofKind: "getExternalProfilePhoto",
+            getExternalProfilePhoto: GetExternalProfilePhotoResult.internalBinaryRead(reader, reader.uint32(), options, message.result.getExternalProfilePhoto)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -12307,6 +12370,12 @@ class RpcResult$Type extends import_runtime4.MessageType {
       SetGridAvatarMicrophoneEnabledResult.internalBinaryWrite(message.result.setGridAvatarMicrophoneEnabled, writer.tag(92, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.result.oneofKind === "getGridHome")
       GetGridHomeResult.internalBinaryWrite(message.result.getGridHome, writer.tag(93, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "createCliSession")
+      CreateCliSessionResult.internalBinaryWrite(message.result.createCliSession, writer.tag(94, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "setProfilePhoto")
+      SetProfilePhotoResult.internalBinaryWrite(message.result.setProfilePhoto, writer.tag(95, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "getExternalProfilePhoto")
+      GetExternalProfilePhotoResult.internalBinaryWrite(message.result.getExternalProfilePhoto, writer.tag(96, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -16563,6 +16632,125 @@ class GetSessionsResult$Type extends import_runtime4.MessageType {
 }
 var GetSessionsResult = new GetSessionsResult$Type;
 
+class CreateCliSessionInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("CreateCliSessionInput", [
+      { no: 1, name: "device_id", kind: "scalar", T: 9 },
+      { no: 2, name: "device_name", kind: "scalar", opt: true, T: 9 },
+      { no: 3, name: "client_version", kind: "scalar", T: 9 },
+      { no: 4, name: "os_version", kind: "scalar", opt: true, T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.deviceId = "";
+    message.clientVersion = "";
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.deviceId = reader.string();
+          break;
+        case 2:
+          message.deviceName = reader.string();
+          break;
+        case 3:
+          message.clientVersion = reader.string();
+          break;
+        case 4:
+          message.osVersion = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.deviceId !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.deviceId);
+    if (message.deviceName !== undefined)
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.deviceName);
+    if (message.clientVersion !== "")
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.clientVersion);
+    if (message.osVersion !== undefined)
+      writer.tag(4, import_runtime.WireType.LengthDelimited).string(message.osVersion);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var CreateCliSessionInput = new CreateCliSessionInput$Type;
+
+class CreateCliSessionResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("CreateCliSessionResult", [
+      { no: 1, name: "token", kind: "scalar", T: 9 },
+      { no: 2, name: "session_id", kind: "scalar", T: 3, L: 0 },
+      { no: 3, name: "user_id", kind: "scalar", T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.token = "";
+    message.sessionId = 0n;
+    message.userId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.token = reader.string();
+          break;
+        case 2:
+          message.sessionId = reader.int64().toBigInt();
+          break;
+        case 3:
+          message.userId = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.token !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.token);
+    if (message.sessionId !== 0n)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.sessionId);
+    if (message.userId !== 0n)
+      writer.tag(3, import_runtime.WireType.Varint).int64(message.userId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var CreateCliSessionResult = new CreateCliSessionResult$Type;
+
 class CheckUsernameInput$Type extends import_runtime4.MessageType {
   constructor() {
     super("CheckUsernameInput", [
@@ -16850,6 +17038,205 @@ class UpdateProfileResult$Type extends import_runtime4.MessageType {
   }
 }
 var UpdateProfileResult = new UpdateProfileResult$Type;
+
+class SetProfilePhotoInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SetProfilePhotoInput", [
+      { no: 1, name: "file_unique_id", kind: "scalar", T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.fileUniqueId = "";
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.fileUniqueId = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.fileUniqueId !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.fileUniqueId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SetProfilePhotoInput = new SetProfilePhotoInput$Type;
+
+class SetProfilePhotoResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SetProfilePhotoResult", [
+      { no: 1, name: "user", kind: "message", T: () => User },
+      { no: 2, name: "updates", kind: "message", repeat: 1, T: () => Update }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.updates = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.user = User.internalBinaryRead(reader, reader.uint32(), options, message.user);
+          break;
+        case 2:
+          message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.user)
+      User.internalBinaryWrite(message.user, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.updates.length; i++)
+      Update.internalBinaryWrite(message.updates[i], writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SetProfilePhotoResult = new SetProfilePhotoResult$Type;
+
+class GetExternalProfilePhotoInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetExternalProfilePhotoInput", [
+      { no: 1, name: "provider", kind: "enum", T: () => ["ExternalProfileProvider", ExternalProfileProvider] },
+      { no: 2, name: "username", kind: "scalar", T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.provider = 0;
+    message.username = "";
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.provider = reader.int32();
+          break;
+        case 2:
+          message.username = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.provider !== 0)
+      writer.tag(1, import_runtime.WireType.Varint).int32(message.provider);
+    if (message.username !== "")
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.username);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetExternalProfilePhotoInput = new GetExternalProfilePhotoInput$Type;
+
+class GetExternalProfilePhotoResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetExternalProfilePhotoResult", [
+      { no: 1, name: "status", kind: "enum", T: () => ["ExternalProfilePhotoStatus", ExternalProfilePhotoStatus] },
+      { no: 2, name: "photo", kind: "scalar", T: 12 },
+      { no: 3, name: "mime_type", kind: "scalar", T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.status = 0;
+    message.photo = new Uint8Array(0);
+    message.mimeType = "";
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.status = reader.int32();
+          break;
+        case 2:
+          message.photo = reader.bytes();
+          break;
+        case 3:
+          message.mimeType = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.status !== 0)
+      writer.tag(1, import_runtime.WireType.Varint).int32(message.status);
+    if (message.photo.length)
+      writer.tag(2, import_runtime.WireType.LengthDelimited).bytes(message.photo);
+    if (message.mimeType !== "")
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.mimeType);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetExternalProfilePhotoResult = new GetExternalProfilePhotoResult$Type;
 
 class BotCommand$Type extends import_runtime4.MessageType {
   constructor() {

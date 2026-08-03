@@ -199,10 +199,14 @@ fn missing_workspace_is_typed_and_has_canonical_recovery_copy() {
         ConversationResolutionError::MissingWorkspace
     ));
     assert_eq!(error.to_string(), BridgeNotice::MissingWorkspace.message());
+    assert_eq!(
+        missing_workspace_message(&route.provider_id),
+        "No project folder is available. Run `inline bridge workspace add \"$HOME\" --provider codex` on the host."
+    );
 }
 
 #[test]
-fn settings_require_the_owner_and_bind_owner_threads_to_a_workspace() {
+fn unbound_chats_use_the_only_workspace_and_settings_remain_owner_only() {
     let store = Arc::new(BridgeStore::open_in_memory().expect("bridge store"));
     let installation_id = InstallationId::new("codex").expect("installation");
     let workspace_id = WorkspaceId::new("workspace-inline").expect("workspace");
@@ -237,6 +241,21 @@ fn settings_require_the_owner_and_bind_owner_threads_to_a_workspace() {
         deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
     };
+
+    let conversation = conversation_for_chat(&route, 998).expect("unbound chat should resolve");
+    let snapshot = conversation.snapshot();
+    assert_eq!(snapshot.binding.workspace_id, workspace_id);
+    assert_eq!(
+        snapshot.workspace,
+        fs::canonicalize(workspace.path()).expect("canonical workspace")
+    );
+    assert!(
+        store
+            .bound_chat_workspace(&installation_id, 998)
+            .expect("read automatic binding")
+            .is_some()
+    );
+
     let event = ClientEvent::BotInteraction(BotInteractionEvent::ChatSettingsRequested {
         request_id: 1,
         chat_id: InlineId::new(999),

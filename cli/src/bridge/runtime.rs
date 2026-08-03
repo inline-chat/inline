@@ -447,11 +447,12 @@ pub(super) async fn inbound_from_delivery(
     let conversation = match conversation_for_chat(route, message.chat_id.get()) {
         Ok(conversation) => conversation.snapshot(),
         Err(ConversationResolutionError::MissingWorkspace) => {
+            let notice = missing_workspace_message(&route.provider_id);
             send_text_reply(
                 bot,
                 message.chat_id.get(),
                 message.message_id.get(),
-                BridgeNotice::MissingWorkspace.message(),
+                &notice,
                 &format!("{event_id}-missing-workspace"),
                 BridgeNotificationClass::ImportantFailure,
             )

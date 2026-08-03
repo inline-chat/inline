@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs::{self, OpenOptions};
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, RwLock};
@@ -67,8 +67,9 @@ mod stream_ui;
 mod supervisor;
 use allowlist_ui::*;
 use approval_ui::*;
-use copy::{BridgeNotice, session_open_notice};
+use copy::{BridgeNotice, missing_workspace_message, session_open_notice};
 use inline_tools::*;
+pub(crate) use provider::bridge_provider_setup_descriptors;
 use provider::*;
 use question_ui::*;
 use reply_threads::*;
@@ -80,10 +81,14 @@ use supervisor::{
 mod recovery;
 use recovery::*;
 mod user_config;
+pub(crate) use user_config::{
+    AgentSetupInstallation, agent_setup_installation, upsert_agent_setup_installation,
+};
 pub use user_config::{OperatorMutation, operators_list, operators_mutate};
 use user_config::{
     ReplyThreadDefault, ReplyThreadDefaultSource, add_operator_for_provider,
     ensure_operator_user_config, operator_policy_for_provider, reply_thread_default_for_provider,
+    set_provider_operator_ids,
 };
 
 const INSTALLATION_ID: &str = "codex";
@@ -174,6 +179,24 @@ struct SetupOutput {
     background_service: String,
 }
 
+pub(crate) struct ProviderSetupOutcome {
+    pub(crate) provider: &'static str,
+    pub(crate) provider_version: String,
+    pub(crate) installation_id: String,
+    pub(crate) bot_user_id: i64,
+    pub(crate) bot_username: String,
+    pub(crate) display_name: String,
+    pub(crate) workspace: PathBuf,
+    pub(crate) background_service: String,
+}
+
+pub(crate) struct ProviderSetupOptions {
+    pub(crate) quiet_adapter_install: bool,
+    pub(crate) allow_adapter_install: bool,
+    pub(crate) manage_service: bool,
+    pub(crate) operator_user_ids: Option<Vec<i64>>,
+}
+
 pub async fn setup_provider(
     config: &Config,
     owner_token: String,
@@ -183,37 +206,28 @@ pub async fn setup_provider(
     json: bool,
     json_format: JsonFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let owner_user_id = resolve_owner_user_id(config, &owner_token).await?;
-    let account_paths = BridgePaths::for_owner(config, owner_user_id);
-    let provider =
-        prepare_setup_provider(&account_paths, provider_id, json).map_err(io::Error::other)?;
-    let saved_workspace = saved_provider_workspace(config, owner_user_id, provider_id)?;
-    let workspace = resolve_setup_workspace(folder, saved_workspace.as_deref())?;
-    let provisioned =
-        provision_dev_bot(config, &owner_token, &provider, &workspace, name.as_deref()).await?;
-    validate_account(&provisioned.account, &provisioned.secrets)?;
-    service::install_service(&provisioned.paths, &provisioned.account)?;
-    service::start_service(
-        &provisioned.paths,
-        &provisioned.account,
-        &provisioned.secrets,
-    )
-    .await?;
-    let health = service::wait_for_provider_ready(
-        &provisioned.paths,
-        &provisioned.account,
-        &provisioned.installation,
-        &provisioned.secrets,
+    let outcome = setup_provider_core(
+        config,
+        owner_token,
+        provider_id,
+        folder,
+        name,
+        ProviderSetupOptions {
+            quiet_adapter_install: json,
+            allow_adapter_install: true,
+            manage_service: true,
+            operator_user_ids: None,
+        },
     )
     .await?;
     let result = SetupOutput {
         status: "ready",
-        provider: provider.provider_id,
-        provider_version: provider.version,
-        display_name: provisioned.installation.display_name.clone(),
-        bot_username: provisioned.installation.bot_username.clone(),
-        workspace: provisioned.installation.workspace.display().to_string(),
-        background_service: health.status,
+        provider: outcome.provider,
+        provider_version: outcome.provider_version,
+        display_name: outcome.display_name,
+        bot_username: outcome.bot_username,
+        workspace: outcome.workspace.display().to_string(),
+        background_service: outcome.background_service,
     };
     if json {
         output::print_json(&result, json_format)?;
@@ -233,13 +247,65 @@ pub async fn setup_provider(
             "Provider: {} ({})",
             result.provider, result.provider_version
         );
-        println!(
-            "Workspace: {}",
-            workspace_label(&provisioned.installation.workspace)
-        );
+        println!("Workspace: {}", workspace_label(&outcome.workspace));
         println!("Background service: {}", result.background_service);
     }
     Ok(())
+}
+
+pub(crate) async fn setup_provider_core(
+    config: &Config,
+    owner_token: String,
+    provider_id: &str,
+    folder: Option<PathBuf>,
+    name: Option<String>,
+    options: ProviderSetupOptions,
+) -> Result<ProviderSetupOutcome, Box<dyn std::error::Error>> {
+    let workspace = resolve_setup_workspace(folder)?;
+    let owner_user_id = resolve_owner_user_id(config, &owner_token).await?;
+    let account_paths = BridgePaths::for_owner(config, owner_user_id);
+    let provider = prepare_setup_provider(
+        &account_paths,
+        provider_id,
+        options.quiet_adapter_install,
+        options.allow_adapter_install,
+    )
+    .map_err(io::Error::other)?;
+    let provisioned =
+        provision_dev_bot(config, &owner_token, &provider, &workspace, name.as_deref()).await?;
+    validate_account(&provisioned.account, &provisioned.secrets)?;
+    if let Some(operator_user_ids) = options.operator_user_ids.as_deref() {
+        set_provider_operator_ids(&provisioned.account, provider_id, operator_user_ids)?;
+    }
+    let background_service = if options.manage_service {
+        service::install_service(&provisioned.paths, &provisioned.account)?;
+        service::start_service(
+            &provisioned.paths,
+            &provisioned.account,
+            &provisioned.secrets,
+        )
+        .await?;
+        service::wait_for_provider_ready(
+            &provisioned.paths,
+            &provisioned.account,
+            &provisioned.installation,
+            &provisioned.secrets,
+        )
+        .await?
+        .status
+    } else {
+        "restart_required".to_string()
+    };
+    Ok(ProviderSetupOutcome {
+        provider: provider.provider_id,
+        provider_version: provider.version,
+        installation_id: provisioned.installation.installation_id.clone(),
+        bot_user_id: provisioned.installation.bot_user_id,
+        bot_username: provisioned.installation.bot_username.clone(),
+        display_name: provisioned.installation.display_name.clone(),
+        workspace: provisioned.installation.workspace.clone(),
+        background_service,
+    })
 }
 
 fn install_bridge_logger(trace: bool) {

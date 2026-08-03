@@ -1,0 +1,601 @@
+mod bot;
+mod catalog;
+mod discovery;
+mod hermes;
+mod openclaw;
+mod process;
+
+use std::io::{self, IsTerminal};
+use std::path::PathBuf;
+
+use clap::{Args, Subcommand, ValueEnum};
+use dialoguer::{Confirm, Select};
+
+use crate::bridge;
+use crate::config::Config;
+use crate::errors::CliError;
+use crate::output::JsonFormat;
+
+pub(crate) use catalog::AgentTarget;
+use catalog::TargetFamily;
+use discovery::{InstalledTarget, installed_target, installed_targets};
+
+pub(super) struct GatewaySetupOutcome {
+    pub(super) integration_action: &'static str,
+    pub(super) integration_version: String,
+    pub(super) service_action: &'static str,
+    pub(super) ready: bool,
+}
+
+pub(super) struct GatewayPreflight {
+    pub(super) configured_bot_id: Option<i64>,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum AgentsCommand {
+    #[command(about = "Set up an installed local agent as an Inline bot")]
+    Setup(AgentsSetupArgs),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub(crate) enum AccessMode {
+    Owner,
+    Allowlist,
+    Open,
+    Disabled,
+}
+
+#[derive(Args)]
+pub(crate) struct AgentsSetupArgs {
+    #[arg(long, value_enum)]
+    pub(crate) target: Option<AgentTarget>,
+    #[arg(long, value_name = "NAME")]
+    pub(crate) profile: Option<String>,
+    #[arg(long, value_name = "PATH")]
+    pub(crate) folder: Option<PathBuf>,
+    #[arg(long, value_name = "ID")]
+    pub(crate) bot_id: Option<i64>,
+    #[arg(long, value_name = "NAME")]
+    pub(crate) bot_name: Option<String>,
+    #[arg(long, value_name = "USERNAME")]
+    pub(crate) bot_username: Option<String>,
+    #[arg(long, value_enum, default_value = "owner")]
+    pub(crate) access: AccessMode,
+    #[arg(long = "allow-user", value_name = "ID")]
+    pub(crate) allow_users: Vec<i64>,
+    #[arg(long)]
+    pub(crate) no_install: bool,
+    #[arg(long)]
+    pub(crate) no_restart: bool,
+    #[arg(long)]
+    pub(crate) replace: bool,
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+    #[arg(long)]
+    pub(crate) non_interactive: bool,
+}
+
+pub(crate) struct ResolvedSetup {
+    pub(crate) args: AgentsSetupArgs,
+    pub(crate) installed: InstalledTarget,
+    pub(crate) non_interactive: bool,
+}
+
+pub(crate) fn resolve_setup(
+    mut args: AgentsSetupArgs,
+    json: bool,
+) -> Result<ResolvedSetup, Box<dyn std::error::Error>> {
+    debug_assert!(catalog::bridge_catalog_matches());
+    validate_common_args(&args)?;
+    let non_interactive =
+        args.non_interactive || json || !io::stdin().is_terminal() || !io::stderr().is_terminal();
+    let installed = if let Some(target) = args.target {
+        installed_target(target).ok_or_else(|| {
+            cli_error(
+                "target_not_installed",
+                format!(
+                    "{} is not installed locally. Install it first, then rerun setup.",
+                    target.descriptor().display_name
+                ),
+            )
+        })?
+    } else {
+        let installed = installed_targets();
+        match installed.as_slice() {
+            [] => {
+                return Err(cli_error(
+                    "no_local_agents",
+                    "No supported local agent installations were found (Hermes, OpenClaw, Codex, OpenCode, Claude, or Amp).",
+                )
+                .into());
+            }
+            [only] => only.clone(),
+            many if non_interactive => {
+                let ids = many
+                    .iter()
+                    .map(|candidate| candidate.descriptor.id)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(cli_error(
+                    "target_selection_required",
+                    format!("Multiple installed agents were found ({ids}); pass --target <id>."),
+                )
+                .into());
+            }
+            many => {
+                let labels = many
+                    .iter()
+                    .map(|candidate| candidate.descriptor.display_name)
+                    .collect::<Vec<_>>();
+                let selection = Select::new()
+                    .with_prompt("Choose an installed agent")
+                    .items(&labels)
+                    .default(0)
+                    .interact()?;
+                many[selection].clone()
+            }
+        }
+    };
+    args.target = Some(installed.descriptor.target);
+    if !non_interactive && !args.dry_run {
+        args.access = prompt_access(installed.descriptor.family, args.access)?;
+    }
+    validate_target_args(&args, installed.descriptor.family)?;
+    if !non_interactive && !args.dry_run {
+        println!();
+        println!("Target: {}", installed.descriptor.display_name);
+        println!("Access: {}", access_name(args.access));
+        println!(
+            "Integration installation: {}",
+            if args.no_install {
+                "disabled"
+            } else {
+                "allowed"
+            }
+        );
+        println!(
+            "Service restart: {}",
+            if args.no_restart {
+                "disabled"
+            } else {
+                "allowed"
+            }
+        );
+        if !Confirm::new()
+            .with_prompt("Set up this agent in Inline?")
+            .default(true)
+            .interact()?
+        {
+            return Err(cli_error("setup_cancelled", "Agent setup was cancelled.").into());
+        }
+    }
+    Ok(ResolvedSetup {
+        args,
+        installed,
+        non_interactive,
+    })
+}
+
+fn prompt_access(
+    family: TargetFamily,
+    current: AccessMode,
+) -> Result<AccessMode, Box<dyn std::error::Error>> {
+    let modes: &[AccessMode] = match family {
+        TargetFamily::Gateway => &[
+            AccessMode::Owner,
+            AccessMode::Allowlist,
+            AccessMode::Open,
+            AccessMode::Disabled,
+        ],
+        TargetFamily::Bridge => &[AccessMode::Owner, AccessMode::Allowlist],
+    };
+    let labels = modes
+        .iter()
+        .map(|mode| match mode {
+            AccessMode::Owner => "Owner only (recommended)",
+            AccessMode::Allowlist => "Owner and allowlisted users",
+            AccessMode::Open => "Anyone who can reach the bot",
+            AccessMode::Disabled => "Disabled",
+        })
+        .collect::<Vec<_>>();
+    let default = modes.iter().position(|mode| *mode == current).unwrap_or(0);
+    let selection = Select::new()
+        .with_prompt("Choose who can use the bot")
+        .items(&labels)
+        .default(default)
+        .interact()?;
+    Ok(modes[selection])
+}
+
+fn access_name(access: AccessMode) -> &'static str {
+    match access {
+        AccessMode::Owner => "owner",
+        AccessMode::Allowlist => "allowlist",
+        AccessMode::Open => "open",
+        AccessMode::Disabled => "disabled",
+    }
+}
+
+pub(crate) async fn setup(
+    config: &Config,
+    owner_token: String,
+    resolved: ResolvedSetup,
+    json: bool,
+    json_format: JsonFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let target = resolved.installed.descriptor.target;
+    if resolved.args.dry_run {
+        match target {
+            AgentTarget::Openclaw => {
+                openclaw::preflight(&resolved.installed, &resolved.args).await?;
+            }
+            AgentTarget::Hermes => {
+                hermes::preflight(&resolved.installed, &resolved.args).await?;
+            }
+            AgentTarget::Codex | AgentTarget::Opencode | AgentTarget::Claude | AgentTarget::Amp => {
+            }
+        }
+        return print_dry_run(&resolved, json, json_format);
+    }
+    match target {
+        AgentTarget::Codex | AgentTarget::Opencode | AgentTarget::Claude | AgentTarget::Amp => {
+            let outcome = bridge::setup_provider_core(
+                config,
+                owner_token,
+                target.descriptor().id,
+                resolved.args.folder,
+                resolved.args.bot_name,
+                bridge::ProviderSetupOptions {
+                    quiet_adapter_install: true,
+                    allow_adapter_install: !resolved.args.no_install,
+                    manage_service: !resolved.args.no_restart,
+                    operator_user_ids: Some(resolved.args.allow_users),
+                },
+            )
+            .await?;
+            print_bridge_result(outcome, json, json_format)
+        }
+        AgentTarget::Openclaw | AgentTarget::Hermes => {
+            let preflight = match target {
+                AgentTarget::Openclaw => {
+                    openclaw::preflight(&resolved.installed, &resolved.args).await?
+                }
+                AgentTarget::Hermes => {
+                    hermes::preflight(&resolved.installed, &resolved.args).await?
+                }
+                _ => unreachable!(),
+            };
+            let instance = gateway_instance(resolved.args.profile.as_deref());
+            let bot = bot::ensure_gateway_bot(
+                config,
+                &owner_token,
+                resolved.installed.descriptor,
+                &instance,
+                &resolved.args,
+                preflight.configured_bot_id,
+            )
+            .await?;
+            let outcome = match target {
+                AgentTarget::Openclaw => {
+                    openclaw::setup(&resolved.installed, &bot, &resolved.args).await?
+                }
+                AgentTarget::Hermes => {
+                    hermes::setup(&resolved.installed, &bot, &resolved.args).await?
+                }
+                _ => unreachable!(),
+            };
+            print_gateway_result(
+                resolved.installed.descriptor,
+                &instance,
+                &bot,
+                outcome,
+                json,
+                json_format,
+            )
+        }
+    }
+}
+
+fn print_bridge_result(
+    outcome: bridge::ProviderSetupOutcome,
+    json: bool,
+    json_format: JsonFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ResultOutput<'a> {
+        ok: bool,
+        action: &'static str,
+        status: &'static str,
+        target: &'a str,
+        family: &'static str,
+        instance: &'a str,
+        bot: BotOutput<'a>,
+        integration: IntegrationOutput<'a>,
+        service: ServiceOutput<'a>,
+        mapping: MappingOutput,
+    }
+    #[derive(serde::Serialize)]
+    struct BotOutput<'a> {
+        id: i64,
+        username: &'a str,
+        name: &'a str,
+    }
+    #[derive(serde::Serialize)]
+    struct IntegrationOutput<'a> {
+        kind: &'static str,
+        action: &'static str,
+        version: &'a str,
+    }
+    #[derive(serde::Serialize)]
+    struct ServiceOutput<'a> {
+        kind: &'static str,
+        action: &'static str,
+        ready: bool,
+        status: &'a str,
+    }
+    #[derive(serde::Serialize)]
+    struct MappingOutput {
+        source: &'static str,
+        action: &'static str,
+    }
+    let ready = outcome.background_service != "restart_required";
+    let output = ResultOutput {
+        ok: true,
+        action: "agents.setup",
+        status: if ready { "ready" } else { "configured" },
+        target: outcome.provider,
+        family: "bridge",
+        instance: &outcome.installation_id,
+        bot: BotOutput {
+            id: outcome.bot_user_id,
+            username: &outcome.bot_username,
+            name: &outcome.display_name,
+        },
+        integration: IntegrationOutput {
+            kind: "bridge_provider",
+            action: "configured",
+            version: &outcome.provider_version,
+        },
+        service: ServiceOutput {
+            kind: "inline_bridge",
+            action: if ready { "started" } else { "skipped" },
+            ready,
+            status: &outcome.background_service,
+        },
+        mapping: MappingOutput {
+            source: "bridge_account",
+            action: "upserted",
+        },
+    };
+    if json {
+        crate::output::print_json(&output, json_format)?;
+    } else {
+        if ready {
+            println!("{} is ready in Inline.", outcome.display_name);
+        } else {
+            println!("{} is configured in Inline.", outcome.display_name);
+        }
+        println!(
+            "Provider: {} ({})",
+            outcome.provider, outcome.provider_version
+        );
+        println!("Bot: @{} ({})", outcome.bot_username, outcome.bot_user_id);
+        println!("Background service: {}", outcome.background_service);
+        if !ready {
+            println!("Restart required before the bot is ready.");
+        }
+    }
+    Ok(())
+}
+
+fn validate_common_args(args: &AgentsSetupArgs) -> Result<(), Box<dyn std::error::Error>> {
+    if args.allow_users.iter().any(|id| *id <= 0) {
+        return Err(CliError::invalid_args("--allow-user IDs must be positive").into());
+    }
+    if args.access != AccessMode::Allowlist && !args.allow_users.is_empty() {
+        return Err(
+            CliError::invalid_args("--allow-user is valid only with --access allowlist").into(),
+        );
+    }
+    if args.bot_id.is_some_and(|id| id <= 0) {
+        return Err(CliError::invalid_args("--bot-id must be positive").into());
+    }
+    if let Some(username) = args.bot_username.as_deref() {
+        bot::normalize_username(username)?;
+    }
+    if let Some(profile) = args.profile.as_deref()
+        && !valid_profile(profile)
+    {
+        return Err(CliError::invalid_args(
+            "--profile must start with a letter or number and contain at most 64 letters, numbers, underscores, or hyphens",
+        )
+        .into());
+    }
+    Ok(())
+}
+
+fn valid_profile(profile: &str) -> bool {
+    !profile.is_empty()
+        && profile.len() <= 64
+        && profile
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric())
+        && profile
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
+fn gateway_instance(profile: Option<&str>) -> String {
+    match profile {
+        Some(profile) if profile != "default" => format!("profile:{profile}"),
+        _ => "default".to_string(),
+    }
+}
+
+fn print_gateway_result(
+    descriptor: &'static catalog::TargetDescriptor,
+    instance: &str,
+    bot: &bot::ManagedBot,
+    outcome: GatewaySetupOutcome,
+    json: bool,
+    json_format: JsonFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ResultOutput<'a> {
+        ok: bool,
+        action: &'static str,
+        status: &'static str,
+        target: &'a str,
+        family: &'static str,
+        instance: &'a str,
+        bot: BotOutput<'a>,
+        integration: IntegrationOutput<'a>,
+        service: ServiceOutput,
+        mapping: MappingOutput,
+    }
+    #[derive(serde::Serialize)]
+    struct BotOutput<'a> {
+        id: i64,
+        username: &'a str,
+        name: &'a str,
+    }
+    #[derive(serde::Serialize)]
+    struct IntegrationOutput<'a> {
+        kind: &'static str,
+        action: &'static str,
+        version: &'a str,
+    }
+    #[derive(serde::Serialize)]
+    struct ServiceOutput {
+        kind: &'static str,
+        action: &'static str,
+        ready: bool,
+    }
+    #[derive(serde::Serialize)]
+    struct MappingOutput {
+        source: &'static str,
+        action: &'static str,
+    }
+    let output = ResultOutput {
+        ok: true,
+        action: "agents.setup",
+        status: if outcome.ready { "ready" } else { "configured" },
+        target: descriptor.id,
+        family: "gateway",
+        instance,
+        bot: BotOutput {
+            id: bot.id,
+            username: &bot.username,
+            name: &bot.name,
+        },
+        integration: IntegrationOutput {
+            kind: "plugin",
+            action: outcome.integration_action,
+            version: &outcome.integration_version,
+        },
+        service: ServiceOutput {
+            kind: "gateway",
+            action: outcome.service_action,
+            ready: outcome.ready,
+        },
+        mapping: MappingOutput {
+            source: "inline_config",
+            action: "upserted",
+        },
+    };
+    if json {
+        crate::output::print_json(&output, json_format)?;
+    } else {
+        println!("{} is configured in Inline.", descriptor.display_name);
+        println!("Bot: @{} ({})", bot.username, bot.id);
+        println!("Integration: {}", outcome.integration_action);
+        println!("Gateway: {}", outcome.service_action);
+        if !outcome.ready {
+            println!("Restart required before the bot is ready.");
+        }
+    }
+    Ok(())
+}
+
+fn validate_target_args(
+    args: &AgentsSetupArgs,
+    family: TargetFamily,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match family {
+        TargetFamily::Bridge => {
+            if args.profile.is_some()
+                || args.bot_id.is_some()
+                || args.bot_username.is_some()
+                || args.replace
+            {
+                return Err(cli_error(
+                    "unsupported_option",
+                    "--profile, --bot-id, --bot-username, and --replace are supported only for Hermes/OpenClaw targets",
+                )
+                .into());
+            }
+            if matches!(args.access, AccessMode::Open | AccessMode::Disabled) {
+                return Err(cli_error(
+                    "unsupported_option",
+                    "Codex/ACP bridge targets support only owner or allowlist access",
+                )
+                .into());
+            }
+        }
+        TargetFamily::Gateway => {
+            if args.folder.is_some() {
+                return Err(cli_error(
+                    "unsupported_option",
+                    "--folder is supported only for Codex/ACP bridge targets",
+                )
+                .into());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn cli_error(code: &'static str, message: impl Into<String>) -> CliError {
+    CliError {
+        code,
+        message: message.into(),
+        hint: None,
+        examples: Vec::new(),
+    }
+}
+
+fn print_dry_run(
+    resolved: &ResolvedSetup,
+    json: bool,
+    json_format: JsonFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct DryRun<'a> {
+        ok: bool,
+        action: &'static str,
+        status: &'static str,
+        target: &'a str,
+        installed: bool,
+    }
+    let result = DryRun {
+        ok: true,
+        action: "agents.setup",
+        status: "planned",
+        target: resolved.installed.descriptor.id,
+        installed: true,
+    };
+    if json {
+        crate::output::print_json(&result, json_format)?;
+    } else {
+        println!(
+            "{} is installed and can be set up.",
+            resolved.installed.descriptor.display_name
+        );
+        println!("Dry run: no changes were made.");
+    }
+    Ok(())
+}

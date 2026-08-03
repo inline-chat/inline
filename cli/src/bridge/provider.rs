@@ -16,7 +16,8 @@ use inline_agent_bridge::{
 };
 use inline_agent_driver_acp::{
     AcpDistribution, AcpDriver, AcpLaunchDescriptor, AcpProcessStatus, VersionDiscovery,
-    provider_support, should_scrub_acp_environment_name, spawn_acp_driver,
+    provider_support, provider_support_catalog, should_scrub_acp_environment_name,
+    spawn_acp_driver,
 };
 use inline_agent_driver_codex::{
     CodexAppServerDriver, CodexLaunchConfig, CodexProcessStatus,
@@ -40,6 +41,29 @@ pub(super) struct ProviderProbe {
     pub(super) executable: std::path::PathBuf,
     pub(super) provider_runtime: Option<std::path::PathBuf>,
     pub(super) version: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct BridgeProviderSetupDescriptor {
+    pub(crate) provider_id: &'static str,
+    pub(crate) display_name: &'static str,
+    pub(crate) runtime_executable: &'static str,
+}
+
+pub(crate) fn bridge_provider_setup_descriptors() -> Vec<BridgeProviderSetupDescriptor> {
+    let mut descriptors = vec![BridgeProviderSetupDescriptor {
+        provider_id: "codex",
+        display_name: "Codex",
+        runtime_executable: "codex",
+    }];
+    descriptors.extend(provider_support_catalog().iter().map(|support| {
+        BridgeProviderSetupDescriptor {
+            provider_id: support.provider_id,
+            display_name: support.display_name,
+            runtime_executable: support.login_program,
+        }
+    }));
+    descriptors
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -157,11 +181,12 @@ pub(super) fn prepare_setup_provider(
     paths: &BridgePaths,
     provider_id: &str,
     json: bool,
+    allow_install: bool,
 ) -> Result<ProviderProbe, String> {
     let Some(support) = provider_support(provider_id) else {
         return probe_provider(provider_id);
     };
-    let Some(adapter) = prepare_pinned_adapter(paths, support)? else {
+    let Some(adapter) = prepare_pinned_adapter(paths, support, allow_install)? else {
         return probe_provider(provider_id);
     };
     if adapter.installed_now && !json {

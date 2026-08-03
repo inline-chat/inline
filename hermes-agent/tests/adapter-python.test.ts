@@ -908,6 +908,90 @@ assert setup_platform_enabled["inline"] is True
 setup_saved_env.clear()
 setup_config_writes.clear()
 setup_platform_enabled["inline"] = False
+machine_args = parser.parse_args([
+    "setup",
+    "--non-interactive",
+    "--token-stdin",
+    "--owner-user-id",
+    "42",
+    "--access",
+    "allowlist",
+    "--allow-user",
+    "50",
+    "--json",
+])
+with contextlib.redirect_stderr(io.StringIO()):
+    try:
+        parser.parse_args(["setup", "--allow-user", "not-an-id"])
+        raise AssertionError("invalid machine allow-user should fail parsing")
+    except SystemExit as exc:
+        assert exc.code != 0
+machine_token = "machine-only-secret-token"
+machine_stdout = io.StringIO()
+saved_stdin = sys.stdin
+try:
+    sys.stdin = io.StringIO(machine_token + "\n")
+    with contextlib.redirect_stdout(machine_stdout):
+        assert inline_cli.dispatch(machine_args) == 0
+finally:
+    sys.stdin = saved_stdin
+machine_output = machine_stdout.getvalue()
+assert machine_token not in machine_output
+assert json.loads(machine_output) == {
+    "ok": True,
+    "action": "inline.setup",
+    "configured": True,
+    "access": "allowlist",
+    "ownerUserId": "42",
+    "allowedUserIds": ["42", "50"],
+}
+assert setup_saved_env["INLINE_TOKEN"] == machine_token
+assert setup_saved_env["INLINE_ALLOW_ALL_USERS"] == "false"
+assert setup_saved_env["INLINE_ALLOWED_USERS"] == "42,50"
+assert setup_saved_env["INLINE_GROUP_ALLOW_FROM"] == "42,50"
+assert setup_platform_enabled["inline"] is True
+
+probe_args = parser.parse_args(["status", "--json", "--probe"])
+probe_stdout = io.StringIO()
+real_find_inline_cli_for_probe = inline_cli._find_inline_cli
+real_subprocess_run_for_probe = inline_cli.subprocess.run
+probe_calls = []
+try:
+    inline_cli._find_inline_cli = lambda: "/usr/local/bin/inline"
+    def fake_probe_run(command, **kwargs):
+        probe_calls.append((command, kwargs))
+        return types.SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({"id": "42", "username": "machine_bot"}),
+            stderr="",
+        )
+    inline_cli.subprocess.run = fake_probe_run
+    with contextlib.redirect_stdout(probe_stdout):
+        assert inline_cli.dispatch(probe_args) == 0
+finally:
+    inline_cli._find_inline_cli = real_find_inline_cli_for_probe
+    inline_cli.subprocess.run = real_subprocess_run_for_probe
+probe_output = probe_stdout.getvalue()
+assert machine_token not in probe_output
+probe_payload = json.loads(probe_output)
+assert probe_payload["probe"] == {
+    "ok": True,
+    "botUserId": "42",
+    "botUsername": "machine_bot",
+}
+assert probe_calls[0][0] == [
+    "/usr/local/bin/inline",
+    "--json",
+    "--compact",
+    "auth",
+    "me",
+]
+assert probe_calls[0][1]["env"]["INLINE_TOKEN"] == machine_token
+assert "INLINE_BOT_TOKEN" not in probe_calls[0][1]["env"]
+
+setup_saved_env.clear()
+setup_config_writes.clear()
+setup_platform_enabled["inline"] = False
 setup_prompt_values.extend(["2", "Hermes", "myhermesbot", ""])
 setup_yes_no_values.extend([True])
 real_run_inline_json = inline_cli._run_inline_json

@@ -2,109 +2,24 @@
 
 use super::*;
 
-pub(super) fn resolve_initial_workspace(
+pub(super) fn resolve_setup_workspace(
     explicit: Option<PathBuf>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     if let Some(path) = explicit {
         return validate_workspace_choice(canonical_workspace(&path)?);
     }
 
-    let cwd = env::current_dir()?;
-    if let Some(root) = containing_git_root(&cwd)
-        && let Ok(workspace) = validate_workspace_choice(root)
-    {
-        return Ok(workspace);
-    }
-    let cwd = canonical_workspace(&cwd)?;
-    if let Ok(workspace) = validate_workspace_choice(cwd) {
-        return Ok(workspace);
-    }
-    if !io::stdin().is_terminal() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "choose a project with `inline setup <provider> --folder /absolute/path`",
-        )
-        .into());
-    }
-    let value: String = dialoguer::Input::new()
-        .with_prompt("Project folder")
-        .interact_text()?;
-    validate_workspace_choice(canonical_workspace(Path::new(value.trim()))?)
-}
-
-pub(super) fn resolve_setup_workspace(
-    explicit: Option<PathBuf>,
-    saved_workspace: Option<&Path>,
-) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    if explicit.is_some() {
-        return resolve_initial_workspace(explicit);
-    }
-    if let Some(saved_workspace) = saved_workspace
-        && let Ok(workspace) = canonical_workspace(saved_workspace)
-        && let Ok(workspace) = validate_workspace_choice(workspace)
-    {
-        return Ok(workspace);
-    }
-    resolve_initial_workspace(None)
-}
-
-pub(super) fn saved_provider_workspace(
-    config: &Config,
-    owner_user_id: i64,
-    provider_id: &str,
-) -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
-    let account_paths = BridgePaths::for_owner(config, owner_user_id);
-    let paths = if account_paths.config.is_file() {
-        account_paths
-    } else {
-        BridgePaths::legacy(config)
-    };
-    if !paths.config.is_file() {
-        return Ok(None);
-    }
-    let (account, secrets) = load_account_files(&paths)?;
-    validate_account_for_setup(&account, &secrets)?;
-    if account.owner_user_id != owner_user_id {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "the installed bridge belongs to a different Inline user",
-        )
-        .into());
-    }
-    let provider = account
-        .providers
-        .iter()
-        .find(|provider| provider.provider_id == provider_id);
-    let Some(provider) = provider else {
-        return Ok(None);
-    };
-    let database = paths.provider_paths(provider).bridge_db;
-    if database.is_file() {
-        let store = BridgeStore::open(database)?;
-        let installation_id = InstallationId::new(provider.installation_id.clone())?;
-        store.refresh_workspace_availability(&installation_id, now_seconds())?;
-        if let Some(workspace) = store.default_workspace(&installation_id)? {
-            return Ok(Some(workspace.path));
-        }
-    }
-    Ok(Some(provider.workspace.clone()))
-}
-
-pub(super) fn containing_git_root(cwd: &Path) -> Option<PathBuf> {
-    let output = Command::new("git")
-        .args([
-            "-C",
-            cwd.to_string_lossy().as_ref(),
-            "rev-parse",
-            "--show-toplevel",
-        ])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let path = String::from_utf8(output.stdout).ok()?;
-    canonical_workspace(Path::new(path.trim())).ok()
+    let home = env::var_os("HOME")
+        .filter(|value| !value.is_empty())
+        .or_else(|| env::var_os("USERPROFILE").filter(|value| !value.is_empty()))
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "user home directory not found; pass --folder /absolute/path",
+            )
+        })?;
+    validate_workspace_choice(canonical_workspace(&home)?)
 }
 
 pub(super) fn validate_workspace_choice(
@@ -114,15 +29,6 @@ pub(super) fn validate_workspace_choice(
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "the filesystem root cannot be used as a bridge workspace",
-        )
-        .into());
-    }
-    if let Some(home) = env::var_os("HOME")
-        && fs::canonicalize(home).is_ok_and(|home| home == path)
-    {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "the home directory cannot be used as a bridge workspace; choose a project folder",
         )
         .into());
     }

@@ -15,8 +15,26 @@ struct InlineUserConfig {
         alias = "agentBridge"
     )]
     agent_bridge: Option<AgentBridgeUserConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent_setup: Option<AgentSetupUserConfig>,
     #[serde(flatten)]
     other: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+struct AgentSetupUserConfig {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    installations: Vec<AgentSetupInstallation>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) struct AgentSetupInstallation {
+    pub(crate) target: String,
+    pub(crate) instance: String,
+    pub(crate) bot_user_id: i64,
+    pub(crate) bot_username: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -121,6 +139,7 @@ impl LegacyInlineUserConfig {
         });
         InlineUserConfig {
             agent_bridge,
+            agent_setup: None,
             other: self.other,
         }
     }
@@ -181,6 +200,11 @@ fn load_user_config(path: &Path) -> Result<Option<InlineUserConfig>, Box<dyn std
         && let Some(agent_bridge) = config.agent_bridge.as_ref()
     {
         validate_agent_bridge_config(agent_bridge)?;
+    }
+    if let Some(config) = config.as_ref()
+        && let Some(agent_setup) = config.agent_setup.as_ref()
+    {
+        validate_agent_setup_config(agent_setup)?;
     }
     Ok(config)
 }
@@ -321,6 +345,127 @@ fn validate_allowlist(user_ids: &[i64]) -> Result<(), Box<dyn std::error::Error>
         )
         .into());
     }
+    Ok(())
+}
+
+fn validate_agent_setup_config(
+    config: &AgentSetupUserConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut keys = BTreeSet::new();
+    for installation in &config.installations {
+        let valid_target = matches!(installation.target.as_str(), "openclaw" | "hermes");
+        let valid_instance = installation.instance == "default"
+            || installation
+                .instance
+                .strip_prefix("profile:")
+                .is_some_and(is_safe_agent_profile);
+        let valid_username = !installation.bot_username.is_empty()
+            && installation.bot_username.len() <= 256
+            && installation.bot_username.ends_with("bot")
+            && installation
+                .bot_username
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_');
+        if !valid_target
+            || !valid_instance
+            || installation.bot_user_id <= 0
+            || !valid_username
+            || !keys.insert((&installation.target, &installation.instance))
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "agent_setup contains an invalid or duplicate installation",
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
+fn is_safe_agent_profile(profile: &str) -> bool {
+    !profile.is_empty()
+        && profile.len() <= 64
+        && profile
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric())
+        && profile
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
+pub(crate) fn agent_setup_installation(
+    target: &str,
+    instance: &str,
+) -> Result<Option<AgentSetupInstallation>, Box<dyn std::error::Error>> {
+    let path = inline_user_config_path()?;
+    let config = load_user_config(&path)?;
+    Ok(config
+        .and_then(|config| config.agent_setup)
+        .and_then(|config| {
+            config.installations.into_iter().find(|installation| {
+                installation.target == target && installation.instance == instance
+            })
+        }))
+}
+
+pub(crate) fn upsert_agent_setup_installation(
+    owner_user_id: i64,
+    installation: AgentSetupInstallation,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let path = inline_user_config_path()?;
+    let config_lock = acquire_user_config_lock(&path)?;
+    let mut config = load_user_config_for_write(&path, owner_user_id)?.unwrap_or_default();
+    let agent_setup = config.agent_setup.get_or_insert_with(Default::default);
+    if let Some(existing) = agent_setup.installations.iter_mut().find(|existing| {
+        existing.target == installation.target && existing.instance == installation.instance
+    }) {
+        *existing = installation;
+    } else {
+        agent_setup.installations.push(installation);
+    }
+    agent_setup.installations.sort_by(|left, right| {
+        (&left.target, &left.instance).cmp(&(&right.target, &right.instance))
+    });
+    validate_agent_setup_config(agent_setup)?;
+    write_private_toml(&path, &config)?;
+    drop(config_lock);
+    Ok(())
+}
+
+pub(crate) fn set_provider_operator_ids(
+    account: &AccountBridgeConfig,
+    provider_id: &str,
+    allowed_user_ids: &[i64],
+) -> Result<(), Box<dyn std::error::Error>> {
+    configured_provider(account, provider_id)?;
+    let mut allowed_user_ids = allowed_user_ids
+        .iter()
+        .copied()
+        .filter(|user_id| *user_id != account.owner_user_id)
+        .collect::<Vec<_>>();
+    allowed_user_ids.sort_unstable();
+    allowed_user_ids.dedup();
+    validate_allowlist(&allowed_user_ids)?;
+
+    let path = inline_user_config_path()?;
+    let config_lock = acquire_user_config_lock(&path)?;
+    let mut config = load_user_config_for_write(&path, account.owner_user_id)?.unwrap_or_default();
+    let agent_bridge = config
+        .agent_bridge
+        .get_or_insert_with(|| initial_agent_bridge_config(account));
+    let reply_threads = agent_bridge.reply_threads;
+    let provider = agent_bridge
+        .providers
+        .entry(provider_id.to_string())
+        .or_insert_with(|| ProviderPolicyConfig {
+            allowed_user_ids: Vec::new(),
+            reply_threads,
+        });
+    provider.allowed_user_ids = allowed_user_ids;
+    validate_agent_bridge_config(agent_bridge)?;
+    write_private_toml(&path, &config)?;
+    drop(config_lock);
     Ok(())
 }
 
@@ -778,6 +923,7 @@ mod tests {
                     },
                 )]),
             }),
+            agent_setup: None,
             other: BTreeMap::new(),
         };
 
@@ -848,6 +994,75 @@ mod tests {
         );
         let agent_bridge = config.agent_bridge.expect("agent bridge config");
         assert!(agent_bridge.allowed_user_ids.is_empty());
+    }
+
+    #[test]
+    fn agent_setup_is_sparse_and_preserves_unrelated_top_level_config() {
+        let config: InlineUserConfig = toml::from_str(
+            r#"
+                theme = "system"
+
+                [notifications]
+                sound = false
+
+                [[agent_setup.installations]]
+                target = "openclaw"
+                instance = "default"
+                bot_user_id = 42
+                bot_username = "inline_openclaw_42_37a8ee_bot"
+            "#,
+        )
+        .expect("parse sparse setup config");
+        validate_agent_setup_config(config.agent_setup.as_ref().expect("agent setup"))
+            .expect("validate setup config");
+
+        let encoded = toml::to_string_pretty(&config).expect("serialize config");
+        let decoded: InlineUserConfig = toml::from_str(&encoded).expect("reparse config");
+        assert_eq!(decoded.other["theme"].as_str(), Some("system"));
+        assert_eq!(
+            decoded.other["notifications"]["sound"].as_bool(),
+            Some(false)
+        );
+        let installations = decoded.agent_setup.expect("agent setup").installations;
+        assert_eq!(installations.len(), 1);
+        assert_eq!(installations[0].bot_user_id, 42);
+        assert!(!encoded.contains("token"));
+        assert!(!encoded.contains("version"));
+    }
+
+    #[test]
+    fn agent_setup_rejects_unknown_fields_and_duplicate_installations() {
+        assert!(
+            toml::from_str::<InlineUserConfig>(
+                r#"
+                    [[agent_setup.installations]]
+                    target = "hermes"
+                    instance = "default"
+                    bot_user_id = 42
+                    bot_username = "inline_hermes_42_37a8ee_bot"
+                    credential = "must-not-be-accepted"
+                "#,
+            )
+            .is_err()
+        );
+
+        let duplicated = AgentSetupUserConfig {
+            installations: vec![
+                AgentSetupInstallation {
+                    target: "hermes".to_string(),
+                    instance: "default".to_string(),
+                    bot_user_id: 42,
+                    bot_username: "inline_hermes_42_37a8ee_bot".to_string(),
+                },
+                AgentSetupInstallation {
+                    target: "hermes".to_string(),
+                    instance: "default".to_string(),
+                    bot_user_id: 43,
+                    bot_username: "inline_hermes_43_37a8ee_bot".to_string(),
+                },
+            ],
+        };
+        assert!(validate_agent_setup_config(&duplicated).is_err());
     }
 
     #[test]

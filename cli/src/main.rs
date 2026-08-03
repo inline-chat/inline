@@ -1,3 +1,4 @@
+mod agents;
 mod attachments;
 mod auth;
 mod auth_flow;
@@ -245,6 +246,11 @@ enum Command {
     Setup {
         #[command(subcommand)]
         command: SetupCommand,
+    },
+    #[command(about = "Discover and configure installed local agents")]
+    Agents {
+        #[command(subcommand)]
+        command: agents::AgentsCommand,
     },
     #[command(about = "Manage the local coding-agent bridge")]
     Bridge {
@@ -1704,6 +1710,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
             | Command::Doctor
             | Command::Skill { .. }
             | Command::Setup { .. }
+            | Command::Agents { .. }
             | Command::Bridge { .. }
     );
     let update_handle = if skip_update_check || cli.json || !io::stdout().is_terminal() {
@@ -1761,6 +1768,57 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 )
                 .await?;
             }
+            Command::Agents { command } => match command {
+                agents::AgentsCommand::Setup(args) => {
+                    let resolved = agents::resolve_setup(args, cli.json)?;
+                    if resolved.args.dry_run {
+                        agents::setup(
+                            &config,
+                            String::new(),
+                            resolved,
+                            cli.json,
+                            json_format,
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+                    let owner_token = match auth_store.load_token()? {
+                        Some(token) => token,
+                        None if resolved.non_interactive => {
+                            return Err(CliError::not_authenticated().into());
+                        }
+                        None => {
+                            handle_login(
+                                AuthLoginArgs {
+                                    email: None,
+                                    phone: None,
+                                    send_code: false,
+                                    code: None,
+                                    code_stdin: false,
+                                    challenge_token: None,
+                                    mac_app_bootstrap: false,
+                                },
+                                &api,
+                                &auth_store,
+                                &config.realtime_url,
+                                &local_db,
+                                cli.json,
+                                json_format,
+                            )
+                            .await?;
+                            require_token(&auth_store)?
+                        }
+                    };
+                    agents::setup(
+                        &config,
+                        owner_token,
+                        resolved,
+                        cli.json,
+                        json_format,
+                    )
+                    .await?;
+                }
+            },
             Command::Bridge { command } => match command {
                 BridgeCommand::Status => {
                     bridge::status(&config, cli.json, json_format).await?;
@@ -4726,6 +4784,79 @@ mod cli_parsing_tests {
 
         let cli = Cli::try_parse_from(["inline", "logout"]).unwrap();
         assert!(matches!(cli.command, Command::Logout));
+    }
+
+    #[test]
+    fn parses_non_interactive_agents_setup_flags() {
+        let cli = Cli::try_parse_from([
+            "inline",
+            "agents",
+            "setup",
+            "--target",
+            "codex",
+            "--folder",
+            "/tmp/project",
+            "--bot-name",
+            "Mo's Builder",
+            "--access",
+            "allowlist",
+            "--allow-user",
+            "50",
+            "--allow-user",
+            "60",
+            "--no-install",
+            "--no-restart",
+            "--non-interactive",
+        ])
+        .expect("agents setup parses");
+        let Command::Agents {
+            command: agents::AgentsCommand::Setup(args),
+        } = cli.command
+        else {
+            panic!("expected agents setup command");
+        };
+        assert_eq!(args.target, Some(agents::AgentTarget::Codex));
+        assert_eq!(args.folder, Some(PathBuf::from("/tmp/project")));
+        assert_eq!(args.bot_name.as_deref(), Some("Mo's Builder"));
+        assert_eq!(args.access, agents::AccessMode::Allowlist);
+        assert_eq!(args.allow_users, [50, 60]);
+        assert!(args.no_install);
+        assert!(args.no_restart);
+        assert!(args.non_interactive);
+    }
+
+    #[test]
+    fn parses_gateway_agents_setup_flags() {
+        let cli = Cli::try_parse_from([
+            "inline",
+            "agents",
+            "setup",
+            "--target",
+            "hermes",
+            "--profile",
+            "work",
+            "--bot-id",
+            "42",
+            "--bot-username",
+            "@work_helper_bot",
+            "--replace",
+            "--dry-run",
+        ])
+        .expect("gateway setup parses");
+        assert!(matches!(
+            cli.command,
+            Command::Agents {
+                command: agents::AgentsCommand::Setup(agents::AgentsSetupArgs {
+                    target: Some(agents::AgentTarget::Hermes),
+                    profile: Some(profile),
+                    bot_id: Some(42),
+                    bot_username: Some(username),
+                    replace: true,
+                    dry_run: true,
+                    ..
+                })
+            } if profile == "work" && username == "@work_helper_bot"
+        ));
     }
 
     #[test]

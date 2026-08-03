@@ -566,12 +566,12 @@ mod tests {
     }
 
     #[test]
-    fn root_and_home_are_not_valid_workspace_choices() {
+    fn root_is_not_valid_but_home_is_a_valid_workspace_choice() {
         assert!(validate_workspace_choice(PathBuf::from("/")).is_err());
         if let Some(home) = env::var_os("HOME")
             && let Ok(home) = fs::canonicalize(home)
         {
-            assert!(validate_workspace_choice(home).is_err());
+            assert_eq!(validate_workspace_choice(home.clone()).unwrap(), home);
         }
     }
 
