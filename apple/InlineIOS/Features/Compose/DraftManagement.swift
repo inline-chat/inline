@@ -35,6 +35,7 @@ extension ComposeView {
 
   func applyDraft(_ draft: String?, entities: MessageEntities? = nil) {
     if let draft, !draft.isEmpty {
+      autocompleteManager?.dismissCompletion()
       textView.text = draft
       draftManager.markLoaded(text: draft, entities: entities)
 

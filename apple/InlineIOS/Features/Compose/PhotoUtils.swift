@@ -62,6 +62,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
   }
 
   private func resetComposeStateAfterPreviewSend() {
+    autocompleteManager?.dismissCompletion()
     if let attributed = textView.attributedText?.mutableCopy() as? NSMutableAttributedString {
       let marker = "\u{FFFC}" as NSString
       var range = (attributed.string as NSString).range(of: marker as String)

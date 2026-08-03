@@ -7,6 +7,11 @@ extension ComposeView {
       return
     }
 
+    guard key.modifierFlags.isEmpty else {
+      super.pressesBegan(presses, with: event)
+      return
+    }
+
     var keyString = ""
     switch key.keyCode {
       case .keyboardUpArrow:
@@ -24,17 +29,7 @@ extension ComposeView {
         return
     }
 
-    if slashCommandManager?.handleKeyPress(keyString) == true {
-      return
-    }
-
     if autocompleteManager?.handleKeyPress(keyString) == true {
-      return
-    }
-
-    // Let mention manager handle the key press
-    if mentionManager?.handleKeyPress(keyString) == true {
-      // Key was handled by mention manager
       return
     }
 

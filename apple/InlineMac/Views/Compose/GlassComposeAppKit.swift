@@ -2650,6 +2650,9 @@ extension GlassComposeAppKit: ComposeAutocompleteMenuDelegate {
 
         hideAutocomplete()
         updateHeightIfNeeded(for: textEditor.textView)
+
+      case .mention, .command:
+        assertionFailure("iOS-only autocomplete payload reached the glass macOS composer")
     }
   }
 

@@ -7,6 +7,11 @@ import UIKit
 
 extension ComposeView: UITextViewDelegate {
   private static let log = Log.scoped("ComposeView.UITextViewDelegate")
+
+  func textViewDidBeginEditing(_ textView: UITextView) {
+    _ = autocompleteManager?.handleTextChange(in: textView)
+  }
+
   func textViewDidChange(_ textView: UITextView) {
     // Prevent mention style leakage to new text
     textView.updateTypingAttributesIfNeeded()
@@ -46,18 +51,7 @@ extension ComposeView: UITextViewDelegate {
       startDraftSaveTimer()
     }
 
-    let slashActive = slashCommandManager?.handleTextChange(in: textView) ?? false
-    if slashActive {
-      autocompleteManager?.dismissCompletion()
-      return
-    }
-
-    let autocompleteActive = autocompleteManager?.handleTextChange(in: textView) ?? false
-    if autocompleteActive {
-      mentionManager?.dismissCompletion()
-    } else {
-      mentionManager?.handleTextChange(in: textView)
-    }
+    _ = autocompleteManager?.handleTextChange(in: textView)
   }
 
   func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
@@ -67,27 +61,18 @@ extension ComposeView: UITextViewDelegate {
       }
     }
 
-    if slashCommandManager?.isCompletionVisible != true,
-       autocompleteManager?.isCompletionVisible != true
-    {
-      mentionManager?.handleIncomingText(text)
-    }
+    autocompleteManager?.handleIncomingText(text)
 
-    // If deleting inside a mention, strip mention styling first, then apply the delete.
-    if slashCommandManager?.isCompletionVisible != true,
-       autocompleteManager?.isCompletionVisible != true,
-       mentionManager?.handleMentionRemovalOnDelete(in: textView, changeRange: range, replacementText: text) == true
-    {
-      draftManager.invalidateLoadedEntities(overlapping: range)
-      textViewDidChange(textView)
-      return false
-    }
+    // Semantic entities are atomic. Any edit through their interior turns them back into
+    // plain text before UIKit applies the edit, so a changed label can never retain identity.
+    _ = autocompleteManager?.prepareSemanticEntitiesForEdit(in: textView, changeRange: range)
 
     // Auto-pick an exact mention match when typing space/punctuation at the end of a single result.
-    if slashCommandManager?.isCompletionVisible != true,
-       autocompleteManager?.isCompletionVisible != true,
-       mentionManager?.handleAutoPickIfNeeded(in: textView, changeRange: range, replacementText: text) == true
-    {
+    if autocompleteManager?.handleAutoPickIfNeeded(
+      in: textView,
+      changeRange: range,
+      replacementText: text
+    ) == true {
       return false
     }
 
@@ -115,18 +100,11 @@ extension ComposeView: UITextViewDelegate {
     // Reset typing attributes when cursor moves to prevent style leakage
     textView.updateTypingAttributesIfNeeded()
 
-    let slashActive = slashCommandManager?.handleTextChange(in: textView) ?? false
-    if slashActive {
-      autocompleteManager?.dismissCompletion()
-      return
-    }
+    _ = autocompleteManager?.handleTextChange(in: textView)
+  }
 
-    let autocompleteActive = autocompleteManager?.handleTextChange(in: textView) ?? false
-    if autocompleteActive {
-      mentionManager?.dismissCompletion()
-    } else {
-      mentionManager?.handleTextChange(in: textView)
-    }
+  func textViewDidEndEditing(_ textView: UITextView) {
+    autocompleteManager?.dismissCompletion()
   }
 
   // MARK: - Bold Text Processing

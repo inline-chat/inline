@@ -46,6 +46,128 @@ struct PeerBotCommandsViewModelTests {
     #expect(viewModel.botGroups.first?.bot.username == "alpha")
   }
 
+  @Test("concurrent callers wait for the same initial load")
+  func concurrentCallersWaitForInitialLoad() async {
+    let gate = AsyncGate()
+    let completion = AsyncFlag()
+    let counter = FetchCounter()
+    let viewModel = PeerBotCommandsViewModel(
+      peer: .thread(id: 100),
+      fetcher: { _ in
+        await counter.increment()
+        await gate.wait()
+        return [Self.makeGroup(botId: 1, username: "alpha", commands: [("help", "Show help")])]
+      },
+      userInfoResolver: Self.makeResolver()
+    )
+
+    let first = Task { @MainActor in
+      await viewModel.ensureLoaded()
+    }
+    while viewModel.loadState != .loading {
+      await Task.yield()
+    }
+    let second = Task { @MainActor in
+      await viewModel.ensureLoaded()
+      await completion.set()
+    }
+
+    await Task.yield()
+    #expect(await completion.value == false)
+    #expect(await counter.value == 1)
+
+    await gate.open()
+    await first.value
+    await second.value
+
+    #expect(await completion.value)
+    #expect(viewModel.loadState == .loaded)
+    #expect(viewModel.suggestions.map(\.command) == ["help"])
+  }
+
+  @Test("a superseded load cannot overwrite the refreshed cache")
+  func supersededLoadCannotOverwriteRefreshedCache() async {
+    let firstLoadGate = AsyncGate()
+    let counter = FetchCounter()
+    let peer = Peer.thread(id: 100)
+    let otherPeer = Peer.thread(id: 200)
+    let viewModel = PeerBotCommandsViewModel(
+      peer: peer,
+      fetcher: { _ in
+        let attempt = await counter.next()
+        if attempt == 1 {
+          await firstLoadGate.wait()
+          return [Self.makeGroup(botId: 1, username: "old", commands: [("old", "Old result")])]
+        }
+        return [Self.makeGroup(botId: 2, username: "new", commands: [("new", "New result")])]
+      },
+      userInfoResolver: Self.makeResolver()
+    )
+
+    let initialLoad = Task { @MainActor in
+      await viewModel.ensureLoaded()
+    }
+    while viewModel.loadState != .loading {
+      await Task.yield()
+    }
+
+    await viewModel.refresh()
+    #expect(viewModel.suggestions.map(\.command) == ["new"])
+
+    await firstLoadGate.open()
+    await initialLoad.value
+    #expect(viewModel.suggestions.map(\.command) == ["new"])
+
+    viewModel.setPeer(otherPeer)
+    viewModel.setPeer(peer)
+    #expect(viewModel.suggestions.map(\.command) == ["new"])
+    #expect(await counter.value == 2)
+  }
+
+  @Test("ensure loaded waits for an in-flight refresh instead of restoring stale cache")
+  func ensureLoadedWaitsForRefresh() async {
+    let refreshGate = AsyncGate()
+    let completion = AsyncFlag()
+    let counter = FetchCounter()
+    let viewModel = PeerBotCommandsViewModel(
+      peer: .thread(id: 100),
+      fetcher: { _ in
+        let attempt = await counter.next()
+        if attempt == 1 {
+          return [Self.makeGroup(botId: 1, username: "old", commands: [("old", "Old result")])]
+        }
+        await refreshGate.wait()
+        return [Self.makeGroup(botId: 2, username: "new", commands: [("new", "New result")])]
+      },
+      userInfoResolver: Self.makeResolver()
+    )
+
+    await viewModel.ensureLoaded()
+    let refresh = Task { @MainActor in
+      await viewModel.refresh()
+    }
+    while viewModel.loadState != .loading {
+      await Task.yield()
+    }
+
+    let concurrentLoad = Task { @MainActor in
+      await viewModel.ensureLoaded()
+      await completion.set()
+    }
+    await Task.yield()
+
+    #expect(await completion.value == false)
+    #expect(viewModel.loadState == .loading)
+
+    await refreshGate.open()
+    await refresh.value
+    await concurrentLoad.value
+
+    #expect(await completion.value)
+    #expect(viewModel.suggestions.map(\.command) == ["new"])
+    #expect(await counter.value == 2)
+  }
+
   @Test("marks duplicate commands case-insensitively and builds targeted insertion text")
   func marksAmbiguousSuggestions() async {
     let peer = Peer.thread(id: 100)
@@ -197,5 +319,32 @@ private actor FetchCounter {
   func next() -> Int {
     value += 1
     return value
+  }
+}
+
+private actor AsyncGate {
+  private var isOpen = false
+  private var waiters: [CheckedContinuation<Void, Never>] = []
+
+  func wait() async {
+    guard !isOpen else { return }
+    await withCheckedContinuation { continuation in
+      waiters.append(continuation)
+    }
+  }
+
+  func open() {
+    isOpen = true
+    let currentWaiters = waiters
+    waiters.removeAll()
+    currentWaiters.forEach { $0.resume() }
+  }
+}
+
+private actor AsyncFlag {
+  private(set) var value = false
+
+  func set() {
+    value = true
   }
 }

@@ -6,8 +6,8 @@ import Testing
 @MainActor
 @Suite("Compose Autocomplete View Model")
 struct ComposeAutocompleteViewModelTests {
-  @Test("selection clamps at item edges")
-  func selectionClampsAtItemEdges() {
+  @Test("selection wraps at item edges")
+  func selectionWrapsAtItemEdges() {
     let viewModel = ComposeAutocompleteViewModel(
       emojiItems: { _, _ in
         [
@@ -40,16 +40,102 @@ struct ComposeAutocompleteViewModelTests {
     #expect(viewModel.selectedIndex == 0)
 
     viewModel.selectPrevious()
+    #expect(viewModel.selectedIndex == 1)
+
+    viewModel.selectNext()
     #expect(viewModel.selectedIndex == 0)
 
     viewModel.selectNext()
     #expect(viewModel.selectedIndex == 1)
 
     viewModel.selectNext()
-    #expect(viewModel.selectedIndex == 1)
+    #expect(viewModel.selectedIndex == 0)
 
     viewModel.selectPrevious()
+    #expect(viewModel.selectedIndex == 1)
+  }
+
+  @Test("changing an async match clears stale items immediately")
+  func changingAsyncMatchClearsStaleItemsImmediately() async throws {
+    let db = AppDatabase.empty()
+    try await db.dbWriter.write { sqlDb in
+      try Chat(
+        id: 42,
+        date: Date(timeIntervalSince1970: 1),
+        type: .thread,
+        title: "Roadmap",
+        spaceId: nil
+      ).insert(sqlDb)
+    }
+    let viewModel = ComposeAutocompleteViewModel(db: db)
+
+    viewModel.update(
+      match: ComposeAutocompleteMatch(
+        kind: .thread,
+        range: NSRange(location: 0, length: 3),
+        query: "ro"
+      )
+    )
+    #expect(viewModel.loadState == .loading)
+    await waitForItems(viewModel, count: 1)
+    #expect(viewModel.loadState == .idle)
+
+    viewModel.update(
+      match: ComposeAutocompleteMatch(
+        kind: .thread,
+        range: NSRange(location: 0, length: 4),
+        query: "zzz"
+      )
+    )
+
+    #expect(viewModel.items.isEmpty)
     #expect(viewModel.selectedIndex == 0)
+    #expect(viewModel.loadState == .loading)
+  }
+
+  @Test("rapid thread refinements publish only the latest query")
+  func rapidThreadRefinementsPublishOnlyLatestQuery() async throws {
+    let db = AppDatabase.empty()
+    try await db.dbWriter.write { sqlDb in
+      try Chat(
+        id: 42,
+        date: Date(timeIntervalSince1970: 1),
+        type: .thread,
+        title: "Roadmap",
+        spaceId: nil
+      ).insert(sqlDb)
+      try Chat(
+        id: 43,
+        date: Date(timeIntervalSince1970: 2),
+        type: .thread,
+        title: "Zebra",
+        spaceId: nil
+      ).insert(sqlDb)
+    }
+    let viewModel = ComposeAutocompleteViewModel(db: db)
+
+    viewModel.update(
+      match: ComposeAutocompleteMatch(
+        kind: .thread,
+        range: NSRange(location: 0, length: 3),
+        query: "ro"
+      )
+    )
+    viewModel.update(
+      match: ComposeAutocompleteMatch(
+        kind: .thread,
+        range: NSRange(location: 0, length: 3),
+        query: "ze"
+      )
+    )
+
+    try await Task.sleep(for: .milliseconds(40))
+    #expect(viewModel.items.isEmpty)
+    #expect(viewModel.loadState == .loading)
+
+    await waitForItems(viewModel, count: 1)
+    #expect(viewModel.items.map(\.title) == ["Zebra"])
+    #expect(viewModel.loadState == .idle)
   }
 
   @Test("bare thread opener shows recent thread items")
@@ -247,7 +333,7 @@ struct ComposeAutocompleteViewModelTests {
   }
 
   private func waitForItems(_ viewModel: ComposeAutocompleteViewModel, count: Int) async {
-    for _ in 0 ..< 20 {
+    for _ in 0 ..< 100 {
       if viewModel.items.count == count {
         return
       }

@@ -4,8 +4,16 @@ import GRDB
 import Logger
 
 public enum ComposeAutocompleteKind: String, Hashable, Sendable {
+  case mention
+  case command
   case thread
   case emoji
+}
+
+public enum ComposeAutocompleteLoadState: Equatable, Sendable {
+  case idle
+  case loading
+  case failed
 }
 
 public struct ComposeAutocompleteMatch: Hashable {
@@ -22,6 +30,8 @@ public struct ComposeAutocompleteMatch: Hashable {
 
 public struct ComposeAutocompleteItem: Identifiable, Hashable, Sendable {
   public enum Payload: Hashable, Sendable {
+    case mention(MentionCompletionItem)
+    case command(PeerBotCommandSuggestion)
     case thread(chatId: Int64, spaceId: Int64?, title: String)
     case emoji(value: String, shortcode: String)
   }
@@ -32,6 +42,7 @@ public struct ComposeAutocompleteItem: Identifiable, Hashable, Sendable {
   public let subtitle: String?
   public let symbol: String?
   public let emoji: String?
+  public let avatarUserInfo: UserInfo?
   public let payload: Payload
 
   public init(
@@ -41,6 +52,7 @@ public struct ComposeAutocompleteItem: Identifiable, Hashable, Sendable {
     subtitle: String? = nil,
     symbol: String? = nil,
     emoji: String? = nil,
+    avatarUserInfo: UserInfo? = nil,
     payload: Payload
   ) {
     self.id = id
@@ -49,9 +61,20 @@ public struct ComposeAutocompleteItem: Identifiable, Hashable, Sendable {
     self.subtitle = subtitle
     self.symbol = symbol
     self.emoji = emoji
+    self.avatarUserInfo = avatarUserInfo
     self.payload = payload
   }
 }
+
+public typealias ComposeMentionAutocompleteItemsProvider = @MainActor (
+  _ query: String,
+  _ limit: Int
+) -> [ComposeAutocompleteItem]
+
+public typealias ComposeCommandAutocompleteItemsProvider = @MainActor (
+  _ query: String,
+  _ limit: Int
+) -> [ComposeAutocompleteItem]
 
 public typealias ComposeEmojiAutocompleteItemsProvider = @MainActor (
   _ query: String,
@@ -67,11 +90,14 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
   @Published public private(set) var match: ComposeAutocompleteMatch?
   @Published public private(set) var items: [ComposeAutocompleteItem] = []
   @Published public private(set) var selectedIndex = 0
+  @Published public private(set) var loadState: ComposeAutocompleteLoadState = .idle
 
   private let log = Log.scoped("ComposeAutocompleteViewModel")
   private let db: AppDatabase
   private let limit: Int
   private let recentThreadChatIds: ComposeThreadRecentChatIdsProvider
+  private let mentionItems: ComposeMentionAutocompleteItemsProvider
+  private let commandItems: ComposeCommandAutocompleteItemsProvider
   private let emojiItems: ComposeEmojiAutocompleteItemsProvider
   private var spaceId: Int64?
   private var loadTask: Task<Void, Never>?
@@ -84,12 +110,16 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
     spaceId: Int64? = nil,
     limit: Int = 8,
     recentThreadChatIds: @escaping ComposeThreadRecentChatIdsProvider = { _ in [] },
+    mentionItems: @escaping ComposeMentionAutocompleteItemsProvider = { _, _ in [] },
+    commandItems: @escaping ComposeCommandAutocompleteItemsProvider = { _, _ in [] },
     emojiItems: @escaping ComposeEmojiAutocompleteItemsProvider = { _, _ in [] }
   ) {
     self.db = db
     self.spaceId = spaceId
     self.limit = limit
     self.recentThreadChatIds = recentThreadChatIds
+    self.mentionItems = mentionItems
+    self.commandItems = commandItems
     self.emojiItems = emojiItems
   }
 
@@ -119,6 +149,7 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
       self.match = nil
       items = []
       selectedIndex = 0
+      loadState = .idle
       return
     }
 
@@ -127,8 +158,12 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
     }
 
     guard self.match != match else { return }
-    self.match = match
+    loadTask?.cancel()
+    loadToken = UUID()
+    items = []
     selectedIndex = 0
+    loadState = .idle
+    self.match = match
     reloadItems()
   }
 
@@ -144,16 +179,21 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
     match = nil
     items = []
     selectedIndex = 0
+    loadState = .idle
   }
 
   public func selectNext() {
     guard items.isEmpty == false else { return }
-    selectedIndex = min(selectedIndex + 1, items.count - 1)
+    selectedIndex = (selectedIndex + 1) % items.count
   }
 
   public func selectPrevious() {
     guard items.isEmpty == false else { return }
-    selectedIndex = max(selectedIndex - 1, 0)
+    selectedIndex = selectedIndex > 0 ? selectedIndex - 1 : items.count - 1
+  }
+
+  public func reloadCurrentMatch() {
+    reloadItems()
   }
 
   public func item(at index: Int) -> ComposeAutocompleteItem? {
@@ -168,19 +208,24 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
     guard let match else {
       items = []
       selectedIndex = 0
+      loadState = .idle
       return
     }
 
     switch match.kind {
+    case .mention:
+      loadSynchronousItems(mentionItems(match.query, limit))
+    case .command:
+      loadSynchronousItems(commandItems(match.query, limit))
     case .thread:
       loadThreadItems(query: match.query)
     case .emoji:
-      loadEmojiItems(query: match.query)
+      loadSynchronousItems(emojiItems(match.query, limit))
     }
   }
 
-  private func loadEmojiItems(query: String) {
-    let items = emojiItems(query, limit)
+  private func loadSynchronousItems(_ items: [ComposeAutocompleteItem]) {
+    loadState = .idle
     self.items = items
     selectedIndex = items.isEmpty ? 0 : min(selectedIndex, items.count - 1)
   }
@@ -202,9 +247,14 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
     let compactTitlePattern = Self.likePattern(containing: compactQuery)
     let token = UUID()
     loadToken = token
+    loadState = .loading
 
     loadTask = Task { [db, limit] in
       do {
+        // Avoid issuing a local database search for every intermediate keystroke.
+        // The presentation layer keeps the current menu stable during this short debounce.
+        try await Task.sleep(for: .milliseconds(80))
+        try Task.checkCancellation()
         let items = try await db.reader.read { db in
           let compactTitleSQL = """
           replace(replace(replace(replace(title, ' ', ''), char(9), ''), char(10), ''), char(13), '')
@@ -252,12 +302,14 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
           guard let self, self.loadToken == token else { return }
           self.items = items
           self.selectedIndex = items.isEmpty ? 0 : min(self.selectedIndex, items.count - 1)
+          self.loadState = .idle
         }
       } catch {
         await MainActor.run { [weak self] in
           guard let self, self.loadToken == token else { return }
           self.items = []
           self.selectedIndex = 0
+          self.loadState = .failed
           self.log.error("Failed to load thread autocomplete items", error: error)
         }
       }
@@ -269,11 +321,13 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
     guard !chatIds.isEmpty else {
       items = []
       selectedIndex = 0
+      loadState = .idle
       return
     }
 
     let token = UUID()
     loadToken = token
+    loadState = .loading
 
     loadTask = Task { [db] in
       do {
@@ -320,12 +374,14 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
           guard let self, self.loadToken == token else { return }
           self.items = items
           self.selectedIndex = items.isEmpty ? 0 : min(self.selectedIndex, items.count - 1)
+          self.loadState = .idle
         }
       } catch {
         await MainActor.run { [weak self] in
           guard let self, self.loadToken == token else { return }
           self.items = []
           self.selectedIndex = 0
+          self.loadState = .failed
           self.log.error("Failed to load recent thread autocomplete items", error: error)
         }
       }

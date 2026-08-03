@@ -1,27 +1,92 @@
-import InlineIOSUI
 import InlineKit
 import UIKit
 
 @MainActor
 protocol ComposeAutocompleteCompletionDelegate: AnyObject {
-  func autocompleteCompletion(_ view: ComposeAutocompleteCompletionView, didSelect item: ComposeAutocompleteItem)
-  func autocompleteCompletionDidRequestClose(_ view: ComposeAutocompleteCompletionView)
+  func autocompleteCompletion(
+    _ view: ComposeAutocompleteCompletionView,
+    didSelect item: ComposeAutocompleteItem,
+    activation: ComposeAutocompleteSelectionActivation
+  )
+}
+
+enum ComposeAutocompleteSelectionActivation {
+  case primary
+  case completionOnly
+}
+
+enum ComposeAutocompletePlaceholder: Equatable {
+  case loading
+  case failed
+}
+
+private final class ComposeAutocompleteRowControl: UIControl {
+  var isKeyboardSelected = false {
+    didSet {
+      updateBackground()
+    }
+  }
+
+  override var isHighlighted: Bool {
+    didSet {
+      updateBackground()
+    }
+  }
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    layer.cornerRadius = ComposeAutocompleteCompletionView.rowCornerRadius
+    layer.cornerCurve = .continuous
+    clipsToBounds = true
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  private func updateBackground() {
+    if isHighlighted {
+      backgroundColor = UIColor.label.withAlphaComponent(0.05)
+    } else if isKeyboardSelected {
+      backgroundColor = UIColor.label.withAlphaComponent(0.08)
+    } else {
+      backgroundColor = .clear
+    }
+  }
 }
 
 final class ComposeAutocompleteCompletionView: UIView {
-  static let maxHeight: CGFloat = 216
-  static let itemHeight: CGFloat = 56
+  static let maxHeight: CGFloat = 280
+  static let minimumItemHeight: CGFloat = 56
+  static let cornerRadius: CGFloat = 20
+  static let contentInset: CGFloat = 4
+  static let rowCornerRadius = cornerRadius - contentInset
 
   weak var delegate: ComposeAutocompleteCompletionDelegate?
 
   private var items: [ComposeAutocompleteItem] = []
+  private var placeholder: ComposeAutocompletePlaceholder?
   private var selectedIndex = 0
+  private var heightConstraint: NSLayoutConstraint?
+  private var visibilityAnimator: UIViewPropertyAnimator?
+  private var visibilityGeneration = 0
+  private var isPresented = false
+  private var showsKeyboardSelection = false
+  private var isContentInteractionEnabled = true
 
   private lazy var scrollView: UIScrollView = {
     let scrollView = UIScrollView()
     scrollView.translatesAutoresizingMaskIntoConstraints = false
     scrollView.showsVerticalScrollIndicator = false
     scrollView.backgroundColor = .clear
+    scrollView.delaysContentTouches = false
+    scrollView.verticalScrollIndicatorInsets = UIEdgeInsets(
+      top: Self.contentInset,
+      left: 0,
+      bottom: Self.contentInset,
+      right: 2
+    )
     return scrollView
   }()
 
@@ -33,31 +98,30 @@ final class ComposeAutocompleteCompletionView: UIView {
     return stackView
   }()
 
-  private lazy var backgroundView: UIView = {
-    let view = UIView()
-    let blurEffect = UIBlurEffect(style: .systemMaterial)
-    let blurView = UIVisualEffectView(effect: blurEffect)
-    blurView.translatesAutoresizingMaskIntoConstraints = false
-    blurView.layer.cornerRadius = 12
-    blurView.clipsToBounds = true
-    view.addSubview(blurView)
+  private lazy var backgroundView: UIVisualEffectView = {
+    let effect: UIVisualEffect
+    if #available(iOS 26.0, *) {
+      let glassEffect = UIGlassEffect(style: .regular)
+      glassEffect.isInteractive = true
+      effect = glassEffect
+    } else {
+      effect = UIBlurEffect(style: .systemMaterial)
+    }
 
-    NSLayoutConstraint.activate([
-      blurView.topAnchor.constraint(equalTo: view.topAnchor),
-      blurView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-      blurView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      blurView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-    ])
-
-    view.layer.cornerRadius = 12
-    view.layer.borderWidth = 1
-    view.layer.borderColor = UIColor.lightGray.withAlphaComponent(0.2).cgColor
+    let view = UIVisualEffectView(effect: effect)
+    view.layer.cornerRadius = Self.cornerRadius
+    view.layer.cornerCurve = .continuous
+    view.clipsToBounds = true
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
 
   var isVisible: Bool {
-    !isHidden && alpha > 0
+    isPresented
+  }
+
+  var canSelectItems: Bool {
+    isPresented && isContentInteractionEnabled && placeholder == nil && !items.isEmpty
   }
 
   override init(frame: CGRect) {
@@ -70,55 +134,143 @@ final class ComposeAutocompleteCompletionView: UIView {
     fatalError("init(coder:) has not been implemented")
   }
 
-  func update(items: [ComposeAutocompleteItem], selectedIndex: Int) {
-    self.items = items
-    self.selectedIndex = items.indices.contains(selectedIndex) ? selectedIndex : 0
-    rebuildRows()
-    updateHeight()
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: Self.cornerRadius).cgPath
   }
 
-  func setSelectedIndex(_ selectedIndex: Int) {
-    guard items.indices.contains(selectedIndex) else { return }
-    self.selectedIndex = selectedIndex
+  func update(
+    items: [ComposeAutocompleteItem],
+    selectedIndex: Int,
+    placeholder: ComposeAutocompletePlaceholder?
+  ) {
+    let shouldRebuild = self.items != items || self.placeholder != placeholder
+    self.items = items
+    self.placeholder = placeholder
+    self.selectedIndex = items.indices.contains(selectedIndex) ? selectedIndex : 0
+    scrollView.isScrollEnabled = placeholder == nil
+    setContentInteractionEnabled(placeholder == nil)
+    if shouldRebuild {
+      rebuildRows()
+    }
+    updateHeight()
     updateSelection()
   }
 
-  func show() {
-    guard !items.isEmpty else { return }
+  func show(animated: Bool) {
+    guard !items.isEmpty || placeholder != nil else { return }
+    guard !isPresented else { return }
 
+    visibilityGeneration += 1
+    visibilityAnimator?.stopAnimation(true)
+    visibilityAnimator = nil
+    isPresented = true
+    isUserInteractionEnabled = true
+    accessibilityElementsHidden = false
     isHidden = false
+    alpha = 1
     updateHeight()
-    UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseOut]) {
-      self.alpha = 1.0
-      self.transform = .identity
+    guard animated, !UIAccessibility.isReduceMotionEnabled else {
+      transform = .identity
+      announceSuggestionsIfNeeded()
+      return
     }
+
+    transform = CGAffineTransform(translationX: 0, y: 8).scaledBy(x: 0.98, y: 0.98)
+    let animator = UIViewPropertyAnimator(duration: 0.2, dampingRatio: 0.88) { [weak self] in
+      self?.transform = .identity
+    }
+    animator.addCompletion { [weak self] _ in
+      self?.visibilityAnimator = nil
+      self?.announceSuggestionsIfNeeded()
+    }
+    visibilityAnimator = animator
+    animator.startAnimation()
   }
 
   func hide() {
-    UIView.animate(withDuration: 0.15, delay: 0, options: [.curveEaseIn]) {
-      self.alpha = 0.0
-      self.transform = CGAffineTransform(scaleX: 0.95, y: 0.95)
-    } completion: { _ in
-      self.isHidden = true
+    guard isPresented else { return }
+
+    visibilityGeneration += 1
+    let generation = visibilityGeneration
+    visibilityAnimator?.stopAnimation(true)
+    visibilityAnimator = nil
+    isPresented = false
+    isUserInteractionEnabled = false
+    accessibilityElementsHidden = true
+    guard !UIAccessibility.isReduceMotionEnabled else {
+      isHidden = true
+      transform = .identity
+      return
     }
+
+    let animator = UIViewPropertyAnimator(duration: 0.15, curve: .easeIn) { [weak self] in
+      self?.transform = CGAffineTransform(translationX: 0, y: 6).scaledBy(x: 0.98, y: 0.98)
+    }
+    animator.addCompletion { [weak self] position in
+      guard let self,
+            position == .end,
+            self.visibilityGeneration == generation,
+            !self.isPresented
+      else {
+        return
+      }
+      self.isHidden = true
+      self.transform = .identity
+      self.visibilityAnimator = nil
+    }
+    visibilityAnimator = animator
+    animator.startAnimation()
   }
 
   @discardableResult
-  func selectCurrentItem() -> Bool {
-    guard items.indices.contains(selectedIndex) else { return false }
-    delegate?.autocompleteCompletion(self, didSelect: items[selectedIndex])
+  func selectCurrentItem(activation: ComposeAutocompleteSelectionActivation = .primary) -> Bool {
+    guard canSelectItems, items.indices.contains(selectedIndex) else { return false }
+    delegate?.autocompleteCompletion(self, didSelect: items[selectedIndex], activation: activation)
     return true
+  }
+
+  func setContentInteractionEnabled(_ enabled: Bool) {
+    guard isContentInteractionEnabled != enabled else { return }
+    isContentInteractionEnabled = enabled
+    scrollView.isUserInteractionEnabled = enabled
+    if !enabled {
+      showsKeyboardSelection = false
+    }
+    for case let control as ComposeAutocompleteRowControl in stackView.arrangedSubviews {
+      control.isEnabled = enabled
+    }
+    updateSelection()
+  }
+
+  func setKeyboardSelectionVisible(_ visible: Bool) {
+    guard showsKeyboardSelection != visible else { return }
+    showsKeyboardSelection = visible
+    updateSelection()
   }
 
   private func setupView() {
     backgroundColor = .clear
     clipsToBounds = false
     isHidden = true
-    alpha = 0
+    isUserInteractionEnabled = false
+    accessibilityElementsHidden = true
+    alpha = 1
     translatesAutoresizingMaskIntoConstraints = false
+    layer.shadowColor = UIColor.black.cgColor
+    layer.shadowOffset = CGSize(width: 0, height: 8)
+    layer.shadowRadius = 18
+    layer.shadowOpacity = 0.12
+
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(contentSizeCategoryDidChange),
+      name: UIContentSizeCategory.didChangeNotification,
+      object: nil
+    )
 
     addSubview(backgroundView)
-    addSubview(scrollView)
+    backgroundView.contentView.addSubview(scrollView)
     scrollView.addSubview(stackView)
 
     NSLayoutConstraint.activate([
@@ -127,17 +279,37 @@ final class ComposeAutocompleteCompletionView: UIView {
       backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
       backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-      scrollView.topAnchor.constraint(equalTo: topAnchor),
-      scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      scrollView.topAnchor.constraint(equalTo: backgroundView.contentView.topAnchor),
+      scrollView.leadingAnchor.constraint(equalTo: backgroundView.contentView.leadingAnchor),
+      scrollView.trailingAnchor.constraint(equalTo: backgroundView.contentView.trailingAnchor),
+      scrollView.bottomAnchor.constraint(equalTo: backgroundView.contentView.bottomAnchor),
 
-      stackView.topAnchor.constraint(equalTo: scrollView.topAnchor),
-      stackView.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
-      stackView.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
-      stackView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
-      stackView.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
+      stackView.topAnchor.constraint(
+        equalTo: scrollView.contentLayoutGuide.topAnchor,
+        constant: Self.contentInset
+      ),
+      stackView.leadingAnchor.constraint(
+        equalTo: scrollView.contentLayoutGuide.leadingAnchor,
+        constant: Self.contentInset
+      ),
+      stackView.trailingAnchor.constraint(
+        equalTo: scrollView.contentLayoutGuide.trailingAnchor,
+        constant: -Self.contentInset
+      ),
+      stackView.bottomAnchor.constraint(
+        equalTo: scrollView.contentLayoutGuide.bottomAnchor,
+        constant: -Self.contentInset
+      ),
+      stackView.widthAnchor.constraint(
+        equalTo: scrollView.frameLayoutGuide.widthAnchor,
+        constant: -(Self.contentInset * 2)
+      ),
     ])
+
+    let initialHeight = heightAnchor.constraint(equalToConstant: 0)
+    initialHeight.priority = UILayoutPriority(999)
+    initialHeight.isActive = true
+    heightConstraint = initialHeight
   }
 
   private func rebuildRows() {
@@ -146,31 +318,52 @@ final class ComposeAutocompleteCompletionView: UIView {
       view.removeFromSuperview()
     }
 
-    for (index, item) in items.enumerated() {
-      let row = makeRow(for: item, index: index)
-      stackView.addArrangedSubview(row)
+    if let placeholder {
+      stackView.addArrangedSubview(makePlaceholderRow(placeholder))
+    } else {
+      for (index, item) in items.enumerated() {
+        let row = makeRow(for: item, index: index)
+        stackView.addArrangedSubview(row)
+      }
     }
 
     updateSelection()
   }
 
   private func makeRow(for item: ComposeAutocompleteItem, index: Int) -> UIView {
-    let containerView = UIView()
+    let containerView = ComposeAutocompleteRowControl()
     containerView.translatesAutoresizingMaskIntoConstraints = false
     containerView.tag = index
+    containerView.isEnabled = isContentInteractionEnabled
+    containerView.isAccessibilityElement = true
+    containerView.accessibilityLabel = [item.title, item.subtitle]
+      .compactMap { $0 }
+      .joined(separator: ", ")
+    containerView.accessibilityTraits = .button
+    containerView.addAction(UIAction { [weak self, weak containerView] _ in
+      guard let self, let containerView else { return }
+      self.selectItem(at: containerView.tag)
+    }, for: .touchUpInside)
 
     let iconView = makeIconView(for: item)
 
     let titleLabel = UILabel()
-    titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+    titleLabel.font = UIFontMetrics(forTextStyle: .body).scaledFont(
+      for: .systemFont(ofSize: 15, weight: .semibold)
+    )
+    titleLabel.adjustsFontForContentSizeCategory = true
     titleLabel.text = item.title
     titleLabel.textColor = .label
+    titleLabel.numberOfLines = traitCollection.preferredContentSizeCategory.isAccessibilityCategory ? 2 : 1
     titleLabel.lineBreakMode = .byTruncatingTail
 
     let subtitleLabel = UILabel()
-    subtitleLabel.font = .systemFont(ofSize: 12, weight: .regular)
+    subtitleLabel.font = UIFontMetrics(forTextStyle: .caption1).scaledFont(
+      for: .systemFont(ofSize: 12, weight: .regular)
+    )
+    subtitleLabel.adjustsFontForContentSizeCategory = true
     subtitleLabel.textColor = .secondaryLabel
-    subtitleLabel.numberOfLines = 1
+    subtitleLabel.numberOfLines = traitCollection.preferredContentSizeCategory.isAccessibilityCategory ? 2 : 1
     subtitleLabel.text = item.subtitle
     subtitleLabel.lineBreakMode = .byTruncatingTail
     subtitleLabel.isHidden = item.subtitle?.isEmpty != false
@@ -185,6 +378,9 @@ final class ComposeAutocompleteCompletionView: UIView {
     rowStack.alignment = .center
     rowStack.spacing = 9
     rowStack.translatesAutoresizingMaskIntoConstraints = false
+    // The row control must remain the hit-test target. Decorative descendants otherwise
+    // consume the touch and prevent UIControl from beginning touch tracking.
+    rowStack.isUserInteractionEnabled = false
 
     containerView.addSubview(rowStack)
 
@@ -196,15 +392,71 @@ final class ComposeAutocompleteCompletionView: UIView {
       rowStack.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -12),
       rowStack.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 8),
       rowStack.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -8),
-      containerView.heightAnchor.constraint(equalToConstant: Self.itemHeight),
+      containerView.heightAnchor.constraint(greaterThanOrEqualToConstant: Self.minimumItemHeight),
     ])
-
-    let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleRowTap(_:)))
-    containerView.addGestureRecognizer(tapGesture)
     return containerView
   }
 
+  private func makePlaceholderRow(_ placeholder: ComposeAutocompletePlaceholder) -> UIView {
+    let container = UIView()
+    container.translatesAutoresizingMaskIntoConstraints = false
+    container.isAccessibilityElement = true
+
+    let iconView: UIView
+    let message: String
+    switch placeholder {
+    case .loading:
+      let spinner = UIActivityIndicatorView(style: .medium)
+      spinner.startAnimating()
+      iconView = spinner
+      message = String(localized: "Loading suggestions")
+      container.accessibilityTraits = .updatesFrequently
+    case .failed:
+      let imageView = UIImageView(image: UIImage(systemName: "exclamationmark.circle"))
+      imageView.tintColor = .secondaryLabel
+      imageView.contentMode = .scaleAspectFit
+      iconView = imageView
+      message = String(localized: "Couldn’t load suggestions. Type to retry.")
+      container.accessibilityTraits = .staticText
+    }
+
+    iconView.translatesAutoresizingMaskIntoConstraints = false
+    iconView.isUserInteractionEnabled = false
+
+    let label = UILabel()
+    label.translatesAutoresizingMaskIntoConstraints = false
+    label.font = UIFont.preferredFont(forTextStyle: .body)
+    label.adjustsFontForContentSizeCategory = true
+    label.textColor = .secondaryLabel
+    label.numberOfLines = traitCollection.preferredContentSizeCategory.isAccessibilityCategory ? 2 : 1
+    label.text = message
+
+    container.accessibilityLabel = message
+    container.addSubview(iconView)
+    container.addSubview(label)
+    NSLayoutConstraint.activate([
+      iconView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
+      iconView.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+      iconView.widthAnchor.constraint(equalToConstant: 20),
+      iconView.heightAnchor.constraint(equalToConstant: 20),
+      label.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 10),
+      label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
+      label.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
+      label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12),
+      container.heightAnchor.constraint(greaterThanOrEqualToConstant: Self.minimumItemHeight),
+    ])
+    return container
+  }
+
   private func makeIconView(for item: ComposeAutocompleteItem) -> UIView {
+    if let userInfo = item.avatarUserInfo {
+      let avatarView = UserAvatarView()
+      avatarView.configure(with: userInfo, size: 30)
+      avatarView.translatesAutoresizingMaskIntoConstraints = false
+      avatarView.isUserInteractionEnabled = false
+      return avatarView
+    }
+
     let container = UIView()
     container.translatesAutoresizingMaskIntoConstraints = false
     container.layer.cornerRadius = 15
@@ -244,38 +496,70 @@ final class ComposeAutocompleteCompletionView: UIView {
 
   private func updateSelection() {
     for (index, view) in stackView.arrangedSubviews.enumerated() {
-      view.backgroundColor = index == selectedIndex
-        ? UIColor.tertiarySystemFill
-        : .clear
-      view.layer.cornerRadius = 10
-      view.clipsToBounds = true
+      guard let control = view as? ComposeAutocompleteRowControl else { continue }
+      let isSelected = showsKeyboardSelection && index == selectedIndex
+      control.isKeyboardSelected = isSelected
+      var traits: UIAccessibilityTraits = .button
+      if isSelected {
+        traits.insert(.selected)
+      }
+      if !isContentInteractionEnabled {
+        traits.insert(.notEnabled)
+      }
+      control.accessibilityTraits = traits
     }
 
-    guard stackView.arrangedSubviews.indices.contains(selectedIndex) else { return }
+    guard showsKeyboardSelection,
+          stackView.arrangedSubviews.indices.contains(selectedIndex)
+    else {
+      return
+    }
     let selectedView = stackView.arrangedSubviews[selectedIndex]
-    scrollView.scrollRectToVisible(selectedView.frame.insetBy(dx: 0, dy: -8), animated: false)
+    let selectedRect = selectedView.convert(selectedView.bounds, to: scrollView).insetBy(dx: 0, dy: -8)
+    scrollView.scrollRectToVisible(selectedRect, animated: false)
   }
 
   private func updateHeight() {
-    let constrainedHeight = suggestionListHeight(
-      itemCount: items.count,
-      itemHeight: Self.itemHeight,
-      maxVisibleItems: 4,
-      maxHeight: Self.maxHeight
-    )
+    let usesExpandedAccessibilityRows = traitCollection.preferredContentSizeCategory.isAccessibilityCategory
+    let titleHeight = UIFontMetrics(forTextStyle: .body)
+      .scaledFont(for: .systemFont(ofSize: 15, weight: .semibold)).lineHeight
+    let subtitleHeight = UIFontMetrics(forTextStyle: .caption1)
+      .scaledFont(for: .systemFont(ofSize: 12)).lineHeight
+    let lineMultiplier: CGFloat = usesExpandedAccessibilityRows ? 2 : 1
+    let itemHeight = max(Self.minimumItemHeight, ceil((titleHeight + subtitleHeight) * lineMultiplier + 18))
+    let rowCount = placeholder == nil ? min(items.count, 4) : 1
+    let contentHeight = CGFloat(rowCount) * itemHeight + Self.contentInset * 2
+    let constrainedHeight = min(contentHeight, Self.maxHeight)
 
-    if let heightConstraint = constraints.first(where: { $0.firstAttribute == .height }) {
+    if let heightConstraint {
       heightConstraint.constant = constrainedHeight
-    } else {
-      heightAnchor.constraint(equalToConstant: constrainedHeight).isActive = true
+      return
     }
+
+    let constraint = heightAnchor.constraint(equalToConstant: constrainedHeight)
+    constraint.priority = UILayoutPriority(999)
+    constraint.isActive = true
+    heightConstraint = constraint
+  }
+
+  private func selectItem(at index: Int) {
+    guard canSelectItems, items.indices.contains(index) else { return }
+    selectedIndex = index
+    updateSelection()
+    delegate?.autocompleteCompletion(self, didSelect: items[selectedIndex], activation: .primary)
+  }
+
+  private func announceSuggestionsIfNeeded() {
+    guard UIAccessibility.isVoiceOverRunning else { return }
+    UIAccessibility.post(
+      notification: .announcement,
+      argument: String(localized: "Autocomplete suggestions available")
+    )
   }
 
   @objc
-  private func handleRowTap(_ gesture: UITapGestureRecognizer) {
-    guard let view = gesture.view, items.indices.contains(view.tag) else { return }
-    selectedIndex = view.tag
-    updateSelection()
-    delegate?.autocompleteCompletion(self, didSelect: items[selectedIndex])
+  private func contentSizeCategoryDidChange() {
+    rebuildRows()
+    updateHeight()
   }
 }

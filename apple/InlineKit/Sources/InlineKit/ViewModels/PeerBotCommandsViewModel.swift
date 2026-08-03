@@ -3,7 +3,7 @@ import InlineProtocol
 import Logger
 import Observation
 
-public struct PeerBotCommandSuggestion: Identifiable, Equatable, Sendable {
+public struct PeerBotCommandSuggestion: Identifiable, Hashable, Sendable {
   public let command: String
   public let description: String
   public let normalizedCommand: String
@@ -51,6 +51,8 @@ public final class PeerBotCommandsViewModel {
   @ObservationIgnored private let userInfoResolver: UserInfoResolver
   @ObservationIgnored private let log = Log.scoped("PeerBotCommandsViewModel")
   @ObservationIgnored private var cache: [Peer: [InlineProtocol.PeerBotCommands]] = [:]
+  @ObservationIgnored private var loadTask: Task<Void, Never>?
+  @ObservationIgnored private var loadGeneration = UUID()
 
   public init(peer: Peer, fetcher: @escaping Fetcher) {
     self.peer = peer
@@ -76,12 +78,16 @@ public final class PeerBotCommandsViewModel {
     Self.flattenSuggestions(from: botGroups, userInfoResolver: userInfoResolver)
   }
 
+  deinit {
+    loadTask?.cancel()
+  }
+
   public var shouldAttemptLoad: Bool {
     switch loadState {
-      case .idle, .failed:
-        return true
-      case .loading, .loaded:
-        return false
+    case .idle, .failed:
+      return true
+    case .loading, .loaded:
+      return false
     }
   }
 
@@ -116,23 +122,33 @@ public final class PeerBotCommandsViewModel {
   }
 
   public func ensureLoaded() async {
+    if let loadTask {
+      await loadTask.value
+      return
+    }
+
     if let cached = cache[peer] {
       botGroups = cached
       loadState = .loaded
       return
     }
 
-    guard loadState != .loading else { return }
-    await fetchAndStore(for: peer)
+    await startLoad(for: peer)
   }
 
   public func refresh() async {
-    await fetchAndStore(for: peer, forceRefresh: true)
+    loadTask?.cancel()
+    loadTask = nil
+    loadGeneration = UUID()
+    await startLoad(for: peer, forceRefresh: true)
   }
 
   public func setPeer(_ peer: Peer) {
     guard self.peer != peer else { return }
 
+    loadTask?.cancel()
+    loadTask = nil
+    loadGeneration = UUID()
     self.peer = peer
     if let cached = cache[peer] {
       botGroups = cached
@@ -144,7 +160,25 @@ public final class PeerBotCommandsViewModel {
     loadState = .idle
   }
 
-  private func fetchAndStore(for peer: Peer, forceRefresh: Bool = false) async {
+  private func startLoad(for peer: Peer, forceRefresh: Bool = false) async {
+    let generation = UUID()
+    loadGeneration = generation
+    let task = Task { @MainActor [weak self] in
+      guard let self else { return }
+      await fetchAndStore(for: peer, forceRefresh: forceRefresh, generation: generation)
+    }
+    loadTask = task
+    await task.value
+    if loadGeneration == generation {
+      loadTask = nil
+    }
+  }
+
+  private func fetchAndStore(
+    for peer: Peer,
+    forceRefresh: Bool = false,
+    generation: UUID
+  ) async {
     if !forceRefresh, let cached = cache[peer] {
       botGroups = cached
       loadState = .loaded
@@ -155,17 +189,19 @@ public final class PeerBotCommandsViewModel {
 
     do {
       let groups = try await fetcher(peer)
-      cache[peer] = groups
-
-      guard self.peer == peer else {
+      guard loadGeneration == generation, self.peer == peer else {
         return
       }
 
+      cache[peer] = groups
       botGroups = groups
       loadState = .loaded
     } catch {
+      if error is CancellationError {
+        return
+      }
+      guard loadGeneration == generation, self.peer == peer else { return }
       log.error("Failed to fetch peer bot commands", error: error)
-      guard self.peer == peer else { return }
       loadState = .failed(String(describing: error))
     }
   }

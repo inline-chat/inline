@@ -254,7 +254,7 @@ class MentionManager: NSObject {
     let cursorPosition = textView.selectedRange.location
     let attributedText = textView.attributedText ?? NSAttributedString()
 
-    Log.shared.debug("🔍 detectMentionAtCursor: cursor=\(cursorPosition), text='\(textView.text ?? "")'")
+    Log.shared.debug("🔍 detectMentionAtCursor: cursor=\(cursorPosition), textUTF16Length=\((textView.text ?? "").utf16.count)")
 
     if suppressMentionDetection {
       Log.shared.debug("🔍 Mention detection suppressed after delete")
@@ -263,7 +263,7 @@ class MentionManager: NSObject {
 
     if let mentionRange = mentionDetector.detectMentionAt(cursorPosition: cursorPosition, in: attributedText) {
       currentMentionRange = mentionRange
-      Log.shared.debug("🔍 Mention detected: '\(mentionRange.query)' at \(mentionRange.range)")
+      Log.shared.debug("🔍 Mention detected: queryUTF16Length=\(mentionRange.query.utf16.count), range=\(mentionRange.range)")
       showMentionCompletion(for: mentionRange.query, textView: textView)
     } else {
       Log.shared.debug("🔍 No mention detected")
@@ -272,7 +272,7 @@ class MentionManager: NSObject {
   }
 
   private func showMentionCompletion(for query: String, textView: UITextView) {
-    Log.shared.debug("🔍 showMentionCompletion: query='\(query)'")
+    Log.shared.debug("🔍 showMentionCompletion: queryUTF16Length=\(query.utf16.count)")
 
     guard let mentionCompletionView,
           let parentView else { return }

@@ -146,9 +146,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       autocompleteManager?.configure(spaceId: spaceId)
     }
   }
+  // Compatibility slots for the retained legacy manager files. The active composer never initializes them.
   var mentionManager: MentionManager?
-  private lazy var mentionedParticipantsAccess = MentionedParticipantsAccessManager(composeView: self)
   var slashCommandManager: SlashCommandManager?
+  private lazy var mentionedParticipantsAccess = MentionedParticipantsAccessManager(composeView: self)
   var autocompleteManager: ComposeAutocompleteManager?
   let draftManager = DraftManager(debounceDelay: 2.0)
 
@@ -247,8 +248,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   override func didMoveToWindow() {
     super.didMoveToWindow()
     if window != nil {
-      setupMentionManager()
-      setupSlashCommandManager()
       setupAutocompleteManager()
       layoutIfNeeded()
       let hasEmbed = (embedContainerHeightConstraint?.constant ?? 0) > 0
@@ -301,10 +300,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   func resetMentionManager() {
-    mentionManager?.cleanup()
-    mentionManager = nil
-    slashCommandManager?.cleanup()
-    slashCommandManager = nil
     autocompleteManager?.cleanup()
     autocompleteManager = nil
   }
@@ -1414,6 +1409,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
   @objc func handleEditingStateChange() {
     guard let peerId, let chatId else { return }
+    autocompleteManager?.dismissCompletion()
     let isEditing = ChatState.shared.getState(peer: peerId).editingMessageId != nil
     updateSendButtonForEditing(isEditing)
 
@@ -1547,6 +1543,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   private func clearEditingComposeState() {
+    autocompleteManager?.dismissCompletion()
     textView.text = ""
     textView.showPlaceholder(true)
     buttonDisappear()
@@ -1681,6 +1678,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     heightBehavior: ComposeResetHeightBehavior,
     didPrepareSendAnimationPreview: Bool = false
   ) {
+    autocompleteManager?.dismissCompletion()
     let hadAttachments = !attachmentItems.isEmpty || !pendingVideoAttachments.isEmpty
     let shouldAnimateHeightReset = ComposeResetBehavior.shouldAnimateHeightResetAfterSend(
       hadAttachments: hadAttachments
@@ -1733,6 +1731,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     shouldCoordinateSendAnimationReset: Bool,
     didPrepareSendAnimationPreview: Bool
   ) {
+    autocompleteManager?.dismissCompletion()
     let heightBeforeClear = composeHeightConstraint.constant
     let shouldAnimateHeight = shouldCoordinateSendAnimationReset && abs(heightBeforeClear - Self.minHeight) > 1
     pendingSendAnimationHeightChange = shouldAnimateHeight

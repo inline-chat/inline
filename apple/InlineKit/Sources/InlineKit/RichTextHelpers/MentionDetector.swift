@@ -30,7 +30,7 @@ public class MentionDetector {
     }
 
     let nsString = text as NSString
-    log.trace("Detecting mention at cursor \(cursorPosition) in text: '\(text)'")
+    log.trace("Detecting mention at cursor \(cursorPosition), textUTF16Length=\(utf16Length)")
 
     // Find the last @ symbol before or at the cursor position
     var atSymbolLocation = -1
@@ -38,14 +38,6 @@ public class MentionDetector {
 
     while searchPosition >= 0 {
       let char = nsString.character(at: searchPosition)
-
-      #if DEBUG
-      if let scalar = UnicodeScalar(char) {
-        log.trace("Checking character at \(searchPosition): '\(Character(scalar))'")
-      } else {
-        log.trace("Checking character at \(searchPosition): [invalid unicode: \(char)]")
-      }
-      #endif // DEBUG
 
       if char == 64 { // '@' character
         atSymbolLocation = searchPosition
@@ -72,11 +64,7 @@ public class MentionDetector {
       let charBeforeAt = nsString.character(at: atSymbolLocation - 1)
       if charBeforeAt != 32, charBeforeAt != 10, charBeforeAt != 9 { // space, newline, tab
         // @ is part of another word, not a mention
-        if let scalar = UnicodeScalar(charBeforeAt) {
-          log.trace("@ symbol is part of another word (char before: '\(Character(scalar))')")
-        } else {
-          log.trace("@ symbol is part of another word (char before: [invalid unicode: \(charBeforeAt)])")
-        }
+        log.trace("@ symbol is part of another word")
         return nil
       }
     }
@@ -101,7 +89,7 @@ public class MentionDetector {
     // The complete mention range (including @)
     let mentionRange = NSRange(location: atSymbolLocation, length: endIndex - atSymbolLocation)
 
-    log.trace("Detected mention at \(atSymbolLocation): '@\(query)' (range: \(mentionRange))")
+    log.trace("Detected mention at \(atSymbolLocation), queryUTF16Length=\(query.utf16.count), range=\(mentionRange)")
 
     return MentionRange(
       range: mentionRange,
@@ -126,14 +114,14 @@ public class MentionDetector {
       replacement.append(NSAttributedString(string: trailingText, attributes: trailingAttributes))
     }
 
-    let mutable = attributedText.mutableCopy() as! NSMutableAttributedString
+    let mutable = NSMutableAttributedString(attributedString: attributedText)
     mutable.replaceCharacters(in: range, with: replacement)
 
     let newCursorPosition = range.location + mentionText.utf16.count + trailingText.utf16.count
 
-    log.trace("Replaced mention at \(range) with '\(mentionText)' for user \(userId), new cursor: \(newCursorPosition)")
+    log.trace("Replaced user mention at \(range), replacementUTF16Length=\(mentionText.utf16.count), newCursor=\(newCursorPosition)")
 
-    return (mutable.copy() as! NSAttributedString, newCursorPosition)
+    return (NSAttributedString(attributedString: mutable), newCursorPosition)
   }
 
   /// Replace a mention range with the selected group mention text and group ID.
@@ -152,14 +140,14 @@ public class MentionDetector {
       replacement.append(NSAttributedString(string: trailingText, attributes: trailingAttributes))
     }
 
-    let mutable = attributedText.mutableCopy() as! NSMutableAttributedString
+    let mutable = NSMutableAttributedString(attributedString: attributedText)
     mutable.replaceCharacters(in: range, with: replacement)
 
     let newCursorPosition = range.location + mentionText.utf16.count + trailingText.utf16.count
 
-    log.trace("Replaced mention at \(range) with '\(mentionText)' for group \(groupId), new cursor: \(newCursorPosition)")
+    log.trace("Replaced group mention at \(range), replacementUTF16Length=\(mentionText.utf16.count), newCursor=\(newCursorPosition)")
 
-    return (mutable.copy() as! NSAttributedString, newCursorPosition)
+    return (NSAttributedString(attributedString: mutable), newCursorPosition)
   }
 
   private func mentionString(
