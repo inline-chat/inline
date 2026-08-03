@@ -121,7 +121,7 @@ struct SlashCommandDetectorTests {
     let result = detector.replaceSlashCommand(
       in: NSAttributedString(string: "/he"),
       range: NSRange(location: 0, length: 3),
-      with: "/help@agent_bot",
+      with: "/help",
       targetBotUserId: 42
     )
 
@@ -131,6 +131,7 @@ struct SlashCommandDetectorTests {
       effectiveRange: nil
     ) as? NSNumber
     #expect(target?.int64Value == 42)
-    #expect(result.newAttributedText.attribute(.botCommandTargetUserId, at: 15, effectiveRange: nil) == nil)
+    #expect(result.newAttributedText.string == "/help ")
+    #expect(result.newAttributedText.attribute(.botCommandTargetUserId, at: 5, effectiveRange: nil) == nil)
   }
 }

@@ -860,7 +860,7 @@ struct ProcessEntitiesTests {
 
   @Test("Extract structured bot command target from attributed string")
   func testExtractTargetedBotCommandFromAttributedString() {
-    let text = "/help@agent_bot"
+    let text = "/help"
     let attributedString = NSMutableAttributedString(string: text)
     attributedString.addAttributes([
       .botCommand: text,
