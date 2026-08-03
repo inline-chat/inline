@@ -97,13 +97,15 @@ struct ExperimentalRootView: View {
 
 private struct ExperimentalAuthedRootView: View {
   @State private var nav = ExperimentalNavigationModel()
-  @State private var rootTab: RootTab = .inbox
-  @State private var lastContentRootTab: RootTab = .inbox
+  @State private var rootTab: RootTab = .allChats
+  @State private var lastContentRootTab: RootTab = .allChats
   @State private var searchQuery = ""
   @State private var isCreatingThread = false
   @State private var isNotificationSettingsPresented = false
   @AppStorage("ios.experimental.root.selectedTab")
-  private var persistedRootTabRaw = RootTab.inbox.rawValue
+  private var persistedRootTabRaw = RootTab.allChats.rawValue
+  @AppStorage(ExperimentalHomePreferenceKeys.chatScope)
+  private var homeChatScopeRaw = ExperimentalHomeChatScope.all.rawValue
   @AppStorage(ExperimentalHomePreferenceKeys.chatItemRenderMode)
   private var chatItemRenderModeRaw = ExperimentalHomeChatItemRenderMode.twoLineLastMessage.rawValue
   @AppStorage(ExperimentalHomePreferenceKeys.sortMode)
@@ -114,9 +116,8 @@ private struct ExperimentalAuthedRootView: View {
   @Environment(\.colorScheme) private var colorScheme
   @Environment(\.realtimeV2) private var realtimeV2
   @EnvironmentStateObject private var data: DataManager
-  @EnvironmentStateObject private var home: HomeViewModel
   @EnvironmentStateObject private var compactSpaceList: CompactSpaceList
-  @EnvironmentStateObject private var spaceChats: ExperimentalSpaceChatsViewModel
+  @EnvironmentStateObject private var homeListStore: ExperimentalHomeListStore
   @EnvironmentObject private var notificationSettings: NotificationSettingsManager
 
   init() {
@@ -124,26 +125,22 @@ private struct ExperimentalAuthedRootView: View {
       DataManager(database: env.appDatabase)
     }
 
-    _home = EnvironmentStateObject { env in
-      HomeViewModel(db: env.appDatabase)
-    }
-
     _compactSpaceList = EnvironmentStateObject { env in
       CompactSpaceList(db: env.appDatabase)
     }
-    _spaceChats = EnvironmentStateObject { env in
-      ExperimentalSpaceChatsViewModel(db: env.appDatabase)
+    _homeListStore = EnvironmentStateObject { env in
+      ExperimentalHomeListStore(database: env.appDatabase)
     }
   }
 
   var body: some View {
     rootNavigation
       .environmentObject(data)
-      .environmentObject(home)
       .environmentObject(compactSpaceList)
-      .environmentObject(spaceChats)
+      .environmentObject(homeListStore)
       .onReceive(NotificationCenter.default.publisher(for: .localDataCleared)) { _ in
         nav.resetHomeDataState()
+        homeListStore.refresh()
         Task {
           await refetchCoreDataAfterLocalDataCleared()
         }
@@ -180,10 +177,10 @@ private struct ExperimentalAuthedRootView: View {
     }
     .onAppear {
       // TODO: Give Inbox and All Chats dedicated persisted AppTab cases after UX verification.
-      let restoredRootTab = RootTab(rawValue: persistedRootTabRaw) ?? .inbox
-      let desiredRootTab = restoredRootTab == .newChat ? .inbox : restoredRootTab
+      let restoredRootTab = RootTab(rawValue: persistedRootTabRaw) ?? .allChats
+      let desiredRootTab = restoredRootTab == .newChat ? .allChats : restoredRootTab
       let desiredTab = desiredRootTab.appTab
-      spaceChats.setSpaceId(nav.activeSpaceId)
+      configureHomeList()
       if bindableRouter.selectedTab != desiredTab {
         bindableRouter.selectedTab = desiredTab
       }
@@ -222,8 +219,14 @@ private struct ExperimentalAuthedRootView: View {
       }
       searchQuery = ""
     }
-    .onChange(of: nav.activeSpaceId) { _, newValue in
-      spaceChats.setSpaceId(newValue)
+    .onChange(of: nav.activeSpaceId) { _, _ in
+      configureHomeList()
+    }
+    .onChange(of: sortModeRaw) { _, _ in
+      configureHomeList()
+    }
+    .onChange(of: homeChatScopeRaw) { _, _ in
+      configureHomeList()
     }
   }
 
@@ -234,14 +237,13 @@ private struct ExperimentalAuthedRootView: View {
       Tab("All Chats", systemImage: "bubble.left.and.bubble.right.fill", value: .allChats) {
         chatsRoot(nav: bindableNav, rootTab: .allChats)
       }
-      .badge(prototypeAllChatsUnreadCount)
 
       // TODO: Decide the badge color before bridging UIKit's global
       // `UITabBarItem.badgeColor`; SwiftUI's native tab badge has no tint API.
       Tab("Inbox", systemImage: "tray.full.fill", value: .inbox) {
         chatsRoot(nav: bindableNav, rootTab: .inbox)
       }
-      .badge(prototypeInboxUnreadCount)
+      .badge(homeListStore.state.presentation.inboxUnreadCount)
 
       Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
         ExperimentalSearchView(
@@ -265,29 +267,14 @@ private struct ExperimentalAuthedRootView: View {
     .background(Color(.systemBackground))
   }
 
-  private var prototypeScopedChats: [HomeChatItem] {
-    let chats = nav.activeSpaceId == nil ? home.chats : spaceChats.items
-    return chats.filter { $0.dialog.archived != true }
-  }
-
-  private var prototypeInboxUnreadCount: Int {
-    prototypeScopedChats.count { item in
-      isInboxItem(item) && hasUnread(item)
-    }
-  }
-
-  private var prototypeAllChatsUnreadCount: Int {
-    prototypeScopedChats.count { item in
-      item.dialog.open != true && hasUnread(item)
-    }
-  }
-
-  private func isInboxItem(_ item: HomeChatItem) -> Bool {
-    item.dialog.open == true || item.dialog.pinned == true
-  }
-
-  private func hasUnread(_ item: HomeChatItem) -> Bool {
-    (item.dialog.unreadCount ?? 0) > 0 || item.dialog.unreadMark == true
+  private func configureHomeList() {
+    let homeScope = ExperimentalHomeChatScope(rawValue: homeChatScopeRaw) ?? .all
+    let sortMode = ExperimentalHomeSortMode(rawValue: sortModeRaw) ?? .recentActivity
+    homeListStore.setConfiguration(ExperimentalHomeListConfiguration(
+      spaceID: nav.activeSpaceId,
+      includeSpaceChatsInHome: homeScope == .all,
+      sort: sortMode.chatListSort
+    ))
   }
 
   private func chatsRoot(
@@ -437,6 +424,9 @@ private struct ExperimentalAuthedRootView: View {
       onNotifications: {
         isNotificationSettingsPresented = true
       },
+      onArchive: {
+        router.push(.archived, for: router.selectedTab)
+      },
       onSelectItemSize: { mode in
         chatItemRenderModeRaw = mode.rawValue
       },
@@ -502,6 +492,7 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
   let sortMode: ExperimentalHomeSortMode
   let activeSpaceName: String?
   let onNotifications: () -> Void
+  let onArchive: () -> Void
   let onSelectItemSize: (ExperimentalHomeChatItemRenderMode) -> Void
   let onSelectSortMode: (ExperimentalHomeSortMode) -> Void
   let onInvite: (() -> Void)?
@@ -534,6 +525,12 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
     }
 
     let notificationSection = UIMenu(options: .displayInline, children: [notifications])
+    let archive = UIAction(
+      title: "Archive",
+      image: UIImage(systemName: "archivebox")
+    ) { _ in
+      onArchive()
+    }
     let itemSizeMenu = UIMenu(
       title: "Item Size",
       options: [.displayInline, .singleSelection],
@@ -558,7 +555,7 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
       children: [itemSizeMenu, sortMenu]
     )
 
-    var children: [UIMenuElement] = [notificationSection, viewOptions]
+    var children: [UIMenuElement] = [notificationSection, archive, viewOptions]
     if let activeSpaceName,
        let onInvite,
        let onMembers,

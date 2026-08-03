@@ -1,4 +1,5 @@
 import Foundation
+import InlineKit
 
 enum ExperimentalHomePreferenceKeys {
   static let isEnabled = "enableExperimentalView"
@@ -44,6 +45,15 @@ enum ExperimentalHomeSortMode: String, CaseIterable, Identifiable {
       "Opened Time"
     case .recentActivity:
       "Recent Activity"
+    }
+  }
+
+  var chatListSort: ChatListSort {
+    switch self {
+    case .openedTime:
+      .recentlyOpened
+    case .recentActivity:
+      .lastUpdated
     }
   }
 }

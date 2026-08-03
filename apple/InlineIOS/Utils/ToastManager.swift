@@ -27,6 +27,7 @@ enum ToastPlacement: Equatable {
 struct ToastData: Identifiable {
   let id = UUID()
   let message: String
+  let description: String?
   let type: ToastType
   var action: (() -> Void)?
   var actionTitle: String?
@@ -37,6 +38,34 @@ struct ToastData: Identifiable {
   var countdownStartDate: Date?
   var countdownDuration: TimeInterval?
   var placement: ToastPlacement?
+
+  init(
+    message: String,
+    description: String? = nil,
+    type: ToastType,
+    action: (() -> Void)? = nil,
+    actionTitle: String? = nil,
+    systemImage: String? = nil,
+    shouldStayVisible: Bool = false,
+    progressStep: Int = 0,
+    totalSteps: Int = 4,
+    countdownStartDate: Date? = nil,
+    countdownDuration: TimeInterval? = nil,
+    placement: ToastPlacement? = nil
+  ) {
+    self.message = message
+    self.description = description
+    self.type = type
+    self.action = action
+    self.actionTitle = actionTitle
+    self.systemImage = systemImage
+    self.shouldStayVisible = shouldStayVisible
+    self.progressStep = progressStep
+    self.totalSteps = totalSteps
+    self.countdownStartDate = countdownStartDate
+    self.countdownDuration = countdownDuration
+    self.placement = placement
+  }
 }
 
 class ToastManager: ObservableObject {
@@ -50,6 +79,7 @@ class ToastManager: ObservableObject {
 
   func showToast(
     _ message: String,
+    description: String? = nil,
     type: ToastType,
     systemImage: String? = nil,
     action: (() -> Void)? = nil,
@@ -82,6 +112,7 @@ class ToastManager: ObservableObject {
 
     let newToast = ToastData(
       message: message,
+      description: description,
       type: type,
       action: action,
       actionTitle: actionTitle,
@@ -118,6 +149,7 @@ class ToastManager: ObservableObject {
 
     let newToast = ToastData(
       message: message,
+      description: nil,
       type: .info,
       action: action,
       actionTitle: actionTitle,
@@ -141,6 +173,7 @@ class ToastManager: ObservableObject {
 
     let updatedToast = ToastData(
       message: message,
+      description: currentToast.description,
       type: currentToast.type,
       action: currentToast.action,
       actionTitle: currentToast.actionTitle,

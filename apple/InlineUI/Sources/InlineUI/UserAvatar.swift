@@ -102,6 +102,41 @@ public struct UserAvatar: View, Equatable {
     nameForInitials = Self.getNameForInitials(user: user)
   }
 
+  /// Creates an avatar from values that were prepared off the main actor.
+  /// Callers are responsible for validating `localURL` before constructing the view.
+  public init(
+    userID: Int64,
+    firstName: String?,
+    lastName: String?,
+    email: String?,
+    username: String?,
+    stableAvatarIdentity: String?,
+    remoteURL: URL?,
+    localURL: URL?,
+    size: CGFloat = 32,
+    ignoresSafeArea: Bool = false,
+    backgroundOpacity: Double = 1.0,
+    cacheRemoteAvatar: Bool = true
+  ) {
+    userId = userID
+    self.firstName = firstName
+    self.lastName = lastName
+    self.email = email
+    self.username = username
+    self.stableAvatarIdentity = stableAvatarIdentity
+    remoteUrl = remoteURL
+    localUrl = localURL
+    self.size = size
+    self.ignoresSafeArea = ignoresSafeArea
+    self.backgroundOpacity = backgroundOpacity
+    self.cacheRemoteAvatar = cacheRemoteAvatar
+    nameForInitials = AvatarColorUtility.formatNameForHashing(
+      firstName: firstName,
+      lastName: lastName,
+      email: email
+    )
+  }
+
   public init(
     apiUser: ApiUser,
     size: CGFloat = 32,

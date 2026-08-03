@@ -72,10 +72,10 @@ struct ToastView: View {
   }
 
   private var toastBubble: some View {
-    HStack(alignment: toast.showsProgressDetails ? .top : .center, spacing: 10) {
+    HStack(alignment: toast.hasSecondaryContent ? .top : .center, spacing: 10) {
       leadingIndicator
 
-      VStack(alignment: .leading, spacing: toast.showsProgressDetails ? 4 : 0) {
+      VStack(alignment: .leading, spacing: toast.hasSecondaryContent ? 4 : 0) {
         Text(toast.message)
           .font(.callout.weight(.semibold))
           .foregroundStyle(.primary)
@@ -84,6 +84,15 @@ struct ToastView: View {
           .fixedSize(horizontal: false, vertical: true)
           .transition(.move(edge: .trailing).combined(with: .opacity))
           .id(toast.message)
+
+        if let description = toast.description {
+          Text(description)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.leading)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
+        }
 
         if toast.showsProgressDetails {
           HStack(spacing: 6) {
@@ -100,7 +109,7 @@ struct ToastView: View {
       }
     }
     .padding(.horizontal, 18)
-    .padding(.vertical, toast.showsProgressDetails ? 12 : 10)
+    .padding(.vertical, toast.hasSecondaryContent ? 12 : 10)
     .modifier(ToastBubbleSurfaceModifier(toast: toast, cornerRadius: bubbleCornerRadius))
     .contentShape(.rect(cornerRadius: bubbleCornerRadius))
     .onTapGesture {
@@ -281,6 +290,10 @@ private extension ToastData {
 
   var showsProgressDetails: Bool {
     type == .info && shouldStayVisible && countdown == nil
+  }
+
+  var hasSecondaryContent: Bool {
+    description != nil || showsProgressDetails
   }
 
   var statusAccentColor: Color {

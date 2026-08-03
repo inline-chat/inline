@@ -8,6 +8,7 @@ public enum PerformanceTrace {
     case sync = "SyncPerformance"
     case updates = "UpdateApply"
     case messages = "MessageList"
+    case home = "HomeList"
     case realtime = "RealtimePerformance"
   }
 
@@ -49,6 +50,7 @@ public enum PerformanceTrace {
   private static let syncLog = OSLog(subsystem: subsystem, category: Category.sync.rawValue)
   private static let updatesLog = OSLog(subsystem: subsystem, category: Category.updates.rawValue)
   private static let messagesLog = OSLog(subsystem: subsystem, category: Category.messages.rawValue)
+  private static let homeLog = OSLog(subsystem: subsystem, category: Category.home.rawValue)
   private static let realtimeLog = OSLog(subsystem: subsystem, category: Category.realtime.rawValue)
 
   @discardableResult
@@ -125,6 +127,8 @@ public enum PerformanceTrace {
         updatesLog
       case .messages:
         messagesLog
+      case .home:
+        homeLog
       case .realtime:
         realtimeLog
     }

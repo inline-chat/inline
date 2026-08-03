@@ -1,5 +1,3 @@
-import Combine
-import GRDB
 import InlineKit
 import InlineUI
 import Invite
@@ -159,55 +157,56 @@ struct ExperimentalHomeView: View {
   @Bindable var nav: ExperimentalNavigationModel
   let initialTab: ExperimentalHomeTab
 
-  @Environment(Router.self) private var router
   @EnvironmentObject private var compactSpaceList: CompactSpaceList
   @EnvironmentObject private var data: DataManager
-  @EnvironmentObject private var home: HomeViewModel
+  @EnvironmentObject private var homeListStore: ExperimentalHomeListStore
   @EnvironmentObject private var notificationHandler: NotificationHandler
-  @EnvironmentObject private var chatsModel: ExperimentalSpaceChatsViewModel
   @Environment(\.realtimeV2) private var realtimeV2
 
-  @AppStorage(ExperimentalHomePreferenceKeys.chatScope) private var homeChatScopeRaw: String = ExperimentalHomeChatScope.all.rawValue
-  @AppStorage(ExperimentalHomePreferenceKeys.chatItemRenderMode) private var chatItemRenderModeRaw: String = ExperimentalHomeChatItemRenderMode.twoLineLastMessage.rawValue
-  @AppStorage(ExperimentalHomePreferenceKeys.sortMode) private var sortModeRaw: String = ExperimentalHomeSortMode.recentActivity.rawValue
-  @State private var hasLoadedHomeData = false
-  @State private var isLoadingHomeData = false
+  @AppStorage(ExperimentalHomePreferenceKeys.chatItemRenderMode)
+  private var chatItemRenderModeRaw = ExperimentalHomeChatItemRenderMode.twoLineLastMessage.rawValue
 
   var body: some View {
     Group {
       switch initialTab {
       case .inbox:
         ExperimentalChatListView(
-          items: inboxItems,
+          items: homeListStore.state.presentation.inbox,
+          pinnedItems: [],
+          daySections: [],
           mode: .inbox,
-          emptyStyle: .inlineLogo,
+          emptyStyle: .inbox,
           emptyTitle: "Inbox is clear",
           emptySubtitle: "Open a chat from All Chats to keep it here.",
           sectionHeader: nil,
           chatItemRenderMode: chatItemRenderMode,
-          isLoading: isLoadingHomeData
+          isLoading: homeListStore.state.isLoading
         )
       case .allChats:
         ExperimentalChatListView(
-          items: allChatItems,
+          items: [],
+          pinnedItems: homeListStore.state.presentation.closedPinned,
+          daySections: homeListStore.state.presentation.allChatSections,
           mode: .allChats,
           emptyStyle: .inlineLogo,
           emptyTitle: "No chats",
           emptySubtitle: "Start a new thread with the plus button.",
           sectionHeader: nil,
           chatItemRenderMode: chatItemRenderMode,
-          isLoading: isLoadingHomeData
+          isLoading: homeListStore.state.isLoading
         )
       case .archived:
         ExperimentalChatListView(
-          items: archivedItems,
+          items: homeListStore.state.presentation.archived,
+          pinnedItems: [],
+          daySections: [],
           mode: .archived,
           emptyStyle: .text,
           emptyTitle: "No archived chats",
           emptySubtitle: "Archived chats will show up here.",
           sectionHeader: "Archived Chats",
           chatItemRenderMode: chatItemRenderMode,
-          isLoading: isLoadingHomeData
+          isLoading: homeListStore.state.isLoading
         )
       }
     }
@@ -216,109 +215,20 @@ struct ExperimentalHomeView: View {
     .navigationBarTitleDisplayMode(.inline)
     .navigationTitle("")
     .task {
-      chatsModel.setSpaceId(nav.activeSpaceId)
       await loadHomeDataOnAppear()
     }
     .onChange(of: compactSpaceList.spaces) { _, _ in
       nav.pruneDialogFetchState(validSpaceIds: Set(compactSpaceList.spaces.map(\.id)))
       ensureActiveSpaceExists()
-      chatsModel.setSpaceId(nav.activeSpaceId)
       Task { await refreshDialogsForCurrentSelection() }
     }
-    .onChange(of: nav.activeSpaceId) { _, newValue in
-      chatsModel.setSpaceId(newValue)
+    .onChange(of: nav.activeSpaceId) { _, _ in
       Task { await reloadHomeData(forceDialogs: true) }
     }
   }
 
-  private var homeChatScope: ExperimentalHomeChatScope {
-    ExperimentalHomeChatScope(rawValue: homeChatScopeRaw) ?? .all
-  }
-
   private var chatItemRenderMode: ExperimentalHomeChatItemRenderMode {
     ExperimentalHomeChatItemRenderMode(rawValue: chatItemRenderModeRaw) ?? .twoLineLastMessage
-  }
-
-  private var sortMode: ExperimentalHomeSortMode {
-    ExperimentalHomeSortMode(rawValue: sortModeRaw) ?? .recentActivity
-  }
-
-  private var visibleChats: [HomeChatItem] { chatsModel.items }
-
-  private var currentChats: [HomeChatItem] {
-    let scopedChats: [HomeChatItem]
-
-    if nav.activeSpaceId == nil {
-      scopedChats = home.chats.filter { item in
-        switch homeChatScope {
-        case .all:
-          true
-        case .home:
-          item.space == nil
-        }
-      }
-    } else {
-      scopedChats = visibleChats
-    }
-
-    switch sortMode {
-    case .openedTime:
-      return Self.sortByOpenedTime(scopedChats)
-    case .recentActivity:
-      return Self.sortByActivity(scopedChats)
-    }
-  }
-
-  private var inboxItems: [HomeChatItem] {
-    let items = nonArchivedItems.filter { item in
-      item.dialog.open == true || item.dialog.pinned == true
-    }
-
-    return items.filter { $0.dialog.pinned == true }
-      + items.filter { $0.dialog.pinned != true }
-  }
-
-  private var allChatItems: [HomeChatItem] {
-    nonArchivedItems.filter { $0.dialog.open != true }
-  }
-
-  private var nonArchivedItems: [HomeChatItem] {
-    currentChats.filter { $0.dialog.archived != true }
-  }
-
-  private var archivedItems: [HomeChatItem] {
-    currentChats.filter { $0.dialog.archived == true }
-  }
-
-  private static func sortByActivity(_ items: [HomeChatItem]) -> [HomeChatItem] {
-    items.sorted { lhs, rhs in
-      let lhsDate = lhs.experimentalActivityDate
-      let rhsDate = rhs.experimentalActivityDate
-      if lhsDate == rhsDate {
-        return lhs.id > rhs.id
-      }
-      return lhsDate > rhsDate
-    }
-  }
-
-  private static func sortByOpenedTime(_ items: [HomeChatItem]) -> [HomeChatItem] {
-    items.sorted { lhs, rhs in
-      switch (lhs.dialog.openedDate, rhs.dialog.openedDate) {
-      case let (lhsDate?, rhsDate?) where lhsDate != rhsDate:
-        return lhsDate > rhsDate
-      case (_?, nil):
-        return true
-      case (nil, _?):
-        return false
-      default:
-        let lhsActivity = lhs.experimentalActivityDate
-        let rhsActivity = rhs.experimentalActivityDate
-        if lhsActivity == rhsActivity {
-          return lhs.id > rhs.id
-        }
-        return lhsActivity > rhsActivity
-      }
-    }
   }
 
   private func ensureActiveSpaceExists() {
@@ -341,15 +251,6 @@ struct ExperimentalHomeView: View {
     includeBootstrapData: Bool = false,
     forceDialogs: Bool = false
   ) async {
-    let shouldShowLoadingState = !hasLoadedHomeData || currentChats.isEmpty
-    if shouldShowLoadingState {
-      isLoadingHomeData = true
-    }
-    defer {
-      hasLoadedHomeData = true
-      isLoadingHomeData = false
-    }
-
     var availableSpaces = compactSpaceList.spaces
 
     if includeBootstrapData {
@@ -375,8 +276,10 @@ struct ExperimentalHomeView: View {
       }
     }
 
-    chatsModel.setSpaceId(nav.activeSpaceId)
-    await refreshDialogsForCurrentSelection(force: forceDialogs, availableSpaces: availableSpaces)
+    await refreshDialogsForCurrentSelection(
+      force: forceDialogs,
+      availableSpaces: availableSpaces
+    )
   }
 
   private func refreshDialogsForCurrentSelection(
@@ -386,7 +289,7 @@ struct ExperimentalHomeView: View {
     if let spaceId = nav.activeSpaceId {
       await fetchDialogsIfNeeded(spaceId: spaceId, force: force)
     } else {
-      // Home: show chats from all spaces, so ensure each space has at least one dialogs fetch.
+      // Cached rows remain interactive while remote reconciliation continues.
       for space in availableSpaces ?? compactSpaceList.spaces {
         await fetchDialogsIfNeeded(spaceId: space.id, force: force)
       }
@@ -405,136 +308,22 @@ struct ExperimentalHomeView: View {
   }
 }
 
-@MainActor
-final class ExperimentalSpaceChatsViewModel: ObservableObject {
-  @Published private(set) var items: [HomeChatItem] = []
-
-  private let db: AppDatabase
-  private let log = Log.scoped("ExperimentalSpaceChatsViewModel")
-  private var cancellable: AnyCancellable?
-  private var activeSpaceId: Int64?
-
-  init(db: AppDatabase) {
-    self.db = db
-  }
-
-  func setSpaceId(_ spaceId: Int64?) {
-    guard activeSpaceId != spaceId else { return }
-    activeSpaceId = spaceId
-    bind()
-  }
-
-  private func bind() {
-    cancellable?.cancel()
-
-    guard let spaceId = activeSpaceId else {
-      items = []
-      return
-    }
-
-    let spaceIdValue = spaceId
-    items = []
-
-    cancellable = ValueObservation
-      .tracking { db in
-        let space = try Space.fetchOne(db, id: spaceIdValue)
-
-        let threads = try Dialog
-          .spaceChatItemQuery()
-          .filter(Column("spaceId") == spaceIdValue)
-          .fetchAll(db)
-
-        let contacts = try Dialog
-          .spaceChatItemQueryForUser()
-          .filter(
-            sql: "dialog.peerUserId IN (SELECT userId FROM member WHERE spaceId = ?)",
-            arguments: StatementArguments([spaceIdValue])
-          )
-          .fetchAll(db)
-
-        return ExperimentalSpaceChatsSnapshot(
-          space: space,
-          threadItems: threads,
-          contactItems: contacts
-        )
-      }
-      .publisher(in: db.dbWriter, scheduling: .immediate)
-      .sink(
-        receiveCompletion: { [weak self] completion in
-          guard let self else { return }
-          if case let .failure(error) = completion {
-            log.error("Failed to fetch experimental space chats for spaceId=\(spaceIdValue): \(error)")
-          }
-        },
-        receiveValue: { [weak self] snapshot in
-          guard let self else { return }
-
-          let mapped = Self.mergeUnique(
-            (snapshot.threadItems + snapshot.contactItems).map { item in
-              HomeChatItem(
-                dialog: item.dialog,
-                user: item.userInfo,
-                chat: item.chat,
-                lastMessage: Self.embeddedMessage(for: item),
-                space: snapshot.space
-              )
-            }
-          )
-          .filter { $0.chat != nil || $0.user != nil }
-
-          items = HomeViewModel.sortChats(mapped)
-        }
-      )
-  }
-
-  private static func embeddedMessage(for item: SpaceChatItem) -> EmbeddedMessage? {
-    guard let message = item.message else { return nil }
-    return EmbeddedMessage(
-      message: message,
-      senderInfo: item.from,
-      translations: item.translations,
-      photoInfo: item.photoInfo,
-      videoInfo: nil
-    )
-  }
-
-  private static func mergeUnique(_ items: [HomeChatItem]) -> [HomeChatItem] {
-    var seen = Set<Int64>()
-    return items.filter { item in
-      seen.insert(item.id).inserted
-    }
-  }
-
-  private struct ExperimentalSpaceChatsSnapshot: Sendable {
-    let space: Space?
-    let threadItems: [SpaceChatItem]
-    let contactItems: [SpaceChatItem]
-  }
-}
-
 private enum ExperimentalChatListMode: Equatable {
   case inbox
   case allChats
   case archived
 }
 
-private enum ExperimentalChatSwipeEdge: Hashable {
-  case leading
-  case trailing
-}
-
-private struct ExperimentalChatSwipePresentation: Hashable {
-  let peerId: Peer
-  let edge: ExperimentalChatSwipeEdge
-}
-
 private struct ExperimentalChatListView: View {
   enum EmptyStyle {
     case text
     case inlineLogo
+    case inbox
   }
 
-  let items: [HomeChatItem]
+  let items: [ChatListItemSnapshot]
+  let pinnedItems: [ChatListItemSnapshot]
+  let daySections: [ChatListDaySection]
   let mode: ExperimentalChatListMode
   let emptyStyle: EmptyStyle
   let emptyTitle: String
@@ -543,24 +332,29 @@ private struct ExperimentalChatListView: View {
   let chatItemRenderMode: ExperimentalHomeChatItemRenderMode
   let isLoading: Bool
 
-  @Environment(Router.self) private var router
   @EnvironmentObject private var data: DataManager
   @Environment(\.realtimeV2) private var realtimeV2
-  @StateObject private var translationCoordinator = ChatListTranslationCoordinator()
-  // TODO: Extract swipe reconciliation into an @Observable presentation model
-  // and cover rapid inverse actions and failed mutations before shipping.
-  @State private var presentedItems: [HomeChatItem]?
-  @State private var pendingItemsAfterSwipe: [HomeChatItem]?
-  @State private var activeSwipes = Set<ExperimentalChatSwipePresentation>()
 
   var body: some View {
-    if isLoading && displayedItems.isEmpty {
+    if isLoading && isEmpty {
       ExperimentalLoadingStateView()
-    } else if displayedItems.isEmpty {
+    } else if isEmpty {
       emptyContent
     } else {
       List {
         if mode == .allChats {
+          if !pinnedItems.isEmpty {
+            Section {
+              rows(for: pinnedItems, showsPinnedIndicator: false)
+            } header: {
+              Text("Pinned")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .textCase(nil)
+                .listRowInsets(sectionHeaderInsets)
+            }
+          }
+
           ForEach(daySections) { section in
             Section {
               rows(for: section.items)
@@ -571,36 +365,24 @@ private struct ExperimentalChatListView: View {
           }
         } else if let sectionHeader {
           Section {
-            rows(for: displayedItems)
+            rows(for: items)
           } header: {
             Text(sectionHeader)
               .textCase(nil)
           }
         } else {
-          rows(for: displayedItems)
+          rows(for: items)
         }
       }
       .listStyle(.plain)
       .listSectionSpacing(
         chatItemRenderMode == .noLastMessage ? .custom(0) : .default
       )
-      .onChange(of: items) { oldItems, newItems in
-        reconcilePresentedItems(from: oldItems, to: newItems)
-        translationCoordinator.process(
-          items: newItems,
-          currentPeers: currentPeers
-        )
-      }
-      .onAppear {
-        if presentedItems == nil {
-          presentedItems = items
-        }
-        translationCoordinator.prime(items: items)
-      }
-      .onDisappear {
-        translationCoordinator.cancel()
-      }
     }
+  }
+
+  private var isEmpty: Bool {
+    items.isEmpty && pinnedItems.isEmpty && daySections.isEmpty
   }
 
   @ViewBuilder
@@ -610,225 +392,111 @@ private struct ExperimentalChatListView: View {
       ExperimentalEmptyStateView(title: emptyTitle, subtitle: emptySubtitle)
     case .inlineLogo:
       ExperimentalInlineLogoEmptyStateView()
+    case .inbox:
+      ExperimentalInboxEmptyStateView(title: emptyTitle, subtitle: emptySubtitle)
     }
-  }
-
-  private var displayedItems: [HomeChatItem] {
-    presentedItems ?? items
   }
 
   private var sectionHeaderInsets: EdgeInsets {
     if chatItemRenderMode == .noLastMessage {
       return EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16)
     }
-
     return EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16)
   }
 
-  // TODO: Move day-section preparation into the shared chat snapshot and
-  // schedule a midnight refresh so Today/Yesterday roll over without a data change.
-  private var daySections: [ExperimentalChatDaySection] {
-    let calendar = Calendar.autoupdatingCurrent
-    var sections: [ExperimentalChatDaySection] = []
-
-    for item in displayedItems {
-      let day = calendar.startOfDay(for: item.experimentalActivityDate)
-      if sections.last?.id == day {
-        sections[sections.count - 1].items.append(item)
-      } else {
-        sections.append(ExperimentalChatDaySection(id: day, items: [item]))
-      }
+  private func rows(
+    for sectionItems: [ChatListItemSnapshot],
+    showsPinnedIndicator: Bool = true
+  ) -> some View {
+    ForEach(sectionItems) { item in
+      swipeEnabledRow(for: item, showsPinnedIndicator: showsPinnedIndicator)
+        .listRowSeparator(.hidden, edges: .top)
+        .listRowSeparator(
+          chatItemRenderMode == .noLastMessage || item.id == sectionItems.last?.id
+            ? .hidden
+            : .visible,
+          edges: .bottom
+        )
+        .listRowInsets(EdgeInsets(
+          top: chatItemRenderMode.listVerticalInset,
+          leading: 12,
+          bottom: chatItemRenderMode.listVerticalInset,
+          trailing: 16
+        ))
     }
-
-    return sections
   }
 
-  private var currentPeers: Set<Peer> {
-    Set(router.selectedTabPath.compactMap { destination in
-      if case let .chat(peer) = destination {
-        return peer
-      }
-      return nil
-    })
-  }
-
-  private func rows(for items: [HomeChatItem]) -> some View {
-    ForEach(items) { item in
-      swipeEnabledRow(for: item)
-      .listRowSeparator(.hidden, edges: .top)
-      .listRowSeparator(
-        chatItemRenderMode == .noLastMessage || item.id == items.last?.id ? .hidden : .visible,
-        edges: .bottom
+  private func baseRow(
+    for item: ChatListItemSnapshot,
+    showsPinnedIndicator: Bool
+  ) -> some View {
+    NavigationLink(value: Destination.chat(peer: item.peer)) {
+      ExperimentalChatListRow(
+        item: item,
+        layoutMode: chatItemRenderMode.chatListLayoutMode,
+        showsPinnedIndicator: showsPinnedIndicator
       )
-      .listRowInsets(EdgeInsets(
-        top: chatItemRenderMode.listVerticalInset,
-        leading: 12,
-        bottom: chatItemRenderMode.listVerticalInset,
-        trailing: 16
-      ))
-    }
-  }
-
-  private func baseRow(for item: HomeChatItem) -> some View {
-    NavigationLink(value: Destination.chat(peer: item.peerId)) {
-      rowContent(for: item)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(.rect)
+      .equatable()
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .contentShape(.rect)
     }
     .navigationLinkIndicatorVisibility(.hidden)
   }
 
-  @ViewBuilder
-  private func swipeEnabledRow(for item: HomeChatItem) -> some View {
-    if #available(iOS 27.0, *) {
-      baseRow(for: item)
-        .swipeActions(
-          edge: .leading,
-          allowsFullSwipe: false,
-          content: {
-            readUnreadButton(for: item)
-          },
-          onPresentationChanged: { isPresented in
-            setSwipePresented(
-              isPresented,
-              peerId: item.peerId,
-              edge: .leading
-            )
-          }
-        )
-        .swipeActions(
-          edge: .trailing,
-          allowsFullSwipe: true,
-          content: {
-            trailingSwipeActions(for: item)
-          },
-          onPresentationChanged: { isPresented in
-            setSwipePresented(
-              isPresented,
-              peerId: item.peerId,
-              edge: .trailing
-            )
-          }
-        )
-    } else {
-      baseRow(for: item)
-        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-          readUnreadButton(for: item)
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-          trailingSwipeActions(for: item)
-        }
-    }
+  private func swipeEnabledRow(
+    for item: ChatListItemSnapshot,
+    showsPinnedIndicator: Bool
+  ) -> some View {
+    baseRow(for: item, showsPinnedIndicator: showsPinnedIndicator)
+      .swipeActions(edge: .leading, allowsFullSwipe: false) {
+        readUnreadButton(for: item)
+      }
+      .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+        trailingSwipeActions(for: item)
+      }
   }
 
   @ViewBuilder
-  private func trailingSwipeActions(for item: HomeChatItem) -> some View {
+  private func trailingSwipeActions(for item: ChatListItemSnapshot) -> some View {
     if mode == .inbox {
       closeButton(for: item)
       pinButton(for: item)
     } else if mode == .allChats {
       openButton(for: item)
+      archiveButton(for: item)
     }
   }
 
-  private func setSwipePresented(
-    _ isPresented: Bool,
-    peerId: Peer,
-    edge: ExperimentalChatSwipeEdge
-  ) {
-    let presentation = ExperimentalChatSwipePresentation(peerId: peerId, edge: edge)
-
-    if isPresented {
-      if activeSwipes.isEmpty {
-        presentedItems = items
-      }
-      activeSwipes.insert(presentation)
-      return
-    }
-
-    activeSwipes.remove(presentation)
-    guard activeSwipes.isEmpty, let pendingItemsAfterSwipe else { return }
-
-    self.pendingItemsAfterSwipe = nil
-    withAnimation(.snappy(duration: 0.25, extraBounce: 0)) {
-      presentedItems = pendingItemsAfterSwipe
-    }
-  }
-
-  private func reconcilePresentedItems(
-    from oldItems: [HomeChatItem],
-    to newItems: [HomeChatItem]
-  ) {
-    guard !activeSwipes.isEmpty else {
-      if #available(iOS 27.0, *) {
-        withAnimation(.snappy(duration: 0.25, extraBounce: 0)) {
-          presentedItems = newItems
+  private func closeButton(for item: ChatListItemSnapshot) -> some View {
+    Button(role: .destructive) {
+      Task {
+        do {
+          _ = try await realtimeV2.send(
+            .updateDialogOpen(peerId: item.peer, open: false)
+          )
+        } catch {
+          Log.shared.error("Failed to update Inbox state", error: error)
+          ToastManager.shared.showToast(
+            "Could not close chat",
+            type: .error,
+            systemImage: "exclamationmark.triangle.fill"
+          )
         }
-      } else {
-        presentedItems = newItems
       }
-      return
+    } label: {
+      Label("Close", systemImage: "xmark.circle.fill")
     }
-
-    let currentItems = presentedItems ?? oldItems
-    pendingItemsAfterSwipe = newItems
-
-    var transaction = Transaction(animation: nil)
-    transaction.disablesAnimations = true
-    withTransaction(transaction) {
-      presentedItems = mergeLatestContent(
-        into: currentItems,
-        from: newItems
-      )
-    }
-  }
-
-  private func mergeLatestContent(
-    into currentItems: [HomeChatItem],
-    from newItems: [HomeChatItem]
-  ) -> [HomeChatItem] {
-    let latestByID = Dictionary(uniqueKeysWithValues: newItems.map { ($0.id, $0) })
-    let currentIDs = Set(currentItems.map(\.id))
-    let retainedItems = currentItems.map { latestByID[$0.id] ?? $0 }
-    let insertedItems = newItems.filter { !currentIDs.contains($0.id) }
-    return retainedItems + insertedItems
+    .tint(.gray)
   }
 
   @ViewBuilder
-  private func closeButton(for item: HomeChatItem) -> some View {
-    // TODO: Decide whether closing a pinned chat should also unpin it.
-    // For the prototype, pinned chats stay in Inbox and expose Unpin instead.
-    if item.dialog.open == true, item.dialog.pinned != true {
+  private func openButton(for item: ChatListItemSnapshot) -> some View {
+    if !item.isOpen {
       Button(role: .destructive) {
         Task {
           do {
             _ = try await realtimeV2.send(
-              .updateDialogOpen(peerId: item.peerId, open: false)
-            )
-          } catch {
-            Log.shared.error("Failed to update Inbox state", error: error)
-            ToastManager.shared.showToast(
-              "Could not close chat",
-              type: .error,
-              systemImage: "exclamationmark.triangle.fill"
-            )
-          }
-        }
-      } label: {
-        Label("Close", systemImage: "xmark.circle.fill")
-      }
-      .tint(.gray)
-    }
-  }
-
-  @ViewBuilder
-  private func openButton(for item: HomeChatItem) -> some View {
-    if item.dialog.open != true {
-      Button(role: .destructive) {
-        Task {
-          do {
-            _ = try await realtimeV2.send(
-              .updateDialogOpen(peerId: item.peerId, open: true)
+              .updateDialogOpen(peerId: item.peer, open: true)
             )
             ToastManager.shared.showToast(
               "Opened in Inbox",
@@ -851,16 +519,43 @@ private struct ExperimentalChatListView: View {
     }
   }
 
-  @ViewBuilder
-  private func pinButton(for item: HomeChatItem) -> some View {
-    let isPinned = item.dialog.pinned ?? false
+  private func archiveButton(for item: ChatListItemSnapshot) -> some View {
+    Button(role: .destructive) {
+      Task {
+        do {
+          try await data.updateDialog(
+            peerId: item.peer,
+            archived: true,
+            spaceId: item.spaceID
+          )
+          ToastManager.shared.showToast(
+            "Archived",
+            description: "View it later in ••• → Archive.",
+            type: .success,
+            systemImage: "archivebox.fill"
+          )
+        } catch {
+          Log.shared.error("Failed to archive chat", error: error)
+          ToastManager.shared.showToast(
+            "Could not archive chat",
+            type: .error,
+            systemImage: "exclamationmark.triangle.fill"
+          )
+        }
+      }
+    } label: {
+      Label("Archive", systemImage: "archivebox.fill")
+    }
+  }
 
+  private func pinButton(for item: ChatListItemSnapshot) -> some View {
     Button {
       Task {
         do {
           try await data.updateDialog(
-            peerId: item.peerId,
-            pinned: !isPinned
+            peerId: item.peer,
+            pinned: !item.isPinned,
+            spaceId: item.spaceID
           )
         } catch {
           Log.shared.error("Failed to update pin state", error: error)
@@ -873,24 +568,21 @@ private struct ExperimentalChatListView: View {
       }
     } label: {
       Label(
-        isPinned ? "Unpin" : "Pin",
-        systemImage: isPinned ? "pin.slash.fill" : "pin.fill"
+        item.isPinned ? "Unpin" : "Pin",
+        systemImage: item.isPinned ? "pin.slash.fill" : "pin.fill"
       )
     }
     .tint(.indigo)
   }
 
-  @ViewBuilder
-  private func readUnreadButton(for item: HomeChatItem) -> some View {
-    let hasUnread = (item.dialog.unreadCount ?? 0) > 0 || item.dialog.unreadMark == true
-
+  private func readUnreadButton(for item: ChatListItemSnapshot) -> some View {
     Button {
       Task {
         do {
-          if hasUnread {
-            UnreadManager.shared.readAll(item.peerId, chatId: item.chat?.id ?? 0)
+          if item.isUnread {
+            UnreadManager.shared.readAll(item.peer, chatId: item.chatID)
           } else {
-            _ = try await realtimeV2.send(.markAsUnread(peerId: item.peerId))
+            _ = try await realtimeV2.send(.markAsUnread(peerId: item.peer))
           }
         } catch {
           Log.shared.error("Failed to update read state", error: error)
@@ -903,46 +595,12 @@ private struct ExperimentalChatListView: View {
       }
     } label: {
       Label(
-        hasUnread ? "Read" : "Unread",
-        systemImage: hasUnread ? "checkmark.message.fill" : "envelope.badge.fill"
+        item.isUnread ? "Read" : "Unread",
+        systemImage: item.isUnread ? "checkmark.message.fill" : "envelope.badge.fill"
       )
     }
     .tint(.blue)
   }
-
-  @ViewBuilder
-  private func rowContent(for item: HomeChatItem) -> some View {
-    if let user = item.displayUserInfo {
-      ChatListItem(
-        type: .user(user, chat: item.chat),
-        dialog: item.dialog,
-        lastMessage: item.lastMessage?.message,
-        lastMessageSender: item.lastMessage?.senderInfo,
-        embeddedLastMessage: item.lastMessage,
-        showsPinnedIndicator: true,
-        displayMode: chatItemRenderMode.chatListItemDisplayMode,
-        rowStyle: chatItemRenderMode.chatListItemRowStyle
-      )
-    } else if let chat = item.chat {
-      ChatListItem(
-        type: .chat(chat, spaceName: nil),
-        dialog: item.dialog,
-        lastMessage: item.lastMessage?.message,
-        lastMessageSender: item.lastMessage?.senderInfo,
-        embeddedLastMessage: item.lastMessage,
-        showsPinnedIndicator: true,
-        displayMode: chatItemRenderMode.chatListItemDisplayMode,
-        rowStyle: chatItemRenderMode.chatListItemRowStyle
-      )
-    } else {
-      EmptyView()
-    }
-  }
-}
-
-private struct ExperimentalChatDaySection: Identifiable {
-  let id: Date
-  var items: [HomeChatItem]
 }
 
 private struct ExperimentalChatDaySectionHeader: View {
@@ -971,32 +629,15 @@ private struct ExperimentalChatDaySectionHeader: View {
   }
 }
 
-private extension HomeChatItem {
-  var experimentalActivityDate: Date {
-    lastMessage?.message.date ?? chat?.date ?? .distantPast
-  }
-}
-
 private extension ExperimentalHomeChatItemRenderMode {
-  var chatListItemDisplayMode: ChatListItem.DisplayMode {
+  var chatListLayoutMode: ChatListLayoutMode {
     switch self {
     case .large:
-      .twoLineLastMessage
+      .large
     case .oneLineLastMessage, .twoLineLastMessage:
-      .oneLineLastMessage
+      .standard
     case .noLastMessage:
-      .minimal
-    }
-  }
-
-  var chatListItemRowStyle: ChatListItem.RowStyle {
-    switch self {
-    case .noLastMessage:
-      .prototypeCompact
-    case .oneLineLastMessage, .twoLineLastMessage:
-      .prototypeWithPreview
-    case .large:
-      .prototypeLarge
+      .compact
     }
   }
 
@@ -1041,6 +682,33 @@ private struct ExperimentalLoadingStateView: View {
         .font(.headline)
         .foregroundStyle(.secondary)
     }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background(Color(.systemBackground))
+  }
+}
+
+private struct ExperimentalInboxEmptyStateView: View {
+  let title: String
+  let subtitle: String
+
+  var body: some View {
+    VStack(spacing: 8) {
+      Image(systemName: "tray")
+        .font(.system(size: 30, weight: .regular))
+        .symbolRenderingMode(.hierarchical)
+        .foregroundStyle(.tertiary)
+        .accessibilityHidden(true)
+
+      Text(title)
+        .font(.callout.weight(.semibold))
+
+      Text(subtitle)
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: 240)
+    }
+    .padding(.horizontal, 24)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(Color(.systemBackground))
   }

@@ -94,16 +94,11 @@ struct SettingsView: View {
       }
     }
     .listStyle(.insetGrouped)
+    .navigationTitle("Settings")
     .navigationBarTitleDisplayMode(.inline)
     .navigationBarBackButtonHidden(true)
-    .toolbarRole(.editor)
     .hideTabBarIfNeeded()
     .toolbar {
-      ToolbarItem(id: "settings", placement: .principal) {
-        Label("Settings", systemImage: "gearshape.fill")
-          .font(.body.weight(.semibold))
-      }
-
       ToolbarItem(placement: .topBarLeading) {
         Button {
           dismissSettings()
