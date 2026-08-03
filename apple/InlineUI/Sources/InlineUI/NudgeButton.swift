@@ -9,12 +9,18 @@ import UIKit
 import AppKit
 #endif
 
-/// Nudge button used in iOS nav bar and macOS toolbar for DMs.
+public enum NudgeButtonPresentation {
+  case toolbar
+  case menu
+}
+
+/// Nudge control used in chat toolbars and native menus for DMs.
 public struct NudgeButton: View {
   private let log = Log.scoped("NudgeButton")
 
   public let peer: Peer
   public let chatId: Int64?
+  private let presentation: NudgeButtonPresentation
 
   @AppStorage("nudgeGuideSeen", store: UserDefaults.shared) private var hasSeenGuide = false
   @Binding private var isPopoverPresented: Bool
@@ -30,16 +36,22 @@ public struct NudgeButton: View {
   @State private var pressStartedAt: Date?
   @State private var shouldSuppressTap = false
   @State private var isSending = false
-  @State private var peerDisplayName: String? = nil
+  @State private var peerDisplayName: String?
 
   private let syncPopoverPresentation: Bool
   private let longPressDuration: TimeInterval = 1.5
   private let holdProgressRevealDelay: TimeInterval = 0.2
   private let holdProgressUpdateInterval: TimeInterval = 1.0 / 60.0
 
-  public init(peer: Peer, chatId: Int64? = nil, isPopoverPresented: Binding<Bool>? = nil) {
+  public init(
+    peer: Peer,
+    chatId: Int64? = nil,
+    presentation: NudgeButtonPresentation = .toolbar,
+    isPopoverPresented: Binding<Bool>? = nil
+  ) {
     self.peer = peer
     self.chatId = chatId
+    self.presentation = presentation
     _isPopoverPresented = isPopoverPresented ?? .constant(false)
     syncPopoverPresentation = isPopoverPresented != nil
   }
@@ -60,50 +72,62 @@ public struct NudgeButton: View {
 
   @ViewBuilder
   private var content: some View {
-    let button = nudgeButton
+    switch presentation {
+    case .toolbar:
+      let button = nudgeButton
 #if os(iOS)
-    button
-      .alert(
-        alertTitle,
-        isPresented: Binding(
-          get: { activePopover != nil },
-          set: { isPresented in
-            if !isPresented { activePopover = nil }
-          }
-        ),
-        actions: {
-          switch activePopover {
-          case .guide:
-            Button("Got it") {
-              activePopover = nil
+      button
+        .alert(
+          alertTitle,
+          isPresented: Binding(
+            get: { activePopover != nil },
+            set: { isPresented in
+              if !isPresented { activePopover = nil }
             }
-          case .confirm:
-            Button("Send \(NudgeButtonState.urgentNudgeText)") {
-              activePopover = nil
-              triggerUrgentHaptic()
-              sendNudge(nudgeText: NudgeButtonState.urgentNudgeText)
+          ),
+          actions: {
+            switch activePopover {
+            case .guide:
+              Button("Got it") {
+                activePopover = nil
+              }
+            case .confirm:
+              Button("Send \(NudgeButtonState.urgentNudgeText)") {
+                activePopover = nil
+                triggerUrgentHaptic()
+                sendNudge(nudgeText: NudgeButtonState.urgentNudgeText)
+              }
+            case .none:
+              EmptyView()
             }
-          case .none:
-            EmptyView()
+          },
+          message: {
+            Text(alertMessage)
           }
-        },
-        message: {
-          Text(alertMessage)
-        }
-      )
+        )
 #else
-    button
-      .popover(item: $activePopover, arrowEdge: .top) { popover in
-        let content = popoverContent(popover)
-          .presentationCompactAdaptation(.popover)
+      button
+        .popover(item: $activePopover, arrowEdge: .top) { popover in
+          let content = popoverContent(popover)
+            .presentationCompactAdaptation(.popover)
 
-        if #available(macOS 15, *) {
-          content.presentationSizing(.fitted)
-        } else {
-          content
+          if #available(macOS 15, *) {
+            content.presentationSizing(.fitted)
+          } else {
+            content
+          }
         }
-      }
 #endif
+    case .menu:
+      Button {
+        triggerHaptic()
+        sendNudge()
+      } label: {
+        Label("Nudge", systemImage: NudgeButtonState.nudgeIconName)
+      }
+      .disabled(isSending)
+      // TODO: Add a separate confirmed urgent-nudge action to the menu.
+    }
   }
 
   private var nudgeButton: some View {
@@ -238,7 +262,6 @@ public struct NudgeButton: View {
     }
   }
 #endif
-
 
   private var peerUserId: Int64? {
     if case let .user(id) = peer {

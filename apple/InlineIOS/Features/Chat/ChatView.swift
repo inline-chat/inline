@@ -22,6 +22,7 @@ struct ChatView: View {
   @State private var userGroupMentionTarget: UserGroupMentionTarget?
   @State private var botChatSettingsCoordinator: BotChatSettingsCoordinator
   @State private var isBotChatSettingsPresented = false
+  @State private var translationPlacement: ChatTranslationPlacement
 
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
 
@@ -59,6 +60,11 @@ struct ChatView: View {
     }
   }
 
+  private enum ChatTranslationPlacement {
+    case toolbar
+    case moreMenu
+  }
+
   init(
     peer: Peer,
     contextSpaceId: Int64? = nil,
@@ -70,6 +76,9 @@ struct ChatView: View {
     self.preview = preview
     self.autoCleanupUntitledEmptyThreadOnBack = autoCleanupUntitledEmptyThreadOnBack
     _botChatSettingsCoordinator = State(initialValue: BotChatSettingsCoordinator(peer: peer))
+    _translationPlacement = State(
+      initialValue: TranslationState.shared.isTranslationEnabled(for: peer) ? .toolbar : .moreMenu
+    )
     _fullChatViewModel = EnvironmentStateObject { env in
       FullChatViewModel(db: env.appDatabase, peer: peer)
     }
@@ -87,32 +96,20 @@ struct ChatView: View {
     .hideTabBarIfNeeded()
     .toolbarRole(.editor)
     .toolbar {
-      if peerId.isPrivate {
-        if #available(iOS 26.0, *) {
-          ToolbarItem(placement: .primaryAction) {
-            NudgeButton(peer: peerId, chatId: fullChatViewModel.chat?.id)
-          }
-          ToolbarSpacer(.fixed, placement: .primaryAction)
-          ToolbarItem(placement: .primaryAction) {
-            TranslationButton(peer: peerId, activeColor: ThemeManager.shared.accentColor)
-          }
-        } else {
-          ToolbarItem(placement: .topBarTrailing) {
-            NudgeButton(peer: peerId, chatId: fullChatViewModel.chat?.id)
-          }
-          ToolbarItem(placement: .primaryAction) {
-            TranslationButton(peer: peerId, activeColor: ThemeManager.shared.accentColor)
-          }
-        }
-      } else {
+      if translationPlacement == .toolbar {
         ToolbarItem(placement: .primaryAction) {
           TranslationButton(peer: peerId, activeColor: ThemeManager.shared.accentColor)
         }
-        ToolbarItem(placement: .primaryAction) {
-          ChatTranscriptToolbarMenu(peer: peerId) {
-            guard let chatItem = fullChatViewModel.chatItem else { return }
-            router.presentSheet(.chatInfo(chatItem: chatItem))
-          }
+      }
+
+      ToolbarItem(placement: .primaryAction) {
+        ChatToolbarMoreMenu(
+          peer: peerId,
+          chatId: fullChatViewModel.chat?.id,
+          includesTranslationAction: translationPlacement == .moreMenu
+        ) {
+          guard let chatItem = fullChatViewModel.chatItem else { return }
+          router.presentSheet(.chatInfo(chatItem: chatItem))
         }
       }
 
@@ -153,6 +150,11 @@ struct ChatView: View {
       botChatSettingsCoordinator.startObservingDiscoveryScope(in: appDatabase)
       await botChatSettingsCoordinator.warmUp()
     }
+    .onReceive(TranslationState.shared.subject) { event in
+      let (eventPeer, enabled) = event
+      guard eventPeer == peerId, enabled, translationPlacement == .moreMenu else { return }
+      translationPlacement = .toolbar
+    }
     .sheet(isPresented: $isBotChatSettingsPresented) {
       BotChatSettingsSheet(coordinator: botChatSettingsCoordinator)
     }
@@ -164,6 +166,7 @@ struct ChatView: View {
       isBotChatSettingsPresented = false
       botChatSettingsCoordinator.cancel()
       botChatSettingsCoordinator = BotChatSettingsCoordinator(peer: newPeer)
+      translationPlacement = TranslationState.shared.isTranslationEnabled(for: newPeer) ? .toolbar : .moreMenu
       updateMessageUpdateActivation()
     }
     .onChange(of: fullChatViewModel.chat?.id) { _, chatId in
@@ -517,33 +520,67 @@ struct ChatView: View {
   }
 }
 
-private struct ChatTranscriptToolbarMenu: View {
+private struct ChatToolbarMoreMenu: View {
   let peer: Peer
+  let chatId: Int64?
+  let includesTranslationAction: Bool
   let openChatInfo: () -> Void
 
   @Environment(\.realtimeV2) private var realtimeV2
   @State private var transcriptTask: Task<Void, Never>?
   @State private var pendingTranscript: ChatTranscriptExport?
   @State private var showTranscriptScope = false
+  @State private var showTranslationPopover = false
+  @State private var showTranslationOptions = false
 
   var body: some View {
     Menu {
+      if includesTranslationAction {
+        Button("Translate", systemImage: "translate") {
+          showTranslationPopover = true
+        }
+      }
+
+      if peer.isPrivate {
+        NudgeButton(
+          peer: peer,
+          chatId: chatId,
+          presentation: .menu
+        )
+      }
+
+      if includesTranslationAction || peer.isPrivate {
+        Divider()
+      }
+
       Button("Chat Info", systemImage: "info.circle", action: openChatInfo)
 
-      Divider()
+      if peer.isThread {
+        Divider()
 
-      Button("Copy Link", systemImage: "link") {
-        copyLink()
-      }
+        Button("Copy Link", systemImage: "link") {
+          copyLink()
+        }
 
-      Button("Copy as Markdown", systemImage: "doc.on.doc") {
-        prepareTranscript()
+        Button("Copy as Markdown", systemImage: "doc.on.doc") {
+          prepareTranscript()
+        }
+        .disabled(transcriptTask != nil)
       }
-      .disabled(transcriptTask != nil)
     } label: {
       Image(systemName: "ellipsis")
     }
     .accessibilityLabel("More")
+    .popover(isPresented: $showTranslationPopover, arrowEdge: .bottom) {
+      TranslationPopover(
+        peer: peer,
+        isOptionsSheetPresented: $showTranslationOptions
+      )
+      .presentationCompactAdaptation(.popover)
+    }
+    .sheet(isPresented: $showTranslationOptions) {
+      TranslationOptions(peer: peer)
+    }
     .confirmationDialog(
       "How much should be copied?",
       isPresented: $showTranscriptScope,

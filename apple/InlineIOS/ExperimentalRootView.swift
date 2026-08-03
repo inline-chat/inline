@@ -1,32 +1,39 @@
+import Auth
 import InlineKit
 import InlineUI
 import Logger
+import RealtimeV2
 import SwiftUI
+import UIKit
 
-private enum RootTab: Hashable {
-  case chats
+private enum RootTab: String, Hashable {
+  case inbox
+  case allChats
   case search
-  case archived
+  case newChat
 
   init(appTab: AppTab) {
     switch appTab {
-      case .archived:
-        self = .archived
-      case .search:
-        self = .search
-      case .chats, .spaces:
-        self = .chats
+    case .archived:
+      self = .allChats
+    case .search:
+      self = .search
+    case .chats, .spaces:
+      self = .inbox
     }
   }
 
   var appTab: AppTab {
     switch self {
-      case .chats:
-        .chats
-      case .search:
-        .search
-      case .archived:
-        .archived
+    case .inbox:
+      .chats
+    case .allChats:
+      .archived
+    case .search:
+      .search
+    case .newChat:
+      // Selection is intercepted before this compatibility value is used.
+      .chats
     }
   }
 }
@@ -45,13 +52,13 @@ struct ExperimentalRootView: View {
   var body: some View {
     Group {
       switch mainViewRouter.route {
-        case .main:
-          // Keep auth-session state under the authed subtree so a fresh login rebuilds bootstrap state.
-          ExperimentalAuthedRootView()
-        case .onboarding:
-          OnboardingView()
-        case .loading:
-          loadingView
+      case .main:
+        // Keep auth-session state under the authed subtree so a fresh login rebuilds bootstrap state.
+        ExperimentalAuthedRootView()
+      case .onboarding:
+        OnboardingView()
+      case .loading:
+        loadingView
       }
     }
     .environment(router)
@@ -73,8 +80,6 @@ struct ExperimentalRootView: View {
         )
       }
     }
-    // Experimental UI keeps navigation inside per-tab stacks; each stack owns tab bar visibility.
-    .environment(\.inlineHideTabBar, false)
     .toastView()
   }
 
@@ -92,11 +97,17 @@ struct ExperimentalRootView: View {
 
 private struct ExperimentalAuthedRootView: View {
   @State private var nav = ExperimentalNavigationModel()
-  @State private var rootTab: RootTab = .chats
-  @State private var lastNonSearchRootTab: RootTab = .chats
+  @State private var rootTab: RootTab = .inbox
+  @State private var lastContentRootTab: RootTab = .inbox
   @State private var searchQuery = ""
-  @State private var isSearchPresented = false
   @State private var isCreatingThread = false
+  @State private var isNotificationSettingsPresented = false
+  @AppStorage("ios.experimental.root.selectedTab")
+  private var persistedRootTabRaw = RootTab.inbox.rawValue
+  @AppStorage(ExperimentalHomePreferenceKeys.chatItemRenderMode)
+  private var chatItemRenderModeRaw = ExperimentalHomeChatItemRenderMode.twoLineLastMessage.rawValue
+  @AppStorage(ExperimentalHomePreferenceKeys.sortMode)
+  private var sortModeRaw = ExperimentalHomeSortMode.recentActivity.rawValue
 
   @Environment(Router.self) private var router
   @Environment(\.auth) private var auth
@@ -105,6 +116,8 @@ private struct ExperimentalAuthedRootView: View {
   @EnvironmentStateObject private var data: DataManager
   @EnvironmentStateObject private var home: HomeViewModel
   @EnvironmentStateObject private var compactSpaceList: CompactSpaceList
+  @EnvironmentStateObject private var spaceChats: ExperimentalSpaceChatsViewModel
+  @EnvironmentObject private var notificationSettings: NotificationSettingsManager
 
   init() {
     _data = EnvironmentStateObject { env in
@@ -118,13 +131,17 @@ private struct ExperimentalAuthedRootView: View {
     _compactSpaceList = EnvironmentStateObject { env in
       CompactSpaceList(db: env.appDatabase)
     }
+    _spaceChats = EnvironmentStateObject { env in
+      ExperimentalSpaceChatsViewModel(db: env.appDatabase)
+    }
   }
 
   var body: some View {
-    mainTabs
+    rootNavigation
       .environmentObject(data)
       .environmentObject(home)
       .environmentObject(compactSpaceList)
+      .environmentObject(spaceChats)
       .onReceive(NotificationCenter.default.publisher(for: .localDataCleared)) { _ in
         nav.resetHomeDataState()
         Task {
@@ -133,33 +150,26 @@ private struct ExperimentalAuthedRootView: View {
       }
   }
 
-  private var mainTabs: some View {
+  private var rootNavigation: some View {
     @Bindable var bindableRouter = router
     @Bindable var bindableNav = nav
 
-    return TabView(selection: $rootTab) {
-      Tab("Archived", systemImage: "archivebox.fill", value: .archived) {
-        rootNavigationStack(
-          nav: bindableNav,
-          appTab: .archived,
-          rootDestination: .archived
-        )
-      }
-
-      Tab("Chats", systemImage: "bubble.left.and.bubble.right.fill", value: .chats) {
-        rootNavigationStack(
-          nav: bindableNav,
-          appTab: .chats,
-          rootDestination: .chats
-        )
-      }
-
-      Tab(value: .search, role: .search) {
-        searchNavigationStack(nav: bindableNav)
-      }
+    return NavigationStack(path: $bindableRouter[bindableRouter.selectedTab]) {
+      rootPage(nav: bindableNav)
+        .background(Color(.systemBackground))
+        .experimentalRootTitleDisplayMode()
+        .navigationTitle("")
+        .toolbar {
+          experimentalToolbarContent()
+        }
+        .navigationDestination(for: Destination.self) { destination in
+          ExperimentalDestinationView(nav: bindableNav, destination: destination)
+        }
     }
-    .background(Color(.systemBackground))
-    .experimentalRootSearchable(text: $searchQuery, isPresented: $isSearchPresented)
+    // Prevent child views (e.g. ChatView) from leaking their toolbar appearance
+    // back to Root when the shared stack pops.
+    .toolbarColorScheme(colorScheme, for: .navigationBar)
+    .toolbarBackground(.visible, for: .navigationBar)
     .sheet(item: $bindableRouter.presentedSheet) { sheet in
       if case .chatInfo = sheet {
         ExperimentalSheetView(sheet: sheet)
@@ -169,14 +179,19 @@ private struct ExperimentalAuthedRootView: View {
       }
     }
     .onAppear {
-      // Experimental UI only supports `.chats`, `.archived`, and `.search` as root tabs.
-      let desiredTab = RootTab(appTab: bindableRouter.selectedTab).appTab
+      // TODO: Give Inbox and All Chats dedicated persisted AppTab cases after UX verification.
+      let restoredRootTab = RootTab(rawValue: persistedRootTabRaw) ?? .inbox
+      let desiredRootTab = restoredRootTab == .newChat ? .inbox : restoredRootTab
+      let desiredTab = desiredRootTab.appTab
+      spaceChats.setSpaceId(nav.activeSpaceId)
       if bindableRouter.selectedTab != desiredTab {
         bindableRouter.selectedTab = desiredTab
       }
-      rootTab = RootTab(appTab: desiredTab)
-      if rootTab != .search {
-        lastNonSearchRootTab = rootTab
+      rootTab = desiredRootTab
+      lastContentRootTab = desiredRootTab
+
+      if chatItemRenderModeRaw == ExperimentalHomeChatItemRenderMode.oneLineLastMessage.rawValue {
+        chatItemRenderModeRaw = ExperimentalHomeChatItemRenderMode.twoLineLastMessage.rawValue
       }
     }
     .onChange(of: bindableRouter.selectedTab) { _, newValue in
@@ -189,108 +204,102 @@ private struct ExperimentalAuthedRootView: View {
       if rootTab != desiredRootTab {
         rootTab = desiredRootTab
       }
+      lastContentRootTab = desiredRootTab
+      persistedRootTabRaw = desiredRootTab.rawValue
     }
-    .onChange(of: rootTab) { oldValue, newValue in
+    .onChange(of: rootTab) { _, newValue in
+      if newValue == .newChat {
+        createThreadInstantly(spaceId: nav.activeSpaceId)
+        rootTab = lastContentRootTab
+        return
+      }
+
+      lastContentRootTab = newValue
+      persistedRootTabRaw = newValue.rawValue
       let desiredTab = newValue.appTab
       if bindableRouter.selectedTab != desiredTab {
         bindableRouter.selectedTab = desiredTab
       }
-
-      if newValue == .search {
-        if oldValue != .search {
-          lastNonSearchRootTab = oldValue
-        }
-        if !usesNativeSearchTabActivation {
-          activateSearch()
-        }
-      } else {
-        lastNonSearchRootTab = newValue
-        if !usesNativeSearchTabActivation, isSearchPresented {
-          isSearchPresented = false
-        }
-      }
-    }
-    .onChange(of: isSearchPresented) { _, newValue in
-      guard !newValue else { return }
-      guard !usesNativeSearchTabActivation else { return }
-      guard rootTab == .search else { return }
-
       searchQuery = ""
+    }
+    .onChange(of: nav.activeSpaceId) { _, newValue in
+      spaceChats.setSpaceId(newValue)
+    }
+  }
 
-      if rootTab != lastNonSearchRootTab {
-        rootTab = lastNonSearchRootTab
+  private func rootPage(nav: ExperimentalNavigationModel) -> some View {
+    @Bindable var bindableNav = nav
+
+    return TabView(selection: $rootTab) {
+      Tab("All Chats", systemImage: "bubble.left.and.bubble.right.fill", value: .allChats) {
+        chatsRoot(nav: bindableNav, rootTab: .allChats)
+      }
+      .badge(prototypeAllChatsUnreadCount)
+
+      // TODO: Decide the badge color before bridging UIKit's global
+      // `UITabBarItem.badgeColor`; SwiftUI's native tab badge has no tint API.
+      Tab("Inbox", systemImage: "tray.full.fill", value: .inbox) {
+        chatsRoot(nav: bindableNav, rootTab: .inbox)
+      }
+      .badge(prototypeInboxUnreadCount)
+
+      Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
+        ExperimentalSearchView(
+          query: $searchQuery,
+          activeSpaceId: bindableNav.activeSpaceId
+        )
+      }
+
+      if #available(iOS 27.0, *) {
+        Tab("New Thread", systemImage: "plus", value: .newChat, role: .prominent) {
+          Color.clear
+        }
+      } else if #available(iOS 26.0, *) {
+        // Search now owns the semantic `.search` role. iOS 26 has no separate
+        // `.prominent` role, so New Thread remains a standard native tab action.
+        Tab("New Thread", systemImage: "plus", value: .newChat) {
+          Color.clear
+        }
       }
     }
+    .background(Color(.systemBackground))
+  }
+
+  private var prototypeScopedChats: [HomeChatItem] {
+    let chats = nav.activeSpaceId == nil ? home.chats : spaceChats.items
+    return chats.filter { $0.dialog.archived != true }
+  }
+
+  private var prototypeInboxUnreadCount: Int {
+    prototypeScopedChats.count { item in
+      isInboxItem(item) && hasUnread(item)
+    }
+  }
+
+  private var prototypeAllChatsUnreadCount: Int {
+    prototypeScopedChats.count { item in
+      item.dialog.open != true && hasUnread(item)
+    }
+  }
+
+  private func isInboxItem(_ item: HomeChatItem) -> Bool {
+    item.dialog.open == true || item.dialog.pinned == true
+  }
+
+  private func hasUnread(_ item: HomeChatItem) -> Bool {
+    (item.dialog.unreadCount ?? 0) > 0 || item.dialog.unreadMark == true
   }
 
   private func chatsRoot(
     nav: ExperimentalNavigationModel,
-    root: Destination
+    rootTab: RootTab
   ) -> some View {
     @Bindable var bindableNav = nav
 
-    return ExperimentalDestinationView(nav: bindableNav, destination: root)
-  }
-
-  private func rootNavigationStack(
-    nav: ExperimentalNavigationModel,
-    appTab: AppTab,
-    rootDestination: Destination
-  ) -> some View {
-    @Bindable var bindableRouter = router
-    @Bindable var bindableNav = nav
-
-    return NavigationStack(path: $bindableRouter[appTab]) {
-      chatsRoot(nav: bindableNav, root: rootDestination)
-        .background(Color(.systemBackground))
-        .experimentalRootTitleDisplayMode()
-        .navigationTitle("")
-        .toolbar {
-          experimentalToolbarContent(activeSpaceId: bindableNav.activeSpaceId)
-        }
-        .navigationDestination(for: Destination.self) { destination in
-          ExperimentalDestinationView(nav: bindableNav, destination: destination)
-        }
-    }
-    .toolbar(
-      bindableRouter[appTab].isEmpty ? Visibility.visible : Visibility.hidden,
-      for: .tabBar
+    return ExperimentalHomeView(
+      nav: bindableNav,
+      initialTab: rootTab == .inbox ? .inbox : .allChats
     )
-    // Prevent child views (e.g. ChatView) from "leaking" a dark toolbar color scheme back to the root.
-    .toolbarColorScheme(colorScheme, for: .navigationBar)
-    // Also reset any leaked toolbar background visibility state.
-    .toolbarBackground(.visible, for: .navigationBar)
-  }
-
-  private func searchNavigationStack(
-    nav: ExperimentalNavigationModel
-  ) -> some View {
-    @Bindable var bindableRouter = router
-    @Bindable var bindableNav = nav
-
-    return NavigationStack(path: $bindableRouter[.search]) {
-      ExperimentalSearchView(query: searchQuery, activeSpaceId: bindableNav.activeSpaceId)
-        .background(Color(.systemBackground))
-        .experimentalRootTitleDisplayMode()
-        .navigationTitle("")
-        .navigationDestination(for: Destination.self) { destination in
-          ExperimentalDestinationView(nav: bindableNav, destination: destination)
-        }
-    }
-    .toolbar(
-      bindableRouter[.search].isEmpty ? Visibility.visible : Visibility.hidden,
-      for: .tabBar
-    )
-    .toolbarColorScheme(colorScheme, for: .navigationBar)
-    .toolbarBackground(.visible, for: .navigationBar)
-  }
-
-  private var usesNativeSearchTabActivation: Bool {
-    if #available(iOS 26.0, *) {
-      true
-    } else {
-      false
-    }
   }
 
   @ViewBuilder
@@ -339,10 +348,16 @@ private struct ExperimentalAuthedRootView: View {
           spaceId: spaceId,
           participants: [currentUserId]
         )
+        let peer: Peer = .thread(id: chatId)
+
+        // Match macOS: a newly-created thread immediately belongs to Inbox.
+        await realtimeV2.sendQueued(
+          .updateDialogOpen(peerId: peer, open: true, requiresChatCreated: true)
+        )
 
         await MainActor.run {
           isCreatingThread = false
-          router.push(.chat(peer: .thread(id: chatId)), for: router.selectedTab)
+          router.push(.chat(peer: peer), for: router.selectedTab)
         }
       } catch {
         await MainActor.run {
@@ -358,85 +373,105 @@ private struct ExperimentalAuthedRootView: View {
     }
   }
 
-  private func activateSearch() {
-    Task { @MainActor in
-      await Task.yield()
-      guard rootTab == .search else { return }
-      isSearchPresented = true
-    }
-  }
-
   @ToolbarContentBuilder
-  private func experimentalToolbarContent(activeSpaceId: Int64?) -> some ToolbarContent {
+  private func experimentalToolbarContent() -> some ToolbarContent {
     if #available(iOS 26.0, *) {
-
-      ToolbarItem(placement: .principal) {
+      ToolbarItem(placement: .topBarLeading) {
         activeSpacePicker(selectedSpaceId: $nav.activeSpaceId)
-          .frame(maxWidth: .infinity, alignment: .leading)
       }
       .sharedBackgroundVisibility(.hidden)
 
+      ToolbarItem(placement: .topBarTrailing) {
+        overflowMenu()
+      }
+
+      ToolbarSpacer(.fixed, placement: .topBarTrailing)
 
       ToolbarItem(placement: .topBarTrailing) {
-        Color.clear
-          .frame(width: 36, height: 36)
-          .allowsHitTesting(false)
-          .accessibilityHidden(true)
+        accountButton()
       }
       .sharedBackgroundVisibility(.hidden)
-      ToolbarSpacer(.fixed, placement: .topBarTrailing)
-
-      ToolbarItem(placement: .topBarTrailing) {
-        notificationsButton
-      }
-      ToolbarSpacer(.fixed, placement: .topBarTrailing)
-      ToolbarItem(placement: .topBarTrailing) {
-        overflowMenuButton(activeSpaceId: activeSpaceId)
-      }
     } else {
       ToolbarItem(placement: .topBarLeading) {
         activeSpacePicker(selectedSpaceId: $nav.activeSpaceId)
       }
 
+      ToolbarItemGroup(placement: .topBarTrailing) {
+        newChatButton(activeSpaceId: nav.activeSpaceId)
+        overflowMenu()
+      }
+
       ToolbarItem(placement: .topBarTrailing) {
-        HStack(spacing: 8) {
-          notificationsButton
-          overflowMenuButton(activeSpaceId: activeSpaceId)
-        }
+        accountButton()
       }
     }
   }
 
-  private var notificationsButton: some View {
-    NotificationSettingsButton(
-      iconColor: .primary,
-      iconFont: .system(size: 14, weight: .semibold)
-    )
-    .frame(width: 36, height: 36)
-  }
-
-  private func overflowMenuButton(activeSpaceId: Int64?) -> some View {
-    Menu {
-      Button {
-        createThreadInstantly(spaceId: activeSpaceId)
-      } label: {
-        Label("New Chat", systemImage: "plus")
-      }
-      .disabled(isCreatingThread)
-
-      Button {
-        router.presentSheet(.settings)
-      } label: {
-        Label("Settings", systemImage: "gearshape")
-      }
+  private func newChatButton(activeSpaceId: Int64?) -> some View {
+    Button {
+      createThreadInstantly(spaceId: activeSpaceId)
     } label: {
-      Image(systemName: "ellipsis")
-        .font(.system(size: 14, weight: .semibold))
-        .foregroundStyle(.primary)
-        .frame(width: 36, height: 36)
-        .contentShape(Rectangle())
+      Image(systemName: "square.and.pencil")
     }
+    .disabled(isCreatingThread)
+    .accessibilityLabel("New Thread")
+  }
+
+  private func accountButton() -> some View {
+    Button {
+      router.presentSheet(.settings)
+    } label: {
+      ExperimentalProfileToolbarLabel()
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel("App Settings")
+  }
+
+  private func overflowMenu() -> some View {
+    ExperimentalOverflowMenuButton(
+      notificationSubtitle: String(localized: notificationSettings.mode.valueTitle),
+      notificationSystemImage: notificationSettings.mode.systemImage,
+      itemSize: selectedChatItemRenderMode,
+      sortMode: ExperimentalHomeSortMode(rawValue: sortModeRaw) ?? .recentActivity,
+      activeSpaceName: activeSpace?.displayName,
+      onNotifications: {
+        isNotificationSettingsPresented = true
+      },
+      onSelectItemSize: { mode in
+        chatItemRenderModeRaw = mode.rawValue
+      },
+      onSelectSortMode: { mode in
+        sortModeRaw = mode.rawValue
+      },
+      onInvite: activeSpace.map { space in
+        { router.presentSheet(.addMember(spaceId: space.id)) }
+      },
+      onMembers: activeSpace.map { space in
+        { router.presentSheet(.members(spaceId: space.id)) }
+      },
+      onManage: activeSpace.map { space in
+        { router.push(.spaceSettings(spaceId: space.id), for: router.selectedTab) }
+      }
+    )
+    .frame(width: 28, height: 28)
     .accessibilityLabel("More")
+    .popover(isPresented: $isNotificationSettingsPresented) {
+      NotificationSettingsPopoverContent {
+        isNotificationSettingsPresented = false
+      }
+      .frame(idealWidth: 360, idealHeight: 480)
+      .presentationCompactAdaptation(.popover)
+    }
+  }
+
+  private var selectedChatItemRenderMode: ExperimentalHomeChatItemRenderMode {
+    let mode = ExperimentalHomeChatItemRenderMode(rawValue: chatItemRenderModeRaw) ?? .twoLineLastMessage
+    return mode == .oneLineLastMessage ? .twoLineLastMessage : mode
+  }
+
+  private var activeSpace: Space? {
+    guard let activeSpaceId = nav.activeSpaceId else { return nil }
+    return compactSpaceList.spaces.first(where: { $0.id == activeSpaceId })
   }
 
   private func refetchCoreDataAfterLocalDataCleared() async {
@@ -460,6 +495,89 @@ private struct ExperimentalAuthedRootView: View {
   }
 }
 
+private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
+  let notificationSubtitle: String
+  let notificationSystemImage: String
+  let itemSize: ExperimentalHomeChatItemRenderMode
+  let sortMode: ExperimentalHomeSortMode
+  let activeSpaceName: String?
+  let onNotifications: () -> Void
+  let onSelectItemSize: (ExperimentalHomeChatItemRenderMode) -> Void
+  let onSelectSortMode: (ExperimentalHomeSortMode) -> Void
+  let onInvite: (() -> Void)?
+  let onMembers: (() -> Void)?
+  let onManage: (() -> Void)?
+
+  func makeUIView(context: Context) -> UIButton {
+    let button = UIButton(type: .system)
+    var configuration = UIButton.Configuration.plain()
+    configuration.image = UIImage(systemName: "ellipsis")
+    configuration.baseForegroundColor = .label
+    configuration.contentInsets = .zero
+    button.configuration = configuration
+    button.showsMenuAsPrimaryAction = true
+    button.accessibilityLabel = "More"
+    return button
+  }
+
+  func updateUIView(_ button: UIButton, context: Context) {
+    button.menu = makeMenu()
+  }
+
+  private func makeMenu() -> UIMenu {
+    let notifications = UIAction(
+      title: "Notifications",
+      subtitle: notificationSubtitle,
+      image: UIImage(systemName: notificationSystemImage)
+    ) { _ in
+      onNotifications()
+    }
+
+    let notificationSection = UIMenu(options: .displayInline, children: [notifications])
+    let itemSizeMenu = UIMenu(
+      title: "Item Size",
+      options: [.displayInline, .singleSelection],
+      children: ExperimentalHomeChatItemRenderMode.allCases.map { mode in
+        UIAction(title: mode.title, state: mode == itemSize ? .on : .off) { _ in
+          onSelectItemSize(mode)
+        }
+      }
+    )
+    let sortMenu = UIMenu(
+      title: "Sort By",
+      options: [.displayInline, .singleSelection],
+      children: ExperimentalHomeSortMode.allCases.map { mode in
+        UIAction(title: mode.title, state: mode == sortMode ? .on : .off) { _ in
+          onSelectSortMode(mode)
+        }
+      }
+    )
+    let viewOptions = UIMenu(
+      title: "View Options",
+      image: UIImage(systemName: "line.3.horizontal.decrease"),
+      children: [itemSizeMenu, sortMenu]
+    )
+
+    var children: [UIMenuElement] = [notificationSection, viewOptions]
+    if let activeSpaceName,
+       let onInvite,
+       let onMembers,
+       let onManage {
+      children.append(UIMenu(
+        title: activeSpaceName,
+        options: .displayInline,
+        children: [
+          UIAction(title: "Invite", image: UIImage(systemName: "person.badge.plus")) { _ in onInvite() },
+          UIAction(title: "Members", image: UIImage(systemName: "person.2")) { _ in onMembers() },
+          UIAction(title: "Manage", image: UIImage(systemName: "gearshape.2")) { _ in onManage() },
+        ]
+      ))
+    }
+
+    return UIMenu(children: children)
+  }
+}
+
 private extension View {
   @ViewBuilder
   func experimentalRootTitleDisplayMode() -> some View {
@@ -467,19 +585,6 @@ private extension View {
       toolbarTitleDisplayMode(.inlineLarge)
     } else {
       navigationBarTitleDisplayMode(.inline)
-    }
-  }
-
-  @ViewBuilder
-  func experimentalRootSearchable(
-    text: Binding<String>,
-    isPresented: Binding<Bool>
-  ) -> some View {
-    if #available(iOS 26.0, *) {
-      searchable(text: text, prompt: "Find")
-        .tabViewSearchActivation(.searchTabSelection)
-    } else {
-      searchable(text: text, isPresented: isPresented, prompt: "Find")
     }
   }
 }

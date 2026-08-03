@@ -37,6 +37,8 @@ struct DebugView: View {
         .disabled(isClearing)
       }
 
+      ClearCacheSettingsSection()
+
       IntentDonationDebugSection()
     }
     .listStyle(.insetGrouped)

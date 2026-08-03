@@ -1,7 +1,7 @@
 import InlineKit
 import SwiftUI
 
-/// A button that opens the notification settings popover for iOS
+/// A button that opens the notification settings sheet for iOS.
 struct NotificationSettingsButton: View {
   @EnvironmentObject private var notificationSettings: NotificationSettingsManager
 
@@ -17,14 +17,10 @@ struct NotificationSettingsButton: View {
   var body: some View {
     button
       .sheet(isPresented: $presented) {
-        NavigationStack {
-          popover
-            .navigationTitle("Notifications")
-            .navigationBarTitleDisplayMode(.inline)
-        }
-        .presentationDragIndicator(.visible)
-        .presentationDetents([.medium, .large])
-        .presentationContentInteraction(.scrolls)
+        NotificationSettingsPopoverContent(onSelection: close)
+          .presentationDragIndicator(.visible)
+          .presentationDetents([.medium, .large])
+          .presentationContentInteraction(.scrolls)
       }
   }
 
@@ -52,17 +48,58 @@ struct NotificationSettingsButton: View {
   }
 
   var notificationIcon: String {
-    switch notificationSettings.mode {
-      case .all: "bell"
-      case .none: "bell.slash"
-      case .mentions: "at"
-      case .importantOnly: "at"
-      case .onlyMentions: "at"
+    notificationSettings.mode.systemImage
+  }
+
+  private func close() {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+      // Delay closing to allow animations to finish
+      presented = false
+    }
+  }
+}
+
+extension NotificationMode {
+  var systemImage: String {
+    switch self {
+    case .all: "bell"
+    case .none: "bell.slash"
+    case .mentions, .importantOnly, .onlyMentions: "at"
     }
   }
 
-  @ViewBuilder
-  private var popover: some View {
+  var valueTitle: LocalizedStringResource {
+    switch self {
+    case .all:
+      "All"
+    case .mentions, .importantOnly:
+      "Any message to you"
+    case .onlyMentions:
+      "Only mentions"
+    case .none:
+      "None"
+    }
+  }
+}
+
+struct NotificationSettingsPopoverContent: View {
+  let onSelection: () -> Void
+
+  var body: some View {
+    NavigationStack {
+      NotificationSettingsList(onSelection: onSelection)
+        .navigationTitle("Notifications")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+  }
+}
+
+private struct NotificationSettingsList: View {
+  @EnvironmentObject private var notificationSettings: NotificationSettingsManager
+
+  let onSelection: () -> Void
+
+  var body: some View {
     List {
       Section("Control how you receive notifications") {
         NotificationSettingsItem(
@@ -82,7 +119,7 @@ struct NotificationSettingsButton: View {
           systemImage: "at",
           title: "Any message to you",
           description: "Mentions, direct messages, and replies to you",
-          selected: notificationSettings.mode == .mentions,
+          selected: notificationSettings.mode == .mentions || notificationSettings.mode == .importantOnly,
           value: NotificationMode.mentions,
           onChange: {
             notificationSettings.mode = $0
@@ -122,10 +159,7 @@ struct NotificationSettingsButton: View {
   }
 
   private func close() {
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-      // Delay closing to allow animations to finish
-      presented = false
-    }
+    onSelection()
   }
 }
 
@@ -136,7 +170,7 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
   var selected: Bool
   var value: Value
   var onChange: (Value) -> Void
-  var iconFontSize: CGFloat? = nil
+  var iconFontSize: CGFloat?
   let theme = ThemeManager.shared.selected
 
   var body: some View {

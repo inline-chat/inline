@@ -2,7 +2,8 @@ import InlineKit
 import SwiftUI
 
 struct InlineRootView: View {
-  @AppStorage("enableExperimentalView") private var enableExperimentalView = false
+  @AppStorage(ExperimentalHomePreferenceKeys.isEnabled)
+  private var enableExperimentalView = false
   @Environment(Router.self) private var router
 
   var body: some View {

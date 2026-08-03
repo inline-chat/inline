@@ -1,8 +1,10 @@
 import Foundation
 
 enum ExperimentalHomePreferenceKeys {
+  static let isEnabled = "enableExperimentalView"
   static let chatScope = "ios.experimental.home.chatScope"
   static let chatItemRenderMode = "ios.experimental.home.chatItemRenderMode"
+  static let sortMode = "ios.experimental.home.sortMode"
 }
 
 enum ExperimentalHomeChatScope: String, CaseIterable, Identifiable {
@@ -30,36 +32,54 @@ enum ExperimentalHomeChatScope: String, CaseIterable, Identifiable {
   }
 }
 
+enum ExperimentalHomeSortMode: String, CaseIterable, Identifiable {
+  case openedTime
+  case recentActivity
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .openedTime:
+      "Opened Time"
+    case .recentActivity:
+      "Recent Activity"
+    }
+  }
+}
+
 enum ExperimentalHomeChatItemRenderMode: String, CaseIterable, Identifiable {
   case twoLineLastMessage
+  // Kept for compatibility with preferences written by the earlier picker.
   case oneLineLastMessage
   case noLastMessage = "minimal"
+  case large
 
   static var allCases: [ExperimentalHomeChatItemRenderMode] {
-    [.noLastMessage, .oneLineLastMessage, .twoLineLastMessage]
+    [.noLastMessage, .twoLineLastMessage, .large]
   }
 
   var id: String { rawValue }
 
   var title: String {
     switch self {
-    case .twoLineLastMessage:
-      "Default"
-    case .oneLineLastMessage:
-      "Medium"
     case .noLastMessage:
       "Compact"
+    case .oneLineLastMessage, .twoLineLastMessage:
+      "Standard"
+    case .large:
+      "Large"
     }
   }
 
   var systemImage: String {
     switch self {
-    case .twoLineLastMessage:
-      "text.alignleft"
-    case .oneLineLastMessage:
-      "text.justify.left"
     case .noLastMessage:
       "line.3.horizontal.decrease"
+    case .oneLineLastMessage, .twoLineLastMessage:
+      "text.justify.left"
+    case .large:
+      "text.alignleft"
     }
   }
 }

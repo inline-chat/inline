@@ -14,13 +14,21 @@ struct ChatListItem: View {
     case minimal
   }
 
+  enum RowStyle {
+    case standard
+    case prototypeCompact
+    case prototypeWithPreview
+    case prototypeLarge
+  }
+
   var type: ChatListItemType
   var dialog: Dialog?
   var lastMessage: Message?
   var lastMessageSender: UserInfo?
-  var embeddedLastMessage: EmbeddedMessage? = nil
+  var embeddedLastMessage: EmbeddedMessage?
   var showsPinnedIndicator: Bool = true
   var displayMode: DisplayMode = .twoLineLastMessage
+  var rowStyle: RowStyle = .standard
 
   // fonts
   static var titleFont: Font = .system(size: 16.0, weight: .regular, design: .default)
@@ -69,24 +77,46 @@ struct ChatListItem: View {
   }
 
   private var rowHeight: CGFloat {
+    switch rowStyle {
+    case .prototypeCompact:
+      return 35
+    case .prototypeWithPreview:
+      return 52
+    case .prototypeLarge:
+      return 66
+    case .standard:
+      break
+    }
+
     switch displayMode {
     case .twoLineLastMessage:
-      66
+      return 66
     case .oneLineLastMessage:
-      58
+      return 58
     case .minimal:
-      50
+      return 50
     }
   }
 
   private var avatarSize: CGFloat {
+    switch rowStyle {
+    case .prototypeCompact:
+      return 34
+    case .prototypeWithPreview:
+      return 44
+    case .prototypeLarge:
+      return 56
+    case .standard:
+      break
+    }
+
     switch displayMode {
     case .twoLineLastMessage:
-      56
+      return 56
     case .oneLineLastMessage:
-      50
+      return 50
     case .minimal:
-      40
+      return 40
     }
   }
 
@@ -102,16 +132,21 @@ struct ChatListItem: View {
   }
 
   private var subtitleLineLimit: Int {
+    if rowStyle == .prototypeWithPreview {
+      return 1
+    }
+
     switch displayMode {
     case .twoLineLastMessage:
-      2
+      return 2
     case .oneLineLastMessage, .minimal:
-      1
+      return 1
     }
   }
 
   private var subtitleReservesSpace: Bool {
-    displayMode == .twoLineLastMessage
+    (rowStyle == .standard || rowStyle == .prototypeLarge)
+      && displayMode == .twoLineLastMessage
   }
 
   private var rowAlignment: VerticalAlignment {
@@ -123,19 +158,89 @@ struct ChatListItem: View {
   }
 
   private var showsUnreadInTitle: Bool {
-    displayMode == .minimal
+    displayMode == .minimal && !usesCenteredUnreadAccessory
+  }
+
+  private var usesCenteredUnreadAccessory: Bool {
+    rowStyle != .standard
+  }
+
+  private var showsLeadingUnreadDot: Bool {
+    usesCenteredUnreadAccessory && unreadCount == nil && hasUnreadMark
+  }
+
+  private var showsTrailingUnreadCount: Bool {
+    usesCenteredUnreadAccessory && unreadCount != nil
+  }
+
+  private var hasProminentUnread: Bool {
+    if dialog?.peerUserId != nil || dialog?.isFollowingReplyThread == true {
+      return true
+    }
+
+    switch type {
+    case .user:
+      return true
+    case let .chat(chat, _):
+      return chat.type == .privateChat
+    }
+  }
+
+  private var titleFont: Font {
+    switch rowStyle {
+    case .standard:
+      Self.titleFont
+    case .prototypeCompact:
+      .system(size: 18, weight: .medium)
+    case .prototypeWithPreview:
+      .system(size: 16, weight: .medium)
+    case .prototypeLarge:
+      .system(size: 16, weight: .medium)
+    }
+  }
+
+  private var subtitleFont: Font {
+    switch rowStyle {
+    case .standard, .prototypeLarge:
+      Self.subtitleFont
+    case .prototypeCompact, .prototypeWithPreview:
+      .system(size: 14, weight: .regular)
+    }
+  }
+
+  private var avatarAndContentSpacing: CGFloat {
+    switch rowStyle {
+    case .standard, .prototypeLarge:
+      Self.avatarAndContentSpacing
+    case .prototypeCompact, .prototypeWithPreview:
+      10
+    }
   }
 
   var body: some View {
-    HStack(alignment: rowAlignment, spacing: Self.avatarAndContentSpacing) {
-      avatarView
-      VStack(alignment: .leading, spacing: showsLastMessage ? 2 : 0) {
-        titleView
-        if showsLastMessage {
-          subTitleView
+    ZStack(alignment: .leading) {
+      if showsLeadingUnreadDot {
+        unreadCountView
+      }
+
+      HStack(alignment: rowAlignment, spacing: avatarAndContentSpacing) {
+        avatarView
+        VStack(alignment: .leading, spacing: showsLastMessage ? 2 : 0) {
+          titleView
+          if showsLastMessage {
+            subTitleView
+          }
+        }
+        .padding(.top, textTopOffset)
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        if showsTrailingUnreadCount {
+          unreadCountView
+            .padding(.leading, 8)
+            .frame(height: rowHeight, alignment: .center)
         }
       }
-      .padding(.top, textTopOffset)
+      .padding(.leading, usesCenteredUnreadAccessory ? 10 : 0)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .frame(height: rowHeight)
@@ -155,8 +260,10 @@ struct ChatListItem: View {
           ThreadIconView(
             ThreadIconDescriptor(chat: chat),
             size: threadIconSize,
-            shape: .circle
+            shape: rowStyle == .prototypeCompact ? .none : .circle,
+            symbolColor: rowStyle == .prototypeCompact ? .primary : .secondary
           )
+          .frame(width: avatarSize, height: avatarSize)
 
         case let .user(userInfo, _):
           UserAvatar(userInfo: userInfo, size: avatarSize)
@@ -168,7 +275,9 @@ struct ChatListItem: View {
   private var threadIconSize: ThreadIconSize {
     switch displayMode {
     case .minimal:
-      return .regular(avatarSize)
+      return rowStyle == .prototypeCompact
+        ? .compact((avatarSize + 2) * 0.9)
+        : .regular(avatarSize)
     case .twoLineLastMessage, .oneLineLastMessage:
       return .large(avatarSize)
     }
@@ -180,7 +289,7 @@ struct ChatListItem: View {
       case let .chat(chat, spaceName):
         HStack(spacing: 0) {
           Text(chat.humanReadableTitle ?? "Unknown Chat")
-            .font(Self.titleFont)
+            .font(titleFont)
             .foregroundColor(Self.titleColor)
             .lineLimit(1)
             .truncationMode(.tail)
@@ -193,13 +302,8 @@ struct ChatListItem: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .monospacedDigit()
-              if isPinned, showsPinnedIndicator {
-                Image(systemName: "pin.fill")
-                  .font(.system(size: 11, weight: .semibold))
-                  .foregroundColor(.secondary)
-                  .padding(.leading, 4)
-              }
             }
+            ChatListPinnedIndicator(isVisible: isPinned && showsPinnedIndicator)
             if showsUnreadInTitle {
               unreadCountView
                 .padding(.leading, 8)
@@ -209,16 +313,12 @@ struct ChatListItem: View {
       case let .user(userInfo, _):
         HStack(spacing: 0) {
           Text(userInfo.user.needsDisplayNameFetch ? "Loading..." : userInfo.user.displayName)
-            .font(Self.titleFont)
+            .font(titleFont)
             .foregroundColor(Self.titleColor)
             .lineLimit(1)
             .truncationMode(.tail)
             .frame(maxWidth: .infinity, alignment: .leading)
-          if isPinned, showsPinnedIndicator {
-            Image(systemName: "pin.fill")
-              .font(.system(size: 11, weight: .semibold))
-              .foregroundColor(.secondary)
-          }
+          ChatListPinnedIndicator(isVisible: isPinned && showsPinnedIndicator)
           if showsUnreadInTitle {
             unreadCountView
               .padding(.leading, 8)
@@ -239,38 +339,42 @@ struct ChatListItem: View {
         HStack(alignment: .top, spacing: 0) {
           if resolvedLastMessage != nil {
             Text("\(resolvedLastMessageSender?.user.shortDisplayName ?? ""): \(lastMessageText)")
-              .font(Self.subtitleFont)
+              .font(subtitleFont)
               .foregroundColor(Self.subtitleColor)
               .lineLimit(subtitleLineLimit, reservesSpace: subtitleReservesSpace)
               .truncationMode(.tail)
               .frame(maxWidth: .infinity, alignment: .leading)
           } else {
             Text(" ")
-              .font(Self.subtitleFont)
+              .font(subtitleFont)
               .foregroundColor(Self.subtitleColor)
               .lineLimit(subtitleLineLimit, reservesSpace: subtitleReservesSpace)
               .frame(maxWidth: .infinity, alignment: .leading)
           }
-          unreadCountView
+          if !usesCenteredUnreadAccessory {
+            unreadCountView
+          }
         }
 //        .animation(.easeInOut, value: unreadCount)
       case .user:
         HStack(alignment: .top, spacing: 0) {
           if resolvedLastMessage != nil {
             Text("\(lastMessageText)")
-              .font(Self.subtitleFont)
+              .font(subtitleFont)
               .foregroundColor(Self.subtitleColor)
               .lineLimit(subtitleLineLimit, reservesSpace: subtitleReservesSpace)
               .truncationMode(.tail)
               .frame(maxWidth: .infinity, alignment: .leading)
           } else {
             Text(" ")
-              .font(Self.subtitleFont)
+              .font(subtitleFont)
               .foregroundColor(Self.subtitleColor)
               .lineLimit(subtitleLineLimit, reservesSpace: subtitleReservesSpace)
               .frame(maxWidth: .infinity, alignment: .leading)
           }
-          unreadCountView
+          if !usesCenteredUnreadAccessory {
+            unreadCountView
+          }
         }
 //        .animation(.easeInOut, value: unreadCount)
     }
@@ -278,19 +382,52 @@ struct ChatListItem: View {
 
   @ViewBuilder
   var unreadCountView: some View {
-    if let unreadCount {
-      Text(String(unreadCount))
-        .font(Self.unreadCountFont.monospacedDigit())
-        .foregroundColor(Self.unreadCountColor)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .frame(minWidth: 21, alignment: .center)
-        .background(Self.unreadCircleColor)
-        .cornerRadius(12)
-    } else if hasUnreadMark {
-      Circle()
-        .fill(Self.unreadCircleColor)
-        .frame(width: 10, height: 10)
+    if usesCenteredUnreadAccessory {
+      if let unreadCount {
+        Text(String(unreadCount))
+          .font(.system(size: 13, weight: .semibold).monospacedDigit())
+          .foregroundStyle(hasProminentUnread ? Color.white : Color.primary.opacity(0.76))
+          .lineLimit(1)
+          .contentTransition(.numericText())
+          .padding(.horizontal, 6)
+          .frame(minWidth: 20, minHeight: 20)
+          .fixedSize(horizontal: true, vertical: false)
+          .background(
+            Capsule().fill(hasProminentUnread ? Color.accentColor : Color(.secondarySystemFill))
+          )
+      } else if hasUnreadMark {
+        Circle()
+          .fill(hasProminentUnread ? Color.accentColor : Color.secondary)
+          .frame(width: 7, height: 7)
+      }
+    } else {
+      if let unreadCount {
+        Text(String(unreadCount))
+          .font(Self.unreadCountFont.monospacedDigit())
+          .foregroundColor(Self.unreadCountColor)
+          .padding(.horizontal, 6)
+          .padding(.vertical, 2)
+          .frame(minWidth: 21, alignment: .center)
+          .background(Self.unreadCircleColor)
+          .cornerRadius(12)
+      } else if hasUnreadMark {
+        Circle()
+          .fill(Self.unreadCircleColor)
+          .frame(width: 10, height: 10)
+      }
+    }
+  }
+}
+
+private struct ChatListPinnedIndicator: View {
+  let isVisible: Bool
+
+  var body: some View {
+    if isVisible {
+      Image(systemName: "pin.fill")
+        .font(.system(size: 11, weight: .semibold))
+        .foregroundStyle(.tertiary)
+        .padding(.leading, 4)
     }
   }
 }

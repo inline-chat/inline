@@ -1,25 +1,22 @@
 import SwiftUI
 
 struct ExperimentalView: View {
-  // Example future toggle:
-  // @AppStorage("experimental.exampleFeature") private var enableExampleFeature = false
+  @AppStorage(ExperimentalHomePreferenceKeys.isEnabled)
+  private var isNewHomeEnabled = false
 
   var body: some View {
     List {
-      Section("Experimental") {
-        Text("Experimental toggles will appear here.")
-          .foregroundStyle(.secondary)
-
-        // Example future toggle:
-        // SettingsItem(
-        //   icon: "sparkles",
-        //   iconColor: .purple,
-        //   title: "Enable example feature"
-        // ) {
-        //   Toggle("", isOn: $enableExampleFeature)
-        //     .labelsHidden()
-        //     .accessibilityLabel("Enable example feature")
-        // }
+      Section {
+        Toggle(isOn: $isNewHomeEnabled) {
+          VStack(alignment: .leading, spacing: 3) {
+            Text("New Home")
+            Text("Use the experimental Inbox, All Chats, and Search tabs.")
+              .font(.footnote)
+              .foregroundStyle(.secondary)
+          }
+        }
+      } footer: {
+        Text("The app switches Home experiences immediately. You can return here to switch back.")
       }
     }
     .listStyle(.insetGrouped)
@@ -29,7 +26,7 @@ struct ExperimentalView: View {
 }
 
 #Preview("Experimental") {
-  NavigationView {
+  NavigationStack {
     ExperimentalView()
   }
 }
