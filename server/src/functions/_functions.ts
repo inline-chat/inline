@@ -3,6 +3,7 @@ import { deleteMessageAttachment } from "@in/server/functions/messages.deleteMes
 import { clearChatHistory } from "@in/server/functions/messages.clearChatHistory"
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import { getChatHistory } from "@in/server/functions/messages.getChatHistory"
+import { getChatTranscript } from "@in/server/functions/messages.getChatTranscript"
 import { getChat } from "@in/server/functions/messages.getChat"
 import { getMessages } from "@in/server/functions/messages.getMessages"
 import { getThreadReferences, getThreadSubthreads } from "@in/server/functions/messages.getThreadReferences"
@@ -83,6 +84,7 @@ export const Functions = {
     clearChatHistory: clearChatHistory,
     sendMessage: sendMessage,
     getChatHistory: getChatHistory,
+    getChatTranscript: getChatTranscript,
     getMessages: getMessages,
     getThreadReferences: getThreadReferences,
     getThreadSubthreads: getThreadSubthreads,

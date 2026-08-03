@@ -5,6 +5,7 @@ import Logger
 import RealtimeV2
 import SwiftUI
 import Translation
+import UIKit
 
 struct ChatView: View {
   var peerId: Peer
@@ -106,6 +107,12 @@ struct ChatView: View {
       } else {
         ToolbarItem(placement: .primaryAction) {
           TranslationButton(peer: peerId, activeColor: ThemeManager.shared.accentColor)
+        }
+        ToolbarItem(placement: .primaryAction) {
+          ChatTranscriptToolbarMenu(peer: peerId) {
+            guard let chatItem = fullChatViewModel.chatItem else { return }
+            router.presentSheet(.chatInfo(chatItem: chatItem))
+          }
         }
       }
 
@@ -507,5 +514,139 @@ struct ChatView: View {
     AppTab.allCases.contains { tab in
       router[tab].contains(.chat(peer: peerId))
     }
+  }
+}
+
+private struct ChatTranscriptToolbarMenu: View {
+  let peer: Peer
+  let openChatInfo: () -> Void
+
+  @Environment(\.realtimeV2) private var realtimeV2
+  @State private var transcriptTask: Task<Void, Never>?
+  @State private var pendingTranscript: ChatTranscriptExport?
+  @State private var showTranscriptScope = false
+
+  var body: some View {
+    Menu {
+      Button("Chat Info", systemImage: "info.circle", action: openChatInfo)
+
+      Divider()
+
+      Button("Copy Link", systemImage: "link") {
+        copyLink()
+      }
+
+      Button("Copy as Markdown", systemImage: "doc.on.doc") {
+        prepareTranscript()
+      }
+      .disabled(transcriptTask != nil)
+    } label: {
+      Image(systemName: "ellipsis")
+    }
+    .accessibilityLabel("More")
+    .confirmationDialog(
+      "How much should be copied?",
+      isPresented: $showTranscriptScope,
+      titleVisibility: .visible
+    ) {
+      if let pendingTranscript {
+        Button {
+          copyTranscript(pendingTranscript)
+        } label: {
+          Text("Copy Latest \(pendingTranscript.messageCount) Messages")
+        }
+        Button("Copy Entire Chat") {
+          prepareEntireTranscript(startingWith: pendingTranscript)
+        }
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("This chat has more messages than the default transcript.")
+    }
+    .onDisappear {
+      transcriptTask?.cancel()
+    }
+  }
+
+  @MainActor
+  private func copyLink() {
+    guard case let .thread(id) = peer,
+          let url = InlineDeepLink.chat(id: id).url
+    else {
+      ToastManager.shared.showToast(
+        "Failed to copy link",
+        type: .error,
+        systemImage: "exclamationmark.triangle"
+      )
+      return
+    }
+
+    UIPasteboard.general.string = url.absoluteString
+    ToastManager.shared.showToast("Copied link", type: .success, systemImage: "link")
+  }
+
+  @MainActor
+  private func prepareTranscript() {
+    guard transcriptTask == nil else { return }
+    transcriptTask = Task(priority: .userInitiated) { @MainActor in
+      defer { transcriptTask = nil }
+      ToastManager.shared.showToast("Preparing…", type: .loading)
+
+      do {
+        let transcript = try await ChatTranscriptExporter.latest(peer: peer, realtime: realtimeV2)
+        try Task.checkCancellation()
+        ToastManager.shared.hideToast()
+
+        if transcript.hasMore {
+          pendingTranscript = transcript
+          showTranscriptScope = true
+        } else {
+          copyTranscript(transcript)
+        }
+      } catch is CancellationError {
+        ToastManager.shared.hideToast()
+      } catch {
+        ToastManager.shared.showToast(
+          "Failed to prepare transcript",
+          type: .error,
+          systemImage: "exclamationmark.triangle"
+        )
+      }
+    }
+  }
+
+  @MainActor
+  private func prepareEntireTranscript(startingWith latest: ChatTranscriptExport) {
+    guard transcriptTask == nil else { return }
+    transcriptTask = Task(priority: .userInitiated) { @MainActor in
+      defer { transcriptTask = nil }
+      ToastManager.shared.showToast("Preparing…", type: .loading)
+
+      do {
+        let transcript = try await ChatTranscriptExporter.all(
+          peer: peer,
+          startingWith: latest,
+          realtime: realtimeV2
+        )
+        try Task.checkCancellation()
+        ToastManager.shared.hideToast()
+        copyTranscript(transcript)
+      } catch is CancellationError {
+        ToastManager.shared.hideToast()
+      } catch {
+        ToastManager.shared.showToast(
+          "Failed to prepare transcript",
+          type: .error,
+          systemImage: "exclamationmark.triangle"
+        )
+      }
+    }
+  }
+
+  @MainActor
+  private func copyTranscript(_ transcript: ChatTranscriptExport) {
+    UIPasteboard.general.string = transcript.markdown
+    pendingTranscript = nil
+    ToastManager.shared.showToast("Copied as Markdown", type: .success, systemImage: "doc.on.doc")
   }
 }

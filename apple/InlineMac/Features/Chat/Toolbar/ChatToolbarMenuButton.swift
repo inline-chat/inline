@@ -3,6 +3,7 @@ import AppKit
 import Combine
 import GRDB
 import InlineKit
+import RealtimeV2
 import SwiftUI
 
 struct ChatToolbarMenuButton: View {
@@ -19,6 +20,9 @@ struct ChatToolbarMenuButton: View {
   @State private var showClearHistorySheet = false
   @State private var pendingDestructiveAction: ChatDestructiveAction?
   @State private var loadHistoryTask: Task<Void, Never>?
+  @State private var transcriptTask: Task<Void, Never>?
+  @State private var pendingTranscript: ChatTranscriptExport?
+  @State private var showTranscriptScope = false
 
   init(peer: Peer, dependencies: AppDependencies) {
     self.peer = peer
@@ -32,8 +36,17 @@ struct ChatToolbarMenuButton: View {
         openChatInfo()
       }
 
+      Divider()
+
       Button("Copy Link", systemImage: "link") {
         copyChatLink()
+      }
+
+      if peer.isThread {
+        Button("Copy as Markdown", systemImage: "doc.on.doc") {
+          prepareTranscript()
+        }
+        .disabled(transcriptTask != nil)
       }
 
       Divider()
@@ -151,6 +164,25 @@ struct ChatToolbarMenuButton: View {
       }
       Button("Cancel", role: .cancel) {}
     }
+    .confirmationDialog(
+      "How much should be copied?",
+      isPresented: $showTranscriptScope,
+      titleVisibility: .visible
+    ) {
+      if let pendingTranscript {
+        Button {
+          copyTranscript(pendingTranscript)
+        } label: {
+          Text("Copy Latest \(pendingTranscript.messageCount) Messages")
+        }
+        Button("Copy Entire Chat") {
+          prepareEntireTranscript(startingWith: pendingTranscript)
+        }
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("This chat has more messages than the default transcript.")
+    }
     .alert(
       pendingDestructiveAction?.title ?? "Confirm",
       isPresented: destructiveConfirmationPresented,
@@ -168,6 +200,7 @@ struct ChatToolbarMenuButton: View {
     }
     .onDisappear {
       cancelHistoryLoad()
+      transcriptTask?.cancel()
     }
   }
 
@@ -204,6 +237,74 @@ struct ChatToolbarMenuButton: View {
     case let .thread(id):
       InlineDeepLink.chat(id: id).url
     }
+  }
+
+  @MainActor
+  private func prepareTranscript() {
+    guard transcriptTask == nil else { return }
+    transcriptTask = Task(priority: .userInitiated) { @MainActor in
+      defer { transcriptTask = nil }
+      ToastCenter.shared.showLoading("Preparing…")
+
+      do {
+        let transcript = try await ChatTranscriptExporter.latest(peer: peer, realtime: realtimeV2)
+        try Task.checkCancellation()
+        ToastCenter.shared.dismiss()
+
+        if transcript.hasMore {
+          pendingTranscript = transcript
+          showTranscriptScope = true
+        } else {
+          copyTranscript(transcript)
+        }
+      } catch is CancellationError {
+        ToastCenter.shared.dismiss()
+      } catch {
+        ToastCenter.shared.dismiss()
+        ToastCenter.shared.showError("Failed to prepare transcript")
+      }
+    }
+  }
+
+  @MainActor
+  private func prepareEntireTranscript(startingWith latest: ChatTranscriptExport) {
+    guard transcriptTask == nil else { return }
+    transcriptTask = Task(priority: .userInitiated) { @MainActor in
+      defer { transcriptTask = nil }
+      ToastCenter.shared.showLoading("Preparing…")
+
+      do {
+        let transcript = try await ChatTranscriptExporter.all(
+          peer: peer,
+          startingWith: latest,
+          realtime: realtimeV2
+        )
+        try Task.checkCancellation()
+        ToastCenter.shared.dismiss()
+        copyTranscript(transcript)
+      } catch is CancellationError {
+        ToastCenter.shared.dismiss()
+      } catch {
+        ToastCenter.shared.dismiss()
+        ToastCenter.shared.showError("Failed to prepare transcript")
+      }
+    }
+  }
+
+  @MainActor
+  private func copyTranscript(_ transcript: ChatTranscriptExport) {
+    let pasteboard = NSPasteboard.general
+    let previousString = pasteboard.string(forType: .string)
+    pasteboard.clearContents()
+    guard pasteboard.setString(transcript.markdown, forType: .string) else {
+      if let previousString {
+        pasteboard.setString(previousString, forType: .string)
+      }
+      ToastCenter.shared.showError("Failed to copy transcript")
+      return
+    }
+    pendingTranscript = nil
+    ToastCenter.shared.showSuccess("Copied as Markdown")
   }
 
   private func keepInChatList() {

@@ -1040,6 +1040,7 @@ enum Method {
   CREATE_CLI_SESSION = 93;
   SET_PROFILE_PHOTO = 94;
   GET_EXTERNAL_PROFILE_PHOTO = 95;
+  GET_CHAT_TRANSCRIPT = 96;
 }
 
 message RpcCall {
@@ -1140,6 +1141,7 @@ message RpcCall {
     CreateCliSessionInput createCliSession = 94;
     SetProfilePhotoInput setProfilePhoto = 95;
     GetExternalProfilePhotoInput getExternalProfilePhoto = 96;
+    GetChatTranscriptInput getChatTranscript = 97;
   }
 }
 
@@ -1242,6 +1244,7 @@ message RpcResult {
     CreateCliSessionResult createCliSession = 94;
     SetProfilePhotoResult setProfilePhoto = 95;
     GetExternalProfilePhotoResult getExternalProfilePhoto = 96;
+    GetChatTranscriptResult getChatTranscript = 97;
   }
 }
 
@@ -2316,6 +2319,54 @@ message GetChatHistoryInput {
 }
 
 message GetChatHistoryResult { repeated Message messages = 1; }
+
+message GetChatTranscriptInput {
+  enum Mode {
+    MODE_UNSPECIFIED = 0;
+    MODE_HUMAN_READABLE = 1;
+  }
+
+  enum Length {
+    LENGTH_UNSPECIFIED = 0;
+    LENGTH_CONCISE = 1;
+  }
+
+  enum Media {
+    MEDIA_UNSPECIFIED = 0;
+    MEDIA_INCLUDED = 1;
+    MEDIA_EXCLUDED = 2;
+  }
+
+  InputPeer peer_id = 1;
+  optional Mode mode = 2;
+  optional Length length = 3;
+  optional Media media = 4;
+
+  // Exclusive upper boundary. Omit to start from the latest message.
+  optional int64 before_message_id = 5;
+
+  // Requested message ceiling. Defaults to 500 and is capped at 500 in V1.
+  optional int32 limit = 6;
+}
+
+message GetChatTranscriptResult {
+  enum StopReason {
+    STOP_REASON_UNSPECIFIED = 0;
+    STOP_REASON_COMPLETE = 1;
+    STOP_REASON_MESSAGE_LIMIT = 2;
+    STOP_REASON_OUTPUT_LIMIT = 3;
+  }
+
+  string markdown = 1;
+  int32 message_count = 2;
+  optional int64 from_message_id = 3;
+  optional int64 to_message_id = 4;
+  bool has_more = 5;
+  StopReason stop_reason = 6;
+
+  // Earliest expiry of any signed media URL in markdown, in Unix seconds.
+  optional int64 expires_at = 7;
+}
 
 message GetMessagesInput {
   InputPeer peer_id = 1;

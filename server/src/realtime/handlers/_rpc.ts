@@ -8,6 +8,7 @@ import { deleteMessageAttachment } from "@in/server/realtime/handlers/messages.d
 import { clearChatHistoryHandler } from "@in/server/realtime/handlers/messages.clearChatHistory"
 import { sendMessage } from "@in/server/realtime/handlers/messages.sendMessage"
 import { getChatHistory } from "@in/server/realtime/handlers/messages.getChatHistory"
+import { getChatTranscript } from "@in/server/realtime/handlers/messages.getChatTranscript"
 import { getMessages } from "@in/server/realtime/handlers/messages.getMessages"
 import { getThreadReferences } from "@in/server/realtime/handlers/messages.getThreadReferences"
 import { getThreadSubthreads } from "@in/server/realtime/handlers/messages.getThreadSubthreads"
@@ -156,6 +157,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await getChatHistory(call.input.getChatHistory, handlerContext)
       return { oneofKind: "getChatHistory", getChatHistory: result }
+    }
+
+    case Method.GET_CHAT_TRANSCRIPT: {
+      if (call.input.oneofKind !== "getChatTranscript") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await getChatTranscript(call.input.getChatTranscript, handlerContext)
+      return { oneofKind: "getChatTranscript", getChatTranscript: result }
     }
 
     case Method.GET_MESSAGES: {

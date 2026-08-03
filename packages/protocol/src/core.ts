@@ -2956,6 +2956,12 @@ export interface RpcCall {
          */
         getExternalProfilePhoto: GetExternalProfilePhotoInput;
     } | {
+        oneofKind: "getChatTranscript";
+        /**
+         * @generated from protobuf field: GetChatTranscriptInput getChatTranscript = 97;
+         */
+        getChatTranscript: GetChatTranscriptInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -3534,6 +3540,12 @@ export interface RpcResult {
          * @generated from protobuf field: GetExternalProfilePhotoResult getExternalProfilePhoto = 96;
          */
         getExternalProfilePhoto: GetExternalProfilePhotoResult;
+    } | {
+        oneofKind: "getChatTranscript";
+        /**
+         * @generated from protobuf field: GetChatTranscriptResult getChatTranscript = 97;
+         */
+        getChatTranscript: GetChatTranscriptResult;
     } | {
         oneofKind: undefined;
     };
@@ -6244,6 +6256,138 @@ export interface GetChatHistoryResult {
      * @generated from protobuf field: repeated Message messages = 1;
      */
     messages: Message[];
+}
+/**
+ * @generated from protobuf message GetChatTranscriptInput
+ */
+export interface GetChatTranscriptInput {
+    /**
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+    /**
+     * @generated from protobuf field: optional GetChatTranscriptInput.Mode mode = 2;
+     */
+    mode?: GetChatTranscriptInput_Mode;
+    /**
+     * @generated from protobuf field: optional GetChatTranscriptInput.Length length = 3;
+     */
+    length?: GetChatTranscriptInput_Length;
+    /**
+     * @generated from protobuf field: optional GetChatTranscriptInput.Media media = 4;
+     */
+    media?: GetChatTranscriptInput_Media;
+    /**
+     * Exclusive upper boundary. Omit to start from the latest message.
+     *
+     * @generated from protobuf field: optional int64 before_message_id = 5;
+     */
+    beforeMessageId?: bigint;
+    /**
+     * Requested message ceiling. Defaults to 500 and is capped at 500 in V1.
+     *
+     * @generated from protobuf field: optional int32 limit = 6;
+     */
+    limit?: number;
+}
+/**
+ * @generated from protobuf enum GetChatTranscriptInput.Mode
+ */
+export enum GetChatTranscriptInput_Mode {
+    /**
+     * @generated from protobuf enum value: MODE_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: MODE_HUMAN_READABLE = 1;
+     */
+    HUMAN_READABLE = 1
+}
+/**
+ * @generated from protobuf enum GetChatTranscriptInput.Length
+ */
+export enum GetChatTranscriptInput_Length {
+    /**
+     * @generated from protobuf enum value: LENGTH_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: LENGTH_CONCISE = 1;
+     */
+    CONCISE = 1
+}
+/**
+ * @generated from protobuf enum GetChatTranscriptInput.Media
+ */
+export enum GetChatTranscriptInput_Media {
+    /**
+     * @generated from protobuf enum value: MEDIA_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: MEDIA_INCLUDED = 1;
+     */
+    INCLUDED = 1,
+    /**
+     * @generated from protobuf enum value: MEDIA_EXCLUDED = 2;
+     */
+    EXCLUDED = 2
+}
+/**
+ * @generated from protobuf message GetChatTranscriptResult
+ */
+export interface GetChatTranscriptResult {
+    /**
+     * @generated from protobuf field: string markdown = 1;
+     */
+    markdown: string;
+    /**
+     * @generated from protobuf field: int32 message_count = 2;
+     */
+    messageCount: number;
+    /**
+     * @generated from protobuf field: optional int64 from_message_id = 3;
+     */
+    fromMessageId?: bigint;
+    /**
+     * @generated from protobuf field: optional int64 to_message_id = 4;
+     */
+    toMessageId?: bigint;
+    /**
+     * @generated from protobuf field: bool has_more = 5;
+     */
+    hasMore: boolean;
+    /**
+     * @generated from protobuf field: GetChatTranscriptResult.StopReason stop_reason = 6;
+     */
+    stopReason: GetChatTranscriptResult_StopReason;
+    /**
+     * Earliest expiry of any signed media URL in markdown, in Unix seconds.
+     *
+     * @generated from protobuf field: optional int64 expires_at = 7;
+     */
+    expiresAt?: bigint;
+}
+/**
+ * @generated from protobuf enum GetChatTranscriptResult.StopReason
+ */
+export enum GetChatTranscriptResult_StopReason {
+    /**
+     * @generated from protobuf enum value: STOP_REASON_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: STOP_REASON_COMPLETE = 1;
+     */
+    COMPLETE = 1,
+    /**
+     * @generated from protobuf enum value: STOP_REASON_MESSAGE_LIMIT = 2;
+     */
+    MESSAGE_LIMIT = 2,
+    /**
+     * @generated from protobuf enum value: STOP_REASON_OUTPUT_LIMIT = 3;
+     */
+    OUTPUT_LIMIT = 3
 }
 /**
  * @generated from protobuf message GetMessagesInput
@@ -9157,7 +9301,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: GET_EXTERNAL_PROFILE_PHOTO = 95;
      */
-    GET_EXTERNAL_PROFILE_PHOTO = 95
+    GET_EXTERNAL_PROFILE_PHOTO = 95,
+    /**
+     * @generated from protobuf enum value: GET_CHAT_TRANSCRIPT = 96;
+     */
+    GET_CHAT_TRANSCRIPT = 96
 }
 /**
  * @generated from protobuf enum GridConnectionUnavailableReason
@@ -14626,7 +14774,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 93, name: "getGridHome", kind: "message", oneof: "input", T: () => GetGridHomeInput },
             { no: 94, name: "createCliSession", kind: "message", oneof: "input", T: () => CreateCliSessionInput },
             { no: 95, name: "setProfilePhoto", kind: "message", oneof: "input", T: () => SetProfilePhotoInput },
-            { no: 96, name: "getExternalProfilePhoto", kind: "message", oneof: "input", T: () => GetExternalProfilePhotoInput }
+            { no: 96, name: "getExternalProfilePhoto", kind: "message", oneof: "input", T: () => GetExternalProfilePhotoInput },
+            { no: 97, name: "getChatTranscript", kind: "message", oneof: "input", T: () => GetChatTranscriptInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -15209,6 +15358,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getExternalProfilePhoto: GetExternalProfilePhotoInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getExternalProfilePhoto)
                     };
                     break;
+                case /* GetChatTranscriptInput getChatTranscript */ 97:
+                    message.input = {
+                        oneofKind: "getChatTranscript",
+                        getChatTranscript: GetChatTranscriptInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getChatTranscript)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -15506,6 +15661,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetExternalProfilePhotoInput getExternalProfilePhoto = 96; */
         if (message.input.oneofKind === "getExternalProfilePhoto")
             GetExternalProfilePhotoInput.internalBinaryWrite(message.input.getExternalProfilePhoto, writer.tag(96, WireType.LengthDelimited).fork(), options).join();
+        /* GetChatTranscriptInput getChatTranscript = 97; */
+        if (message.input.oneofKind === "getChatTranscript")
+            GetChatTranscriptInput.internalBinaryWrite(message.input.getChatTranscript, writer.tag(97, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -15614,7 +15772,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 93, name: "getGridHome", kind: "message", oneof: "result", T: () => GetGridHomeResult },
             { no: 94, name: "createCliSession", kind: "message", oneof: "result", T: () => CreateCliSessionResult },
             { no: 95, name: "setProfilePhoto", kind: "message", oneof: "result", T: () => SetProfilePhotoResult },
-            { no: 96, name: "getExternalProfilePhoto", kind: "message", oneof: "result", T: () => GetExternalProfilePhotoResult }
+            { no: 96, name: "getExternalProfilePhoto", kind: "message", oneof: "result", T: () => GetExternalProfilePhotoResult },
+            { no: 97, name: "getChatTranscript", kind: "message", oneof: "result", T: () => GetChatTranscriptResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -16197,6 +16356,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getExternalProfilePhoto: GetExternalProfilePhotoResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getExternalProfilePhoto)
                     };
                     break;
+                case /* GetChatTranscriptResult getChatTranscript */ 97:
+                    message.result = {
+                        oneofKind: "getChatTranscript",
+                        getChatTranscript: GetChatTranscriptResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getChatTranscript)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -16494,6 +16659,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetExternalProfilePhotoResult getExternalProfilePhoto = 96; */
         if (message.result.oneofKind === "getExternalProfilePhoto")
             GetExternalProfilePhotoResult.internalBinaryWrite(message.result.getExternalProfilePhoto, writer.tag(96, WireType.LengthDelimited).fork(), options).join();
+        /* GetChatTranscriptResult getChatTranscript = 97; */
+        if (message.result.oneofKind === "getChatTranscript")
+            GetChatTranscriptResult.internalBinaryWrite(message.result.getChatTranscript, writer.tag(97, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -25581,6 +25749,179 @@ class GetChatHistoryResult$Type extends MessageType<GetChatHistoryResult> {
  * @generated MessageType for protobuf message GetChatHistoryResult
  */
 export const GetChatHistoryResult = new GetChatHistoryResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetChatTranscriptInput$Type extends MessageType<GetChatTranscriptInput> {
+    constructor() {
+        super("GetChatTranscriptInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "mode", kind: "enum", opt: true, T: () => ["GetChatTranscriptInput.Mode", GetChatTranscriptInput_Mode, "MODE_"] },
+            { no: 3, name: "length", kind: "enum", opt: true, T: () => ["GetChatTranscriptInput.Length", GetChatTranscriptInput_Length, "LENGTH_"] },
+            { no: 4, name: "media", kind: "enum", opt: true, T: () => ["GetChatTranscriptInput.Media", GetChatTranscriptInput_Media, "MEDIA_"] },
+            { no: 5, name: "before_message_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 6, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetChatTranscriptInput>): GetChatTranscriptInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<GetChatTranscriptInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetChatTranscriptInput): GetChatTranscriptInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* optional GetChatTranscriptInput.Mode mode */ 2:
+                    message.mode = reader.int32();
+                    break;
+                case /* optional GetChatTranscriptInput.Length length */ 3:
+                    message.length = reader.int32();
+                    break;
+                case /* optional GetChatTranscriptInput.Media media */ 4:
+                    message.media = reader.int32();
+                    break;
+                case /* optional int64 before_message_id */ 5:
+                    message.beforeMessageId = reader.int64().toBigInt();
+                    break;
+                case /* optional int32 limit */ 6:
+                    message.limit = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetChatTranscriptInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional GetChatTranscriptInput.Mode mode = 2; */
+        if (message.mode !== undefined)
+            writer.tag(2, WireType.Varint).int32(message.mode);
+        /* optional GetChatTranscriptInput.Length length = 3; */
+        if (message.length !== undefined)
+            writer.tag(3, WireType.Varint).int32(message.length);
+        /* optional GetChatTranscriptInput.Media media = 4; */
+        if (message.media !== undefined)
+            writer.tag(4, WireType.Varint).int32(message.media);
+        /* optional int64 before_message_id = 5; */
+        if (message.beforeMessageId !== undefined)
+            writer.tag(5, WireType.Varint).int64(message.beforeMessageId);
+        /* optional int32 limit = 6; */
+        if (message.limit !== undefined)
+            writer.tag(6, WireType.Varint).int32(message.limit);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetChatTranscriptInput
+ */
+export const GetChatTranscriptInput = new GetChatTranscriptInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetChatTranscriptResult$Type extends MessageType<GetChatTranscriptResult> {
+    constructor() {
+        super("GetChatTranscriptResult", [
+            { no: 1, name: "markdown", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "message_count", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 3, name: "from_message_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "to_message_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "has_more", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 6, name: "stop_reason", kind: "enum", T: () => ["GetChatTranscriptResult.StopReason", GetChatTranscriptResult_StopReason, "STOP_REASON_"] },
+            { no: 7, name: "expires_at", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetChatTranscriptResult>): GetChatTranscriptResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.markdown = "";
+        message.messageCount = 0;
+        message.hasMore = false;
+        message.stopReason = 0;
+        if (value !== undefined)
+            reflectionMergePartial<GetChatTranscriptResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetChatTranscriptResult): GetChatTranscriptResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string markdown */ 1:
+                    message.markdown = reader.string();
+                    break;
+                case /* int32 message_count */ 2:
+                    message.messageCount = reader.int32();
+                    break;
+                case /* optional int64 from_message_id */ 3:
+                    message.fromMessageId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 to_message_id */ 4:
+                    message.toMessageId = reader.int64().toBigInt();
+                    break;
+                case /* bool has_more */ 5:
+                    message.hasMore = reader.bool();
+                    break;
+                case /* GetChatTranscriptResult.StopReason stop_reason */ 6:
+                    message.stopReason = reader.int32();
+                    break;
+                case /* optional int64 expires_at */ 7:
+                    message.expiresAt = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetChatTranscriptResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string markdown = 1; */
+        if (message.markdown !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.markdown);
+        /* int32 message_count = 2; */
+        if (message.messageCount !== 0)
+            writer.tag(2, WireType.Varint).int32(message.messageCount);
+        /* optional int64 from_message_id = 3; */
+        if (message.fromMessageId !== undefined)
+            writer.tag(3, WireType.Varint).int64(message.fromMessageId);
+        /* optional int64 to_message_id = 4; */
+        if (message.toMessageId !== undefined)
+            writer.tag(4, WireType.Varint).int64(message.toMessageId);
+        /* bool has_more = 5; */
+        if (message.hasMore !== false)
+            writer.tag(5, WireType.Varint).bool(message.hasMore);
+        /* GetChatTranscriptResult.StopReason stop_reason = 6; */
+        if (message.stopReason !== 0)
+            writer.tag(6, WireType.Varint).int32(message.stopReason);
+        /* optional int64 expires_at = 7; */
+        if (message.expiresAt !== undefined)
+            writer.tag(7, WireType.Varint).int64(message.expiresAt);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetChatTranscriptResult
+ */
+export const GetChatTranscriptResult = new GetChatTranscriptResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class GetMessagesInput$Type extends MessageType<GetMessagesInput> {
     constructor() {
