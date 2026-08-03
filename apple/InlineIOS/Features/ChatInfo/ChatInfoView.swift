@@ -9,6 +9,7 @@ import SwiftUI
 
 struct ChatInfoView: View {
   let chatItem: SpaceChatItem
+  let isPresentedModally: Bool
   @StateObject var participantsWithMembersViewModel: ChatParticipantsWithMembersViewModel
   @EnvironmentStateObject var documentsViewModel: ChatDocumentsViewModel
   @EnvironmentStateObject var linksViewModel: ChatLinksViewModel
@@ -28,7 +29,6 @@ struct ChatInfoView: View {
   @Environment(Router.self) var router
   @Environment(\.dismiss) private var dismiss
   @State var selectedTab: ChatInfoTab
-  @Namespace var tabSelection
   @State  var showMakePublicAlert = false
   @State  var showMakePrivateSheet = false
   @State  var showClearHistorySheet = false
@@ -45,14 +45,6 @@ struct ChatInfoView: View {
   @State  var notificationSelection: DialogNotificationSettingSelection
 
   @Environment(\.appDatabase) var database
-
-  enum ChatInfoTab: String, CaseIterable {
-    case info = "Info"
-    case media = "Media"
-    case voice = "Voice"
-    case files = "Files"
-    case links = "Links"
-  }
 
   var availableTabs: [ChatInfoTab] {
     isDM ? [.media, .voice, .files, .links] : [.info, .media, .voice, .files, .links]
@@ -152,13 +144,17 @@ struct ChatInfoView: View {
   }
 
   var isPresentedAsSheet: Bool {
+    if isPresentedModally {
+      return true
+    }
     guard let presentedSheet = router.presentedSheet else { return false }
     guard case let .chatInfo(presentedChatItem) = presentedSheet else { return false }
     return presentedChatItem.id == chatItem.id
   }
 
-  init(chatItem: SpaceChatItem) {
+  init(chatItem: SpaceChatItem, isPresentedModally: Bool = false) {
     self.chatItem = chatItem
+    self.isPresentedModally = isPresentedModally
     _participantsWithMembersViewModel = StateObject(wrappedValue: ChatParticipantsWithMembersViewModel(
       db: AppDatabase.shared,
       chatId: chatItem.chat?.id ?? 0
@@ -226,38 +222,9 @@ struct ChatInfoView: View {
         LazyVStack(spacing: 18) {
           chatInfoHeader
 
-          // Tab Bar
-          HStack(spacing: 2) {
-            Spacer()
-
-            ForEach(availableTabs, id: \.self) { tab in
-              Button {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                withAnimation(.smoothSnappy) {
-                  selectedTab = tab
-                }
-              } label: {
-                Text(tab.rawValue)
-                  .font(.callout)
-                  .foregroundColor(selectedTab == tab ? .primary : .secondary)
-                  .padding(.horizontal, 16)
-                  .padding(.vertical, 8)
-                  .background {
-                    if selectedTab == tab {
-                      Capsule()
-                        .fill(.thinMaterial)
-                        .matchedGeometryEffect(id: "tab_background", in: tabSelection)
-                    }
-                  }
-              }
-              .buttonStyle(.plain)
-            }
+          ChatInfoTabBar(tabs: availableTabs, selection: $selectedTab)
+            .padding(.vertical, 8)
             .padding(.bottom, 12)
-
-            Spacer()
-          }
-          .padding(.horizontal, 16)
-          .padding(.vertical, 8)
         }
         // }
         // Tab Content

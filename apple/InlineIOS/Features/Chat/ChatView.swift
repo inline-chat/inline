@@ -23,6 +23,8 @@ struct ChatView: View {
   @State private var botChatSettingsCoordinator: BotChatSettingsCoordinator
   @State private var isBotChatSettingsPresented = false
   @State private var translationPlacement: ChatTranslationPlacement
+  @State private var presentedChatInfo: SpaceChatItem?
+  @Namespace private var chatInfoTransition
 
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
 
@@ -63,6 +65,10 @@ struct ChatView: View {
   private enum ChatTranslationPlacement {
     case toolbar
     case moreMenu
+  }
+
+  private enum TransitionID: Hashable {
+    case chatInfo
   }
 
   init(
@@ -109,7 +115,7 @@ struct ChatView: View {
           includesTranslationAction: translationPlacement == .moreMenu
         ) {
           guard let chatItem = fullChatViewModel.chatItem else { return }
-          router.presentSheet(.chatInfo(chatItem: chatItem))
+          presentedChatInfo = chatItem
         }
       }
 
@@ -129,8 +135,10 @@ struct ChatView: View {
           ChatToolbarLeadingView(
             peerId: peerId,
             contextSpaceId: contextSpaceId,
-            isChatHeaderPressed: $isChatHeaderPressed
+            isChatHeaderPressed: $isChatHeaderPressed,
+            onOpenChatInfo: { presentedChatInfo = $0 }
           )
+          .matchedTransitionSource(id: TransitionID.chatInfo, in: chatInfoTransition)
         }
         .sharedBackgroundVisibility(.hidden)
       } else {
@@ -138,8 +146,10 @@ struct ChatView: View {
           ChatToolbarLeadingView(
             peerId: peerId,
             contextSpaceId: contextSpaceId,
-            isChatHeaderPressed: $isChatHeaderPressed
+            isChatHeaderPressed: $isChatHeaderPressed,
+            onOpenChatInfo: { presentedChatInfo = $0 }
           )
+          .matchedTransitionSource(id: TransitionID.chatInfo, in: chatInfoTransition)
         }
       }
     }
@@ -157,6 +167,14 @@ struct ChatView: View {
     }
     .sheet(isPresented: $isBotChatSettingsPresented) {
       BotChatSettingsSheet(coordinator: botChatSettingsCoordinator)
+    }
+    .sheet(item: $presentedChatInfo) { chatItem in
+      NavigationStack {
+        ChatInfoView(chatItem: chatItem, isPresentedModally: true)
+      }
+      .navigationTransition(.zoom(sourceID: TransitionID.chatInfo, in: chatInfoTransition))
+      .presentationDetents([.large])
+      .presentationDragIndicator(.hidden)
     }
     .onAppear {
       isVisible = true

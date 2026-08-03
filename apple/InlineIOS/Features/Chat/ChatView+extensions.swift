@@ -6,6 +6,7 @@ import SwiftUI
 struct ChatToolbarLeadingView: View {
   let peerId: Peer
   let contextSpaceId: Int64?
+  let onOpenChatInfo: (SpaceChatItem) -> Void
   @Binding private var isChatHeaderPressed: Bool
 
   @EnvironmentObject private var fullChatViewModel: FullChatViewModel
@@ -19,10 +20,12 @@ struct ChatToolbarLeadingView: View {
     peerId: Peer,
     contextSpaceId: Int64? = nil,
     isChatHeaderPressed: Binding<Bool>,
+    onOpenChatInfo: @escaping (SpaceChatItem) -> Void,
     composeActions: ComposeActions = .shared
   ) {
     self.peerId = peerId
     self.contextSpaceId = contextSpaceId
+    self.onOpenChatInfo = onOpenChatInfo
     _isChatHeaderPressed = isChatHeaderPressed
     _composeActions = ObservedObject(initialValue: composeActions)
   }
@@ -270,7 +273,7 @@ struct ChatToolbarLeadingView: View {
 
   private func openChatInfo() {
     if let chatItem = fullChatViewModel.chatItem {
-      router.presentSheet(.chatInfo(chatItem: chatItem))
+      onOpenChatInfo(chatItem)
     }
   }
 }
