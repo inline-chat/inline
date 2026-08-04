@@ -15,7 +15,7 @@ categories = ["development-tools"]
 [dependencies]
 base64 = "0.22.1"
 futures-util.workspace = true
-inline-agent-bridge = { version = "0.7.1", path = "../agent-bridge" }
+inline-agent-bridge = { version = "0.7.2", path = "../agent-bridge" }
 libc = "0.2.172"
 log.workspace = true
 reqwest.workspace = true
