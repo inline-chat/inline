@@ -118,6 +118,25 @@ struct UrlPreviewDisplayTests {
     #expect(display.body?.contains("\nThird line") == true)
   }
 
+  @Test("uses headline hierarchy for X articles")
+  func usesHeadlineHierarchyForXArticles() {
+    let preview = makePreview(
+      url: "https://x.com/mitchellh/status/2041566958681014418",
+      title: "The Building Block Economy",
+      description: "The most effective way to build software is through building blocks.",
+      provider: "x",
+      author: "Mitchell Hashimoto",
+      mediaType: "article"
+    )
+    let display = preview.largeDisplayContent(maxDescriptionLength: 420)
+
+    #expect(display.style == .standard)
+    #expect(display.title == "The Building Block Economy")
+    #expect(display.subtitle == "The most effective way to build software is through building blocks.")
+    #expect(display.authorName == "Mitchell Hashimoto")
+    #expect(display.authorSubtitle == "X")
+  }
+
   @Test("moves large standard source into author block")
   func movesLargeStandardSourceIntoAuthorBlock() {
     let preview = makePreview(

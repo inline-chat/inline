@@ -27,6 +27,11 @@ type XMediaPreview = {
   duration?: number
 }
 
+type XArticlePreview = {
+  title?: string
+  description?: string
+}
+
 export const xProvider: UrlPreviewProvider = {
   name: "x",
   canHandle: isXStatusUrl,
@@ -65,18 +70,16 @@ async function fetchXPreview(
   const user = objectValue(data["user"])
   const author = cleanField(asString(user?.["name"]), options.maxSiteNameLength ?? DEFAULT_SITE_NAME_LENGTH)
   const screenName = cleanField(asString(user?.["screen_name"]), 80)
-  const rawTweetText = tweetTextWithoutAttachedMediaUrls(data)
-  const resolvedTweetText = (await fetchXNoteTweetText(id, data, rawTweetText, options)) ?? rawTweetText
-  const tweetText = cleanMultilineField(
-    resolvedTweetText,
-    options.maxDescriptionLength ?? DEFAULT_DESCRIPTION_LENGTH,
-  )
+  const article = xArticle(data, options)
+  const tweetText = article ? undefined : await resolvedTweetText(id, data, options)
   const authorPhotoUrl = normalizeXProfileImageUrl(asString(user?.["profile_image_url_https"]))
   const media = tweetMedia(data)
-  const title = cleanField(tweetTitle(author, screenName), options.maxTitleLength ?? DEFAULT_TITLE_LENGTH)
-  const layout = media.media ? previewLayout(media.media) : textCardLayout("x", Boolean(tweetText))
+  const title =
+    article?.title ?? cleanField(tweetTitle(author, screenName), options.maxTitleLength ?? DEFAULT_TITLE_LENGTH)
+  const description = article?.description ?? tweetText
+  const layout = media.media ? previewLayout(media.media) : textCardLayout("x", article != null || Boolean(tweetText))
 
-  if (!title && !tweetText && !authorPhotoUrl && !media.imageUrl) {
+  if (!title && !description && !authorPhotoUrl && !media.imageUrl) {
     return null
   }
 
@@ -85,16 +88,45 @@ async function fetchXPreview(
     finalUrl: url,
     siteName: "X",
     title: title ?? undefined,
-    description: tweetText ?? undefined,
+    description: description ?? undefined,
     imageUrl: media.imageUrl,
     duration: media.duration,
-    mediaType: media.mediaType,
+    mediaType: article ? "article" : media.mediaType,
     provider: "x",
     author: author ?? undefined,
     authorPhotoUrl,
     media: media.media,
     layout,
   }
+}
+
+async function resolvedTweetText(
+  id: string,
+  data: Record<string, unknown>,
+  options: FetchUrlPreviewOptions,
+): Promise<string | undefined> {
+  const rawTweetText = tweetTextWithoutAttachedMediaUrls(data)
+  const text = (await fetchXNoteTweetText(id, data, rawTweetText, options)) ?? rawTweetText
+  return cleanMultilineField(text, options.maxDescriptionLength ?? DEFAULT_DESCRIPTION_LENGTH) ?? undefined
+}
+
+function xArticle(data: Record<string, unknown>, options: FetchUrlPreviewOptions): XArticlePreview | null {
+  const article = objectValue(data["article"])
+  if (!article) {
+    return null
+  }
+
+  const title = cleanField(asString(article["title"]), options.maxTitleLength ?? DEFAULT_TITLE_LENGTH)
+  const description = cleanMultilineField(
+    asString(article["preview_text"]),
+    options.maxDescriptionLength ?? DEFAULT_DESCRIPTION_LENGTH,
+  )
+  return title || description
+    ? {
+        title: title ?? undefined,
+        description: description ?? undefined,
+      }
+    : null
 }
 
 async function fetchXEndpoint(endpoint: URL, options: FetchUrlPreviewOptions): Promise<Response | null> {

@@ -129,6 +129,8 @@ const maxDescriptionLength = 420
 const previousMaxDescriptionLength = 220
 // Existing X note-tweet cache rows can contain only the 280-character compatibility body without an ellipsis.
 const xNoteTweetFallbackFetchedAt = new Date("2026-07-09T13:50:00.000Z")
+// Existing X article rows can contain only the shortened article URL instead of the article metadata.
+const xArticleFallbackFetchedAt = new Date("2026-08-04T19:30:00.000Z")
 // Retry older image-less rows once so they can use fallback metadata added by this fix.
 const previewImageFallbackFetchedAt = new Date("2026-07-13T11:00:00.000Z")
 const xCompatibilityDescriptionMinLength = 260
@@ -324,7 +326,8 @@ function shouldRefetchCachedPreview(cache: DbUrlPreviewCache, url: string): bool
     return (
       isStaleXPreviewCache(cache) ||
       cachedPrimaryImageIsAuthorImage(cache) ||
-      cachedDescriptionLooksTruncated(cache)
+      cachedDescriptionLooksTruncated(cache) ||
+      cachedDescriptionIsXArticlePlaceholder(cache)
     )
   }
 
@@ -398,6 +401,15 @@ function cachedDescriptionLooksTruncated(cache: DbUrlPreviewCache): boolean {
       description.length >= xCompatibilityDescriptionMinLength &&
       description.length <= xCompatibilityDescriptionMaxLength)
   )
+}
+
+function cachedDescriptionIsXArticlePlaceholder(cache: DbUrlPreviewCache): boolean {
+  if (cache.mediaType === "article" || cache.fetchedAt >= xArticleFallbackFetchedAt) {
+    return false
+  }
+
+  const description = decryptCacheValue(cache.description, cache.descriptionIv, cache.descriptionTag)?.trim()
+  return description != null && /^https:\/\/t\.co\/[a-z0-9]+$/i.test(description)
 }
 
 function shouldKeepCachedAuthorImageFallback(

@@ -529,6 +529,56 @@ describe("url-preview", () => {
     expect(preview?.media).toBeUndefined()
   })
 
+  it("extracts X article headlines and preview text", async () => {
+    const payload = {
+      __typename: "Tweet",
+      text: "https://t.co/RZlp39Wkrf",
+      article: {
+        id: "QXJ0aWNsZUVudGl0eToyMDQxNTQ4Nzc1MzI4ODI5NDQw",
+        rest_id: "2041548775328829440",
+        title: "The Building Block Economy",
+        preview_text:
+          "The most effective way to build software and get massive adoption is no longer high quality mainline apps but via building blocks.",
+      },
+      user: {
+        name: "Mitchell Hashimoto",
+        screen_name: "mitchellh",
+        profile_image_url_https: "https://pbs.twimg.com/profile_images/123/avatar_normal.jpg",
+      },
+      entities: {
+        urls: [
+          {
+            url: "https://t.co/RZlp39Wkrf",
+            expanded_url: "http://x.com/i/article/2041548775328829440",
+          },
+        ],
+      },
+    }
+    const fetchImpl: NonNullable<FetchUrlPreviewOptions["fetchImpl"]> = async () => Response.json(payload)
+
+    const preview = await fetchUrlPreview("https://x.com/mitchellh/status/2041566958681014418", {
+      fetchImpl,
+      lookup: publicLookup,
+    })
+
+    expect(preview).toMatchObject({
+      provider: "x",
+      siteName: "X",
+      title: "The Building Block Economy",
+      description:
+        "The most effective way to build software and get massive adoption is no longer high quality mainline apps but via building blocks.",
+      mediaType: "article",
+      author: "Mitchell Hashimoto",
+      authorPhotoUrl: "https://pbs.twimg.com/profile_images/123/avatar_200x200.jpg",
+      layout: {
+        hasLargeMedia: true,
+        showLargeMedia: true,
+      },
+    })
+    expect(preview?.description).not.toContain("t.co")
+    expect(preview?.media).toBeUndefined()
+  })
+
   it("retains normal X tweet text beyond the old compact-card storage limit", async () => {
     const fullText =
       "A Brown professor gave his students a take-home midterm exam. After suspecting many cheated using AI, he made the final in-person. The orange dots are the midterm scores and the gray dots are the final scores. Looks like all but 3 cheated on the midterm."

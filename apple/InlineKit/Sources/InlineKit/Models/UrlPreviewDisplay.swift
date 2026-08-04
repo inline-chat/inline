@@ -56,7 +56,7 @@ public extension UrlPreview {
   }
 
   var largePreviewStyle: UrlPreviewLargeStyle {
-    largePreviewProvider == .x ? .x : .standard
+    largePreviewProvider == .x && mediaType?.isSameDisplayText(as: "article") != true ? .x : .standard
   }
 
   func largeDisplayContent(maxDescriptionLength: Int) -> UrlPreviewLargeDisplayContent {

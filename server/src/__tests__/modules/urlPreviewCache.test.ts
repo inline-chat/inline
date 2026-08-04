@@ -631,6 +631,100 @@ describe("URL preview cache", () => {
     expect(attachment?.linkEmbed?.description).toBe(fullText)
   })
 
+  it("refetches cached X article placeholders", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers(
+      "X Article Cache",
+      ["x-article-cache@example.com"],
+    )
+    const user = users[0]
+    if (!space || !user) {
+      throw new Error("Failed to create X article cache test fixtures")
+    }
+
+    const chat = await testUtils.createChat(space.id, "Preview Thread", "thread", true, user.id)
+    if (!chat) {
+      throw new Error("Failed to create X article cache test chat")
+    }
+
+    const url = "https://x.com/mitchellh/status/2041566958681014418"
+    const articleTitle = "The Building Block Economy"
+    const articleDescription =
+      "The most effective way to build software and get massive adoption is through building blocks."
+    const message = await testUtils.createTestMessage({
+      chatId: chat.id,
+      fromId: user.id,
+      messageId: 1,
+      text: url,
+    })
+
+    const cache = await upsertPreviewCache({
+      now: new Date("2026-08-04T19:15:00.000Z"),
+      photoId: null,
+      metadata: {
+        url,
+        finalUrl: url,
+        siteName: "X",
+        title: "Mitchell Hashimoto (@mitchellh) on X",
+        description: "https://t.co/RZlp39Wkrf",
+        provider: "x",
+        author: "Mitchell Hashimoto",
+      },
+    })
+    await db
+      .update(schema.urlPreviewCache)
+      .set({ expiresAt: new Date("2999-01-01T00:00:00.000Z") })
+      .where(eq(schema.urlPreviewCache.id, cache.id))
+
+    const payload = {
+      __typename: "Tweet",
+      text: "https://t.co/RZlp39Wkrf",
+      article: {
+        id: "QXJ0aWNsZUVudGl0eToyMDQxNTQ4Nzc1MzI4ODI5NDQw",
+        rest_id: "2041548775328829440",
+        title: articleTitle,
+        preview_text: articleDescription,
+      },
+      user: {
+        name: "Mitchell Hashimoto",
+        screen_name: "mitchellh",
+      },
+      entities: {
+        urls: [
+          {
+            url: "https://t.co/RZlp39Wkrf",
+            expanded_url: "http://x.com/i/article/2041548775328829440",
+          },
+        ],
+      },
+    }
+    const fetchedUrls: string[] = []
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      fetchedUrls.push(String(input))
+      return Response.json(payload)
+    }) as unknown as typeof fetch
+
+    try {
+      await processUrlPreview({
+        message,
+        previewUrl: url,
+        chatId: chat.id,
+        currentUserId: user.id,
+        inputPeer: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } },
+      })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+
+    expect(fetchedUrls).toHaveLength(1)
+    expect(fetchedUrls[0]).toContain("cdn.syndication.twimg.com/tweet-result")
+
+    const attachments = await db._query.messageAttachments.findMany({ with: { linkEmbed: true } })
+    const [attachment] = MessageModel.processAttachments(attachments)
+    expect(attachment?.linkEmbed?.title).toBe(articleTitle)
+    expect(attachment?.linkEmbed?.description).toBe(articleDescription)
+    expect(attachment?.linkEmbed?.mediaType).toBe("article")
+  })
+
   it("moves stale cached X profile images out of primary preview media", async () => {
     const { space, users } = await testUtils.createSpaceWithMembers(
       "X Stale Author Image Cache",
