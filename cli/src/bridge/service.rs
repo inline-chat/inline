@@ -905,7 +905,7 @@ fn read_log_tail(path: &Path) -> io::Result<String> {
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 fn cap_log_file(path: &Path) -> io::Result<()> {
     if path
         .metadata()
@@ -1331,12 +1331,12 @@ fn service_process_running(_account: &AccountBridgeConfig) -> bool {
     false
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 fn launchd_output_indicates_running(output: &str) -> bool {
     output.contains("\n\tstate = running\n")
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 fn launchd_output_indicates_disabled(output: &str, label: &str) -> bool {
     output.lines().any(|line| {
         line.split_once("=>").is_some_and(|(key, value)| {
