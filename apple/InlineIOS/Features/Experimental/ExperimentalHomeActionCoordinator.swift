@@ -6,6 +6,16 @@ import Observation
 final class ExperimentalHomeActionCoordinator {
   @ObservationIgnored
   private var pendingPeers = Set<Peer>()
+  @ObservationIgnored
+  private var deferredPinUpdates: [Peer: Bool] = [:]
+
+  func deferPinUpdate(peer: Peer, pinned: Bool) {
+    deferredPinUpdates[peer] = pinned
+  }
+
+  func takeDeferredPinUpdate(peer: Peer) -> Bool? {
+    deferredPinUpdates.removeValue(forKey: peer)
+  }
 
   @discardableResult
   func perform(

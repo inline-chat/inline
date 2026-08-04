@@ -2,6 +2,7 @@ import Auth
 import InlineKit
 import InlineUI
 import Logger
+import QuartzCore
 import RealtimeV2
 import SwiftUI
 import UIKit
@@ -122,6 +123,7 @@ private struct ExperimentalAuthedRootView: View {
   @EnvironmentStateObject private var compactSpaceList: CompactSpaceList
   @EnvironmentStateObject private var homeListStore: ExperimentalHomeListStore
   @EnvironmentObject private var notificationSettings: NotificationSettingsManager
+  @EnvironmentObject private var realtimeState: RealtimeState
 
   init() {
     _data = EnvironmentStateObject { env in
@@ -349,7 +351,8 @@ private struct ExperimentalAuthedRootView: View {
       },
       onCreateSpace: {
         router.push(.createSpace, for: router.selectedTab)
-      }
+      },
+      showsConnectionStateInTitle: false
     )
 
     picker
@@ -421,6 +424,14 @@ private struct ExperimentalAuthedRootView: View {
       }
       .sharedBackgroundVisibility(.hidden)
 
+      if let connectionState = realtimeState.displayedConnectionState {
+        ToolbarItem(placement: .topBarTrailing) {
+          connectionProgressIndicator(connectionState)
+        }
+
+        ToolbarSpacer(.fixed, placement: .topBarTrailing)
+      }
+
       ToolbarItem(placement: .topBarTrailing) {
         overflowMenu()
       }
@@ -438,6 +449,9 @@ private struct ExperimentalAuthedRootView: View {
 
       ToolbarItemGroup(placement: .topBarTrailing) {
         newChatButton(activeSpaceId: nav.activeSpaceId)
+        if let connectionState = realtimeState.displayedConnectionState {
+          connectionProgressIndicator(connectionState)
+        }
         overflowMenu()
       }
 
@@ -455,6 +469,16 @@ private struct ExperimentalAuthedRootView: View {
     }
     .disabled(isCreatingThread)
     .accessibilityLabel("New Thread")
+  }
+
+  private func connectionProgressIndicator(
+    _ connectionState: RealtimeConnectionState
+  ) -> some View {
+    ExperimentalConnectionToolbarSpinner(lineWidth: 2.25)
+      .frame(width: 18, height: 18)
+      .frame(width: 28, height: 28)
+      .fixedSize(horizontal: true, vertical: true)
+      .accessibilityLabel(connectionState.title)
   }
 
   private func accountButton() -> some View {
@@ -535,6 +559,110 @@ private struct ExperimentalAuthedRootView: View {
     } catch {
       Log.shared.error("Failed to reload spaces after clearing local data", error: error)
     }
+  }
+}
+
+private struct ExperimentalConnectionToolbarSpinner: UIViewRepresentable {
+  @Environment(\.colorScheme) private var colorScheme
+
+  let lineWidth: CGFloat
+
+  func makeUIView(context: Context) -> ExperimentalConnectionSpinnerView {
+    let view = ExperimentalConnectionSpinnerView()
+    view.isUserInteractionEnabled = false
+    return view
+  }
+
+  func updateUIView(_ view: ExperimentalConnectionSpinnerView, context: Context) {
+    view.update(
+      color: colorScheme == .dark ? .white : .black,
+      lineWidth: lineWidth
+    )
+  }
+}
+
+private final class ExperimentalConnectionSpinnerView: UIView {
+  private static let animationKey = "inline.connection-spinner.rotation"
+  private static let rotationDuration: CFTimeInterval = 0.65
+
+  private let trackLayer = CAShapeLayer()
+  private let arcLayer = CAShapeLayer()
+  private var lineWidth: CGFloat = 2.25
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+
+    backgroundColor = .clear
+    isOpaque = false
+
+    trackLayer.fillColor = UIColor.clear.cgColor
+    arcLayer.fillColor = UIColor.clear.cgColor
+    arcLayer.lineCap = .round
+    arcLayer.strokeStart = 0
+    arcLayer.strokeEnd = 0.72
+
+    layer.addSublayer(trackLayer)
+    layer.addSublayer(arcLayer)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+    startAnimatingIfNeeded()
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+
+    let layerBounds = bounds
+    let circleBounds = layerBounds.insetBy(dx: lineWidth / 2, dy: lineWidth / 2)
+    let circlePath = UIBezierPath(ovalIn: circleBounds).cgPath
+
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    trackLayer.frame = layerBounds
+    trackLayer.path = circlePath
+    arcLayer.frame = layerBounds
+    arcLayer.path = circlePath
+    CATransaction.commit()
+
+    startAnimatingIfNeeded()
+  }
+
+  func update(color: UIColor, lineWidth: CGFloat) {
+    let resolvedColor = color.resolvedColor(with: traitCollection)
+    self.lineWidth = lineWidth
+
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    trackLayer.strokeColor = resolvedColor.withAlphaComponent(0.14).cgColor
+    trackLayer.lineWidth = lineWidth
+    arcLayer.strokeColor = resolvedColor.cgColor
+    arcLayer.lineWidth = lineWidth
+    CATransaction.commit()
+
+    setNeedsLayout()
+    startAnimatingIfNeeded()
+  }
+
+  private func startAnimatingIfNeeded() {
+    guard window != nil else { return }
+    guard arcLayer.animation(forKey: Self.animationKey) == nil else { return }
+
+    let layerTime = arcLayer.convertTime(CACurrentMediaTime(), from: nil)
+    let animation = CABasicAnimation(keyPath: "transform.rotation.z")
+    animation.fromValue = 0
+    animation.toValue = CGFloat.pi * 2
+    animation.duration = Self.rotationDuration
+    animation.repeatCount = .infinity
+    // Align every recreated toolbar host to one continuous phase instead of restarting at zero.
+    animation.beginTime = layerTime - layerTime.truncatingRemainder(dividingBy: Self.rotationDuration)
+    animation.isRemovedOnCompletion = false
+    arcLayer.add(animation, forKey: Self.animationKey)
   }
 }
 

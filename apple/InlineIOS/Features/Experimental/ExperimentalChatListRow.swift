@@ -6,23 +6,27 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
   let item: ChatListItemSnapshot
   let layoutMode: ChatListLayoutMode
   let showsPinnedIndicator: Bool
+  let showsActivityTime: Bool
 
   @ScaledMetric(relativeTo: .body) private var metricScale: CGFloat = 1
 
   init(
     item: ChatListItemSnapshot,
     layoutMode: ChatListLayoutMode,
-    showsPinnedIndicator: Bool = true
+    showsPinnedIndicator: Bool = true,
+    showsActivityTime: Bool = false
   ) {
     self.item = item
     self.layoutMode = layoutMode
     self.showsPinnedIndicator = showsPinnedIndicator
+    self.showsActivityTime = showsActivityTime
   }
 
   static func == (lhs: Self, rhs: Self) -> Bool {
     lhs.item == rhs.item
       && lhs.layoutMode == rhs.layoutMode
       && lhs.showsPinnedIndicator == rhs.showsPinnedIndicator
+      && lhs.showsActivityTime == rhs.showsActivityTime
       && lhs.metricScale == rhs.metricScale
   }
 
@@ -68,6 +72,16 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
           .font(.caption2)
           .foregroundStyle(.tertiary)
           .accessibilityHidden(true)
+      }
+
+      if showsActivityTime,
+         layoutMode != .compact,
+         let timestampText = item.timestampText {
+        Text(timestampText)
+          .font(.system(size: 11))
+          .foregroundStyle(.tertiary)
+          .lineLimit(1)
+          .fixedSize(horizontal: true, vertical: false)
       }
 
       if layoutMode == .compact {
@@ -189,13 +203,15 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
         parts.append(resolvedPreviewText)
       }
     }
-    if let timestampText = item.timestampText {
+    if showsActivityTime,
+       layoutMode != .compact,
+       let timestampText = item.timestampText {
       parts.append(timestampText)
     }
     if item.isUnread {
       parts.append(item.unreadCount > 0 ? "\(item.unreadCount) unread" : "unread")
     }
-    if item.isPinned {
+    if item.isPinned, showsPinnedIndicator {
       parts.append("pinned")
     }
     return parts.joined(separator: ", ")

@@ -9,27 +9,13 @@ public enum ChatListDateFormatter {
     calendar: Calendar = .autoupdatingCurrent
   ) -> String? {
     guard let date, date != .distantPast else { return nil }
+    guard calendar.isDate(date, inSameDayAs: now) else { return nil }
 
     let age = now.timeIntervalSince(date)
     if age >= 0, age < 60 {
       return "just now"
     }
 
-    if calendar.isDate(date, inSameDayAs: now) {
-      return date.formatted(date: .omitted, time: .shortened)
-    }
-
-    let day = calendar.startOfDay(for: date)
-    let today = calendar.startOfDay(for: now)
-    let days = calendar.dateComponents([.day], from: day, to: today).day
-    if let days, days > 0, days < 7 {
-      return date.formatted(.dateTime.weekday(.abbreviated))
-    }
-
-    if calendar.component(.year, from: date) == calendar.component(.year, from: now) {
-      return date.formatted(.dateTime.month(.abbreviated).day())
-    }
-
-    return date.formatted(.dateTime.month(.abbreviated).day().year())
+    return date.formatted(date: .omitted, time: .shortened)
   }
 }

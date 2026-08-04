@@ -17,6 +17,7 @@ struct SpacePickerMenu: View {
   var onSelectHome: (() -> Void)?
   var onSelectSpace: ((Space) -> Void)?
   var onCreateSpace: (() -> Void)?
+  var showsConnectionStateInTitle = true
 
   @State private var localSelectedSpaceId: Int64?
   @State private var presentedSheet: PresentedSheet?
@@ -24,7 +25,9 @@ struct SpacePickerMenu: View {
   var body: some View {
     let selectedSpaceId = selectedSpaceId ?? $localSelectedSpaceId
     let activeSpace = selectedSpace(selectedSpaceId.wrappedValue)
-    let visibleConnectionState = connectionStateForToolbar(activeSpace: activeSpace)
+    let visibleConnectionState = showsConnectionStateInTitle
+      ? connectionStateForToolbar(activeSpace: activeSpace)
+      : nil
     let title = visibleConnectionState?.title
       ?? activeSpace?.displayName
       ?? (onSelectHome != nil ? "Home" : "Spaces")

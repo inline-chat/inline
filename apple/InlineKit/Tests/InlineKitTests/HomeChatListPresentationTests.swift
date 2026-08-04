@@ -84,6 +84,24 @@ struct HomeChatListPresentationTests {
     #expect(presentation.inboxUnreadCount == 2)
   }
 
+  @Test("Row timestamps only describe activity from today")
+  func todayOnlyRowTimestamps() {
+    let now = calendar.date(from: DateComponents(
+      year: 2026,
+      month: 8,
+      day: 4,
+      hour: 14,
+      minute: 30
+    ))!
+    let justNow = now.addingTimeInterval(-30)
+    let earlierToday = now.addingTimeInterval(-3_600)
+    let yesterday = now.addingTimeInterval(-86_400)
+
+    #expect(ChatListDateFormatter.rowTitle(for: justNow, now: now, calendar: calendar) == "just now")
+    #expect(ChatListDateFormatter.rowTitle(for: earlierToday, now: now, calendar: calendar) != nil)
+    #expect(ChatListDateFormatter.rowTitle(for: yesterday, now: now, calendar: calendar) == nil)
+  }
+
   @Test("Structural diff ignores content-only changes and detects membership moves")
   func structuralDiff() {
     let original = ChatListPresentation.make(from: [

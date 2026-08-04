@@ -293,7 +293,6 @@ struct ExperimentalHomeView: View {
   @EnvironmentObject private var data: DataManager
   @EnvironmentObject private var homeListStore: ExperimentalHomeListStore
   @EnvironmentObject private var notificationHandler: NotificationHandler
-  @EnvironmentObject private var realtimeState: RealtimeState
   @Environment(\.realtimeV2) private var realtimeV2
 
   @AppStorage(ExperimentalHomePreferenceKeys.chatItemRenderMode)
@@ -373,9 +372,6 @@ struct ExperimentalHomeView: View {
     }
     if let message = nav.homeRefreshErrorDescription {
       return .error(message)
-    }
-    if let connectionState = realtimeState.displayedConnectionState {
-      return .connection(connectionState.title)
     }
     return nil
   }
@@ -521,7 +517,6 @@ private enum ExperimentalChatListMode: Equatable {
 }
 
 private enum ExperimentalHomeStatus: Equatable {
-  case connection(String)
   case error(String)
 }
 
@@ -586,8 +581,18 @@ private struct ExperimentalChatListView: View {
         .listSectionSpacing(
           chatItemRenderMode == .noLastMessage ? .custom(0) : .default
         )
+        .animation(
+          mode == .inbox ? .snappy(duration: 0.25, extraBounce: 0) : nil,
+          value: animatedRowIDs
+        )
       }
     }
+  }
+
+  /// A focused animation trigger for Inbox membership and ordering changes.
+  /// Content updates keep the same identity sequence and do not animate.
+  private var animatedRowIDs: [Peer] {
+    mode == .inbox ? items.map(\.id) : []
   }
 
   private var isEmpty: Bool {
@@ -613,12 +618,9 @@ private struct ExperimentalChatListView: View {
     return EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16)
   }
 
-  private func rows(
-    for sectionItems: [ChatListItemSnapshot],
-    showsPinnedIndicator: Bool = true
-  ) -> some View {
+  private func rows(for sectionItems: [ChatListItemSnapshot]) -> some View {
     ForEach(sectionItems) { item in
-      swipeEnabledRow(for: item, showsPinnedIndicator: showsPinnedIndicator)
+      swipeEnabledRow(for: item)
         .listRowSeparator(.hidden, edges: .top)
         .listRowSeparator(
           chatItemRenderMode == .noLastMessage || item.id == sectionItems.last?.id
@@ -635,40 +637,44 @@ private struct ExperimentalChatListView: View {
     }
   }
 
-  private func baseRow(
-    for item: ChatListItemSnapshot,
-    showsPinnedIndicator: Bool
-  ) -> some View {
+  private func baseRow(for item: ChatListItemSnapshot) -> some View {
     NavigationLink(value: Destination.chat(peer: item.peer)) {
       ExperimentalChatListRow(
         item: item,
         layoutMode: chatItemRenderMode.chatListLayoutMode,
-        showsPinnedIndicator: showsPinnedIndicator
+        showsPinnedIndicator: mode == .inbox,
+        showsActivityTime: mode == .allChats
       )
       .equatable()
       .frame(maxWidth: .infinity, alignment: .leading)
       .contentShape(.rect)
     }
     .navigationLinkIndicatorVisibility(.hidden)
-    .simultaneousGesture(TapGesture().onEnded {
-      ExperimentalHomeNavigationPerformance.beginChatOpen(
-        peer: item.peer,
-        source: mode == .inbox ? "inbox" : mode == .allChats ? "all_chats" : "archived"
-      )
-    })
   }
 
-  private func swipeEnabledRow(
-    for item: ChatListItemSnapshot,
-    showsPinnedIndicator: Bool
-  ) -> some View {
-    baseRow(for: item, showsPinnedIndicator: showsPinnedIndicator)
+  @ViewBuilder
+  private func swipeEnabledRow(for item: ChatListItemSnapshot) -> some View {
+    let row = baseRow(for: item)
       .swipeActions(edge: .leading, allowsFullSwipe: mode == .allChats) {
         leadingSwipeActions(for: item)
       }
-      .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+
+    if #available(iOS 27.0, *) {
+      row.swipeActions(
+        edge: .trailing,
+        allowsFullSwipe: true,
+        content: {
+          trailingSwipeActions(for: item)
+        },
+        onPresentationChanged: { isPresented in
+          trailingSwipePresentationChanged(isPresented, peer: item.peer)
+        }
+      )
+    } else {
+      row.swipeActions(edge: .trailing, allowsFullSwipe: true) {
         trailingSwipeActions(for: item)
       }
+    }
   }
 
   @ViewBuilder
@@ -718,7 +724,7 @@ private struct ExperimentalChatListView: View {
   @ViewBuilder
   private func openButton(for item: ChatListItemSnapshot) -> some View {
     if !item.isOpen {
-      Button(role: .destructive) {
+      Button {
         Task {
           do {
             let didPerform = try await homeActions.perform(peer: item.peer) {
@@ -783,23 +789,7 @@ private struct ExperimentalChatListView: View {
 
   private func pinButton(for item: ChatListItemSnapshot) -> some View {
     Button {
-      Task {
-        do {
-          _ = try await homeActions.perform(peer: item.peer) {
-            _ = try await realtimeV2.send(.updateDialogOrder(
-              peerId: item.peer,
-              pinned: !item.isPinned
-            ))
-          }
-        } catch {
-          Log.shared.error("Failed to update pin state", error: error)
-          ToastManager.shared.showToast(
-            "Could not update pin",
-            type: .error,
-            systemImage: "exclamationmark.triangle.fill"
-          )
-        }
-      }
+      requestPinUpdate(peer: item.peer, pinned: !item.isPinned)
     } label: {
       Label(
         item.isPinned ? "Unpin" : "Pin",
@@ -807,6 +797,55 @@ private struct ExperimentalChatListView: View {
       )
     }
     .tint(.indigo)
+  }
+
+  private func requestPinUpdate(peer: Peer, pinned: Bool) {
+    if #available(iOS 27.0, *) {
+      // The active List cell remains owned by the native swipe presentation.
+      // Mutate only after its dismissal callback so SwiftUI can animate the
+      // same stable row from its source position to its destination.
+      homeActions.deferPinUpdate(peer: peer, pinned: pinned)
+    } else {
+      Task {
+        // Older SwiftUI has no swipe-dismissal callback. Keep the compatibility
+        // wait local to this structural action instead of delaying list updates.
+        try? await Task.sleep(for: .milliseconds(300))
+        guard !Task.isCancelled else { return }
+        performPinUpdate(peer: peer, pinned: pinned)
+      }
+    }
+  }
+
+  private func trailingSwipePresentationChanged(_ isPresented: Bool, peer: Peer) {
+    guard !isPresented,
+          let pinned = homeActions.takeDeferredPinUpdate(peer: peer)
+    else { return }
+
+    Task { @MainActor in
+      // Commit after SwiftUI has finished the dismissal transaction.
+      await Task.yield()
+      performPinUpdate(peer: peer, pinned: pinned)
+    }
+  }
+
+  private func performPinUpdate(peer: Peer, pinned: Bool) {
+    Task {
+      do {
+        _ = try await homeActions.perform(peer: peer) {
+          _ = try await realtimeV2.send(.updateDialogOrder(
+            peerId: peer,
+            pinned: pinned
+          ))
+        }
+      } catch {
+        Log.shared.error("Failed to update pin state", error: error)
+        ToastManager.shared.showToast(
+          "Could not update pin",
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
+        )
+      }
+    }
   }
 
   private func readUnreadButton(for item: ChatListItemSnapshot) -> some View {
@@ -879,10 +918,6 @@ private struct ExperimentalHomeStatusView: View {
   var body: some View {
     HStack(spacing: 8) {
       switch status {
-      case let .connection(message):
-        ProgressView()
-          .controlSize(.small)
-        Text(message)
       case let .error(message):
         Image(systemName: "exclamationmark.triangle.fill")
           .foregroundStyle(.orange)
