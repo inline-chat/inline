@@ -1,4 +1,6 @@
+#[cfg(any(target_os = "macos", test))]
 use rand::{RngCore, rngs::OsRng};
+#[cfg(any(target_os = "macos", test))]
 use serde::{Deserialize, Serialize};
 use std::io;
 
@@ -18,6 +20,7 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 #[cfg(target_os = "macos")]
 use tokio::net::{TcpListener, TcpStream};
 
+#[cfg(any(target_os = "macos", test))]
 const PROTOCOL_VERSION: u32 = 1;
 #[cfg(target_os = "macos")]
 const BUNDLE_ID: &str = "chat.inline.InlineMac";
@@ -30,11 +33,13 @@ const LOGIN_TIMEOUT: Duration = Duration::from_secs(120);
 #[cfg(target_os = "macos")]
 const MAX_CONNECTIONS: usize = 8;
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) enum LoginOutcome {
     Token { token: String, user_id: i64 },
     Cancelled(Option<String>),
 }
 
+#[cfg(any(target_os = "macos", test))]
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Request {
@@ -47,6 +52,7 @@ struct Request {
     detail: Option<String>,
 }
 
+#[cfg(any(target_os = "macos", test))]
 #[derive(Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum Action {
@@ -55,6 +61,7 @@ enum Action {
     Cancel,
 }
 
+#[cfg(target_os = "macos")]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Response<'a> {
@@ -101,11 +108,11 @@ pub(crate) async fn login(
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (device_id, device_name, client_version, os_version);
-        return Err(io::Error::new(
+        Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "Inline for Mac login is unavailable",
         )
-        .into());
+        .into())
     }
 
     #[cfg(target_os = "macos")]
@@ -414,6 +421,7 @@ fn supports_protocol(app: &Path, required_version: u32) -> bool {
     parse_protocol_version(&output.stdout).is_some_and(|version| version >= required_version)
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn parse_protocol_version(bytes: &[u8]) -> Option<u32> {
     std::str::from_utf8(bytes).ok()?.trim().parse().ok()
 }
@@ -433,6 +441,7 @@ fn random_verification_code() -> String {
     format!("{:06}", OsRng.next_u32() % 1_000_000)
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn random_hex(byte_count: usize) -> String {
     let mut bytes = vec![0_u8; byte_count];
     OsRng.fill_bytes(&mut bytes);

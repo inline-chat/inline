@@ -128,11 +128,11 @@ pub async fn debug_probe_workspace_picker(
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (config, owner_token, bot_user_id, chat_id, folder);
-        return Err(io::Error::new(
+        Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "the host-local folder picker is available only on macOS",
         )
-        .into());
+        .into())
     }
 
     #[cfg(target_os = "macos")]

@@ -147,7 +147,7 @@ impl WorkspaceRegistrar {
         #[cfg(not(target_os = "macos"))]
         {
             let _ = (paths, account);
-            return Ok(None);
+            Ok(None)
         }
 
         #[cfg(target_os = "macos")]
@@ -585,18 +585,21 @@ mod tests {
         assert!(endpoint_debug.contains("<redacted>"));
         assert!(!endpoint_debug.contains("picker-secret"));
 
-        let request = WorkspaceRegistrationRequest {
-            version: WORKSPACE_RPC_VERSION,
-            action: WorkspaceRegistrationAction::Register,
-            host_installation_id: "host-test".to_string(),
-            bot_user_id: 42,
-            capability: "request-secret".to_string(),
-            path: Some(PathBuf::from("/private/project")),
-        };
-        let request_debug = format!("{request:?}");
-        assert!(request_debug.contains("<redacted>"));
-        assert!(!request_debug.contains("request-secret"));
-        assert!(!request_debug.contains("/private/project"));
+        #[cfg(target_os = "macos")]
+        {
+            let request = WorkspaceRegistrationRequest {
+                version: WORKSPACE_RPC_VERSION,
+                action: WorkspaceRegistrationAction::Register,
+                host_installation_id: "host-test".to_string(),
+                bot_user_id: 42,
+                capability: "request-secret".to_string(),
+                path: Some(PathBuf::from("/private/project")),
+            };
+            let request_debug = format!("{request:?}");
+            assert!(request_debug.contains("<redacted>"));
+            assert!(!request_debug.contains("request-secret"));
+            assert!(!request_debug.contains("/private/project"));
+        }
     }
 
     #[cfg(target_os = "macos")]
