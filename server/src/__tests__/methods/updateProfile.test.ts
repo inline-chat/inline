@@ -86,6 +86,17 @@ describe("updateProfile", () => {
     expect(storedUser?.lastName).toBeNull()
   })
 
+  test("completes pending setup when a profile name is saved", async () => {
+    const user = await testUtils.createUser("pending-profile@example.com")
+    await db.update(users).set({ pendingSetup: true }).where(eq(users.id, user.id))
+
+    const result = await handler({ firstName: "Ada" }, makeContext(user.id))
+
+    expect(result.user.pendingSetup).toBe(false)
+    const [storedUser] = await db.select().from(users).where(eq(users.id, user.id))
+    expect(storedUser?.pendingSetup).toBe(false)
+  })
+
   test("trims and clears bio", async () => {
     const user = await testUtils.createUser("bio-profile@example.com")
     await db.update(users).set({ bio: "Old bio" }).where(eq(users.id, user.id))

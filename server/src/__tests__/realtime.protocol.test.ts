@@ -813,6 +813,7 @@ describe("realtime protocol safety", () => {
 
   it("changes and clears username via RPC", async () => {
     const { ws, userId } = await authenticateSocket()
+    await db.update(users).set({ pendingSetup: true }).where(eq(users.id, userId))
 
     wsSendClientProtocolMessage(ws, {
       id: 620n,
@@ -845,6 +846,7 @@ describe("realtime protocol safety", () => {
 
     const [storedUser] = await db.select().from(users).where(eq(users.id, userId))
     expect(storedUser?.username).toBe("newhandle")
+    expect(storedUser?.pendingSetup).toBe(false)
 
     wsSendClientProtocolMessage(ws, {
       id: 621n,

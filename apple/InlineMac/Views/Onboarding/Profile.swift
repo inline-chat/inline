@@ -135,7 +135,6 @@ final class OnboardingProfileSetupModel {
   func saveUsername(currentUsername: String?, realtimeV2: RealtimeV2) async -> Bool {
     guard !isSavingUsername, usernameState.canContinue else { return false }
     let candidate = cleanUsername(username)
-    if candidate == currentUsername { return true }
 
     isSavingUsername = true
     errorMessage = nil

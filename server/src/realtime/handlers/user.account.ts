@@ -66,12 +66,14 @@ export const changeUsernameHandler = async (
   switch (availability) {
     case UsernameAvailability.USERNAME_AVAILABLE:
     case UsernameAvailability.USERNAME_CURRENT: {
-      const { user, update } = await updateUserAndPush(context, { username }).catch((error: unknown) => {
-        if (isUsernameUniqueError(error)) {
-          throw RealtimeRpcError.UsernameTaken()
-        }
-        throw error
-      })
+      const { user, update } = await updateUserAndPush(context, { username, pendingSetup: false }).catch(
+        (error: unknown) => {
+          if (isUsernameUniqueError(error)) {
+            throw RealtimeRpcError.UsernameTaken()
+          }
+          throw error
+        },
+      )
       return { user: encodeUser({ user }), updates: [update] }
     }
     case UsernameAvailability.USERNAME_INVALID:

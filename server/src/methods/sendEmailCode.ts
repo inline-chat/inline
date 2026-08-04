@@ -9,7 +9,7 @@ import type { Static } from "elysia"
 import type { UnauthenticatedHandlerContext } from "@in/server/controllers/helpers"
 import { sendEmail } from "@in/server/utils/email"
 import { issueEmailLoginChallenge } from "@in/server/modules/auth/emailLoginChallenges"
-import { isInviteCodeRequired } from "@in/server/modules/auth/signupInvites"
+import { isInviteCodeRequired, isLoginUser } from "@in/server/modules/auth/signupInvites"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 import { normalizeAuthClientType } from "@in/server/modules/auth/clientType"
 
@@ -46,7 +46,7 @@ export const handler = async (
     if (user?.deleted === true) {
       throw new InlineError(InlineError.ApiError.USER_DEACTIVATED)
     }
-    let existingUser = user ? user.pendingSetup !== true : false
+    let existingUser = isLoginUser(user)
     let needsInviteCode = await isInviteCodeRequired(user)
     let firstName = user?.firstName ?? undefined
 

@@ -8,7 +8,7 @@ import { eq } from "drizzle-orm"
 import { users } from "@in/server/db/schema"
 import { prelude } from "@in/server/libs/prelude"
 import parsePhoneNumber from "libphonenumber-js"
-import { isInviteCodeRequired } from "@in/server/modules/auth/signupInvites"
+import { isInviteCodeRequired, isLoginUser } from "@in/server/modules/auth/signupInvites"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 import { normalizeAuthClientType } from "@in/server/modules/auth/clientType"
 
@@ -59,7 +59,7 @@ export const handler = async (
     }
 
     const needsInviteCode = await isInviteCodeRequired(existingUser)
-    const isLogin = existingUser ? existingUser.pendingSetup !== true : false
+    const isLogin = isLoginUser(existingUser)
 
     BotAlerts.authAttempt({
       kind: isLogin ? "login" : "signup",

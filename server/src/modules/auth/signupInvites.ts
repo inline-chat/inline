@@ -12,6 +12,10 @@ export const areInviteCodesRequired = async (): Promise<boolean> => {
   return isInviteCodesRequiredConfig()
 }
 
+export const isLoginUser = (user: DbUser | undefined): boolean => {
+  return Boolean(user && (user.pendingSetup !== true || user.emailVerified === true || user.phoneVerified === true))
+}
+
 export const isInviteCodeRequired = async (user: DbUser | undefined): Promise<boolean> => {
   if (!(await areInviteCodesRequired())) {
     return false
@@ -21,7 +25,7 @@ export const isInviteCodeRequired = async (user: DbUser | undefined): Promise<bo
     return true
   }
 
-  if (user.pendingSetup !== true) {
+  if (isLoginUser(user)) {
     return false
   }
 
@@ -49,7 +53,7 @@ export const getOrCreateUserByEmailForSignup = async (
           .values({
             email,
             emailVerified: true,
-            pendingSetup: false,
+            pendingSetup: true,
           })
           .returning()
       )[0]
@@ -64,7 +68,7 @@ export const getOrCreateUserByEmailForSignup = async (
       return { user: created, created: true }
     }
 
-    const inviteRequired = codesRequired && user.pendingSetup === true && !(await hasSpaceMembership(user.id, tx))
+    const inviteRequired = codesRequired && !isLoginUser(user) && !(await hasSpaceMembership(user.id, tx))
     if (inviteRequired) {
       const code = getInviteCode(inviteCode)
       await redeemInviteCode(tx, code, user.id)
@@ -75,7 +79,6 @@ export const getOrCreateUserByEmailForSignup = async (
         .update(users)
         .set({
           emailVerified: true,
-          pendingSetup: false,
         })
         .where(eq(users.id, user.id))
         .returning()
@@ -106,7 +109,7 @@ export const getOrCreateUserByPhoneForSignup = async (
           .values({
             phoneNumber,
             phoneVerified: true,
-            pendingSetup: false,
+            pendingSetup: true,
           })
           .returning()
       )[0]
@@ -121,7 +124,7 @@ export const getOrCreateUserByPhoneForSignup = async (
       return { user: created, created: true }
     }
 
-    const inviteRequired = codesRequired && user.pendingSetup === true && !(await hasSpaceMembership(user.id, tx))
+    const inviteRequired = codesRequired && !isLoginUser(user) && !(await hasSpaceMembership(user.id, tx))
     if (inviteRequired) {
       const code = getInviteCode(inviteCode)
       await redeemInviteCode(tx, code, user.id)
@@ -132,7 +135,6 @@ export const getOrCreateUserByPhoneForSignup = async (
         .update(users)
         .set({
           phoneVerified: true,
-          pendingSetup: false,
         })
         .where(eq(users.id, user.id))
         .returning()

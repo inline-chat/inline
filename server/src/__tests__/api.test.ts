@@ -281,6 +281,32 @@ describe("API Endpoints", () => {
 
       const response = await testServer.handle(request)
       expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({
+        ok: true,
+        result: {
+          user: {
+            pendingSetup: true,
+          },
+        },
+      })
+
+      const resumeResponse = await testServer.handle(
+        new Request("http://localhost/v1/sendEmailCode", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ email }),
+        }),
+      )
+      expect(resumeResponse.status).toBe(200)
+      expect(await resumeResponse.json()).toMatchObject({
+        ok: true,
+        result: {
+          existingUser: true,
+          needsInviteCode: false,
+        },
+      })
     })
 
     it("normalizes unknown auth clientType to api when creating a session", async () => {
@@ -519,7 +545,7 @@ describe("API Endpoints", () => {
         expect(response.status).toBe(200)
         const created = (await db.select().from(users).where(eq(users.email, email)).limit(1))[0]
         expect(created?.emailVerified).toBe(true)
-        expect(created?.pendingSetup).toBe(false)
+        expect(created?.pendingSetup).toBe(true)
         const bypassCode = (await db.select().from(inviteCodes).where(eq(inviteCodes.code, "AAAAAAAA")).limit(1))[0]
         expect(bypassCode).toBeUndefined()
       } finally {
@@ -802,7 +828,7 @@ describe("API Endpoints", () => {
         expect(response.status).toBe(200)
         const created = (await db.select().from(users).where(eq(users.email, email)).limit(1))[0]
         expect(created?.emailVerified).toBe(true)
-        expect(created?.pendingSetup).toBe(false)
+        expect(created?.pendingSetup).toBe(true)
       } finally {
         if (previous === undefined) {
           delete process.env["INVITE_CODES_REQUIRED"]
@@ -867,7 +893,7 @@ describe("API Endpoints", () => {
       const response = await testServer.handle(request)
       expect(response.status).toBe(200)
       const updated = (await db.select().from(users).where(eq(users.id, invitee.id)).limit(1))[0]
-      expect(updated?.pendingSetup).toBe(false)
+      expect(updated?.pendingSetup).toBe(true)
       expect(updated?.emailVerified).toBe(true)
     })
 

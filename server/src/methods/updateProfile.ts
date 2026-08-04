@@ -70,6 +70,10 @@ export const handler = async (input: Input, context: HandlerContext): Promise<St
       }
     }
 
+    if (props.firstName) {
+      props.pendingSetup = false
+    }
+
     let user = await db.update(users).set(props).where(eq(users.id, context.currentUserId)).returning()
     if (!user[0]) {
       log.error("Failed to set profile", { userId: context.currentUserId })
