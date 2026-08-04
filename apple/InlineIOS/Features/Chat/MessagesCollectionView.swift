@@ -17,6 +17,7 @@ final class MessagesCollectionView: UICollectionView {
   private let peerId: Peer
   private var chatId: Int64
   private var spaceId: Int64?
+  private let isPreview: Bool
   private var coordinator: Coordinator
   static var contextMenuOpen: Bool = false
   private var lastKnownNavBarHeight: CGFloat = 0
@@ -28,15 +29,18 @@ final class MessagesCollectionView: UICollectionView {
     peerId: Peer,
     chatId: Int64,
     spaceId: Int64?,
+    isPreview: Bool = false,
     sendAnimationCoordinator: SendMessageAnimationCoordinator? = nil
   ) {
     self.peerId = peerId
     self.chatId = chatId
     self.spaceId = spaceId
+    self.isPreview = isPreview
     let coordinator = Coordinator(
       peerId: peerId,
       chatId: chatId,
       spaceId: spaceId,
+      isPreview: isPreview,
       sendAnimationCoordinator: sendAnimationCoordinator
     )
     self.coordinator = coordinator
@@ -112,13 +116,14 @@ final class MessagesCollectionView: UICollectionView {
 
   deinit {
     NotificationCenter.default.removeObserver(self)
-    Log.shared.debug("CollectionView deinit")
 
     cancelSendAnimationScrollAnimations()
     coordinator.dispose()
 
-    Task {
-      await ImagePrefetcher.shared.clearCache()
+    if !isPreview {
+      Task {
+        await ImagePrefetcher.shared.clearCache()
+      }
     }
   }
 
@@ -345,7 +350,9 @@ final class MessagesCollectionView: UICollectionView {
 
     var bottomInset: CGFloat = 0.0
 
-    bottomInset += composeHeight + (ComposeView.textViewVerticalMargin * 2)
+    if !isPreview {
+      bottomInset += composeHeight + (ComposeView.textViewVerticalMargin * 2)
+    }
     bottomInset += Self.messagesBottomPadding
     if isKeyboardVisible {
       bottomInset += keyboardHeight
@@ -795,6 +802,7 @@ private extension MessagesCollectionView {
     private let peerId: Peer
     private let chatId: Int64
     private let spaceId: Int64?
+    private let isPreview: Bool
     private weak var collectionContextMenu: UIContextMenuInteraction?
     private var cancellables = Set<AnyCancellable>()
     private var updateWorkItem: DispatchWorkItem?
@@ -1789,11 +1797,13 @@ private extension MessagesCollectionView {
       peerId: Peer,
       chatId: Int64,
       spaceId: Int64?,
+      isPreview: Bool = false,
       sendAnimationCoordinator: SendMessageAnimationCoordinator? = nil
     ) {
       self.peerId = peerId
       self.chatId = chatId
       self.spaceId = spaceId
+      self.isPreview = isPreview
       self.sendAnimationCoordinator = sendAnimationCoordinator
       viewModel = MessagesSectionedViewModel(peer: peerId, reversed: true)
       translationViewModel = TranslationViewModel(peerId: peerId)
@@ -1802,31 +1812,34 @@ private extension MessagesCollectionView {
       rebuildListSections()
 
       viewModel.observe { [weak self] update in
-        self?.applyUpdate(update)
-        self?.handleTranslationForUpdate(update)
-        self?.ensureThreadAnchorCachedIfNeeded()
+        guard let self else { return }
+        applyUpdate(update)
+        if !isPreview {
+          handleTranslationForUpdate(update)
+          ensureThreadAnchorCachedIfNeeded()
+        }
       }
 
-      // Subscribe to translation state changes
-      TranslationState.shared.subject
-        .sink { [weak self] peer, _ in
-          print("👽 TranslationState update")
-
-          guard let self, peer == self.peerId else { return }
-          var snapshot = dataSource.snapshot()
-          let ids = messages.map { MessageListItem.message(id: $0.id) }
-          // Safety check: only reconfigure items that actually exist in the snapshot
-          let existingIds = ids.filter { snapshot.itemIdentifiers.contains($0) }
-          if !existingIds.isEmpty {
-            snapshot.reconfigureItems(existingIds)
-            safeApplySnapshot(snapshot, animatingDifferences: true)
+      if !isPreview {
+        // Subscribe to translation state changes
+        TranslationState.shared.subject
+          .sink { [weak self] peer, _ in
+            guard let self, peer == self.peerId else { return }
+            var snapshot = dataSource.snapshot()
+            let ids = messages.map { MessageListItem.message(id: $0.id) }
+            // Safety check: only reconfigure items that actually exist in the snapshot
+            let existingIds = ids.filter { snapshot.itemIdentifiers.contains($0) }
+            if !existingIds.isEmpty {
+              snapshot.reconfigureItems(existingIds)
+              safeApplySnapshot(snapshot, animatingDifferences: true)
+            }
           }
-        }
-        .store(in: &cancellables)
+          .store(in: &cancellables)
 
-      // Setup NotionTaskManager delegate
-      setupNotionTaskManager()
-      ensureThreadAnchorCachedIfNeeded()
+        // Setup NotionTaskManager delegate
+        setupNotionTaskManager()
+        ensureThreadAnchorCachedIfNeeded()
+      }
     }
 
     func dispose() {
@@ -1891,6 +1904,7 @@ private extension MessagesCollectionView {
     }
 
     private func ensureThreadAnchorCachedIfNeeded() {
+      guard !isPreview else { return }
       guard threadAnchorFetchTask == nil else { return }
       guard !didExhaustThreadAnchorFetch else { return }
       guard viewModel.threadAnchor == nil else { return }
@@ -2813,6 +2827,7 @@ private extension MessagesCollectionView {
     }
 
     func updateUnreadIfNeeded() {
+      guard !isPreview else { return }
       // Only mark as read when the chat is actually on-screen and app is in foreground.
       guard let collectionView = currentCollectionView,
             let window = collectionView.window,

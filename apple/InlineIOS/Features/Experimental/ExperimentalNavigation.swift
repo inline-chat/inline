@@ -540,6 +540,9 @@ private struct ExperimentalChatListView: View {
   let onRetry: () -> Void
 
   @EnvironmentObject private var data: DataManager
+  @EnvironmentObject private var realtimeState: RealtimeState
+  @Environment(Router.self) private var router
+  @Environment(\.appDatabase) private var appDatabase
   @Environment(\.realtimeV2) private var realtimeV2
   @Environment(ExperimentalHomeActionCoordinator.self) private var homeActions
 
@@ -628,12 +631,9 @@ private struct ExperimentalChatListView: View {
             : .visible,
           edges: .bottom
         )
-        .listRowInsets(EdgeInsets(
-          top: chatItemRenderMode.listVerticalInset,
-          leading: 12,
-          bottom: chatItemRenderMode.listVerticalInset,
-          trailing: 16
-        ))
+        // Keep spacing inside the link so its tap and context-menu source
+        // cover the complete native List row rather than only its contents.
+        .listRowInsets(EdgeInsets())
     }
   }
 
@@ -647,9 +647,67 @@ private struct ExperimentalChatListView: View {
       )
       .equatable()
       .frame(maxWidth: .infinity, alignment: .leading)
-      .contentShape(.rect)
+      .padding(rowContentInsets)
+      .contentShape(.interaction, Rectangle())
     }
     .navigationLinkIndicatorVisibility(.hidden)
+    .contentShape(.interaction, Rectangle())
+    .contentShape(.contextMenuPreview, Capsule())
+    .contextMenu {
+      contextMenuActions(for: item)
+    } preview: {
+      ChatView(
+        peer: item.peer,
+        contextSpaceId: item.spaceID,
+        preview: true
+      )
+      // SwiftUI presents context-menu previews in a separate hosting tree.
+      // Re-inject every non-default dependency ChatView resolves before body.
+      .environment(router)
+      .environmentObject(data)
+      .environmentObject(realtimeState)
+      .environment(\.realtimeV2, realtimeV2)
+      .appDatabase(appDatabase)
+      .frame(idealWidth: 340, idealHeight: 480)
+    }
+  }
+
+  private var rowContentInsets: EdgeInsets {
+    EdgeInsets(
+      top: chatItemRenderMode.listVerticalInset,
+      leading: 12,
+      bottom: chatItemRenderMode.listVerticalInset,
+      trailing: 16
+    )
+  }
+
+  @ViewBuilder
+  private func contextMenuActions(for item: ChatListItemSnapshot) -> some View {
+    if mode == .inbox {
+      closeButton(for: item)
+      contextMenuPinButton(for: item)
+      readUnreadButton(for: item)
+    } else if mode == .allChats {
+      openButton(for: item)
+      readUnreadButton(for: item)
+      Divider()
+      archiveButton(for: item)
+    } else if mode == .archived {
+      unarchiveButton(for: item)
+    }
+  }
+
+  private func contextMenuPinButton(for item: ChatListItemSnapshot) -> some View {
+    Button {
+      // Unlike a swipe action, the context menu owns no List cell that must
+      // finish dismissing before the stable row can move.
+      performPinUpdate(peer: item.peer, pinned: !item.isPinned)
+    } label: {
+      Label(
+        item.isPinned ? "Unpin" : "Pin",
+        systemImage: item.isPinned ? "pin.slash.fill" : "pin.fill"
+      )
+    }
   }
 
   @ViewBuilder

@@ -7,6 +7,7 @@ public class ChatContainerView: UIView {
   let peerId: InlineKit.Peer
   let chatId: Int64?
   let spaceId: Int64?
+  private let isPreview: Bool
   private var peerUser: InlineKit.User?
   private var lastAppliedDraftSignature: DraftSignature?
   private var lastRequestedFocusMessageID: Int64?
@@ -27,7 +28,9 @@ public class ChatContainerView: UIView {
   }
 
   private weak var edgePanGestureRecognizer: UIScreenEdgePanGestureRecognizer?
-  private lazy var sendAnimationCoordinator = SendMessageAnimationCoordinator(hostView: self)
+  private lazy var sendAnimationCoordinator: SendMessageAnimationCoordinator? = isPreview
+    ? nil
+    : SendMessageAnimationCoordinator(hostView: self)
 
   private lazy var keyboardDismissTapGestureRecognizer: UITapGestureRecognizer = {
     let gesture = UITapGestureRecognizer(target: self, action: #selector(handleTapOutsideCompose))
@@ -41,6 +44,7 @@ public class ChatContainerView: UIView {
       peerId: peerId,
       chatId: chatId ?? 0,
       spaceId: spaceId,
+      isPreview: isPreview,
       sendAnimationCoordinator: sendAnimationCoordinator
     )
     collectionView.translatesAutoresizingMaskIntoConstraints = false
@@ -117,21 +121,30 @@ public class ChatContainerView: UIView {
   private var pinnedHeaderHeightConstraint: NSLayoutConstraint?
 
   isolated deinit {
-    sendAnimationCoordinator.cancelAll()
+    sendAnimationCoordinator?.cancelAll()
     NotificationCenter.default.removeObserver(self)
     edgePanGestureRecognizer?.removeTarget(self, action: #selector(handleEdgePan(_:)))
   }
 
-  init(peerId: InlineKit.Peer, chatId: Int64?, spaceId: Int64?, peerUser: InlineKit.User?) {
+  init(
+    peerId: InlineKit.Peer,
+    chatId: Int64?,
+    spaceId: Int64?,
+    peerUser: InlineKit.User?,
+    isPreview: Bool = false
+  ) {
     self.peerId = peerId
     self.chatId = chatId
     self.spaceId = spaceId
     self.peerUser = peerUser
+    self.isPreview = isPreview
 
     super.init(frame: .zero)
     setupViews()
-    setupObservers()
-    attachEdgePanHandlerIfNeeded()
+    if !isPreview {
+      setupObservers()
+      attachEdgePanHandlerIfNeeded()
+    }
   }
 
   @available(*, unavailable)
@@ -142,21 +155,25 @@ public class ChatContainerView: UIView {
   override public func didMoveToWindow() {
     super.didMoveToWindow()
     if window == nil {
-      sendAnimationCoordinator.cancelAll()
+      sendAnimationCoordinator?.cancelAll()
     }
-    sendAnimationCoordinator.setHostView(window == nil ? nil : self)
-    sendAnimationCoordinator.setSourceLayoutView(window == nil ? nil : messagesCollectionView)
-    attachEdgePanHandlerIfNeeded()
-    resetComposeToSafeAreaIfKeyboardClosed()
+    sendAnimationCoordinator?.setHostView(window == nil ? nil : self)
+    sendAnimationCoordinator?.setSourceLayoutView(window == nil ? nil : messagesCollectionView)
+    if !isPreview {
+      attachEdgePanHandlerIfNeeded()
+      resetComposeToSafeAreaIfKeyboardClosed()
+    }
   }
 
   func setPeerUser(_ user: InlineKit.User?) {
     guard peerUser != user else { return }
     peerUser = user
+    guard !isPreview else { return }
     composeView.setPeerUser(user)
   }
 
   func loadDraftIfNeeded(_ draftMessage: DraftMessage?) {
+    guard !isPreview else { return }
     guard let draftMessage else {
       lastAppliedDraftSignature = nil
       return
@@ -181,9 +198,29 @@ public class ChatContainerView: UIView {
     backgroundColor = ThemeManager.shared.selected.backgroundColor
 
     addSubview(messagesCollectionView)
-    sendAnimationCoordinator.setSourceLayoutView(messagesCollectionView)
-    messagesCollectionView.addGestureRecognizer(keyboardDismissTapGestureRecognizer)
+    sendAnimationCoordinator?.setSourceLayoutView(messagesCollectionView)
     addSubview(pinnedHeaderView)
+
+    pinnedHeaderHeightConstraint = pinnedHeaderView.heightAnchor.constraint(equalToConstant: 0)
+    let commonConstraints = [
+      messagesCollectionView.topAnchor.constraint(equalTo: topAnchor),
+      messagesCollectionView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
+      messagesCollectionView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
+      messagesCollectionView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+      pinnedHeaderView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
+      pinnedHeaderView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
+      pinnedHeaderView.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: -4),
+      pinnedHeaderHeightConstraint!,
+    ]
+
+    if isPreview {
+      isUserInteractionEnabled = false
+      NSLayoutConstraint.activate(commonConstraints)
+      return
+    }
+
+    messagesCollectionView.addGestureRecognizer(keyboardDismissTapGestureRecognizer)
     addSubview(composeContainerView)
     composeContainerView.addSubview(borderView)
     addSubview(mentionCompletionViewWrapper)
@@ -203,20 +240,8 @@ public class ChatContainerView: UIView {
     // initialize mention completion height constraint
     mentionCompletionHeightConstraint = mentionCompletionViewWrapper.heightAnchor
       .constraint(equalToConstant: 0)
-    pinnedHeaderHeightConstraint = pinnedHeaderView.heightAnchor.constraint(equalToConstant: 0)
-
     NSLayoutConstraint.activate(
-      [
-        messagesCollectionView.topAnchor.constraint(equalTo: topAnchor),
-        messagesCollectionView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
-        messagesCollectionView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
-        messagesCollectionView.bottomAnchor.constraint(equalTo: bottomAnchor),
-
-        pinnedHeaderView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
-        pinnedHeaderView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
-        pinnedHeaderView.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: -4),
-        pinnedHeaderHeightConstraint!,
-
+      commonConstraints + [
         composeContainerView.leadingAnchor.constraint(equalTo: leadingAnchor),
         composeContainerView.trailingAnchor.constraint(equalTo: trailingAnchor),
         composeContainerView.topAnchor.constraint(
@@ -815,23 +840,34 @@ struct ChatViewUIKit: UIViewRepresentable {
   let spaceId: Int64?
   let draftMessage: DraftMessage?
   let focusMessageID: Int64?
+  let isPreview: Bool
   @EnvironmentObject var data: DataManager
   @EnvironmentObject var fullChatViewModel: FullChatViewModel
 
   func makeUIView(context _: Context) -> ChatContainerView {
-    let view = ChatContainerView(peerId: peerId, chatId: chatId, spaceId: spaceId, peerUser: fullChatViewModel.peerUser)
-    view.loadDraftIfNeeded(draftMessage)
-    view.focusMessage(focusMessageID)
+    let view = ChatContainerView(
+      peerId: peerId,
+      chatId: chatId,
+      spaceId: spaceId,
+      peerUser: fullChatViewModel.peerUser,
+      isPreview: isPreview
+    )
+    if !isPreview {
+      view.loadDraftIfNeeded(draftMessage)
+      view.focusMessage(focusMessageID)
 
-    // Mark messages as read when view appears
-    UnreadManager.shared.readAll(peerId, chatId: chatId ?? 0)
+      // Mark messages as read when the interactive chat appears.
+      UnreadManager.shared.readAll(peerId, chatId: chatId ?? 0)
+    }
 
     return view
   }
 
   func updateUIView(_ view: ChatContainerView, context _: Context) {
     view.setPeerUser(fullChatViewModel.peerUser)
-    view.loadDraftIfNeeded(draftMessage)
-    view.focusMessage(focusMessageID)
+    if !isPreview {
+      view.loadDraftIfNeeded(draftMessage)
+      view.focusMessage(focusMessageID)
+    }
   }
 }

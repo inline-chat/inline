@@ -15,9 +15,10 @@ extension EnvironmentValues {
 
 private struct HideTabBarIfNeededModifier: ViewModifier {
   @Environment(\.inlineHideTabBar) private var inlineHideTabBar
+  let isEnabled: Bool
 
   func body(content: Content) -> some View {
-    if inlineHideTabBar {
+    if isEnabled, inlineHideTabBar {
       content.toolbar(.hidden, for: .tabBar)
     } else {
       content
@@ -26,8 +27,7 @@ private struct HideTabBarIfNeededModifier: ViewModifier {
 }
 
 extension View {
-  func hideTabBarIfNeeded() -> some View {
-    modifier(HideTabBarIfNeededModifier())
+  func hideTabBarIfNeeded(_ isEnabled: Bool = true) -> some View {
+    modifier(HideTabBarIfNeededModifier(isEnabled: isEnabled))
   }
 }
-

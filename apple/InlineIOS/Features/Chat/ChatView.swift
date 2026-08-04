@@ -10,7 +10,7 @@ import UIKit
 struct ChatView: View {
   var peerId: Peer
   var contextSpaceId: Int64?
-  var preview: Bool
+  private let preview: Bool
   private let focusMessageID: Int64?
   private let autoCleanupUntitledEmptyThreadOnBack: Bool
 
@@ -96,63 +96,67 @@ struct ChatView: View {
   var body: some View {
     ZStack(alignment: .top) {
       chatContent
-      ChatViewHeader(navBarHeight: $navBarHeight)
+      if !preview {
+        ChatViewHeader(navBarHeight: $navBarHeight)
+      }
       renderOverlay
     }
     .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
     .toolbarBackground(.hidden, for: .navigationBar)
     .toolbarTitleDisplayMode(.inline)
-    .hideTabBarIfNeeded()
+    .hideTabBarIfNeeded(!preview)
     .toolbarRole(.editor)
     .toolbar {
-      if translationPlacement == .toolbar {
-        ToolbarItem(placement: .primaryAction) {
-          TranslationButton(peer: peerId, activeColor: ThemeManager.shared.accentColor)
-        }
-      }
-
-      ToolbarItem(placement: .primaryAction) {
-        ChatToolbarMoreMenu(
-          peer: peerId,
-          chatId: fullChatViewModel.chat?.id,
-          includesTranslationAction: translationPlacement == .moreMenu
-        ) {
-          guard let chatItem = fullChatViewModel.chatItem else { return }
-          presentedChatInfo = chatItem
-        }
-      }
-
-      if botChatSettingsCoordinator.isToolbarVisible {
-        ToolbarItem(placement: .primaryAction) {
-          Button {
-            isBotChatSettingsPresented = true
-          } label: {
-            Label("Agent Settings", systemImage: "slider.horizontal.3")
+      if !preview {
+        if translationPlacement == .toolbar {
+          ToolbarItem(placement: .primaryAction) {
+            TranslationButton(peer: peerId, activeColor: ThemeManager.shared.accentColor)
           }
-          .accessibilityLabel("Agent Settings")
         }
-      }
 
-      if #available(iOS 26.0, *) {
-        ToolbarItem(placement: .principal) {
-          ChatToolbarLeadingView(
-            peerId: peerId,
-            contextSpaceId: contextSpaceId,
-            isChatHeaderPressed: $isChatHeaderPressed,
-            onOpenChatInfo: { presentedChatInfo = $0 }
-          )
-          .matchedTransitionSource(id: TransitionID.chatInfo, in: chatInfoTransition)
+        ToolbarItem(placement: .primaryAction) {
+          ChatToolbarMoreMenu(
+            peer: peerId,
+            chatId: fullChatViewModel.chat?.id,
+            includesTranslationAction: translationPlacement == .moreMenu
+          ) {
+            guard let chatItem = fullChatViewModel.chatItem else { return }
+            presentedChatInfo = chatItem
+          }
         }
-        .sharedBackgroundVisibility(.hidden)
-      } else {
-        ToolbarItem(placement: .topBarLeading) {
-          ChatToolbarLeadingView(
-            peerId: peerId,
-            contextSpaceId: contextSpaceId,
-            isChatHeaderPressed: $isChatHeaderPressed,
-            onOpenChatInfo: { presentedChatInfo = $0 }
-          )
-          .matchedTransitionSource(id: TransitionID.chatInfo, in: chatInfoTransition)
+
+        if botChatSettingsCoordinator.isToolbarVisible {
+          ToolbarItem(placement: .primaryAction) {
+            Button {
+              isBotChatSettingsPresented = true
+            } label: {
+              Label("Agent Settings", systemImage: "slider.horizontal.3")
+            }
+            .accessibilityLabel("Agent Settings")
+          }
+        }
+
+        if #available(iOS 26.0, *) {
+          ToolbarItem(placement: .principal) {
+            ChatToolbarLeadingView(
+              peerId: peerId,
+              contextSpaceId: contextSpaceId,
+              isChatHeaderPressed: $isChatHeaderPressed,
+              onOpenChatInfo: { presentedChatInfo = $0 }
+            )
+            .matchedTransitionSource(id: TransitionID.chatInfo, in: chatInfoTransition)
+          }
+          .sharedBackgroundVisibility(.hidden)
+        } else {
+          ToolbarItem(placement: .topBarLeading) {
+            ChatToolbarLeadingView(
+              peerId: peerId,
+              contextSpaceId: contextSpaceId,
+              isChatHeaderPressed: $isChatHeaderPressed,
+              onOpenChatInfo: { presentedChatInfo = $0 }
+            )
+            .matchedTransitionSource(id: TransitionID.chatInfo, in: chatInfoTransition)
+          }
         }
       }
     }
@@ -163,12 +167,17 @@ struct ChatView: View {
       await loadFocusedMessageIfNeeded()
     }
     .task(id: peerId.toString()) {
+      guard !preview else { return }
       botChatSettingsCoordinator.startObservingDiscoveryScope(in: appDatabase)
       await botChatSettingsCoordinator.warmUp()
     }
     .onReceive(TranslationState.shared.subject) { event in
       let (eventPeer, enabled) = event
-      guard eventPeer == peerId, enabled, translationPlacement == .moreMenu else { return }
+      guard !preview,
+            eventPeer == peerId,
+            enabled,
+            translationPlacement == .moreMenu
+      else { return }
       translationPlacement = .toolbar
     }
     .sheet(isPresented: $isBotChatSettingsPresented) {
@@ -183,10 +192,12 @@ struct ChatView: View {
       .presentationDragIndicator(.hidden)
     }
     .onAppear {
+      guard !preview else { return }
       isVisible = true
       updateMessageUpdateActivation()
     }
     .onChange(of: peerId) { _, newPeer in
+      guard !preview else { return }
       isBotChatSettingsPresented = false
       botChatSettingsCoordinator.cancel()
       botChatSettingsCoordinator = BotChatSettingsCoordinator(peer: newPeer)
@@ -198,6 +209,7 @@ struct ChatView: View {
       pageState = .loaded
     }
     .onDisappear {
+      guard !preview else { return }
       isVisible = false
       botChatSettingsCoordinator.cancel()
       updateMessageUpdateActivation()
@@ -205,11 +217,15 @@ struct ChatView: View {
     }
     .onChange(of: scenePhase) { _, newPhase in
       updateMessageUpdateActivation()
-      if newPhase == .active, fullChatViewModel.chat != nil, case .loaded = pageState {
+      if !preview,
+         newPhase == .active,
+         fullChatViewModel.chat != nil,
+         case .loaded = pageState {
         fullChatViewModel.refetchHistoryOnly()
       }
     }
     .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NavigationBarHeight"))) { notification in
+      guard !preview else { return }
       if let height = notification.userInfo?["navBarHeight"] as? CGFloat {
         navBarHeight = height
       }
@@ -218,6 +234,7 @@ struct ChatView: View {
       NotificationCenter.default
         .publisher(for: Notification.Name("chatDeletedNotification"))
     ) { notification in
+      guard !preview else { return }
       if let chatId = notification.userInfo?["chatId"] as? Int64,
          chatId == fullChatViewModel.chat?.id ?? 0
       {
@@ -228,6 +245,7 @@ struct ChatView: View {
       NotificationCenter.default
         .publisher(for: Notification.Name("MentionTapped"))
     ) { notification in
+      guard !preview else { return }
       if let userId = notification.userInfo?["userId"] as? Int64 {
         Task {
           // TODO: hacky
@@ -244,6 +262,7 @@ struct ChatView: View {
       NotificationCenter.default
         .publisher(for: .userGroupMentionTapped)
     ) { notification in
+      guard !preview else { return }
       guard var target = notification.userInfo?["target"] as? UserGroupMentionTarget else { return }
       if target.spaceId == nil {
         target.spaceId = contextSpaceId ?? fullChatViewModel.chat?.spaceId
@@ -257,6 +276,7 @@ struct ChatView: View {
       NotificationCenter.default
         .publisher(for: Notification.Name("NavigateToUser"))
     ) { notification in
+      guard !preview else { return }
       if let userId = notification.userInfo?["userId"] as? Int64 {
         router.push(.chat(peer: Peer.user(id: userId)))
       }
@@ -265,6 +285,7 @@ struct ChatView: View {
       NotificationCenter.default
         .publisher(for: Notification.Name("NavigateToForwardedMessage"))
     ) { notification in
+      guard !preview else { return }
       guard let messageId = notification.userInfo?["messageId"] as? Int64 else { return }
 
       let targetPeer: Peer? = if let userId = notification.userInfo?["peerUserId"] as? Int64 {
@@ -313,6 +334,7 @@ struct ChatView: View {
       NotificationCenter.default
         .publisher(for: Notification.Name("NavigateToForwardDestination"))
     ) { notification in
+      guard !preview else { return }
       let targetPeer: Peer? = if let userId = notification.userInfo?["peerUserId"] as? Int64 {
         .user(id: userId)
       } else if let threadId = notification.userInfo?["peerThreadId"] as? Int64 {
@@ -328,6 +350,7 @@ struct ChatView: View {
       NotificationCenter.default
         .publisher(for: .navigateToThreadLink)
     ) { notification in
+      guard !preview else { return }
       let targetPeer: Peer? = if let userId = notification.userInfo?["peerUserId"] as? Int64 {
         .user(id: userId)
       } else if let threadId = notification.userInfo?["peerThreadId"] as? Int64 {
@@ -343,6 +366,7 @@ struct ChatView: View {
       NotificationCenter.default
         .publisher(for: .navigateToReplyThread)
     ) { notification in
+      guard !preview else { return }
       let targetPeer: Peer? = if let userId = notification.userInfo?["peerUserId"] as? Int64 {
         .user(id: userId)
       } else if let threadId = notification.userInfo?["peerThreadId"] as? Int64 {
@@ -355,6 +379,7 @@ struct ChatView: View {
       router.push(.chat(peer: targetPeer))
     }
     .onReceive(NotificationCenter.default.publisher(for: .mediaSendFailed)) { notification in
+      guard !preview else { return }
       guard let chatId = notification.userInfo?["chatId"] as? Int64,
             chatId == fullChatViewModel.chat?.id
       else { return }
@@ -396,7 +421,7 @@ struct ChatView: View {
 
   @MainActor
   private func updateMessageUpdateActivation() {
-    if isVisible, scenePhase == .active {
+    if !preview, isVisible, scenePhase == .active {
       activateMessageUpdates()
     } else {
       deactivateMessageUpdates()
@@ -421,7 +446,9 @@ struct ChatView: View {
   private func fetchChatIfNeeded() async {
     if fullChatViewModel.chat != nil {
       pageState = .loaded
-      fullChatViewModel.refetchHistoryOnly()
+      if !preview {
+        fullChatViewModel.refetchHistoryOnly()
+      }
       return
     }
 
@@ -430,7 +457,9 @@ struct ChatView: View {
       let chat = try await fullChatViewModel.ensureChat()
       if chat != nil || fullChatViewModel.chat != nil {
         pageState = .loaded
-        fullChatViewModel.refetchHistoryOnly()
+        if !preview {
+          fullChatViewModel.refetchHistoryOnly()
+        }
       } else {
         pageState = .error(ChatLoadError.unavailable)
       }
@@ -451,7 +480,8 @@ struct ChatView: View {
         chatId: chat.id,
         spaceId: chat.spaceId,
         draftMessage: fullChatViewModel.chatItem?.dialog.draftMessage,
-        focusMessageID: focusMessageID
+        focusMessageID: focusMessageID,
+        isPreview: preview
       )
       .edgesIgnoringSafeArea(.all)
     }
@@ -552,7 +582,7 @@ struct ChatView: View {
   }
 
   private func loadFocusedMessageIfNeeded() async {
-    guard let focusMessageID else { return }
+    guard !preview, let focusMessageID else { return }
 
     do {
       _ = try await realtimeV2.send(
