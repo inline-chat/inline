@@ -88,6 +88,9 @@ reuse its Inline bot, install the Inline integration, configure owner-safe
 access, and start its gateway or bridge:
 
 ```bash
+# Machine-readable, read-only discovery for apps and agents.
+inline agents discover --json --compact
+
 # Interactive picker; only installed agents are shown.
 inline agents setup
 
@@ -105,6 +108,11 @@ or `--no-restart` to configure without changing the user service. The default
 access mode is owner-only; automation can use `--access allowlist` with repeated
 `--allow-user ID` flags. Codex/ACP bridge targets use the user's home directory
 as their workspace unless `--folder` is provided explicitly.
+
+Unified discovery and setup JSON include `protocolVersion` and
+`documentationUrl`. Errors use stable codes and safe hints so an app or agent
+can offer a retry or send the user to the setup guide without parsing terminal
+output. The JSON never includes bot tokens or local executable/workspace paths.
 
 For gateway targets, `~/.inline/config.toml` stores only the target, profile
 instance, bot user ID, and bot username needed for idempotent reconciliation.

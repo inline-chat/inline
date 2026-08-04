@@ -59,6 +59,11 @@ fn search_directories() -> Vec<PathBuf> {
         Some(PathBuf::from("/usr/local/bin")),
         home_bin(".local/bin"),
         home_bin(".bun/bin"),
+        home_bin(".local/share/pnpm"),
+        home_bin(".claude/local"),
+        home_bin(".opencode/bin"),
+        home_bin(".amp/bin"),
+        home_bin(".hermes/bin"),
     ]
     .into_iter()
     .flatten()
@@ -72,6 +77,7 @@ fn search_directories() -> Vec<PathBuf> {
 
 fn home_bin(relative: &str) -> Option<PathBuf> {
     env::var_os("HOME")
+        .or_else(|| env::var_os("USERPROFILE"))
         .map(PathBuf::from)
         .map(|home| home.join(relative))
 }

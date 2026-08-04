@@ -156,8 +156,48 @@ jobs:
             fi
           fi
 
-  build-linux:
+      - name: Verify Published Agent Setup Release Group
+        if: ${{ github.event.inputs.build_only != 'true' }}
+        run: node scripts/check-agent-release-group.mjs
+
+  validate:
     needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.ref }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.1"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Validate Agent Setup Release Group
+        run: |
+          set -euo pipefail
+          node scripts/check-agent-release-group.mjs --source-only
+          bun run --cwd openclaw check
+          bun run --cwd hermes-agent check
+          bun run --cwd cli ci
+
+  build-linux:
+    needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -284,7 +324,7 @@ jobs:
           retention-days: 1
 
   build-macos:
-    needs: preflight
+    needs: validate
     runs-on: macos-26
     # The release script allows notarytool to wait up to 60 minutes after the
     # Rust build, so the job needs headroom for compilation and packaging.
@@ -421,6 +461,7 @@ jobs:
   publish:
     needs:
       - preflight
+      - validate
       - build-linux
       - build-macos
     if: ${{ always() && github.event.inputs.build_only != 'true' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}

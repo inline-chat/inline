@@ -20,6 +20,9 @@ pub(crate) use catalog::AgentTarget;
 use catalog::TargetFamily;
 use discovery::{InstalledTarget, installed_target, installed_targets};
 
+pub(crate) const AGENTS_PROTOCOL_VERSION: u32 = 1;
+pub(crate) const AGENTS_DOCUMENTATION_URL: &str = "https://inline.chat/docs/agents";
+
 pub(super) struct GatewaySetupOutcome {
     pub(super) integration_action: &'static str,
     pub(super) integration_version: String,
@@ -33,6 +36,8 @@ pub(super) struct GatewayPreflight {
 
 #[derive(Subcommand)]
 pub(crate) enum AgentsCommand {
+    #[command(about = "Discover supported local agent harnesses without making changes")]
+    Discover,
     #[command(about = "Set up an installed local agent as an Inline bot")]
     Setup(AgentsSetupArgs),
 }
@@ -79,6 +84,69 @@ pub(crate) struct ResolvedSetup {
     pub(crate) args: AgentsSetupArgs,
     pub(crate) installed: InstalledTarget,
     pub(crate) non_interactive: bool,
+}
+
+pub(crate) fn discover(
+    json: bool,
+    json_format: JsonFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let output = discovery_output(&installed_targets());
+    if json {
+        crate::output::print_json(&output, json_format)?;
+    } else {
+        let installed = output
+            .targets
+            .iter()
+            .filter(|target| target.installed)
+            .collect::<Vec<_>>();
+        if installed.is_empty() {
+            println!("No supported local agent harnesses were found.");
+            println!("Setup guide: {AGENTS_DOCUMENTATION_URL}");
+        } else {
+            println!("Installed agent harnesses:");
+            for target in installed {
+                println!("  {} ({})", target.display_name, target.id);
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentDiscoveryOutput {
+    protocol_version: u32,
+    action: &'static str,
+    documentation_url: &'static str,
+    targets: Vec<AgentDiscoveryTarget>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentDiscoveryTarget {
+    id: &'static str,
+    display_name: &'static str,
+    family: TargetFamily,
+    installed: bool,
+}
+
+fn discovery_output(installed: &[InstalledTarget]) -> AgentDiscoveryOutput {
+    AgentDiscoveryOutput {
+        protocol_version: AGENTS_PROTOCOL_VERSION,
+        action: "agents.discover",
+        documentation_url: AGENTS_DOCUMENTATION_URL,
+        targets: catalog::TARGETS
+            .iter()
+            .map(|descriptor| AgentDiscoveryTarget {
+                id: descriptor.id,
+                display_name: descriptor.display_name,
+                family: descriptor.family,
+                installed: installed
+                    .iter()
+                    .any(|candidate| candidate.descriptor.target == descriptor.target),
+            })
+            .collect(),
+    }
 }
 
 pub(crate) fn resolve_setup(
@@ -304,9 +372,12 @@ fn print_bridge_result(
     #[derive(serde::Serialize)]
     #[serde(rename_all = "camelCase")]
     struct ResultOutput<'a> {
+        protocol_version: u32,
         ok: bool,
         action: &'static str,
         status: &'static str,
+        documentation_url: &'static str,
+        open_url: String,
         target: &'a str,
         family: &'static str,
         instance: &'a str,
@@ -341,9 +412,12 @@ fn print_bridge_result(
     }
     let ready = outcome.background_service != "restart_required";
     let output = ResultOutput {
+        protocol_version: AGENTS_PROTOCOL_VERSION,
         ok: true,
         action: "agents.setup",
         status: if ready { "ready" } else { "configured" },
+        documentation_url: AGENTS_DOCUMENTATION_URL,
+        open_url: format!("in://user/{}", outcome.bot_user_id),
         target: outcome.provider,
         family: "bridge",
         instance: &outcome.installation_id,
@@ -381,6 +455,7 @@ fn print_bridge_result(
             outcome.provider, outcome.provider_version
         );
         println!("Bot: @{} ({})", outcome.bot_username, outcome.bot_user_id);
+        println!("Open: in://user/{}", outcome.bot_user_id);
         println!("Background service: {}", outcome.background_service);
         if !ready {
             println!("Restart required before the bot is ready.");
@@ -445,9 +520,12 @@ fn print_gateway_result(
     #[derive(serde::Serialize)]
     #[serde(rename_all = "camelCase")]
     struct ResultOutput<'a> {
+        protocol_version: u32,
         ok: bool,
         action: &'static str,
         status: &'static str,
+        documentation_url: &'static str,
+        open_url: String,
         target: &'a str,
         family: &'static str,
         instance: &'a str,
@@ -480,9 +558,12 @@ fn print_gateway_result(
         action: &'static str,
     }
     let output = ResultOutput {
+        protocol_version: AGENTS_PROTOCOL_VERSION,
         ok: true,
         action: "agents.setup",
         status: if outcome.ready { "ready" } else { "configured" },
+        documentation_url: AGENTS_DOCUMENTATION_URL,
+        open_url: format!("in://user/{}", bot.id),
         target: descriptor.id,
         family: "gateway",
         instance,
@@ -511,6 +592,7 @@ fn print_gateway_result(
     } else {
         println!("{} is configured in Inline.", descriptor.display_name);
         println!("Bot: @{} ({})", bot.username, bot.id);
+        println!("Open: in://user/{}", bot.id);
         println!("Integration: {}", outcome.integration_action);
         println!("Gateway: {}", outcome.service_action);
         if !outcome.ready {
@@ -562,7 +644,9 @@ fn cli_error(code: &'static str, message: impl Into<String>) -> CliError {
     CliError {
         code,
         message: message.into(),
-        hint: None,
+        hint: Some(format!(
+            "See the agent setup guide: {AGENTS_DOCUMENTATION_URL}"
+        )),
         examples: Vec::new(),
     }
 }
@@ -575,16 +659,20 @@ fn print_dry_run(
     #[derive(serde::Serialize)]
     #[serde(rename_all = "camelCase")]
     struct DryRun<'a> {
+        protocol_version: u32,
         ok: bool,
         action: &'static str,
         status: &'static str,
+        documentation_url: &'static str,
         target: &'a str,
         installed: bool,
     }
     let result = DryRun {
+        protocol_version: AGENTS_PROTOCOL_VERSION,
         ok: true,
         action: "agents.setup",
         status: "planned",
+        documentation_url: AGENTS_DOCUMENTATION_URL,
         target: resolved.installed.descriptor.id,
         installed: true,
     };
@@ -598,4 +686,30 @@ fn print_dry_run(
         println!("Dry run: no changes were made.");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod app_protocol_tests {
+    use super::*;
+
+    #[test]
+    fn discovery_protocol_lists_every_target_without_local_paths() {
+        let installed = vec![InstalledTarget {
+            descriptor: AgentTarget::Codex.descriptor(),
+            executable: PathBuf::from("/private/example/codex"),
+        }];
+        let output = discovery_output(&installed);
+        let json = serde_json::to_string(&output).expect("serialize discovery");
+
+        assert_eq!(output.protocol_version, 1);
+        assert_eq!(output.action, "agents.discover");
+        assert_eq!(output.targets.len(), catalog::TARGETS.len());
+        assert!(
+            output
+                .targets
+                .iter()
+                .any(|target| target.id == "codex" && target.installed)
+        );
+        assert!(!json.contains("/private/example"));
+    }
 }

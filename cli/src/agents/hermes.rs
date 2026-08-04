@@ -10,7 +10,8 @@ use super::{AccessMode, AgentsSetupArgs, GatewayPreflight, GatewaySetupOutcome};
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(180);
-const MIN_MACHINE_PLUGIN_VERSION: &str = "0.0.6";
+const MACHINE_SETUP_PROTOCOL_VERSION: u64 = 1;
+const MIN_MACHINE_PLUGIN_VERSION: &str = "0.0.7";
 
 struct HermesProfile {
     home: Option<PathBuf>,
@@ -20,6 +21,11 @@ struct HermesProfile {
 struct PluginSetup {
     action: &'static str,
     version: String,
+}
+
+struct MachinePluginStatus {
+    version: String,
+    configured: bool,
 }
 
 pub(super) async fn preflight(
@@ -36,15 +42,32 @@ pub(super) async fn preflight(
     .await?;
     let profile = resolve_profile(installed, args.profile.as_deref()).await?;
     let installer = find_executable("inline-hermes");
-    let plugin_ready = match installer.as_deref() {
-        Some(installer) => plugin_healthy(installer, profile.home.as_deref()).await?,
-        None => false,
+    if let Some(machine) = machine_plugin_status(installed, &profile.environment, false).await? {
+        let configured_bot_id = if machine.configured {
+            let status = run_machine_status(installed, &profile.environment, true).await?;
+            let bot_id = status_bot_id(&status.stdout).filter(|_| status.success);
+            if bot_id.is_none() && !args.replace {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "the existing Hermes Inline credential cannot be verified; rerun with --replace to replace it",
+                )
+                .into());
+            }
+            bot_id
+        } else {
+            None
+        };
+        return Ok(GatewayPreflight { configured_bot_id });
+    }
+
+    let legacy_configured = match installer.as_deref() {
+        Some(installer) => {
+            plugin_has_configured_credential(installer, profile.home.as_deref()).await?
+                || legacy_plugin_configured(installed, &profile.environment).await?
+        }
+        None => legacy_plugin_configured(installed, &profile.environment).await?,
     };
-    if !plugin_ready
-        && !args.replace
-        && let Some(installer) = installer.as_deref()
-        && plugin_has_configured_credential(installer, profile.home.as_deref()).await?
-    {
+    if legacy_configured && !args.replace {
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
             "the existing Hermes Inline plugin is configured but cannot report its bot identity; rerun with --replace to upgrade and replace it",
@@ -52,39 +75,22 @@ pub(super) async fn preflight(
         .into());
     }
     if args.no_install {
-        installer.as_deref().ok_or_else(|| {
-            io::Error::new(
+        if installer.is_none() {
+            return Err(io::Error::new(
                 io::ErrorKind::NotFound,
                 "inline-hermes is not installed and --no-install was provided",
             )
-        })?;
-        if !plugin_ready {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                "the Inline Hermes plugin is not usable and --no-install was provided",
-            )
             .into());
         }
-    }
-    let configured_bot_id = if plugin_ready {
-        let status = run_with_environment(
-            &installed.executable,
-            &[],
-            &["inline", "status", "--json", "--probe"],
-            None,
-            COMMAND_TIMEOUT,
-            &profile.environment,
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "the Inline Hermes plugin does not support machine setup and --no-install was provided",
         )
-        .await?;
-        if status.success {
-            status_bot_id(&status.stdout)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-    Ok(GatewayPreflight { configured_bot_id })
+        .into());
+    }
+    Ok(GatewayPreflight {
+        configured_bot_id: None,
+    })
 }
 
 pub(super) async fn setup(
@@ -103,7 +109,9 @@ pub(super) async fn setup(
     )
     .await?;
     let installer = find_executable("inline-hermes");
-    let integration = ensure_plugin(
+    let current_machine = machine_plugin_status(installed, environment, false).await?;
+    let mut integration = ensure_plugin(
+        current_machine,
         installer.as_deref(),
         args.no_install,
         profile.home.as_deref(),
@@ -123,6 +131,15 @@ pub(super) async fn setup(
         environment,
     )
     .await?;
+    let machine = machine_plugin_status(installed, environment, false)
+        .await?
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "the installed Inline Hermes plugin does not provide the required machine setup protocol",
+            )
+        })?;
+    integration.version = machine.version;
 
     let owner_user_id = bot.owner_user_id.to_string();
     let allowed = args
@@ -157,6 +174,17 @@ pub(super) async fn setup(
         environment,
     )
     .await?;
+
+    let credential_status = require_success_with_environment(
+        &installed.executable,
+        &[],
+        &["inline", "status", "--json", "--probe"],
+        None,
+        COMMAND_TIMEOUT,
+        environment,
+    )
+    .await?;
+    verify_status(&credential_status, bot.id)?;
 
     let (service_action, ready) = if args.no_restart {
         ("skipped", false)
@@ -193,28 +221,18 @@ pub(super) async fn setup(
             .await?;
             "installed"
         };
-        let status = require_success_with_environment(
+        require_success_with_environment(
             &installed.executable,
             &[],
-            &["inline", "status", "--json", "--probe"],
+            &["gateway", "status"],
             None,
             COMMAND_TIMEOUT,
             environment,
         )
         .await?;
-        verify_status(&status, bot.id)?;
         (action, true)
     };
 
-    doctor_plugin(
-        if integration.action == "kept" {
-            installer.as_deref()
-        } else {
-            None
-        },
-        profile.home.as_deref(),
-    )
-    .await?;
     Ok(GatewaySetupOutcome {
         integration_action: integration.action,
         integration_version: integration.version,
@@ -224,10 +242,17 @@ pub(super) async fn setup(
 }
 
 async fn ensure_plugin(
+    current_machine: Option<MachinePluginStatus>,
     installer: Option<&Path>,
     no_install: bool,
     hermes_home: Option<&Path>,
 ) -> Result<PluginSetup, Box<dyn std::error::Error>> {
+    if let Some(machine) = current_machine {
+        return Ok(PluginSetup {
+            action: "kept",
+            version: machine.version,
+        });
+    }
     if let Some(installer) = installer {
         let (healthy, version) = plugin_status(installer, hermes_home).await?;
         if healthy {
@@ -236,29 +261,21 @@ async fn ensure_plugin(
                 version,
             });
         }
-        if no_install {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                "the Inline Hermes plugin is not usable and --no-install was provided",
-            )
-            .into());
-        }
-        let version = install_latest_plugin(hermes_home).await?;
-        return Ok(PluginSetup {
-            action: "repaired",
-            version,
-        });
     }
     if no_install {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
-            "inline-hermes is not installed and --no-install was provided",
+            "the Inline Hermes plugin does not support machine setup and --no-install was provided",
         )
         .into());
     }
     let version = install_latest_plugin(hermes_home).await?;
     Ok(PluginSetup {
-        action: "installed",
+        action: if installer.is_some() {
+            "repaired"
+        } else {
+            "installed"
+        },
         version,
     })
 }
@@ -285,11 +302,12 @@ async fn install_latest_plugin(
     Ok(plugin_package_version(&output).unwrap_or_else(|| "latest".to_string()))
 }
 
-async fn plugin_healthy(
-    installer: &Path,
-    hermes_home: Option<&Path>,
-) -> Result<bool, Box<dyn std::error::Error>> {
-    Ok(plugin_status(installer, hermes_home).await?.0)
+fn plugin_package_version(output: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(output)
+        .ok()?
+        .get("packageVersion")?
+        .as_str()
+        .map(str::to_string)
 }
 
 async fn plugin_status(
@@ -306,12 +324,21 @@ async fn plugin_status(
     ))
 }
 
-fn plugin_package_version(output: &str) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(output)
-        .ok()?
-        .get("packageVersion")?
-        .as_str()
-        .map(str::to_string)
+fn plugin_status_healthy(success: bool, output: &str) -> bool {
+    if !success {
+        return false;
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
+        return false;
+    };
+    let reported_ok = value.get("ok").and_then(serde_json::Value::as_bool) == Some(true);
+    let version = value
+        .get("packageVersion")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|version| semver::Version::parse(version).ok());
+    let minimum = semver::Version::parse(MIN_MACHINE_PLUGIN_VERSION)
+        .expect("machine plugin minimum must be valid semver");
+    reported_ok && version.is_some_and(|version| version >= minimum)
 }
 
 async fn plugin_has_configured_credential(
@@ -335,50 +362,81 @@ async fn plugin_has_configured_credential(
     Ok(configured)
 }
 
-fn plugin_status_healthy(success: bool, output: &str) -> bool {
-    if !success {
-        return false;
-    }
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
-        return false;
-    };
-    let reported_ok = value.get("ok").and_then(serde_json::Value::as_bool) == Some(true);
-    let version = value
-        .get("packageVersion")
-        .and_then(serde_json::Value::as_str)
-        .and_then(|version| semver::Version::parse(version).ok());
-    let minimum = semver::Version::parse(MIN_MACHINE_PLUGIN_VERSION)
-        .expect("machine plugin minimum must be valid semver");
-    reported_ok && version.is_some_and(|version| version >= minimum)
+async fn machine_plugin_status(
+    installed: &InstalledTarget,
+    environment: &[(OsString, OsString)],
+    probe: bool,
+) -> Result<Option<MachinePluginStatus>, Box<dyn std::error::Error>> {
+    let status = run_machine_status(installed, environment, probe).await?;
+    Ok(parse_machine_plugin_status(status.success, &status.stdout))
 }
 
-async fn doctor_plugin(
-    installer: Option<&Path>,
-    hermes_home: Option<&Path>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let doctor_args = installer_args("doctor", hermes_home, &["--json"]);
-    if let Some(installer) = installer {
-        let refs = doctor_args.iter().map(String::as_str).collect::<Vec<_>>();
-        require_success(installer, &[], &refs, None, COMMAND_TIMEOUT).await?;
-        return Ok(());
+async fn run_machine_status(
+    installed: &InstalledTarget,
+    environment: &[(OsString, OsString)],
+    probe: bool,
+) -> Result<super::process::CommandOutput, Box<dyn std::error::Error>> {
+    let args = if probe {
+        &["inline", "status", "--json", "--probe"][..]
+    } else {
+        &["inline", "status", "--json"][..]
+    };
+    run_with_environment(
+        &installed.executable,
+        &[],
+        args,
+        None,
+        COMMAND_TIMEOUT,
+        environment,
+    )
+    .await
+}
+
+fn parse_machine_plugin_status(success: bool, output: &str) -> Option<MachinePluginStatus> {
+    if !success {
+        return None;
     }
-    let npm = find_executable("npm").ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::NotFound,
-            "npm is required to verify the Inline Hermes plugin",
-        )
-    })?;
-    let mut args = vec![
-        "exec".to_string(),
-        "--yes".to_string(),
-        "--package=@inline-chat/hermes-agent-adapter@latest".to_string(),
-        "--".to_string(),
-        "inline-hermes".to_string(),
-    ];
-    args.extend(doctor_args);
-    let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
-    require_success(&npm, &[], &refs, None, INSTALL_TIMEOUT).await?;
-    Ok(())
+    let value = serde_json::from_str::<serde_json::Value>(output).ok()?;
+    let protocol = value
+        .get("setupProtocolVersion")
+        .and_then(serde_json::Value::as_u64)?;
+    let version = value
+        .get("pluginVersion")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|version| semver::Version::parse(version).ok())?;
+    let minimum = semver::Version::parse(MIN_MACHINE_PLUGIN_VERSION)
+        .expect("machine plugin minimum must be valid semver");
+    let sidecar_bundled = value
+        .get("sidecarBundled")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true);
+    if protocol < MACHINE_SETUP_PROTOCOL_VERSION || version < minimum || !sidecar_bundled {
+        return None;
+    }
+    Some(MachinePluginStatus {
+        version: version.to_string(),
+        configured: value.get("configured").and_then(serde_json::Value::as_bool) == Some(true),
+    })
+}
+
+async fn legacy_plugin_configured(
+    installed: &InstalledTarget,
+    environment: &[(OsString, OsString)],
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let status = run_with_environment(
+        &installed.executable,
+        &[],
+        &["inline", "status"],
+        None,
+        COMMAND_TIMEOUT,
+        environment,
+    )
+    .await?;
+    Ok(status.success
+        && status
+            .stdout
+            .lines()
+            .any(|line| line.trim().eq_ignore_ascii_case("Inline configured: yes")))
 }
 
 async fn resolve_profile(
@@ -388,7 +446,7 @@ async fn resolve_profile(
     let Some(profile) = profile.filter(|profile| *profile != "default") else {
         return Ok(HermesProfile {
             home: None,
-            environment: Vec::new(),
+            environment: cli_environment(),
         });
     };
     let output = require_success(
@@ -400,13 +458,28 @@ async fn resolve_profile(
     )
     .await?;
     let home = parse_profile_home(&output)?;
+    let mut environment = cli_environment();
+    environment.push((
+        OsString::from("HERMES_HOME"),
+        home.as_os_str().to_os_string(),
+    ));
     Ok(HermesProfile {
-        environment: vec![(
-            OsString::from("HERMES_HOME"),
-            home.as_os_str().to_os_string(),
-        )],
+        environment,
         home: Some(home),
     })
+}
+
+fn cli_environment() -> Vec<(OsString, OsString)> {
+    std::env::current_exe()
+        .ok()
+        .filter(|path| path.is_absolute())
+        .map(|path| {
+            vec![(
+                OsString::from("INLINE_CLI_BIN"),
+                path.as_os_str().to_os_string(),
+            )]
+        })
+        .unwrap_or_default()
 }
 
 fn parse_profile_home(output: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
@@ -501,15 +574,41 @@ mod tests {
     fn plugin_health_requires_the_machine_setup_contract_version() {
         assert!(plugin_status_healthy(
             true,
-            r#"{"ok":true,"packageVersion":"0.0.6"}"#
+            r#"{"ok":true,"packageVersion":"0.0.7"}"#
         ));
         assert!(!plugin_status_healthy(
             true,
-            r#"{"ok":true,"packageVersion":"0.0.5"}"#
+            r#"{"ok":true,"packageVersion":"0.0.6"}"#
         ));
         assert!(!plugin_status_healthy(
             false,
             r#"{"ok":true,"packageVersion":"9.0.0"}"#
         ));
+    }
+
+    #[test]
+    fn live_machine_contract_is_independent_of_installer_state() {
+        let status = parse_machine_plugin_status(
+            true,
+            r#"{"ok":false,"setupProtocolVersion":1,"pluginVersion":"0.0.7","configured":false,"sidecarBundled":true}"#,
+        )
+        .expect("unconfigured live plugin still provides setup capability");
+        assert_eq!(status.version, "0.0.7");
+        assert!(!status.configured);
+
+        assert!(
+            parse_machine_plugin_status(
+                true,
+                r#"{"ok":true,"setupProtocolVersion":1,"pluginVersion":"0.0.6","configured":true,"sidecarBundled":true}"#,
+            )
+            .is_none()
+        );
+        assert!(
+            parse_machine_plugin_status(
+                true,
+                r#"{"ok":true,"setupProtocolVersion":1,"pluginVersion":"0.0.7","configured":true,"sidecarBundled":false}"#,
+            )
+            .is_none()
+        );
     }
 }

@@ -11,6 +11,7 @@ use super::{AccessMode, AgentsSetupArgs, GatewayPreflight, GatewaySetupOutcome};
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(180);
+const MIN_SETUP_PLUGIN_VERSION: &str = "0.0.56";
 
 pub(super) async fn preflight(
     installed: &InstalledTarget,
@@ -34,9 +35,13 @@ pub(super) async fn preflight(
     )
     .await?;
     let plugin_state = inspect_plugin(&inspected);
-    let plugin_healthy = matches!(&plugin_state, PluginState::Healthy { .. });
+    let plugin_can_probe = matches!(
+        &plugin_state,
+        PluginState::Healthy { .. } | PluginState::Outdated
+    );
     match plugin_state {
         PluginState::Healthy { .. } => {}
+        PluginState::Outdated if !args.no_install => {}
         PluginState::Missing if !args.no_install => {}
         PluginState::ManagedBroken if !args.no_install => {}
         PluginState::Foreign if args.replace && !args.no_install => {}
@@ -48,11 +53,14 @@ pub(super) async fn preflight(
             .into());
         }
         PluginState::Missing => require_plugin_install_allowed(args, "is not installed")?,
+        PluginState::Outdated => {
+            require_plugin_install_allowed(args, "must be updated for unified setup")?
+        }
         PluginState::ManagedBroken => {
             require_plugin_install_allowed(args, "is installed but unusable")?
         }
     };
-    let configured_bot_id = if plugin_healthy {
+    let configured_bot_id = if plugin_can_probe {
         let status = run(
             &installed.executable,
             &prefix,
@@ -116,6 +124,18 @@ pub(super) async fn setup(
     let plugin_state = inspect_plugin(&inspected);
     let integration_action = match plugin_state {
         PluginState::Healthy { .. } => "kept",
+        PluginState::Outdated => {
+            require_plugin_install_allowed(args, "must be updated for unified setup")?;
+            require_success(
+                &installed.executable,
+                &prefix,
+                &["plugins", "update", "inline"],
+                None,
+                INSTALL_TIMEOUT,
+            )
+            .await?;
+            "updated"
+        }
         PluginState::Missing => {
             require_plugin_install_allowed(args, "is not installed")?;
             require_success(
@@ -279,6 +299,7 @@ pub(super) async fn setup(
 enum PluginState {
     Missing,
     Healthy { version: String },
+    Outdated,
     ManagedBroken,
     Foreign,
 }
@@ -323,10 +344,17 @@ fn inspect_plugin_json(output: &str) -> PluginState {
         .pointer("/dependencyStatus/requiredInstalled")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(true);
-    if loaded && dependencies_ready {
+    let version_ready = semver::Version::parse(&version).is_ok_and(|version| {
+        version
+            >= semver::Version::parse(MIN_SETUP_PLUGIN_VERSION)
+                .expect("OpenClaw setup plugin minimum must be valid semver")
+    });
+    if !loaded || !dependencies_ready {
+        PluginState::ManagedBroken
+    } else if version_ready {
         PluginState::Healthy { version }
     } else {
-        PluginState::ManagedBroken
+        PluginState::Outdated
     }
 }
 
@@ -634,11 +662,17 @@ mod tests {
     #[test]
     fn plugin_inspection_distinguishes_healthy_and_foreign_sources() {
         let healthy = inspect_plugin_json(
-            r#"{"plugin":{"packageName":"@inline-openclaw/inline","version":"0.0.55","status":"loaded","dependencyStatus":{"requiredInstalled":true}}}"#,
+            r#"{"plugin":{"packageName":"@inline-openclaw/inline","version":"0.0.56","status":"loaded","dependencyStatus":{"requiredInstalled":true}}}"#,
         );
         assert!(matches!(
             healthy,
-            PluginState::Healthy { version } if version == "0.0.55"
+            PluginState::Healthy { version } if version == "0.0.56"
+        ));
+        assert!(matches!(
+            inspect_plugin_json(
+                r#"{"plugin":{"packageName":"@inline-openclaw/inline","version":"0.0.55","status":"loaded","dependencyStatus":{"requiredInstalled":true}}}"#
+            ),
+            PluginState::Outdated
         ));
         assert!(matches!(
             inspect_plugin_json(

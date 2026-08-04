@@ -867,6 +867,19 @@ finally:
 
 parser = argparse.ArgumentParser()
 inline_cli.register_cli(parser)
+with tempfile.TemporaryDirectory(prefix="inline-hermes-cli-bin-") as tmp:
+    configured_inline = Path(tmp) / "inline"
+    configured_inline.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    configured_inline.chmod(0o700)
+    saved_inline_cli_bin = os.environ.get("INLINE_CLI_BIN")
+    try:
+        os.environ["INLINE_CLI_BIN"] = str(configured_inline)
+        assert inline_cli._find_inline_cli() == str(configured_inline)
+    finally:
+        if saved_inline_cli_bin is None:
+            os.environ.pop("INLINE_CLI_BIN", None)
+        else:
+            os.environ["INLINE_CLI_BIN"] = saved_inline_cli_bin
 default_args = parser.parse_args([])
 assert inline_cli.dispatch(default_args) == 0
 status_args = parser.parse_args(["status"])
@@ -940,6 +953,8 @@ assert machine_token not in machine_output
 assert json.loads(machine_output) == {
     "ok": True,
     "action": "inline.setup",
+    "setupProtocolVersion": 1,
+    "pluginVersion": "0.0.7",
     "configured": True,
     "access": "allowlist",
     "ownerUserId": "42",
@@ -974,6 +989,8 @@ finally:
 probe_output = probe_stdout.getvalue()
 assert machine_token not in probe_output
 probe_payload = json.loads(probe_output)
+assert probe_payload["setupProtocolVersion"] == 1
+assert probe_payload["pluginVersion"] == "0.0.7"
 assert probe_payload["probe"] == {
     "ok": True,
     "botUserId": "42",

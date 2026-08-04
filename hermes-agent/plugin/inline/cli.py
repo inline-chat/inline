@@ -21,6 +21,7 @@ _MIN_NODE_MAJOR = 20
 _BOT_USERNAME_RE = re.compile(r"^[A-Za-z0-9_]+bot$", re.IGNORECASE)
 _CLI_INSTALL_URL = "https://inline.chat/cli/install.sh"
 _MAX_TOKEN_BYTES = 16 * 1024
+_MACHINE_SETUP_PROTOCOL_VERSION = 1
 
 
 def gateway_setup() -> None:
@@ -206,6 +207,11 @@ def _install_inline_cli(hermes_setup) -> str | None:
 
 
 def _find_inline_cli() -> str | None:
+    configured = os.getenv("INLINE_CLI_BIN", "").strip()
+    if configured:
+        candidate = Path(configured).expanduser()
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
     discovered = shutil.which("inline")
     if discovered:
         return discovered
@@ -388,6 +394,8 @@ def _machine_setup(args) -> int:
     result = {
         "ok": True,
         "action": "inline.setup",
+        "setupProtocolVersion": _MACHINE_SETUP_PROTOCOL_VERSION,
+        "pluginVersion": _plugin_version(),
         "configured": True,
         "access": getattr(args, "access", "owner"),
         "ownerUserId": owner_user_id,
@@ -414,6 +422,8 @@ def _status(args) -> int:
     result = {
         "ok": ready,
         "action": "inline.status",
+        "setupProtocolVersion": _MACHINE_SETUP_PROTOCOL_VERSION,
+        "pluginVersion": _plugin_version(),
         "configured": configured,
         "sidecarBundled": _SIDECAR_ENTRY.exists(),
         "node": _node_status(),
@@ -432,6 +442,20 @@ def _status(args) -> int:
             print(f"Inline credential probe: {'ready' if ready else 'failed'}")
         print("Advanced diagnostics: inline-hermes doctor --json")
     return 0 if not probe_requested or ready else 1
+
+
+def _plugin_version() -> str:
+    """Read the separately installed plugin version without package-manager state."""
+    try:
+        for line in (Path(__file__).parent / "plugin.yaml").read_text(encoding="utf-8").splitlines():
+            key, separator, value = line.partition(":")
+            if separator and key.strip() == "version":
+                version = value.strip().strip("\"'")
+                if version:
+                    return version
+    except OSError:
+        pass
+    return "unknown"
 
 
 def _probe_inline_token(token: str) -> dict:

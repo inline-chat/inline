@@ -56,7 +56,7 @@ describe("packed artifact", () => {
     const pkg = JSON.parse(await readFile(path.join(packageRoot, "package.json"), "utf8")) as {
       bin?: Record<string, string>
       engines?: Record<string, string>
-      inlineHermes?: Record<string, string>
+      inlineHermes?: Record<string, string | number>
       repository?: { directory?: string }
       scripts?: Record<string, string>
     }
@@ -69,6 +69,7 @@ describe("packed artifact", () => {
     expect(pkg.inlineHermes).toMatchObject({
       pluginId: "inline",
       pluginPath: "plugin/inline",
+      machineSetupProtocol: 1,
       minHermesVersion: "0.17.0",
       testedHermesVersion: "0.19.1",
       testedHermesCommit: "cc4cab2",
@@ -153,7 +154,7 @@ describe("packed artifact", () => {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       }).trim()
-      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.6")
+      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.7")
 
       const install = execFileSync(bin, ["install", "--hermes-home", hermesHome, "--force", "--json"], {
         cwd: packageRoot,
