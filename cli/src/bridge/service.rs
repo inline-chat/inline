@@ -905,7 +905,7 @@ fn read_log_tail(path: &Path) -> io::Result<String> {
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 fn cap_log_file(path: &Path) -> io::Result<()> {
     if path
         .metadata()
@@ -1114,7 +1114,7 @@ fn executable_check(path: &Path) -> Check {
     }
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 fn ensure_log_file(path: &Path) -> io::Result<()> {
     let mut options = OpenOptions::new();
     options.create(true).append(true);
@@ -1331,12 +1331,12 @@ fn service_process_running(_account: &AccountBridgeConfig) -> bool {
     false
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 fn launchd_output_indicates_running(output: &str) -> bool {
     output.contains("\n\tstate = running\n")
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 fn launchd_output_indicates_disabled(output: &str, label: &str) -> bool {
     output.lines().any(|line| {
         line.split_once("=>").is_some_and(|(key, value)| {

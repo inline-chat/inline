@@ -74,6 +74,7 @@ impl BoundedLogWriter {
         })
     }
 
+    #[cfg(target_os = "macos")]
     fn copy_from(mut self, mut reader: std::fs::File) {
         use std::io::Read;
 
