@@ -812,11 +812,8 @@ private extension MessagesCollectionView {
     private var pendingAppearingItems: Set<MessageListItem> = []
     private var sendAnimationListTransaction = SendMessageAnimationListTransaction()
     private weak var sendAnimationCoordinator: SendMessageAnimationCoordinator?
-    private var initialThumbnailWarmupTask: Task<Void, Never>?
-    private var initialThumbnailWarmup: InlineTinyThumbnailWarmup?
     private var mediaWarmupTask: Task<Void, Never>?
     private var mediaWarmups: [InlineTinyThumbnailWarmup] = []
-    private var hasPresentedMessageSnapshot = false
 
     private struct MessageGroupInfo {
       let ownerItem: MessageListItem
@@ -1839,13 +1836,10 @@ private extension MessagesCollectionView {
       remoteOlderTask = nil
       threadAnchorFetchTask?.cancel()
       threadAnchorFetchTask = nil
-      initialThumbnailWarmupTask?.cancel()
-      initialThumbnailWarmupTask = nil
       mediaWarmupTask?.cancel()
       mediaWarmupTask = nil
-      let thumbnailWarmups = mediaWarmups + [initialThumbnailWarmup].compactMap { $0 }
+      let thumbnailWarmups = mediaWarmups
       mediaWarmups.removeAll()
-      initialThumbnailWarmup = nil
       Task {
         for warmup in thumbnailWarmups {
           await InlineTinyThumbnailPrewarmer.cancel(warmup)
@@ -2230,75 +2224,14 @@ private extension MessagesCollectionView {
         }
       }
 
-      if shouldWarmBeforeFirstPresentation(snapshot) {
-        scheduleFirstPresentation(
-          snapshot,
-          animatingDifferences: animated ?? false,
-          completion: completion
-        )
-      } else {
-        safeApplySnapshot(
-          snapshot,
-          animatingDifferences: animated ?? false,
-          completion: completion
-        )
-      }
-    }
-
-    private func shouldWarmBeforeFirstPresentation(
-      _ snapshot: NSDiffableDataSourceSnapshot<MessageListSectionID, MessageListItem>
-    ) -> Bool {
-      !hasPresentedMessageSnapshot && snapshot.itemIdentifiers.contains { item in
-        if case .message = item { return true }
-        return false
-      }
-    }
-
-    private func scheduleFirstPresentation(
-      _ snapshot: NSDiffableDataSourceSnapshot<MessageListSectionID, MessageListItem>,
-      animatingDifferences: Bool,
-      completion: (() -> Void)?
-    ) {
-      initialThumbnailWarmupTask?.cancel()
-      let messagesToWarm = snapshot.itemIdentifiers
-        .prefix(InlineTinyThumbnailWarmupPolicy.firstPresentationMessageLimit)
-        .compactMap { message(for: $0) }
-
-      initialThumbnailWarmupTask = Task { @MainActor [weak self] in
-        guard let self else { return }
-
-        if let previousWarmup = initialThumbnailWarmup {
-          await InlineTinyThumbnailPrewarmer.cancel(previousWarmup)
-        }
-
-        let warmup = await ImagePrefetcher.shared.prepareThumbnails(
-          for: messagesToWarm,
-          includeSupportingMedia: false,
-          priority: .visible
-        )
-        initialThumbnailWarmup = warmup
-        let ready = await InlineTinyThumbnailPrewarmer.waitUntilReady(
-          warmup,
-          timeout: InlineTinyThumbnailWarmupPolicy.firstPresentationTimeout
-        )
-
-        guard !Task.isCancelled else {
-          await InlineTinyThumbnailPrewarmer.cancel(warmup)
-          initialThumbnailWarmup = nil
-          return
-        }
-
-        if ready {
-          initialThumbnailWarmup = nil
-        }
-        hasPresentedMessageSnapshot = true
-        safeApplySnapshot(
-          snapshot,
-          animatingDifferences: animatingDifferences,
-          completion: completion
-        )
-        initialThumbnailWarmupTask = nil
-      }
+      // Cached messages are the primary first-frame content. Applying their snapshot must not
+      // wait for thumbnail preparation: visible cells request high-priority thumbnails as they
+      // bind, and the snapshot completion warms the visible and nearby rows concurrently.
+      safeApplySnapshot(
+        snapshot,
+        animatingDifferences: animated ?? false,
+        completion: completion
+      )
     }
 
     private func safeApplySnapshot(
@@ -2329,12 +2262,6 @@ private extension MessagesCollectionView {
       let startedAt = Date()
       let sectionCount = snapshot.sectionIdentifiers.count
       let itemCount = snapshot.itemIdentifiers.count
-      if snapshot.itemIdentifiers.contains(where: { item in
-        if case .message = item { return true }
-        return false
-      }) {
-        hasPresentedMessageSnapshot = true
-      }
       let span = PerformanceTrace.begin(
         "IOSMessagesSnapshotApply",
         category: .messages,
