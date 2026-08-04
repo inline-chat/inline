@@ -11,6 +11,7 @@ struct ChatView: View {
   var peerId: Peer
   var contextSpaceId: Int64?
   var preview: Bool
+  private let focusMessageID: Int64?
   private let autoCleanupUntitledEmptyThreadOnBack: Bool
 
   @State var navBarHeight: CGFloat = 0
@@ -75,11 +76,13 @@ struct ChatView: View {
     peer: Peer,
     contextSpaceId: Int64? = nil,
     preview: Bool = false,
+    focusMessageID: Int64? = nil,
     autoCleanupUntitledEmptyThreadOnBack: Bool = false
   ) {
     peerId = peer
     self.contextSpaceId = contextSpaceId
     self.preview = preview
+    self.focusMessageID = focusMessageID
     self.autoCleanupUntitledEmptyThreadOnBack = autoCleanupUntitledEmptyThreadOnBack
     _botChatSettingsCoordinator = State(initialValue: BotChatSettingsCoordinator(peer: peer))
     _translationPlacement = State(
@@ -155,6 +158,9 @@ struct ChatView: View {
     }
     .task {
       await fetchChatIfNeeded()
+    }
+    .task(id: focusMessageID) {
+      await loadFocusedMessageIfNeeded()
     }
     .task(id: peerId.toString()) {
       botChatSettingsCoordinator.startObservingDiscoveryScope(in: appDatabase)
@@ -444,7 +450,8 @@ struct ChatView: View {
         peerId: peerId,
         chatId: chat.id,
         spaceId: chat.spaceId,
-        draftMessage: fullChatViewModel.chatItem?.dialog.draftMessage
+        draftMessage: fullChatViewModel.chatItem?.dialog.draftMessage,
+        focusMessageID: focusMessageID
       )
       .edgesIgnoringSafeArea(.all)
     }
@@ -533,7 +540,33 @@ struct ChatView: View {
 
   private var chatRouteStillPresent: Bool {
     AppTab.allCases.contains { tab in
-      router[tab].contains(.chat(peer: peerId))
+      router[tab].contains { destination in
+        switch destination {
+        case let .chat(peer), let .chatMessage(peer, _):
+          peer == peerId
+        default:
+          false
+        }
+      }
+    }
+  }
+
+  private func loadFocusedMessageIfNeeded() async {
+    guard let focusMessageID else { return }
+
+    do {
+      _ = try await realtimeV2.send(
+        .getMessages(peer: peerId, messageIds: [focusMessageID])
+      )
+    } catch is CancellationError {
+      return
+    } catch {
+      Log.shared.error("Failed to load focused message", error: error)
+      ToastManager.shared.showToast(
+        "Could not load that message",
+        type: .error,
+        systemImage: "exclamationmark.triangle.fill"
+      )
     }
   }
 }

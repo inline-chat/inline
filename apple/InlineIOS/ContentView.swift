@@ -125,7 +125,7 @@ private struct AuthedAppRoot: View {
   @ViewBuilder
   private func tabContentView(for tab: AppTab) -> some View {
     switch tab {
-    case .chats:
+    case .inbox, .allChats, .chats:
       HomeView()
     case .archived:
       ArchivedChatsView()
@@ -149,6 +149,8 @@ private struct AuthedAppRoot: View {
       SpaceView(spaceId: id)
     case let .chat(peer):
       ChatView(peer: peer)
+    case let .chatMessage(peer, messageID):
+      ChatView(peer: peer, focusMessageID: messageID)
     case let .chatInfo(chatItem):
       ChatInfoView(chatItem: chatItem)
     case let .spaceSettings(spaceId):

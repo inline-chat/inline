@@ -9,6 +9,7 @@ public class ChatContainerView: UIView {
   let spaceId: Int64?
   private var peerUser: InlineKit.User?
   private var lastAppliedDraftSignature: DraftSignature?
+  private var lastRequestedFocusMessageID: Int64?
 
   private struct DraftSignature: Equatable {
     let text: String
@@ -166,6 +167,12 @@ public class ChatContainerView: UIView {
     guard !Drafts.shared.shouldSuppressDraftRestoration(for: peerId) else { return }
     lastAppliedDraftSignature = signature
     composeView.loadDraft(from: draftMessage)
+  }
+
+  func focusMessage(_ messageID: Int64?) {
+    guard let messageID, lastRequestedFocusMessageID != messageID else { return }
+    lastRequestedFocusMessageID = messageID
+    messagesCollectionView.scrollToMessageWhenAvailable(messageID)
   }
 
   private var mentionCompletionHeightConstraint: NSLayoutConstraint!
@@ -807,12 +814,14 @@ struct ChatViewUIKit: UIViewRepresentable {
   let chatId: Int64?
   let spaceId: Int64?
   let draftMessage: DraftMessage?
+  let focusMessageID: Int64?
   @EnvironmentObject var data: DataManager
   @EnvironmentObject var fullChatViewModel: FullChatViewModel
 
   func makeUIView(context _: Context) -> ChatContainerView {
     let view = ChatContainerView(peerId: peerId, chatId: chatId, spaceId: spaceId, peerUser: fullChatViewModel.peerUser)
     view.loadDraftIfNeeded(draftMessage)
+    view.focusMessage(focusMessageID)
 
     // Mark messages as read when view appears
     UnreadManager.shared.readAll(peerId, chatId: chatId ?? 0)
@@ -823,5 +832,6 @@ struct ChatViewUIKit: UIViewRepresentable {
   func updateUIView(_ view: ChatContainerView, context _: Context) {
     view.setPeerUser(fullChatViewModel.peerUser)
     view.loadDraftIfNeeded(draftMessage)
+    view.focusMessage(focusMessageID)
   }
 }

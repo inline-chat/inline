@@ -17,27 +17,23 @@ public struct ChatListDaySection: Identifiable, Equatable, Sendable {
 public struct ChatListPresentation: Equatable, Sendable {
   public static let empty = Self(
     inbox: [],
-    closedPinned: [],
     allChatSections: [],
     archived: [],
     inboxUnreadCount: 0
   )
 
   public let inbox: [ChatListItemSnapshot]
-  public let closedPinned: [ChatListItemSnapshot]
   public let allChatSections: [ChatListDaySection]
   public let archived: [ChatListItemSnapshot]
   public let inboxUnreadCount: Int
 
   public init(
     inbox: [ChatListItemSnapshot],
-    closedPinned: [ChatListItemSnapshot],
     allChatSections: [ChatListDaySection],
     archived: [ChatListItemSnapshot],
     inboxUnreadCount: Int
   ) {
     self.inbox = inbox
-    self.closedPinned = closedPinned
     self.allChatSections = allChatSections
     self.archived = archived
     self.inboxUnreadCount = inboxUnreadCount
@@ -52,11 +48,7 @@ public struct ChatListPresentation: Equatable, Sendable {
     let inbox = visible
       .filter(\.isOpen)
       .sorted { inboxOrdered($0, before: $1, sort: sort) }
-    let closedPinned = visible
-      .filter { !$0.isOpen && $0.isPinned }
-      .sorted(by: pinnedOrdered)
     let timeline = visible
-      .filter { $0.isOpen || !$0.isPinned }
       .sorted { timelineOrdered($0, before: $1, sort: sort) }
     let archived = snapshots
       .filter { !$0.isChatListHidden && $0.isArchived }
@@ -64,7 +56,6 @@ public struct ChatListPresentation: Equatable, Sendable {
 
     return Self(
       inbox: inbox,
-      closedPinned: closedPinned,
       allChatSections: daySections(from: timeline, sort: sort, calendar: calendar),
       archived: archived,
       inboxUnreadCount: inbox.lazy.filter(\.isUnread).count
@@ -72,7 +63,22 @@ public struct ChatListPresentation: Equatable, Sendable {
   }
 
   public var allChats: [ChatListItemSnapshot] {
-    closedPinned + allChatSections.flatMap(\.items)
+    allChatSections.flatMap(\.items)
+  }
+
+  public var allChatCount: Int {
+    allChatSections.reduce(into: 0) { count, section in
+      count += section.items.count
+    }
+  }
+
+  /// Counts only identity moves between Home surfaces or positions. Content-only
+  /// updates intentionally return zero so they do not trigger list move animations.
+  public func structuralLocationChangeCount(from previous: Self) -> Int {
+    let oldLocations = previous.locationsByPeer()
+    let newLocations = locationsByPeer()
+    let peers = Set(oldLocations.keys).union(newLocations.keys)
+    return peers.lazy.count { oldLocations[$0] != newLocations[$0] }
   }
 
   private static func daySections(
@@ -106,16 +112,6 @@ public struct ChatListPresentation: Equatable, Sendable {
       return order
     }
     return timelineOrdered(lhs, before: rhs, sort: sort)
-  }
-
-  private static func pinnedOrdered(
-    _ lhs: ChatListItemSnapshot,
-    _ rhs: ChatListItemSnapshot
-  ) -> Bool {
-    if let order = compareOptionalOrder(lhs.pinnedOrder, rhs.pinnedOrder) {
-      return order
-    }
-    return timelineOrdered(lhs, before: rhs, sort: .lastUpdated)
   }
 
   private static func timelineOrdered(
@@ -154,5 +150,51 @@ public struct ChatListPresentation: Equatable, Sendable {
     default:
       nil
     }
+  }
+
+  private struct OrderedPosition: Equatable {
+    let predecessor: Peer?
+    let sectionID: Date?
+  }
+
+  private struct Locations: Equatable {
+    var inbox: OrderedPosition?
+    var allChats: OrderedPosition?
+    var archived: OrderedPosition?
+  }
+
+  private func locationsByPeer() -> [Peer: Locations] {
+    var locations: [Peer: Locations] = [:]
+    locations.reserveCapacity(max(inbox.count, allChatCount, archived.count))
+
+    var predecessor: Peer?
+    for item in inbox {
+      locations[item.peer, default: Locations()].inbox = OrderedPosition(
+        predecessor: predecessor,
+        sectionID: nil
+      )
+      predecessor = item.peer
+    }
+
+    predecessor = nil
+    for section in allChatSections {
+      for item in section.items {
+        locations[item.peer, default: Locations()].allChats = OrderedPosition(
+          predecessor: predecessor,
+          sectionID: section.id
+        )
+        predecessor = item.peer
+      }
+    }
+
+    predecessor = nil
+    for item in archived {
+      locations[item.peer, default: Locations()].archived = OrderedPosition(
+        predecessor: predecessor,
+        sectionID: nil
+      )
+      predecessor = item.peer
+    }
+    return locations
   }
 }

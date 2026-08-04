@@ -14,6 +14,7 @@ public struct UpdateDialogOrderTransaction: Transaction2 {
     let order: String?
     let pinnedOrder: String?
     let pinned: Bool?
+    let intentId: String?
   }
 
   enum CodingKeys: String, CodingKey {
@@ -23,7 +24,13 @@ public struct UpdateDialogOrderTransaction: Transaction2 {
   private var log = Log.scoped("Transactions/UpdateDialogOrder")
 
   public init(peerId: Peer, order: String? = nil, pinnedOrder: String? = nil, pinned: Bool? = nil) {
-    context = Context(peerId: peerId, order: order, pinnedOrder: pinnedOrder, pinned: pinned)
+    context = Context(
+      peerId: peerId,
+      order: order,
+      pinnedOrder: pinnedOrder,
+      pinned: pinned,
+      intentId: UUID().uuidString
+    )
   }
 
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
@@ -43,12 +50,26 @@ public struct UpdateDialogOrderTransaction: Transaction2 {
 
   public func optimistic() async {
     do {
+      let original = try await AppDatabase.shared.reader.read { db in
+        try Dialog.get(peerId: context.peerId).fetchOne(db)
+      }
+      await DialogMutationRollbackTracker.shared.record(
+        intentID: context.intentId,
+        peer: context.peerId,
+        kind: .order,
+        original: original
+      )
       try await AppDatabase.shared.dbWriter.write { db in
         guard var dialog = try Dialog.get(peerId: context.peerId).fetchOne(db) else { return }
         try applyLocalOrder(&dialog, db: db)
         try dialog.save(db, onConflict: .replace)
       }
     } catch {
+      await DialogMutationRollbackTracker.shared.complete(
+        intentID: context.intentId,
+        peer: context.peerId,
+        kind: .order
+      )
       log.error("Failed to optimistically update dialog order", error: error)
     }
   }
@@ -72,6 +93,11 @@ public struct UpdateDialogOrderTransaction: Transaction2 {
         try chat.saveWithValidLastMsg(db)
         _ = try response.dialog.saveFull(db)
       }
+      await DialogMutationRollbackTracker.shared.complete(
+        intentID: context.intentId,
+        peer: context.peerId,
+        kind: .order
+      )
     } catch {
       log.error("Failed to apply dialog order result", error: error)
       throw TransactionExecutionError.invalid
@@ -80,6 +106,27 @@ public struct UpdateDialogOrderTransaction: Transaction2 {
 
   public func failed(error: TransactionError2) async {
     log.error("UpdateDialogOrder transaction failed", error: error)
+    guard let rollback = await DialogMutationRollbackTracker.shared.takeForRollback(
+      intentID: context.intentId,
+      peer: context.peerId,
+      kind: .order
+    ), let original = rollback.original else { return }
+
+    do {
+      try await AppDatabase.shared.dbWriter.write { db in
+        guard var dialog = try Dialog.get(peerId: context.peerId).fetchOne(db) else { return }
+        dialog.pinned = original.pinned
+        dialog.open = original.open
+        dialog.openedDate = original.openedDate
+        dialog.order = original.order
+        dialog.pinnedOrder = original.pinnedOrder
+        dialog.archived = original.archived
+        dialog.chatListHidden = original.chatListHidden
+        try dialog.save(db, onConflict: .replace)
+      }
+    } catch {
+      log.error("Failed to roll back dialog order state", error: error)
+    }
   }
 
   private func applyLocalOrder(_ dialog: inout Dialog, db: Database) throws {

@@ -75,6 +75,24 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     return true
   }
 
+  @MainActor
+  func handleDeepLink(_ url: URL) -> Bool {
+    guard let deepLink = InlineDeepLink(url: url) else { return false }
+
+    switch deepLink {
+    case let .user(id):
+      router.navigateFromNotification(peer: .user(id: id))
+    case let .chat(id):
+      router.navigateFromNotification(peer: .thread(id: id))
+    case let .message(chatId, messageId):
+      router.selectedTab = .inbox
+      router[.inbox] = [
+        .chatMessage(peer: .thread(id: chatId), messageID: messageId),
+      ]
+    }
+    return true
+  }
+
   private func applicationDidResignActive(_ notification: Notification) {
 //    Task {
 //      // Mark offline

@@ -10,6 +10,7 @@ struct ExperimentalSearchView: View {
   let activeSpaceId: Int64?
 
   @Environment(Router.self) private var router
+  @Environment(ExperimentalHomeActionCoordinator.self) private var homeActions
   @Environment(\.appDatabase) private var database
   @Environment(\.realtimeV2) private var realtimeV2
   @EnvironmentObject private var dataManager: DataManager
@@ -34,6 +35,11 @@ struct ExperimentalSearchView: View {
             openMessage: openSearchMessage,
             openGlobalUser: openSearchGlobalUser
           )
+          .safeAreaInset(edge: .top, spacing: 0) {
+            if let errorText = searchModel.errorText, searchModel.hasResults {
+              searchErrorBanner(errorText)
+            }
+          }
         } else {
           ProgressView()
         }
@@ -88,9 +94,42 @@ struct ExperimentalSearchView: View {
     } else if isSearching && !hasResults {
       ProgressView()
         .controlSize(.large)
+    } else if let errorText = searchModel?.errorText, !hasResults {
+      ContentUnavailableView {
+        Label("Search unavailable", systemImage: "exclamationmark.magnifyingglass")
+      } description: {
+        Text(errorText)
+      } actions: {
+        Button("Try Again", action: retrySearch)
+          .buttonStyle(.borderedProminent)
+      }
     } else if !hasResults {
       ContentUnavailableView.search(text: trimmedQuery)
     }
+  }
+
+  private func searchErrorBanner(_ errorText: String) -> some View {
+    HStack(spacing: 10) {
+      Image(systemName: "exclamationmark.triangle.fill")
+        .foregroundStyle(.orange)
+
+      Text(errorText)
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .lineLimit(2)
+
+      Spacer(minLength: 4)
+
+      Button("Retry", action: retrySearch)
+        .font(.footnote.weight(.semibold))
+    }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 10)
+    .background(.bar)
+  }
+
+  private func retrySearch() {
+    searchModel?.search(query, scope: searchScope)
   }
 
   private func updateSearch(for query: String) {
@@ -141,7 +180,10 @@ struct ExperimentalSearchView: View {
 
   private func openSearchMessage(_ result: LocalMessageSearchResult) {
     isSearchFocused = false
-    openInInbox(result.peer)
+    openInInbox(
+      result.peer,
+      destination: .chatMessage(peer: result.peer, messageID: result.messageId)
+    )
   }
 
   private func openSearchGlobalUser(_ result: InlineSearchGlobalUserResult) {
@@ -153,17 +195,35 @@ struct ExperimentalSearchView: View {
         openInInbox(.user(id: user.id))
       } catch {
         Log.shared.error("Failed to open private chat from experimental search", error: error)
+        showOpenError()
       }
     }
   }
 
-  private func openInInbox(_ peer: Peer) {
+  private func openInInbox(_ peer: Peer, destination: Destination? = nil) {
+    ExperimentalHomeNavigationPerformance.beginChatOpen(peer: peer, source: "search")
+    router.selectedTab = .inbox
+    router[.inbox] = [destination ?? .chat(peer: peer)]
+
     Task {
-      await realtimeV2.sendQueued(.updateDialogOpen(peerId: peer, open: true))
-      router.selectedTab = .chats
-      router.popToRoot(for: .chats)
-      router.push(.chat(peer: peer), for: .chats)
+      do {
+        _ = try await homeActions.perform(peer: peer) {
+          _ = try await realtimeV2.send(.updateDialogOpen(peerId: peer, open: true))
+        }
+      } catch {
+        Log.shared.error("Failed to open search result in Inbox", error: error)
+        showOpenError()
+      }
     }
+  }
+
+  private func showOpenError() {
+    ToastManager.shared.showToast(
+      "Could not update Inbox",
+      description: "The chat opened, but Inbox could not be updated. Try again.",
+      type: .error,
+      systemImage: "exclamationmark.triangle.fill"
+    )
   }
 }
 
@@ -181,6 +241,9 @@ private struct ExperimentalSearchInput: View {
         .textInputAutocapitalization(.never)
         .autocorrectionDisabled()
         .submitLabel(.search)
+        .onSubmit {
+          isFocused = false
+        }
 
       if !text.isEmpty {
         Button {

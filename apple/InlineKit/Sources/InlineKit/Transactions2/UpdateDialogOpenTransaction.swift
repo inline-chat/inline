@@ -52,12 +52,26 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
     await DialogOpenIntentTracker.shared.mark(context.intentId, peer: context.peerId)
 
     do {
+      let original = try await AppDatabase.shared.reader.read { db in
+        try Dialog.get(peerId: context.peerId).fetchOne(db)
+      }
+      await DialogMutationRollbackTracker.shared.record(
+        intentID: context.intentId,
+        peer: context.peerId,
+        kind: .open,
+        original: original
+      )
       try await AppDatabase.shared.dbWriter.write { db in
         guard var dialog = try optimisticDialog(db) else { return }
         Self.applyLocalOpenState(&dialog, open: context.open, order: context.order)
         try dialog.save(db, onConflict: .replace)
       }
     } catch {
+      await DialogMutationRollbackTracker.shared.complete(
+        intentID: context.intentId,
+        peer: context.peerId,
+        kind: .open
+      )
       log.error("Failed to optimistically update dialog open state", error: error)
     }
   }
@@ -72,6 +86,11 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
         try await AppDatabase.shared.dbWriter.write { db in
           try Self.applyDeletedChat(peer: context.peerId, db: db)
         }
+        await DialogMutationRollbackTracker.shared.complete(
+          intentID: context.intentId,
+          peer: context.peerId,
+          kind: .open
+        )
         return
       } catch {
         log.error("Failed to apply deleted dialog open result", error: error)
@@ -102,6 +121,11 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
         _ = try response.dialog.saveFull(db)
         try Self.applyLocalOpenState(peerId: context.peerId, open: context.open, order: context.order, db: db)
       }
+      await DialogMutationRollbackTracker.shared.complete(
+        intentID: context.intentId,
+        peer: context.peerId,
+        kind: .open
+      )
     } catch {
       log.error("Failed to apply dialog open result", error: error)
       throw TransactionExecutionError.invalid
@@ -110,6 +134,28 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
 
   public func failed(error: TransactionError2) async {
     log.error("UpdateDialogOpen transaction failed", error: error)
+    guard let rollback = await DialogMutationRollbackTracker.shared.takeForRollback(
+      intentID: context.intentId,
+      peer: context.peerId,
+      kind: .open
+    ) else { return }
+
+    do {
+      try await AppDatabase.shared.dbWriter.write { db in
+        guard let original = rollback.original else {
+          try Dialog.deleteOne(db, key: Dialog.getDialogId(peerId: context.peerId))
+          return
+        }
+        guard var dialog = try Dialog.get(peerId: context.peerId).fetchOne(db) else { return }
+        dialog.open = original.open
+        dialog.openedDate = original.openedDate
+        dialog.order = original.order
+        dialog.archived = original.archived
+        try dialog.save(db, onConflict: .replace)
+      }
+    } catch {
+      log.error("Failed to roll back dialog open state", error: error)
+    }
   }
 
   public var blockers: [TransactionBlocker] {
@@ -130,15 +176,15 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
     guard context.open else { return nil }
 
     switch context.peerId {
-      case let .user(id):
-        return Dialog(optimisticForUserId: id)
-      case let .thread(id):
-        guard let chat = try Chat.fetchOne(db, id: id) else { return nil }
-        var dialog = Dialog(optimisticForChat: chat)
-        if chat.isReplyThread {
-          dialog.chatListHidden = true
-        }
-        return dialog
+    case let .user(id):
+      return Dialog(optimisticForUserId: id)
+    case let .thread(id):
+      guard let chat = try Chat.fetchOne(db, id: id) else { return nil }
+      var dialog = Dialog(optimisticForChat: chat)
+      if chat.isReplyThread {
+        dialog.chatListHidden = true
+      }
+      return dialog
     }
   }
 

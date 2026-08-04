@@ -4,16 +4,34 @@ import SwiftUI
 typealias Router = NavigationModel<AppTab, Destination, Sheet>
 
 enum AppTab: String, TabType, CaseIterable, Codable {
-  case archived, chats, search, spaces
+  case inbox, allChats, search
+  case archived, chats, spaces
 
   var id: String { rawValue }
   var icon: String {
     switch self {
-      case .archived: "archivebox.fill"
-      case .chats: "bubble.left.and.bubble.right.fill"
-      case .search: "magnifyingglass"
-      case .spaces: "building.2.fill"
+    case .inbox: "tray.full.fill"
+    case .allChats: "bubble.left.and.bubble.right.fill"
+    case .archived: "archivebox.fill"
+    case .chats: "bubble.left.and.bubble.right.fill"
+    case .search: "magnifyingglass"
+    case .spaces: "building.2.fill"
     }
+  }
+}
+
+extension AppTab {
+  var currentChatsTab: AppTab {
+    switch self {
+    case .inbox, .allChats:
+      self
+    case .archived, .chats, .search, .spaces:
+      .chats
+    }
+  }
+
+  var experimentalHomeFallbackTab: AppTab {
+    self == .inbox ? .inbox : .allChats
   }
 }
 
@@ -23,6 +41,7 @@ enum Destination: DestinationType, Codable {
   case spaces
   case space(id: Int64)
   case chat(peer: Peer)
+  case chatMessage(peer: Peer, messageID: Int64)
   case chatInfo(chatItem: SpaceChatItem)
   case spaceSettings(spaceId: Int64)
   case spaceIntegrations(spaceId: Int64)
@@ -44,23 +63,23 @@ enum Sheet: SheetType, Codable {
   case chatInfo(chatItem: SpaceChatItem)
   var id: String {
     switch self {
-      case .createSpace:
-        "createSpace"
+    case .createSpace:
+      "createSpace"
 
-      case .alphaSheet:
-        "alphaSheet"
+    case .alphaSheet:
+      "alphaSheet"
 
-      case .settings:
-        "settings"
+    case .settings:
+      "settings"
 
-      case let .addMember(spaceId):
-        "addMember_\(spaceId)"
+    case let .addMember(spaceId):
+      "addMember_\(spaceId)"
 
-      case let .members(spaceId):
-        "members_\(spaceId)"
+    case let .members(spaceId):
+      "members_\(spaceId)"
 
-      case let .chatInfo(chatItem):
-        "chatInfo_\(chatItem.id)"
+    case let .chatInfo(chatItem):
+      "chatInfo_\(chatItem.id)"
     }
   }
 }
@@ -70,21 +89,24 @@ extension Router {
   func navigateFromNotification(peer: Peer) {
     // Check if user is already in the chat from the notification
     if let currentDestination = self[selectedTab].last,
-       case let .chat(currentPeer) = currentDestination,
-       currentPeer == peer
-    {
+       currentDestination.chatPeer == peer {
       // User is already in the correct chat, no need to navigate
       return
     }
 
-    // Switch to chats tab first (matching Navigation.swift behavior)
-    selectedTab = .chats
+    selectedTab = .inbox
+    self[.inbox] = [.chat(peer: peer)]
+  }
+}
 
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-      self.popToRoot(for: .chats)
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-        self.push(.chat(peer: peer), for: .chats)
-      }
+extension Destination {
+  var chatPeer: Peer? {
+    switch self {
+    case let .chat(peer), let .chatMessage(peer, _):
+      peer
+    case .chats, .archived, .spaces, .space, .chatInfo, .spaceSettings,
+         .spaceIntegrations, .integrationOptions, .createSpaceChat, .createThread, .createSpace:
+      nil
     }
   }
 }

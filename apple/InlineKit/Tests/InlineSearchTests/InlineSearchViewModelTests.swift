@@ -168,6 +168,32 @@ struct InlineSearchViewModelTests {
     #expect(model.globalUsers.map(\.id) == [2])
   }
 
+  @Test("clearing search ignores an in-flight global result")
+  func clearingSearchIgnoresInFlightGlobalResult() async throws {
+    let (_, db) = try makeInMemoryDB()
+    let client = BlockingGlobalClient()
+    let model = InlineSearchViewModel(
+      db: db,
+      limits: InlineSearchLimits(globalDebounceNanoseconds: 0),
+      globalClient: client
+    )
+
+    model.search("first")
+    await client.waitForQuery("first")
+
+    model.clear()
+    await client.resume(
+      query: "first",
+      users: [apiUser(id: 1, firstName: "First", username: "first")]
+    )
+    try await Task.sleep(nanoseconds: 20_000_000)
+
+    #expect(model.query.isEmpty)
+    #expect(model.globalUsers.isEmpty)
+    #expect(model.isSearching == false)
+    #expect(model.errorText == nil)
+  }
+
   @Test("ranker prefers exact field matches over contains matches")
   func rankerPrefersExactMatches() throws {
     let query = try #require(InlineSearchRanker.prepare("deploy"))

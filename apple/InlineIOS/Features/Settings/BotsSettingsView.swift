@@ -5,6 +5,7 @@ import Logger
 import RealtimeV2
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 struct BotsSettingsView: View {
   @Environment(\.realtimeV2) private var realtimeV2
@@ -18,6 +19,7 @@ struct BotsSettingsView: View {
   @State private var isCreating = false
   @State private var errorMessage: String?
   @State private var botToDelete: InlineProtocol.User?
+  @State private var copiedTokenPasteboardChangeCount: Int?
 
   var body: some View {
     List {
@@ -122,6 +124,12 @@ struct BotsSettingsView: View {
     }
     .task {
       await loadBots()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
+      clearSensitiveState(clearClipboard: true)
+    }
+    .onDisappear {
+      clearSensitiveState(clearClipboard: false)
     }
   }
 
@@ -230,8 +238,30 @@ struct BotsSettingsView: View {
   }
 
   private func copyToken(_ token: String) {
-    UIPasteboard.general.string = token
-    ToastManager.shared.showToast("Token copied", type: .success, systemImage: "doc.on.doc.fill")
+    UIPasteboard.general.setItems(
+      [[UTType.plainText.identifier: token]],
+      options: [
+        .localOnly: true,
+        .expirationDate: Date().addingTimeInterval(60),
+      ]
+    )
+    copiedTokenPasteboardChangeCount = UIPasteboard.general.changeCount
+    ToastManager.shared.showToast(
+      "Token copied for 60 seconds",
+      type: .success,
+      systemImage: "doc.on.doc.fill"
+    )
+  }
+
+  private func clearSensitiveState(clearClipboard: Bool) {
+    revealedTokens.removeAll(keepingCapacity: false)
+
+    if clearClipboard,
+       let copiedTokenPasteboardChangeCount,
+       UIPasteboard.general.changeCount == copiedTokenPasteboardChangeCount {
+      UIPasteboard.general.items = []
+    }
+    copiedTokenPasteboardChangeCount = nil
   }
 }
 

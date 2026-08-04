@@ -1,4 +1,6 @@
 import InlineIntents
+import InlineKit
+import RealtimeV2
 import SwiftUI
 
 struct DebugView: View {
@@ -39,6 +41,8 @@ struct DebugView: View {
 
       ClearCacheSettingsSection()
 
+      ResetLocalDataDebugSection()
+
       IntentDonationDebugSection()
     }
     .listStyle(.insetGrouped)
@@ -78,6 +82,80 @@ struct DebugView: View {
     }
   }
 
+}
+
+private struct ResetLocalDataDebugSection: View {
+  @Environment(\.realtimeV2) private var realtimeV2
+
+  @State private var isResetting = false
+  @State private var showConfirmation = false
+  @State private var resetError: Error?
+  @State private var showError = false
+
+  var body: some View {
+    Section {
+      Button {
+        showConfirmation = true
+      } label: {
+        SettingsItem(
+          icon: "arrow.counterclockwise.circle.fill",
+          iconColor: .red,
+          title: "Reset Local Data"
+        ) {
+          if isResetting {
+            ProgressView()
+              .padding(.trailing, 8)
+          }
+        }
+      }
+      .disabled(isResetting)
+    } header: {
+      Text("Recovery")
+    } footer: {
+      Text("Clears Inline’s local database, sync state, pending actions, and downloads on this device. Your account and server data are not deleted.")
+    }
+    .confirmationDialog(
+      "Reset Local Data?",
+      isPresented: $showConfirmation,
+      titleVisibility: .visible
+    ) {
+      Button("Reset", role: .destructive, action: resetLocalData)
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("Inline will reload your chats and messages from the server. Pending offline actions on this device will be discarded.")
+    }
+    .alert("Couldn’t Reset Local Data", isPresented: $showError, presenting: resetError) { _ in
+      Button("OK", role: .cancel) {}
+    } message: { error in
+      Text(error.localizedDescription)
+    }
+  }
+
+  private func resetLocalData() {
+    guard !isResetting else { return }
+    isResetting = true
+
+    Task { @MainActor in
+      do {
+        try await FileCache.shared.clearCache()
+        await ImagePrefetcher.shared.clearCache()
+        Transactions.shared.clearAll()
+        await realtimeV2.clearSyncState()
+        try AppDatabase.clearDB()
+        NotificationCenter.default.post(name: .localDataCleared, object: nil)
+        ToastManager.shared.showToast(
+          "Local data reset",
+          description: "Inline is reloading from the server.",
+          type: .success,
+          systemImage: "arrow.clockwise"
+        )
+      } catch {
+        resetError = error
+        showError = true
+      }
+      isResetting = false
+    }
+  }
 }
 
 private struct IntentDonationDebugSection: View {

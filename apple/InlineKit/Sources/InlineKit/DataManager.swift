@@ -434,12 +434,17 @@ public class DataManager: ObservableObject {
     archived: Bool? = nil,
     spaceId: Int64? = nil,
     order: String? = nil,
-    pinnedOrder: String? = nil
+    pinnedOrder: String? = nil,
+    deleteEmptyThreadIfArchiving: Bool = true
   ) async throws {
-    if archived == true, case .thread = peerId {
+    if archived == true, deleteEmptyThreadIfArchiving, case .thread = peerId {
       if try await deleteThreadIfUntitledAndEmpty(peerId: peerId) {
         return
       }
+    }
+
+    let originalDialog = try await database.reader.read { db in
+      try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
     }
 
     let requestOrder = try await database.dbWriter.write { db -> (order: String?, pinnedOrder: String?) in
@@ -522,22 +527,90 @@ public class DataManager: ObservableObject {
       return (orderForRequest, pinnedOrderForRequest)
     }
 
-    let updatedDialog = try await database.reader.read { db in
-      try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
+    do {
+      let updatedDialog = try await database.reader.read { db in
+        try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
+      }
+      if updatedDialog == nil {
+        log.error("Failed to update dialog")
+      }
+      let archivedValue = archived ?? updatedDialog?.archived
+      let response = try await ApiClient.shared.updateDialog(
+        peerId: peerId,
+        pinned: pinned,
+        archived: archivedValue,
+        order: requestOrder.order,
+        pinnedOrder: requestOrder.pinnedOrder
+      )
+      try await database.dbWriter.write { db in
+        _ = try response.dialog.saveFull(db)
+      }
+    } catch {
+      await rollbackDialogUpdate(
+        original: originalDialog,
+        peerId: peerId,
+        fields: DialogUpdateRollbackFields(
+          pinned: pinned != nil,
+          draft: draft != nil,
+          archived: archived != nil,
+          spaceID: spaceId != nil,
+          order: order != nil,
+          pinnedOrder: pinnedOrder != nil
+        )
+      )
+      throw error
     }
-    if updatedDialog == nil {
-      log.error("Failed to update dialog")
-    }
-    let archivedValue = archived ?? updatedDialog?.archived
-    let response = try await ApiClient.shared.updateDialog(
-      peerId: peerId,
-      pinned: pinned,
-      archived: archivedValue,
-      order: requestOrder.order,
-      pinnedOrder: requestOrder.pinnedOrder
-    )
-    try await database.dbWriter.write { db in
-      _ = try response.dialog.saveFull(db)
+  }
+
+  private struct DialogUpdateRollbackFields {
+    let pinned: Bool
+    let draft: Bool
+    let archived: Bool
+    let spaceID: Bool
+    let order: Bool
+    let pinnedOrder: Bool
+  }
+
+  private func rollbackDialogUpdate(original: Dialog?, peerId: Peer, fields: DialogUpdateRollbackFields) async {
+    do {
+      try await database.dbWriter.write { db in
+        guard let original else {
+          try Dialog.deleteOne(db, key: Dialog.getDialogId(peerId: peerId))
+          return
+        }
+        guard var current = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId)) else {
+          return
+        }
+
+        if fields.pinned {
+          current.pinned = original.pinned
+          current.open = original.open
+          current.openedDate = original.openedDate
+          current.order = original.order
+          current.pinnedOrder = original.pinnedOrder
+          current.chatListHidden = original.chatListHidden
+        }
+        if fields.draft {
+          current.draftMessage = original.draftMessage
+        }
+        if fields.archived {
+          current.archived = original.archived
+          current.chatListHidden = original.chatListHidden
+        }
+        if fields.order {
+          current.order = original.order
+        }
+        if fields.pinnedOrder {
+          current.pinnedOrder = original.pinnedOrder
+        }
+        if fields.spaceID, original.spaceId == nil {
+          current.spaceId = nil
+        }
+
+        try current.save(db, onConflict: .replace)
+      }
+    } catch {
+      log.error("Failed to roll back dialog update", error: error)
     }
   }
 

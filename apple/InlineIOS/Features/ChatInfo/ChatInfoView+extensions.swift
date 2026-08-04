@@ -122,8 +122,9 @@ extension ChatInfoView {
   }
 
   func showMessageInChat(_ message: Message) {
-    router.selectedTab = .chats
-    router.pop(for: .chats)
+    let targetTab = router.selectedTab.currentChatsTab
+    router.selectedTab = targetTab
+    router.pop(for: targetTab)
 
     if !nav.pathComponents.isEmpty {
       nav.pop()

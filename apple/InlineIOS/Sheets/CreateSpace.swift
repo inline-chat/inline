@@ -8,7 +8,8 @@ struct CreateSpace: View {
   @State private var name = ""
   @FocusState private var isFocused: Bool
   @FormState var formState
-  @AppStorage("enableExperimentalView") private var enableExperimentalView = false
+  @AppStorage(ExperimentalHomePreferenceKeys.isEnabled)
+  private var enableExperimentalView = false
 
   @EnvironmentObject var nav: Navigation
   @Environment(\.appDatabase) var database
@@ -66,7 +67,7 @@ struct CreateSpace: View {
 
         if let id {
           if enableExperimentalView {
-            let targetTab: AppTab = (router.selectedTab == .archived) ? .archived : .chats
+            let targetTab = router.selectedTab.experimentalHomeFallbackTab
             if router.selectedTab != targetTab {
               router.selectedTab = targetTab
             }

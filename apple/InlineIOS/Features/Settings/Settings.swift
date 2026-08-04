@@ -72,12 +72,14 @@ struct SettingsView: View {
           color: .orange,
           destination: ExperimentalView()
         )
-        SettingsNavigationRow(
-          title: "Debug",
-          systemImage: "ladybug.fill",
-          color: .green,
-          destination: DebugView()
-        )
+        if SettingsBuildAudience.showsDebugTools {
+          SettingsNavigationRow(
+            title: "Debug",
+            systemImage: "ladybug.fill",
+            color: .green,
+            destination: DebugView()
+          )
+        }
       }
 
       Section {
@@ -107,12 +109,27 @@ struct SettingsView: View {
             .fontWeight(.semibold)
         }
       }
+
+      ToolbarItem(placement: .principal) {
+        Text("Settings")
+          .font(.headline)
+      }
     }
   }
 
   private func dismissSettings() {
     router.dismissSheet()
     dismiss()
+  }
+}
+
+private enum SettingsBuildAudience {
+  static var showsDebugTools: Bool {
+    #if DEBUG || DEBUG_BUILD
+    true
+    #else
+    Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt"
+    #endif
   }
 }
 

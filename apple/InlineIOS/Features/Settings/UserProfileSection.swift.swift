@@ -8,7 +8,14 @@ struct UserProfileSection: View {
   var body: some View {
     Section(header: Text("Account")) {
       if let user = currentUser {
-        ProfileRow(userInfo: user)
+        NavigationLink {
+          ExperimentalProfileView()
+        } label: {
+          ProfileRow(userInfo: user)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
 
       } else {
         Button("Set up profile") {

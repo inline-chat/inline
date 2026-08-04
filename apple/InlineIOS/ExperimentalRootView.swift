@@ -14,11 +14,11 @@ private enum RootTab: String, Hashable {
 
   init(appTab: AppTab) {
     switch appTab {
-    case .archived:
+    case .allChats, .archived:
       self = .allChats
     case .search:
       self = .search
-    case .chats, .spaces:
+    case .inbox, .chats, .spaces:
       self = .inbox
     }
   }
@@ -26,14 +26,14 @@ private enum RootTab: String, Hashable {
   var appTab: AppTab {
     switch self {
     case .inbox:
-      .chats
+      .inbox
     case .allChats:
-      .archived
+      .allChats
     case .search:
       .search
     case .newChat:
       // Selection is intercepted before this compatibility value is used.
-      .chats
+      .allChats
     }
   }
 }
@@ -97,6 +97,7 @@ struct ExperimentalRootView: View {
 
 private struct ExperimentalAuthedRootView: View {
   @State private var nav = ExperimentalNavigationModel()
+  @State private var homeActions = ExperimentalHomeActionCoordinator()
   @State private var rootTab: RootTab = .allChats
   @State private var lastContentRootTab: RootTab = .allChats
   @State private var searchQuery = ""
@@ -104,6 +105,8 @@ private struct ExperimentalAuthedRootView: View {
   @State private var isNotificationSettingsPresented = false
   @AppStorage("ios.experimental.root.selectedTab")
   private var persistedRootTabRaw = RootTab.allChats.rawValue
+  @AppStorage("ios.experimental.root.didMigrateExplicitTabs")
+  private var didMigrateExplicitTabs = false
   @AppStorage(ExperimentalHomePreferenceKeys.chatScope)
   private var homeChatScopeRaw = ExperimentalHomeChatScope.all.rawValue
   @AppStorage(ExperimentalHomePreferenceKeys.chatItemRenderMode)
@@ -138,6 +141,7 @@ private struct ExperimentalAuthedRootView: View {
       .environmentObject(data)
       .environmentObject(compactSpaceList)
       .environmentObject(homeListStore)
+      .environment(homeActions)
       .onReceive(NotificationCenter.default.publisher(for: .localDataCleared)) { _ in
         nav.resetHomeDataState()
         homeListStore.refresh()
@@ -176,9 +180,12 @@ private struct ExperimentalAuthedRootView: View {
       }
     }
     .onAppear {
-      // TODO: Give Inbox and All Chats dedicated persisted AppTab cases after UX verification.
+      migrateLegacyRootTabsIfNeeded()
       let restoredRootTab = RootTab(rawValue: persistedRootTabRaw) ?? .allChats
-      let desiredRootTab = restoredRootTab == .newChat ? .allChats : restoredRootTab
+      let persistedTab = restoredRootTab == .newChat ? .allChats : restoredRootTab
+      let routedTab = RootTab(appTab: bindableRouter.selectedTab)
+      let hasPendingRoute = !bindableRouter[bindableRouter.selectedTab].isEmpty
+      let desiredRootTab = hasPendingRoute ? routedTab : persistedTab
       let desiredTab = desiredRootTab.appTab
       configureHomeList()
       if bindableRouter.selectedTab != desiredTab {
@@ -211,6 +218,12 @@ private struct ExperimentalAuthedRootView: View {
         return
       }
 
+      let previousRootTab = lastContentRootTab
+      ExperimentalHomeNavigationPerformance.measureTabSwitch(
+        from: previousRootTab.rawValue,
+        to: newValue.rawValue,
+        rows: homeListStore.state.presentation.allChatCount
+      )
       lastContentRootTab = newValue
       persistedRootTabRaw = newValue.rawValue
       let desiredTab = newValue.appTab
@@ -218,6 +231,14 @@ private struct ExperimentalAuthedRootView: View {
         bindableRouter.selectedTab = desiredTab
       }
       searchQuery = ""
+    }
+    .onChange(of: bindableRouter.selectedTabPath) { oldPath, newPath in
+      guard let previousPeer = oldPath.last?.chatPeer,
+            newPath.contains(where: { $0.chatPeer == previousPeer }) == false
+      else { return }
+      ExperimentalHomeNavigationPerformance.measureBackToHome(
+        rows: homeListStore.state.presentation.allChatCount
+      )
     }
     .onChange(of: nav.activeSpaceId) { _, _ in
       configureHomeList()
@@ -228,6 +249,27 @@ private struct ExperimentalAuthedRootView: View {
     .onChange(of: homeChatScopeRaw) { _, _ in
       configureHomeList()
     }
+  }
+
+  private func migrateLegacyRootTabsIfNeeded() {
+    guard !didMigrateExplicitTabs else { return }
+
+    if router[.inbox].isEmpty {
+      router[.inbox] = router[.chats]
+    }
+    if router[.allChats].isEmpty {
+      router[.allChats] = router[.archived]
+    }
+
+    switch router.selectedTab {
+    case .chats, .spaces:
+      router.selectedTab = .inbox
+    case .archived:
+      router.selectedTab = .allChats
+    case .inbox, .allChats, .search:
+      break
+    }
+    didMigrateExplicitTabs = true
   }
 
   private func rootPage(nav: ExperimentalNavigationModel) -> some View {
@@ -297,13 +339,13 @@ private struct ExperimentalAuthedRootView: View {
       selectedSpaceId: selectedSpaceId,
       onSelectHome: {
         selectedSpaceId.wrappedValue = nil
-        router.popToRoot(for: router.selectedTab)
+        selectAllChatsAfterSpaceChange()
       },
       onSelectSpace: { space in
         if selectedSpaceId.wrappedValue != space.id {
           selectedSpaceId.wrappedValue = space.id
         }
-        router.popToRoot(for: router.selectedTab)
+        selectAllChatsAfterSpaceChange()
       },
       onCreateSpace: {
         router.push(.createSpace, for: router.selectedTab)
@@ -311,6 +353,17 @@ private struct ExperimentalAuthedRootView: View {
     )
 
     picker
+  }
+
+  private func selectAllChatsAfterSpaceChange() {
+    let previousTab = router.selectedTab
+    router.popToRoot(for: previousTab)
+
+    lastContentRootTab = .allChats
+    persistedRootTabRaw = RootTab.allChats.rawValue
+    rootTab = .allChats
+    router.selectedTab = .allChats
+    router.popToRoot(for: .allChats)
   }
 
   private func createThreadInstantly(spaceId: Int64?) {

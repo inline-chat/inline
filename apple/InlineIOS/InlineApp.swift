@@ -18,6 +18,9 @@ struct InlineApp: App {
         .environmentObject(appDelegate.notificationHandler)
         .environmentObject(appDelegate.nav)
         .environmentObject(INUserSettings.current.notification)
+        .onOpenURL { url in
+          _ = appDelegate.handleDeepLink(url)
+        }
     }
   }
 }

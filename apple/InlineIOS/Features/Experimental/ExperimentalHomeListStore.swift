@@ -89,18 +89,28 @@ final class ExperimentalHomeListStore: ObservableObject {
 
     observation = ValueObservation
       .tracking { db in
-        let scopeLabel = configuration.spaceID.map(String.init) ?? "home"
+        let startedAt = Date()
+        let scopeLabel = configuration.spaceID == nil ? "home" : "space"
         let span = PerformanceTrace.begin(
           "HomeListQuery",
           category: .home,
           "space=\(scopeLabel)"
         )
-        defer { span.end() }
-        return try ChatListDatabaseQuery.fetchSnapshots(
+        let snapshots = try ChatListDatabaseQuery.fetchSnapshots(
           db,
           spaceID: configuration.spaceID,
           includeSpaceChatsInHome: configuration.includeSpaceChatsInHome
         )
+        let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
+        span.end("rows=\(snapshots.count) duration_ms=\(durationMs)")
+        PerformanceTrace.slowBreadcrumb(
+          "iOS Home list query was slow",
+          category: "ios.home.query",
+          durationMs: durationMs,
+          thresholdMs: 50,
+          data: ["rows": snapshots.count, "scope": scopeLabel]
+        )
+        return snapshots
       }
       .publisher(in: database.reader, scheduling: .async(onQueue: workerQueue))
       .subscribe(on: workerQueue)
@@ -153,18 +163,18 @@ final class ExperimentalHomeListStore: ObservableObject {
   ) {
     guard generation == observationGeneration else { return }
 
+    let startedAt = Date()
+    let span = PerformanceTrace.begin(
+      "HomeListCommit",
+      category: .home,
+      "inbox=\(update.presentation.inbox.count) all=\(update.presentation.allChatCount) changes=\(update.structuralChangeCount)"
+    )
     let nextState = ExperimentalHomeListState(
       presentation: update.presentation,
       isLoading: false,
       errorDescription: nil,
       revision: state.revision + 1
     )
-    PerformanceTrace.event(
-      "HomeListCommit",
-      category: .home,
-      "inbox=\(update.presentation.inbox.count) all=\(update.presentation.allChats.count) changes=\(update.structuralChangeCount)"
-    )
-
     if update.shouldAnimate {
       withAnimation(.snappy(duration: 0.25, extraBounce: 0)) {
         state = nextState
@@ -176,6 +186,19 @@ final class ExperimentalHomeListStore: ObservableObject {
         state = nextState
       }
     }
+    let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
+    span.end("duration_ms=\(durationMs)")
+    PerformanceTrace.slowBreadcrumb(
+      "iOS Home main-thread commit exceeded one frame",
+      category: "ios.home.commit",
+      durationMs: durationMs,
+      thresholdMs: 17,
+      data: [
+        "inbox": update.presentation.inbox.count,
+        "all_chats": update.presentation.allChatCount,
+        "structural_changes": update.structuralChangeCount,
+      ]
+    )
   }
 
   private func apply(_ error: any Error, generation observationGeneration: Int) {
@@ -196,8 +219,9 @@ private struct ExperimentalHomeListPreparedUpdate: Sendable {
   let shouldAnimate: Bool
 }
 
-/// Keeps the first local snapshot immediate and collapses subsequent sync bursts.
-/// Projection and list comparison both stay on the dedicated worker queue.
+/// Keeps the first local snapshot and small structural moves immediate while
+/// collapsing content-only and bulk sync bursts. Projection and list comparison
+/// both stay on the dedicated worker queue.
 private final class ExperimentalHomeListPipeline: @unchecked Sendable {
   typealias Emit = @Sendable (ExperimentalHomeListPreparedUpdate) -> Void
 
@@ -224,6 +248,7 @@ private final class ExperimentalHomeListPipeline: @unchecked Sendable {
   }
 
   func submit(_ snapshots: [ChatListItemSnapshot]) {
+    let startedAt = Date()
     let span = PerformanceTrace.begin(
       "HomeListPrepare",
       category: .home,
@@ -233,7 +258,15 @@ private final class ExperimentalHomeListPipeline: @unchecked Sendable {
       from: snapshots,
       sort: configuration.sort
     )
-    span.end()
+    let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
+    span.end("duration_ms=\(durationMs)")
+    PerformanceTrace.slowBreadcrumb(
+      "iOS Home list preparation was slow",
+      category: "ios.home.prepare",
+      durationMs: durationMs,
+      thresholdMs: 25,
+      data: ["rows": snapshots.count]
+    )
 
     var immediate: ExperimentalHomeListPreparedUpdate?
     var scheduled: (DispatchWorkItem, DispatchTime)?
@@ -249,18 +282,29 @@ private final class ExperimentalHomeListPipeline: @unchecked Sendable {
         lock.unlock()
         return
       }
-      pending = presentation
-      pendingGeneration += 1
-      let generation = pendingGeneration
-      pendingWorkItem?.cancel()
-      let workItem = DispatchWorkItem { [weak self] in
-        self?.flush(generation: generation)
+
+      let update = makeUpdate(previous: previous, current: presentation)
+      if update.shouldAnimate {
+        pendingGeneration += 1
+        pending = nil
+        pendingWorkItem?.cancel()
+        pendingWorkItem = nil
+        lastApplied = presentation
+        immediate = update
+      } else {
+        pending = presentation
+        pendingGeneration += 1
+        let generation = pendingGeneration
+        pendingWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+          self?.flush(generation: generation)
+        }
+        pendingWorkItem = workItem
+        scheduled = (workItem, .now() + .milliseconds(100))
       }
-      pendingWorkItem = workItem
-      scheduled = (workItem, .now() + .milliseconds(100))
     } else {
       lastApplied = presentation
-      immediate = Self.update(previous: nil, current: presentation)
+      immediate = makeUpdate(previous: nil, current: presentation)
     }
     lock.unlock()
 
@@ -297,7 +341,7 @@ private final class ExperimentalHomeListPipeline: @unchecked Sendable {
     pendingWorkItem = nil
     let previous = lastApplied
     lastApplied = current
-    update = previous == current ? nil : Self.update(previous: previous, current: current)
+    update = previous == current ? nil : makeUpdate(previous: previous, current: current)
     lock.unlock()
 
     if let update {
@@ -305,45 +349,37 @@ private final class ExperimentalHomeListPipeline: @unchecked Sendable {
     }
   }
 
-  private static func update(
+  private func makeUpdate(
     previous: ChatListPresentation?,
     current: ChatListPresentation
   ) -> ExperimentalHomeListPreparedUpdate {
+    let startedAt = Date()
+    let span = PerformanceTrace.begin(
+      "HomeListDiff",
+      category: .home,
+      "all=\(current.allChatCount) inbox=\(current.inbox.count)"
+    )
     let structuralChangeCount = previous.map {
-      locationChanges(previous: $0, current: current)
-    } ?? current.allChats.count + current.inbox.count
+      current.structuralLocationChangeCount(from: $0)
+    } ?? current.allChatCount + current.inbox.count
+    let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
+    span.end("changes=\(structuralChangeCount) duration_ms=\(durationMs)")
+    PerformanceTrace.slowBreadcrumb(
+      "iOS Home list diff was slow",
+      category: "ios.home.diff",
+      durationMs: durationMs,
+      thresholdMs: 25,
+      data: [
+        "all_chats": current.allChatCount,
+        "inbox": current.inbox.count,
+        "structural_changes": structuralChangeCount,
+      ]
+    )
 
     return ExperimentalHomeListPreparedUpdate(
       presentation: current,
       structuralChangeCount: structuralChangeCount,
       shouldAnimate: previous != nil && structuralChangeCount > 0 && structuralChangeCount <= 8
     )
-  }
-
-  private static func locationChanges(
-    previous: ChatListPresentation,
-    current: ChatListPresentation
-  ) -> Int {
-    let oldLocations = locations(in: previous)
-    let newLocations = locations(in: current)
-    let keys = Set(oldLocations.keys).union(newLocations.keys)
-    return keys.lazy.count { oldLocations[$0] != newLocations[$0] }
-  }
-
-  private static func locations(in presentation: ChatListPresentation) -> [String: Int] {
-    var locations: [String: Int] = [:]
-    for (index, item) in presentation.inbox.enumerated() {
-      locations["inbox:\(item.peer.toString())"] = index
-    }
-    for (index, item) in presentation.closedPinned.enumerated() {
-      locations["pinned:\(item.peer.toString())"] = index
-    }
-    for (index, item) in presentation.allChatSections.flatMap(\.items).enumerated() {
-      locations["all:\(item.peer.toString())"] = index
-    }
-    for (index, item) in presentation.archived.enumerated() {
-      locations["archived:\(item.peer.toString())"] = index
-    }
-    return locations
   }
 }

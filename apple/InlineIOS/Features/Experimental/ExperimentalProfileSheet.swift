@@ -36,6 +36,7 @@ struct ExperimentalProfileView: View {
   @Query(CurrentUser()) private var currentUser: UserInfo?
 
   @Environment(\.realtimeV2) private var realtimeV2
+  @Environment(\.dismiss) private var dismiss
   @EnvironmentObject private var fileUploadViewModel: FileUploadViewModel
 
   @State private var pickedImage: UIImage?
@@ -52,6 +53,7 @@ struct ExperimentalProfileView: View {
   @State private var isSaving = false
   @State private var saveErrorMessage = ""
   @State private var showsSaveError = false
+  @State private var showsDiscardConfirmation = false
 
   var body: some View {
     Form {
@@ -96,7 +98,19 @@ struct ExperimentalProfileView: View {
     .background(Color(.systemGroupedBackground))
     .navigationTitle("Account")
     .navigationBarTitleDisplayMode(.inline)
+    .navigationBarBackButtonHidden(hasChanges)
+    .interactiveDismissDisabled(hasChanges || isSaving || fileUploadViewModel.isUploading)
     .toolbar {
+      if hasChanges {
+        ToolbarItem(placement: .cancellationAction) {
+          Button {
+            showsDiscardConfirmation = true
+          } label: {
+            Label("Back", systemImage: "chevron.backward")
+          }
+        }
+      }
+
       ToolbarItem(placement: .confirmationAction) {
         Button(isSaving ? "Saving…" : "Save") {
           saveProfile()
@@ -141,6 +155,18 @@ struct ExperimentalProfileView: View {
       Button("OK", role: .cancel) {}
     } message: {
       Text(saveErrorMessage)
+    }
+    .confirmationDialog(
+      "Discard Changes?",
+      isPresented: $showsDiscardConfirmation,
+      titleVisibility: .visible
+    ) {
+      Button("Discard Changes", role: .destructive) {
+        dismiss()
+      }
+      Button("Keep Editing", role: .cancel) {}
+    } message: {
+      Text("Your unsaved account changes will be lost.")
     }
   }
 
@@ -240,12 +266,15 @@ struct ExperimentalProfileView: View {
           )
           await realtimeV2.applyUpdates(result.updates)
           try await persist(result.user)
+          initialFullName = name
+          initialBio = bio
         }
 
         if username != initialUsername {
           let result = try await realtimeV2.changeUsername(username)
           await realtimeV2.applyUpdates(result.updates)
           try await persist(result.user)
+          initialUsername = username
         }
 
         fullName = name
@@ -320,13 +349,27 @@ struct ExperimentalProfileView: View {
   private func upload(_ image: UIImage) {
     guard let data = image.jpegData(compressionQuality: 0.86) else {
       showsCropper = false
+      showSaveError("The selected photo could not be prepared. Try another image.")
       return
     }
 
     Task {
+      fileUploadViewModel.errorState = nil
       await fileUploadViewModel.uploadImage(data, fileType: .jpeg)
       pickedImage = nil
       showsCropper = false
+      if let errorState = fileUploadViewModel.errorState {
+        let details = [errorState.message, errorState.suggestion]
+          .compactMap { $0 }
+          .joined(separator: " ")
+        showSaveError(details)
+      } else {
+        ToastManager.shared.showToast(
+          "Profile photo updated",
+          type: .success,
+          systemImage: "checkmark.circle.fill"
+        )
+      }
     }
   }
 }

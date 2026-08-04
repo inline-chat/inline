@@ -11,7 +11,8 @@ struct CreateSpaceView: View {
   @FocusState private var isFocused: Bool
   @FocusState private var showEmojiPicker: Bool
   @FormState var formState
-  @AppStorage("enableExperimentalView") private var enableExperimentalView = false
+  @AppStorage(ExperimentalHomePreferenceKeys.isEnabled)
+  private var enableExperimentalView = false
 
   @Environment(\.appDatabase) var database
   @Environment(Router.self) private var router
@@ -111,7 +112,7 @@ struct CreateSpaceView: View {
 
         if let id {
           if enableExperimentalView {
-            let targetTab: AppTab = (router.selectedTab == .archived) ? .archived : .chats
+            let targetTab = router.selectedTab.experimentalHomeFallbackTab
             if router.selectedTab != targetTab {
               router.selectedTab = targetTab
             }

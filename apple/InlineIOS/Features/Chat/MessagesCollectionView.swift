@@ -21,6 +21,7 @@ final class MessagesCollectionView: UICollectionView {
   static var contextMenuOpen: Bool = false
   private var lastKnownNavBarHeight: CGFloat = 0
   private var needsContentInsetUpdateAfterContextMenu = false
+  private var pendingScrollMessageID: Int64?
   private let sendAnimationScrollState = SendMessageAnimationScrollState()
 
   init(
@@ -124,6 +125,35 @@ final class MessagesCollectionView: UICollectionView {
   func scrollToBottom() {
     if !itemsEmpty, shouldScrollToBottom {
       safeScrollToTop(animated: true)
+    }
+  }
+
+  func scrollToMessageWhenAvailable(_ messageID: Int64) {
+    pendingScrollMessageID = messageID
+    resolvePendingMessageScroll()
+  }
+
+  fileprivate func resolvePendingMessageScroll() {
+    guard let messageID = pendingScrollMessageID,
+          let indexPath = findIndexPath(
+            forMessageId: messageID,
+            chatId: chatId,
+            includeThreadAnchor: false
+          ),
+          isValidIndexPath(indexPath)
+    else { return }
+
+    pendingScrollMessageID = nil
+    scrollToItem(at: indexPath, at: .centeredVertically, animated: true)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+      guard let self else { return }
+      for cell in visibleCells {
+        (cell as? MessageCollectionViewCell)?.clearHighlight()
+      }
+      if isValidIndexPath(indexPath),
+         let cell = cellForItem(at: indexPath) as? MessageCollectionViewCell {
+        cell.highlightBubble()
+      }
     }
   }
 
@@ -690,28 +720,7 @@ final class MessagesCollectionView: UICollectionView {
           let repliedToMessageId = userInfo["repliedToMessageId"] as? Int64,
           let chatId = userInfo["chatId"] as? Int64,
           chatId == self.chatId else { return }
-    // Find the index path of the message with this messageId
-    if let indexPath = findIndexPath(
-      forMessageId: repliedToMessageId,
-      chatId: chatId,
-      includeThreadAnchor: false
-    ), isValidIndexPath(indexPath) {
-      scrollToItem(at: indexPath, at: .centeredVertically, animated: true)
-      // Highlight the cell after scrolling
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
-        guard let self else { return }
-        // Clear highlight on all visible cells first
-        for cell in visibleCells {
-          if let cell = cell as? MessageCollectionViewCell {
-            cell.clearHighlight()
-          }
-        }
-        // Revalidate index path before accessing cell
-        if isValidIndexPath(indexPath), let cell = cellForItem(at: indexPath) as? MessageCollectionViewCell {
-          cell.highlightBubble()
-        }
-      }
-    }
+    scrollToMessageWhenAvailable(repliedToMessageId)
   }
 }
 
@@ -2355,6 +2364,7 @@ private extension MessagesCollectionView {
           ]
         )
         self.syncAvatarOverlay(animate: false)
+        (self.currentCollectionView as? MessagesCollectionView)?.resolvePendingMessageScroll()
         self.scheduleMediaWarmupForVisibleAndNearby(reason: "snapshot")
         (self.currentCollectionView?.collectionViewLayout as? AnimatedCompositionalLayout)?
           .clearSendAnimationAppearingItemSuppression()

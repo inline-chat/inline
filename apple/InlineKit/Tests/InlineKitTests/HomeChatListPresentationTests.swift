@@ -27,10 +27,10 @@ struct HomeChatListPresentationTests {
     ], sort: .lastUpdated, calendar: calendar)
 
     #expect(presentation.inbox.map(\.peer) == [.thread(id: 3), .thread(id: 1)])
-    #expect(presentation.closedPinned.map(\.peer) == [.thread(id: 2)])
+    #expect(presentation.allChats.map(\.peer).contains(.thread(id: 2)))
   }
 
-  @Test("All Chats includes Inbox and separates only closed pinned chats")
+  @Test("All Chats includes Inbox and keeps closed pinned chats in activity order")
   func allChatsMembership() {
     let presentation = ChatListPresentation.make(from: [
       item(1, open: true, pinned: false, activity: date(day: 3)),
@@ -42,9 +42,8 @@ struct HomeChatListPresentationTests {
     #expect(Set(presentation.allChats.map(\.peer)) == Set([
       .thread(id: 1), .thread(id: 2), .thread(id: 3), .thread(id: 4),
     ]))
-    #expect(presentation.closedPinned.map(\.peer) == [.thread(id: 2)])
     #expect(presentation.allChatSections.flatMap(\.items).map(\.peer) == [
-      .thread(id: 1), .thread(id: 3), .thread(id: 4),
+      .thread(id: 2), .thread(id: 1), .thread(id: 3), .thread(id: 4),
     ])
   }
 
@@ -85,6 +84,90 @@ struct HomeChatListPresentationTests {
     #expect(presentation.inboxUnreadCount == 2)
   }
 
+  @Test("Structural diff ignores content-only changes and detects membership moves")
+  func structuralDiff() {
+    let original = ChatListPresentation.make(from: [
+      item(1, open: true, activity: date(day: 3)),
+      item(2, open: false, activity: date(day: 2)),
+    ], sort: .lastUpdated, calendar: calendar)
+    let contentOnly = ChatListPresentation.make(from: [
+      item(1, open: true, activity: date(day: 3), title: "Renamed"),
+      item(2, open: false, activity: date(day: 2)),
+    ], sort: .lastUpdated, calendar: calendar)
+    let moved = ChatListPresentation.make(from: [
+      item(1, open: true, activity: date(day: 3)),
+      item(2, open: true, activity: date(day: 2)),
+    ], sort: .lastUpdated, calendar: calendar)
+
+    #expect(contentOnly.structuralLocationChangeCount(from: original) == 0)
+    #expect(moved.structuralLocationChangeCount(from: original) == 1)
+  }
+
+  @Test("Pinning one Inbox chat remains a small animated reorder")
+  func pinnedReorderDiff() {
+    let original = ChatListPresentation.make(from: [
+      item(1, open: true, activity: date(day: 4)),
+      item(2, open: true, activity: date(day: 3)),
+      item(3, open: true, activity: date(day: 2)),
+      item(4, open: true, activity: date(day: 1)),
+    ], sort: .lastUpdated, calendar: calendar)
+    let pinned = ChatListPresentation.make(from: [
+      item(1, open: true, activity: date(day: 4)),
+      item(2, open: true, activity: date(day: 3)),
+      item(3, open: true, pinned: true, activity: date(day: 2)),
+      item(4, open: true, activity: date(day: 1)),
+    ], sort: .lastUpdated, calendar: calendar)
+
+    #expect(pinned.inbox.map(\.peer) == [
+      .thread(id: 3), .thread(id: 1), .thread(id: 2), .thread(id: 4),
+    ])
+    #expect(pinned.structuralLocationChangeCount(from: original) == 3)
+  }
+
+  @Test("Production-scale projection keeps stable identity and surface membership")
+  func productionScaleProjection() {
+    let itemCount = 5_000
+    let snapshots = (1 ... itemCount).map { index in
+      item(
+        Int64(index),
+        open: index.isMultiple(of: 3),
+        pinned: index.isMultiple(of: 97),
+        archived: index.isMultiple(of: 31),
+        hidden: index.isMultiple(of: 47),
+        unreadCount: index.isMultiple(of: 11) ? 1 : 0,
+        activity: Date(timeIntervalSince1970: TimeInterval(itemCount - index))
+      )
+    }
+
+    let presentation = ChatListPresentation.make(
+      from: snapshots,
+      sort: .lastUpdated,
+      calendar: calendar
+    )
+    let expectedVisible = snapshots.filter(\.isVisibleInHome)
+    let expectedInbox = expectedVisible.filter(\.isOpen)
+    let allPeers = presentation.allChats.map(\.peer)
+    let pinnedPrefixIsValid = presentation.inbox
+      .prefix { $0.isPinned }
+      .allSatisfy { $0.isPinned }
+    let unpinnedSuffixIsValid = presentation.inbox
+      .drop { $0.isPinned }
+      .allSatisfy { !$0.isPinned }
+    let allChatsAreActivityOrdered = presentation.allChats.elementsEqual(
+      presentation.allChats.sorted {
+        ($0.lastUpdatedAt ?? .distantPast) > ($1.lastUpdatedAt ?? .distantPast)
+      }
+    )
+
+    #expect(presentation.allChatCount == expectedVisible.count)
+    #expect(presentation.inbox.count == expectedInbox.count)
+    #expect(Set(allPeers).count == allPeers.count)
+    #expect(pinnedPrefixIsValid)
+    #expect(unpinnedSuffixIsValid)
+    #expect(allChatsAreActivityOrdered)
+    #expect(presentation.structuralLocationChangeCount(from: presentation) == 0)
+  }
+
   private var calendar: Calendar {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -104,12 +187,13 @@ struct HomeChatListPresentationTests {
     unreadCount: Int = 0,
     unreadMark: Bool = false,
     activity: Date? = nil,
-    opened: Date? = nil
+    opened: Date? = nil,
+    title: String? = nil
   ) -> ChatListItemSnapshot {
     ChatListItemSnapshot(
       peer: .thread(id: id),
       chatID: id,
-      title: "Chat \(id)",
+      title: title ?? "Chat \(id)",
       unreadCount: unreadCount,
       unreadMark: unreadMark,
       isOpen: open,

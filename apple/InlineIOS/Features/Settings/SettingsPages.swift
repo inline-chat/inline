@@ -168,7 +168,7 @@ struct ClearCacheSettingsSection: View {
       Button {
         showClearCacheAlert = true
       } label: {
-        SettingsItem(icon: "eraser.fill", iconColor: .red, title: "Clear Cache") {
+        SettingsItem(icon: "eraser.fill", iconColor: .indigo, title: "Clear Cache") {
           if isClearing {
             ProgressView()
           }
@@ -180,7 +180,7 @@ struct ClearCacheSettingsSection: View {
       Button("Cancel", role: .cancel) {}
       Button("Clear", role: .destructive, action: clearCache)
     } message: {
-      Text("This clears locally cached media and files. Downloaded content will need to be downloaded again.")
+      Text("Removes downloaded photos, videos, voice messages, and files from this device. Chats and messages stay available.")
     }
     .alert("Error Clearing Cache", isPresented: $showClearCacheError) {
       Button("OK", role: .cancel) {}
@@ -194,12 +194,14 @@ struct ClearCacheSettingsSection: View {
     Task {
       do {
         try await FileCache.shared.clearCache()
-        Transactions.shared.clearAll()
-        await Api.realtime.clearSyncState()
-        try? AppDatabase.clearDB()
-        NotificationCenter.default.post(name: .localDataCleared, object: nil)
+        await ImagePrefetcher.shared.clearCache()
         isClearing = false
-        ToastManager.shared.showToast("Cache cleared", type: .success, systemImage: "checkmark.circle.fill")
+        ToastManager.shared.showToast(
+          "Downloads cleared",
+          description: "Chats and messages were not removed.",
+          type: .success,
+          systemImage: "checkmark.circle.fill"
+        )
       } catch {
         clearCacheError = error
         showClearCacheError = true
