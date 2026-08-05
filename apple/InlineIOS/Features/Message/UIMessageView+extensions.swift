@@ -459,8 +459,15 @@ extension UIMessageView {
     controller.safeAreaRegions = []
     controller.view.translatesAutoresizingMaskIntoConstraints = false
     controller.view.backgroundColor = .clear
+
+    // Propose the standalone width without preventing the parent stack from
+    // stretching the voice surface to match a wider text or preview child.
+    let preferredWidth = controller.view.widthAnchor.constraint(equalToConstant: 240)
+    preferredWidth.priority = .defaultLow
+
     NSLayoutConstraint.activate([
-      controller.view.widthAnchor.constraint(equalToConstant: 240),
+      controller.view.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
+      preferredWidth,
       controller.view.heightAnchor.constraint(equalToConstant: 54),
     ])
     return controller
