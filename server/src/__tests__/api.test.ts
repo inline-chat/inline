@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test"
 import { app } from "../legacyServer"
 import { db } from "@in/server/db"
 import { inviteCodes, loginCodes, members, sessions, spaces, users } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
 import { hashLoginCode, hashToken } from "@in/server/utils/auth"
 import { setupTestLifecycle } from "./setup"
+import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 
 describe("API Endpoints", () => {
   // Setup test lifecycle
@@ -265,6 +266,8 @@ describe("API Endpoints", () => {
         challengeId: challengeToken,
         expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
       })
+      const loginAlertSpy = spyOn(BotAlerts, "login")
+      const confirmationAlertSpy = spyOn(BotAlerts, "authContactConfirmed")
 
       const request = new Request("http://localhost/v1/verifyEmailCode", {
         method: "POST",
@@ -289,6 +292,14 @@ describe("API Endpoints", () => {
           },
         },
       })
+      expect(loginAlertSpy).toHaveBeenCalledTimes(0)
+      expect(confirmationAlertSpy).toHaveBeenCalledTimes(1)
+      expect(confirmationAlertSpy.mock.calls[0]?.[0]).toMatchObject({
+        contact: { type: "email", value: email },
+        source: "/v1/verifyEmailCode",
+      })
+      expect(confirmationAlertSpy.mock.calls[0]?.[0].user).toBeUndefined()
+      const attemptAlertSpy = spyOn(BotAlerts, "authAttempt")
 
       const resumeResponse = await testServer.handle(
         new Request("http://localhost/v1/sendEmailCode", {
@@ -307,6 +318,15 @@ describe("API Endpoints", () => {
           needsInviteCode: false,
         },
       })
+      expect(attemptAlertSpy).toHaveBeenCalledTimes(1)
+      expect(attemptAlertSpy.mock.calls[0]?.[0]).toMatchObject({
+        kind: "signup",
+        existing: true,
+        userId: expect.any(Number),
+      })
+      loginAlertSpy.mockRestore()
+      confirmationAlertSpy.mockRestore()
+      attemptAlertSpy.mockRestore()
     })
 
     it("normalizes unknown auth clientType to api when creating a session", async () => {
@@ -620,7 +640,14 @@ describe("API Endpoints", () => {
       const code = "123456"
       const [existingUser] = await db
         .insert(users)
-        .values({ email, emailVerified: true, pendingSetup: false })
+        .values({
+          email,
+          emailVerified: true,
+          firstName: "Existing",
+          lastName: "User",
+          username: "existinguser",
+          pendingSetup: false,
+        })
         .returning()
 
       if (!existingUser) {
@@ -651,6 +678,8 @@ describe("API Endpoints", () => {
         challengeId: "lc_invite_existing_user",
         expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
       })
+      const loginAlertSpy = spyOn(BotAlerts, "login")
+      const confirmationAlertSpy = spyOn(BotAlerts, "authContactConfirmed")
 
       const verifyRequest = new Request("http://localhost/v1/verifyEmailCode", {
         method: "POST",
@@ -671,6 +700,20 @@ describe("API Endpoints", () => {
           userId: existingUser.id,
         },
       })
+      expect(loginAlertSpy).toHaveBeenCalledTimes(1)
+      expect(confirmationAlertSpy).toHaveBeenCalledTimes(1)
+      expect(confirmationAlertSpy.mock.calls[0]?.[0]).toMatchObject({
+        contact: { type: "email", value: email },
+        user: {
+          id: existingUser.id,
+          firstName: "Existing",
+          lastName: "User",
+          username: "existinguser",
+          pendingSetup: false,
+        },
+      })
+      loginAlertSpy.mockRestore()
+      confirmationAlertSpy.mockRestore()
     })
 
     it("returns a clear error for malformed invite codes", async () => {
@@ -906,6 +949,7 @@ describe("API Endpoints", () => {
         challengeId: "lc_invalid_code",
         expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
       })
+      const confirmationAlertSpy = spyOn(BotAlerts, "authContactConfirmed")
 
       const request = new Request("http://localhost/v1/verifyEmailCode", {
         method: "POST",
@@ -926,6 +970,8 @@ describe("API Endpoints", () => {
         error: "EMAIL_CODE_INVALID",
         errorCode: 400,
       })
+      expect(confirmationAlertSpy).toHaveBeenCalledTimes(0)
+      confirmationAlertSpy.mockRestore()
     })
 
     it("should preserve deviceId when saving push token", async () => {

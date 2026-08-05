@@ -1,6 +1,6 @@
 import { db } from "@in/server/db"
 import { eq } from "drizzle-orm"
-import { users, type DbNewUser } from "@in/server/db/schema"
+import { users, type DbNewUser, type DbUser } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
@@ -9,6 +9,7 @@ import { checkUsernameAvailable } from "@in/server/methods/checkUsername"
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { validateIanaTimezone } from "@in/server/utils/validate"
 import { normalizeUsername } from "@in/server/utils/normalize"
+import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 
 export const Input = Type.Object({
   firstName: Type.Optional(Type.String()),
@@ -74,12 +75,17 @@ export const handler = async (input: Input, context: HandlerContext): Promise<St
       props.pendingSetup = false
     }
 
-    let user = await db.update(users).set(props).where(eq(users.id, context.currentUserId)).returning()
-    if (!user[0]) {
+    const { user, completedSignup } = await updateUserAndDetectSignupCompletion(context.currentUserId, props)
+    if (!user) {
       log.error("Failed to set profile", { userId: context.currentUserId })
       throw new InlineError(InlineError.ApiError.INTERNAL)
     }
-    return { user: encodeUserInfo(user[0]) }
+
+    if (completedSignup) {
+      BotAlerts.signupCompleted({ user })
+    }
+
+    return { user: encodeUserInfo(user) }
   } catch (error) {
     if (error instanceof InlineError) {
       throw error
@@ -87,6 +93,35 @@ export const handler = async (input: Input, context: HandlerContext): Promise<St
     log.error("Failed to set profile", error)
     throw new InlineError(InlineError.ApiError.INTERNAL)
   }
+}
+
+async function updateUserAndDetectSignupCompletion(
+  userId: number,
+  props: DbNewUser,
+): Promise<{ user: DbUser | undefined; completedSignup: boolean }> {
+  if (props.pendingSetup !== false) {
+    const [user] = await db.update(users).set(props).where(eq(users.id, userId)).returning()
+    return { user, completedSignup: false }
+  }
+
+  return db.transaction(async (tx) => {
+    const [previousUser] = await tx
+      .select({ pendingSetup: users.pendingSetup })
+      .from(users)
+      .where(eq(users.id, userId))
+      .for("update")
+      .limit(1)
+
+    if (!previousUser) {
+      return { user: undefined, completedSignup: false }
+    }
+
+    const [user] = await tx.update(users).set(props).where(eq(users.id, userId)).returning()
+    return {
+      user,
+      completedSignup: previousUser.pendingSetup === true && user?.pendingSetup === false,
+    }
+  })
 }
 
 /// HELPER FUNCTIONS ///

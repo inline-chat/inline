@@ -23,6 +23,7 @@ import { eq } from "drizzle-orm"
 import { afterAll, beforeAll, describe, expect, it, mock, spyOn } from "bun:test"
 import Elysia from "elysia"
 import { Log } from "@in/server/utils/log"
+import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 
 const handleConnectionOpen = mock().mockResolvedValue(undefined)
 const handleConnectionClose = mock().mockResolvedValue(undefined)
@@ -813,7 +814,11 @@ describe("realtime protocol safety", () => {
 
   it("changes and clears username via RPC", async () => {
     const { ws, userId } = await authenticateSocket()
-    await db.update(users).set({ pendingSetup: true }).where(eq(users.id, userId))
+    await db
+      .update(users)
+      .set({ firstName: "Grace", lastName: "Hopper", pendingSetup: true })
+      .where(eq(users.id, userId))
+    const alertSpy = spyOn(BotAlerts, "signupCompleted")
 
     wsSendClientProtocolMessage(ws, {
       id: 620n,
@@ -847,6 +852,13 @@ describe("realtime protocol safety", () => {
     const [storedUser] = await db.select().from(users).where(eq(users.id, userId))
     expect(storedUser?.username).toBe("newhandle")
     expect(storedUser?.pendingSetup).toBe(false)
+    expect(alertSpy).toHaveBeenCalledTimes(1)
+    expect(alertSpy.mock.calls[0]?.[0].user).toMatchObject({
+      id: userId,
+      firstName: "Grace",
+      lastName: "Hopper",
+      username: "newhandle",
+    })
 
     wsSendClientProtocolMessage(ws, {
       id: 621n,
@@ -879,7 +891,9 @@ describe("realtime protocol safety", () => {
 
     const [clearedUser] = await db.select().from(users).where(eq(users.id, userId))
     expect(clearedUser?.username).toBeNull()
+    expect(alertSpy).toHaveBeenCalledTimes(1)
 
+    alertSpy.mockRestore()
     await wsClosed(ws)
   })
 

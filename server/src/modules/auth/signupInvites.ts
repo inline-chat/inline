@@ -16,6 +16,8 @@ export const isLoginUser = (user: DbUser | undefined): boolean => {
   return Boolean(user && (user.pendingSetup !== true || user.emailVerified === true || user.phoneVerified === true))
 }
 
+export const isSignupComplete = (user: Pick<DbUser, "pendingSetup">): boolean => user.pendingSetup !== true
+
 export const isInviteCodeRequired = async (user: DbUser | undefined): Promise<boolean> => {
   if (!(await areInviteCodesRequired())) {
     return false

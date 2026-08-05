@@ -13,8 +13,11 @@ import { prelude } from "@in/server/libs/prelude"
 import { sendBotEvent } from "@in/server/modules/bot-events"
 import { maskPhoneNumber } from "@in/server/utils/privacy"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
-import { getOrCreateUserByPhoneForSignup } from "@in/server/modules/auth/signupInvites"
+import { getOrCreateUserByPhoneForSignup, isSignupComplete } from "@in/server/modules/auth/signupInvites"
 import { normalizeAuthClientType } from "@in/server/modules/auth/clientType"
+import { db } from "@in/server/db"
+import { users } from "@in/server/db/schema"
+import { eq } from "drizzle-orm"
 
 export const Input = Type.Object({
   phoneNumber: Type.String(),
@@ -38,9 +41,10 @@ export const Response = Type.Object({
 
 export const handler = async (
   input: Static<typeof Input>,
-  { ip: requestIp }: UnauthenticatedHandlerContext,
+  context: UnauthenticatedHandlerContext,
 ): Promise<Static<typeof Response>> => {
   try {
+    const requestIp = context.ip
     const clientType = normalizeAuthClientType(input.clientType, "verifySmsCode")
 
     // verify formatting
@@ -70,6 +74,31 @@ export const handler = async (
     if (response?.status !== "success") {
       throw new InlineError(InlineError.ApiError.SMS_CODE_INVALID)
     }
+
+    // Record contact proof before account/session mutation so a missing later checkpoint locates where the flow stopped.
+    const confirmedUser = await db
+      .select()
+      .from(users)
+      .where(eq(users.phoneNumber, formattedPhoneNumber))
+      .limit(1)
+      .then(([user]) => user)
+      .catch((error) => {
+        Log.shared.error("Failed to load user for phone confirmation alert", { error })
+        return undefined
+      })
+    BotAlerts.authContactConfirmed({
+      contact: { type: "phone", value: formattedPhoneNumber },
+      user: confirmedUser,
+      source: context.source,
+      ip: requestIp,
+      device: {
+        deviceName: input.deviceName,
+        deviceId: input.deviceId,
+        clientType,
+        clientVersion: input.clientVersion,
+        osVersion: input.osVersion,
+      },
+    })
 
     // Formatted in E.164 format. It's important to use this format for phone numbers.
     // Otherwise, we'll endup with duplicates.
@@ -127,17 +156,19 @@ export const handler = async (
       deviceId: input.deviceId ?? undefined,
     })
 
-    // Best-effort internal alert (should never affect the user action).
-    BotAlerts.login({
-      userId,
-      device: {
-        deviceName: session.personalData.deviceName,
-        deviceId: session.deviceId,
-        clientType: session.clientType,
-        clientVersion: session.clientVersion,
-        osVersion: session.osVersion,
-      },
-    })
+    // New users are reported only after onboarding has saved their final profile.
+    if (isSignupComplete(user)) {
+      BotAlerts.login({
+        userId,
+        device: {
+          deviceName: session.personalData.deviceName,
+          deviceId: session.deviceId,
+          clientType: session.clientType,
+          clientVersion: session.clientVersion,
+          osVersion: session.osVersion,
+        },
+      })
+    }
 
     if (created) {
       sendTelegramEvent(formattedPhoneNumber)

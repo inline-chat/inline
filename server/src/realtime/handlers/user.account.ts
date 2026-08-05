@@ -33,6 +33,7 @@ import {
 } from "@in/server/modules/users/externalProfilePhoto"
 import { InMemoryRateLimiter } from "@in/server/modules/oauth/rateLimiter"
 import { eq } from "drizzle-orm"
+import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 
 const USERNAME_UNIQUE_CONSTRAINT = "users_username_unique"
 const externalProfilePhotoRateLimiter = new InMemoryRateLimiter()
@@ -66,7 +67,7 @@ export const changeUsernameHandler = async (
   switch (availability) {
     case UsernameAvailability.USERNAME_AVAILABLE:
     case UsernameAvailability.USERNAME_CURRENT: {
-      const { user, update } = await updateUserAndPush(context, { username, pendingSetup: false }).catch(
+      const { user, update, completedSignup } = await updateUserAndPush(context, { username, pendingSetup: false }).catch(
         (error: unknown) => {
           if (isUsernameUniqueError(error)) {
             throw RealtimeRpcError.UsernameTaken()
@@ -74,6 +75,9 @@ export const changeUsernameHandler = async (
           throw error
         },
       )
+      if (completedSignup) {
+        BotAlerts.signupCompleted({ user })
+      }
       return { user: encodeUser({ user }), updates: [update] }
     }
     case UsernameAvailability.USERNAME_INVALID:
@@ -192,8 +196,22 @@ async function usernameAvailability(username: string, currentUserId: number): Pr
 async function updateUserAndPush(
   context: HandlerContext,
   props: DbNewUser,
-): Promise<{ user: DbUser; update: Update }> {
-  const { user, update } = await db.transaction(async (tx) => {
+): Promise<{ user: DbUser; update: Update; completedSignup: boolean }> {
+  const { user, update, completedSignup } = await db.transaction(async (tx) => {
+    let wasPendingSetup = false
+    if (props.pendingSetup === false) {
+      const [previousUser] = await tx
+        .select({ pendingSetup: users.pendingSetup })
+        .from(users)
+        .where(eq(users.id, context.userId))
+        .for("update")
+        .limit(1)
+      if (!previousUser) {
+        throw RealtimeRpcError.UserIdInvalid()
+      }
+      wasPendingSetup = previousUser.pendingSetup === true
+    }
+
     const [user] = await tx.update(users).set(props).where(eq(users.id, context.userId)).returning()
     if (!user) {
       throw RealtimeRpcError.UserIdInvalid()
@@ -214,12 +232,13 @@ async function updateUserAndPush(
     return {
       user,
       update: updatedUserUpdate(protocolUser, seqDate),
+      completedSignup: wasPendingSetup && user.pendingSetup === false,
     }
   })
 
   RealtimeUpdates.pushToUser(context.userId, [update], { skipSessionId: context.sessionId })
 
-  return { user, update }
+  return { user, update, completedSignup }
 }
 
 function updatedUserUpdate(user: ProtocolUser, seqDate: UpdateSeqAndDate): Update {

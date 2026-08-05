@@ -7,6 +7,7 @@ import {
   getOrCreateUserByPhoneForSignup,
   isInviteCodeRequired,
   isLoginUser,
+  isSignupComplete,
 } from "./signupInvites"
 
 describe("signup invite user setup state", () => {
@@ -58,9 +59,11 @@ describe("signup invite user setup state", () => {
     expect(unfinished.user.emailVerified).toBe(true)
     expect(unfinished.user.pendingSetup).toBe(true)
     expect(isLoginUser(unfinished.user)).toBe(true)
+    expect(isSignupComplete(unfinished.user)).toBe(false)
     expect(completed.created).toBe(false)
     expect(completed.user.phoneVerified).toBe(true)
     expect(completed.user.pendingSetup).toBe(false)
+    expect(isSignupComplete(completed.user)).toBe(true)
 
     process.env["INVITE_CODES_REQUIRED"] = "true"
     expect(await isInviteCodeRequired(unfinished.user)).toBe(false)

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { eq } from "drizzle-orm"
 import { db } from "../../db"
 import { users } from "../../db/schema"
@@ -6,6 +6,7 @@ import { handler } from "../../methods/updateProfile"
 import type { HandlerContext } from "../../controllers/helpers"
 import { setupTestLifecycle, testUtils } from "../setup"
 import { InlineError } from "../../types/errors"
+import { BotAlerts } from "../../modules/bot-events/alerts"
 
 describe("updateProfile", () => {
   setupTestLifecycle()
@@ -86,15 +87,31 @@ describe("updateProfile", () => {
     expect(storedUser?.lastName).toBeNull()
   })
 
-  test("completes pending setup when a profile name is saved", async () => {
+  test("alerts once with the finalized profile when pending setup completes", async () => {
     const user = await testUtils.createUser("pending-profile@example.com")
     await db.update(users).set({ pendingSetup: true }).where(eq(users.id, user.id))
+    const alertSpy = spyOn(BotAlerts, "signupCompleted")
 
-    const result = await handler({ firstName: "Ada" }, makeContext(user.id))
+    const result = await handler(
+      { firstName: "Ada", lastName: "Lovelace", username: "pendingprofile" },
+      makeContext(user.id),
+    )
 
     expect(result.user.pendingSetup).toBe(false)
     const [storedUser] = await db.select().from(users).where(eq(users.id, user.id))
     expect(storedUser?.pendingSetup).toBe(false)
+    expect(alertSpy).toHaveBeenCalledTimes(1)
+    expect(alertSpy.mock.calls[0]?.[0].user).toMatchObject({
+      id: user.id,
+      firstName: "Ada",
+      lastName: "Lovelace",
+      username: "pendingprofile",
+      email: "pending-profile@example.com",
+    })
+
+    await handler({ firstName: "Augusta" }, makeContext(user.id))
+    expect(alertSpy).toHaveBeenCalledTimes(1)
+    alertSpy.mockRestore()
   })
 
   test("trims and clears bio", async () => {

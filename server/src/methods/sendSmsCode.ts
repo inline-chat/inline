@@ -62,7 +62,7 @@ export const handler = async (
     const isLogin = isLoginUser(existingUser)
 
     BotAlerts.authAttempt({
-      kind: isLogin ? "login" : "signup",
+      kind: existingUser?.pendingSetup === true ? "signup" : isLogin ? "login" : "signup",
       contact: { type: "phone", value: formattedPhoneNumber },
       existing: Boolean(existingUser),
       source: context.source,

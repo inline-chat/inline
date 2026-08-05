@@ -56,7 +56,7 @@ export const handler = async (
     await sendEmailCode(email, code, firstName, existingUser)
 
     BotAlerts.authAttempt({
-      kind: existingUser ? "login" : "signup",
+      kind: user?.pendingSetup === true ? "signup" : existingUser ? "login" : "signup",
       contact: { type: "email", value: email },
       existing: Boolean(user),
       source: context.source,

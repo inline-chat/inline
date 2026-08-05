@@ -13,8 +13,11 @@ import { DEMO_CODE, DEMO_CODE2, DEMO_EMAIL, DEMO_EMAIL2 } from "@in/server/env"
 import { maskEmail } from "@in/server/utils/privacy"
 import { verifyEmailLoginChallenge } from "@in/server/modules/auth/emailLoginChallenges"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
-import { getOrCreateUserByEmailForSignup } from "@in/server/modules/auth/signupInvites"
+import { getOrCreateUserByEmailForSignup, isSignupComplete } from "@in/server/modules/auth/signupInvites"
 import { normalizeAuthClientType } from "@in/server/modules/auth/clientType"
+import { db } from "@in/server/db"
+import { users } from "@in/server/db/schema"
+import { eq } from "drizzle-orm"
 
 export const Input = Type.Object({
   email: Type.String(),
@@ -39,8 +42,9 @@ export const Response = Type.Object({
 
 export const handler = async (
   input: Static<typeof Input>,
-  { ip: requestIp }: UnauthenticatedHandlerContext,
+  context: UnauthenticatedHandlerContext,
 ): Promise<Static<typeof Response>> => {
+  const requestIp = context.ip
   if (input.code === "") {
     throw new InlineError(InlineError.ApiError.EMAIL_CODE_EMPTY)
   }
@@ -68,8 +72,32 @@ export const handler = async (
   // add random delay to limit bruteforce
   await new Promise((resolve) => setTimeout(resolve, Math.random() * 1000))
 
-  // send code to email
+  // Record contact proof before account/session mutation so a missing later checkpoint locates where the flow stopped.
   await verifyCode(email, input.code, input.challengeToken)
+
+  const confirmedUser = await db
+    .select()
+    .from(users)
+    .where(eq(users.email, email))
+    .limit(1)
+    .then(([user]) => user)
+    .catch((error) => {
+      Log.shared.error("Failed to load user for email confirmation alert", { error })
+      return undefined
+    })
+  BotAlerts.authContactConfirmed({
+    contact: { type: "email", value: email },
+    user: confirmedUser,
+    source: context.source,
+    ip: requestIp,
+    device: {
+      deviceName: input.deviceName,
+      deviceId: input.deviceId,
+      clientType,
+      clientVersion: input.clientVersion,
+      osVersion: input.osVersion,
+    },
+  })
 
   // make session
   //let ipInfo = requestIp ? await ipinfo(requestIp) : undefined
@@ -124,17 +152,19 @@ export const handler = async (
     osVersion: osVersion ?? undefined,
   })
 
-  // Best-effort internal alert (should never affect the user action).
-  BotAlerts.login({
-    userId,
-    device: {
-      deviceName: session.personalData.deviceName,
-      deviceId: session.deviceId,
-      clientType: session.clientType,
-      clientVersion: session.clientVersion,
-      osVersion: session.osVersion,
-    },
-  })
+  // New users are reported only after onboarding has saved their final profile.
+  if (isSignupComplete(user)) {
+    BotAlerts.login({
+      userId,
+      device: {
+        deviceName: session.personalData.deviceName,
+        deviceId: session.deviceId,
+        clientType: session.clientType,
+        clientVersion: session.clientVersion,
+        osVersion: session.osVersion,
+      },
+    })
+  }
 
   if (created) {
     sendTelegramEvent(email)

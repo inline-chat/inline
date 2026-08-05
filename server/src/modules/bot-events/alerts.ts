@@ -14,6 +14,8 @@ type AlertUser = {
   lastName: string | null
   username: string | null
   email: string | null
+  phoneNumber: string | null
+  pendingSetup: boolean | null
 }
 
 type AlertDevice = {
@@ -38,6 +40,8 @@ async function getAlertUser(userId: number): Promise<AlertUser | null> {
         lastName: users.lastName,
         username: users.username,
         email: users.email,
+        phoneNumber: users.phoneNumber,
+        pendingSetup: users.pendingSetup,
       })
       .from(users)
       .where(eq(users.id, userId))
@@ -51,14 +55,19 @@ async function getAlertUser(userId: number): Promise<AlertUser | null> {
   }
 }
 
-function userLabel(user: AlertUser): string {
-  const name =
-    user.firstName && user.lastName
-      ? `${user.firstName} ${user.lastName}`
-      : user.firstName ?? user.lastName ?? null
+function userName(user: AlertUser): string | null {
+  const firstName = user.firstName ? compact(user.firstName) : null
+  const lastName = user.lastName ? compact(user.lastName) : null
 
-  if (name && user.username) return `${name} (@${user.username})`
-  if (user.username) return `@${user.username}`
+  return firstName && lastName ? `${firstName} ${lastName}` : firstName ?? lastName
+}
+
+function userLabel(user: AlertUser): string {
+  const name = userName(user)
+  const username = user.username ? compact(user.username) : null
+
+  if (name && username) return `${name} (@${username})`
+  if (username) return `@${username}`
   if (name) return name
   return `User ${user.id}`
 }
@@ -90,6 +99,44 @@ function adminUserUrl(userId: number): string {
 function adminUserLink(user: AlertUser): string {
   const label = escapeMarkdownLinkLabel(userLabel(user))
   return `[${label}](${adminUserUrl(user.id)})`
+}
+
+export function formatSignupCompletedAlert(user: AlertUser): string {
+  const lines = [
+    `Signup completed: ${adminUserLink(user)}`,
+    `name: ${userName(user) ?? "not set"}`,
+    `username: ${user.username ? `@${compact(user.username)}` : "not set"}`,
+  ]
+
+  if (user.email) lines.push(`email: ${compact(user.email)}`)
+  if (user.phoneNumber) lines.push(`phone: ${compact(user.phoneNumber)}`)
+
+  return lines.join("\n")
+}
+
+type AuthContactConfirmedProps = {
+  contact: AlertAuthContact
+  user?: AlertUser | null
+  source?: string
+  ip?: string
+  device?: AlertDevice
+}
+
+export function formatAuthContactConfirmedAlert(props: AuthContactConfirmedProps): string {
+  const userText = props.user ? `${adminUserLink(props.user)} with ` : ""
+  const profileState = props.user ? (props.user.pendingSetup === true ? "pending" : "complete") : "not created"
+  const flow = props.user?.pendingSetup === true || !props.user ? "signup" : "login"
+  const lines = [
+    `${props.contact.type === "email" ? "Email" : "Phone"} confirmed: ${userText}${authContactDetails(props.contact)}`,
+    `flow: ${flow}`,
+    `account: ${props.user ? "existing" : "new"}`,
+    `profile: ${profileState}`,
+    `source: ${props.source ? compact(props.source) : "unknown"}`,
+    `ip: ${props.ip ? compact(props.ip) : "unknown"}`,
+    `client: ${clientDetails(props.device)}`,
+  ]
+
+  return lines.join("\n")
 }
 
 function authContactDetails(contact: AlertAuthContact): string {
@@ -161,6 +208,14 @@ export const BotAlerts = {
     ]
 
     sendInlineOnlyBotEvent(lines.join("\n"))
+  },
+
+  signupCompleted(props: { user: AlertUser }) {
+    sendInlineOnlyBotEvent(formatSignupCompletedAlert(props.user))
+  },
+
+  authContactConfirmed(props: AuthContactConfirmedProps) {
+    sendInlineOnlyBotEvent(formatAuthContactConfirmedAlert(props))
   },
 
   spaceInvite(props: { inviterUserId: number; invitedUserId: number; spaceId: number; spaceName: string | null }) {
