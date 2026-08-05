@@ -110,6 +110,7 @@ struct Nav2Entry: Codable {
 /// Manages navigation per window
 @Observable class Nav2 {
   @ObservationIgnored private let log = Log.scoped("Nav2")
+  @ObservationIgnored private let stateFileURL = FileHelpers.getApplicationStateFileURL(named: "nav_state_v2.json")
   @ObservationIgnored private var saveStateTask: Task<Void, Never>?
   @ObservationIgnored private let navigationSignpostLog = OSLog(subsystem: "InlineMac", category: "Navigation")
   @ObservationIgnored private var activeChatNavigation: (peer: Peer, id: OSSignpostID)?
@@ -452,12 +453,6 @@ struct Nav2Entry: Codable {
     if history.isEmpty {
       activateTab(at: activeTabIndex)
     }
-  }
-
-  // File URL for persistence
-  private var stateFileURL: URL {
-    FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent("nav_state_v2.json")
   }
 
   struct Persisted: Codable {

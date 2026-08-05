@@ -51,6 +51,71 @@ public enum FileHelpers {
     return paths[0]
   }
 
+  /// Returns a bundle-scoped location for small, private application state.
+  ///
+  /// Existing releases stored some state files in the user's Documents directory.
+  /// The first lookup moves that legacy file into Application Support when possible.
+  public static func getApplicationStateFileURL(named fileName: String) -> URL {
+    let fileManager = FileManager.default
+    let applicationSupportDirectory = getApplicationSupportDirectory()
+    let stateDirectory = applicationStateDirectory(
+      applicationSupportDirectory: applicationSupportDirectory,
+      bundleIdentifier: Bundle.main.bundleIdentifier
+    )
+
+    do {
+      try fileManager.createDirectory(
+        at: stateDirectory,
+        withIntermediateDirectories: true,
+        attributes: nil
+      )
+    } catch {
+      let nsError = error as NSError
+      Log.shared.error(
+        "Failed to create application state directory (\(nsError.domain):\(nsError.code))"
+      )
+    }
+
+    let destinationURL = stateDirectory.appendingPathComponent(fileName)
+    let legacyURL = getDocumentsDirectory().appendingPathComponent(fileName)
+
+    do {
+      try moveLegacyStateFile(
+        from: legacyURL,
+        to: destinationURL,
+        fileManager: fileManager
+      )
+    } catch {
+      let nsError = error as NSError
+      Log.shared.error(
+        "Failed to migrate legacy application state file (\(nsError.domain):\(nsError.code))"
+      )
+    }
+
+    return destinationURL
+  }
+
+  static func applicationStateDirectory(
+    applicationSupportDirectory: URL,
+    bundleIdentifier: String?
+  ) -> URL {
+    applicationSupportDirectory
+      .appendingPathComponent(bundleIdentifier ?? "chat.inline", isDirectory: true)
+      .appendingPathComponent("State", isDirectory: true)
+  }
+
+  static func moveLegacyStateFile(
+    from legacyURL: URL,
+    to destinationURL: URL,
+    fileManager: FileManager
+  ) throws {
+    guard !fileManager.fileExists(atPath: destinationURL.path),
+          fileManager.fileExists(atPath: legacyURL.path)
+    else { return }
+
+    try fileManager.moveItem(at: legacyURL, to: destinationURL)
+  }
+
   // For truly temporary files
   public static func getTrueTemporaryDirectory() -> URL {
     FileManager.default.temporaryDirectory

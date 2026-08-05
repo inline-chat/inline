@@ -45,6 +45,7 @@ class NavigationModel: ObservableObject {
   static let shared = NavigationModel()
 
   private let log = Log.scoped("Navigation", enableTracing: false)
+  private let stateFileURL = FileHelpers.getApplicationStateFileURL(named: "navigation_state.json")
 
   @Published var homePath: [NavigationRoute] = []
   @Published var homeSelection: NavigationRoute = .homeRoot
@@ -197,12 +198,6 @@ class NavigationModel: ObservableObject {
         self?.saveState()
       }
       .store(in: &cancellables)
-  }
-
-  // File URL for persistence
-  private var stateFileURL: URL {
-    FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent("navigation_state.json")
   }
 
   private func saveState() {

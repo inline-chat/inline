@@ -20,8 +20,7 @@ class TransactionsCache {
   private(set) var maxOrder: Int = 0
 
   public init() {
-    documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent("transactions.json")
+    stateFileURL = FileHelpers.getApplicationStateFileURL(named: "transactions.json")
     transactions = loadAll()
     maxOrder = transactions.map(\.order).max() ?? 0
   }
@@ -61,7 +60,7 @@ class TransactionsCache {
   // MARK: - Private
 
   private let fileManager = FileManager.default
-  private nonisolated let documentsURL: URL
+  private nonisolated let stateFileURL: URL
 
   private func persistAll() {
     do {
@@ -69,7 +68,7 @@ class TransactionsCache {
       encoder.dateEncodingStrategy = .iso8601
 
       let data = try encoder.encode(transactions)
-      try data.write(to: documentsURL, options: .atomic)
+      try data.write(to: stateFileURL, options: .atomic)
     } catch {
       log.error("Failed to persist transactions: \(error)")
       // In a production app, you might want to use proper error handling
@@ -78,11 +77,11 @@ class TransactionsCache {
 
   private nonisolated func loadAll() -> [PersistedTransaction] {
     do {
-      guard fileManager.fileExists(atPath: documentsURL.path) else {
+      guard fileManager.fileExists(atPath: stateFileURL.path) else {
         return []
       }
 
-      let data = try Data(contentsOf: documentsURL)
+      let data = try Data(contentsOf: stateFileURL)
       let decoder = JSONDecoder()
       decoder.dateDecodingStrategy = .iso8601
 

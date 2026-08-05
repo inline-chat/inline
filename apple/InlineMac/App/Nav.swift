@@ -69,6 +69,7 @@ class Nav: ObservableObject {
 
   private let log = Log.scoped("Nav")
   private let maxHistoryLength = 200
+  private let stateFileURL = FileHelpers.getApplicationStateFileURL(named: "nav_state.json")
   private var saveStateTask: Task<Void, Never>?
 
   // TODO: support multi-window
@@ -236,12 +237,6 @@ extension Nav {
 // MARK: - Persistance
 
 extension Nav {
-  // File URL for persistence
-  private var stateFileURL: URL {
-    FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent("nav_state.json")
-  }
-
   struct Persisted: Codable {
     var lastEntry: NavEntry?
   }
