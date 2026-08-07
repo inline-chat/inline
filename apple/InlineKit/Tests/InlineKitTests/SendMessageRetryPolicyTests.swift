@@ -1,4 +1,5 @@
 import Foundation
+import RealtimeV2
 import Testing
 @testable import Auth
 @testable import InlineKit
@@ -56,6 +57,33 @@ struct SendMessageRetryPolicyTests {
     )
 
     #expect(transaction.shouldRetryOnFail(error: APIError.networkError))
+  }
+
+  @Test("keeps retrying when primary realtime disconnects after upload")
+  func retryForPrimaryRealtimeDisconnect() {
+    let transaction = TransactionSendMessage(
+      text: nil,
+      peerId: .user(id: 1),
+      chatId: 1
+    )
+
+    #expect(transaction.shouldRetryOnFail(error: RealtimeDirectRpcError.notConnected))
+  }
+
+  @Test("does not retry permanent primary realtime failures")
+  func noRetryForPermanentPrimaryRealtimeFailures() {
+    let transaction = TransactionSendMessage(
+      text: nil,
+      peerId: .user(id: 1),
+      chatId: 1
+    )
+
+    #expect(transaction.shouldRetryOnFail(error: RealtimeDirectRpcError.notAuthorized) == false)
+    #expect(
+      transaction.shouldRetryOnFail(
+        error: RealtimeDirectRpcError.rpcError(message: "bad request", code: 400)
+      ) == false
+    )
   }
 
   @Test("uses server descriptions for localized api errors")

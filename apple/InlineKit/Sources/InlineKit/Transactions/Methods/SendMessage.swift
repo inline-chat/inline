@@ -4,6 +4,7 @@ import GRDB
 import InlineProtocol
 import Logger
 import MultipartFormDataKit
+import RealtimeV2
 
 #if os(iOS)
 import UIKit
@@ -365,10 +366,10 @@ public struct TransactionSendMessage: Transaction {
       if let sendMode { $0.sendMode = sendMode }
     }
 
-    let result_ = try await Realtime.shared.invoke(
-      .sendMessage,
-      input: .sendMessage(input),
-      discardIfNotConnected: true
+    // Keep upload persistence/retries here while finalizing through the primary socket.
+    let result_ = try await Api.realtime.callRpcDirect(
+      method: .sendMessage,
+      input: .sendMessage(input)
     )
 
     guard case let .sendMessage(result) = result_ else {
@@ -410,6 +411,17 @@ public struct TransactionSendMessage: Transaction {
           }
         default:
           return true
+      }
+    }
+
+    if let error = error as? RealtimeDirectRpcError {
+      switch error {
+      case let .rpcError(_, code):
+        return code != 400 && code != 401
+      case .notAuthorized:
+        return false
+      case .notConnected, .timeout, .unknown:
+        return true
       }
     }
 
