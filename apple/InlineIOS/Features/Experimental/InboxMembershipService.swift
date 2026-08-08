@@ -9,93 +9,64 @@ import RealtimeV2
 actor InboxMembershipService {
   static let shared = InboxMembershipService()
 
-  private var pendingPeers = Set<InlineKit.Peer>()
+  private let reconciler = InboxMembershipReconciler(
+    loadState: { peer in
+      try await AppDatabase.shared.reader.read { db in
+        let dialog = try Dialog.get(peerId: peer).fetchOne(db)
+        let chat: InlineKit.Chat? = switch peer {
+        case .user:
+          nil
+        case let .thread(id):
+          try Chat.fetchOne(db, id: id)
+        }
+
+        return InboxMembershipCanonicalState(
+          isOpen: dialog?.open == true,
+          isPinned: dialog?.pinned == true,
+          isArchived: dialog?.archived == true,
+          isChatListHidden: dialog?.chatListHidden == true,
+          isUnfollowed: dialog?.followMode == .unfollowed,
+          needsReplyThreadReveal: dialog == nil && chat?.isReplyThread == true
+        )
+      }
+    },
+    performMutation: { peer, mutation in
+      switch mutation {
+      case .follow:
+        _ = try await Api.realtime.send(
+          .updateDialogFollowMode(peerId: peer, selection: .following)
+        )
+      case .showInChatList:
+        _ = try await Api.realtime.send(.showInChatList(peerId: peer))
+      case let .setOpen(isOpen):
+        _ = try await Api.realtime.send(.updateDialogOpen(peerId: peer, open: isOpen))
+      case let .setPinned(isPinned):
+        _ = try await Api.realtime.send(.updateDialogOrder(peerId: peer, pinned: isPinned))
+      case let .setArchived(isArchived):
+        try await DataManager.shared.updateDialog(
+          peerId: peer,
+          archived: isArchived,
+          deleteEmptyThreadIfArchiving: false
+        )
+      }
+    }
+  )
 
   @discardableResult
   func open(peer: InlineKit.Peer) async throws -> Bool {
-    guard pendingPeers.insert(peer).inserted else { return false }
-    defer { pendingPeers.remove(peer) }
-
-    let state = try await AppDatabase.shared.reader.read { db in
-      try InboxMembershipState(peer: peer, db: db)
-    }
-    var didMutate = false
-
-    if state.followMode == .unfollowed {
-      _ = try await Api.realtime.send(
-        .updateDialogFollowMode(peerId: peer, selection: .following)
-      )
-      didMutate = true
-    }
-
-    if state.isChatListHidden || state.needsReplyThreadReveal {
-      _ = try await Api.realtime.send(.showInChatList(peerId: peer))
-      didMutate = true
-    }
-
-    if !state.isOpen {
-      _ = try await Api.realtime.send(.updateDialogOpen(peerId: peer, open: true))
-      didMutate = true
-    }
-
-    if state.isArchived {
-      try await DataManager.shared.updateDialog(
-        peerId: peer,
-        archived: false,
-        deleteEmptyThreadIfArchiving: false
-      )
-      didMutate = true
-    }
-
-    return didMutate
+    let outcome = try await reconciler.submit(peer: peer, intent: .open)
+    return outcome.didConvergeRequestedIntent && outcome.didMutate
   }
 
   @discardableResult
   func close(peer: InlineKit.Peer) async throws -> Bool {
-    guard pendingPeers.insert(peer).inserted else { return false }
-    defer { pendingPeers.remove(peer) }
-
-    let state = try await AppDatabase.shared.reader.read { db in
-      try InboxMembershipState(peer: peer, db: db)
-    }
-    var didMutate = false
-
-    if state.isOpen {
-      _ = try await Api.realtime.send(.updateDialogOpen(peerId: peer, open: false))
-      didMutate = true
-    }
-
-    if state.isPinned {
-      _ = try await Api.realtime.send(.updateDialogOrder(peerId: peer, pinned: false))
-      didMutate = true
-    }
-
-    return didMutate
+    let outcome = try await reconciler.submit(peer: peer, intent: .close)
+    return outcome.didConvergeRequestedIntent && outcome.didMutate
   }
-}
 
-private struct InboxMembershipState: Sendable {
-  let isOpen: Bool
-  let isPinned: Bool
-  let isArchived: Bool
-  let isChatListHidden: Bool
-  let followMode: InlineProtocol.DialogFollowMode?
-  let needsReplyThreadReveal: Bool
-
-  init(peer: InlineKit.Peer, db: Database) throws {
-    let dialog = try Dialog.get(peerId: peer).fetchOne(db)
-    let chat: InlineKit.Chat? = switch peer {
-    case .user:
-      nil
-    case let .thread(id):
-      try Chat.fetchOne(db, id: id)
-    }
-
-    isOpen = dialog?.open == true
-    isPinned = dialog?.pinned == true
-    isArchived = dialog?.archived == true
-    isChatListHidden = dialog?.chatListHidden == true
-    followMode = dialog?.followMode
-    needsReplyThreadReveal = dialog == nil && chat?.isReplyThread == true
+  @discardableResult
+  func setPinned(peer: InlineKit.Peer, pinned: Bool) async throws -> Bool {
+    let outcome = try await reconciler.submit(peer: peer, intent: .setPinned(pinned))
+    return outcome.didConvergeRequestedIntent && outcome.didMutate
   }
 }

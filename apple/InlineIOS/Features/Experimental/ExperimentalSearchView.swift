@@ -10,7 +10,6 @@ struct ExperimentalSearchView: View {
   let activeSpaceId: Int64?
 
   @Environment(Router.self) private var router
-  @Environment(ExperimentalHomeActionCoordinator.self) private var homeActions
   @Environment(\.appDatabase) private var database
   @EnvironmentObject private var dataManager: DataManager
 
@@ -181,9 +180,7 @@ struct ExperimentalSearchView: View {
 
     Task {
       do {
-        _ = try await homeActions.perform(peer: peer) {
-          _ = try await InboxMembershipService.shared.open(peer: peer)
-        }
+        _ = try await InboxMembershipService.shared.open(peer: peer)
       } catch {
         Log.shared.error("Failed to open search result in Inbox", error: error)
         showOpenError()

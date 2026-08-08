@@ -373,7 +373,10 @@ private struct ExperimentalAuthedRootView: View {
       nav: bindableNav,
       initialTab: rootTab == .inbox ? .inbox : .allChats,
       allChatsFilter: ChatListFilter(rawValue: allChatsFilterRaw) ?? .all,
-      onRetry: retryHomeData
+      onRetry: retryHomeData,
+      onRowVisibilityChange: { peer, isVisible in
+        translationCoordinator.rowVisibilityChanged(peer: peer, isVisible: isVisible)
+      }
     )
   }
 

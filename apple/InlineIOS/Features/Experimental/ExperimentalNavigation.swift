@@ -282,6 +282,7 @@ struct ExperimentalHomeView: View {
   let initialTab: ExperimentalHomeTab
   var allChatsFilter: ChatListFilter = .all
   var onRetry: () -> Void = {}
+  var onRowVisibilityChange: (Peer, Bool) -> Void = { _, _ in }
 
   @EnvironmentObject private var homeListStore: ExperimentalHomeListStore
 
@@ -302,7 +303,8 @@ struct ExperimentalHomeView: View {
           chatItemRenderMode: chatItemRenderMode,
           isLoading: homeListStore.state.isLoading,
           status: homeStatus,
-          onRetry: onRetry
+          onRetry: onRetry,
+          onRowVisibilityChange: onRowVisibilityChange
         )
       case .allChats:
         ExperimentalChatListView(
@@ -317,7 +319,8 @@ struct ExperimentalHomeView: View {
           chatItemRenderMode: chatItemRenderMode,
           isLoading: homeListStore.state.isLoading,
           status: homeStatus,
-          onRetry: onRetry
+          onRetry: onRetry,
+          onRowVisibilityChange: onRowVisibilityChange
         )
       case .archived:
         ExperimentalChatListView(
@@ -330,7 +333,8 @@ struct ExperimentalHomeView: View {
           chatItemRenderMode: chatItemRenderMode,
           isLoading: homeListStore.state.isLoading,
           status: homeStatus,
-          onRetry: onRetry
+          onRetry: onRetry,
+          onRowVisibilityChange: onRowVisibilityChange
         )
       }
     }
@@ -384,6 +388,7 @@ private struct ExperimentalChatListView: View {
   let isLoading: Bool
   let status: ExperimentalHomeStatus?
   let onRetry: () -> Void
+  let onRowVisibilityChange: (Peer, Bool) -> Void
 
   @EnvironmentObject private var data: DataManager
   @EnvironmentObject private var realtimeState: RealtimeState
@@ -475,6 +480,12 @@ private struct ExperimentalChatListView: View {
         // Keep spacing inside the link so its tap and context-menu source
         // cover the complete native List row rather than only its contents.
         .listRowInsets(EdgeInsets())
+        .onAppear {
+          onRowVisibilityChange(item.peer, true)
+        }
+        .onDisappear {
+          onRowVisibilityChange(item.peer, false)
+        }
     }
   }
 
@@ -639,9 +650,7 @@ private struct ExperimentalChatListView: View {
   private func performClose(peer: Peer) {
     Task {
       do {
-        _ = try await homeActions.perform(peer: peer) {
-          _ = try await InboxMembershipService.shared.close(peer: peer)
-        }
+        _ = try await InboxMembershipService.shared.close(peer: peer)
       } catch {
         Log.shared.error("Failed to update Inbox state", error: error)
         ToastManager.shared.showToast(
@@ -659,9 +668,7 @@ private struct ExperimentalChatListView: View {
       Button {
         Task {
           do {
-            let didPerform = try await homeActions.perform(peer: item.peer) {
-              _ = try await InboxMembershipService.shared.open(peer: item.peer)
-            }
+            let didPerform = try await InboxMembershipService.shared.open(peer: item.peer)
             guard didPerform else { return }
             ToastManager.shared.showToast(
               "Opened in Inbox",
@@ -761,12 +768,7 @@ private struct ExperimentalChatListView: View {
   private func performPinUpdate(peer: Peer, pinned: Bool) {
     Task {
       do {
-        _ = try await homeActions.perform(peer: peer) {
-          _ = try await realtimeV2.send(.updateDialogOrder(
-            peerId: peer,
-            pinned: pinned
-          ))
-        }
+        _ = try await InboxMembershipService.shared.setPinned(peer: peer, pinned: pinned)
       } catch {
         Log.shared.error("Failed to update pin state", error: error)
         ToastManager.shared.showToast(
