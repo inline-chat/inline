@@ -257,6 +257,7 @@ struct SidebarView: View {
       SidebarGridRow(
         avatars: gridStore.recentAvatars(spaceID: spaceID).map { InlineKit.User(from: $0.user) },
         selected: nav.currentRoute == .grid(spaceId: spaceID),
+        titleDimmed: sidebarTitlesDimmed,
         size: settings.sidebarItemSize,
         action: { openGrid(spaceID: spaceID) }
       )
@@ -264,6 +265,7 @@ struct SidebarView: View {
       SidebarGridRow(
         avatars: homeGridAvatars,
         selected: isAnyHomeGridSelected,
+        titleDimmed: sidebarTitlesDimmed,
         size: settings.sidebarItemSize,
         action: { openGrid(spaceID: home.spaceID) }
       )
@@ -1617,16 +1619,7 @@ private struct SidebarInboxActionRow: View {
   }
 
   private var icon: some View {
-    Image(systemName: systemImage)
-      .font(.system(size: 13, weight: .medium))
-      .foregroundStyle(.secondary)
-      .frame(width: iconSize, height: iconSize)
-      .background {
-        if size == .large {
-          Circle()
-            .fill(.quinary)
-        }
-      }
+    SidebarActionRowIcon(systemImage: systemImage, size: size)
   }
 
   private var background: some View {
@@ -1668,6 +1661,7 @@ private struct SidebarInboxActionRow: View {
 private struct SidebarGridRow: View {
   let avatars: [InlineKit.User]
   let selected: Bool
+  let titleDimmed: Bool
   let size: SidebarItemSize
   let action: () -> Void
 
@@ -1676,7 +1670,12 @@ private struct SidebarGridRow: View {
 
   var body: some View {
     Button(action: action) {
-      SidebarGridRowContent(avatars: avatars, size: size, backgroundColor: backgroundColor)
+      SidebarGridRowContent(
+        avatars: avatars,
+        titleDimmed: titleDimmed,
+        size: size,
+        backgroundColor: backgroundColor
+      )
     }
     .buttonStyle(.plain)
     .help("Grid")
@@ -1698,18 +1697,18 @@ private struct SidebarGridRow: View {
 
 private struct SidebarGridRowContent: View {
   let avatars: [InlineKit.User]
+  let titleDimmed: Bool
   let size: SidebarItemSize
   let backgroundColor: Color
 
   var body: some View {
     HStack(spacing: 8) {
-      Image(systemName: "circle.grid.2x2.fill")
-        .font(.system(size: 13, weight: .medium))
-        .foregroundStyle(.secondary)
-        .frame(width: size.iconSize, height: size.iconSize)
+      SidebarActionRowIcon(systemImage: "square.grid.2x2", size: size)
 
       Text("Grid", comment: "Sidebar button for realtime voice rooms.")
-        .font(.system(size: 13))
+        .font(.system(size: 13, weight: .regular))
+        .foregroundStyle(titleDimmed ? Color.secondary : Color.primary)
+        .lineLimit(1)
         .frame(maxWidth: .infinity, alignment: .leading)
 
       HStack(spacing: -6) {
@@ -1729,6 +1728,24 @@ private struct SidebarGridRowContent: View {
         .fill(backgroundColor)
     }
     .padding(.horizontal, -Theme.sidebarNativeDefaultEdgeInsets + 8)
+  }
+}
+
+private struct SidebarActionRowIcon: View {
+  let systemImage: String
+  let size: SidebarItemSize
+
+  var body: some View {
+    Image(systemName: systemImage)
+      .font(.system(size: 13, weight: .medium))
+      .foregroundStyle(.secondary)
+      .frame(width: size.iconSize, height: size.iconSize)
+      .background {
+        if size == .large {
+          Circle()
+            .fill(.quinary)
+        }
+      }
   }
 }
 
