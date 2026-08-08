@@ -120,6 +120,8 @@ class MessageListAppKit: NSViewController {
     chat: Chat,
     showUnreadAfter: Int64? = nil,
     initialState: MessagesProgressiveViewModel.InitialState? = nil,
+    initialCollapsedHistoryMarker: CollapsedHistoryMarker? = nil,
+    initiallyExpandCollapsedHistory: Bool = false,
     initialPinnedMessage: PreparedPinnedMessage? = nil,
     surfaceStyle: ChatViewAppearance.SurfaceStyle = .content,
     additionalTopContentInset: CGFloat = 0
@@ -131,7 +133,12 @@ class MessageListAppKit: NSViewController {
     self.initialPinnedMessage = initialPinnedMessage
     self.surfaceStyle = surfaceStyle
     self.additionalTopContentInset = additionalTopContentInset
-    chatRows = ChatRowListViewModel(peer: peerId, initialState: initialState)
+    chatRows = ChatRowListViewModel(
+      peer: peerId,
+      initialState: initialState,
+      initialCollapsedHistoryMarker: initialCollapsedHistoryMarker,
+      initiallyExpandCollapsedHistory: initiallyExpandCollapsedHistory
+    )
     let renderStyle = AppSettings.shared.messageRenderStyle
     messageRenderStyle = renderStyle
     usesAvatarOverlay = AppConfig.macMessageAvatarOverlayEnabled
@@ -253,6 +260,110 @@ class MessageListAppKit: NSViewController {
 
   private func rebuildRowItems() {
     _ = chatRows.rebuildFromViewModel(showUnreadAfter: showUnreadAfter)
+  }
+
+  func updateCollapsedHistoryMarker(_ marker: CollapsedHistoryMarker?) {
+    applyCollapsedHistoryMutation {
+      chatRows.setCollapsedHistoryMarker(marker) != .none
+    }
+  }
+
+  private func removeCollapsedHistory() {
+    let commandPeerId = peerId
+    Task { @MainActor in
+      do {
+        try await Api.realtime.send(.collapseHistory(peerId: commandPeerId, maxId: nil))
+      } catch {
+        log.error("Failed to remove collapsed history", error: error)
+        ToastCenter.shared.showError("Couldn't show all messages")
+      }
+    }
+  }
+
+  private struct CollapsedHistoryViewportSnapshot {
+    let messageStableId: Int64?
+    let messageOffsetFromViewportTop: CGFloat?
+    let distanceFromBottom: CGFloat
+    let wasAtBottom: Bool
+  }
+
+  private func captureCollapsedHistoryViewport() -> CollapsedHistoryViewportSnapshot {
+    let visibleRect = tableView.visibleRect
+    let visibleRows = tableView.rows(in: visibleRect)
+    var anchoredMessageStableId: Int64?
+    var messageOffsetFromViewportTop: CGFloat?
+
+    if visibleRows.location != NSNotFound, visibleRows.length > 0 {
+      let upperBound = min(visibleRows.location + visibleRows.length, tableView.numberOfRows)
+      for row in visibleRows.location ..< upperBound {
+        guard let stableId = messageStableId(forRow: row) else { continue }
+        anchoredMessageStableId = stableId
+        messageOffsetFromViewportTop = tableView.rect(ofRow: row).minY - visibleRect.minY
+        break
+      }
+    }
+
+    let contentHeight = scrollView.documentView?.bounds.height ?? 0
+    let viewport = scrollView.contentView.bounds
+    return CollapsedHistoryViewportSnapshot(
+      messageStableId: anchoredMessageStableId,
+      messageOffsetFromViewportTop: messageOffsetFromViewportTop,
+      distanceFromBottom: contentHeight - viewport.maxY,
+      wasAtBottom: isAtBottom
+    )
+  }
+
+  @discardableResult
+  private func applyCollapsedHistoryMutation(_ mutation: () -> Bool) -> Bool {
+    let viewport = isViewLoaded ? captureCollapsedHistoryViewport() : nil
+    guard mutation() else { return false }
+    guard isViewLoaded else { return true }
+
+    suppressResizeScrollMaintenance = true
+    clearHoveredMessage()
+    tableView.reloadData()
+    scrollView.layoutSubtreeIfNeeded()
+
+    if let viewport {
+      restoreCollapsedHistoryViewport(viewport)
+    }
+
+    syncAvatarOverlayAfterTableLayout()
+    scheduleMediaWarmupForVisibleAndNearby(reason: "collapsed_history")
+    scheduleMessageHoverRefresh()
+    handleBoundsChange()
+
+    DispatchQueue.main.async { [weak self] in
+      self?.suppressResizeScrollMaintenance = false
+    }
+    return true
+  }
+
+  private func restoreCollapsedHistoryViewport(_ viewport: CollapsedHistoryViewportSnapshot) {
+    if viewport.wasAtBottom {
+      scrollToBottom(animated: false)
+      return
+    }
+
+    if let stableId = viewport.messageStableId,
+       let offset = viewport.messageOffsetFromViewportTop,
+       let row = chatRows.rowIndex(forMessageStableId: stableId)
+    {
+      let targetY = tableView.rect(ofRow: row).minY - offset
+      scrollView.contentView.updateBounds(
+        NSPoint(x: scrollView.contentView.bounds.origin.x, y: clampScrollOffset(targetY)),
+        cancel: true
+      )
+      return
+    }
+
+    let contentHeight = scrollView.documentView?.bounds.height ?? 0
+    let viewportHeight = scrollView.contentView.bounds.height
+    let targetY = contentHeight - viewportHeight - viewport.distanceFromBottom
+    scrollView.contentView.updateBounds(
+      NSPoint(x: scrollView.contentView.bounds.origin.x, y: clampScrollOffset(targetY)),
+      cancel: true
+    )
   }
 
   private func rowItem(at row: Int) -> ChatRowListViewModel.Row? {
@@ -1611,7 +1722,10 @@ class MessageListAppKit: NSViewController {
     isAtAbsoluteBottom = overScrolledToBottom || abs(currentScrollOffset - maxScrollableHeight) <= 0.1
 
     // Check if we're approaching the top
-    if feature_loadsMoreWhenApproachingTop, isUserScrolling, currentScrollOffset < viewportSize.height {
+    if feature_loadsMoreWhenApproachingTop,
+       isUserScrolling,
+       !chatRows.suppressesOlderPagination,
+       currentScrollOffset < viewportSize.height {
       loadBatch(at: .older)
     }
 
@@ -1996,7 +2110,9 @@ class MessageListAppKit: NSViewController {
   }
 
   private func requestRemoteOlderBatch(beforeMessageId: Int64) {
-    guard shouldRequestRemoteOlder(beforeMessageId: beforeMessageId) else { return }
+    guard !chatRows.suppressesOlderPagination,
+          shouldRequestRemoteOlder(beforeMessageId: beforeMessageId)
+    else { return }
 
     loadingRemoteOlderBatch = true
     lastRemoteOlderCursor = beforeMessageId
@@ -2039,6 +2155,7 @@ class MessageListAppKit: NSViewController {
   }
 
   func loadBatch(at direction: MessagesProgressiveViewModel.MessagesLoadDirection) {
+    if direction == .older, chatRows.suppressesOlderPagination { return }
     if loadingBatch { return }
     loadingBatch = true
 
@@ -3346,6 +3463,15 @@ extension MessageListAppKit: NSTableViewDelegate {
         cell.configure(text: NSLocalizedString("Replies", comment: "Reply thread separator label"))
         return cell
 
+      case let .clearedHistory(marker):
+        let identifier = NSUserInterfaceItemIdentifier("ClearedHistoryCell")
+        let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? ClearedHistoryTableCell
+          ?? ClearedHistoryTableCell()
+        cell.identifier = identifier
+        cell.configure(collapsedAt: marker.collapsedAt)
+        cell.onRemoveClear = { [weak self] in self?.removeCollapsedHistory() }
+        return cell
+
       case .parentMessage:
         guard let id = messageStableId(forRow: row) else { return nil }
         return makeMessageCell(tableView: tableView, stableId: id, row: row)
@@ -3391,6 +3517,9 @@ extension MessageListAppKit: NSTableViewDelegate {
 
       case .repliesSeparator:
         return UnreadSeparatorTableCell.height
+
+      case .clearedHistory:
+        return ClearedHistoryTableCell.height
 
       case let .message(id), let .parentMessage(id):
         guard let message = messageAndIndex(forStableId: id)?.message else { return defaultRowHeight }
@@ -3465,6 +3594,20 @@ extension MessageListAppKit {
   ) {
     // Don't allow negative msgIds (likely local messages)
     guard msgId > 0 else { return }
+
+    if chatRows.isMessageCollapsed(msgId) {
+      guard applyCollapsedHistoryMutation({
+        chatRows.expandCollapsedHistory() != .none
+      }) else { return }
+      DispatchQueue.main.async { [weak self] in
+        self?.scrollToMsgAndHighlight(
+          msgId,
+          reason: reason,
+          didAttemptLocalAroundLoad: didAttemptLocalAroundLoad
+        )
+      }
+      return
+    }
 
     if messages.isEmpty {
       log.error("No messages to scroll to")

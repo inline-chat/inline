@@ -225,8 +225,19 @@ private extension String {
   }
 }
 
+private enum SharedDataBridgeError: LocalizedError {
+  case containerUnavailable
+
+  var errorDescription: String? {
+    switch self {
+    case .containerUnavailable:
+      "The Inline app-group container is unavailable."
+    }
+  }
+}
+
 // Bridge manager to handle data exchange
-class BridgeManager {
+final class BridgeManager: Sendable {
   static let shared = BridgeManager()
 
   private let sharedContainerIdentifier = "group.chat.inline"
@@ -242,49 +253,44 @@ class BridgeManager {
   private var sharedDataURL: URL? {
     guard let containerURL = FileManager.default
       .containerURL(forSecurityApplicationGroupIdentifier: sharedContainerIdentifier)
-    else {
-      Log.shared.error("Unable to resolve app group container for share data")
-      return nil
-    }
+    else { return nil }
     return containerURL.appendingPathComponent(shareDataFileName)
   }
 
   // Save data from main app to be shared with extension
-  func saveSharedData(chats: [SharedChat], users: [SharedUser]) {
-    Task(priority: .background) {
-      guard let sharedDataURL else { return }
-
-      let shareExtensionData = ShareExtensionData(chats: chats, users: users)
-
-      let sharedData = SharedData(shareExtensionData: shareExtensionData, lastUpdate: Date())
-
-      do {
-        let encoder = JSONEncoder()
-        let data = try encoder.encode(sharedData)
-        try data.write(to: sharedDataURL)
-      } catch {
-        Log.shared.error("Failed to save shared data", error: error)
-      }
+  func saveSharedData(chats: [SharedChat], users: [SharedUser]) throws {
+    guard let sharedDataURL else {
+      throw SharedDataBridgeError.containerUnavailable
     }
+
+    let shareExtensionData = ShareExtensionData(chats: chats, users: users)
+    let sharedData = SharedData(shareExtensionData: shareExtensionData, lastUpdate: Date())
+    let data = try JSONEncoder().encode(sharedData)
+    try data.write(to: sharedDataURL, options: .atomic)
   }
 
   // Load shared data (used by both app and extension)
   func loadSharedData() -> SharedData? {
-    guard let sharedDataURL else { return nil }
+    guard let sharedDataURL else {
+      Log.shared.error("Unable to resolve app group container for shared data")
+      return nil
+    }
+    guard FileManager.default.fileExists(atPath: sharedDataURL.path) else { return nil }
 
     do {
       let data = try Data(contentsOf: sharedDataURL)
-      let decoder = JSONDecoder()
-
-      return try decoder.decode(SharedData.self, from: data)
+      return try JSONDecoder().decode(SharedData.self, from: data)
     } catch {
+      Log.shared.warning("Failed to load share-extension data: \(error.localizedDescription)")
       return nil
     }
   }
 
   // Clear shared data file
   func clearSharedData() throws {
-    guard let sharedDataURL else { return }
+    guard let sharedDataURL else {
+      throw SharedDataBridgeError.containerUnavailable
+    }
 
     if FileManager.default.fileExists(atPath: sharedDataURL.path) {
       try FileManager.default.removeItem(at: sharedDataURL)

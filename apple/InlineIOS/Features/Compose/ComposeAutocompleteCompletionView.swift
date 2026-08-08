@@ -457,6 +457,14 @@ final class ComposeAutocompleteCompletionView: UIView {
       return avatarView
     }
 
+    if let imageName = item.imageName, let image = UIImage(named: imageName) {
+      let imageView = UIImageView(image: image)
+      imageView.contentMode = .scaleAspectFit
+      imageView.translatesAutoresizingMaskIntoConstraints = false
+      imageView.isUserInteractionEnabled = false
+      return imageView
+    }
+
     let container = UIView()
     container.translatesAutoresizingMaskIntoConstraints = false
     container.layer.cornerRadius = 15

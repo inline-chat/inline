@@ -12,7 +12,8 @@ struct AllChatsRouteView: View {
   @Environment(\.nav) private var nav
   @EnvironmentStateObject private var viewModel: AllChatsViewModel
   @ObservedObject private var settings = AppSettings.shared
-  @State private var rowLayout: AllChatsRowLayout = .twoLine
+  @State private var rowLayout: AllChatsRowLayout = .titlePreviewLine
+  @State private var viewFilter: AllChatsViewFilter = .all
 
   private let filter: AllChatsFilter
 
@@ -25,16 +26,20 @@ struct AllChatsRouteView: View {
 
   var body: some View {
     let title = pageTitle
-    let sections = viewModel.sections(for: filter, spaceId: nav.selectedSpaceId)
+    let sections = viewModel.sections(
+      for: filter,
+      spaceId: nav.selectedSpaceId,
+      viewFilter: viewFilter
+    )
 
     ZStack {
       if viewModel.isLoading {
         ProgressView()
           .controlSize(.small)
-      } else if viewModel.errorText != nil || (sections.isEmpty && filter == .archived) {
+      } else if viewModel.errorText != nil || (sections.isEmpty && showsEmptyState) {
         RoutePlaceholderView(
-          title: viewModel.errorText ?? filter.emptyTitle,
-          systemImage: viewModel.errorText == nil ? filter.emptySystemImage : "exclamationmark.triangle"
+          title: viewModel.errorText ?? emptyStateTitle,
+          systemImage: viewModel.errorText == nil ? emptyStateSystemImage : "exclamationmark.triangle"
         )
       } else {
         chatList(sections: sections)
@@ -59,7 +64,7 @@ struct AllChatsRouteView: View {
       }
 
       ToolbarItem {
-        rowLayoutMenu
+        viewOptionsMenu
       }
 
       ToolbarItem {
@@ -80,7 +85,7 @@ struct AllChatsRouteView: View {
 
   private func chatList(sections: [AllChatsSection]) -> some View {
     List {
-      if filter == .chats {
+      if filter == .chats, viewFilter == .all {
         NewThreadListRow(action: createNewThread)
           .listRowInsets(EdgeInsets(top: 0, leading: 5, bottom: 0, trailing: 5))
           .listRowSeparator(.hidden)
@@ -153,7 +158,7 @@ struct AllChatsRouteView: View {
     NewThreadAction.start(dependencies: dependencies, spaceId: nav.selectedSpaceId)
   }
 
-  private var rowLayoutMenu: some View {
+  private var viewOptionsMenu: some View {
     Menu {
       Button {
         rowLayout = rowLayout == .twoLine ? .titlePreviewLine : .twoLine
@@ -164,10 +169,57 @@ struct AllChatsRouteView: View {
           Text("Title and Preview on One Line")
         }
       }
+
+      Divider()
+
+      Button {
+        viewFilter = viewFilter == .unread ? .all : .unread
+      } label: {
+        if viewFilter == .unread {
+          Label("View Unreads", systemImage: "checkmark")
+        } else {
+          Text("View Unreads")
+        }
+      }
+
+      if viewFilter == .unread {
+        Divider()
+
+        Button(action: markVisibleChatsRead) {
+          Label("Mark as Read", systemImage: "checkmark.message.fill")
+        }
+        .disabled(visibleItems.isEmpty)
+      }
     } label: {
       Label("View Options", systemImage: "line.3.horizontal.decrease")
     }
     .help("View Options")
+  }
+
+  private var visibleItems: [AllChatsItem] {
+    viewModel.items(
+      for: filter,
+      spaceId: nav.selectedSpaceId,
+      viewFilter: viewFilter
+    )
+  }
+
+  private var showsEmptyState: Bool {
+    filter == .archived || viewFilter == .unread
+  }
+
+  private var emptyStateTitle: String {
+    viewFilter == .unread ? String(localized: "No unread chats") : filter.emptyTitle
+  }
+
+  private var emptyStateSystemImage: String {
+    viewFilter == .unread ? "checkmark.message" : filter.emptySystemImage
+  }
+
+  private func markVisibleChatsRead() {
+    for item in visibleItems where item.unread {
+      UnreadManager.shared.readAll(item.peerId, chatId: item.chatId)
+    }
   }
 
   private func toggleArchiveFilter() {
@@ -199,6 +251,20 @@ struct AllChatsRouteView: View {
 private enum AllChatsRowLayout: Equatable {
   case twoLine
   case titlePreviewLine
+}
+
+private enum AllChatsViewFilter: Equatable {
+  case all
+  case unread
+
+  func includes(_ item: AllChatsItem) -> Bool {
+    switch self {
+    case .all:
+      true
+    case .unread:
+      item.unread
+    }
+  }
 }
 
 private enum AllChatsFilter: Equatable {
@@ -376,20 +442,36 @@ final class AllChatsViewModel: ObservableObject {
   }
 
   private nonisolated static func makeItems(_ chats: [HomeChatItem], db: Database) throws -> [AllChatsItem] {
-    let titles = try ReplyThreadTitleFallback.titlesByChatId(for: chats, db: db)
-    return HomeViewModel
-      .filterEmptyChats(chats)
+    let nonEmptyChats = HomeViewModel.filterEmptyChats(chats)
+    let titles = try ReplyThreadTitleFallback.titlesByChatId(for: nonEmptyChats, db: db)
+    return nonEmptyChats
       .compactMap { chat in
-        AllChatsItem(chat: chat, titleOverride: chat.chat.flatMap { titles[$0.id] })
+        AllChatsItem(
+          chat: chat,
+          titleOverride: chat.chat.flatMap { titles[$0.id] }
+        )
       }
   }
 
-  fileprivate func sections(for filter: AllChatsFilter, spaceId: Int64?) -> [AllChatsSection] {
-    Self.makeSections(items: items.filter { item in
+  fileprivate func items(
+    for filter: AllChatsFilter,
+    spaceId: Int64?,
+    viewFilter: AllChatsViewFilter
+  ) -> [AllChatsItem] {
+    items.filter { item in
       item.chatListHidden == false
         && filter.includes(item)
+        && viewFilter.includes(item)
         && (spaceId == nil || item.spaceId == spaceId)
-    })
+    }
+  }
+
+  fileprivate func sections(
+    for filter: AllChatsFilter,
+    spaceId: Int64?,
+    viewFilter: AllChatsViewFilter
+  ) -> [AllChatsSection] {
+    Self.makeSections(items: items(for: filter, spaceId: spaceId, viewFilter: viewFilter))
   }
 
   fileprivate func spaceName(id: Int64?) -> String? {
@@ -626,27 +708,26 @@ private struct ChatListRow: View {
   @State private var isHovered = false
   @State private var pendingDestructiveAction: ChatDestructiveAction?
 
-  private static let iconSize: CGFloat = 30
   private static let compactIconSize: CGFloat = 22
   private static let twoLineRowHeight: CGFloat = 50
   private static let oneLineRowHeight: CGFloat = 40
-  private static let oneLineTitleWidth: CGFloat = 164
+  private static let oneLineTitleMinWidth: CGFloat = 210
+  private static let oneLineTitleMaxWidth: CGFloat = 300
   private static let oneLineTrailingWidth: CGFloat = 80
   private static let horizontalPadding: CGFloat = 8
   private static let verticalPadding: CGFloat = 0
   private static let cornerRadius: CGFloat = 6
-  private static let titleFont: Font = .system(size: 13, weight: .medium)
 
   private var rowHeight: CGFloat {
     layout == .titlePreviewLine ? Self.oneLineRowHeight : Self.twoLineRowHeight
   }
 
   private var rowIconSize: CGFloat {
-    layout == .titlePreviewLine ? Self.compactIconSize : Self.iconSize
+    Self.compactIconSize
   }
 
   private var rowIconSpacing: CGFloat {
-    layout == .titlePreviewLine ? 7 : 9
+    7
   }
 
   private var peerId: Peer {
@@ -790,7 +871,7 @@ private struct ChatListRow: View {
   private var twoLineContent: some View {
     VStack(alignment: .leading, spacing: 3) {
       HStack(alignment: .firstTextBaseline, spacing: 8) {
-        titleText
+        AllChatsTitleLine(title: item.title)
           .frame(maxWidth: .infinity, alignment: .leading)
 
         trailingInfo()
@@ -804,7 +885,7 @@ private struct ChatListRow: View {
           showsProfilePhotos: true
         )
 
-        if unreadBadgeStyle == .numbered {
+        if item.unread, unreadBadgeStyle == .numbered {
           unreadIndicator
         }
       }
@@ -813,35 +894,33 @@ private struct ChatListRow: View {
   }
 
   private var titlePreviewLineContent: some View {
-    HStack(alignment: .firstTextBaseline, spacing: 8) {
-      titleText
-        .frame(width: Self.oneLineTitleWidth, alignment: .leading)
+    HStack(alignment: .center, spacing: 8) {
+      AllChatsTitleLine(title: item.title)
+        .frame(
+          minWidth: Self.oneLineTitleMinWidth,
+          maxWidth: Self.oneLineTitleMaxWidth,
+          alignment: .leading
+        )
+        .layoutPriority(2)
 
       AllChatsPreviewLine(
         text: item.subtitle,
         sender: item.previewSender,
         showsProfilePhotos: false
       )
-      .layoutPriority(1)
+      .layoutPriority(0)
 
       trailingInfo(maxWidth: Self.oneLineTrailingWidth)
         .frame(width: Self.oneLineTrailingWidth, alignment: .trailing)
         .layoutPriority(1)
 
-      if unreadBadgeStyle == .numbered {
+      if item.unread, unreadBadgeStyle == .numbered {
         unreadIndicator
           .fixedSize(horizontal: true, vertical: false)
-          .layoutPriority(2)
+          .layoutPriority(3)
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
-  }
-
-  private var titleText: some View {
-    Text(item.title)
-      .font(Self.titleFont)
-      .foregroundStyle(.primary)
-      .lineLimit(1)
   }
 
   private func trailingInfo(maxWidth: CGFloat = 190) -> some View {
@@ -866,36 +945,6 @@ private struct ChatListRow: View {
 
   @ViewBuilder
   private var icon: some View {
-    if layout == .titlePreviewLine {
-      compactIcon
-    } else {
-      fullIcon
-    }
-  }
-
-  @ViewBuilder
-  private var fullIcon: some View {
-    if case let .chat(chat) = item.peer {
-      SidebarThreadIcon(
-        chat: chat,
-        size: Self.iconSize,
-        shape: .circle
-      )
-    } else if let peer = item.peer {
-      ChatIcon(peer: peer, size: Self.iconSize)
-    } else {
-      Circle()
-        .fill(Color.primary.opacity(0.08))
-        .overlay {
-          Image(systemName: "bubble.left")
-            .font(.system(size: 16, weight: .medium))
-            .foregroundStyle(.secondary)
-        }
-    }
-  }
-
-  @ViewBuilder
-  private var compactIcon: some View {
     if case let .chat(chat) = item.peer {
       SidebarThreadIcon(
         chat: chat,
@@ -1038,6 +1087,20 @@ private struct ChatListRow: View {
     }
 
     return false
+  }
+}
+
+private struct AllChatsTitleLine: View {
+  let title: String
+
+  private static let titleFont: Font = .system(size: 13, weight: .medium)
+
+  var body: some View {
+    Text(title)
+      .font(Self.titleFont)
+      .foregroundStyle(.primary)
+      .lineLimit(1)
+      .truncationMode(.tail)
   }
 }
 
@@ -1214,10 +1277,6 @@ private enum AllChatsDateFormatter {
     guard date != Date.distantPast else { return nil }
 
     let now = Date()
-    if now.timeIntervalSince(date) < 60 {
-      return "just now"
-    }
-
     if calendar.isDateInToday(date) {
       return rowTimeFormatter.string(from: date)
     }

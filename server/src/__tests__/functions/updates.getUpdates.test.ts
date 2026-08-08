@@ -992,6 +992,43 @@ describe("getUpdates", () => {
     expect(first.update.updateReadMaxId.unreadCount).toBe(3)
   })
 
+  test("inflates userCollapseHistory in the user bucket", async () => {
+    const user = await testUtils.createUser("collapse-sync@example.com")
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.User,
+      entityId: user.id,
+      seq: 1,
+      payload: {
+        oneofKind: "userCollapseHistory",
+        userCollapseHistory: {
+          peerId: { type: { oneofKind: "chat", chat: { chatId: 123n } } },
+          maxId: 42n,
+          collapsedAt: 1_786_204_800n,
+        },
+      },
+    })
+
+    const result = await getUpdates(
+      {
+        bucket: { type: { oneofKind: "user", user: {} } },
+        startSeq: 0n,
+        seqEnd: 0n,
+        totalLimit: 1000,
+        limit: 0,
+      },
+      { currentUserId: user.id } as any,
+    )
+
+    expect(result.updates).toHaveLength(1)
+    const first = result.updates[0]
+    expect(first?.update.oneofKind).toBe("collapseHistory")
+    if (first?.update.oneofKind === "collapseHistory") {
+      expect(first.update.collapseHistory.maxId).toBe(42n)
+      expect(first.update.collapseHistory.collapsedAt).toBe(1_786_204_800n)
+    }
+  })
+
   test("inflates userMarkAsUnread to markAsUnread in user bucket", async () => {
     const user = await testUtils.createUser("unread-mark@example.com")
 

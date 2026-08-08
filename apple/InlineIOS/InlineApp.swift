@@ -1,4 +1,5 @@
 import Auth
+import Foundation
 import InlineKit
 import Sentry
 import SwiftUI
@@ -9,18 +10,76 @@ struct InlineApp: App {
 
   var body: some Scene {
     WindowGroup {
-      InlineRootView()
-        .environment(\.auth, Auth.shared)
-        .environment(\.realtime, Realtime.shared)
-        .environment(\.transactions, Transactions.shared)
-        .environment(appDelegate.router)
-        .appDatabase(AppDatabase.shared)
-        .environmentObject(appDelegate.notificationHandler)
-        .environmentObject(appDelegate.nav)
-        .environmentObject(INUserSettings.current.notification)
-        .onOpenURL { url in
-          _ = appDelegate.handleDeepLink(url)
-        }
+      InlineSceneRoot(appDelegate: appDelegate)
     }
+  }
+}
+
+private struct InlineSceneRoot: View {
+  private static let sceneMigrationKey = "ios.navigation.didMigrateToSceneStorage.v1"
+
+  let appDelegate: AppDelegate
+
+  @State private var router: Router
+  @State private var sceneID = UUID()
+  @State private var didRestoreScene = false
+  @SceneStorage("ios.navigation.routerState.v1") private var routerState: Data?
+  @Environment(\.scenePhase) private var scenePhase
+
+  init(appDelegate: AppDelegate) {
+    self.appDelegate = appDelegate
+    let shouldRestoreLegacyState = !UserDefaults.standard.bool(forKey: Self.sceneMigrationKey)
+    _router = State(initialValue: Router(
+      initialTab: .allChats,
+      persistence: .externallyManaged,
+      restoresPersistedState: shouldRestoreLegacyState
+    ))
+  }
+
+  var body: some View {
+    InlineRootView()
+      .environment(\.auth, Auth.shared)
+      .environment(\.realtime, Realtime.shared)
+      .environment(\.transactions, Transactions.shared)
+      .environment(router)
+      .appDatabase(AppDatabase.shared)
+      .environmentObject(appDelegate.notificationHandler)
+      .environmentObject(appDelegate.nav)
+      .environmentObject(INUserSettings.current.notification)
+      .onOpenURL { url in
+        _ = appDelegate.handleDeepLink(url, router: router)
+      }
+      .onAppear {
+        restoreSceneIfNeeded()
+        appDelegate.sceneRouterRegistry.register(
+          router,
+          sceneID: sceneID,
+          isActive: scenePhase == .active
+        )
+      }
+      .onDisappear {
+        appDelegate.sceneRouterRegistry.unregister(sceneID)
+      }
+      .onChange(of: scenePhase) { _, newValue in
+        if newValue == .active {
+          appDelegate.sceneRouterRegistry.activate(sceneID)
+        } else {
+          appDelegate.sceneRouterRegistry.deactivate(sceneID)
+        }
+      }
+      .onChange(of: router.persistenceRevision) { _, _ in
+        guard didRestoreScene else { return }
+        routerState = router.encodedPersistentState()
+      }
+  }
+
+  private func restoreSceneIfNeeded() {
+    guard !didRestoreScene else { return }
+    didRestoreScene = true
+    if let routerState {
+      _ = router.restorePersistentState(from: routerState)
+    }
+    routerState = router.encodedPersistentState()
+    UserDefaults.standard.set(true, forKey: Self.sceneMigrationKey)
   }
 }

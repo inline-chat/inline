@@ -1040,6 +1040,16 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       attributedText,
       threadLinkSpaceId: spaceId
     )
+    if !isEditing,
+       forwardContext == nil,
+       !containsBotCommand(in: attributedText),
+       let command = InlineCommands.resolveExact(rawText) {
+      textView.attributedText = NSAttributedString()
+      textView.selectedRange = NSRange(location: 0, length: 0)
+      textViewDidChange(textView)
+      executeInlineCommand(command)
+      return
+    }
     let hasText = !rawText.isEmpty
     let attachmentItemsSnapshot = attachmentItems
     let hasAttachmentItems = !attachmentItemsSnapshot.isEmpty
@@ -1269,6 +1279,65 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
         didPrepareSendAnimationPreview: didPrepareSendAnimationPreview
       )
     }
+  }
+
+  func executeInlineCommand(_ command: InlineCommandDefinition) {
+    guard case .transaction(.collapseHistory) = command.action,
+          let peerId,
+          let chatId
+    else { return }
+
+    Task { @MainActor in
+      do {
+        let maxId = try await AppDatabase.shared.reader.read { db in
+          try CollapseHistoryTransaction.maxMessageIdForClear(db, chatId: chatId)
+        }
+        guard let maxId else { return }
+        try await Api.realtime.send(.collapseHistory(peerId: peerId, maxId: maxId))
+        ToastManager.shared.showToast(
+          "History collapsed",
+          type: .success,
+          systemImage: "rectangle.compress.vertical",
+          action: { Self.undoCollapsedHistory(peerId: peerId) },
+          actionTitle: "Undo"
+        )
+      } catch {
+        log.error("Failed to collapse history", error: error)
+        ToastManager.shared.showToast(
+          "Couldn't collapse history",
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
+        )
+      }
+    }
+  }
+
+  private static func undoCollapsedHistory(peerId: InlineKit.Peer) {
+    ToastManager.shared.hideToast()
+    Task { @MainActor in
+      do {
+        try await Api.realtime.send(.collapseHistory(peerId: peerId, maxId: nil))
+      } catch {
+        Log.shared.error("Failed to undo collapsed history", error: error)
+        ToastManager.shared.showToast(
+          "Couldn't undo clear",
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
+        )
+      }
+    }
+  }
+
+  private func containsBotCommand(in text: NSAttributedString) -> Bool {
+    guard text.length > 0 else { return false }
+    var found = false
+    text.enumerateAttribute(.botCommand, in: NSRange(location: 0, length: text.length)) { value, _, stop in
+      if value != nil {
+        found = true
+        stop.pointee = true
+      }
+    }
+    return found
   }
 
   private func attributedStringForSend() -> NSAttributedString {

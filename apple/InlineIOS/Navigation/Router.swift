@@ -1,10 +1,15 @@
 import Foundation
 import Observation
 
-/// A generic navigation model that provides tab-based navigation with persistent state.
+public enum NavigationPersistenceMode: Sendable {
+  case userDefaults
+  case externallyManaged
+}
+
+/// A generic navigation model that provides tab-based navigation with optional persistence.
 ///
-/// This model automatically persists the selected tab and navigation paths for each tab
-/// to UserDefaults. State is restored when the model is initialized.
+/// The owner can use built-in UserDefaults persistence or store encoded snapshots in
+/// scene-scoped storage so each window restores its own tab and navigation paths.
 ///
 /// - Parameters:
 ///   - Tab: Must conform to TabType and Codable
@@ -20,15 +25,19 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
 
   private var paths: [Tab: [Destination]] = [:] {
     didSet {
-      savePersistentState()
+      navigationStateDidChange()
     }
   }
 
   public var selectedTab: Tab {
     didSet {
-      savePersistentState()
+      navigationStateDidChange()
     }
   }
+
+  /// Changes whenever the selected tab or a navigation path changes. Scene owners
+  /// use this to persist one router snapshot per window.
+  public private(set) var persistenceRevision = 0
 
   public var presentedSheet: Sheet?
 
@@ -37,39 +46,71 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
 
   // Persistence keys
   @ObservationIgnored private let defaults: UserDefaults
+  @ObservationIgnored private let persistenceMode: NavigationPersistenceMode
   @ObservationIgnored private let stateKey: String
   @ObservationIgnored private let pathsKey: String
   @ObservationIgnored private let selectedTabKey: String
   @ObservationIgnored private let presentedSheetKey: String
   @ObservationIgnored private let encoder = JSONEncoder()
   @ObservationIgnored private let decoder = JSONDecoder()
+  @ObservationIgnored private var isRestoring = false
 
   /// Initialize the navigation model with persistence support
   /// - Parameters:
   ///   - initialTab: The default tab to select if no persisted state exists
   public convenience init(initialTab: Tab) {
-    self.init(initialTab: initialTab, defaults: .standard, keyPrefix: "AppRouter")
+    self.init(
+      initialTab: initialTab,
+      persistence: .userDefaults,
+      restoresPersistedState: true
+    )
   }
 
-  init(initialTab: Tab, defaults: UserDefaults, keyPrefix: String) {
+  public convenience init(
+    initialTab: Tab,
+    persistence: NavigationPersistenceMode,
+    restoresPersistedState: Bool = true
+  ) {
+    self.init(
+      initialTab: initialTab,
+      defaults: .standard,
+      keyPrefix: "AppRouter",
+      persistence: persistence,
+      restoresPersistedState: restoresPersistedState
+    )
+  }
+
+  init(
+    initialTab: Tab,
+    defaults: UserDefaults,
+    keyPrefix: String,
+    persistence: NavigationPersistenceMode = .userDefaults,
+    restoresPersistedState: Bool = true
+  ) {
     self.initialTab = initialTab
     self.defaults = defaults
+    persistenceMode = persistence
     stateKey = "\(keyPrefix)_state_v1"
     pathsKey = "\(keyPrefix)_paths"
     selectedTabKey = "\(keyPrefix)_selectedTab"
     presentedSheetKey = "\(keyPrefix)_presentedSheet"
     selectedTab = initialTab
 
-    if let stateData = defaults.data(forKey: stateKey),
+    if restoresPersistedState,
+       let stateData = defaults.data(forKey: stateKey),
        let state = try? decoder.decode(PersistentState.self, from: stateData) {
       paths = state.paths
       selectedTab = state.selectedTab
-    } else {
+    } else if restoresPersistedState {
       loadLegacyPersistentState()
-      savePersistentState()
+      if persistenceMode == .userDefaults {
+        savePersistentState()
+      }
     }
 
-    clearPersistedSheet()
+    if persistenceMode == .userDefaults {
+      clearPersistedSheet()
+    }
   }
 
   public subscript(tab: Tab) -> [Destination] {
@@ -114,12 +155,40 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
 
   // MARK: - Persistence
 
+  public func encodedPersistentState() -> Data? {
+    try? encoder.encode(PersistentState(paths: paths, selectedTab: selectedTab))
+  }
+
+  @discardableResult
+  public func restorePersistentState(from data: Data) -> Bool {
+    guard let state = try? decoder.decode(PersistentState.self, from: data) else {
+      return false
+    }
+
+    isRestoring = true
+    paths = state.paths
+    selectedTab = state.selectedTab
+    isRestoring = false
+    navigationStateDidChange()
+    return true
+  }
+
+  private func navigationStateDidChange() {
+    guard !isRestoring else { return }
+    persistenceRevision &+= 1
+    if persistenceMode == .userDefaults {
+      savePersistentState()
+    }
+  }
+
   private func savePersistentState() {
     let state = PersistentState(paths: paths, selectedTab: selectedTab)
     if let data = try? encoder.encode(state) {
       defaults.set(data, forKey: stateKey)
     }
-    clearPersistedSheet()
+    if persistenceMode == .userDefaults {
+      clearPersistedSheet()
+    }
   }
 
   private func loadLegacyPersistentState() {
@@ -142,14 +211,17 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
 
   /// Reset all navigation state and clear persistence
   public func reset() {
+    isRestoring = true
     paths = [:]
     selectedTab = initialTab
     presentedSheet = nil
+    isRestoring = false
 
     // Clear persisted data
     defaults.removeObject(forKey: stateKey)
     defaults.removeObject(forKey: pathsKey)
     defaults.removeObject(forKey: selectedTabKey)
     defaults.removeObject(forKey: presentedSheetKey)
+    navigationStateDidChange()
   }
 }

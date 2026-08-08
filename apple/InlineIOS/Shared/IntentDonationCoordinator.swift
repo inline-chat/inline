@@ -4,12 +4,12 @@ import Logger
 
 enum IntentDonationCoordinator {
   static func donateOutgoing(peerId: Peer, chatId: Int64) {
-    Task(priority: .utility) {
+    Task(priority: .userInitiated) {
       guard let request = await AppDataUpdater.shared.outgoingIntentRequest(
         peerId: peerId,
         chatId: chatId
       ) else {
-        Log.shared.debug("Skipped send-message intent donation: conversation metadata unavailable")
+        Log.shared.warning("Skipped send-message intent donation: conversation metadata unavailable")
         return
       }
 

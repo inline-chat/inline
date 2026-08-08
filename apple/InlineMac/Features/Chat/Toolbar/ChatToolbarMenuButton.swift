@@ -123,7 +123,7 @@ struct ChatToolbarMenuButton: View {
           Button(role: .destructive) {
             showClearHistorySheet = true
           } label: {
-            Label("Clear History...", systemImage: "trash")
+            Label("Delete History...", systemImage: "trash")
           }
         }
 
@@ -648,7 +648,7 @@ private struct ClearChatHistorySheet: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       VStack(alignment: .leading, spacing: 4) {
-        Text("Clear History for Everyone")
+        Text("Delete History for Everyone")
           .font(.headline)
         Text(chatTitle)
           .font(.subheadline)
@@ -680,7 +680,7 @@ private struct ClearChatHistorySheet: View {
         }
         .keyboardShortcut(.defaultAction)
 
-        Button("Clear", role: .destructive) {
+        Button("Delete", role: .destructive) {
           showClearConfirmation = true
         }
         .disabled(isSubmitting)
@@ -688,11 +688,11 @@ private struct ClearChatHistorySheet: View {
     }
     .padding(20)
     .frame(width: 360)
-    .alert("Clear history for everyone?", isPresented: $showClearConfirmation) {
+    .alert("Delete history for everyone?", isPresented: $showClearConfirmation) {
       Button("Cancel", role: .cancel) {}
         .keyboardShortcut(.defaultAction)
 
-      Button("Clear History", role: .destructive) {
+      Button("Delete History", role: .destructive) {
         clearHistory()
       }
     } message: {
@@ -714,7 +714,7 @@ private struct ClearChatHistorySheet: View {
   private var clearConfirmationMessage: String {
     let target = clearSpace && spaceId != nil ? "all chats in this space" : "this chat"
     let rangeText = keepLastDays == 0 ? "all history" : "history older than \(keepLastDays) days"
-    return "This will clear \(rangeText) from \(target) for everyone. You will have 5 seconds to undo before it starts."
+    return "This will delete \(rangeText) from \(target) for everyone. You will have 5 seconds to undo before it starts."
   }
 
   @MainActor
@@ -728,7 +728,7 @@ private struct ClearChatHistorySheet: View {
     DelayedDestructiveActionScheduler.shared.cancelAll()
     let token = DelayedDestructiveActionScheduler.shared.schedule(
       onPerforming: {
-        ToastCenter.shared.showLoading("Clearing history...")
+        ToastCenter.shared.showLoading("Deleting history...")
       },
       action: {
         if let selectedSpaceId {
@@ -746,16 +746,16 @@ private struct ClearChatHistorySheet: View {
         }
       },
       onSuccess: {
-        ToastCenter.shared.showSuccess("History cleared")
+        ToastCenter.shared.showSuccess("History deleted")
       },
       onFailure: { _ in
-        ToastCenter.shared.showError("Failed to clear history")
+        ToastCenter.shared.showError("Failed to delete history")
       }
     )
 
-    ToastCenter.shared.showUndoCountdown("Clearing history") {
+    ToastCenter.shared.showUndoCountdown("Deleting history") {
       if DelayedDestructiveActionScheduler.shared.cancel(token) {
-        ToastCenter.shared.showSuccess("Clear history canceled")
+        ToastCenter.shared.showSuccess("Delete history canceled")
       }
     }
     dismiss()

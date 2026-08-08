@@ -547,7 +547,7 @@ async function insertMessage(message: Omit<DbNewMessage, "messageId">): Promise<
       throw ModelError.ChatInvalid
     }
 
-    const nextId = (chat.lastMsgId ?? 0) + 1
+    const nextId = chat.messageIdHighWater + 1
 
     // Insert the new message
     const [newDbMessage] = await tx
@@ -577,6 +577,7 @@ async function insertMessage(message: Omit<DbNewMessage, "messageId">): Promise<
       .update(chats)
       .set({
         lastMsgId: nextId,
+        messageIdHighWater: nextId,
         updateSeq: update.seq,
         lastUpdateDate: update.date,
       })

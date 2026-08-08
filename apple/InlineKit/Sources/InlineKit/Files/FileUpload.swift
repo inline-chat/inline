@@ -531,6 +531,7 @@ public actor FileUploader {
     var uploadMimeType = mimeType
     var uploadFileName = fileName
     var resolvedVideoMetadata = videoMetadata
+    var resolvedThumbnailMetadata: ApiClient.ThumbnailUploadMetadata?
     var resolvedVoiceMetadata = voiceMetadata
     var temporaryArtifacts: [URL] = []
 
@@ -563,8 +564,8 @@ public actor FileUploader {
       if prepared.cleanupAfterUpload {
         temporaryArtifacts.append(prepared.url)
       }
-    case .document:
-      break
+    case let .document(documentInfo):
+      resolvedThumbnailMetadata = Self.thumbnailUploadMetadata(from: documentInfo.thumbnail)
     case let .voice(voiceContent):
       resolvedVoiceMetadata = ApiClient.VoiceUploadMetadata(
         duration: Int(voiceContent.duration),
@@ -600,6 +601,7 @@ public actor FileUploader {
       filename: uploadFileName,
       mimeType: MIMEType(text: uploadMimeType),
       videoMetadata: resolvedVideoMetadata,
+      thumbnailMetadata: resolvedThumbnailMetadata,
       voiceMetadata: resolvedVoiceMetadata,
       progress: progressHandler
     )
@@ -729,12 +731,31 @@ public actor FileUploader {
             )
           }
         }
+        if let serverThumbId = result.photoId, let localThumb = documentInfo.thumbnail?.photo {
+          try await AppDatabase.shared.dbWriter.write { db in
+            try AppDatabase.updatePhotoWithServerId(db, localPhoto: localThumb, serverId: serverThumbId)
+          }
+        }
       case .voice:
         break
     }
   }
 
   // MARK: - Helpers
+
+  private static func thumbnailUploadMetadata(from thumbnail: PhotoInfo?) -> ApiClient.ThumbnailUploadMetadata? {
+    guard let thumbnail,
+          let size = thumbnail.bestPhotoSize(),
+          let localPath = size.localPath
+    else {
+      return nil
+    }
+
+    let url = FileCache.getUrl(for: .photos, localPath: localPath)
+    guard let data = try? Data(contentsOf: url) else { return nil }
+    let mimeType = thumbnail.photo.format == .png ? "image/png" : "image/jpeg"
+    return ApiClient.ThumbnailUploadMetadata(data: data, mimeType: MIMEType(text: mimeType))
+  }
 
   private func getUploadId(photoId: Int64) -> String {
     "photo_\(photoId)"

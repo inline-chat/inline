@@ -994,7 +994,10 @@ class LegacyComposeAppKit: NSView {
     hideAutocomplete()
 
     guard let peerBotCommandsViewModel, let commandCompletionMenu else { return }
-    let suggestions = peerBotCommandsViewModel.suggestions(matching: query)
+    let suggestions = InlineCommands.suggestions(
+      matching: query,
+      botSuggestions: peerBotCommandsViewModel.suggestions(matching: query)
+    )
     commandCompletionMenu.updateSuggestions(suggestions)
 
     if suggestions.isEmpty {
@@ -1472,7 +1475,9 @@ class LegacyComposeAppKit: NSView {
 
   @discardableResult
   func addFile(_ url: URL) -> Bool {
-    drafts2.addFile(peer: peerId, url: url)
+    let pendingId = drafts2.addFile(peer: peerId, url: url)
+    attachments.addPendingDocument(url: url, id: pendingId)
+    updateHeight(animate: true)
     return true
   }
 
@@ -1521,6 +1526,52 @@ class LegacyComposeAppKit: NSView {
     updateHeight()
   }
 
+  private func executeInlineCommand(_ command: InlineCommandDefinition) {
+    guard case .transaction(.collapseHistory) = command.action,
+          let chatId = chat?.id
+    else { return }
+    let commandPeerId = peerId
+
+    Task { @MainActor in
+      do {
+        let maxId = try await dependencies.database.reader.read { db in
+          try CollapseHistoryTransaction.maxMessageIdForClear(db, chatId: chatId)
+        }
+        guard let maxId else { return }
+        try await Api.realtime.send(.collapseHistory(peerId: commandPeerId, maxId: maxId))
+        ToastCenter.shared.showSuccess("History collapsed", actionTitle: "Undo") {
+          Self.undoCollapsedHistory(peerId: commandPeerId)
+        }
+      } catch {
+        log.error("Failed to collapse history", error: error)
+        ToastCenter.shared.showError("Couldn't collapse history")
+      }
+    }
+  }
+
+  private static func undoCollapsedHistory(peerId: InlineKit.Peer) {
+    Task { @MainActor in
+      do {
+        try await Api.realtime.send(.collapseHistory(peerId: peerId, maxId: nil))
+      } catch {
+        Log.shared.error("Failed to undo collapsed history", error: error)
+        ToastCenter.shared.showError("Couldn't undo clear")
+      }
+    }
+  }
+
+  private func containsBotCommand(in text: NSAttributedString) -> Bool {
+    guard text.length > 0 else { return false }
+    var found = false
+    text.enumerateAttribute(.botCommand, in: NSRange(location: 0, length: text.length)) { value, _, stop in
+      if value != nil {
+        found = true
+        stop.pointee = true
+      }
+    }
+    return found
+  }
+
   // Send the message
   func send(sendMode: MessageSendMode? = nil) {
     if voiceViewModel.phase == .review {
@@ -1546,6 +1597,19 @@ class LegacyComposeAppKit: NSView {
       attributedString,
       threadLinkSpaceId: chat?.spaceId
     )
+
+    if editingMessageId == nil,
+       forwardContext == nil,
+       !containsBotCommand(in: attributedString),
+       let command = InlineCommands.resolveExact(rawText) {
+      textEditor.clear()
+      updateHeightIfNeeded(for: textEditor.textView)
+      updateSendButtonIfNeeded()
+      saveDraft()
+      executeInlineCommand(command)
+      ignoreNextHeightChange = false
+      return
+    }
 
     let hasText = !rawText.isEmpty
     let hasAttachments = !attachmentItemsSnapshot.isEmpty
@@ -2432,33 +2496,47 @@ extension LegacyComposeAppKit: MentionCompletionMenuDelegate {
 extension LegacyComposeAppKit: CommandCompletionMenuDelegate {
   func commandMenu(
     _ menu: CommandCompletionMenu,
-    didSelectSuggestion suggestion: PeerBotCommandSuggestion,
+    didSelectSuggestion suggestion: ComposeCommandSource,
     sendAfterInsertion: Bool
   ) {
     guard let currentSlashCommandRange else { return }
 
-    let currentAttributedText = textEditor.attributedString
-    let commandText = suggestion.insertionText.trimmingCharacters(in: .whitespacesAndNewlines)
-    let result = slashCommandDetector.replaceSlashCommand(
-      in: currentAttributedText,
-      range: currentSlashCommandRange.range,
-      with: commandText,
-      targetBotUserId: suggestion.botId
-    )
+    switch suggestion {
+    case let .bot(botCommand):
+      let currentAttributedText = textEditor.attributedString
+      let commandText = botCommand.insertionText.trimmingCharacters(in: .whitespacesAndNewlines)
+      let result = slashCommandDetector.replaceSlashCommand(
+        in: currentAttributedText,
+        range: currentSlashCommandRange.range,
+        with: commandText,
+        targetBotUserId: botCommand.botId
+      )
 
-    ignoreNextHeightChange = true
-    textEditor.setAttributedString(result.newAttributedText)
-    textEditor.textView.setSelectedRange(NSRange(location: result.newCursorPosition, length: 0))
-    ignoreNextHeightChange = false
+      ignoreNextHeightChange = true
+      textEditor.setAttributedString(result.newAttributedText)
+      textEditor.textView.setSelectedRange(NSRange(location: result.newCursorPosition, length: 0))
+      ignoreNextHeightChange = false
 
-    hideCommandCompletion()
-
-    if sendAfterInsertion {
-      send()
-    } else {
+      hideCommandCompletion()
+      if sendAfterInsertion {
+        send()
+      } else {
+        updateHeightIfNeeded(for: textEditor.textView)
+        updateSendButtonIfNeeded()
+        saveDraft()
+      }
+    case let .inline(command):
+      let updated = NSMutableAttributedString(attributedString: textEditor.attributedString)
+      updated.replaceCharacters(in: currentSlashCommandRange.range, with: "")
+      ignoreNextHeightChange = true
+      textEditor.setAttributedString(updated)
+      textEditor.textView.setSelectedRange(NSRange(location: currentSlashCommandRange.range.location, length: 0))
+      ignoreNextHeightChange = false
+      hideCommandCompletion()
       updateHeightIfNeeded(for: textEditor.textView)
       updateSendButtonIfNeeded()
       saveDraft()
+      executeInlineCommand(command)
     }
   }
 

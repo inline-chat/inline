@@ -58,6 +58,7 @@ let package = Package(
     ),
   ],
   dependencies: [
+    .package(path: "../InlineThumbnailing"),
     .package(url: "https://github.com/inline-chat/GRDB.swift", from: "7.10.0"),
     // Keep SQLCipher exact so every SwiftPM root and Xcode preview resolves
     // the same binary framework used by GRDBSQLCipher.
@@ -99,6 +100,7 @@ let package = Package(
     .target(
       name: "InlineKit",
       dependencies: [
+        .product(name: "InlineThumbnailing", package: "InlineThumbnailing"),
         .product(name: "GRDB", package: "GRDB.swift"),
         .product(name: "GRDBQuery", package: "GRDBQuery"),
         .product(name: "Sentry", package: "sentry-cocoa"),
@@ -206,7 +208,10 @@ let package = Package(
 
     .testTarget(
       name: "InlineKitTests",
-      dependencies: ["InlineKit"],
+      dependencies: [
+        "InlineKit",
+        .product(name: "InlineThumbnailing", package: "InlineThumbnailing"),
+      ],
       swiftSettings: swiftSettings
     ),
 

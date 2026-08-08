@@ -7,6 +7,7 @@ final class CommandCompletionMenuItem: NSTableCellView {
   private let avatarLeading: CGFloat = 8
   private let avatarTextSpacing: CGFloat = 7
   private var avatarView = ChatIconSwiftUIBridge(.user(.preview), size: 22)
+  private let inlineIconView = NSImageView()
   private let commandLabel = NSTextField()
   private let descriptionLabel = NSTextField()
   private let botLabel = NSTextField()
@@ -39,6 +40,11 @@ final class CommandCompletionMenuItem: NSTableCellView {
 
     avatarView.translatesAutoresizingMaskIntoConstraints = false
     containerView.addSubview(avatarView)
+
+    inlineIconView.imageScaling = .scaleProportionallyUpOrDown
+    inlineIconView.translatesAutoresizingMaskIntoConstraints = false
+    inlineIconView.isHidden = true
+    containerView.addSubview(inlineIconView)
 
     commandLabel.isBordered = false
     commandLabel.isEditable = false
@@ -76,6 +82,11 @@ final class CommandCompletionMenuItem: NSTableCellView {
       avatarView.widthAnchor.constraint(equalToConstant: avatarSize),
       avatarView.heightAnchor.constraint(equalToConstant: avatarSize),
 
+      inlineIconView.leadingAnchor.constraint(equalTo: avatarView.leadingAnchor),
+      inlineIconView.trailingAnchor.constraint(equalTo: avatarView.trailingAnchor),
+      inlineIconView.topAnchor.constraint(equalTo: avatarView.topAnchor),
+      inlineIconView.bottomAnchor.constraint(equalTo: avatarView.bottomAnchor),
+
       commandLabel.leadingAnchor.constraint(equalTo: avatarView.trailingAnchor, constant: avatarTextSpacing),
       commandLabel.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 4),
 
@@ -95,15 +106,28 @@ final class CommandCompletionMenuItem: NSTableCellView {
     updateAppearance()
   }
 
-  func configure(with suggestion: PeerBotCommandSuggestion) {
-    avatarView.update(peerType: .user(suggestion.botUserInfo))
-    commandLabel.stringValue = "/\(suggestion.command)"
-    descriptionLabel.stringValue = suggestion.description
+  func configure(with source: ComposeCommandSource) {
+    switch source {
+    case let .bot(suggestion):
+      avatarView.isHidden = false
+      inlineIconView.isHidden = true
+      avatarView.update(peerType: .user(suggestion.botUserInfo))
+      commandLabel.stringValue = "/\(suggestion.command)"
+      descriptionLabel.stringValue = suggestion.description
 
-    if suggestion.isAmbiguous, let botLabelText = suggestion.botLabel {
-      botLabel.stringValue = botLabelText
-      botLabel.isHidden = false
-    } else {
+      if suggestion.isAmbiguous, let botLabelText = suggestion.botLabel {
+        botLabel.stringValue = botLabelText
+        botLabel.isHidden = false
+      } else {
+        botLabel.stringValue = ""
+        botLabel.isHidden = true
+      }
+    case let .inline(command):
+      avatarView.isHidden = true
+      inlineIconView.isHidden = false
+      inlineIconView.image = NSImage(named: "AppIcon") ?? NSApp.applicationIconImage
+      commandLabel.stringValue = command.title
+      descriptionLabel.stringValue = command.description
       botLabel.stringValue = ""
       botLabel.isHidden = true
     }

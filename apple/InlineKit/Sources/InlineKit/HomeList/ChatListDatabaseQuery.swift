@@ -8,6 +8,7 @@ public enum ChatListDatabaseQuery {
     _ db: Database,
     spaceID: Int64?,
     includeSpaceChatsInHome: Bool,
+    translationLanguage: String,
     now: Date = Date(),
     calendar: Calendar = .autoupdatingCurrent
   ) throws -> [ChatListItemSnapshot] {
@@ -15,6 +16,8 @@ public enum ChatListDatabaseQuery {
       spaceID: spaceID,
       includeSpaceChatsInHome: includeSpaceChatsInHome
     )
+    var arguments = StatementArguments([translationLanguage])
+    arguments += scope.arguments
     let request = SQLRequest<Row>(
       sql: """
       SELECT
@@ -58,6 +61,7 @@ public enum ChatListDatabaseQuery {
         "lastMessage"."videoId" AS "lastMessageVideoID",
         "lastMessage"."documentId" AS "lastMessageDocumentID",
         "lastMessage"."contentPayload" AS "lastMessageContentPayload",
+        "lastTranslation"."translation" AS "lastMessageTranslation",
         "lastDocument"."fileName" AS "lastDocumentFileName",
         "lastSender"."firstName" AS "senderFirstName",
         "lastSender"."lastName" AS "senderLastName",
@@ -88,6 +92,11 @@ public enum ChatListDatabaseQuery {
         AND "lastMessage"."messageId" = "chat"."lastMsgId"
       LEFT JOIN "user" AS "lastSender"
         ON "lastSender"."id" = "lastMessage"."fromId"
+      LEFT JOIN "translation" AS "lastTranslation"
+        ON "lastTranslation"."chatId" = "lastMessage"."chatId"
+        AND "lastTranslation"."messageId" = "lastMessage"."messageId"
+        AND "lastTranslation"."language" = ?
+        AND "lastTranslation"."msgRev" = "lastMessage"."rev"
       LEFT JOIN "document" AS "lastDocument"
         ON "lastDocument"."documentId" = "lastMessage"."documentId"
       LEFT JOIN "draft2"
@@ -103,7 +112,7 @@ public enum ChatListDatabaseQuery {
         AND \(scope.sql)
       ORDER BY "dialog"."id"
       """,
-      arguments: scope.arguments
+      arguments: arguments
     )
 
     let rows = try request.fetchAll(db)
@@ -184,7 +193,7 @@ public enum ChatListDatabaseQuery {
       title = threadTitle(
         rawTitle: row[.chatTitle],
         isReplyThread: isReplyThread,
-        anchorPreview: messagePreview(MessagePreviewInput(
+        anchorPreview: messagePreview(ChatListMessagePreviewInput(
           messageID: row[.anchorMessageID],
           text: row[.anchorMessageText],
           isSticker: row[.anchorMessageIsSticker],
@@ -213,6 +222,8 @@ public enum ChatListDatabaseQuery {
       legacyDraftData: row[.legacyDraftMessage]
     )
     let lastMessagePreview = makeLastMessagePreview(row: row, chatType: chatType)
+    let lastMessageTranslation: String? = row[.lastMessageTranslation]
+    let translatedPreview = singleLineText(lastMessageTranslation)
     let lastMessageDate: Date? = row[.lastMessageDate]
     let chatDate: Date? = row[.chatDate]
     let lastUpdatedAt = lastMessageDate ?? chatDate
@@ -224,6 +235,7 @@ public enum ChatListDatabaseQuery {
       title: title,
       previewSenderName: draftPreview == nil ? lastMessagePreview?.senderName : nil,
       previewText: draftPreview ?? lastMessagePreview?.text,
+      translatedPreviewText: draftPreview == nil ? translatedPreview : nil,
       timestampText: ChatListDateFormatter.rowTitle(
         for: lastUpdatedAt,
         now: now,
@@ -260,7 +272,7 @@ public enum ChatListDatabaseQuery {
     row: ChatListDatabaseRow,
     chatType: String
   ) -> LastMessagePreview? {
-    guard let preview = messagePreview(MessagePreviewInput(
+    guard let preview = messagePreview(ChatListMessagePreviewInput(
       messageID: row[.lastMessageID],
       text: row[.lastMessageText],
       isSticker: row[.lastMessageIsSticker],
@@ -311,7 +323,7 @@ public enum ChatListDatabaseQuery {
     return nil
   }
 
-  private static func messagePreview(_ input: MessagePreviewInput) -> String? {
+  static func messagePreview(_ input: ChatListMessagePreviewInput) -> String? {
     let payload = input.contentPayloadData.flatMap { data in
       try? Client_MessageContentPayload(serializedBytes: data)
     }
@@ -327,7 +339,7 @@ public enum ChatListDatabaseQuery {
     if input.photoID != nil { return "Photo" }
     if input.videoID != nil { return "Video" }
     if input.documentID != nil {
-      return singleLineText(input.documentFileName) ?? "Document"
+      return MessagePreviewText.document(fileName: input.documentFileName)
     }
     if payload?.hasVoice == true { return "Voice message" }
     return input.messageID == nil ? nil : "Message"
@@ -408,7 +420,7 @@ public enum ChatListDatabaseQuery {
   }
 }
 
-private struct MessagePreviewInput {
+struct ChatListMessagePreviewInput {
   let messageID: Int64?
   let text: String?
   let isSticker: Bool?

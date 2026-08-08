@@ -2,6 +2,7 @@ import Combine
 import Foundation
 import GRDB
 import InlineKit
+import InlineUI
 import Logger
 import QuickLook
 import UIKit
@@ -48,6 +49,10 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
 
   var document: Document? {
     documentInfo?.document
+  }
+
+  private var hasDocumentThumbnail: Bool {
+    documentInfo?.thumbnail?.bestPhotoSize() != nil
   }
 
   var textColor: UIColor {
@@ -134,10 +139,14 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
   let horizantalStackView = createHorizantalStackView()
   let textsStackView = createTextsStackView()
   let fileIconButton = createFileIconButton()
+  let thumbnailView = createThumbnailView()
+  let thumbnailTransferOverlay = createThumbnailTransferOverlay()
   let iconView = createFileIcon()
   let verticalStackView = createVerticalStackView()
   let fileNameLabel = createFileNameLabel()
   let fileSizeLabel = createFileSizeLabel()
+  private var mediaWidthConstraint: NSLayoutConstraint!
+  private var mediaHeightConstraint: NSLayoutConstraint!
 
   // MARK: - Setup & helpers
 
@@ -160,10 +169,15 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
 
     addSubview(horizantalStackView)
     horizantalStackView.addArrangedSubview(fileIconButton)
+    fileIconButton.addSubview(thumbnailView)
+    fileIconButton.addSubview(thumbnailTransferOverlay)
     fileIconButton.addSubview(iconView)
     horizantalStackView.addArrangedSubview(verticalStackView)
     verticalStackView.addArrangedSubview(fileNameLabel)
     verticalStackView.addArrangedSubview(fileSizeLabel)
+
+    mediaWidthConstraint = fileIconButton.widthAnchor.constraint(equalToConstant: 38)
+    mediaHeightConstraint = fileIconButton.heightAnchor.constraint(equalToConstant: 38)
 
     NSLayoutConstraint.activate([
       horizantalStackView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -171,8 +185,18 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
       horizantalStackView.topAnchor.constraint(equalTo: topAnchor, constant: 2),
       horizantalStackView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-      fileIconButton.widthAnchor.constraint(equalToConstant: 38),
-      fileIconButton.heightAnchor.constraint(equalToConstant: 38),
+      mediaWidthConstraint,
+      mediaHeightConstraint,
+
+      thumbnailView.leadingAnchor.constraint(equalTo: fileIconButton.leadingAnchor),
+      thumbnailView.trailingAnchor.constraint(equalTo: fileIconButton.trailingAnchor),
+      thumbnailView.topAnchor.constraint(equalTo: fileIconButton.topAnchor),
+      thumbnailView.bottomAnchor.constraint(equalTo: fileIconButton.bottomAnchor),
+
+      thumbnailTransferOverlay.centerXAnchor.constraint(equalTo: fileIconButton.centerXAnchor),
+      thumbnailTransferOverlay.centerYAnchor.constraint(equalTo: fileIconButton.centerYAnchor),
+      thumbnailTransferOverlay.widthAnchor.constraint(equalToConstant: 38),
+      thumbnailTransferOverlay.heightAnchor.constraint(equalToConstant: 38),
 
       iconView.centerXAnchor.constraint(equalTo: fileIconButton.centerXAnchor),
       iconView.centerYAnchor.constraint(equalTo: fileIconButton.centerYAnchor),
@@ -198,6 +222,17 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
     updateProgressPath(progress: 0.0)
 
     fileIconButton.layer.addSublayer(progressLayer)
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    let progressSize: CGFloat = 38
+    progressLayer.frame = CGRect(
+      x: floor((fileIconButton.bounds.width - progressSize) / 2),
+      y: floor((fileIconButton.bounds.height - progressSize) / 2),
+      width: progressSize,
+      height: progressSize
+    )
   }
 
   private func updateProgressPath(progress: CGFloat) {
@@ -272,7 +307,7 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
     // Colors
     fileNameLabel.textColor = textColor
     fileSizeLabel.textColor = labelColor
-    fileIconButton.backgroundColor = fileIconWrapperColor
+    configureThumbnail()
 
     // Data
     fileNameLabel.text = document?.fileName ?? "Unknown File"
@@ -290,6 +325,20 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
 
     updateFileIcon()
     invalidateIntrinsicContentSize()
+  }
+
+  private func configureThumbnail() {
+    let hasThumbnail = hasDocumentThumbnail
+    let mediaSize: CGFloat = hasThumbnail ? 70 : 38
+    mediaWidthConstraint.constant = mediaSize
+    mediaHeightConstraint.constant = mediaSize
+    fileIconButton.layer.cornerRadius = hasThumbnail ? 8 : 19
+    fileIconButton.backgroundColor = hasThumbnail ? .clear : fileIconWrapperColor
+    thumbnailView.isHidden = !hasThumbnail
+    thumbnailView.setPhoto(
+      hasThumbnail ? documentInfo?.thumbnail : nil,
+      reloadMessageOnFinish: fullMessage?.message
+    )
   }
 
   func update(with fullMessage: FullMessage, outgoing: Bool) {
@@ -358,18 +407,22 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
   }
 
   private func updateFileIcon() {
+    iconView.isHidden = hasDocumentThumbnail && documentState == .locallyAvailable
+    thumbnailTransferOverlay.isHidden = !hasDocumentThumbnail || documentState == .locallyAvailable
+    let thumbnailOverlayColor: UIColor = hasDocumentThumbnail ? .white : (outgoing ? .white : .systemGray)
+
     switch documentState {
       case .needsDownload:
         iconView.image = UIImage(systemName: "arrow.down")
-        iconView.tintColor = outgoing ? .white : ThemeManager.shared.selected.accent
+        iconView.tintColor = hasDocumentThumbnail ? .white : (outgoing ? .white : ThemeManager.shared.selected.accent)
 
       case .downloading:
         iconView.image = UIImage(systemName: "xmark")
-        iconView.tintColor = outgoing ? .white : ThemeManager.shared.selected.accent
+        iconView.tintColor = hasDocumentThumbnail ? .white : (outgoing ? .white : ThemeManager.shared.selected.accent)
 
       case .uploading:
         iconView.image = UIImage(systemName: "xmark")
-        iconView.tintColor = outgoing ? .white : ThemeManager.shared.selected.accent
+        iconView.tintColor = hasDocumentThumbnail ? .white : (outgoing ? .white : ThemeManager.shared.selected.accent)
 
       case .locallyAvailable:
         let iconName = DocumentIconResolver.symbolName(
@@ -378,7 +431,7 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
           style: .filled
         )
         iconView.image = UIImage(systemName: iconName)
-        iconView.tintColor = outgoing ? .white : .systemGray
+        iconView.tintColor = thumbnailOverlayColor
     }
   }
 
@@ -1027,6 +1080,26 @@ extension DocumentView {
     button.clipsToBounds = true
     button.clipsToBounds = true
     return button
+  }
+
+  static func createThumbnailView() -> PlatformPhotoView {
+    let view = PlatformPhotoView()
+    view.photoContentMode = .aspectFit
+    view.showsTinyThumbnailBackground = true
+    view.showsLoadingPlaceholder = true
+    view.isUserInteractionEnabled = false
+    view.isHidden = true
+    return view
+  }
+
+  static func createThumbnailTransferOverlay() -> UIView {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.isUserInteractionEnabled = false
+    view.backgroundColor = .black.withAlphaComponent(0.38)
+    view.layer.cornerRadius = 19
+    view.isHidden = true
+    return view
   }
 
   static func createFileIcon() -> UIImageView {

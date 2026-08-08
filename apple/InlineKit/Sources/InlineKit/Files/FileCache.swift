@@ -507,36 +507,98 @@ public actor FileCache: Sendable {
   }
 
   public static func saveDocument(url: URL) throws -> InlineKit.DocumentInfo {
-    // Info
+    let staged = try stageDocument(url: url)
+    return try persistDocument(staged, thumbnail: nil)
+  }
+
+  public static func saveDocumentWithImmediateThumbnail(url: URL) throws -> InlineKit.DocumentInfo {
+    let staged = try stageDocument(url: url)
+    let thumbnail = DocumentThumbnailIntegration.generateImmediately(at: staged.localURL)
+      .flatMap { try? saveDocumentThumbnail($0) }
+    return try persistDocument(staged, thumbnail: thumbnail)
+  }
+
+  /// Copies the document first, then performs optional thumbnail enrichment away from UI actors.
+  /// Thumbnail failure is intentionally swallowed; only staging/persistence can fail the attachment.
+  public static func saveDocumentWithThumbnail(url: URL) async throws -> InlineKit.DocumentInfo {
+    let staged = try await Task.detached(priority: .userInitiated) {
+      try stageDocument(url: url)
+    }.value
+    let artifact = await DocumentThumbnailIntegration.generate(at: staged.localURL)
+    return try await Task.detached(priority: .userInitiated) {
+      let thumbnail = artifact.flatMap { try? saveDocumentThumbnail($0) }
+      return try persistDocument(staged, thumbnail: thumbnail)
+    }.value
+  }
+
+  private struct StagedDocument: Sendable {
+    let fileName: String
+    let localPath: String
+    let localURL: URL
+    let fileSize: Int
+    let mimeType: String?
+  }
+
+  private static func stageDocument(url: URL) throws -> StagedDocument {
     let fileName = url.lastPathComponent
 
-    // Save in files
     let fileManager = FileManager.default
     let directory = FileHelpers.getLocalCacheDirectory(for: .documents)
     let localPath = UUID().uuidString + "-" + fileName
-    let localUrl = directory.appendingPathComponent(localPath)
+    let localURL = directory.appendingPathComponent(localPath)
 
-    // Start accessing the security-scoped resource
     let hasAccess = url.startAccessingSecurityScopedResource()
-
-    // Ensure we stop accessing the resource when we're done
     defer {
       if hasAccess {
         url.stopAccessingSecurityScopedResource()
       }
     }
 
-    try fileManager.copyItem(at: url, to: localUrl)
+    try fileManager.copyItem(at: url, to: localURL)
 
-    let fileSize = FileHelpers.getFileSize(at: url)
-    let mimeType = FileHelpers.getMimeType(for: url)
+    return StagedDocument(
+      fileName: fileName,
+      localPath: localPath,
+      localURL: localURL,
+      fileSize: FileHelpers.getFileSize(at: localURL),
+      mimeType: FileHelpers.getMimeType(for: localURL)
+    )
+  }
 
-    // Save in DB
-    let documentInfo = try AppDatabase.shared.dbWriter.write { db in
-      try Document.createLocalDocument(db, fileName: fileName, mimeType: mimeType, size: fileSize, localPath: localPath)
+  private static func persistDocument(
+    _ staged: StagedDocument,
+    thumbnail: PhotoInfo?
+  ) throws -> InlineKit.DocumentInfo {
+    try AppDatabase.shared.dbWriter.write { db in
+      try Document.createLocalDocument(
+        db,
+        fileName: staged.fileName,
+        mimeType: staged.mimeType,
+        size: staged.fileSize,
+        localPath: staged.localPath,
+        thumbnail: thumbnail
+      )
     }
+  }
 
-    return documentInfo
+  private static func saveDocumentThumbnail(
+    _ artifact: DocumentThumbnailArtifact
+  ) throws -> PhotoInfo {
+    let localPath = "\(UUID().uuidString).jpg"
+    let directory = FileHelpers.getLocalCacheDirectory(for: .photos)
+    let url = directory.appendingPathComponent(localPath)
+    try artifact.jpegData.write(to: url, options: .atomic)
+
+    return try AppDatabase.shared.dbWriter.write { db in
+      try Photo.createLocalPhoto(
+        db,
+        format: .jpeg,
+        localPath: localPath,
+        fileSize: artifact.jpegData.count,
+        width: artifact.pixelWidth,
+        height: artifact.pixelHeight
+      )
+    }
   }
 }
 

@@ -45,11 +45,16 @@ struct SidebarChatItemView: Equatable, View {
   var unreadBadgeStyle: UnreadBadgeStyle = .defaultValue
   var showsCloseButton = false
   var opensOnMouseDown = true
+  var allowsHoverEffects = true
   var isTemporary = false
   var isDropTargeted = false
+  var indentationLevel = 0
+  var disclosureExpanded: Bool?
+  var usesFullWidthCollectionLayout = false
   var onOpen: (() -> Void)?
   var onClose: (() -> Void)?
   var onPersist: (() -> Void)?
+  var onToggleDisclosure: (() -> Void)?
 
   // Env and State
   @Environment(\.nav) private var nav
@@ -57,6 +62,7 @@ struct SidebarChatItemView: Equatable, View {
   @Environment(\.dependencies) private var dependencies
   @State private var isHovered = false
   @State private var isCloseHovered = false
+  @State private var isDisclosureHovered = false
   @State private var isPressing = false
   @State private var pendingDestructiveAction: ChatDestructiveAction?
 
@@ -141,8 +147,12 @@ struct SidebarChatItemView: Equatable, View {
       && lhs.unreadBadgeStyle == rhs.unreadBadgeStyle
       && lhs.showsCloseButton == rhs.showsCloseButton
       && lhs.opensOnMouseDown == rhs.opensOnMouseDown
+      && lhs.allowsHoverEffects == rhs.allowsHoverEffects
       && lhs.isTemporary == rhs.isTemporary
       && lhs.isDropTargeted == rhs.isDropTargeted
+      && lhs.indentationLevel == rhs.indentationLevel
+      && lhs.disclosureExpanded == rhs.disclosureExpanded
+      && lhs.usesFullWidthCollectionLayout == rhs.usesFullWidthCollectionLayout
   }
 
   var body: some View {
@@ -150,6 +160,7 @@ struct SidebarChatItemView: Equatable, View {
       if unreadBadgeStyle == .dot {
         unreadBadge
           .padding(.leading, Theme.sidebarItemUnreadDotLeadingSpacing)
+          .opacity(showsDisclosureControl ? 0 : 1)
       }
 
       HStack(spacing: 0) {
@@ -176,8 +187,14 @@ struct SidebarChatItemView: Equatable, View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
       }
-      .padding(.leading, Theme.sidebarItemInnerSpacing)
+      .padding(.leading, Theme.sidebarItemInnerSpacing + CGFloat(indentationLevel) * 16)
       .padding(.trailing, Theme.sidebarItemOuterSpacing)
+
+      if disclosureExpanded != nil {
+        disclosureButton
+          .opacity(showsDisclosureControl ? 1 : 0)
+          .allowsHitTesting(showsDisclosureControl)
+      }
     }
     .frame(height: rowHeight)
     .animation(.smoothSnappy, value: size)
@@ -187,20 +204,23 @@ struct SidebarChatItemView: Equatable, View {
     .animation(.smoothSnappy, value: item.prominentUnreadDot)
     .animation(.smoothSnappy, value: unreadBadgeStyle)
     .animation(.smoothSnappy, value: item.pinned)
-    .contentShape(.interaction, .rect(cornerRadius: Theme.sidebarItemRadius))
+    .animation(.easeInOut(duration: 0.14), value: showsDisclosureControl)
     .background(background)
     // Outer paddings
-    .padding(.horizontal, -Theme.sidebarNativeDefaultEdgeInsets + 8)
+    .padding(.horizontal, outerHorizontalPadding)
     .padding(.vertical, Self.outerPaddingVertical)
+    .contentShape(.interaction, .rect(cornerRadius: Theme.sidebarItemRadius))
     .onHover {
+      guard allowsHoverEffects else { return }
       isHovered = $0
       if $0 == false {
         isCloseHovered = false
+        isDisclosureHovered = false
       }
     }
     .modifier(SidebarOpenInteractionModifier(
       opensOnMouseDown: opensOnMouseDown,
-      isCloseHovered: isCloseHovered,
+      isControlHovered: isCloseHovered || isDisclosureHovered,
       isPressing: $isPressing,
       open: open
     ))
@@ -358,6 +378,35 @@ struct SidebarChatItemView: Equatable, View {
     .buttonStyle(SidebarCloseButtonStyle(isHovered: isCloseHovered))
     .help("Close")
     .onHover { isCloseHovered = $0 }
+  }
+
+  private var showsDisclosureControl: Bool {
+    disclosureExpanded != nil && isHovered
+  }
+
+  private var outerHorizontalPadding: CGFloat {
+    usesFullWidthCollectionLayout
+      ? 8
+      : -Theme.sidebarNativeDefaultEdgeInsets + 8
+  }
+
+  private var disclosureButton: some View {
+    Button {
+      onToggleDisclosure?()
+    } label: {
+      Image(systemName: "chevron.right")
+        .font(.system(size: 6.5, weight: .bold))
+        .foregroundStyle(.secondary)
+        .rotationEffect(.degrees(disclosureExpanded == true ? 90 : 0))
+        .animation(.easeInOut(duration: 0.16), value: disclosureExpanded)
+        .frame(width: 24, height: rowHeight)
+        .contentShape(.interaction, .rect)
+    }
+    .buttonStyle(.plain)
+    .offset(x: (Theme.sidebarItemInnerSpacing - 24) / 2)
+    .help(disclosureExpanded == true ? "Collapse reply threads" : "Expand reply threads")
+    .accessibilityLabel(disclosureExpanded == true ? "Collapse reply threads" : "Expand reply threads")
+    .onHover { isDisclosureHovered = $0 }
   }
 
   private func accessoryView(_ accessory: SidebarChatItemAccessory) -> some View {
@@ -557,7 +606,7 @@ private enum SidebarChatItemAccessory {
 
 private struct SidebarOpenInteractionModifier: ViewModifier {
   let opensOnMouseDown: Bool
-  let isCloseHovered: Bool
+  let isControlHovered: Bool
   @Binding var isPressing: Bool
   let open: () -> Void
 
@@ -570,7 +619,7 @@ private struct SidebarOpenInteractionModifier: ViewModifier {
     } else {
       content
         .onTapGesture {
-          guard isCloseHovered == false else { return }
+          guard isControlHovered == false else { return }
           open()
         }
     }
@@ -589,7 +638,7 @@ private struct SidebarOpenInteractionModifier: ViewModifier {
 
   private func openOnMouseDown() {
     guard didOpenDuringPress == false else { return }
-    guard isCloseHovered == false else { return }
+    guard isControlHovered == false else { return }
     didOpenDuringPress = true
     isPressing = true
     open()

@@ -117,6 +117,7 @@ struct Nav2Entry: Codable {
   @ObservationIgnored private var pendingChatOpenTask: Task<Void, Never>?
   @ObservationIgnored private var pendingChatOpenRequestID: UUID?
   @ObservationIgnored private var preparedChatPayloads: [Peer: PreparedChatPayload] = [:]
+  @ObservationIgnored private var lastUsagePeer: Peer?
 
   // MARK: - State
 
@@ -499,6 +500,7 @@ struct Nav2Entry: Codable {
   func reset() {
     clearPendingChatOpenState()
     preparedChatPayloads.removeAll(keepingCapacity: true)
+    lastUsagePeer = nil
     tabs = [.home]
     activeTabIndex = 0
     history = []
@@ -550,6 +552,7 @@ struct Nav2Entry: Codable {
     }
     activeTabIndex = tabIndex
     lastRoutes[entry.tab] = entry.route
+    recordVisibleChatSwitchIfNeeded(route: entry.route)
   }
 
   @discardableResult
@@ -563,6 +566,7 @@ struct Nav2Entry: Codable {
 
     guard let lastIndex = history.indices.last else {
       history.append(entry)
+      recordVisibleChatSwitchIfNeeded(route: route)
       return true
     }
 
@@ -570,6 +574,7 @@ struct Nav2Entry: Codable {
 
     if replaceImplicit, last.tab == tab, last.isImplicit, !isImplicit {
       history[lastIndex] = entry
+      recordVisibleChatSwitchIfNeeded(route: route)
       return true
     }
 
@@ -578,7 +583,19 @@ struct Nav2Entry: Codable {
     }
 
     history.append(entry)
+    recordVisibleChatSwitchIfNeeded(route: route)
     return true
+  }
+
+  private func recordVisibleChatSwitchIfNeeded(route: Nav2Route) {
+    let visiblePeer = route.selectedPeer
+    guard visiblePeer != lastUsagePeer else { return }
+    lastUsagePeer = visiblePeer
+    guard let visiblePeer else { return }
+
+    Task(priority: .utility) {
+      await QuickSearchUsageStore.shared.recordSwitch(to: visiblePeer)
+    }
   }
 
   private func normalizeState() {

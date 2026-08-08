@@ -411,7 +411,7 @@ public final class Drafts2: @unchecked Sendable {
     onComplete: Drafts2AttachmentCompletion? = nil
   ) -> String {
     startMaterialization(peer: peer, prefix: "pending_document") {
-      .document(try FileCache.saveDocument(url: url))
+      .document(try await FileCache.saveDocumentWithThumbnail(url: url))
     } onComplete: { result in
       onComplete?(result)
     }

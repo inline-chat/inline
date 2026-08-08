@@ -4,6 +4,7 @@ enum DialogMutationKind: Hashable, Sendable {
   case open
   case order
   case read
+  case collapse
 }
 
 struct DialogMutationRollbackEntry: Sendable {

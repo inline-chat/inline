@@ -7,6 +7,8 @@ public class ChatContainerView: UIView {
   let peerId: InlineKit.Peer
   let chatId: Int64?
   let spaceId: Int64?
+  private let initialCollapsedHistoryMarker: CollapsedHistoryMarker?
+  private let initiallyExpandCollapsedHistory: Bool
   private let isPreview: Bool
   private var peerUser: InlineKit.User?
   private var lastAppliedDraftSignature: DraftSignature?
@@ -44,6 +46,8 @@ public class ChatContainerView: UIView {
       peerId: peerId,
       chatId: chatId ?? 0,
       spaceId: spaceId,
+      initialCollapsedHistoryMarker: initialCollapsedHistoryMarker,
+      initiallyExpandCollapsedHistory: initiallyExpandCollapsedHistory,
       isPreview: isPreview,
       sendAnimationCoordinator: sendAnimationCoordinator
     )
@@ -130,12 +134,16 @@ public class ChatContainerView: UIView {
     peerId: InlineKit.Peer,
     chatId: Int64?,
     spaceId: Int64?,
+    initialCollapsedHistoryMarker: CollapsedHistoryMarker?,
+    initiallyExpandCollapsedHistory: Bool,
     peerUser: InlineKit.User?,
     isPreview: Bool = false
   ) {
     self.peerId = peerId
     self.chatId = chatId
     self.spaceId = spaceId
+    self.initialCollapsedHistoryMarker = initialCollapsedHistoryMarker
+    self.initiallyExpandCollapsedHistory = initiallyExpandCollapsedHistory
     self.peerUser = peerUser
     self.isPreview = isPreview
 
@@ -170,6 +178,10 @@ public class ChatContainerView: UIView {
     peerUser = user
     guard !isPreview else { return }
     composeView.setPeerUser(user)
+  }
+
+  func updateCollapsedHistoryMarker(_ marker: CollapsedHistoryMarker?) {
+    messagesCollectionView.updateCollapsedHistoryMarker(marker)
   }
 
   func loadDraftIfNeeded(_ draftMessage: DraftMessage?) {
@@ -839,6 +851,7 @@ struct ChatViewUIKit: UIViewRepresentable {
   let chatId: Int64?
   let spaceId: Int64?
   let draftMessage: DraftMessage?
+  let collapsedHistoryMarker: CollapsedHistoryMarker?
   let focusMessageID: Int64?
   let isPreview: Bool
   @EnvironmentObject var data: DataManager
@@ -849,6 +862,10 @@ struct ChatViewUIKit: UIViewRepresentable {
       peerId: peerId,
       chatId: chatId,
       spaceId: spaceId,
+      initialCollapsedHistoryMarker: collapsedHistoryMarker,
+      initiallyExpandCollapsedHistory: collapsedHistoryMarker.map { marker in
+        focusMessageID.map { $0 <= marker.maxId } ?? false
+      } ?? false,
       peerUser: fullChatViewModel.peerUser,
       isPreview: isPreview
     )
@@ -865,6 +882,7 @@ struct ChatViewUIKit: UIViewRepresentable {
 
   func updateUIView(_ view: ChatContainerView, context _: Context) {
     view.setPeerUser(fullChatViewModel.peerUser)
+    view.updateCollapsedHistoryMarker(collapsedHistoryMarker)
     if !isPreview {
       view.loadDraftIfNeeded(draftMessage)
       view.focusMessage(focusMessageID)

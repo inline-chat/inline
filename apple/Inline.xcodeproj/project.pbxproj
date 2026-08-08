@@ -6,6 +6,19 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXAggregateTarget section */
+		A11EC1002F97000100000001 /* ApplePackageChecks */ = {
+			isa = PBXAggregateTarget;
+			buildConfigurationList = A11EC1002F97000100000002 /* Build configuration list for PBXAggregateTarget "ApplePackageChecks" */;
+			buildPhases = (
+			);
+			dependencies = (
+			);
+			name = ApplePackageChecks;
+			productName = ApplePackageChecks;
+		};
+/* End PBXAggregateTarget section */
+
 /* Begin PBXBuildFile section */
 		A9E100042F50000100000001 /* MemojiKit in Frameworks */ = {isa = PBXBuildFile; productRef = A9E100022F50000100000001 /* MemojiKit */; };
 		A9E100052F50000100000001 /* MemojiPickerUI in Frameworks */ = {isa = PBXBuildFile; productRef = A9E100032F50000100000001 /* MemojiPickerUI */; };
@@ -37,7 +50,6 @@
 		CD0240C42EA439D400976FDE /* Invite in Frameworks */ = {isa = PBXBuildFile; productRef = CD0240C32EA439D400976FDE /* Invite */; };
 		CD0240C62EA439DA00976FDE /* Invite in Frameworks */ = {isa = PBXBuildFile; productRef = CD0240C52EA439DA00976FDE /* Invite */; };
 		CD092C4D2EDC6F4A00E867E5 /* InlineMacUI in Frameworks */ = {isa = PBXBuildFile; productRef = CD092C4C2EDC6F4A00E867E5 /* InlineMacUI */; };
-		F17C11012F9A000100000001 /* InlineCLIInstaller in Frameworks */ = {isa = PBXBuildFile; productRef = F17C11002F9A000100000000 /* InlineCLIInstaller */; };
 		CD092C4F2EDC6F4A00E867E5 /* MacTheme in Frameworks */ = {isa = PBXBuildFile; productRef = CD092C4E2EDC6F4A00E867E5 /* MacTheme */; };
 		CD0A3CDA2CD536DF0081AD69 /* GRDBQuery in Frameworks */ = {isa = PBXBuildFile; productRef = CD0A3CD92CD536DF0081AD69 /* GRDBQuery */; };
 		CD27856F2CFB053C008A0EEF /* InlineConfig in Frameworks */ = {isa = PBXBuildFile; productRef = CD27856E2CFB053C008A0EEF /* InlineConfig */; };
@@ -51,11 +63,6 @@
 		CD735FF02E493C8E00F7BFFE /* Translation in Frameworks */ = {isa = PBXBuildFile; productRef = CD735FEF2E493C8E00F7BFFE /* Translation */; };
 		CD735FF22E493C9400F7BFFE /* Translation in Frameworks */ = {isa = PBXBuildFile; productRef = CD735FF12E493C9400F7BFFE /* Translation */; };
 		CD7C6F132E5847CD00C89032 /* RealtimeV2 in Frameworks */ = {isa = PBXBuildFile; productRef = CD7C6F122E5847CD00C89032 /* RealtimeV2 */; };
-		D6B90A012F49000100000001 /* InlineAvatarRendering in Frameworks */ = {isa = PBXBuildFile; productRef = D6B90A002F49000100000001 /* InlineAvatarRendering */; };
-		E12407240000000100000001 /* InlineIntents in Frameworks */ = {isa = PBXBuildFile; productRef = E12407240000000100000000 /* InlineIntents */; };
-		E12407240000000100000003 /* InlineIntents in Frameworks */ = {isa = PBXBuildFile; productRef = E12407240000000100000002 /* InlineIntents */; };
-		E12407240000000100000005 /* InlineIntents in Frameworks */ = {isa = PBXBuildFile; productRef = E12407240000000100000004 /* InlineIntents */; };
-		D7A0C0022F50000100000001 /* InlineRTC in Frameworks */ = {isa = PBXBuildFile; productRef = D7A0C0012F50000100000001 /* InlineRTC */; };
 		CDB123D52D3E8066001AFC1A /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = CDB123D42D3E8066001AFC1A /* Nuke */; };
 		CDB123D72D3E8066001AFC1A /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = CDB123D62D3E8066001AFC1A /* NukeUI */; };
 		CDC72E3D2D999C6D001E8A0C /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = CDC72E3C2D999C6D001E8A0C /* GRDB */; };
@@ -63,7 +70,14 @@
 		D1A0B1C32F10432100A1B2C3 /* InlineIOSUI in Frameworks */ = {isa = PBXBuildFile; productRef = D1A0B1C22F10432100A1B2C3 /* InlineIOSUI */; };
 		D4ACD0012F1B000000000001 /* MacDevtools in Frameworks */ = {isa = PBXBuildFile; productRef = D4ACD0022F1B000000000001 /* MacDevtools */; };
 		D4B53A112F1C000100000001 /* InlineSearch in Frameworks */ = {isa = PBXBuildFile; productRef = D4B53A102F1C000100000001 /* InlineSearch */; };
+		D4B53A132F1C000100000001 /* InlineSearch in Frameworks */ = {isa = PBXBuildFile; productRef = D4B53A122F1C000100000001 /* InlineSearch */; };
+		D6B90A012F49000100000001 /* InlineAvatarRendering in Frameworks */ = {isa = PBXBuildFile; productRef = D6B90A002F49000100000001 /* InlineAvatarRendering */; };
+		D7A0C0022F50000100000001 /* InlineRTC in Frameworks */ = {isa = PBXBuildFile; productRef = D7A0C0012F50000100000001 /* InlineRTC */; };
+		E12407240000000100000001 /* InlineIntents in Frameworks */ = {isa = PBXBuildFile; productRef = E12407240000000100000000 /* InlineIntents */; };
+		E12407240000000100000003 /* InlineIntents in Frameworks */ = {isa = PBXBuildFile; productRef = E12407240000000100000002 /* InlineIntents */; };
+		E12407240000000100000005 /* InlineIntents in Frameworks */ = {isa = PBXBuildFile; productRef = E12407240000000100000004 /* InlineIntents */; };
 		E95DD2F1FC76F473B6D31EB6 /* InlineMacWindow in Frameworks */ = {isa = PBXBuildFile; productRef = 7BABF642C785B35DB0C34BF2 /* InlineMacWindow */; };
+		F17C11012F9A000100000001 /* InlineCLIInstaller in Frameworks */ = {isa = PBXBuildFile; productRef = F17C11002F9A000100000000 /* InlineCLIInstaller */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -274,6 +288,7 @@
 			files = (
 				A9E100042F50000100000001 /* MemojiKit in Frameworks */,
 				A9E100052F50000100000001 /* MemojiPickerUI in Frameworks */,
+				D4B53A132F1C000100000001 /* InlineSearch in Frameworks */,
 				D7A0C0022F50000100000001 /* InlineRTC in Frameworks */,
 				F17C11012F9A000100000001 /* InlineCLIInstaller in Frameworks */,
 				CD092C4D2EDC6F4A00E867E5 /* InlineMacUI in Frameworks */,
@@ -359,21 +374,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXHeadersBuildPhase section */
-
-/* Begin PBXAggregateTarget section */
-		A11EC1002F97000100000001 /* ApplePackageChecks */ = {
-			isa = PBXAggregateTarget;
-			buildConfigurationList = A11EC1002F97000100000002 /* Build configuration list for PBXAggregateTarget "ApplePackageChecks" */;
-			buildPhases = (
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = ApplePackageChecks;
-			productName = ApplePackageChecks;
-		};
-/* End PBXAggregateTarget section */
 
 /* Begin PBXNativeTarget section */
 		B7020C412DCE1534007099D9 /* InlineShareExtension */ = {
@@ -494,6 +494,7 @@
 			packageProductDependencies = (
 				A9E100022F50000100000001 /* MemojiKit */,
 				A9E100032F50000100000001 /* MemojiPickerUI */,
+				D4B53A122F1C000100000001 /* InlineSearch */,
 				D7A0C0012F50000100000001 /* InlineRTC */,
 				C38C905F2CB9432200B78B8A /* InlineKit */,
 				CDE960152CB94C4F004C541C /* SwiftUIIntrospect */,
@@ -1752,6 +1753,10 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		7BABF642C785B35DB0C34BF2 /* InlineMacWindow */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineMacWindow;
+		};
 		A9E100022F50000100000001 /* MemojiKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MemojiKit;
@@ -1759,22 +1764,6 @@
 		A9E100032F50000100000001 /* MemojiPickerUI */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MemojiPickerUI;
-		};
-		E12407240000000100000000 /* InlineIntents */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = InlineIntents;
-		};
-		E12407240000000100000002 /* InlineIntents */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = InlineIntents;
-		};
-		E12407240000000100000004 /* InlineIntents */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = InlineIntents;
-		};
-		7BABF642C785B35DB0C34BF2 /* InlineMacWindow */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = InlineMacWindow;
 		};
 		B7020C532DCE157F007099D9 /* InlineConfig */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -1862,10 +1851,6 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineKit;
 		};
-		D7A0C0012F50000100000001 /* InlineRTC */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = InlineRTC;
-		};
 		C3AEE6A92D4FCDC9005D1179 /* Nuke */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = CDB123D32D3E8066001AFC1A /* XCRemoteSwiftPackageReference "Nuke" */;
@@ -1884,10 +1869,6 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineUI;
 		};
-		D6B90A002F49000100000001 /* InlineAvatarRendering */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = InlineAvatarRendering;
-		};
 		C3E6D5CA2CAE82B00048D2D8 /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = C3E6D5C92CAE82B00048D2D8 /* XCRemoteSwiftPackageReference "GRDB" */;
@@ -1904,10 +1885,6 @@
 		CD092C4C2EDC6F4A00E867E5 /* InlineMacUI */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineMacUI;
-		};
-		F17C11002F9A000100000000 /* InlineCLIInstaller */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = InlineCLIInstaller;
 		};
 		CD092C4E2EDC6F4A00E867E5 /* MacTheme */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -1991,6 +1968,34 @@
 		D4B53A102F1C000100000001 /* InlineSearch */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineSearch;
+		};
+		D4B53A122F1C000100000001 /* InlineSearch */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineSearch;
+		};
+		D6B90A002F49000100000001 /* InlineAvatarRendering */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineAvatarRendering;
+		};
+		D7A0C0012F50000100000001 /* InlineRTC */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineRTC;
+		};
+		E12407240000000100000000 /* InlineIntents */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineIntents;
+		};
+		E12407240000000100000002 /* InlineIntents */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineIntents;
+		};
+		E12407240000000100000004 /* InlineIntents */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineIntents;
+		};
+		F17C11002F9A000100000000 /* InlineCLIInstaller */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineCLIInstaller;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

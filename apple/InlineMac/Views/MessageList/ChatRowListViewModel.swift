@@ -11,6 +11,7 @@ final class ChatRowListViewModel {
     case repliesSeparator
     case parentMessage(id: Int64)
     case message(id: Int64)
+    case clearedHistory(marker: CollapsedHistoryMarker)
   }
 
   enum UpdateKind: Equatable {
@@ -40,6 +41,9 @@ final class ChatRowListViewModel {
   private var rowIdxsByMsgId: [Int64: IndexSet] = [:]
 
   private(set) var showUnreadAfter: Int64?
+  private(set) var collapsedHistoryMarker: CollapsedHistoryMarker?
+  private(set) var isCollapsedHistoryExpanded = false
+  private var collapsedMaxId: Int64? { collapsedHistoryMarker?.maxId }
   var threadAnchor: FullMessage? { progressiveViewModel.threadAnchor }
 
   var rowCount: Int { rows.count }
@@ -49,8 +53,15 @@ final class ChatRowListViewModel {
 
   // MARK: - Init
 
-  init(peer: Peer, initialState: MessagesProgressiveViewModel.InitialState?) {
+  init(
+    peer: Peer,
+    initialState: MessagesProgressiveViewModel.InitialState?,
+    initialCollapsedHistoryMarker: CollapsedHistoryMarker?,
+    initiallyExpandCollapsedHistory: Bool
+  ) {
     progressiveViewModel = MessagesProgressiveViewModel(peer: peer, initialState: initialState)
+    collapsedHistoryMarker = initialCollapsedHistoryMarker
+    isCollapsedHistoryExpanded = initialCollapsedHistoryMarker != nil && initiallyExpandCollapsedHistory
     messages = progressiveViewModel.messages
     rebuildRows()
   }
@@ -134,12 +145,38 @@ final class ChatRowListViewModel {
     return true
   }
 
+  @discardableResult
+  func setCollapsedHistoryMarker(_ marker: CollapsedHistoryMarker?) -> UpdateKind {
+    guard collapsedHistoryMarker != marker else { return .none }
+    collapsedHistoryMarker = marker
+    isCollapsedHistoryExpanded = false
+    rebuildRows()
+    return .reloadAll
+  }
+
+  @discardableResult
+  func expandCollapsedHistory() -> UpdateKind {
+    guard collapsedMaxId != nil, !isCollapsedHistoryExpanded else { return .none }
+    isCollapsedHistoryExpanded = true
+    rebuildRows()
+    return .reloadAll
+  }
+
+  func isMessageCollapsed(_ messageId: Int64) -> Bool {
+    guard let collapsedMaxId, !isCollapsedHistoryExpanded else { return false }
+    return messageId <= collapsedMaxId
+  }
+
+  var suppressesOlderPagination: Bool {
+    collapsedMaxId != nil && !isCollapsedHistoryExpanded
+  }
+
   func messageStableId(forRow row: Int) -> Int64? {
     guard let row = self.row(at: row) else { return nil }
     switch row {
       case let .message(id), let .parentMessage(id):
         return id
-      case .daySeparator, .unreadSeparator, .repliesSeparator:
+      case .daySeparator, .unreadSeparator, .repliesSeparator, .clearedHistory:
         return nil
     }
   }
@@ -334,7 +371,7 @@ final class ChatRowListViewModel {
         case let .parentMessage(id):
           allIdxsByMsgId[id, default: []].insert(rowIdx)
 
-        case .daySeparator, .unreadSeparator, .repliesSeparator:
+        case .daySeparator, .unreadSeparator, .repliesSeparator, .clearedHistory:
           break
       }
     }
@@ -408,16 +445,28 @@ final class ChatRowListViewModel {
 
   private func makeRows(for messages: [FullMessage]) -> [Row] {
     Self.makeRows(
-      messages: messages,
+      messages: visibleMessages(from: messages),
       showUnreadAfter: showUnreadAfter,
-      parentMessageStableId: threadAnchor?.id
+      parentMessageStableId: threadAnchor?.id,
+      collapsedHistoryMarker: collapsedHistoryMarker
     )
+  }
+
+  private func visibleMessages(from messages: [FullMessage]) -> [FullMessage] {
+    guard let collapsedHistoryMarker, !isCollapsedHistoryExpanded else { return messages }
+    return messages.filter { message in
+      !collapsedHistoryMarker.contains(
+        messageId: message.message.messageId,
+        date: message.message.date
+      )
+    }
   }
 
   private static func makeRows(
     messages: [FullMessage],
     showUnreadAfter: Int64?,
-    parentMessageStableId: Int64?
+    parentMessageStableId: Int64?,
+    collapsedHistoryMarker: CollapsedHistoryMarker?
   ) -> [Row] {
     var out: [Row] = []
     out.reserveCapacity(messages.count + 9)
@@ -429,8 +478,20 @@ final class ChatRowListViewModel {
 
     var prevDayStart: Date?
     var didInsertUnread = false
+    var didInsertClearedHistory = false
 
     for msg in messages {
+      if let collapsedHistoryMarker,
+         !didInsertClearedHistory,
+         !collapsedHistoryMarker.contains(
+           messageId: msg.message.messageId,
+           date: msg.message.date
+         )
+      {
+        out.append(.clearedHistory(marker: collapsedHistoryMarker))
+        didInsertClearedHistory = true
+      }
+
       let dayStart = dayStart(for: msg.message.date)
       if prevDayStart == nil || dayStart != prevDayStart {
         out.append(.daySeparator(dayStart: dayStart))
@@ -446,6 +507,10 @@ final class ChatRowListViewModel {
       }
 
       out.append(.message(id: msg.id))
+    }
+
+    if let collapsedHistoryMarker, !didInsertClearedHistory {
+      out.append(.clearedHistory(marker: collapsedHistoryMarker))
     }
 
     return out

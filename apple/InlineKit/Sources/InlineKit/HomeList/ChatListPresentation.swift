@@ -41,22 +41,24 @@ public struct ChatListPresentation: Equatable, Sendable {
 
   public static func make(
     from snapshots: [ChatListItemSnapshot],
-    sort: ChatListSort,
+    inboxSort: ChatListSort,
+    allChatsFilter: ChatListFilter = .all,
     calendar: Calendar = .autoupdatingCurrent
   ) -> Self {
     let visible = snapshots.filter(\.isVisibleInHome)
-    let inbox = visible
-      .filter(\.isOpen)
-      .sorted { inboxOrdered($0, before: $1, sort: sort) }
+    let inbox = snapshots
+      .filter(\.isInboxMember)
+      .sorted { inboxOrdered($0, before: $1, sort: inboxSort) }
     let timeline = visible
-      .sorted { timelineOrdered($0, before: $1, sort: sort) }
+      .filter { allChatsFilter == .all || $0.isUnread }
+      .sorted { timelineOrdered($0, before: $1, sort: .lastUpdated) }
     let archived = snapshots
       .filter { !$0.isChatListHidden && $0.isArchived }
-      .sorted { timelineOrdered($0, before: $1, sort: sort) }
+      .sorted { timelineOrdered($0, before: $1, sort: .lastUpdated) }
 
     return Self(
       inbox: inbox,
-      allChatSections: daySections(from: timeline, sort: sort, calendar: calendar),
+      allChatSections: daySections(from: timeline, calendar: calendar),
       archived: archived,
       inboxUnreadCount: inbox.lazy.filter(\.isUnread).count
     )
@@ -83,13 +85,12 @@ public struct ChatListPresentation: Equatable, Sendable {
 
   private static func daySections(
     from items: [ChatListItemSnapshot],
-    sort: ChatListSort,
     calendar: Calendar
   ) -> [ChatListDaySection] {
     var grouped: [(day: Date, items: [ChatListItemSnapshot])] = []
 
     for item in items {
-      let day = calendar.startOfDay(for: sortDate(for: item, sort: sort))
+      let day = calendar.startOfDay(for: sortDate(for: item, sort: .lastUpdated))
       if grouped.last?.day == day {
         grouped[grouped.count - 1].items.append(item)
       } else {

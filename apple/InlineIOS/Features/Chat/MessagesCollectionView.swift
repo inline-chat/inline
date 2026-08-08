@@ -29,6 +29,8 @@ final class MessagesCollectionView: UICollectionView {
     peerId: Peer,
     chatId: Int64,
     spaceId: Int64?,
+    initialCollapsedHistoryMarker: CollapsedHistoryMarker?,
+    initiallyExpandCollapsedHistory: Bool,
     isPreview: Bool = false,
     sendAnimationCoordinator: SendMessageAnimationCoordinator? = nil
   ) {
@@ -40,6 +42,8 @@ final class MessagesCollectionView: UICollectionView {
       peerId: peerId,
       chatId: chatId,
       spaceId: spaceId,
+      initialCollapsedHistoryMarker: initialCollapsedHistoryMarker,
+      initiallyExpandCollapsedHistory: initiallyExpandCollapsedHistory,
       isPreview: isPreview,
       sendAnimationCoordinator: sendAnimationCoordinator
     )
@@ -133,13 +137,24 @@ final class MessagesCollectionView: UICollectionView {
     }
   }
 
+  func updateCollapsedHistoryMarker(_ marker: CollapsedHistoryMarker?) {
+    coordinator.updateCollapsedHistoryMarker(marker)
+  }
+
   func scrollToMessageWhenAvailable(_ messageID: Int64) {
     pendingScrollMessageID = messageID
     resolvePendingMessageScroll()
   }
 
   fileprivate func resolvePendingMessageScroll() {
-    guard let messageID = pendingScrollMessageID,
+    guard let messageID = pendingScrollMessageID else { return }
+    if coordinator.expandCollapsedHistoryIfNeeded(for: messageID) {
+      DispatchQueue.main.async { [weak self] in
+        self?.resolvePendingMessageScroll()
+      }
+      return
+    }
+    guard
           let indexPath = findIndexPath(
             forMessageId: messageID,
             chatId: chatId,
@@ -822,6 +837,9 @@ private extension MessagesCollectionView {
     private weak var sendAnimationCoordinator: SendMessageAnimationCoordinator?
     private var mediaWarmupTask: Task<Void, Never>?
     private var mediaWarmups: [InlineTinyThumbnailWarmup] = []
+    private var collapsedHistoryMarker: CollapsedHistoryMarker?
+    private var collapsedMaxId: Int64? { collapsedHistoryMarker?.maxId }
+    private var isCollapsedHistoryExpanded = false
 
     private struct MessageGroupInfo {
       let ownerItem: MessageListItem
@@ -833,6 +851,16 @@ private extension MessagesCollectionView {
       let item: MessageListItem
       let frameInWindow: CGRect
       let contentOffset: CGPoint
+    }
+
+    private struct CollapsedHistoryViewportSnapshot {
+      struct Candidate {
+        let item: MessageListItem
+        let frameInWindow: CGRect
+      }
+
+      let candidates: [Candidate]
+      let wasAtBottom: Bool
     }
 
     private struct AvatarOverlayDraft {
@@ -1095,12 +1123,47 @@ private extension MessagesCollectionView {
     }
 
     private func makeListSections() -> [MessageListSection] {
-      var sections = viewModel.sections.map { section in
-        MessageListSection(
-          id: .messages(dayStart: section.date),
-          dayString: section.dayString,
-          items: section.messages.map { .message(id: $0.id) }
-        )
+      var sections: [MessageListSection] = []
+      var didInsertClearedHistory = false
+
+      for section in viewModel.sections {
+        var sectionItems: [MessageListItem] = []
+
+        for message in section.messages {
+          let messageId = message.message.messageId
+          let isBeforeOrAtCutoff = collapsedHistoryMarker?.contains(
+            messageId: messageId,
+            date: message.message.date
+          ) == true
+
+          if isBeforeOrAtCutoff, let collapsedMaxId, !didInsertClearedHistory {
+            sectionItems.append(.clearedHistory(maxId: collapsedMaxId))
+            didInsertClearedHistory = true
+          }
+
+          if !isBeforeOrAtCutoff || isCollapsedHistoryExpanded {
+            sectionItems.append(.message(id: message.id))
+          }
+        }
+
+        guard !sectionItems.isEmpty else { continue }
+        let containsMessage = sectionItems.contains { item in
+          if case .message = item { return true }
+          return false
+        }
+        sections.append(MessageListSection(
+          id: containsMessage ? .messages(dayStart: section.date) : .collapsedHistory,
+          dayString: containsMessage ? section.dayString : nil,
+          items: sectionItems
+        ))
+      }
+
+      if let collapsedMaxId, !didInsertClearedHistory {
+        sections.append(MessageListSection(
+          id: .collapsedHistory,
+          dayString: nil,
+          items: [.clearedHistory(maxId: collapsedMaxId)]
+        ))
       }
 
       if let anchor = viewModel.threadAnchor {
@@ -1150,7 +1213,7 @@ private extension MessagesCollectionView {
           } else {
             nil
           }
-        case .unreadSeparator:
+        case .unreadSeparator, .clearedHistory:
           nil
       }
     }
@@ -1165,6 +1228,8 @@ private extension MessagesCollectionView {
           return MessageListItemModel(content: .message(message, displayMode: .threadAnchor))
         case .unreadSeparator:
           return MessageListItemModel(content: .unreadSeparator(title: "Unread messages"))
+        case .clearedHistory:
+          return MessageListItemModel(content: .clearedHistory(title: "[ cleared ]"))
       }
     }
 
@@ -1465,7 +1530,7 @@ private extension MessagesCollectionView {
         return nil
       }
 
-      guard let frameInWindow = sendAnimationAnchorFrameInWindow(
+      guard let frameInWindow = itemFrameInWindow(
         for: item,
         in: collectionView
       ) else {
@@ -1497,7 +1562,7 @@ private extension MessagesCollectionView {
         return
       }
 
-      guard let currentFrameInWindow = sendAnimationAnchorFrameInWindow(
+      guard let currentFrameInWindow = itemFrameInWindow(
         for: anchor.item,
         in: collectionView
       ) else {
@@ -1527,7 +1592,7 @@ private extension MessagesCollectionView {
       collectionView.setContentOffset(restoredOffset, animated: false)
       collectionView.layoutIfNeeded()
 
-      let restoredFrameInWindow = sendAnimationAnchorFrameInWindow(
+      let restoredFrameInWindow = itemFrameInWindow(
         for: anchor.item,
         in: collectionView
       )
@@ -1540,7 +1605,7 @@ private extension MessagesCollectionView {
       )
     }
 
-    private func sendAnimationAnchorFrameInWindow(
+    private func itemFrameInWindow(
       for item: MessageListItem,
       in collectionView: UICollectionView
     ) -> CGRect? {
@@ -1797,6 +1862,8 @@ private extension MessagesCollectionView {
       peerId: Peer,
       chatId: Int64,
       spaceId: Int64?,
+      initialCollapsedHistoryMarker: CollapsedHistoryMarker?,
+      initiallyExpandCollapsedHistory: Bool,
       isPreview: Bool = false,
       sendAnimationCoordinator: SendMessageAnimationCoordinator? = nil
     ) {
@@ -1805,6 +1872,8 @@ private extension MessagesCollectionView {
       self.spaceId = spaceId
       self.isPreview = isPreview
       self.sendAnimationCoordinator = sendAnimationCoordinator
+      collapsedHistoryMarker = initialCollapsedHistoryMarker
+      isCollapsedHistoryExpanded = initialCollapsedHistoryMarker != nil && initiallyExpandCollapsedHistory
       viewModel = MessagesSectionedViewModel(peer: peerId, reversed: true)
       translationViewModel = TranslationViewModel(peerId: peerId)
 
@@ -1862,6 +1931,41 @@ private extension MessagesCollectionView {
       cancellables.forEach { $0.cancel() }
       cancellables.removeAll()
       detachAvatarOverlay()
+    }
+
+    func updateCollapsedHistoryMarker(_ marker: CollapsedHistoryMarker?) {
+      guard collapsedHistoryMarker != marker else { return }
+      collapsedHistoryMarker = marker
+      isCollapsedHistoryExpanded = false
+      if dataSource != nil {
+        setInitialData(animated: false, preservingCollapsedHistoryViewport: true)
+      }
+    }
+
+    @discardableResult
+    func expandCollapsedHistoryIfNeeded(for messageId: Int64) -> Bool {
+      guard let collapsedMaxId,
+            messageId <= collapsedMaxId,
+            !isCollapsedHistoryExpanded
+      else { return false }
+      isCollapsedHistoryExpanded = true
+      setInitialData(animated: false)
+      return true
+    }
+
+    private func removeCollapsedHistory() {
+      Task { @MainActor [peerId] in
+        do {
+          try await Api.realtime.send(.collapseHistory(peerId: peerId, maxId: nil))
+        } catch {
+          Log.shared.error("Failed to remove collapsed history", error: error)
+          ToastManager.shared.showToast(
+            "Couldn't show all messages",
+            type: .error,
+            systemImage: "exclamationmark.triangle.fill"
+          )
+        }
+      }
     }
 
     private func setupNotionTaskManager() {
@@ -2100,6 +2204,19 @@ private extension MessagesCollectionView {
         cell.configure(title: title)
       }
 
+      let clearedRegistration = UICollectionView.CellRegistration<
+        MessageListSeparatorCell,
+        MessageListItem
+      > { [weak self] cell, _, item in
+        guard let self,
+              let model = model(for: item),
+              case let .clearedHistory(title) = model.content
+        else { return }
+        cell.configureAsClearedHistory(title: title) { [weak self] in
+          self?.removeCollapsedHistory()
+        }
+      }
+
       dataSource = UICollectionViewDiffableDataSource<MessageListSectionID, MessageListItem>(
         collectionView: collectionView
       ) { collectionView, indexPath, item in
@@ -2113,6 +2230,12 @@ private extension MessagesCollectionView {
           case .unreadSeparator:
             collectionView.dequeueConfiguredReusableCell(
               using: separatorRegistration,
+              for: indexPath,
+              item: item
+            )
+          case .clearedHistory:
+            collectionView.dequeueConfiguredReusableCell(
+              using: clearedRegistration,
               for: indexPath,
               item: item
             )
@@ -2169,8 +2292,15 @@ private extension MessagesCollectionView {
       return gapSeconds >= 0 && gapSeconds <= 300
     }
 
-    private func setInitialData(animated: Bool? = false, reconfigureExisting: Bool = true) {
+    private func setInitialData(
+      animated: Bool? = false,
+      reconfigureExisting: Bool = true,
+      preservingCollapsedHistoryViewport: Bool = false
+    ) {
       let startedAt = Date()
+      let collapsedHistoryViewport = preservingCollapsedHistoryViewport
+        ? captureCollapsedHistoryViewport()
+        : nil
       rebuildListSections()
       let sections = listSections
       let span = PerformanceTrace.begin(
@@ -2232,6 +2362,10 @@ private extension MessagesCollectionView {
       )
 
       let completion = { [weak self] in
+        if let self, let collapsedHistoryViewport {
+          self.restoreCollapsedHistoryViewport(collapsedHistoryViewport)
+        }
+
         // Kick-off the auto-hide timer on first load as well (after layout pass)
         DispatchQueue.main.async {
           self?.scheduleHideDateSeparators()
@@ -2246,6 +2380,64 @@ private extension MessagesCollectionView {
         animatingDifferences: animated ?? false,
         completion: completion
       )
+    }
+
+    private func captureCollapsedHistoryViewport() -> CollapsedHistoryViewportSnapshot? {
+      guard let collectionView = currentCollectionView as? MessagesCollectionView,
+            collectionView.window != nil
+      else { return nil }
+
+      collectionView.layoutIfNeeded()
+      let candidates: [CollapsedHistoryViewportSnapshot.Candidate] = collectionView
+        .indexPathsForVisibleItems.compactMap { indexPath in
+          guard let item = dataSource.itemIdentifier(for: indexPath),
+                let frameInWindow = itemFrameInWindow(for: item, in: collectionView)
+          else { return nil }
+          return CollapsedHistoryViewportSnapshot.Candidate(
+            item: item,
+            frameInWindow: frameInWindow
+          )
+        }
+        .sorted { $0.frameInWindow.minY < $1.frameInWindow.minY }
+
+      return CollapsedHistoryViewportSnapshot(
+        candidates: candidates,
+        wasAtBottom: collectionView.shouldScrollToBottom
+      )
+    }
+
+    private func restoreCollapsedHistoryViewport(_ viewport: CollapsedHistoryViewportSnapshot) {
+      guard let collectionView = currentCollectionView as? MessagesCollectionView else { return }
+      collectionView.layoutIfNeeded()
+
+      if viewport.wasAtBottom {
+        collectionView.safeScrollToTop(animated: false)
+        return
+      }
+
+      for candidate in viewport.candidates {
+        guard dataSource.indexPath(for: candidate.item) != nil,
+              let currentFrame = itemFrameInWindow(for: candidate.item, in: collectionView)
+        else { continue }
+
+        let visualDeltaY = candidate.frameInWindow.minY - currentFrame.minY
+        guard abs(visualDeltaY) > 0.5 else { return }
+        let offsetDeltaY = collectionView.transform.d < 0 ? visualDeltaY : -visualDeltaY
+        let requestedOffset = CGPoint(
+          x: collectionView.contentOffset.x,
+          y: collectionView.contentOffset.y + offsetDeltaY
+        )
+        collectionView.setContentOffset(
+          collectionView.clampedSendAnimationContentOffset(requestedOffset),
+          animated: false
+        )
+        collectionView.layoutIfNeeded()
+        return
+      }
+
+      if !viewport.candidates.isEmpty {
+        collectionView.safeScrollToTop(animated: false)
+      }
     }
 
     private func safeApplySnapshot(
@@ -3167,6 +3359,9 @@ private extension MessagesCollectionView {
       if case .unreadSeparator = item {
         return CGSize(width: collectionView.bounds.width, height: 34)
       }
+      if case .clearedHistory = item {
+        return CGSize(width: collectionView.bounds.width, height: 34)
+      }
 
       if let cachedSize = sizeCache[item] {
         return cachedSize
@@ -3255,7 +3450,12 @@ private extension MessagesCollectionView {
       point: CGPoint
     ) -> UIContextMenuConfiguration? {
       guard let indexPath = indexPaths.first,
-            let item = item(at: indexPath),
+            let item = item(at: indexPath)
+      else { return nil }
+
+      if case .clearedHistory = item { return nil }
+
+      guard
             !item.isThreadAnchor,
             let fullMessage = message(for: item) else { return nil }
       let message = fullMessage.message
@@ -3893,7 +4093,9 @@ private extension MessagesCollectionView {
     }
 
     private func loadOlderMessagesIfNeeded() {
-      guard olderLoadTask == nil else { return }
+      guard olderLoadTask == nil,
+            collapsedMaxId == nil || isCollapsedHistoryExpanded
+      else { return }
 
       let oldestMessageIdBeforeLoad = viewModel.oldestLoadedMessageId ?? messages.last?.message.messageId
       guard viewModel.canLoadOlderFromLocal else {

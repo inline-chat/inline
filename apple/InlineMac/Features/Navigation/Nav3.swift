@@ -135,6 +135,7 @@ class Nav3 {
   @ObservationIgnored private let navigationSignpostLog = OSLog(subsystem: "InlineMac", category: "PointsOfInterest")
   @ObservationIgnored private let persistsActiveSpace: Bool
   @ObservationIgnored private var activeChatNavigation: (peer: Peer, id: OSSignpostID)?
+  @ObservationIgnored private var lastUsagePeer: Peer?
   @ObservationIgnored var onRouteChange: (() -> Void)?
   @ObservationIgnored private var isRestoringInitialState = true
 
@@ -191,6 +192,7 @@ class Nav3 {
       pendingRoute: pendingRoute,
       fallbackSelectedSpaceId: restoresActiveSpace ? Nav3ActiveSpaceStore.selectedSpaceId : nil
     )
+    lastUsagePeer = currentReplyThreadPeer ?? currentRoute.selectedPeer
     isRestoringInitialState = false
   }
 
@@ -351,7 +353,21 @@ class Nav3 {
 
   private func notifyRouteChange() {
     persistActiveSpaceSelection()
+    recordVisibleChatSwitchIfNeeded()
     onRouteChange?()
+  }
+
+  private func recordVisibleChatSwitchIfNeeded() {
+    guard isRestoringInitialState == false else { return }
+
+    let visiblePeer = currentReplyThreadPeer ?? currentRoute.selectedPeer
+    guard visiblePeer != lastUsagePeer else { return }
+    lastUsagePeer = visiblePeer
+    guard let visiblePeer else { return }
+
+    Task(priority: .utility) {
+      await QuickSearchUsageStore.shared.recordSwitch(to: visiblePeer)
+    }
   }
 
   func persistActiveSpaceSelection() {

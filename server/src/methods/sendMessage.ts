@@ -139,7 +139,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
       throw new InlineError(InlineError.ApiError.INTERNAL)
     }
 
-    const nextId = (chat.lastMsgId ?? 0) + 1
+    const nextId = chat.messageIdHighWater + 1
 
     // Insert the new message
     const [message] = await tx
@@ -165,7 +165,10 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
       .returning()
 
     // Update the lastMsgId
-    await tx.update(chats).set({ lastMsgId: nextId }).where(eq(chats.id, chatId))
+    await tx
+      .update(chats)
+      .set({ lastMsgId: nextId, messageIdHighWater: nextId })
+      .where(eq(chats.id, chatId))
 
     return message
   })

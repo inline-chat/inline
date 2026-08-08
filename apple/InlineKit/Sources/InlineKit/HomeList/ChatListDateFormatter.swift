@@ -1,6 +1,6 @@
 import Foundation
 
-/// Matches the compact time/date treatment used by macOS All Chats without installing a
+/// Matches the compact absolute-time treatment used by All Chats without installing a
 /// continuously updating relative-date timer in every visible row.
 public enum ChatListDateFormatter {
   public static func rowTitle(
@@ -10,11 +10,6 @@ public enum ChatListDateFormatter {
   ) -> String? {
     guard let date, date != .distantPast else { return nil }
     guard calendar.isDate(date, inSameDayAs: now) else { return nil }
-
-    let age = now.timeIntervalSince(date)
-    if age >= 0, age < 60 {
-      return "just now"
-    }
 
     return date.formatted(date: .omitted, time: .shortened)
   }

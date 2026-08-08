@@ -4,6 +4,7 @@ import Invite
 import Logger
 import RealtimeV2
 import SwiftUI
+import UIKit
 
 @MainActor
 @Observable
@@ -18,7 +19,6 @@ final class ExperimentalNavigationModel {
 
   var activeSpaceId: Int64? {
     didSet {
-      saveActiveSpaceId(activeSpaceId)
       guard oldValue != activeSpaceId else { return }
       homeRefreshRevision += 1
       failedHomeRefreshRequestIDs.removeAll()
@@ -29,8 +29,8 @@ final class ExperimentalNavigationModel {
     failedHomeRefreshRequestIDs.isEmpty ? nil : "Some chats could not be refreshed."
   }
 
-  init() {
-    activeSpaceId = Self.loadActiveSpaceId()
+  init(activeSpaceId: Int64? = nil) {
+    self.activeSpaceId = activeSpaceId
   }
 
   func consumeNeedsHomeBootstrap() -> Bool {
@@ -93,7 +93,7 @@ final class ExperimentalNavigationModel {
     homeRefreshRevision += 1
   }
 
-  private static func loadActiveSpaceId() -> Int64? {
+  static func loadLegacyActiveSpaceId() -> Int64? {
     let defaults = UserDefaults.standard
 
     if let value = defaults.object(forKey: activeSpaceDefaultsKey) as? Int64 {
@@ -106,15 +106,6 @@ final class ExperimentalNavigationModel {
       return value.int64Value
     }
     return nil
-  }
-
-  private func saveActiveSpaceId(_ spaceId: Int64?) {
-    let defaults = UserDefaults.standard
-    if let spaceId {
-      defaults.set(spaceId, forKey: Self.activeSpaceDefaultsKey)
-    } else {
-      defaults.removeObject(forKey: Self.activeSpaceDefaultsKey)
-    }
   }
 }
 
@@ -199,6 +190,7 @@ enum ExperimentalHomeNavigationPerformance {
 struct ExperimentalDestinationView: View {
   @Bindable var nav: ExperimentalNavigationModel
   let destination: Destination
+  var onRetryHome: () -> Void = {}
 
   var body: some View {
     content
@@ -208,9 +200,9 @@ struct ExperimentalDestinationView: View {
   private var content: some View {
     switch destination {
     case .chats:
-      ExperimentalHomeView(nav: nav, initialTab: .inbox)
+      ExperimentalHomeView(nav: nav, initialTab: .inbox, onRetry: onRetryHome)
     case .archived:
-      ExperimentalHomeView(nav: nav, initialTab: .archived)
+      ExperimentalHomeView(nav: nav, initialTab: .archived, onRetry: onRetryHome)
     case .spaces:
       SpacesView()
     case let .space(id):
@@ -288,12 +280,10 @@ enum ExperimentalHomeTab: Hashable {
 struct ExperimentalHomeView: View {
   @Bindable var nav: ExperimentalNavigationModel
   let initialTab: ExperimentalHomeTab
+  var allChatsFilter: ChatListFilter = .all
+  var onRetry: () -> Void = {}
 
-  @EnvironmentObject private var compactSpaceList: CompactSpaceList
-  @EnvironmentObject private var data: DataManager
   @EnvironmentObject private var homeListStore: ExperimentalHomeListStore
-  @EnvironmentObject private var notificationHandler: NotificationHandler
-  @Environment(\.realtimeV2) private var realtimeV2
 
   @AppStorage(ExperimentalHomePreferenceKeys.chatItemRenderMode)
   private var chatItemRenderModeRaw = ExperimentalHomeChatItemRenderMode.twoLineLastMessage.rawValue
@@ -309,25 +299,25 @@ struct ExperimentalHomeView: View {
           emptyStyle: .inbox,
           emptyTitle: "Inbox is clear",
           emptySubtitle: "Open a chat from All Chats to keep it here.",
-          sectionHeader: nil,
           chatItemRenderMode: chatItemRenderMode,
           isLoading: homeListStore.state.isLoading,
           status: homeStatus,
-          onRetry: retryHomeData
+          onRetry: onRetry
         )
       case .allChats:
         ExperimentalChatListView(
           items: [],
           daySections: homeListStore.state.presentation.allChatSections,
           mode: .allChats,
-          emptyStyle: .inlineLogo,
-          emptyTitle: "No chats",
-          emptySubtitle: "Start a new thread with the plus button.",
-          sectionHeader: nil,
+          emptyStyle: allChatsFilter == .unread ? .unreadFilter : .inlineLogo,
+          emptyTitle: allChatsFilter == .unread ? "No unread chats" : "No chats",
+          emptySubtitle: allChatsFilter == .unread
+            ? "You’re caught up."
+            : "Start a new thread with the plus button.",
           chatItemRenderMode: chatItemRenderMode,
           isLoading: homeListStore.state.isLoading,
           status: homeStatus,
-          onRetry: retryHomeData
+          onRetry: onRetry
         )
       case .archived:
         ExperimentalChatListView(
@@ -337,11 +327,10 @@ struct ExperimentalHomeView: View {
           emptyStyle: .text,
           emptyTitle: "No archived chats",
           emptySubtitle: "Archived chats will show up here.",
-          sectionHeader: "Archived Chats",
           chatItemRenderMode: chatItemRenderMode,
           isLoading: homeListStore.state.isLoading,
           status: homeStatus,
-          onRetry: retryHomeData
+          onRetry: onRetry
         )
       }
     }
@@ -349,17 +338,6 @@ struct ExperimentalHomeView: View {
     .background(Color(.systemBackground))
     .navigationBarTitleDisplayMode(.inline)
     .navigationTitle("")
-    .task {
-      await loadHomeDataOnAppear()
-    }
-    .onChange(of: compactSpaceList.spaces) { _, _ in
-      nav.pruneDialogFetchState(validSpaceIds: Set(compactSpaceList.spaces.map(\.id)))
-      ensureActiveSpaceExists()
-      Task { await refreshDialogsForCurrentSelection() }
-    }
-    .onChange(of: nav.activeSpaceId) { _, _ in
-      Task { await reloadHomeData(forceDialogs: true) }
-    }
   }
 
   private var chatItemRenderMode: ExperimentalHomeChatItemRenderMode {
@@ -376,138 +354,6 @@ struct ExperimentalHomeView: View {
     return nil
   }
 
-  private func ensureActiveSpaceExists() {
-    guard let activeSpaceId = nav.activeSpaceId else { return }
-    guard !compactSpaceList.spaces.isEmpty else { return }
-    if !compactSpaceList.spaces.contains(where: { $0.id == activeSpaceId }) {
-      nav.activeSpaceId = nil
-    }
-  }
-
-  private func loadHomeDataOnAppear() async {
-    let shouldBootstrap = nav.consumeNeedsHomeBootstrap()
-    await reloadHomeData(
-      includeBootstrapData: shouldBootstrap,
-      forceDialogs: nav.activeSpaceId != nil
-    )
-  }
-
-  private func reloadHomeData(
-    includeBootstrapData: Bool = false,
-    forceDialogs: Bool = false
-  ) async {
-    let refreshRevision = nav.homeRefreshRevision
-    var availableSpaces = compactSpaceList.spaces
-
-    if includeBootstrapData {
-      notificationHandler.setAuthenticated(value: true)
-
-      do {
-        _ = try await realtimeV2.send(.getMe())
-        nav.recordHomeRefreshResult(requestID: "me", succeeded: true, revision: refreshRevision)
-      } catch {
-        nav.recordHomeRefreshResult(
-          requestID: "me",
-          succeeded: false,
-          revision: refreshRevision,
-          reportFailure: !Task.isCancelled
-        )
-        Log.shared.error("Failed to getMe", error: error)
-      }
-
-      do {
-        _ = try await realtimeV2.send(.getChats())
-        nav.recordHomeRefreshResult(requestID: "chats", succeeded: true, revision: refreshRevision)
-      } catch {
-        nav.recordHomeRefreshResult(
-          requestID: "chats",
-          succeeded: false,
-          revision: refreshRevision,
-          reportFailure: !Task.isCancelled
-        )
-        Log.shared.error("Failed to getChats", error: error)
-      }
-
-      do {
-        availableSpaces = try await data.getSpaces()
-        nav.pruneDialogFetchState(validSpaceIds: Set(availableSpaces.map(\.id)))
-        nav.recordHomeRefreshResult(requestID: "spaces", succeeded: true, revision: refreshRevision)
-      } catch {
-        nav.recordHomeRefreshResult(
-          requestID: "spaces",
-          succeeded: false,
-          revision: refreshRevision,
-          reportFailure: !Task.isCancelled
-        )
-        Log.shared.error("Failed to getSpaces", error: error)
-      }
-    }
-
-    guard !Task.isCancelled else { return }
-    await refreshDialogsForCurrentSelection(
-      force: forceDialogs,
-      availableSpaces: availableSpaces,
-      refreshRevision: refreshRevision
-    )
-  }
-
-  private func refreshDialogsForCurrentSelection(
-    force: Bool = false,
-    availableSpaces: [Space]? = nil,
-    refreshRevision: Int? = nil
-  ) async {
-    let revision = refreshRevision ?? nav.homeRefreshRevision
-    if let spaceId = nav.activeSpaceId {
-      await fetchDialogsIfNeeded(spaceId: spaceId, force: force, refreshRevision: revision)
-    } else {
-      // Cached rows remain interactive while remote reconciliation continues.
-      let spaceIDs = (availableSpaces ?? compactSpaceList.spaces).map(\.id)
-      for batchStart in stride(from: 0, to: spaceIDs.count, by: 4) {
-        guard !Task.isCancelled, revision == nav.homeRefreshRevision else { return }
-        let batchEnd = min(batchStart + 4, spaceIDs.count)
-        let batch = spaceIDs[batchStart ..< batchEnd]
-        await withTaskGroup(of: Void.self) { group in
-          for spaceID in batch {
-            group.addTask { @MainActor in
-              await fetchDialogsIfNeeded(
-                spaceId: spaceID,
-                force: force,
-                refreshRevision: revision
-              )
-            }
-          }
-        }
-      }
-    }
-  }
-
-  private func fetchDialogsIfNeeded(
-    spaceId: Int64,
-    force: Bool = false,
-    refreshRevision: Int
-  ) async {
-    guard nav.beginDialogsFetchIfNeeded(spaceId: spaceId, force: force) else { return }
-    do {
-      try await data.getDialogs(spaceId: spaceId)
-      nav.completeDialogsFetch(spaceId: spaceId, succeeded: true, revision: refreshRevision)
-    } catch {
-      nav.completeDialogsFetch(
-        spaceId: spaceId,
-        succeeded: false,
-        revision: refreshRevision,
-        reportFailure: !Task.isCancelled
-      )
-      Log.shared.error("Failed to get dialogs", error: error)
-    }
-  }
-
-  private func retryHomeData() {
-    nav.clearHomeRefreshFailures()
-    homeListStore.refresh()
-    Task {
-      await reloadHomeData(includeBootstrapData: true, forceDialogs: true)
-    }
-  }
 }
 
 private enum ExperimentalChatListMode: Equatable {
@@ -525,6 +371,7 @@ private struct ExperimentalChatListView: View {
     case text
     case inlineLogo
     case inbox
+    case unreadFilter
   }
 
   let items: [ChatListItemSnapshot]
@@ -533,7 +380,6 @@ private struct ExperimentalChatListView: View {
   let emptyStyle: EmptyStyle
   let emptyTitle: String
   let emptySubtitle: String
-  let sectionHeader: String?
   let chatItemRenderMode: ExperimentalHomeChatItemRenderMode
   let isLoading: Bool
   let status: ExperimentalHomeStatus?
@@ -547,11 +393,7 @@ private struct ExperimentalChatListView: View {
   @Environment(ExperimentalHomeActionCoordinator.self) private var homeActions
 
   var body: some View {
-    VStack(spacing: 0) {
-      if let status {
-        ExperimentalHomeStatusView(status: status, onRetry: onRetry)
-      }
-
+    Group {
       if isLoading && isEmpty {
         ExperimentalLoadingStateView()
       } else if isEmpty, case .error = status {
@@ -568,13 +410,6 @@ private struct ExperimentalChatListView: View {
                 ExperimentalChatDaySectionHeader(day: section.id)
                   .listRowInsets(sectionHeaderInsets)
               }
-            }
-          } else if let sectionHeader {
-            Section {
-              rows(for: items)
-            } header: {
-              Text(sectionHeader)
-                .textCase(nil)
             }
           } else {
             rows(for: items)
@@ -611,6 +446,12 @@ private struct ExperimentalChatListView: View {
       ExperimentalInlineLogoEmptyStateView()
     case .inbox:
       ExperimentalInboxEmptyStateView(title: emptyTitle, subtitle: emptySubtitle)
+    case .unreadFilter:
+      ContentUnavailableView(
+        emptyTitle,
+        systemImage: "checkmark.message",
+        description: Text(emptySubtitle)
+      )
     }
   }
 
@@ -684,16 +525,30 @@ private struct ExperimentalChatListView: View {
   @ViewBuilder
   private func contextMenuActions(for item: ChatListItemSnapshot) -> some View {
     if mode == .inbox {
-      closeButton(for: item)
       contextMenuPinButton(for: item)
       readUnreadButton(for: item)
+      copyLinkButton(for: item)
+      Divider()
+      contextMenuCloseButton(for: item)
+      archiveButton(for: item)
     } else if mode == .allChats {
       openButton(for: item)
       readUnreadButton(for: item)
+      copyLinkButton(for: item)
       Divider()
       archiveButton(for: item)
     } else if mode == .archived {
       unarchiveButton(for: item)
+      readUnreadButton(for: item)
+      copyLinkButton(for: item)
+    }
+  }
+
+  private func contextMenuCloseButton(for item: ChatListItemSnapshot) -> some View {
+    Button {
+      performClose(peer: item.peer)
+    } label: {
+      Label("Close", systemImage: "xmark.circle")
     }
   }
 
@@ -707,6 +562,23 @@ private struct ExperimentalChatListView: View {
         item.isPinned ? "Unpin" : "Pin",
         systemImage: item.isPinned ? "pin.slash.fill" : "pin.fill"
       )
+    }
+  }
+
+  @ViewBuilder
+  private func copyLinkButton(for item: ChatListItemSnapshot) -> some View {
+    if case let .thread(id) = item.peer,
+       let url = InlineDeepLink.chat(id: id).webURL {
+      Button {
+        UIPasteboard.general.url = url
+        ToastManager.shared.showToast(
+          "Copied link",
+          type: .success,
+          systemImage: "link"
+        )
+      } label: {
+        Label("Copy Link", systemImage: "link")
+      }
     }
   }
 
@@ -757,26 +629,28 @@ private struct ExperimentalChatListView: View {
 
   private func closeButton(for item: ChatListItemSnapshot) -> some View {
     Button(role: .destructive) {
-      Task {
-        do {
-          _ = try await homeActions.perform(peer: item.peer) {
-            _ = try await realtimeV2.send(
-              .updateDialogOpen(peerId: item.peer, open: false)
-            )
-          }
-        } catch {
-          Log.shared.error("Failed to update Inbox state", error: error)
-          ToastManager.shared.showToast(
-            "Could not close chat",
-            type: .error,
-            systemImage: "exclamationmark.triangle.fill"
-          )
-        }
-      }
+      performClose(peer: item.peer)
     } label: {
       Label("Close", systemImage: "xmark.circle.fill")
     }
     .tint(.gray)
+  }
+
+  private func performClose(peer: Peer) {
+    Task {
+      do {
+        _ = try await homeActions.perform(peer: peer) {
+          _ = try await InboxMembershipService.shared.close(peer: peer)
+        }
+      } catch {
+        Log.shared.error("Failed to update Inbox state", error: error)
+        ToastManager.shared.showToast(
+          "Could not close chat",
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
+        )
+      }
+    }
   }
 
   @ViewBuilder
@@ -786,9 +660,7 @@ private struct ExperimentalChatListView: View {
         Task {
           do {
             let didPerform = try await homeActions.perform(peer: item.peer) {
-              _ = try await realtimeV2.send(
-                .updateDialogOpen(peerId: item.peer, open: true)
-              )
+              _ = try await InboxMembershipService.shared.open(peer: item.peer)
             }
             guard didPerform else { return }
             ToastManager.shared.showToast(
@@ -969,32 +841,6 @@ private struct ExperimentalChatListView: View {
   }
 }
 
-private struct ExperimentalHomeStatusView: View {
-  let status: ExperimentalHomeStatus
-  let onRetry: () -> Void
-
-  var body: some View {
-    HStack(spacing: 8) {
-      switch status {
-      case let .error(message):
-        Image(systemName: "exclamationmark.triangle.fill")
-          .foregroundStyle(.orange)
-        Text(message)
-        Spacer(minLength: 8)
-        Button("Retry", action: onRetry)
-          .fontWeight(.semibold)
-      }
-    }
-    .font(.footnote)
-    .foregroundStyle(.secondary)
-    .padding(.horizontal, 16)
-    .padding(.vertical, 8)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .background(Color(.secondarySystemBackground))
-    .accessibilityElement(children: .combine)
-  }
-}
-
 private struct ExperimentalHomeFailureStateView: View {
   let onRetry: () -> Void
 
@@ -1023,12 +869,6 @@ private struct ExperimentalChatDaySectionHeader: View {
 
   private var title: Text {
     let calendar = Calendar.autoupdatingCurrent
-    if calendar.isDateInToday(day) {
-      return Text("Today")
-    }
-    if calendar.isDateInYesterday(day) {
-      return Text("Yesterday")
-    }
     if calendar.component(.year, from: day) == calendar.component(.year, from: Date()) {
       return Text(day, format: .dateTime.month(.abbreviated).day())
     }
@@ -1101,7 +941,7 @@ private struct ExperimentalInboxEmptyStateView: View {
   var body: some View {
     VStack(spacing: 8) {
       Image(systemName: "tray")
-        .font(.system(size: 30, weight: .regular))
+        .font(.title)
         .symbolRenderingMode(.hierarchical)
         .foregroundStyle(.tertiary)
         .accessibilityHidden(true)

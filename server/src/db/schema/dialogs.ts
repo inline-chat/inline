@@ -1,10 +1,11 @@
-import { pgTable, boolean, unique, integer, text, bytea, index, timestamp } from "drizzle-orm/pg-core"
+import { pgTable, boolean, unique, integer, text, bytea, index, timestamp, check } from "drizzle-orm/pg-core"
 import { users } from "./users"
 import { spaces } from "./spaces"
 import { relations } from "drizzle-orm/_relations"
 import { chats } from "./chats"
 import { creationDate } from "@in/server/db/schema/common"
 import { serial } from "drizzle-orm/pg-core"
+import { sql } from "drizzle-orm"
 
 export const dialogs = pgTable(
   "dialogs",
@@ -74,6 +75,12 @@ export const dialogs = pgTable(
 
     /** Thread surfacing policy; null means relevance-only default, unfollowed blocks auto-follow. */
     followMode: text("follow_mode", { enum: ["following", "unfollowed"] }),
+
+    /** Personal message boundary through which history is collapsed in the chat view. */
+    collapsedMaxId: integer("collapsed_max_id"),
+
+    /** Server time of the latest explicit collapse; also identifies the collapse generation. */
+    collapsedAt: timestamp("collapsed_at", { mode: "date", precision: 3, withTimezone: true }),
   },
   (table) => ({
     chatIdUserIdUnique: unique("chat_id_user_id_unique").on(table.chatId, table.userId),
@@ -81,6 +88,11 @@ export const dialogs = pgTable(
     userIdPeerUserIdIndex: index("dialogs_user_id_peer_user_id_idx").on(table.userId, table.peerUserId),
     userIdOrderIndex: index("dialogs_user_id_order_idx").on(table.userId, table.order),
     userIdPinnedOrderIndex: index("dialogs_user_id_pinned_order_idx").on(table.userId, table.pinnedOrder),
+    collapsedMaxIdPositive: check("dialogs_collapsed_max_id_positive", sql`${table.collapsedMaxId} > 0`),
+    collapsePair: check(
+      "dialogs_collapse_pair_check",
+      sql`(${table.collapsedMaxId} IS NULL) = (${table.collapsedAt} IS NULL)`,
+    ),
   }),
 )
 

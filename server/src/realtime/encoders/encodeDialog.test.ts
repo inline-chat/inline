@@ -24,6 +24,8 @@ const baseDialog: DbDialog = {
   unreadMark: false,
   notificationSettings: null,
   followMode: null,
+  collapsedMaxId: null,
+  collapsedAt: null,
 }
 
 const encode = (overrides: Partial<DbDialog> = {}) =>
@@ -68,5 +70,12 @@ describe("encodeDialog", () => {
   test("emits reply-thread unfollowed mode when set", () => {
     const dialog = encode({ followMode: "unfollowed" })
     expect(dialog.followMode).toBe(DialogFollowMode.UNFOLLOWED)
+  })
+
+  test("emits the personal collapsed-history boundary when set", () => {
+    const collapsedAt = new Date("2026-08-08T16:00:00.000Z")
+    const dialog = encode({ collapsedMaxId: 42, collapsedAt })
+    expect(dialog.collapsedMaxId).toBe(42n)
+    expect(dialog.collapsedAt).toBe(1_786_204_800n)
   })
 })

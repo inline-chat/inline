@@ -218,6 +218,110 @@ struct InlineSearchViewModelTests {
     ))
   }
 
+  @Test("chat catalog uses switch frequency within the same match tier")
+  func chatCatalogUsesSwitchFrequencyWithinTier() async throws {
+    let (queue, _) = try makeInMemoryDB()
+    let alexanderId: Int64 = 10
+    let alexThreadId: Int64 = 7010
+
+    try await queue.write { db in
+      try seedUser(db, id: alexanderId, firstName: "Alexander", lastName: nil, username: "alexander")
+      try seedPrivateChat(db, chatId: 5010, userId: alexanderId)
+      try seedThread(db, id: alexThreadId, title: "Alex's xyz", spaceId: nil)
+      try seedDialog(db, chat: try Chat.fetchOne(db, id: alexThreadId)!)
+    }
+
+    let snapshots = try await queue.read { db in
+      try HomeChatListItemSnapshot.snapshots(from: HomeChatItem.all().fetchAll(db), db: db)
+    }
+    let catalog = InlineSearchChatCatalog()
+    await catalog.replace(snapshots)
+
+    let projection = await catalog.project(
+      query: "alex",
+      usage: [
+        .user(id: alexanderId): InlineSearchUsageSignal(switchFrecency: 50),
+        .thread(id: alexThreadId): InlineSearchUsageSignal(switchFrecency: 1),
+      ],
+      currentPeer: nil,
+      scope: InlineSearchScope(includeArchived: true)
+    )
+
+    #expect(projection.chats.map(\.peer).prefix(2) == [
+      .user(id: alexanderId),
+      .thread(id: alexThreadId),
+    ])
+  }
+
+  @Test("chat catalog query affinity learns the selected Dena")
+  func chatCatalogUsesQueryAffinity() async throws {
+    let (queue, _) = try makeInMemoryDB()
+    let preferredId: Int64 = 20
+    let otherId: Int64 = 21
+
+    try await queue.write { db in
+      try seedUser(db, id: preferredId, firstName: "Dena", lastName: "Preferred", username: "denap")
+      try seedPrivateChat(db, chatId: 5020, userId: preferredId)
+      try seedUser(db, id: otherId, firstName: "Dena", lastName: "Other", username: "denao")
+      try seedPrivateChat(db, chatId: 5021, userId: otherId)
+    }
+
+    let snapshots = try await queue.read { db in
+      try HomeChatListItemSnapshot.snapshots(from: HomeChatItem.all().fetchAll(db), db: db)
+    }
+    let catalog = InlineSearchChatCatalog()
+    await catalog.replace(snapshots)
+
+    let projection = await catalog.project(
+      query: "dena",
+      usage: [
+        .user(id: preferredId): InlineSearchUsageSignal(queryAffinity: 8),
+        .user(id: otherId): InlineSearchUsageSignal(queryAffinity: 1),
+      ],
+      currentPeer: nil,
+      scope: InlineSearchScope(includeArchived: true)
+    )
+
+    #expect(projection.chats.first?.peer == .user(id: preferredId))
+  }
+
+  @Test("empty chat catalog returns suggestions then deduped chats")
+  func chatCatalogEmptyProjection() async throws {
+    let (queue, _) = try makeInMemoryDB()
+    let firstId: Int64 = 30
+    let secondId: Int64 = 31
+    let currentId: Int64 = 32
+
+    try await queue.write { db in
+      for (id, name) in [(firstId, "First"), (secondId, "Second"), (currentId, "Current")] {
+        try seedUser(db, id: id, firstName: name, lastName: nil, username: name.lowercased())
+        try seedPrivateChat(db, chatId: 5_000 + id, userId: id)
+      }
+    }
+
+    let snapshots = try await queue.read { db in
+      try HomeChatListItemSnapshot.snapshots(from: HomeChatItem.all().fetchAll(db), db: db)
+    }
+    let catalog = InlineSearchChatCatalog()
+    await catalog.replace(snapshots)
+
+    let projection = await catalog.project(
+      query: "",
+      usage: [
+        .user(id: firstId): InlineSearchUsageSignal(switchFrecency: 10),
+        .user(id: secondId): InlineSearchUsageSignal(switchFrecency: 5),
+        .user(id: currentId): InlineSearchUsageSignal(switchFrecency: 100),
+      ],
+      currentPeer: .user(id: currentId),
+      scope: InlineSearchScope(includeArchived: false),
+      suggestionLimit: 1,
+      chatLimit: 5
+    )
+
+    #expect(projection.suggestions.map(\.peer) == [.user(id: firstId)])
+    #expect(projection.chats.map(\.peer) == [.user(id: secondId)])
+  }
+
   nonisolated private func makeInMemoryDB() throws -> (DatabaseQueue, AppDatabase) {
     let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
     let appDatabase = try AppDatabase(queue)

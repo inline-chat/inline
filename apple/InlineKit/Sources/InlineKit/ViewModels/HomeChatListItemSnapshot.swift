@@ -133,6 +133,6 @@ private extension EmbeddedMessage {
     else {
       return nil
     }
-    return fileName.replacingOccurrences(of: "\n", with: " ")
+    return MessagePreviewText.document(fileName: fileName)
   }
 }

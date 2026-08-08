@@ -1,30 +1,26 @@
-
 import SwiftUI
 
-struct ErrorView: View {
-  let errorMessage: String
-  let retryAction: (() -> Void)?
+struct ChatLoadErrorView: View {
+  let retryAction: () -> Void
 
   var body: some View {
-    VStack(spacing: 4) {
-      let symbol =
-        Image(systemName: "exclamationmark.icloud.fill")
-          .resizable()
-          .aspectRatio(contentMode: .fit)
-          .frame(width: 34, height: 34)
-          .foregroundColor(.indigo)
-          .symbolRenderingMode(.monochrome)
+    VStack(spacing: 12) {
+      Image(systemName: "exclamationmark.triangle")
+        .font(.system(size: 34))
+        .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
 
-      if #available(macOS 15.0, *) {
-        symbol.symbolEffect(
-          .wiggle, options: .repeat(.periodic).speed(1.2), isActive: true
-        )
-      } else {
-        symbol
+      VStack(spacing: 4) {
+        Text("Chat unavailable")
+          .font(.headline)
+
+        Text("You may not have access to this chat, or it may no longer exist.")
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
       }
 
-      Text("Chat failed to load.")
-        .font(.headline)
+      Button("Try Again", action: retryAction)
     }
     .padding(.horizontal, 18)
     .padding(.vertical, 12)
@@ -36,6 +32,6 @@ struct ErrorView: View {
 }
 
 #Preview {
-  ErrorView(errorMessage: "Failed to load chat. Please try again later.", retryAction: nil)
+  ChatLoadErrorView(retryAction: {})
     .frame(width: 400, height: 400)
 }

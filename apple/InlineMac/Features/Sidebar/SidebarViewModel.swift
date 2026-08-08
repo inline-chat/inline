@@ -17,6 +17,7 @@ final class SidebarViewModel {
     let id: ChatListItem.Identifier
     let peerId: Peer
     let chatId: Int64
+    let parentChatId: Int64?
     let spaceId: Int64?
     let title: String
     let parentTitle: String?
@@ -38,6 +39,7 @@ final class SidebarViewModel {
       id = listItem.id
       self.peerId = peerId
       chatId = listItem.chat?.id ?? 0
+      parentChatId = listItem.chat?.parentChatId
       spaceId = listItem.spaceId
       title = listItem.displayTitle
       parentTitle = listItem.parentTitle
@@ -77,6 +79,7 @@ final class SidebarViewModel {
   @ObservationIgnored private var spacesCancellable: AnyCancellable?
   @ObservationIgnored private var includeSpaceChatsInHome = true
   @ObservationIgnored private var started = false
+  @ObservationIgnored private var refreshGeneration = 0
 
   private enum Source: Equatable {
     case home(ContentMode)
@@ -97,6 +100,19 @@ final class SidebarViewModel {
         nil
       case let .space(spaceId, _):
         spaceId
+      }
+    }
+
+    var diagnosticLabel: String {
+      switch self {
+      case .home(.chatList):
+        "home-chat-list"
+      case .home(.inbox):
+        "home-inbox"
+      case .space(_, .chatList):
+        "space-chat-list"
+      case .space(_, .inbox):
+        "space-inbox"
       }
     }
   }
@@ -355,16 +371,31 @@ final class SidebarViewModel {
   }
 
   private func applySpaces(_ spaces: [HomeSpaceItem]) {
-    self.spaces = spaces.map(\.space)
+    let nextSpaces = spaces.map(\.space)
+    guard self.spaces != nextSpaces else { return }
+    self.spaces = nextSpaces
+    log.debug("spaces updated count=\(nextSpaces.count)")
   }
 
   private func refreshItems() {
+    refreshGeneration += 1
     let items = sortItems(filterHomeItems(mergeUniqueItems(threadItems + contactItems)))
 
     if isInboxMode {
       let active = items.compactMap(Item.init(listItem:))
-      activeItems = active
-      archivedItems = []
+      let activeChanged = activeItems != active
+      let archivedChanged = archivedItems.isEmpty == false
+      if activeChanged {
+        activeItems = active
+      }
+      if archivedChanged {
+        archivedItems = []
+      }
+      log.debug(
+        "refresh #\(refreshGeneration) source=\(source?.diagnosticLabel ?? "none") "
+          + "threads=\(threadItems.count) contacts=\(contactItems.count) active=\(active.count) "
+          + "activeChanged=\(activeChanged) archivedChanged=\(archivedChanged)"
+      )
       return
     }
 
@@ -376,8 +407,20 @@ final class SidebarViewModel {
       .filter { $0.dialog?.archived == true }
       .compactMap(Item.init(listItem:))
 
-    activeItems = active
-    archivedItems = archived
+    let activeChanged = activeItems != active
+    let archivedChanged = archivedItems != archived
+    if activeChanged {
+      activeItems = active
+    }
+    if archivedChanged {
+      archivedItems = archived
+    }
+    log.debug(
+      "refresh #\(refreshGeneration) source=\(source?.diagnosticLabel ?? "none") "
+        + "threads=\(threadItems.count) contacts=\(contactItems.count) "
+        + "active=\(active.count) archived=\(archived.count) "
+        + "activeChanged=\(activeChanged) archivedChanged=\(archivedChanged)"
+    )
   }
 
   private func mergeUniqueItems(_ items: [ChatListItem]) -> [ChatListItem] {

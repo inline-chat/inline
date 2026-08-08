@@ -527,7 +527,7 @@ extension Document {
     mimeType: String? = nil,
     size: Int? = nil,
     localPath: String? = nil,
-    thumbnail: Photo? = nil
+    thumbnail: PhotoInfo? = nil
   ) throws -> DocumentInfo {
     // Create a temporary negative ID
     let tempId = Int64(bitPattern: UInt64(arc4random()) | (UInt64(arc4random()) << 32)) * -1
@@ -541,12 +541,11 @@ extension Document {
       size: size,
       cdnUrl: nil,
       localPath: localPath,
-      thumbnailPhotoId: thumbnail?.id
+      thumbnailPhotoId: thumbnail?.photo.id
     )
     let document = try document_.saveAndFetch(db)
 
-    // TODO: support thumbnails
-    return DocumentInfo(document: document)
+    return DocumentInfo(document: document, photoInfo: thumbnail)
   }
 }
 

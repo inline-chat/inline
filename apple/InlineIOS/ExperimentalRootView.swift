@@ -5,6 +5,7 @@ import Logger
 import QuartzCore
 import RealtimeV2
 import SwiftUI
+import Translation
 import UIKit
 
 private enum RootTab: String, Hashable {
@@ -99,15 +100,19 @@ struct ExperimentalRootView: View {
 private struct ExperimentalAuthedRootView: View {
   @State private var nav = ExperimentalNavigationModel()
   @State private var homeActions = ExperimentalHomeActionCoordinator()
-  @State private var rootTab: RootTab = .allChats
-  @State private var lastContentRootTab: RootTab = .allChats
+  @State private var translationCoordinator = ExperimentalHomeTranslationCoordinator()
   @State private var searchQuery = ""
   @State private var isCreatingThread = false
   @State private var isNotificationSettingsPresented = false
-  @AppStorage("ios.experimental.root.selectedTab")
-  private var persistedRootTabRaw = RootTab.allChats.rawValue
+  @State private var didRestoreSceneHomeState = false
+  @SceneStorage("ios.home.activeSpaceID.v1")
+  private var sceneActiveSpaceIDRaw = ""
+  @SceneStorage("ios.home.allChatsFilter.v1")
+  private var allChatsFilterRaw = ChatListFilter.all.rawValue
   @AppStorage("ios.experimental.root.didMigrateExplicitTabs")
   private var didMigrateExplicitTabs = false
+  @AppStorage("ios.home.didMigrateActiveSpaceToScene.v1")
+  private var didMigrateActiveSpaceToScene = false
   @AppStorage(ExperimentalHomePreferenceKeys.chatScope)
   private var homeChatScopeRaw = ExperimentalHomeChatScope.all.rawValue
   @AppStorage(ExperimentalHomePreferenceKeys.chatItemRenderMode)
@@ -123,6 +128,7 @@ private struct ExperimentalAuthedRootView: View {
   @EnvironmentStateObject private var compactSpaceList: CompactSpaceList
   @EnvironmentStateObject private var homeListStore: ExperimentalHomeListStore
   @EnvironmentObject private var notificationSettings: NotificationSettingsManager
+  @EnvironmentObject private var notificationHandler: NotificationHandler
   @EnvironmentObject private var realtimeState: RealtimeState
 
   init() {
@@ -140,6 +146,9 @@ private struct ExperimentalAuthedRootView: View {
 
   var body: some View {
     rootNavigation
+      // The stack wraps the root TabView, so pushed destinations naturally replace
+      // the tab surface. Legacy per-destination tab-bar hiding is unnecessary here.
+      .environment(\.inlineHideTabBar, false)
       .environmentObject(data)
       .environmentObject(compactSpaceList)
       .environmentObject(homeListStore)
@@ -150,6 +159,33 @@ private struct ExperimentalAuthedRootView: View {
         Task {
           await refetchCoreDataAfterLocalDataCleared()
         }
+      }
+      .task {
+        restoreSceneHomeStateIfNeeded()
+        await loadHomeDataOnAppear()
+      }
+      .onChange(of: compactSpaceList.spaces) { _, _ in
+        nav.pruneDialogFetchState(validSpaceIds: Set(compactSpaceList.spaces.map(\.id)))
+        ensureActiveSpaceExists()
+        Task { await refreshDialogsForCurrentSelection() }
+      }
+      .onChange(of: homeListStore.state.revision) { _, _ in
+        translationCoordinator.process(
+          presentation: homeListStore.state.presentation,
+          currentPeers: currentChatPeers
+        )
+      }
+      .onReceive(TranslationState.shared.subject) { event in
+        let (peer, isEnabled) = event
+        translationCoordinator.translationStateChanged(
+          peer: peer,
+          isEnabled: isEnabled,
+          presentation: homeListStore.state.presentation,
+          currentPeers: currentChatPeers
+        )
+      }
+      .onDisappear {
+        translationCoordinator.cancel()
       }
   }
 
@@ -166,7 +202,11 @@ private struct ExperimentalAuthedRootView: View {
           experimentalToolbarContent()
         }
         .navigationDestination(for: Destination.self) { destination in
-          ExperimentalDestinationView(nav: bindableNav, destination: destination)
+          ExperimentalDestinationView(
+            nav: bindableNav,
+            destination: destination,
+            onRetryHome: retryHomeData
+          )
         }
     }
     // Prevent child views (e.g. ChatView) from leaking their toolbar appearance
@@ -182,57 +222,36 @@ private struct ExperimentalAuthedRootView: View {
       }
     }
     .onAppear {
+      restoreSceneHomeStateIfNeeded()
       migrateLegacyRootTabsIfNeeded()
-      let restoredRootTab = RootTab(rawValue: persistedRootTabRaw) ?? .allChats
-      let persistedTab = restoredRootTab == .newChat ? .allChats : restoredRootTab
       let routedTab = RootTab(appTab: bindableRouter.selectedTab)
-      let hasPendingRoute = !bindableRouter[bindableRouter.selectedTab].isEmpty
-      let desiredRootTab = hasPendingRoute ? routedTab : persistedTab
+      let desiredRootTab = routedTab == .newChat ? .allChats : routedTab
       let desiredTab = desiredRootTab.appTab
       configureHomeList()
       if bindableRouter.selectedTab != desiredTab {
         bindableRouter.selectedTab = desiredTab
       }
-      rootTab = desiredRootTab
-      lastContentRootTab = desiredRootTab
-
       if chatItemRenderModeRaw == ExperimentalHomeChatItemRenderMode.oneLineLastMessage.rawValue {
         chatItemRenderModeRaw = ExperimentalHomeChatItemRenderMode.twoLineLastMessage.rawValue
       }
     }
-    .onChange(of: bindableRouter.selectedTab) { _, newValue in
+    .onChange(of: bindableRouter.selectedTab) { oldValue, newValue in
+      let previousRootTab = RootTab(appTab: oldValue)
       let desiredRootTab = RootTab(appTab: newValue)
       let desiredTab = desiredRootTab.appTab
       if bindableRouter.selectedTab != desiredTab {
         bindableRouter.selectedTab = desiredTab
         return
       }
-      if rootTab != desiredRootTab {
-        rootTab = desiredRootTab
-      }
-      lastContentRootTab = desiredRootTab
-      persistedRootTabRaw = desiredRootTab.rawValue
-    }
-    .onChange(of: rootTab) { _, newValue in
-      if newValue == .newChat {
-        createThreadInstantly(spaceId: nav.activeSpaceId)
-        rootTab = lastContentRootTab
-        return
-      }
-
-      let previousRootTab = lastContentRootTab
+      guard previousRootTab != desiredRootTab else { return }
       ExperimentalHomeNavigationPerformance.measureTabSwitch(
         from: previousRootTab.rawValue,
-        to: newValue.rawValue,
+        to: desiredRootTab.rawValue,
         rows: homeListStore.state.presentation.allChatCount
       )
-      lastContentRootTab = newValue
-      persistedRootTabRaw = newValue.rawValue
-      let desiredTab = newValue.appTab
-      if bindableRouter.selectedTab != desiredTab {
-        bindableRouter.selectedTab = desiredTab
+      if previousRootTab == .search {
+        searchQuery = ""
       }
-      searchQuery = ""
     }
     .onChange(of: bindableRouter.selectedTabPath) { oldPath, newPath in
       guard let previousPeer = oldPath.last?.chatPeer,
@@ -243,12 +262,17 @@ private struct ExperimentalAuthedRootView: View {
       )
     }
     .onChange(of: nav.activeSpaceId) { _, _ in
+      sceneActiveSpaceIDRaw = nav.activeSpaceId.map(String.init) ?? ""
       configureHomeList()
+      Task { await reloadHomeData(forceDialogs: true) }
     }
     .onChange(of: sortModeRaw) { _, _ in
       configureHomeList()
     }
     .onChange(of: homeChatScopeRaw) { _, _ in
+      configureHomeList()
+    }
+    .onChange(of: allChatsFilterRaw) { _, _ in
       configureHomeList()
     }
   }
@@ -274,10 +298,14 @@ private struct ExperimentalAuthedRootView: View {
     didMigrateExplicitTabs = true
   }
 
+  private var currentChatPeers: Set<Peer> {
+    Set(router.selectedTabPath.compactMap(\.chatPeer))
+  }
+
   private func rootPage(nav: ExperimentalNavigationModel) -> some View {
     @Bindable var bindableNav = nav
 
-    return TabView(selection: $rootTab) {
+    return TabView(selection: rootTabSelection) {
       Tab("All Chats", systemImage: "bubble.left.and.bubble.right.fill", value: .allChats) {
         chatsRoot(nav: bindableNav, rootTab: .allChats)
       }
@@ -311,13 +339,27 @@ private struct ExperimentalAuthedRootView: View {
     .background(Color(.systemBackground))
   }
 
+  private var rootTabSelection: Binding<RootTab> {
+    Binding(
+      get: { RootTab(appTab: router.selectedTab) },
+      set: { newValue in
+        if newValue == .newChat {
+          createThreadInstantly(spaceId: nav.activeSpaceId)
+        } else if router.selectedTab != newValue.appTab {
+          router.selectedTab = newValue.appTab
+        }
+      }
+    )
+  }
+
   private func configureHomeList() {
     let homeScope = ExperimentalHomeChatScope(rawValue: homeChatScopeRaw) ?? .all
     let sortMode = ExperimentalHomeSortMode(rawValue: sortModeRaw) ?? .recentActivity
     homeListStore.setConfiguration(ExperimentalHomeListConfiguration(
       spaceID: nav.activeSpaceId,
       includeSpaceChatsInHome: homeScope == .all,
-      sort: sortMode.chatListSort
+      inboxSort: sortMode.chatListSort,
+      allChatsFilter: ChatListFilter(rawValue: allChatsFilterRaw) ?? .all
     ))
   }
 
@@ -329,7 +371,9 @@ private struct ExperimentalAuthedRootView: View {
 
     return ExperimentalHomeView(
       nav: bindableNav,
-      initialTab: rootTab == .inbox ? .inbox : .allChats
+      initialTab: rootTab == .inbox ? .inbox : .allChats,
+      allChatsFilter: ChatListFilter(rawValue: allChatsFilterRaw) ?? .all,
+      onRetry: retryHomeData
     )
   }
 
@@ -341,13 +385,13 @@ private struct ExperimentalAuthedRootView: View {
       selectedSpaceId: selectedSpaceId,
       onSelectHome: {
         selectedSpaceId.wrappedValue = nil
-        selectAllChatsAfterSpaceChange()
+        returnToCurrentTabRootAfterSpaceChange()
       },
       onSelectSpace: { space in
         if selectedSpaceId.wrappedValue != space.id {
           selectedSpaceId.wrappedValue = space.id
         }
-        selectAllChatsAfterSpaceChange()
+        returnToCurrentTabRootAfterSpaceChange()
       },
       onCreateSpace: {
         router.push(.createSpace, for: router.selectedTab)
@@ -358,15 +402,154 @@ private struct ExperimentalAuthedRootView: View {
     picker
   }
 
-  private func selectAllChatsAfterSpaceChange() {
-    let previousTab = router.selectedTab
-    router.popToRoot(for: previousTab)
+  private func returnToCurrentTabRootAfterSpaceChange() {
+    router.popToRoot(for: router.selectedTab)
+  }
 
-    lastContentRootTab = .allChats
-    persistedRootTabRaw = RootTab.allChats.rawValue
-    rootTab = .allChats
-    router.selectedTab = .allChats
-    router.popToRoot(for: .allChats)
+  private func restoreSceneHomeStateIfNeeded() {
+    guard !didRestoreSceneHomeState else { return }
+    didRestoreSceneHomeState = true
+
+    if let restoredSpaceID = Int64(sceneActiveSpaceIDRaw) {
+      nav.activeSpaceId = restoredSpaceID
+    } else if !didMigrateActiveSpaceToScene {
+      nav.activeSpaceId = ExperimentalNavigationModel.loadLegacyActiveSpaceId()
+      didMigrateActiveSpaceToScene = true
+      sceneActiveSpaceIDRaw = nav.activeSpaceId.map(String.init) ?? ""
+    }
+  }
+
+  private func ensureActiveSpaceExists() {
+    guard let activeSpaceID = nav.activeSpaceId else { return }
+    guard !compactSpaceList.spaces.isEmpty else { return }
+    if !compactSpaceList.spaces.contains(where: { $0.id == activeSpaceID }) {
+      nav.activeSpaceId = nil
+    }
+  }
+
+  private func loadHomeDataOnAppear() async {
+    let shouldBootstrap = nav.consumeNeedsHomeBootstrap()
+    await reloadHomeData(
+      includeBootstrapData: shouldBootstrap,
+      forceDialogs: nav.activeSpaceId != nil
+    )
+  }
+
+  private func reloadHomeData(
+    includeBootstrapData: Bool = false,
+    forceDialogs: Bool = false
+  ) async {
+    let refreshRevision = nav.homeRefreshRevision
+    var availableSpaces = compactSpaceList.spaces
+
+    if includeBootstrapData {
+      notificationHandler.setAuthenticated(value: true)
+
+      do {
+        _ = try await realtimeV2.send(.getMe())
+        nav.recordHomeRefreshResult(requestID: "me", succeeded: true, revision: refreshRevision)
+      } catch {
+        nav.recordHomeRefreshResult(
+          requestID: "me",
+          succeeded: false,
+          revision: refreshRevision,
+          reportFailure: !Task.isCancelled
+        )
+        Log.shared.error("Failed to getMe", error: error)
+      }
+
+      do {
+        _ = try await realtimeV2.send(.getChats())
+        nav.recordHomeRefreshResult(requestID: "chats", succeeded: true, revision: refreshRevision)
+      } catch {
+        nav.recordHomeRefreshResult(
+          requestID: "chats",
+          succeeded: false,
+          revision: refreshRevision,
+          reportFailure: !Task.isCancelled
+        )
+        Log.shared.error("Failed to getChats", error: error)
+      }
+
+      do {
+        availableSpaces = try await data.getSpaces()
+        nav.pruneDialogFetchState(validSpaceIds: Set(availableSpaces.map(\.id)))
+        nav.recordHomeRefreshResult(requestID: "spaces", succeeded: true, revision: refreshRevision)
+      } catch {
+        nav.recordHomeRefreshResult(
+          requestID: "spaces",
+          succeeded: false,
+          revision: refreshRevision,
+          reportFailure: !Task.isCancelled
+        )
+        Log.shared.error("Failed to getSpaces", error: error)
+      }
+    }
+
+    guard !Task.isCancelled else { return }
+    await refreshDialogsForCurrentSelection(
+      force: forceDialogs,
+      availableSpaces: availableSpaces,
+      refreshRevision: refreshRevision
+    )
+  }
+
+  private func refreshDialogsForCurrentSelection(
+    force: Bool = false,
+    availableSpaces: [Space]? = nil,
+    refreshRevision: Int? = nil
+  ) async {
+    let revision = refreshRevision ?? nav.homeRefreshRevision
+    if let spaceID = nav.activeSpaceId {
+      await fetchDialogsIfNeeded(spaceID: spaceID, force: force, refreshRevision: revision)
+    } else {
+      // Cached rows remain interactive while remote reconciliation continues.
+      let spaceIDs = (availableSpaces ?? compactSpaceList.spaces).map(\.id)
+      for batchStart in stride(from: 0, to: spaceIDs.count, by: 4) {
+        guard !Task.isCancelled, revision == nav.homeRefreshRevision else { return }
+        let batchEnd = min(batchStart + 4, spaceIDs.count)
+        let batch = spaceIDs[batchStart ..< batchEnd]
+        await withTaskGroup(of: Void.self) { group in
+          for spaceID in batch {
+            group.addTask { @MainActor in
+              await fetchDialogsIfNeeded(
+                spaceID: spaceID,
+                force: force,
+                refreshRevision: revision
+              )
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private func fetchDialogsIfNeeded(
+    spaceID: Int64,
+    force: Bool = false,
+    refreshRevision: Int
+  ) async {
+    guard nav.beginDialogsFetchIfNeeded(spaceId: spaceID, force: force) else { return }
+    do {
+      try await data.getDialogs(spaceId: spaceID)
+      nav.completeDialogsFetch(spaceId: spaceID, succeeded: true, revision: refreshRevision)
+    } catch {
+      nav.completeDialogsFetch(
+        spaceId: spaceID,
+        succeeded: false,
+        revision: refreshRevision,
+        reportFailure: !Task.isCancelled
+      )
+      Log.shared.error("Failed to get dialogs", error: error)
+    }
+  }
+
+  private func retryHomeData() {
+    nav.clearHomeRefreshFailures()
+    homeListStore.refresh()
+    Task {
+      await reloadHomeData(includeBootstrapData: true, forceDialogs: true)
+    }
   }
 
   private func createThreadInstantly(spaceId: Int64?) {
@@ -424,6 +607,14 @@ private struct ExperimentalAuthedRootView: View {
       }
       .sharedBackgroundVisibility(.hidden)
 
+      if showsAllChatsFilter {
+        ToolbarItem(placement: .topBarTrailing) {
+          allChatsFilterMenu()
+        }
+
+        ToolbarSpacer(.fixed, placement: .topBarTrailing)
+      }
+
       if let connectionState = realtimeState.displayedConnectionState {
         ToolbarItem(placement: .topBarTrailing) {
           connectionProgressIndicator(connectionState)
@@ -449,6 +640,9 @@ private struct ExperimentalAuthedRootView: View {
 
       ToolbarItemGroup(placement: .topBarTrailing) {
         newChatButton(activeSpaceId: nav.activeSpaceId)
+        if showsAllChatsFilter {
+          allChatsFilterMenu()
+        }
         if let connectionState = realtimeState.displayedConnectionState {
           connectionProgressIndicator(connectionState)
         }
@@ -469,6 +663,29 @@ private struct ExperimentalAuthedRootView: View {
     }
     .disabled(isCreatingThread)
     .accessibilityLabel("New Thread")
+  }
+
+  private func allChatsFilterMenu() -> some View {
+    let unreadOnly = Binding(
+      get: { allChatsFilterRaw == ChatListFilter.unread.rawValue },
+      set: { allChatsFilterRaw = $0 ? ChatListFilter.unread.rawValue : ChatListFilter.all.rawValue }
+    )
+
+    return Menu {
+      Toggle(isOn: unreadOnly) {
+        Label("Unread", systemImage: "envelope.badge")
+      }
+    } label: {
+      Image(systemName: unreadOnly.wrappedValue
+        ? "line.3.horizontal.decrease.circle.fill"
+        : "line.3.horizontal.decrease.circle")
+    }
+    .accessibilityLabel("Filter All Chats")
+    .accessibilityValue(unreadOnly.wrappedValue ? "Unread" : "All Chats")
+  }
+
+  private var showsAllChatsFilter: Bool {
+    RootTab(appTab: router.selectedTab) == .allChats && router.selectedTabPath.isEmpty
   }
 
   private func connectionProgressIndicator(
@@ -722,7 +939,7 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
       }
     )
     let sortMenu = UIMenu(
-      title: "Sort By",
+      title: "Inbox Sort",
       options: [.displayInline, .singleSelection],
       children: ExperimentalHomeSortMode.allCases.map { mode in
         UIAction(title: mode.title, state: mode == sortMode ? .on : .off) { _ in

@@ -1,5 +1,5 @@
 import { spawnSync } from "bun";
-import { appendFileSync, mkdirSync, rmSync, writeFileSync, existsSync } from "fs";
+import { appendFileSync, existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "fs";
 import { basename, resolve } from "path";
 import { createInterface } from "node:readline";
 
@@ -31,7 +31,6 @@ type ReleaseOptions = {
   skip: Set<string>;
   fromTask: string;
   dryRun: boolean;
-  pauseBeforeNotarize: boolean;
   rollback: boolean;
   rollbackToBuild: string;
   rollbackStepsBack: number;
@@ -97,7 +96,7 @@ function usage(): string {
     "",
     "Options:",
     "  --channel stable|beta|tip        Update channel (default: beta; prompts if omitted in an interactive terminal)",
-    "  --derived-data <path>            Xcode derived data (default: unique <root>/build/InlineMacDirect/release-*)",
+    "  --derived-data <path>            Xcode DerivedData (default: target of <root>/build/InlineMacDirect/reusable)",
     "  --app-path <path>                App path (default: <derived-data>/Build/Products/Release/Inline.app)",
     "  --dmg-path <path>                DMG path (default: <root>/build/macos-direct/Inline.dmg)",
     `  --sparkle-dir <path>             Sparkle tools dir (default: <root>/.action/sparkle/${sparkleVersion})`,
@@ -112,7 +111,6 @@ function usage(): string {
     "  --rollback-to-build <build>      Target build to restore (default: previous appcast item)",
     "  --rollback-steps-back <n>        Pick the Nth previous appcast item (default: 1)",
     "  --drop-build <build>             Remove one non-latest build from the live appcast and republish it",
-    "  --pause-before-notarize          Pause after app/DMG build so you can test locally, then continue notarization",
     "  --upload-sentry-dsyms            Upload dSYMs to Sentry (disabled by default while the upload flow is broken)",
     "  --dry-run                         Print what would run, without executing the pipeline",
     "  --skip-build                      Alias for --skip build",
@@ -132,7 +130,7 @@ function die(message: string): never {
 
 function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   let channel: ReleaseChannel | undefined;
-  let derivedData = resolve(rootDir, "build/InlineMacDirect", `release-${nowIsoCompact()}-${Math.random().toString(16).slice(2, 8)}`);
+  let derivedData = defaultDerivedDataPath(rootDir);
   let appPath = "";
   let dmgPath = resolve(rootDir, "build/macos-direct/Inline.dmg");
   let sparkleDir = resolve(rootDir, ".action/sparkle", sparkleVersion);
@@ -142,7 +140,6 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   const skip = new Set<string>();
   let fromTask = "";
   let dryRun = false;
-  let pauseBeforeNotarize = false;
   let rollback = false;
   let rollbackToBuild = "";
   let rollbackStepsBack = 1;
@@ -233,10 +230,6 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
       dryRun = true;
       continue;
     }
-    if (arg === "--pause-before-notarize") {
-      pauseBeforeNotarize = true;
-      continue;
-    }
     if (arg === "--upload-sentry-dsyms") {
       uploadSentryDsyms = true;
       continue;
@@ -263,6 +256,12 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
 
   if (!appPath) {
     appPath = resolve(derivedData, "Build/Products/Release/Inline.app");
+  }
+  if (derivedData === resolve("/")) {
+    die("Refusing to use the filesystem root as --derived-data. Re-run without the malformed path argument.");
+  }
+  if (appPath === resolve("/Build/Products/Release/Inline.app")) {
+    die("Refusing malformed --app-path /Build/Products/Release/Inline.app. Re-run without the malformed path argument.");
   }
   if (rollback && uploadSentryDsyms) {
     die("--upload-sentry-dsyms is not supported with --rollback.");
@@ -291,9 +290,6 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   if (rollback && skip.size > 0) {
     die("--skip is not supported with --rollback.");
   }
-  if (rollback && pauseBeforeNotarize) {
-    die("--pause-before-notarize is not supported with --rollback.");
-  }
   if (rollback && releaseTag) {
     die("--release-tag is not supported with --rollback.");
   }
@@ -306,9 +302,6 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   if (dropBuild && skip.size > 0) {
     die("--skip is not supported with --drop-build.");
   }
-  if (dropBuild && pauseBeforeNotarize) {
-    die("--pause-before-notarize is not supported with --drop-build.");
-  }
   if (dropBuild && releaseTag) {
     die("--release-tag is not supported with --drop-build.");
   }
@@ -318,7 +311,6 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   if (dropBuild && allowDirty) {
     die("--allow-dirty is only useful for builds and is not supported with --drop-build.");
   }
-
   return {
     channel,
     derivedData,
@@ -331,7 +323,6 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
     skip,
     fromTask,
     dryRun,
-    pauseBeforeNotarize,
     rollback,
     rollbackToBuild,
     rollbackStepsBack,
@@ -350,6 +341,17 @@ function commandExists(cmd: string): boolean {
   return res.exitCode === 0;
 }
 
+function activeXcodebuildForDerivedData(derivedData: string): string {
+  if (!commandExists("pgrep")) return "";
+  const result = spawnSync({ cmd: ["pgrep", "-afil", "xcodebuild"], stdout: "pipe", stderr: "pipe" });
+  if (result.exitCode !== 0) return "";
+  return new TextDecoder()
+    .decode(result.stdout)
+    .split("\n")
+    .find((line) => line.includes(`-derivedDataPath ${derivedData}`))
+    ?.trim() ?? "";
+}
+
 function trimTrailingSlash(s: string): string {
   return s.replace(/\/+$/g, "");
 }
@@ -358,6 +360,11 @@ function nowIsoCompact(): string {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+
+function defaultDerivedDataPath(rootDir: string): string {
+  const reusablePath = resolve(rootDir, "build/InlineMacDirect/reusable");
+  return existsSync(reusablePath) ? realpathSync(reusablePath) : reusablePath;
 }
 
 function readPlistString(plistPath: string, key: string): string {
@@ -517,7 +524,6 @@ function ansiStrip(s: string): string {
 
 const color = {
   reset: "\x1b[0m",
-  dim: "\x1b[2m",
   bold: "\x1b[1m",
   red: "\x1b[31m",
   green: "\x1b[32m",
@@ -527,18 +533,11 @@ const color = {
 };
 
 class Ui {
-  private frame = 0;
-  private lastRenderAt = 0;
   private currentTaskId = "";
-  private currentLog: string[] = [];
-  private lastError = "";
   private tasks: Array<{ id: string; title: string; status: TaskStatus; note?: string }> = [];
-  private ticker: Timer | null = null;
-  private hintLine = "";
+  private taskStartedAt = new Map<string, number>();
   private logPath = "";
   private logWriteFailed = false;
-
-  constructor(private readonly interactive: boolean) {}
 
   setLogPath(logPath: string) {
     this.logPath = logPath;
@@ -547,7 +546,6 @@ class Ui {
       this.logPath,
       [`Inline macOS Release`, `Started: ${new Date().toISOString()}`, ``, ``].join("\n"),
     );
-    this.render(true);
   }
 
   getLogPath(): string {
@@ -555,8 +553,18 @@ class Ui {
   }
 
   setHintLine(hint: string) {
-    this.hintLine = hint;
-    this.render(true);
+    console.log(`${color.bold}Inline macOS Release${color.reset}`);
+    console.log(`${color.gray}${hint}${color.reset}`);
+    this.appendLogLine(hint);
+  }
+
+  showLogFiles(files: Array<{ label: string; path: string }>) {
+    console.log(`${color.gray}Detailed logs:${color.reset}`);
+    for (const file of files) {
+      console.log(`${color.gray}  ${file.label}: ${file.path}${color.reset}`);
+      this.appendLogLine(`Log (${file.label}): ${file.path}`);
+    }
+    console.log("");
   }
 
   init(tasks: Task[]) {
@@ -566,64 +574,65 @@ class Ui {
       status: t.enabled ? "pending" : "skipped",
       note: !t.enabled ? t.skipReason : undefined,
     }));
-    this.render(true);
+    this.appendLogLine(`Pipeline: ${this.tasks.map((task) => `${task.id}=${task.status}`).join(", ")}`);
   }
 
   setRunning(taskId: string) {
     this.currentTaskId = taskId;
-    this.currentLog = [];
-    this.lastError = "";
+    this.taskStartedAt.set(taskId, Date.now());
     this.appendLogLine(`==> ${this.taskLabel(taskId)}`);
     this.setStatus(taskId, "running");
-    this.startTicker();
+    console.log(`${color.blue}→${color.reset} ${this.taskLabel(taskId)}`);
   }
 
   setSkipped(taskId: string, reason?: string) {
     this.appendLogLine(`-- skipped ${this.taskLabel(taskId)}${reason ? ` (${reason})` : ""}`);
     this.setStatus(taskId, "skipped", reason);
-    this.stopTicker();
+    console.log(`${color.gray}– ${this.taskLabel(taskId)}${reason ? ` (${reason})` : ""}${color.reset}`);
+    if (this.currentTaskId === taskId) this.currentTaskId = "";
   }
 
   setSuccess(taskId: string, note?: string) {
     this.appendLogLine(`-- ok ${this.taskLabel(taskId)}${note ? ` (${note})` : ""}`);
     this.setStatus(taskId, "success", note);
-    this.stopTicker();
+    const suffix = [this.elapsedSuffix(taskId), note].filter(Boolean).join(", ");
+    console.log(`${color.green}✓${color.reset} ${this.taskLabel(taskId)}${suffix ? ` ${color.gray}(${suffix})${color.reset}` : ""}`);
+    if (this.currentTaskId === taskId) this.currentTaskId = "";
   }
 
   setFailed(taskId: string, message: string) {
-    this.lastError = message;
     this.appendLogLine(`-- failed ${this.taskLabel(taskId)}: ${message}`);
     this.setStatus(taskId, "failed");
-    this.stopTicker();
+    const elapsed = this.elapsedSuffix(taskId);
+    console.error(`${color.red}✗ ${this.taskLabel(taskId)}${elapsed ? ` (${elapsed})` : ""}${color.reset}`);
+    console.error(`${color.red}  ${message}${color.reset}`);
+    if (this.currentTaskId === taskId) this.currentTaskId = "";
   }
 
   log(line: string) {
     const cleaned = ansiStrip(line).replace(/\r/g, "").trimEnd();
     if (!cleaned) return;
     this.appendLogLine(cleaned);
-    this.currentLog.push(cleaned);
-    if (this.currentLog.length > 200) this.currentLog.splice(0, this.currentLog.length - 200);
-    this.render(false);
   }
 
   info(line: string) {
     const cleaned = ansiStrip(line).replace(/\r/g, "").trimEnd();
     if (!cleaned) return;
-    if (this.interactive) this.log(cleaned);
-    else {
-      this.appendLogLine(cleaned);
-      console.log(cleaned);
-    }
+    this.appendLogLine(cleaned);
+    console.log(`  ${cleaned}`);
   }
 
   error(line: string) {
     const cleaned = ansiStrip(line).replace(/\r/g, "").trimEnd();
     if (!cleaned) return;
-    if (this.interactive) this.log(cleaned);
-    else {
-      this.appendLogLine(cleaned);
-      console.error(cleaned);
-    }
+    this.appendLogLine(cleaned);
+    console.error(`${color.red}  ${cleaned}${color.reset}`);
+  }
+
+  detail(label: string, value: string) {
+    const line = `${label}: ${value}`;
+    this.appendLogLine(`-- ${line}`);
+    console.log(`  ${color.gray}${label}:${color.reset} ${value}`);
   }
 
   private appendLogLine(line: string) {
@@ -633,7 +642,7 @@ class Ui {
     } catch (err) {
       this.logWriteFailed = true;
       const msg = err instanceof Error ? err.message : String(err);
-      if (!this.interactive) console.error(`Could not write release log ${this.logPath}: ${msg}`);
+      console.error(`Could not write release log ${this.logPath}: ${msg}`);
     }
   }
 
@@ -648,95 +657,71 @@ class Ui {
       t.status = status;
       if (note) t.note = note;
     }
-    this.render(true);
   }
 
-  private statusBadge(status: TaskStatus): string {
-    switch (status) {
-      case "pending":
-        return `${color.gray}[TODO]${color.reset}`;
-      case "running": {
-        const sp = ["|", "/", "-", "\\"][this.frame % 4];
-        return `${color.blue}[ ${sp} ]${color.reset}`;
-      }
-      case "success":
-        return `${color.green}[ OK ]${color.reset}`;
-      case "failed":
-        return `${color.red}[FAIL]${color.reset}`;
-      case "skipped":
-        return `${color.gray}[SKIP]${color.reset}`;
-    }
-  }
-
-  private render(force: boolean) {
-    if (!this.interactive) return;
-    const now = Date.now();
-    if (!force && now - this.lastRenderAt < 60) return;
-    this.lastRenderAt = now;
-    this.frame++;
-
-    const lines: string[] = [];
-    lines.push(`${color.bold}Inline macOS Release${color.reset}`);
-    if (this.hintLine) lines.push(`${color.gray}${this.hintLine}${color.reset}`);
-    if (this.logPath) lines.push(`${color.gray}Log: ${this.logPath}${color.reset}`);
-    lines.push(`${color.gray}Press Ctrl+C to cancel.${color.reset}`);
-    lines.push("");
-
-    for (const t of this.tasks) {
-      const badge = this.statusBadge(t.status);
-      const isCurrent = t.id === this.currentTaskId && t.status === "running";
-      const title = isCurrent ? `${color.bold}${t.title}${color.reset}` : t.title;
-      const note = t.note ? ` ${color.gray}(${t.note})${color.reset}` : "";
-      lines.push(`${badge} ${title}${note}`);
-    }
-
-    const tail = this.currentLog.slice(-10);
-    lines.push("");
-    lines.push(`${color.bold}Logs${color.reset} ${color.gray}(latest)${color.reset}`);
-    if (tail.length === 0) {
-      lines.push(`${color.gray}${color.dim}(no output yet)${color.reset}`);
-    } else {
-      for (const l of tail) lines.push(`${color.gray}${l}${color.reset}`);
-    }
-
-    if (this.lastError) {
-      lines.push("");
-      lines.push(`${color.red}${color.bold}Error${color.reset}`);
-      lines.push(`${color.red}${this.lastError}${color.reset}`);
-    }
-
-    // Clear screen + move cursor to top-left.
-    process.stdout.write("\x1b[2J\x1b[H" + lines.join("\n") + "\n");
+  private elapsedSuffix(taskId: string): string {
+    const startedAt = this.taskStartedAt.get(taskId);
+    return startedAt ? formatElapsed(Date.now() - startedAt) : "";
   }
 
   getCurrentTaskId(): string {
     return this.currentTaskId;
   }
+}
 
-  private startTicker() {
-    if (!this.interactive) return;
-    if (this.ticker) return;
-    this.ticker = setInterval(() => this.render(false), 120);
-  }
+function formatElapsed(durationMs: number): string {
+  const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}
 
-  private stopTicker() {
-    if (!this.ticker) return;
-    clearInterval(this.ticker);
-    this.ticker = null;
+function readConfiguredMarketingVersion(rootDir: string, ui: Ui): string {
+  if (!commandExists("xcodebuild")) return "";
+  const result = spawnSync({
+    cmd: [
+      "xcodebuild",
+      "-project",
+      resolve(rootDir, "apple/Inline.xcodeproj"),
+      "-scheme",
+      "Inline (macOS)",
+      "-configuration",
+      "Release",
+      "-showBuildSettings",
+    ],
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const stdout = new TextDecoder().decode(result.stdout);
+  const stderr = new TextDecoder().decode(result.stderr);
+  for (const line of `${stdout}\n${stderr}`.split("\n")) {
+    if (line.trim()) ui.log(`[version] ${line}`);
   }
+  if (result.exitCode !== 0) return "";
+  return stdout.match(/^\s*MARKETING_VERSION = (.+)$/m)?.[1]?.trim() ?? "";
 }
 
 async function runStreaming(
   ui: Ui,
   cmd: string[],
-  opts: { cwd: string; env?: Record<string, string> },
+  opts: { cwd: string; env?: Record<string, string>; onLine?: (line: string) => void },
 ): Promise<void> {
+  const recentLines: string[] = [];
+  let lastErrorLine = "";
   const proc = Bun.spawn(cmd, {
     cwd: opts.cwd,
     env: { ...process.env, ...(opts.env ?? {}) },
+    stdin: "inherit",
     stdout: "pipe",
     stderr: "pipe",
   });
+
+  const recordLine = (line: string) => {
+    const cleaned = ansiStrip(line).trim();
+    recentLines.push(cleaned);
+    if (/\berror:/i.test(cleaned)) lastErrorLine = cleaned;
+    if (recentLines.length > 200) recentLines.splice(0, recentLines.length - 200);
+  };
 
   const forward = async (stream: ReadableStream<Uint8Array> | null, prefix: string) => {
     if (!stream) return;
@@ -751,16 +736,27 @@ async function runStreaming(
       while ((idx = buf.indexOf("\n")) !== -1) {
         const line = buf.slice(0, idx);
         buf = buf.slice(idx + 1);
+        recordLine(prefix + line);
         ui.log(prefix + line);
+        opts.onLine?.(prefix + line);
       }
     }
-    if (buf.trim().length) ui.log(prefix + buf);
+    if (buf.trim().length) {
+      recordLine(prefix + buf);
+      ui.log(prefix + buf);
+      opts.onLine?.(prefix + buf);
+    }
   };
 
   await Promise.all([forward(proc.stdout, ""), forward(proc.stderr, "")]);
   const exitCode = await proc.exited;
   if (exitCode !== 0) {
-    throw new Error(`Command failed (${exitCode}): ${cmd.map((c) => (c.includes(" ") ? JSON.stringify(c) : c)).join(" ")}`);
+    const usefulLine = lastErrorLine || [...recentLines]
+      .reverse()
+      .find((line) => !line.endsWith(":") && line !== "** BUILD FAILED **" && /(error|failed|requires|not found|does not|invalid|timed out|denied|read.only|can.?t save)/i.test(line));
+    throw new Error(
+      `Command failed (${exitCode}): ${cmd.map((c) => (c.includes(" ") ? JSON.stringify(c) : c)).join(" ")}${usefulLine ? `\nLast output: ${usefulLine}` : ""}`,
+    );
   }
 }
 
@@ -802,9 +798,19 @@ function validateSkipIds(skip: Set<string>) {
 }
 
 function formatCmd(args: string[]): string {
-  return args
-    .map((arg) => (/^[A-Za-z0-9_./:=+-]+$/.test(arg) ? arg : JSON.stringify(arg)))
-    .join(" ");
+  const quote = (arg: string) => (/^[A-Za-z0-9_./:=+-]+$/.test(arg) ? arg : JSON.stringify(arg));
+  const lines = [args.slice(0, 3).map(quote).join(" ")];
+  for (let index = 3; index < args.length; index++) {
+    const arg = args[index];
+    const next = args[index + 1];
+    if (arg.startsWith("--") && next && !next.startsWith("--")) {
+      lines.push(`${quote(arg)} ${quote(next)}`);
+      index++;
+    } else {
+      lines.push(quote(arg));
+    }
+  }
+  return lines.join(" \\\n  ");
 }
 
 function defaultReleaseTag(channel: ReleaseChannel): string {
@@ -826,8 +832,8 @@ function validateReleaseTag(channel: ReleaseChannel, releaseTag: string): void {
 }
 
 function buildResumeCommand(ctx: ReleaseContext, fromTask: string): string {
-  const args = ["bun", "run", "scripts/macos/release-app.ts", "--channel", ctx.channel, "--from", fromTask];
-  const defaultDerivedData = resolve(ctx.rootDir, "build/InlineMacDirect");
+  const args = ["bun", "run", resolve(ctx.rootDir, "scripts/macos/release-app.ts"), "--channel", ctx.channel, "--from", fromTask];
+  const defaultDerivedData = defaultDerivedDataPath(ctx.rootDir);
   const defaultAppPath = resolve(defaultDerivedData, "Build/Products/Release/Inline.app");
   const defaultDmgPath = resolve(ctx.rootDir, "build/macos-direct/Inline.dmg");
   const defaultSparkleDir = resolve(ctx.rootDir, ".action/sparkle", sparkleVersion);
@@ -848,7 +854,6 @@ function buildResumeCommand(ctx: ReleaseContext, fromTask: string): string {
 
   if (ctx.skipGithubRelease) args.push("--skip-github-release");
   if (concreteSkipIds.length) args.push("--skip", concreteSkipIds.join(","));
-  if (ctx.pauseBeforeNotarize) args.push("--pause-before-notarize");
   if (ctx.allowDirty) args.push("--allow-dirty");
   if (!ctx.rollback && !ctx.dropBuild && !ctx.skip.has("upload-sentry-dsyms")) args.push("--upload-sentry-dsyms");
   if (ctx.derivedData !== defaultDerivedData) args.push("--derived-data", ctx.derivedData);
@@ -861,8 +866,8 @@ function buildResumeCommand(ctx: ReleaseContext, fromTask: string): string {
 
 async function main() {
   const rootDir = resolve(import.meta.dir, "../..");
-  const interactive = Boolean(process.stdout.isTTY && process.stderr.isTTY && !process.env.CI);
-  const ui = new Ui(interactive);
+  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY && process.stderr.isTTY && !process.env.CI);
+  const ui = new Ui();
 
   let keepTempDir = false;
   const parsedRaw = parseArgs(process.argv.slice(2), rootDir);
@@ -894,7 +899,6 @@ async function main() {
     skip: parsed0.skip,
     fromTask: parsed0.fromTask,
     dryRun: parsed0.dryRun,
-    pauseBeforeNotarize: parsed0.pauseBeforeNotarize,
     rollback: parsed0.rollback,
     rollbackToBuild: parsed0.rollbackToBuild,
     rollbackStepsBack: parsed0.rollbackStepsBack,
@@ -945,13 +949,31 @@ async function main() {
       ? `Rollback  Channel: ${opts.channel}${opts.rollbackToBuild ? `  Build: ${opts.rollbackToBuild}` : `  Steps back: ${opts.rollbackStepsBack}`}${opts.fromTask ? `  From: ${opts.fromTask}` : ""}${opts.dryRun ? "  Dry run" : ""}`
       : opts.dropBuild
         ? `Drop build  Channel: ${opts.channel}  Build: ${opts.dropBuild}${opts.dryRun ? "  Dry run" : ""}`
-        : `Release  Channel: ${opts.channel}${opts.releaseTag ? `  Tag: ${opts.releaseTag}` : ""}${opts.fromTask ? `  From: ${opts.fromTask}` : ""}${opts.pauseBeforeNotarize ? "  Pause before notarize" : ""}${opts.allowDirty ? "  Allow dirty" : ""}${opts.dryRun ? "  Dry run" : ""}`,
+        : `Release  Channel: ${opts.channel}${opts.releaseTag ? `  Tag: ${opts.releaseTag}` : ""}${opts.fromTask ? `  From: ${opts.fromTask}` : ""}${opts.allowDirty ? "  Allow dirty" : ""}${opts.dryRun ? "  Dry run" : ""}`,
   );
-  ui.info(`Release log: ${releaseLogPath}`);
+  const logFiles = [{ label: "release", path: releaseLogPath }];
+  if (!opts.rollback && !opts.dropBuild) {
+    logFiles.push(
+      { label: "build", path: resolve(rootDir, "build/macos-direct/build-direct.log") },
+      { label: "Xcode", path: resolve(rootDir, "build/macos-direct/xcodebuild.log") },
+    );
+  }
+  ui.showLogFiles(logFiles);
 
   const tasks: Task[] = [];
 
   const runPreflight: Task["run"] = async (ctx, ui) => {
+    if (!ctx.rollback && !ctx.dropBuild) {
+      const configuredVersion = readConfiguredMarketingVersion(ctx.rootDir, ui);
+      const plannedBuild = git(ctx.rootDir, ["rev-list", "--count", "HEAD"]);
+      const plannedCommit = git(ctx.rootDir, ["rev-parse", "--short", "HEAD"]);
+      if (configuredVersion) ctx.version = configuredVersion;
+      ui.detail("Version", `${configuredVersion || "unknown"}${plannedBuild ? ` (build ${plannedBuild})` : ""}`);
+      ui.detail("Tag", ctx.releaseTag || "none");
+      ui.detail("Channel", ctx.channel);
+      if (plannedCommit) ui.detail("Commit", plannedCommit);
+      ui.detail("DerivedData", `${existsSync(ctx.derivedData) ? "reusing" : "creating"} ${ctx.derivedData}`);
+    }
     const missing: string[] = [];
     for (const c of ["bun", "python3", "curl", "git"]) {
       if (!commandExists(c)) missing.push(c);
@@ -979,10 +1001,6 @@ async function main() {
     if (!ctx.rollback && !ctx.dropBuild && !opts.skipGithubRelease && opts.releaseTag) {
       if (!commandExists("gh")) missing.push("gh");
     }
-    if (ctx.pauseBeforeNotarize && taskEnabled(opts, "build") && !interactive) {
-      if (ctx.dryRun) ui.info("Warning: --pause-before-notarize requires an interactive terminal when executing the build.");
-      else throw new Error("--pause-before-notarize requires an interactive terminal.");
-    }
     if (stableReleaseNeedsCleanWorktree(ctx)) {
       const dirty = gitLines(ctx.rootDir, ["status", "--porcelain"]);
       if (dirty.length && !ctx.allowDirty) {
@@ -1003,6 +1021,15 @@ async function main() {
       throw new Error(`Missing required command(s): ${missing.join(", ")}`);
     }
     if (!ctx.rollback && !ctx.dropBuild && taskEnabled(opts, "build")) {
+      const activeOwner = activeXcodebuildForDerivedData(ctx.derivedData);
+      if (activeOwner) {
+        const message = `DerivedData is already in use by another Xcode build: ${ctx.derivedData}\n${activeOwner}`;
+        if (ctx.dryRun) ui.info(`Warning: ${message}`);
+        else throw new Error(message);
+      }
+    }
+    ui.detail("Tools", "available");
+    if (!ctx.rollback && !ctx.dropBuild && taskEnabled(opts, "build")) {
       const command = ["bun", "run", resolve(ctx.rootDir, "scripts/macos/check-grid-livekit-pin.ts")];
       if (ctx.dryRun) {
         try {
@@ -1012,6 +1039,7 @@ async function main() {
         }
       } else {
         await runStreaming(ui, command, { cwd: ctx.rootDir });
+        ui.detail("LiveKit pin", "verified");
       }
     }
     if (!ctx.rollback && !ctx.dropBuild && taskEnabled(opts, "build")) {
@@ -1021,13 +1049,14 @@ async function main() {
         await runStreaming(ui, ["bash", resolve(ctx.rootDir, "scripts/macos/check-notary-credentials.sh")], {
           cwd: ctx.rootDir,
         });
+        ui.detail("Notarization credentials", "verified");
       }
     }
   };
 
   tasks.push({
     id: "preflight",
-    title: "Preflight checks",
+    title: "Release details and preflight checks",
     enabled: true,
     dryRun: async (ctx, ui) => {
       ui.info("Checking tool availability only.");
@@ -1112,9 +1141,12 @@ async function main() {
           throw new Error("Rollback DMG URL missing. prepare-rollback must run first.");
         }
         for (let attempt = 1; attempt <= 3; attempt++) {
-          ui.info(`curl -I ${ctx.dmgUrl} (attempt ${attempt}/3)`);
+          ui.log(`curl -I ${ctx.dmgUrl} (attempt ${attempt}/3)`);
           const res = spawnSync({ cmd: ["curl", "-fsI", ctx.dmgUrl], stdout: "pipe", stderr: "pipe" });
-          if (res.exitCode === 0) return;
+          if (res.exitCode === 0) {
+            ui.detail("Verified DMG", ctx.dmgUrl);
+            return;
+          }
           if (attempt === 3) {
             const err = new TextDecoder().decode(res.stderr).trim();
             throw new Error(`Rollback DMG not reachable at ${ctx.dmgUrl}${err ? `\n${err}` : ""}`);
@@ -1181,6 +1213,7 @@ async function main() {
             BUILD_NUMBER: ctx.buildNumber,
           },
         });
+        ui.detail("Uploaded appcast", ctx.appcastUrl);
       },
     });
   } else if (opts.dropBuild) {
@@ -1300,12 +1333,13 @@ async function main() {
             BUILD_NUMBER: ctx.buildNumber,
           },
         });
+        ui.detail("Uploaded appcast", ctx.appcastUrl);
       },
     });
   } else {
     tasks.push({
       id: "build",
-      title: "Build, sign, DMG, notarize (build-direct.sh)",
+      title: "Build, sign, and notarize app",
       enabled: taskEnabled(opts, "build"),
       skipReason: taskEnabled(opts, "build") ? undefined : "operator requested",
       dryRun: (ctx, ui) => {
@@ -1319,13 +1353,19 @@ async function main() {
         ui.info(`  MACOS_RELEASE_ARCH=${macosReleaseArch}`);
         ui.info("  ENABLE_CODE_COVERAGE=NO");
         ui.info("  DEAD_CODE_STRIPPING=YES");
-        ui.info(`  PAUSE_BEFORE_NOTARIZE=${ctx.pauseBeforeNotarize ? "1" : "0"}`);
         ui.info("build-direct.sh strips the release executable before signing.");
         ui.info("build-direct.sh enforces signing/notarization env vars.");
       },
       run: async (ctx, ui) => {
         // Let build-direct.sh enforce its own env requirements. We only pass paths/options through.
-        ui.info(`Running build script; output in ${ctx.tempDir}`);
+        let artifactsShown = false;
+        let notarizationStartedAt = 0;
+        const showArtifacts = () => {
+          if (artifactsShown) return;
+          artifactsShown = true;
+          ui.detail("Built app", ctx.appPath);
+          ui.detail("DMG", ctx.dmgPath);
+        };
         await runStreaming(ui, ["bash", resolve(ctx.rootDir, "scripts/macos/build-direct.sh")], {
           cwd: ctx.rootDir,
           env: {
@@ -1334,7 +1374,21 @@ async function main() {
             DMG_PATH: ctx.dmgPath,
             SPARKLE_DIR: ctx.sparkleDir,
             MACOS_RELEASE_ARCH: macosReleaseArch,
-            PAUSE_BEFORE_NOTARIZE: ctx.pauseBeforeNotarize ? "1" : "0",
+          },
+          onLine: (line) => {
+            if (line.includes("** BUILD SUCCEEDED **")) {
+              ui.detail("Xcode build", "completed");
+            } else if (line.startsWith("Build/sign step complete.")) {
+              showArtifacts();
+            } else if (line.startsWith("Starting notarization for DMG:")) {
+              notarizationStartedAt = Date.now();
+              ui.detail("Notarization", `started ${new Date(notarizationStartedAt).toLocaleTimeString()}`);
+            } else if (line.startsWith("Built app:")) {
+              showArtifacts();
+              if (notarizationStartedAt) {
+                ui.detail("Notarization", `completed in ${formatElapsed(Date.now() - notarizationStartedAt)}`);
+              }
+            }
           },
         });
       },
@@ -1427,6 +1481,7 @@ async function main() {
           BUILD_NUMBER: ctx.buildNumber,
         },
       });
+      ui.detail("Uploaded DMG", ctx.dmgUrl);
     },
     });
 
@@ -1451,9 +1506,12 @@ async function main() {
       }
 
       for (let attempt = 1; attempt <= 5; attempt++) {
-        ui.info(`curl -I ${ctx.dmgUrl} (attempt ${attempt}/5)`);
+        ui.log(`curl -I ${ctx.dmgUrl} (attempt ${attempt}/5)`);
         const res = spawnSync({ cmd: ["curl", "-fsI", ctx.dmgUrl], stdout: "pipe", stderr: "pipe" });
-        if (res.exitCode === 0) return;
+        if (res.exitCode === 0) {
+          ui.detail("Verified DMG", ctx.dmgUrl);
+          return;
+        }
         if (attempt === 5) {
           const err = new TextDecoder().decode(res.stderr).trim();
           throw new Error(`DMG not reachable at ${ctx.dmgUrl}${err ? `\n${err}` : ""}`);
@@ -1611,6 +1669,7 @@ async function main() {
           BUILD_NUMBER: ctx.buildNumber,
         },
       });
+      ui.detail("Uploaded appcast", ctx.appcastUrl);
     },
     });
 
@@ -1653,6 +1712,7 @@ async function main() {
       }
 
       await runStreaming(ui, ["gh", "release", "upload", ctx.releaseTag, ctx.dmgPath, "--clobber"], { cwd: ctx.rootDir });
+      ui.detail("GitHub release tag", ctx.releaseTag);
     },
     });
   }
@@ -1678,8 +1738,21 @@ async function main() {
     }
   };
   process.on("exit", cleanup);
+  let handlingInterrupt = false;
   process.on("SIGINT", () => {
-    cleanup();
+    if (handlingInterrupt) return;
+    handlingInterrupt = true;
+    const current = ui.getCurrentTaskId();
+    try {
+      rmSync(ctx.signingKeyPath, { force: true });
+    } catch {
+      // ignore
+    }
+    keepTempDir = true;
+    ui.error("Interrupted by Ctrl+C.");
+    if (current) ui.error(`Resume this step:\n  ${buildResumeCommand(ctx, current)}`);
+    if (ui.getLogPath()) ui.error(`Release log: ${ui.getLogPath()}`);
+    ui.error(`Temp dir: ${ctx.tempDir}`);
     process.exit(130);
   });
 
@@ -1730,15 +1803,9 @@ async function main() {
     const current = ui.getCurrentTaskId();
     if (current) {
       ui.setFailed(current, msg);
-      if (!interactive) ui.error(msg);
     } else ui.error(msg);
     if (current) {
-      ui.error(`Retry this step: ${buildResumeCommand(ctx, current)}`);
-      const currentIndex = tasks.findIndex((task) => task.id === current);
-      const nextTask = currentIndex === -1 ? undefined : tasks.slice(currentIndex + 1).find((task) => task.enabled);
-      if (nextTask) {
-        ui.error(`Continue past it: ${buildResumeCommand(ctx, nextTask.id)}`);
-      }
+      ui.error(`Retry this step:\n  ${buildResumeCommand(ctx, current)}`);
     }
     if (ui.getLogPath()) ui.error(`Release log: ${ui.getLogPath()}`);
     ui.error(`Temp dir: ${ctx.tempDir}`);

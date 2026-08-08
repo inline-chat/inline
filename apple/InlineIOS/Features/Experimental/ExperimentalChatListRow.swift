@@ -1,14 +1,14 @@
 import InlineKit
 import InlineUI
 import SwiftUI
+import Translation
 
 struct ExperimentalChatListRow: View, @MainActor Equatable {
   let item: ChatListItemSnapshot
   let layoutMode: ChatListLayoutMode
   let showsPinnedIndicator: Bool
   let showsActivityTime: Bool
-
-  @ScaledMetric(relativeTo: .body) private var metricScale: CGFloat = 1
+  @State private var showsTranslatedPreview: Bool
 
   init(
     item: ChatListItemSnapshot,
@@ -20,6 +20,9 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
     self.layoutMode = layoutMode
     self.showsPinnedIndicator = showsPinnedIndicator
     self.showsActivityTime = showsActivityTime
+    _showsTranslatedPreview = State(
+      initialValue: TranslationState.shared.isTranslationEnabled(for: item.peer)
+    )
   }
 
   static func == (lhs: Self, rhs: Self) -> Bool {
@@ -27,7 +30,6 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
       && lhs.layoutMode == rhs.layoutMode
       && lhs.showsPinnedIndicator == rhs.showsPinnedIndicator
       && lhs.showsActivityTime == rhs.showsActivityTime
-      && lhs.metricScale == rhs.metricScale
   }
 
   var body: some View {
@@ -54,6 +56,12 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
     .contentShape(Rectangle())
     .accessibilityElement(children: .combine)
     .accessibilityLabel(accessibilityLabel)
+    .onReceive(TranslationState.shared.subject) { event in
+      let (peer, isEnabled) = event
+      guard peer == item.peer else { return }
+      guard showsTranslatedPreview != isEnabled else { return }
+      showsTranslatedPreview = isEnabled
+    }
   }
 
   private var titleLine: some View {
@@ -78,7 +86,7 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
          layoutMode != .compact,
          let timestampText = item.timestampText {
         Text(timestampText)
-          .font(.system(size: 11))
+          .font(.caption2)
           .foregroundStyle(.tertiary)
           .lineLimit(1)
           .fixedSize(horizontal: true, vertical: false)
@@ -97,7 +105,7 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
           senderName: item.previewSenderName,
           text: previewText
         )
-          .font(.system(size: 14))
+          .font(.subheadline)
           .lineLimit(metrics.previewLines)
           .truncationMode(.tail)
           .frame(maxWidth: .infinity, alignment: .leading)
@@ -162,7 +170,7 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
       if item.unreadMark, item.unreadCount == 0 {
         Circle()
           .fill(item.isProminent ? Color.accentColor : Color.secondary)
-          .frame(width: 6 * metricScale, height: 6 * metricScale)
+          .frame(width: 6, height: 6)
           .accessibilityHidden(true)
       }
     }
@@ -174,8 +182,8 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
       Text(item.unreadCount > 99 ? "99+" : "\(item.unreadCount)")
         .font(.caption2.weight(.semibold))
         .foregroundStyle(.white)
-        .padding(.horizontal, 6 * metricScale)
-        .frame(minWidth: 20 * metricScale, minHeight: 20 * metricScale)
+        .padding(.horizontal, 6)
+        .frame(minWidth: 20, minHeight: 20)
         .background(item.isProminent ? Color.accentColor : Color.secondary, in: Capsule())
         .accessibilityLabel("\(item.unreadCount) unread messages")
     }
@@ -186,11 +194,16 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
   }
 
   private var unreadGutter: CGFloat {
-    11 * metricScale
+    11
   }
 
   private var resolvedPreviewText: String? {
-    let preview = item.previewText?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let source = if showsTranslatedPreview {
+      item.translatedPreviewText ?? item.previewText
+    } else {
+      item.previewText
+    }
+    let preview = source?.trimmingCharacters(in: .whitespacesAndNewlines)
     return preview?.isEmpty == false ? preview : nil
   }
 
@@ -218,7 +231,7 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
   }
 
   private var metrics: Metrics {
-    let base = switch layoutMode {
+    switch layoutMode {
     case .compact:
       Metrics(avatarSize: 34, minimumHeight: 35, horizontalSpacing: 10, textSpacing: 0, previewLines: 0)
     case .standard:
@@ -226,15 +239,14 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
     case .large:
       Metrics(avatarSize: 56, minimumHeight: 66, horizontalSpacing: 12, textSpacing: 2, previewLines: 2)
     }
-    return base.scaled(by: metricScale)
   }
 
   private var titleFont: Font {
     switch layoutMode {
     case .compact:
-      .system(size: 18, weight: item.isUnread ? .semibold : .medium)
+      .body.weight(item.isUnread ? .semibold : .medium)
     case .standard, .large:
-      .system(size: 16, weight: item.isUnread ? .semibold : .medium)
+      .callout.weight(item.isUnread ? .semibold : .medium)
     }
   }
 }
@@ -259,14 +271,4 @@ private struct Metrics {
   let horizontalSpacing: CGFloat
   let textSpacing: CGFloat
   let previewLines: Int
-
-  func scaled(by scale: CGFloat) -> Self {
-    Self(
-      avatarSize: avatarSize * scale,
-      minimumHeight: minimumHeight * scale,
-      horizontalSpacing: horizontalSpacing * scale,
-      textSpacing: textSpacing * scale,
-      previewLines: previewLines
-    )
-  }
 }

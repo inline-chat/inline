@@ -166,7 +166,7 @@
     },
     "packages/openclaw": {
       "name": "@inline-openclaw/inline",
-      "version": "0.0.54",
+      "version": "0.0.55",
       "dependencies": {
         "@inline-chat/realtime-sdk": "0.0.13",
         "zod": "4.4.3",
@@ -179,7 +179,7 @@
         "vitest": "4.1.10",
       },
       "peerDependencies": {
-        "openclaw": ">=2026.6.11",
+        "openclaw": ">=2026.6.11 || >=2026.7.1-0",
       },
       "optionalPeers": [
         "openclaw",

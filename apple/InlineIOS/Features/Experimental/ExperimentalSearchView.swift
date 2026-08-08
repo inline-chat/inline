@@ -12,7 +12,6 @@ struct ExperimentalSearchView: View {
   @Environment(Router.self) private var router
   @Environment(ExperimentalHomeActionCoordinator.self) private var homeActions
   @Environment(\.appDatabase) private var database
-  @Environment(\.realtimeV2) private var realtimeV2
   @EnvironmentObject private var dataManager: DataManager
 
   @State private var searchModel: InlineSearchViewModel?
@@ -35,11 +34,6 @@ struct ExperimentalSearchView: View {
             openMessage: openSearchMessage,
             openGlobalUser: openSearchGlobalUser
           )
-          .safeAreaInset(edge: .top, spacing: 0) {
-            if let errorText = searchModel.errorText, searchModel.hasResults {
-              searchErrorBanner(errorText)
-            }
-          }
         } else {
           ProgressView()
         }
@@ -106,26 +100,6 @@ struct ExperimentalSearchView: View {
     } else if !hasResults {
       ContentUnavailableView.search(text: trimmedQuery)
     }
-  }
-
-  private func searchErrorBanner(_ errorText: String) -> some View {
-    HStack(spacing: 10) {
-      Image(systemName: "exclamationmark.triangle.fill")
-        .foregroundStyle(.orange)
-
-      Text(errorText)
-        .font(.footnote)
-        .foregroundStyle(.secondary)
-        .lineLimit(2)
-
-      Spacer(minLength: 4)
-
-      Button("Retry", action: retrySearch)
-        .font(.footnote.weight(.semibold))
-    }
-    .padding(.horizontal, 16)
-    .padding(.vertical, 10)
-    .background(.bar)
   }
 
   private func retrySearch() {
@@ -208,7 +182,7 @@ struct ExperimentalSearchView: View {
     Task {
       do {
         _ = try await homeActions.perform(peer: peer) {
-          _ = try await realtimeV2.send(.updateDialogOpen(peerId: peer, open: true))
+          _ = try await InboxMembershipService.shared.open(peer: peer)
         }
       } catch {
         Log.shared.error("Failed to open search result in Inbox", error: error)

@@ -736,6 +736,20 @@
       "when": 1785594979100,
       "tag": "0104_email-campaign-from-address",
       "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1786205643032,
+      "tag": "0105_collapse-history",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1786212695182,
+      "tag": "0106_collapse-history-timestamp",
+      "breakpoints": true
     }
   ]
 }

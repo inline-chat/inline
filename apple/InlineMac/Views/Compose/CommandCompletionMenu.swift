@@ -4,7 +4,7 @@ import InlineKit
 protocol CommandCompletionMenuDelegate: AnyObject {
   func commandMenu(
     _ menu: CommandCompletionMenu,
-    didSelectSuggestion suggestion: PeerBotCommandSuggestion,
+    didSelectSuggestion suggestion: ComposeCommandSource,
     sendAfterInsertion: Bool
   )
   func commandMenuDidRequestClose(_ menu: CommandCompletionMenu)
@@ -17,7 +17,7 @@ final class CommandCompletionMenu: NSView {
   private let tableView = NSTableView()
   private let backgroundView = NSVisualEffectView()
 
-  private var suggestions: [PeerBotCommandSuggestion] = []
+  private var suggestions: [ComposeCommandSource] = []
   private var selectedIndex = 0
   private(set) var isVisible = false
   private var heightConstraint: NSLayoutConstraint!
@@ -92,7 +92,7 @@ final class CommandCompletionMenu: NSView {
     isHidden = true
   }
 
-  func updateSuggestions(_ suggestions: [PeerBotCommandSuggestion]) {
+  func updateSuggestions(_ suggestions: [ComposeCommandSource]) {
     self.suggestions = suggestions
     selectedIndex = 0
     updateTableViewAndHeight()

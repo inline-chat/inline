@@ -5,14 +5,99 @@ import Foundation
 import GRDB
 import InlineKit
 import Logger
+import QuickLookUI
+
+struct DocumentPresentationPlan: Equatable {
+  static let iconSize: CGFloat = 36
+  static let thumbnailSize: CGFloat = 70
+  static let thumbnailPreferredWidth: CGFloat = 300
+  static let thumbnailCornerRadius: CGFloat = 8
+  static let iconSpacing: CGFloat = 8
+  static let metadataSpacing: CGFloat = 8
+  static let closeButtonSize: CGFloat = 24
+
+  let size: CGSize
+  let mediaFrame: CGRect
+  let iconFrame: CGRect
+  let fileNameFrame: CGRect
+  let fileSizeFrame: CGRect
+  let actionFrame: CGRect
+  let showsAction: Bool
+  let closeFrame: CGRect?
+
+  static func preferredHeight(for documentInfo: DocumentInfo) -> CGFloat {
+    documentInfo.thumbnail?.bestPhotoSize() == nil ? Theme.documentViewHeight : thumbnailSize
+  }
+
+  static func preferredWidth(for documentInfo: DocumentInfo) -> CGFloat {
+    documentInfo.thumbnail?.bestPhotoSize() == nil ? Theme.documentViewWidth : thumbnailPreferredWidth
+  }
+
+  static func make(
+    documentInfo: DocumentInfo,
+    width: CGFloat,
+    fileSizeWidth: CGFloat,
+    actionWidth: CGFloat,
+    allowsAction: Bool,
+    showsClose: Bool
+  ) -> Self {
+    let height = preferredHeight(for: documentInfo)
+    let hasThumbnail = documentInfo.thumbnail?.bestPhotoSize() != nil
+    let mediaSize = hasThumbnail ? thumbnailSize : iconSize
+    let mediaFrame = CGRect(
+      x: 0,
+      y: floor((height - mediaSize) / 2),
+      width: mediaSize,
+      height: mediaSize
+    )
+    let iconFrame = CGRect(
+      x: floor(mediaFrame.midX - iconSize / 2),
+      y: floor(mediaFrame.midY - iconSize / 2),
+      width: iconSize,
+      height: iconSize
+    )
+    let closeReservation: CGFloat = showsClose ? 32 : 0
+    let textX = mediaFrame.maxX + iconSpacing
+    let availableTextWidth = max(0, width - textX - closeReservation)
+    let labelHeight: CGFloat = 16
+    let centerY = floor(height / 2)
+    let resolvedActionWidth = min(actionWidth, 120)
+    let showsAction = allowsAction &&
+      fileSizeWidth + metadataSpacing + resolvedActionWidth <= availableTextWidth
+    let actionX = max(textX, width - closeReservation - resolvedActionWidth)
+    let resolvedFileSizeWidth = min(
+      fileSizeWidth,
+      showsAction ? max(0, actionX - textX - metadataSpacing) : availableTextWidth
+    )
+
+    return Self(
+      size: CGSize(width: width, height: height),
+      mediaFrame: mediaFrame,
+      iconFrame: iconFrame,
+      fileNameFrame: CGRect(x: textX, y: centerY + 1, width: availableTextWidth, height: labelHeight),
+      fileSizeFrame: CGRect(
+        x: textX,
+        y: centerY - labelHeight - 1,
+        width: resolvedFileSizeWidth,
+        height: labelHeight
+      ),
+      actionFrame: CGRect(
+        x: actionX,
+        y: centerY - labelHeight - 2,
+        width: showsAction ? resolvedActionWidth : 0,
+        height: labelHeight + 4
+      ),
+      showsAction: showsAction,
+      closeFrame: showsClose
+        ? CGRect(x: max(0, width - closeButtonSize), y: floor(centerY - closeButtonSize / 2), width: closeButtonSize, height: closeButtonSize)
+        : nil
+    )
+  }
+}
 
 class DocumentView: NSView {
-  private var height = Theme.documentViewHeight
-  private static var iconCircleSize: CGFloat = 36
   private static var uploadRingSize: CGFloat = 32
   private static var uploadCancelButtonSize: CGFloat = 18
-  private static var iconSpacing: CGFloat = 8
-  private static var textsSpacing: CGFloat = 2
 
   private enum Symbol {
     static let download = "arrow.down"
@@ -34,9 +119,23 @@ class DocumentView: NSView {
   private var uploadProgressSnapshot: UploadProgressSnapshot?
   private var white = false
   private var locallyAvailableFileURL: URL?
+  private var thumbnailLoadGeneration = 0
 
   private var actionColor: NSColor {
     white ? .white : Theme.accentColor
+  }
+
+  private var hasLoadedThumbnail: Bool {
+    !thumbnailImageView.isHidden && thumbnailImageView.image != nil
+  }
+
+  private var transferColor: NSColor {
+    hasLoadedThumbnail ? .white : actionColor
+  }
+
+  private var isLocallyAvailable: Bool {
+    if case .locallyAvailable = documentState { return true }
+    return false
   }
 
   override func viewDidChangeEffectiveAppearance() {
@@ -46,20 +145,29 @@ class DocumentView: NSView {
 
   // MARK: - UI Elements
 
+  private lazy var thumbnailImageView: NSImageView = {
+    let imageView = NSImageView()
+    imageView.imageScaling = .scaleProportionallyUpOrDown
+    imageView.wantsLayer = true
+    imageView.layer?.cornerRadius = DocumentPresentationPlan.thumbnailCornerRadius
+    imageView.layer?.cornerCurve = .continuous
+    imageView.layer?.masksToBounds = true
+    imageView.isHidden = true
+    return imageView
+  }()
+
   private lazy var iconContainer: NSView = {
     let container = NSView()
-    container.translatesAutoresizingMaskIntoConstraints = false
     container.wantsLayer = true
     container.layer?.backgroundColor = white ?
       NSColor.white.withAlphaComponent(0.08).cgColor :
       NSColor.black.withAlphaComponent(0.05).cgColor
-    container.layer?.cornerRadius = DocumentView.iconCircleSize / 2
+    container.layer?.cornerRadius = DocumentPresentationPlan.iconSize / 2
     return container
   }()
 
   private lazy var iconView: NSImageView = {
     let imageView = NSImageView()
-    imageView.translatesAutoresizingMaskIntoConstraints = false
     imageView.wantsLayer = true
     imageView.image = NSImage(systemSymbolName: Symbol.download, accessibilityDescription: nil)
     imageView.contentTintColor = white ? .white : .secondaryLabelColor
@@ -89,7 +197,6 @@ class DocumentView: NSView {
     button.bezelStyle = .shadowlessSquare
     button.isBordered = false
     button.imagePosition = .imageOnly
-    button.translatesAutoresizingMaskIntoConstraints = false
     let config = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
     button.image = NSImage(systemSymbolName: Symbol.cancel, accessibilityDescription: "Cancel Upload")?
       .withSymbolConfiguration(config)
@@ -104,7 +211,6 @@ class DocumentView: NSView {
 
   private let cancelIcon: NSImageView = {
     let imageView = NSImageView()
-    imageView.translatesAutoresizingMaskIntoConstraints = false
     imageView.wantsLayer = true
     imageView.image = NSImage(systemSymbolName: Symbol.cancel, accessibilityDescription: "Cancel")
     imageView.contentTintColor = Theme.accentColor
@@ -125,15 +231,17 @@ class DocumentView: NSView {
     // Configure truncation
     label.cell?.lineBreakMode = .byTruncatingMiddle // Truncate in the middle for filenames
     label.cell?.truncatesLastVisibleLine = true
-    label.translatesAutoresizingMaskIntoConstraints = false
     return label
   }()
 
   private lazy var fileSizeLabel: NSTextField = {
     let label = NSTextField(labelWithString: "2 MB")
     label.font = .systemFont(ofSize: 12)
+    label.maximumNumberOfLines = 1
+    label.lineBreakMode = .byTruncatingTail
+    label.cell?.lineBreakMode = .byTruncatingTail
+    label.cell?.truncatesLastVisibleLine = true
     label.textColor = white ? .white.withAlphaComponent(0.8) : .secondaryLabelColor
-    label.translatesAutoresizingMaskIntoConstraints = false
     return label
   }()
 
@@ -141,29 +249,8 @@ class DocumentView: NSView {
     let button = NSButton(title: "Download", target: nil, action: #selector(actionButtonTapped))
     button.isBordered = false
     button.font = .systemFont(ofSize: 12)
-    button.translatesAutoresizingMaskIntoConstraints = false
     button.contentTintColor = actionColor
     return button
-  }()
-
-  private let containerStackView: NSStackView = {
-    let stackView = NSStackView()
-    stackView.orientation = .horizontal
-    stackView.spacing = DocumentView.iconSpacing
-    stackView.alignment = .centerY // Vertical alignment
-    stackView.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
-    stackView.translatesAutoresizingMaskIntoConstraints = false
-    return stackView
-  }()
-
-  private let textStackView: NSStackView = {
-    let stackView = NSStackView()
-    stackView.orientation = .vertical
-    stackView.spacing = DocumentView.textsSpacing
-    stackView.alignment = .leading // Horizontal alignment
-    stackView.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
-    stackView.translatesAutoresizingMaskIntoConstraints = false
-    return stackView
   }()
 
   private lazy var closeButton: NSButton = {
@@ -174,15 +261,7 @@ class DocumentView: NSView {
     button.imagePosition = .imageOnly
     button.target = self
     button.action = #selector(handleClose)
-    button.translatesAutoresizingMaskIntoConstraints = false
     return button
-  }()
-
-  // Spacer view to push close button to the trailing edge
-  private let spacerView: NSView = {
-    let view = NSView()
-    view.translatesAutoresizingMaskIntoConstraints = false
-    return view
   }()
 
   // MARK: - Properties
@@ -225,8 +304,9 @@ class DocumentView: NSView {
     self.fullMessage = fullMessage
     self.white = white ?? false
     locallyAvailableFileURL = Self.localDocumentURL(for: documentInfo)
+    let height = DocumentPresentationPlan.preferredHeight(for: documentInfo)
 
-    super.init(frame: NSRect(x: 0, y: 0, width: 300, height: Theme.documentViewHeight))
+    super.init(frame: NSRect(x: 0, y: 0, width: 300, height: height))
 
     // Determine initial state
     documentState = determineDocumentState(documentInfo)
@@ -234,7 +314,6 @@ class DocumentView: NSView {
     setupView()
     syncUploadProgressBinding()
     updateUI()
-    updateButtonState()
 
     // Start monitoring progress if download is active
     if case .downloading = documentState {
@@ -256,93 +335,17 @@ class DocumentView: NSView {
 
     actionButton.target = self
 
-    // Create horizontal file info stack
-    let fileSizeDownloadStack = NSStackView(views: [fileSizeLabel, actionButton])
-    fileSizeDownloadStack.spacing = 8
-    fileSizeDownloadStack.alignment = .centerY
-
-    // Add elements to text stack
-    textStackView.addArrangedSubview(fileNameLabel)
-    textStackView.addArrangedSubview(fileSizeDownloadStack)
-
-    fileNameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-    fileNameLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
     // Add icon to container first
     iconContainer.addSubview(iconView)
     iconContainer.addSubview(uploadProgressRing)
     iconContainer.addSubview(uploadCancelButton)
     iconContainer.addSubview(cancelIcon)
-    iconContainer.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-    iconContainer.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-
-    // Add elements to container stack
-    containerStackView.addArrangedSubview(iconContainer)
-    containerStackView.addArrangedSubview(textStackView)
-
-    // Add close button if removeAction is provided
-    if removeAction != nil {
-      // Add spacer to push close button to the right
-      containerStackView.addArrangedSubview(spacerView)
-
-      containerStackView.addArrangedSubview(closeButton)
-    }
-
-    addSubview(containerStackView)
-
-    // Make text stack view expandable
-    textStackView.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-    NSLayoutConstraint.activate([
-      heightAnchor.constraint(equalToConstant: height),
-
-      // Container stack constraints
-      containerStackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 0),
-      containerStackView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: 0),
-      containerStackView.topAnchor.constraint(equalTo: topAnchor),
-      containerStackView.bottomAnchor.constraint(equalTo: bottomAnchor),
-
-      // Icon container constraints to ensure fixed size
-      iconContainer.widthAnchor.constraint(equalToConstant: Self.iconCircleSize),
-      iconContainer.heightAnchor.constraint(equalToConstant: Self.iconCircleSize),
-
-      // Icon constraints
-      iconView.widthAnchor.constraint(equalToConstant: Self.iconCircleSize),
-      iconView.heightAnchor.constraint(equalToConstant: Self.iconCircleSize),
-      iconView.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
-      iconView.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
-
-      // Upload ring
-      uploadProgressRing.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
-      uploadProgressRing.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
-      uploadProgressRing.widthAnchor.constraint(equalToConstant: Self.uploadRingSize),
-      uploadProgressRing.heightAnchor.constraint(equalToConstant: Self.uploadRingSize),
-
-      uploadCancelButton.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
-      uploadCancelButton.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
-      uploadCancelButton.widthAnchor.constraint(equalToConstant: Self.uploadCancelButtonSize),
-      uploadCancelButton.heightAnchor.constraint(equalToConstant: Self.uploadCancelButtonSize),
-
-      // Cancel
-      cancelIcon.widthAnchor.constraint(equalToConstant: Self.iconCircleSize),
-      cancelIcon.heightAnchor.constraint(equalToConstant: Self.iconCircleSize),
-      cancelIcon.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
-      cancelIcon.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
-
-      // Make sure the download button doesn't grow too much
-      actionButton.widthAnchor.constraint(lessThanOrEqualToConstant: 120),
-    ])
-
-    if removeAction != nil {
-      // Close button should have high hugging priority
-      closeButton.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-
-      NSLayoutConstraint.activate([
-        // Close button constraints
-        closeButton.widthAnchor.constraint(equalToConstant: 24),
-        closeButton.heightAnchor.constraint(equalToConstant: 24),
-      ])
-    }
+    addSubview(thumbnailImageView)
+    addSubview(iconContainer)
+    addSubview(fileNameLabel)
+    addSubview(fileSizeLabel)
+    addSubview(actionButton)
+    if removeAction != nil { addSubview(closeButton) }
 
     // Add gesture recognizer to cancel icon
     let tapGesture = NSClickGestureRecognizer(target: self, action: #selector(cancelDownload))
@@ -353,20 +356,113 @@ class DocumentView: NSView {
     let iconTapGesture = NSClickGestureRecognizer(target: self, action: #selector(handleIconOrNameClick))
     iconContainer.addGestureRecognizer(iconTapGesture)
 
+    let thumbnailTapGesture = NSClickGestureRecognizer(target: self, action: #selector(handleIconOrNameClick))
+    thumbnailImageView.addGestureRecognizer(thumbnailTapGesture)
+    thumbnailImageView.isEnabled = true
+
     let nameTapGesture = NSClickGestureRecognizer(target: self, action: #selector(handleIconOrNameClick))
     fileNameLabel.addGestureRecognizer(nameTapGesture)
     fileNameLabel.isEnabled = true
   }
 
+  override func layout() {
+    super.layout()
+    fileSizeLabel.sizeToFit()
+    actionButton.sizeToFit()
+    let plan = DocumentPresentationPlan.make(
+      documentInfo: documentInfo,
+      width: bounds.width,
+      fileSizeWidth: fileSizeLabel.frame.width,
+      actionWidth: actionButton.frame.width,
+      allowsAction: allowsActionForCurrentState,
+      showsClose: removeAction != nil
+    )
+
+    thumbnailImageView.frame = plan.mediaFrame
+    iconContainer.frame = plan.iconFrame
+    iconView.frame = iconContainer.bounds
+    cancelIcon.frame = iconContainer.bounds
+    uploadProgressRing.frame = NSRect(
+      x: floor((DocumentPresentationPlan.iconSize - Self.uploadRingSize) / 2),
+      y: floor((DocumentPresentationPlan.iconSize - Self.uploadRingSize) / 2),
+      width: Self.uploadRingSize,
+      height: Self.uploadRingSize
+    )
+    uploadCancelButton.frame = NSRect(
+      x: floor((DocumentPresentationPlan.iconSize - Self.uploadCancelButtonSize) / 2),
+      y: floor((DocumentPresentationPlan.iconSize - Self.uploadCancelButtonSize) / 2),
+      width: Self.uploadCancelButtonSize,
+      height: Self.uploadCancelButtonSize
+    )
+    fileNameLabel.frame = plan.fileNameFrame
+    fileSizeLabel.frame = plan.fileSizeFrame
+    actionButton.frame = plan.actionFrame
+    actionButton.isHidden = !plan.showsAction
+    if let closeFrame = plan.closeFrame { closeButton.frame = closeFrame }
+  }
+
+  private var allowsActionForCurrentState: Bool {
+    switch documentState {
+    case .locallyAvailable, .needsDownload:
+      true
+    case .downloading, .uploadProcessing, .uploading:
+      false
+    }
+  }
+
   private func updateUI() {
     fileNameLabel.stringValue = documentInfo.document.fileName ?? "Unknown File"
+    updateThumbnail()
     updateButtonState()
     updateIconForCurrentState()
   }
 
+  private func updateThumbnail() {
+    thumbnailLoadGeneration += 1
+    let generation = thumbnailLoadGeneration
+    thumbnailImageView.image = nil
+    thumbnailImageView.isHidden = true
+
+    guard let thumbnail = documentInfo.thumbnail,
+          let size = thumbnail.bestPhotoSize()
+    else {
+      needsLayout = true
+      return
+    }
+
+    guard let localPath = size.localPath else {
+      if size.cdnUrl != nil {
+        Task.detached { [thumbnail, message = fullMessage?.message] in
+          await FileCache.shared.download(photo: thumbnail, reloadMessageOnFinish: message)
+        }
+      }
+      needsLayout = true
+      return
+    }
+
+    let url = FileCache.getUrl(for: .photos, localPath: localPath)
+    let cacheKey = "document-thumb-\(documentInfo.id)"
+    ImageCacheManager.shared.image(
+      for: url,
+      loadSync: false,
+      cacheKey: cacheKey,
+      targetSize: NSSize(
+        width: DocumentPresentationPlan.thumbnailSize,
+        height: DocumentPresentationPlan.thumbnailSize
+      ),
+      scale: window?.backingScaleFactor ?? 2
+    ) { [weak self] image in
+      guard let self, self.thumbnailLoadGeneration == generation else { return }
+      self.thumbnailImageView.image = image
+      self.thumbnailImageView.isHidden = image == nil
+      self.updateButtonState()
+      self.needsLayout = true
+    }
+  }
+
   /// Update the icon to match the current document state and theme
   private func updateIconForCurrentState() {
-    iconView.contentTintColor = white ? .white : .secondaryLabelColor
+    iconView.contentTintColor = hasLoadedThumbnail ? .white : (white ? .white : .secondaryLabelColor)
 
     switch documentState {
       case .needsDownload:
@@ -381,8 +477,9 @@ class DocumentView: NSView {
     }
 
     // Keep the cancel icon color aligned with bubble style
-    cancelIcon.contentTintColor = actionColor
-    uploadCancelButton.contentTintColor = actionColor
+    cancelIcon.contentTintColor = transferColor
+    uploadCancelButton.contentTintColor = transferColor
+    uploadProgressRing.setStrokeColor(transferColor)
   }
 
   private func fileTypeSymbolName() -> String {
@@ -401,7 +498,6 @@ class DocumentView: NSView {
         uploadProgressRing.isHidden = true
         uploadCancelButton.isHidden = true
         cancelIcon.isHidden = true
-        actionButton.isHidden = false
         fileSizeLabel.stringValue = FileHelpers.formatFileSize(UInt64(documentInfo.document.size ?? 0))
         actionButton.title = "Show in Finder"
         actionButton.contentTintColor = actionColor
@@ -413,7 +509,6 @@ class DocumentView: NSView {
         uploadProgressRing.isHidden = true
         uploadCancelButton.isHidden = true
         cancelIcon.isHidden = true
-        actionButton.isHidden = false
         fileSizeLabel.stringValue = FileHelpers.formatFileSize(UInt64(documentInfo.document.size ?? 0))
         actionButton.title = "Download"
         actionButton.contentTintColor = actionColor
@@ -425,10 +520,9 @@ class DocumentView: NSView {
         uploadProgressRing.isHidden = true
         uploadCancelButton.isHidden = true
         cancelIcon.isHidden = false
-        actionButton.isHidden = true
 
         // Ensure cancel icon matches the current bubble color scheme
-        cancelIcon.contentTintColor = actionColor
+        cancelIcon.contentTintColor = transferColor
         cancelIcon.image = NSImage(systemSymbolName: Symbol.cancel, accessibilityDescription: "Cancel")
 
         // Format the progress text
@@ -441,7 +535,6 @@ class DocumentView: NSView {
         cancelIcon.isHidden = true
         uploadProgressRing.isHidden = false
         uploadCancelButton.isHidden = false
-        actionButton.isHidden = true
         uploadProgressRing.setProgress(0)
         fileSizeLabel.stringValue = "Processing"
 
@@ -450,11 +543,25 @@ class DocumentView: NSView {
         cancelIcon.isHidden = true
         uploadProgressRing.isHidden = false
         uploadCancelButton.isHidden = false
-        actionButton.isHidden = true
         let fractionCompleted = totalBytes > 0 ? CGFloat(Double(bytesSent) / Double(totalBytes)) : 0
         uploadProgressRing.setProgress(fractionCompleted)
         fileSizeLabel.stringValue = uploadProgressLabel(bytesSent: bytesSent, totalBytes: totalBytes)
     }
+
+    needsLayout = true
+    updateMediaOverlayAppearance()
+  }
+
+  private func updateMediaOverlayAppearance() {
+    iconContainer.isHidden = hasLoadedThumbnail && isLocallyAvailable
+    iconContainer.layer?.backgroundColor = if hasLoadedThumbnail {
+      NSColor.black.withAlphaComponent(0.38).cgColor
+    } else if white {
+      NSColor.white.withAlphaComponent(0.08).cgColor
+    } else {
+      NSColor.black.withAlphaComponent(0.05).cgColor
+    }
+    updateIconForCurrentState()
   }
 
   // MARK: - Actions
@@ -579,9 +686,9 @@ class DocumentView: NSView {
   @objc private func handleIconOrNameClick() {
     switch documentState {
     case .locallyAvailable:
-      showInFinder()
+      openQuickLook()
     case .needsDownload:
-      downloadAction(saveToDownloadsWhenFinished: true)
+      downloadAction(saveToDownloadsWhenFinished: false)
     case .downloading, .uploadProcessing, .uploading:
       break
     }
@@ -607,6 +714,18 @@ class DocumentView: NSView {
       stopMonitoringProgress()
     }
     requestAutoDownloadIfNeeded()
+  }
+
+  override var acceptsFirstResponder: Bool {
+    true
+  }
+
+  override func becomeFirstResponder() -> Bool {
+    let became = super.becomeFirstResponder()
+    if became {
+      QLPreviewPanel.shared()?.updateController()
+    }
+    return became
   }
 
   // Method to manually set the state
@@ -835,6 +954,24 @@ extension DocumentView: AppThemeRefreshable {
 
 //
 extension DocumentView {
+  private func openQuickLook() {
+    guard let sourceURL = currentLocalDocumentURL(),
+          FileManager.default.fileExists(atPath: sourceURL.path),
+          let panel = QLPreviewPanel.shared()
+    else {
+      return
+    }
+
+    locallyAvailableFileURL = sourceURL
+    if panel.isVisible {
+      panel.orderOut(nil)
+    } else {
+      window?.makeFirstResponder(self)
+      panel.updateController()
+      panel.makeKeyAndOrderFront(nil)
+    }
+  }
+
   private func showInFinder() {
     guard let sourceURL = currentLocalDocumentURL() else { return }
     revealDocumentInFinder(sourceURL: sourceURL)
@@ -1021,6 +1158,64 @@ extension DocumentView {
       Log.shared.error("Error comparing files", error: error)
       return false
     }
+  }
+}
+
+// MARK: - Quick Look
+
+extension DocumentView {
+  override func acceptsPreviewPanelControl(_: QLPreviewPanel!) -> Bool {
+    guard let url = currentLocalDocumentURL() else { return false }
+    return FileManager.default.fileExists(atPath: url.path)
+  }
+
+  override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) {
+    panel.dataSource = self
+    panel.delegate = self
+    panel.reloadData()
+  }
+
+  override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {
+    panel.dataSource = nil
+    panel.delegate = nil
+  }
+}
+
+extension DocumentView: QLPreviewPanelDataSource {
+  func numberOfPreviewItems(in _: QLPreviewPanel!) -> Int {
+    guard let url = currentLocalDocumentURL() else { return 0 }
+    return FileManager.default.fileExists(atPath: url.path) ? 1 : 0
+  }
+
+  func previewPanel(_: QLPreviewPanel!, previewItemAt _: Int) -> QLPreviewItem! {
+    self
+  }
+}
+
+extension DocumentView: QLPreviewPanelDelegate {
+  func previewPanel(_: QLPreviewPanel!, sourceFrameOnScreenFor _: QLPreviewItem!) -> NSRect {
+    let sourceView = hasLoadedThumbnail ? thumbnailImageView : iconContainer
+    let frameInWindow = sourceView.convert(sourceView.bounds, to: nil)
+    return window?.convertToScreen(frameInWindow) ?? .zero
+  }
+
+  func previewPanel(
+    _: QLPreviewPanel!,
+    transitionImageFor _: QLPreviewItem!,
+    contentRect _: UnsafeMutablePointer<NSRect>!
+  ) -> Any! {
+    thumbnailImageView.image ?? iconView.image
+  }
+}
+
+extension DocumentView: QLPreviewItem {
+  var previewItemURL: URL! {
+    guard let url = currentLocalDocumentURL(), FileManager.default.fileExists(atPath: url.path) else { return nil }
+    return url
+  }
+
+  var previewItemTitle: String! {
+    documentInfo.document.fileName ?? "Document"
   }
 }
 

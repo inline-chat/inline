@@ -94,6 +94,18 @@ final class AppMenu: NSObject {
     cliInstallerMenuItem = installCLIMenuItem
     bindCLIInstallerMenuItemState()
 
+    let setupAgentMenuItem = NSMenuItem(
+      title: "Set Up an Agent…",
+      action: #selector(handleAgentSetupMenuAction(_:)),
+      keyEquivalent: ""
+    )
+    setupAgentMenuItem.target = self
+    setupAgentMenuItem.image = NSImage(
+      systemSymbolName: "cpu",
+      accessibilityDescription: nil
+    )
+    appMenu.addItem(setupAgentMenuItem)
+
     appMenu.addItem(NSMenuItem.separator())
 
     let servicesMenu = NSMenu()
@@ -978,12 +990,21 @@ final class AppMenu: NSObject {
 #endif
 
   @MainActor @objc private func handleCLIInstallerMenuAction(_ sender: Any?) {
+    installCLI()
+  }
+
+  @MainActor func installCLI() {
     guard let dependencies else { return }
 
     Task { @MainActor [weak self] in
       let result = await dependencies.cliInstaller.install()
       await self?.presentCLIInstallResult(result)
     }
+  }
+
+  @MainActor @objc private func handleAgentSetupMenuAction(_ sender: Any?) {
+    guard let dependencies else { return }
+    AgentSetupWindowController.show(using: dependencies, sender: sender)
   }
 
   @MainActor private func bindCLIInstallerMenuItemState() {
@@ -1043,7 +1064,10 @@ final class AppMenu: NSObject {
     }
 
     do {
-      let result = try await authenticateCLI(installation, dependencies: dependencies)
+      let result = try await LocalCLIAuthenticationService.authenticate(
+        installation,
+        dependencies: dependencies
+      )
       presentCLIInstallCompletion(
         installation,
         alreadyInstalled: alreadyInstalled,
@@ -1119,41 +1143,6 @@ final class AppMenu: NSObject {
     return "'\(escapedPath)' login"
   }
 
-  @MainActor private func authenticateCLI(
-    _ installation: CLIInstallation,
-    dependencies: AppDependencies
-  ) async throws -> CLIAuthBootstrapResult {
-    let bootstrapper = CLIAuthBootstrapper()
-    var deliveredSessionID: Int64?
-    do {
-      let result = try await bootstrapper.authenticate(installation: installation) { request in
-        guard let endpoint = LocalCLIAuthBroker.Endpoint(url: request.callbackURL) else {
-          throw CLIAuthBootstrapError.invalidHandshake
-        }
-        do {
-          let client = try await LocalCLIAuthBroker.probe(endpoint)
-          deliveredSessionID = try await LocalCLIAuthBroker.createAndDeliverSession(
-            endpoint,
-            client: client,
-            realtime: dependencies.realtimeV2
-          )
-        } catch {
-          await LocalCLIAuthBroker.cancel(
-            endpoint,
-            detail: "Inline for Mac could not complete the request."
-          )
-          throw error
-        }
-      }
-      deliveredSessionID = nil
-      return result
-    } catch {
-      if let deliveredSessionID {
-        _ = try? await dependencies.realtimeV2.revokeSession(deliveredSessionID)
-      }
-      throw error
-    }
-  }
 }
 
 extension AppMenu: NSMenuItemValidation {

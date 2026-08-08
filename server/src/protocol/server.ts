@@ -260,6 +260,12 @@ export interface ServerUpdate {
          */
         userChatPermissions: ServerUserUpdateChatPermissions;
     } | {
+        oneofKind: "userCollapseHistory";
+        /**
+         * @generated from protobuf field: server.ServerUserUpdateCollapseHistory user_collapse_history = 40;
+         */
+        userCollapseHistory: ServerUserUpdateCollapseHistory;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -801,6 +807,25 @@ export interface ServerUserUpdateDialogFollowMode {
     followMode?: DialogFollowMode;
 }
 /**
+ * Update for a user's personal collapsed-history boundary.
+ *
+ * @generated from protobuf message server.ServerUserUpdateCollapseHistory
+ */
+export interface ServerUserUpdateCollapseHistory {
+    /**
+     * @generated from protobuf field: Peer peer_id = 1;
+     */
+    peerId?: Peer;
+    /**
+     * @generated from protobuf field: optional int64 max_id = 2;
+     */
+    maxId?: bigint;
+    /**
+     * @generated from protobuf field: optional int64 collapsed_at = 3;
+     */
+    collapsedAt?: bigint;
+}
+/**
  * Update for a user when their profile/account fields change.
  *
  * @generated from protobuf message server.ServerUserUpdateUser
@@ -983,7 +1008,8 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 35, name: "participant_group_delete", kind: "message", oneof: "update", T: () => ServerChatUpdateParticipantGroupDelete },
             { no: 36, name: "user_chat_participant_group_add", kind: "message", oneof: "update", T: () => ServerUserUpdateChatParticipantGroupAdd },
             { no: 37, name: "user_chat_participant_group_delete", kind: "message", oneof: "update", T: () => ServerUserUpdateChatParticipantGroupDelete },
-            { no: 39, name: "user_chat_permissions", kind: "message", oneof: "update", T: () => ServerUserUpdateChatPermissions }
+            { no: 39, name: "user_chat_permissions", kind: "message", oneof: "update", T: () => ServerUserUpdateChatPermissions },
+            { no: 40, name: "user_collapse_history", kind: "message", oneof: "update", T: () => ServerUserUpdateCollapseHistory }
         ]);
     }
     create(value?: PartialMessage<ServerUpdate>): ServerUpdate {
@@ -1222,6 +1248,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                         userChatPermissions: ServerUserUpdateChatPermissions.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userChatPermissions)
                     };
                     break;
+                case /* server.ServerUserUpdateCollapseHistory user_collapse_history */ 40:
+                    message.update = {
+                        oneofKind: "userCollapseHistory",
+                        userCollapseHistory: ServerUserUpdateCollapseHistory.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userCollapseHistory)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -1348,6 +1380,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* server.ServerUserUpdateChatPermissions user_chat_permissions = 39; */
         if (message.update.oneofKind === "userChatPermissions")
             ServerUserUpdateChatPermissions.internalBinaryWrite(message.update.userChatPermissions, writer.tag(39, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerUserUpdateCollapseHistory user_collapse_history = 40; */
+        if (message.update.oneofKind === "userCollapseHistory")
+            ServerUserUpdateCollapseHistory.internalBinaryWrite(message.update.userCollapseHistory, writer.tag(40, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -3206,6 +3241,66 @@ class ServerUserUpdateDialogFollowMode$Type extends MessageType<ServerUserUpdate
  * @generated MessageType for protobuf message server.ServerUserUpdateDialogFollowMode
  */
 export const ServerUserUpdateDialogFollowMode = new ServerUserUpdateDialogFollowMode$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerUserUpdateCollapseHistory$Type extends MessageType<ServerUserUpdateCollapseHistory> {
+    constructor() {
+        super("server.ServerUserUpdateCollapseHistory", [
+            { no: 1, name: "peer_id", kind: "message", T: () => Peer },
+            { no: 2, name: "max_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "collapsed_at", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ServerUserUpdateCollapseHistory>): ServerUserUpdateCollapseHistory {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<ServerUserUpdateCollapseHistory>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerUserUpdateCollapseHistory): ServerUserUpdateCollapseHistory {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Peer peer_id */ 1:
+                    message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* optional int64 max_id */ 2:
+                    message.maxId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 collapsed_at */ 3:
+                    message.collapsedAt = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerUserUpdateCollapseHistory, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Peer peer_id = 1; */
+        if (message.peerId)
+            Peer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 max_id = 2; */
+        if (message.maxId !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.maxId);
+        /* optional int64 collapsed_at = 3; */
+        if (message.collapsedAt !== undefined)
+            writer.tag(3, WireType.Varint).int64(message.collapsedAt);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerUserUpdateCollapseHistory
+ */
+export const ServerUserUpdateCollapseHistory = new ServerUserUpdateCollapseHistory$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ServerUserUpdateUser$Type extends MessageType<ServerUserUpdateUser> {
     constructor() {

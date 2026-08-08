@@ -80,7 +80,7 @@ class ChatViewAppKit: NSViewController {
   private var messageListVC: MessageListAppKit?
   private var compose: ComposeAppKit?
   private var spinnerVC: NSHostingController<SpinnerView>?
-  private var errorVC: NSHostingController<ErrorView>?
+  private var errorVC: NSHostingController<ChatLoadErrorView>?
   private var appDidBecomeActiveObserver: NSObjectProtocol?
   private var mediaSendFailedObserver: NSObjectProtocol?
   private var chatItemCancellable: AnyCancellable?
@@ -275,10 +275,8 @@ class ChatViewAppKit: NSViewController {
     spinnerVC = hostingController
   }
 
-  private func showError(error: Error) {
-    // Create SwiftUI error view with retry action
-    let errorView = ErrorView(
-      errorMessage: error.localizedDescription,
+  private func showError(error _: Error) {
+    let errorView = ChatLoadErrorView(
       retryAction: { [weak self] in
         self?.state = .loading
         self?.fetchChat()
@@ -306,6 +304,7 @@ class ChatViewAppKit: NSViewController {
         Task { @MainActor [weak self] in
           guard let self, !isDisposed else { return }
           updateDialog(from: item)
+          messageListVC?.updateCollapsedHistoryMarker(item?.dialog.collapsedHistoryMarker)
           compose?.setPeerUser(item?.user)
           guard let chat = item?.chat else { return }
           showLoadedChat(chat)
@@ -361,12 +360,19 @@ class ChatViewAppKit: NSViewController {
         os_signpost(.end, log: signpostLog, name: "MessageListSetup", signpostID: signpostID)
       }
 
+      let initialCollapsedHistoryMarker = (preparedPayload?.chatItem?.dialog ?? dialog)?
+        .collapsedHistoryMarker
+      let initiallyExpandCollapsedHistory = preparedPayload?.targetMessageId.map { targetMessageId in
+        initialCollapsedHistoryMarker.map { targetMessageId <= $0.maxId } ?? false
+      } ?? false
       messageListVC_ = MessageListAppKit(
         dependencies: dependencies,
         peerId: peerId,
         chat: chat,
         showUnreadAfter: unreadBoundaryAtOpen(),
         initialState: preparedPayload?.messagesInitialState,
+        initialCollapsedHistoryMarker: initialCollapsedHistoryMarker,
+        initiallyExpandCollapsedHistory: initiallyExpandCollapsedHistory,
         initialPinnedMessage: preparedPayload?.pinnedMessage,
         surfaceStyle: appearance.surfaceStyle,
         additionalTopContentInset: appearance.additionalTopContentInset
@@ -491,7 +497,7 @@ class ChatViewAppKit: NSViewController {
     switch error {
       case let .rpcError(rpcError):
         switch rpcError.errorCode {
-          case .peerIDInvalid, .chatIDInvalid, .userIDInvalid:
+          case .peerIDInvalid, .chatIDInvalid, .userIDInvalid, .spaceIDInvalid:
             return true
           default:
             return false

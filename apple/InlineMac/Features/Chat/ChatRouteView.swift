@@ -226,6 +226,46 @@ struct ChatRouteView: View {
           }
         }
 
+        if settings.translationUIEnabled, peer.isThread {
+          ToolbarItem {
+            ChatToolbarTranslationButton(peer: peer, toolbarState: chatToolbarState)
+          }
+
+          if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed)
+          }
+        }
+
+        if peer.isThread {
+          ToolbarItem {
+            ChatToolbarParticipantsButton(
+              peer: peer,
+              dependencies: dependencies,
+              toolbarState: chatToolbarState
+            )
+            .macToolbarLayout(toolbarLayout)
+            .id("participants-\(peer.toString())")
+          }
+
+          if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed)
+          }
+
+          ToolbarItem {
+            ChatToolbarShareButton(
+              peer: peer,
+              dependencies: dependencies,
+              toolbarState: chatToolbarState
+            )
+            .macToolbarLayout(toolbarLayout)
+            .id("share-\(peer.toString())")
+          }
+
+          if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed)
+          }
+        }
+
         ToolbarItem {
           ChatToolbarNotificationButton(
             peer: peer,
@@ -249,22 +289,6 @@ struct ChatRouteView: View {
           ToolbarSpacer(.fixed)
         }
 
-        if peer.isThread {
-          ToolbarItem {
-            ChatToolbarParticipantsButton(
-              peer: peer,
-              dependencies: dependencies,
-              toolbarState: chatToolbarState
-            )
-            .macToolbarLayout(toolbarLayout)
-            .id(peer.toString())
-          }
-
-          if #available(macOS 26.0, *) {
-            ToolbarSpacer(.fixed)
-          }
-        }
-
         if case .user = peer {
           ToolbarItem {
             NudgeButton(peer: peer, isPopoverPresented: $nudgePopoverPresented)
@@ -276,7 +300,7 @@ struct ChatRouteView: View {
           }
         }
 
-        if settings.translationUIEnabled {
+        if settings.translationUIEnabled, !peer.isThread {
           ToolbarItem {
             ChatToolbarTranslationButton(peer: peer, toolbarState: chatToolbarState)
           }

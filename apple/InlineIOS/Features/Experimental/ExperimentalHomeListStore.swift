@@ -2,13 +2,16 @@ import Combine
 import Foundation
 import GRDB
 import InlineKit
+import InlineUI
 import Logger
 import SwiftUI
+import Translation
 
 struct ExperimentalHomeListConfiguration: Equatable, Sendable {
   let spaceID: Int64?
   let includeSpaceChatsInHome: Bool
-  let sort: ChatListSort
+  let inboxSort: ChatListSort
+  let allChatsFilter: ChatListFilter
 }
 
 struct ExperimentalHomeListState: Equatable, Sendable {
@@ -99,7 +102,8 @@ final class ExperimentalHomeListStore: ObservableObject {
         let snapshots = try ChatListDatabaseQuery.fetchSnapshots(
           db,
           spaceID: configuration.spaceID,
-          includeSpaceChatsInHome: configuration.includeSpaceChatsInHome
+          includeSpaceChatsInHome: configuration.includeSpaceChatsInHome,
+          translationLanguage: UserLocale.getCurrentLanguage()
         )
         let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
         span.end("rows=\(snapshots.count) duration_ms=\(durationMs)")
@@ -256,7 +260,8 @@ private final class ExperimentalHomeListPipeline: @unchecked Sendable {
     )
     let presentation = ChatListPresentation.make(
       from: snapshots,
-      sort: configuration.sort
+      inboxSort: configuration.inboxSort,
+      allChatsFilter: configuration.allChatsFilter
     )
     let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
     span.end("duration_ms=\(durationMs)")

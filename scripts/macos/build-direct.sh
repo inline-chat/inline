@@ -28,7 +28,6 @@ MACOS_PROVISIONING_PROFILE_PATH=${MACOS_PROVISIONING_PROFILE_PATH:-""}
 OVERWRITE_DMG=${OVERWRITE_DMG:-0}
 SIGN_RETRY_COUNT=${SIGN_RETRY_COUNT:-3}
 SIGN_RETRY_DELAY_SECONDS=${SIGN_RETRY_DELAY_SECONDS:-2}
-PAUSE_BEFORE_NOTARIZE=${PAUSE_BEFORE_NOTARIZE:-0}
 DEBUG_BUILD=${DEBUG_BUILD:-0}
 CREATE_DMG_NODE_BIN_DIR=${CREATE_DMG_NODE_BIN_DIR:-""}
 
@@ -292,17 +291,9 @@ else
   mv -f "${DMG_SOURCE}" "${DMG_PATH}"
 fi
 
-if [[ -z "${SKIP_NOTARIZE:-}" && "${PAUSE_BEFORE_NOTARIZE}" == "1" ]]; then
-  if [[ ! -t 0 ]]; then
-    echo "PAUSE_BEFORE_NOTARIZE=1 requires an interactive terminal." >&2
-    exit 1
-  fi
-  echo "Build/sign step complete. App is ready for local checks:"
-  echo "  App: ${APP_PATH}"
-  echo "  DMG: ${DMG_PATH}"
-  echo "Press Enter to continue with notarization, or Ctrl+C to stop here."
-  read -r
-fi
+echo "Build/sign step complete. App is ready for local checks:"
+echo "  App: ${APP_PATH}"
+echo "  DMG: ${DMG_PATH}"
 
 if [[ -z "${SKIP_NOTARIZE:-}" ]]; then
   echo "Starting notarization for DMG: ${DMG_PATH}"

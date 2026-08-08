@@ -52,15 +52,8 @@ struct ChatView: View {
     case error(Error)
   }
 
-  private enum ChatLoadError: LocalizedError {
+  private enum ChatLoadError: Error {
     case unavailable
-
-    var errorDescription: String? {
-      switch self {
-        case .unavailable:
-          "Chat is not available."
-      }
-    }
   }
 
   private enum ChatTranslationPlacement {
@@ -480,6 +473,7 @@ struct ChatView: View {
         chatId: chat.id,
         spaceId: chat.spaceId,
         draftMessage: fullChatViewModel.chatItem?.dialog.draftMessage,
+        collapsedHistoryMarker: fullChatViewModel.chatItem?.dialog.collapsedHistoryMarker,
         focusMessageID: focusMessageID,
         isPreview: preview
       )
@@ -522,7 +516,7 @@ struct ChatView: View {
     }
   }
 
-  private func errorOverlay(error: Error) -> some View {
+  private func errorOverlay(error _: Error) -> some View {
     ZStack {
       Color.black.opacity(0.1)
         .ignoresSafeArea()
@@ -532,16 +526,16 @@ struct ChatView: View {
           .font(.system(size: 48))
           .foregroundColor(.secondary)
 
-        Text("Failed to load chat")
+        Text("Chat unavailable")
           .font(.headline)
 
-        Text(error.localizedDescription)
+        Text("You may not have access to this chat, or it may no longer exist.")
           .font(.subheadline)
           .foregroundColor(.secondary)
           .multilineTextAlignment(.center)
           .padding(.horizontal)
 
-        Button("Retry") {
+        Button("Try Again") {
           Task { await fetchChatIfNeeded() }
         }
         .buttonStyle(.borderedProminent)
@@ -689,7 +683,7 @@ private struct ChatToolbarMoreMenu: View {
   @MainActor
   private func copyLink() {
     guard case let .thread(id) = peer,
-          let url = InlineDeepLink.chat(id: id).url
+          let url = InlineDeepLink.chat(id: id).webURL
     else {
       ToastManager.shared.showToast(
         "Failed to copy link",

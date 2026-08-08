@@ -163,6 +163,9 @@ public actor UpdatesEngine: Sendable {
         case let .dialogFollowMode(dialogFollowMode):
           try dialogFollowMode.apply(db)
 
+        case let .collapseHistory(collapseHistory):
+          try collapseHistory.apply(db)
+
         case let .chatOpen(chatOpen):
           try chatOpen.apply(db)
 
@@ -1425,6 +1428,22 @@ extension InlineProtocol.UpdateDialogFollowMode {
     } else {
       Log.shared.warning("Could not find dialog for peer \(peerID.toPeer()) to update follow mode")
     }
+  }
+}
+
+extension InlineProtocol.UpdateCollapseHistory {
+  func apply(_ db: Database) throws {
+    let dialogId = Dialog.getDialogId(peerId: peerID.toPeer())
+    let collapsedAt = hasCollapsedAt
+      ? Date(timeIntervalSince1970: TimeInterval(self.collapsedAt))
+      : nil
+    try Dialog
+      .filter(id: dialogId)
+      .updateAll(
+        db,
+        Dialog.Columns.collapsedMaxId.set(to: hasMaxID ? maxID : nil),
+        Dialog.Columns.collapsedAt.set(to: hasMaxID ? collapsedAt : nil)
+      )
   }
 }
 

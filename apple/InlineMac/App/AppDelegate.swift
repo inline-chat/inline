@@ -808,6 +808,8 @@ extension AppDelegate {
 
     Analytics.logout()
 
+    await QuickSearchUsageStore.shared.clearCurrentAccount()
+
     // Clear database
     try? AppDatabase.loggedOut()
 

@@ -8,14 +8,18 @@ final class SidebarState {
 
   func keepInSidebar(_ peer: Peer) {
     Task { @MainActor in
-      guard AppSettings.shared.sidebarAsInbox else { return }
-      SidebarCleanup.shared.markOpened(peer)
+      let usesInbox = AppSettings.shared.sidebarAsInbox
+      if usesInbox {
+        SidebarCleanup.shared.markOpened(peer)
+      }
 
       do {
         if peer.isThread {
           _ = try await Api.realtime.send(.showInChatList(peerId: peer))
         }
-        _ = try await Api.realtime.send(.updateDialogOpen(peerId: peer, open: true))
+        if usesInbox {
+          _ = try await Api.realtime.send(.updateDialogOpen(peerId: peer, open: true))
+        }
       } catch {
         Log.shared.error("Failed to keep chat in sidebar", error: error)
       }

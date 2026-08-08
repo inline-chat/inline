@@ -2,6 +2,7 @@ import Foundation
 
 public enum ExperimentalFeatureFlags {
   public static let sidebarAsInboxKey = "experimental.sidebarAsInbox"
+  public static let appKitSidebarKey = "experimental.appKitSidebar"
 
   public static var sidebarAsInboxEnabled: Bool {
     get { isSidebarAsInboxEnabled }
@@ -14,5 +15,10 @@ public enum ExperimentalFeatureFlags {
 
   public static func setSidebarAsInboxEnabled(_ isEnabled: Bool) {
     UserDefaults.standard.set(isEnabled, forKey: sidebarAsInboxKey)
+  }
+
+  public static var appKitSidebarEnabled: Bool {
+    get { UserDefaults.standard.bool(forKey: appKitSidebarKey) }
+    set { UserDefaults.standard.set(newValue, forKey: appKitSidebarKey) }
   }
 }

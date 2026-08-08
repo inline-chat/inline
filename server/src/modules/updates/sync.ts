@@ -578,6 +578,7 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
       case "userChatParticipantGroupAdd":
       case "userChatParticipantGroupDelete":
       case "userChatPermissions":
+      case "userCollapseHistory":
         inflatedUpdates.push(chatSkipPts(update, chatId))
         break
       case undefined:
@@ -1287,6 +1288,7 @@ function convertSpaceUpdate(update: DecryptedUpdate, options?: { sanitizeUsers?:
     case "userChatParticipantGroupAdd":
     case "userChatParticipantGroupDelete":
     case "userChatPermissions":
+    case "userCollapseHistory":
       return null
     case undefined:
       throw new Error(`Space sync update ${update.seq} has no payload`)
@@ -1431,6 +1433,20 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
             peerId: payload.userReadMaxId.peerId,
             readMaxId: payload.userReadMaxId.readMaxId,
             unreadCount: payload.userReadMaxId.unreadCount,
+          },
+        },
+      }
+
+    case "userCollapseHistory":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "collapseHistory",
+          collapseHistory: {
+            peerId: payload.userCollapseHistory.peerId,
+            maxId: payload.userCollapseHistory.maxId,
+            collapsedAt: payload.userCollapseHistory.collapsedAt,
           },
         },
       }

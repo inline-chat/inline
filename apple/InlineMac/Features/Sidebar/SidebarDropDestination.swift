@@ -1,6 +1,9 @@
 import AppKit
 import InlineMacUI
+import Logger
 import SwiftUI
+
+private let sidebarDropLog = Log.scoped("SidebarDrop")
 
 struct SidebarDropDestination<Content: View>: View {
   let beginTransferDrop: () -> UUID
@@ -61,6 +64,12 @@ private struct SidebarTransferableDropDestination<Content: View>: View {
         update(session)
       }
       .onDisappear {
+        if pendingDrops.isEmpty == false || deliveredSessionIDs.isEmpty == false {
+          sidebarDropLog.warning(
+            "transferable destination disappeared with pending=\(pendingDrops.count) "
+              + "delivered=\(deliveredSessionIDs.count)"
+          )
+        }
         pendingDrops.removeAll()
         deliveredSessionIDs.removeAll()
       }
@@ -79,17 +88,26 @@ private struct SidebarTransferableDropDestination<Content: View>: View {
       deliveredSessionIDs.remove(session.id)
     }
     isTargeted = false
+    sidebarDropLog.info(
+      "transferable values received count=\(transfers.count) "
+        + "navigationAlreadyBegan=\(importID != nil)"
+    )
     performTransferredDrop(transfers, importID)
   }
 
   private func update(_ session: DropSession) {
     switch session.phase {
-    case .entering, .active:
+    case .entering:
+      sidebarDropLog.debug("transferable session entered items=\(session.itemsCount)")
+      isTargeted = true
+    case .active:
       isTargeted = true
     case .exiting:
+      sidebarDropLog.debug("transferable session exited")
       isTargeted = false
     case let .ended(operation):
       isTargeted = false
+      sidebarDropLog.debug("transferable session ended operation=\(String(describing: operation))")
       guard case .copy = operation else {
         pendingDrops.removeValue(forKey: session.id)
         return
@@ -98,6 +116,7 @@ private struct SidebarTransferableDropDestination<Content: View>: View {
       guard pendingDrops[session.id] == nil else { return }
       beginNavigation(for: session)
     case .dataTransferCompleted:
+      sidebarDropLog.debug("transferable data transfer completed")
       isTargeted = false
       // The typed action can be delivered after this phase. Treat this as a
       // cleanup signal only; a timeout here produces false failure toasts for
@@ -108,6 +127,7 @@ private struct SidebarTransferableDropDestination<Content: View>: View {
   }
 
   private func beginNavigation(for session: DropSession) {
+    sidebarDropLog.debug("transferable session beginning navigation")
     pendingDrops[session.id] = beginTransferDrop()
   }
 }
@@ -172,7 +192,8 @@ private final class SidebarNativeDropView: NSView {
   }
 
   override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-    updateTargeting(for: sender.draggingPasteboard)
+    sidebarDropLog.debug("native session entered types=\(sender.draggingPasteboard.types?.count ?? 0)")
+    return updateTargeting(for: sender.draggingPasteboard)
   }
 
   override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
@@ -180,10 +201,12 @@ private final class SidebarNativeDropView: NSView {
   }
 
   override func draggingExited(_ sender: NSDraggingInfo?) {
+    sidebarDropLog.debug("native session exited")
     endTargeting()
   }
 
   override func draggingEnded(_ sender: NSDraggingInfo) {
+    sidebarDropLog.debug("native session ended")
     endTargeting()
   }
 
@@ -193,7 +216,9 @@ private final class SidebarNativeDropView: NSView {
 
     // Only consume the pasteboard once AppKit performs the drop. Reading file
     // URLs earlier can lose the temporary access granted by the drag session.
-    return performDrop?(sender.draggingPasteboard) ?? false
+    let accepted = performDrop?(sender.draggingPasteboard) ?? false
+    sidebarDropLog.info("native drop performed accepted=\(accepted)")
+    return accepted
   }
 
   func endTargeting() {

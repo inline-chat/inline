@@ -20,6 +20,27 @@ public struct ApiDialog: Codable, Hashable, Sendable {
   public var pinnedOrder: String?
   public var sidebarVisible: Bool?
   public var chatListHidden: Bool?
+  public var collapsedMaxId: Int64? = nil
+  public var collapsedAt: Date? = nil
+}
+
+public struct CollapsedHistoryMarker: Equatable, Hashable, Sendable {
+  public let maxId: Int64
+  public let collapsedAt: Date?
+
+  public init(maxId: Int64, collapsedAt: Date?) {
+    self.maxId = maxId
+    self.collapsedAt = collapsedAt
+  }
+
+  /// Server messages use their causal ID boundary. Local optimistic/failed messages have
+  /// negative IDs, so their creation time determines which side of the clear they belong on.
+  public func contains(messageId: Int64, date: Date) -> Bool {
+    if messageId > 0 {
+      return messageId <= maxId
+    }
+    return collapsedAt.map { date <= $0 } ?? false
+  }
 }
 
 public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
@@ -49,6 +70,10 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
   public var chatListHidden: Bool? = nil
   /// Reply-thread automatic surfacing policy; nil means relevance-only default.
   public var followMode: DialogFollowMode? = nil
+  /// Personal message boundary through which history is collapsed in the chat view.
+  public var collapsedMaxId: Int64? = nil
+  /// Synced generation and display time for the current collapse action.
+  public var collapsedAt: Date? = nil
 
   private enum CodingKeys: String, CodingKey {
     case id
@@ -70,6 +95,8 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
     case pinnedOrder
     case chatListHidden
     case followMode
+    case collapsedMaxId
+    case collapsedAt
   }
 
   public enum Columns {
@@ -92,6 +119,8 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
     public static let pinnedOrder = Column(CodingKeys.pinnedOrder)
     public static let chatListHidden = Column(CodingKeys.chatListHidden)
     public static let followMode = Column(CodingKeys.followMode)
+    public static let collapsedMaxId = Column(CodingKeys.collapsedMaxId)
+    public static let collapsedAt = Column(CodingKeys.collapsedAt)
   }
 
   public static let space = belongsTo(Space.self)
@@ -155,6 +184,8 @@ public extension Dialog {
     pinnedOrder = from.pinnedOrder
     chatListHidden = Self.chatListHidden(from: from.chatListHidden, sidebarVisible: from.sidebarVisible)
     followMode = nil
+    collapsedMaxId = from.collapsedMaxId
+    collapsedAt = from.collapsedAt
   }
 
   // Called when user clicks a user for the first time
@@ -181,6 +212,8 @@ public extension Dialog {
     pinnedOrder = nil
     chatListHidden = nil
     followMode = nil
+    collapsedMaxId = nil
+    collapsedAt = nil
   }
 
   init(optimisticForChat chat: Chat) {
@@ -209,6 +242,8 @@ public extension Dialog {
     pinnedOrder = nil
     chatListHidden = nil
     followMode = nil
+    collapsedMaxId = nil
+    collapsedAt = nil
   }
 
   init(from: InlineProtocol.Dialog) {
@@ -247,6 +282,8 @@ public extension Dialog {
       chatListHidden = nil
     }
     followMode = from.hasFollowMode ? from.followMode : nil
+    collapsedMaxId = from.hasCollapsedMaxID ? from.collapsedMaxID : nil
+    collapsedAt = from.hasCollapsedAt ? Date(timeIntervalSince1970: TimeInterval(from.collapsedAt)) : nil
   }
 
   static func getDialogId(peerUserId: Int64) -> Int64 {
@@ -278,6 +315,10 @@ public extension Dialog {
     } else {
       fatalError("One of peerUserId or peerThreadId must be set")
     }
+  }
+
+  var collapsedHistoryMarker: CollapsedHistoryMarker? {
+    collapsedMaxId.map { CollapsedHistoryMarker(maxId: $0, collapsedAt: collapsedAt) }
   }
 }
 
@@ -368,6 +409,10 @@ public extension ApiDialog {
         dialog.chatListHidden = existing.chatListHidden
       }
       dialog.followMode = existing.followMode
+      if collapsedMaxId == nil {
+        dialog.collapsedMaxId = existing.collapsedMaxId
+        dialog.collapsedAt = existing.collapsedAt
+      }
       try dialog.save(db)
     } else {
       try dialog.save(db, onConflict: .replace)

@@ -5,6 +5,11 @@ public enum ChatListSort: String, CaseIterable, Codable, Hashable, Sendable {
   case recentlyOpened
 }
 
+public enum ChatListFilter: String, CaseIterable, Codable, Hashable, Sendable {
+  case all
+  case unread
+}
+
 public enum ChatListLayoutMode: String, CaseIterable, Codable, Hashable, Sendable {
   case compact
   case standard
@@ -103,6 +108,7 @@ public struct ChatListItemSnapshot: Identifiable, Codable, Hashable, Sendable {
   public let title: String
   public let previewSenderName: String?
   public let previewText: String?
+  public let translatedPreviewText: String?
   public let timestampText: String?
   public let identity: ChatListIdentityDescriptor?
   public let unreadCount: Int
@@ -126,6 +132,7 @@ public struct ChatListItemSnapshot: Identifiable, Codable, Hashable, Sendable {
     title: String,
     previewSenderName: String? = nil,
     previewText: String? = nil,
+    translatedPreviewText: String? = nil,
     timestampText: String? = nil,
     identity: ChatListIdentityDescriptor? = nil,
     unreadCount: Int = 0,
@@ -148,6 +155,7 @@ public struct ChatListItemSnapshot: Identifiable, Codable, Hashable, Sendable {
     self.title = title
     self.previewSenderName = previewSenderName
     self.previewText = previewText
+    self.translatedPreviewText = translatedPreviewText
     self.timestampText = timestampText
     self.identity = identity
     self.unreadCount = unreadCount

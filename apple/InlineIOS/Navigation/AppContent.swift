@@ -3,6 +3,84 @@ import SwiftUI
 
 typealias Router = NavigationModel<AppTab, Destination, Sheet>
 
+enum AppNavigationRequest: Sendable {
+  case chat(peer: Peer)
+  case message(peer: Peer, messageID: Int64)
+
+  var peer: Peer {
+    switch self {
+    case let .chat(peer), let .message(peer, _):
+      peer
+    }
+  }
+}
+
+@MainActor
+final class IOSSceneRouterRegistry {
+  private struct Entry {
+    weak var router: Router?
+    var activationOrder: UInt64
+    var isActive: Bool
+  }
+
+  private var entries: [UUID: Entry] = [:]
+  private var nextActivationOrder: UInt64 = 0
+  private var pendingRequest: AppNavigationRequest?
+
+  func register(_ router: Router, sceneID: UUID, isActive: Bool) {
+    entries[sceneID] = Entry(router: router, activationOrder: 0, isActive: isActive)
+    if isActive {
+      activate(sceneID)
+    }
+    deliverPendingRequestIfPossible()
+  }
+
+  func activate(_ sceneID: UUID) {
+    guard var entry = entries[sceneID], entry.router != nil else { return }
+    nextActivationOrder &+= 1
+    entry.activationOrder = nextActivationOrder
+    entry.isActive = true
+    entries[sceneID] = entry
+    deliverPendingRequestIfPossible()
+  }
+
+  func deactivate(_ sceneID: UUID) {
+    guard var entry = entries[sceneID] else { return }
+    entry.isActive = false
+    entries[sceneID] = entry
+  }
+
+  func unregister(_ sceneID: UUID) {
+    entries.removeValue(forKey: sceneID)
+  }
+
+  func navigate(_ request: AppNavigationRequest) {
+    pruneReleasedRouters()
+    guard let router = activeRouter else {
+      pendingRequest = request
+      return
+    }
+    router.navigate(request)
+  }
+
+  private var activeRouter: Router? {
+    let liveEntries = entries.values.filter { $0.router != nil }
+    return (liveEntries.filter(\.isActive).max { $0.activationOrder < $1.activationOrder }
+      ?? liveEntries.max { $0.activationOrder < $1.activationOrder })?
+      .router
+  }
+
+  private func deliverPendingRequestIfPossible() {
+    guard let pendingRequest, let router = activeRouter else { return }
+    self.pendingRequest = nil
+    router.navigate(pendingRequest)
+  }
+
+  private func pruneReleasedRouters() {
+    entries = entries.filter { $0.value.router != nil }
+  }
+}
+
 enum AppTab: String, TabType, CaseIterable, Codable {
   case inbox, allChats, search
   case archived, chats, spaces
@@ -86,11 +164,22 @@ enum Sheet: SheetType, Codable {
 
 @MainActor
 extension Router {
+  func navigate(_ request: AppNavigationRequest) {
+    switch request {
+    case let .chat(peer):
+      navigateFromNotification(peer: peer)
+    case let .message(peer, messageID):
+      selectedTab = .inbox
+      self[.inbox] = [.chatMessage(peer: peer, messageID: messageID)]
+    }
+  }
+
   func navigateFromNotification(peer: Peer) {
-    // Check if user is already in the chat from the notification
-    if let currentDestination = self[selectedTab].last,
+    // Keep external chat opens canonical: they belong to Inbox even when the
+    // same peer happens to be visible through another tab's navigation path.
+    if selectedTab == .inbox,
+       let currentDestination = self[.inbox].last,
        currentDestination.chatPeer == peer {
-      // User is already in the correct chat, no need to navigate
       return
     }
 

@@ -50,6 +50,8 @@ export function encodeDialog(dialog: DbDialog, { unreadCount }: { unreadCount: n
     order: dialog.order ?? undefined,
     pinnedOrder: dialog.pinnedOrder ?? undefined,
     followMode: encodeDialogFollowMode(dialog.followMode),
+    collapsedMaxId: dialog.collapsedMaxId ? BigInt(dialog.collapsedMaxId) : undefined,
+    collapsedAt: encodeDate(dialog.collapsedAt ?? undefined),
     sidebarVisible: dialog.chatListHidden !== true,
     chatListHidden: dialog.chatListHidden === true ? true : undefined,
   }

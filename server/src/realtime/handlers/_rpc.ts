@@ -61,6 +61,7 @@ import { pinMessageHandler } from "@in/server/realtime/handlers/messages.pinMess
 import { moveThreadHandler } from "@in/server/realtime/handlers/messages.moveThread"
 import { updateDialogNotificationSettings } from "@in/server/realtime/handlers/messages.updateDialogNotificationSettings"
 import { updateDialogFollowMode } from "@in/server/realtime/handlers/messages.updateDialogFollowMode"
+import { collapseHistory } from "@in/server/realtime/handlers/messages.collapseHistory"
 import { updatePushNotificationDetailsHandler } from "@in/server/realtime/handlers/user.updatePushNotificationDetails"
 import { reserveChatIds } from "@in/server/realtime/handlers/messages.reserveChatIds"
 import { invokeMessageAction } from "@in/server/realtime/handlers/messages.invokeMessageAction"
@@ -709,6 +710,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       const result = await updateDialogFollowMode(call.input.updateDialogFollowMode, handlerContext)
       return { oneofKind: "updateDialogFollowMode", updateDialogFollowMode: result }
+    }
+
+    case Method.COLLAPSE_HISTORY: {
+      if (call.input.oneofKind !== "collapseHistory") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await collapseHistory(call.input.collapseHistory, handlerContext)
+      return { oneofKind: "collapseHistory", collapseHistory: result }
     }
 
     case Method.UPDATE_PUSH_NOTIFICATION_DETAILS: {

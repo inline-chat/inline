@@ -72,7 +72,10 @@ final class ComposeAutocompleteManager: NSObject {
         return mentionViewModel.items.prefix(limit).map(Self.autocompleteItem(for:))
       },
       commandItems: { query, limit in
-        commandViewModel.suggestions(matching: query).prefix(limit).map(Self.autocompleteItem(for:))
+        InlineCommands.suggestions(
+          matching: query,
+          botSuggestions: commandViewModel.suggestions(matching: query)
+        ).prefix(limit).map(Self.autocompleteItem(for:))
       },
       emojiItems: { query, limit in
         ComposeEmojiAutocompleteProvider.items(matching: query, limit: limit)
@@ -514,15 +517,22 @@ final class ComposeAutocompleteManager: NSObject {
       )
       apply(result.newAttributedText, cursorPosition: result.newCursorPosition, to: textView)
 
-    case let .command(suggestion):
-      let commandText = suggestion.insertionText.trimmingCharacters(in: .whitespacesAndNewlines)
-      let result = slashCommandDetector.replaceSlashCommand(
-        in: currentAttributedText,
-        range: match.range,
-        with: commandText,
-        targetBotUserId: suggestion.botId
-      )
-      apply(result.newAttributedText, cursorPosition: result.newCursorPosition, to: textView)
+    case let .command(source):
+      switch source {
+      case let .bot(suggestion):
+        let commandText = suggestion.insertionText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let result = slashCommandDetector.replaceSlashCommand(
+          in: currentAttributedText,
+          range: match.range,
+          with: commandText,
+          targetBotUserId: suggestion.botId
+        )
+        apply(result.newAttributedText, cursorPosition: result.newCursorPosition, to: textView)
+      case .inline:
+        let updated = NSMutableAttributedString(attributedString: currentAttributedText)
+        updated.replaceCharacters(in: match.range, with: "")
+        apply(updated, cursorPosition: match.range.location, to: textView)
+      }
 
     case let .thread(chatId, _, title):
       let result = threadLinkDetector.replaceThreadLink(
@@ -703,19 +713,31 @@ final class ComposeAutocompleteManager: NSObject {
     )
   }
 
-  private static func autocompleteItem(for command: PeerBotCommandSuggestion) -> ComposeAutocompleteItem {
-    let botLabel = command.isAmbiguous ? (command.botLabel ?? command.botDisplayName) : nil
-    let subtitle = [botLabel, command.description]
-      .compactMap { value in value?.isEmpty == false ? value : nil }
-      .joined(separator: " · ")
-    return ComposeAutocompleteItem(
-      id: "command-\(command.id)",
-      kind: .command,
-      title: "/\(command.command)",
-      subtitle: subtitle,
-      avatarUserInfo: command.botUserInfo,
-      payload: .command(command)
-    )
+  private static func autocompleteItem(for source: ComposeCommandSource) -> ComposeAutocompleteItem {
+    switch source {
+    case let .bot(command):
+      let botLabel = command.isAmbiguous ? (command.botLabel ?? command.botDisplayName) : nil
+      let subtitle = [botLabel, command.description]
+        .compactMap { value in value?.isEmpty == false ? value : nil }
+        .joined(separator: " · ")
+      return ComposeAutocompleteItem(
+        id: "command-\(source.id)",
+        kind: .command,
+        title: "/\(command.command)",
+        subtitle: subtitle,
+        avatarUserInfo: command.botUserInfo,
+        payload: .command(source)
+      )
+    case let .inline(command):
+      return ComposeAutocompleteItem(
+        id: "command-\(source.id)",
+        kind: .command,
+        title: command.title,
+        subtitle: command.description,
+        imageName: "AppIconSmall",
+        payload: .command(source)
+      )
+    }
   }
 }
 
@@ -767,8 +789,12 @@ extension ComposeView: ComposeAutocompleteManagerDelegate {
     activation: ComposeAutocompleteSelectionActivation
   ) {
     switch item.payload {
-    case .command where activation == .primary:
+    case .command(.bot) where activation == .primary:
       sendMessage()
+    case let .command(.inline(command)):
+      executeInlineCommand(command)
+      updateHeight()
+      draftManager.invalidateLoadedEntities()
     case .command, .mention, .thread, .emoji:
       updateHeight()
       draftManager.invalidateLoadedEntities()

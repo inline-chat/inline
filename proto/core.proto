@@ -216,6 +216,10 @@ message Dialog {
   optional string pinned_order = 15;
   // Reply-thread automatic surfacing policy.
   optional DialogFollowMode follow_mode = 16;
+  // Personal boundary through which chat history is collapsed in the message view.
+  optional int64 collapsed_max_id = 17;
+  // Server time of the latest explicit collapse; also identifies the collapse generation.
+  optional int64 collapsed_at = 18;
 }
 
 enum DialogFollowMode {
@@ -1041,6 +1045,7 @@ enum Method {
   SET_PROFILE_PHOTO = 94;
   GET_EXTERNAL_PROFILE_PHOTO = 95;
   GET_CHAT_TRANSCRIPT = 96;
+  COLLAPSE_HISTORY = 97;
 }
 
 message RpcCall {
@@ -1142,6 +1147,7 @@ message RpcCall {
     SetProfilePhotoInput setProfilePhoto = 95;
     GetExternalProfilePhotoInput getExternalProfilePhoto = 96;
     GetChatTranscriptInput getChatTranscript = 97;
+    CollapseHistoryInput collapseHistory = 98;
   }
 }
 
@@ -1245,6 +1251,7 @@ message RpcResult {
     SetProfilePhotoResult setProfilePhoto = 95;
     GetExternalProfilePhotoResult getExternalProfilePhoto = 96;
     GetChatTranscriptResult getChatTranscript = 97;
+    CollapseHistoryResult collapseHistory = 98;
   }
 }
 
@@ -1679,6 +1686,15 @@ message UpdateDialogFollowModeInput {
 }
 
 message UpdateDialogFollowModeResult { repeated Update updates = 1; }
+
+// Set or remove the current user's collapsed-history boundary for a dialog.
+message CollapseHistoryInput {
+  InputPeer peer_id = 1;
+  // If unset, remove the personal collapse marker.
+  optional int64 max_id = 2;
+}
+
+message CollapseHistoryResult { repeated Update updates = 1; }
 
 // Mark dialog as unread
 message MarkAsUnreadInput {
@@ -2616,6 +2632,7 @@ message Update {
     UpdateChatParticipantGroupDelete participant_group_delete = 42;
     UpdateSpaceSettings space_settings = 43;
     UpdateChatPermissions chat_permissions = 44;
+    UpdateCollapseHistory collapse_history = 45;
   }
 }
 
@@ -2785,6 +2802,15 @@ message UpdateDialogFollowMode {
 
   // If unset, the reply thread uses default relevance mode.
   optional DialogFollowMode follow_mode = 2;
+}
+
+// Update when the current user's personal collapsed-history boundary changes.
+message UpdateCollapseHistory {
+  Peer peer_id = 1;
+  // If unset, the personal collapse marker was removed.
+  optional int64 max_id = 2;
+  // Server time of the latest explicit collapse; unset when removed.
+  optional int64 collapsed_at = 3;
 }
 
 // Update when a new chat is created either in space or a private chat

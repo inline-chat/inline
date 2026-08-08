@@ -92,6 +92,23 @@ public enum InlineDeepLink: Equatable, Sendable {
     url()
   }
 
+  public var webURL: URL? {
+    guard isValid else { return nil }
+
+    var components = URLComponents()
+    components.scheme = "https"
+    components.host = "inline.chat"
+
+    switch self {
+    case let .chat(id):
+      components.path = "/c/\(id)"
+    case .user, .message:
+      return nil
+    }
+
+    return components.url
+  }
+
   public static func isSupportedScheme(_ scheme: String?) -> Bool {
     guard let scheme else { return false }
     return supportedSchemes.contains(scheme.lowercased())

@@ -349,6 +349,12 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  @Published var appKitSidebarEnabled: Bool {
+    didSet {
+      UserDefaults.standard.set(appKitSidebarEnabled, forKey: ExperimentalFeatureFlags.appKitSidebarKey)
+    }
+  }
+
   private init() {
     sendsWithCmdEnter = UserDefaults.standard.bool(forKey: "sendsWithCmdEnter")
     automaticSpellCorrection = UserDefaults.standard.object(forKey: "automaticSpellCorrection") as? Bool ?? true
@@ -421,6 +427,7 @@ final class AppSettings: ObservableObject {
     }
     showMainTabStrip = UserDefaults.standard.object(forKey: "showMainTabStrip") as? Bool ?? false
     sidebarAsInbox = UserDefaults.standard.bool(forKey: ExperimentalFeatureFlags.sidebarAsInboxKey)
+    appKitSidebarEnabled = ExperimentalFeatureFlags.appKitSidebarEnabled
   }
 }
 

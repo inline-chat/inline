@@ -838,6 +838,23 @@ public extension Message {
   }
 }
 
+public enum MessagePreviewText {
+  public static func document(fileName: String?, includesEmoji: Bool = true) -> String {
+    let normalizedName = fileName?
+      .components(separatedBy: .whitespacesAndNewlines)
+      .filter { !$0.isEmpty }
+      .joined(separator: " ")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    let label: String
+    if let normalizedName, !normalizedName.isEmpty {
+      label = normalizedName
+    } else {
+      label = "Document"
+    }
+    return includesEmoji ? "📄 \(label)" : label
+  }
+}
+
 public extension InlineProtocol.Message {
   var stringRepresentationWithEmoji: String {
     if hasServiceMessage, let serviceFallbackText = serviceMessage.fallbackText {
@@ -853,7 +870,7 @@ public extension InlineProtocol.Message {
     } else if media.video.hasVideo {
       "🎥 Video"
     } else if media.document.hasDocument {
-      "📄 Document"
+      MessagePreviewText.document(fileName: media.document.document.fileName)
     } else if media.voice.hasVoice {
       "🎤 Voice message"
     } else {
@@ -875,7 +892,7 @@ public extension InlineProtocol.Message {
     } else if media.video.hasVideo {
       "Video"
     } else if media.document.hasDocument {
-      "Document"
+      MessagePreviewText.document(fileName: media.document.document.fileName, includesEmoji: false)
     } else if media.voice.hasVoice {
       "Voice message"
     } else {

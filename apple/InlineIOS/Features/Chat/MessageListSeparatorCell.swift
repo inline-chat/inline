@@ -6,6 +6,7 @@ final class MessageListSeparatorCell: UICollectionViewCell {
   private let label = UILabel()
   private let leadingLine = UIView()
   private let trailingLine = UIView()
+  private var clearedHistoryAction: (() -> Void)?
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -19,11 +20,33 @@ final class MessageListSeparatorCell: UICollectionViewCell {
 
   func configure(title: String) {
     label.text = title
+    clearedHistoryAction = nil
+    label.isUserInteractionEnabled = false
+    label.isAccessibilityElement = false
+    label.accessibilityLabel = nil
+    label.accessibilityHint = nil
+    label.accessibilityTraits = []
+  }
+
+  func configureAsClearedHistory(title: String, action: @escaping () -> Void) {
+    label.text = title
+    clearedHistoryAction = action
+    label.isUserInteractionEnabled = true
+    label.isAccessibilityElement = true
+    label.accessibilityLabel = title
+    label.accessibilityHint = "Shows all messages"
+    label.accessibilityTraits = .button
   }
 
   override func prepareForReuse() {
     super.prepareForReuse()
     label.text = nil
+    clearedHistoryAction = nil
+    label.isUserInteractionEnabled = false
+    label.isAccessibilityElement = false
+    label.accessibilityLabel = nil
+    label.accessibilityHint = nil
+    label.accessibilityTraits = []
   }
 
   private func setup() {
@@ -34,6 +57,7 @@ final class MessageListSeparatorCell: UICollectionViewCell {
     label.textAlignment = .center
     label.setContentCompressionResistancePriority(.required, for: .horizontal)
     label.translatesAutoresizingMaskIntoConstraints = false
+    label.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(didTapLabel)))
 
     for line in [leadingLine, trailingLine] {
       line.backgroundColor = .separator
@@ -58,5 +82,9 @@ final class MessageListSeparatorCell: UICollectionViewCell {
       trailingLine.centerYAnchor.constraint(equalTo: label.centerYAnchor),
       trailingLine.heightAnchor.constraint(equalToConstant: 1 / UIScreen.main.scale),
     ])
+  }
+
+  @objc private func didTapLabel() {
+    clearedHistoryAction?()
   }
 }

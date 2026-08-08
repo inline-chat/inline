@@ -23,6 +23,9 @@ export const chats = pgTable(
     /** Most recent message id */
     lastMsgId: integer("last_msg_id"),
 
+    /** Monotonic per-chat message ID allocator; unlike lastMsgId this never rewinds after deletion. */
+    messageIdHighWater: integer("message_id_high_water").notNull().default(0),
+
     /** optional, if part of a space */
     spaceId: integer("space_id").references(() => spaces.id),
 

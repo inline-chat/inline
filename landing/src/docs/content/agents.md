@@ -22,34 +22,33 @@ Connect an agent to Inline as a private local bot, through MCP, or with an agent
 
 ## Local coding agents
 
-Install and sign in to the [Inline CLI](/docs/cli), then connect a project folder. Setup is persistent; you do not start a new bridge for every chat.
+On macOS, choose **Set Up an Agent…** from Inline's app menu or the Bots settings page. The wizard installs or updates the trusted Inline CLI, signs it in, finds every supported harness already installed on your Mac, and lets you choose which one to connect.
 
-### Codex
-
-```bash
-inline setup codex --folder /path/to/project
-```
-
-### OpenCode
+You can run the same unified flow in Terminal:
 
 ```bash
-inline setup opencode --folder /path/to/project
+# Detect installed harnesses and choose interactively
+inline agents setup
+
+# Prompt-free setup for an agent or script
+inline agents setup --target codex --non-interactive --json
+inline agents setup --target hermes --non-interactive --json
+inline agents setup --target openclaw --non-interactive --json
 ```
 
-### Claude
+Supported harnesses are Codex, Claude, OpenCode, Amp, Hermes, and OpenClaw. Inline installs its own adapter or plugin, but it does not silently install those third-party runtimes. If a local coding harness needs no explicit folder, Inline uses your home directory; pass `--folder` to use a narrower workspace.
 
 ```bash
-inline setup claude --folder /path/to/project
+inline agents setup --target codex --folder /path/to/project
 ```
 
-### Amp
+Read-only discovery is available for troubleshooting and app integrations:
 
 ```bash
-inline setup amp --folder /path/to/project
+inline agents discover --json --compact
 ```
 
-Codex is the primary beta path. OpenCode, Claude, and Amp are experimental;
-check the compatibility details below before relying on them for daily work.
+The older `inline setup codex|opencode|claude|amp` commands remain supported. Codex is the primary local-bridge beta path; OpenCode, Claude, and Amp are experimental, while Hermes and OpenClaw use their own gateway integrations.
 
 Check all configured agents with one command:
 

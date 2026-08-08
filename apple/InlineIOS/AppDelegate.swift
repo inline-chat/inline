@@ -11,7 +11,7 @@ import UIKit
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
   let notificationHandler = NotificationHandler()
   let nav = Navigation()
-  let router = NavigationModel<AppTab, Destination, Sheet>(initialTab: .chats)
+  let sceneRouterRegistry = IOSSceneRouterRegistry()
   private var protectedDataObserver: NSObjectProtocol?
 
   func application(
@@ -76,20 +76,20 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
   }
 
   @MainActor
-  func handleDeepLink(_ url: URL) -> Bool {
+  func handleDeepLink(_ url: URL, router: Router) -> Bool {
     guard let deepLink = InlineDeepLink(url: url) else { return false }
 
+    let request: AppNavigationRequest
     switch deepLink {
     case let .user(id):
-      router.navigateFromNotification(peer: .user(id: id))
+      request = .chat(peer: .user(id: id))
     case let .chat(id):
-      router.navigateFromNotification(peer: .thread(id: id))
+      request = .chat(peer: .thread(id: id))
     case let .message(chatId, messageId):
-      router.selectedTab = .inbox
-      router[.inbox] = [
-        .chatMessage(peer: .thread(id: chatId), messageID: messageId),
-      ]
+      request = .message(peer: .thread(id: chatId), messageID: messageId)
     }
+    router.navigate(request)
+    openInInboxAfterExternalNavigation(request.peer)
     return true
   }
 
@@ -237,8 +237,18 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
       return
     }
 
-    // nav.navigateToChatFromNotification(peer: peerId)
-    router.navigateFromNotification(peer: peerId)
+    sceneRouterRegistry.navigate(.chat(peer: peerId))
+    openInInboxAfterExternalNavigation(peerId)
+  }
+
+  private func openInInboxAfterExternalNavigation(_ peer: Peer) {
+    Task {
+      do {
+        _ = try await InboxMembershipService.shared.open(peer: peer)
+      } catch {
+        Log.shared.error("Failed to open notification chat in Inbox", error: error)
+      }
+    }
   }
 }
 
@@ -353,12 +363,12 @@ private extension AppDelegate {
     if let number = value as? NSNumber { return number.boolValue }
     if let string = value as? String {
       switch string.lowercased() {
-        case "true", "1", "yes":
-          return true
-        case "false", "0", "no":
-          return false
-        default:
-          return nil
+      case "true", "1", "yes":
+        return true
+      case "false", "0", "no":
+        return false
+      default:
+        return nil
       }
     }
     return nil

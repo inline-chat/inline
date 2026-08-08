@@ -1,14 +1,18 @@
 import SwiftUI
 
 struct ExperimentalSettingsDetailView: View {
+  @StateObject private var settings = AppSettings.shared
+
   var body: some View {
     Form {
       Section {
-        SettingsEmptyRow(
-          "No Experimental Features",
-          description: "Experimental controls will appear here when they are available.",
-          systemImage: "testtube.2"
-        )
+        Toggle(isOn: $settings.appKitSidebarEnabled) {
+          SettingsRowLabel(
+            "AppKit Sidebar",
+            description: "Use the collection-view sidebar with nested reply threads and native scrolling and reordering."
+          )
+        }
+        .toggleStyle(.switch)
       } header: {
         SettingsSectionHeader("Experimental")
       }
