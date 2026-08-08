@@ -6,6 +6,7 @@ Checks:
   - sparkle:version + sparkle:shortVersionString present
   - enclosure has url + sparkle:edSignature + length
   - optional: require hardware requirements for the selected build
+  - optional: require the selected build's minimum macOS version
   - optional: require a specific build number and dmg URL
 """
 
@@ -43,6 +44,7 @@ def main() -> int:
     parser.add_argument("--require-build")
     parser.add_argument("--require-url")
     parser.add_argument("--require-hardware")
+    parser.add_argument("--require-minimum-system-version")
     args = parser.parse_args()
 
     appcast_path = Path(args.appcast)
@@ -109,6 +111,25 @@ def main() -> int:
             for item in candidates
         ):
             print(f"Appcast missing hardware requirement {args.require_hardware}", file=sys.stderr)
+            return 1
+
+    if args.require_minimum_system_version:
+        candidates = matching_build_items if args.require_build else items
+        if not candidates:
+            print("No appcast items available for minimum system version check", file=sys.stderr)
+            return 1
+        if not any(
+            (find_sparkle_child(item, "minimumSystemVersion") is not None)
+            and (
+                (find_sparkle_child(item, "minimumSystemVersion").text or "").strip()
+                == args.require_minimum_system_version
+            )
+            for item in candidates
+        ):
+            print(
+                f"Appcast minimum system version does not match {args.require_minimum_system_version}",
+                file=sys.stderr,
+            )
             return 1
 
     for item in items:

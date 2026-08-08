@@ -62,6 +62,7 @@ type BuiltAppMetadata = {
   version: string;
   commit: string;
   feedUrl: string;
+  minimumSystemVersion: string;
 };
 
 type ReleaseContext = ReleaseOptions & {
@@ -81,6 +82,7 @@ type ReleaseContext = ReleaseOptions & {
   baseUrl: string;
   dmgUrl: string;
   appcastUrl: string;
+  minimumSystemVersion: string;
   rollbackSelectedBuild: string;
   rollbackSelectedUrl: string;
   rollbackRemovedBuilds: string[];
@@ -403,18 +405,20 @@ function readBuiltAppMetadata(ctx: ReleaseContext): BuiltAppMetadata {
   const version = readPlistString(infoPlist, "CFBundleShortVersionString");
   const commit = readPlistString(infoPlist, "InlineCommit");
   const feedUrl = readPlistString(infoPlist, "SUFeedURL");
+  const minimumSystemVersion = readPlistString(infoPlist, "LSMinimumSystemVersion");
 
   const missing = [
     ["CFBundleVersion", buildNumber],
     ["CFBundleShortVersionString", version],
     ["InlineCommit", commit],
     ["SUFeedURL", feedUrl],
+    ["LSMinimumSystemVersion", minimumSystemVersion],
   ].flatMap(([key, value]) => (value ? [] : [key]));
   if (missing.length) {
     throw new Error(`Built app metadata missing in ${infoPlist}: ${missing.join(", ")}`);
   }
 
-  return { infoPlist, buildNumber, version, commit, feedUrl };
+  return { infoPlist, buildNumber, version, commit, feedUrl, minimumSystemVersion };
 }
 
 function verifyBuiltAppMetadata(ctx: ReleaseContext, ui: Ui): BuiltAppMetadata {
@@ -447,7 +451,10 @@ function verifyBuiltAppMetadata(ctx: ReleaseContext, ui: Ui): BuiltAppMetadata {
   ctx.commit = metadata.commit;
   ctx.commitLong = git(ctx.rootDir, ["rev-parse", "HEAD"]);
   ctx.appcastUrl = expectedFeedUrl;
-  ui.info(`Verified app metadata: build ${ctx.buildNumber}, commit ${ctx.commit}, feed ${ctx.appcastUrl}`);
+  ctx.minimumSystemVersion = metadata.minimumSystemVersion;
+  ui.info(
+    `Verified app metadata: build ${ctx.buildNumber}, commit ${ctx.commit}, minimum macOS ${ctx.minimumSystemVersion}, feed ${ctx.appcastUrl}`,
+  );
   return metadata;
 }
 
@@ -929,6 +936,7 @@ async function main() {
     baseUrl: "",
     dmgUrl: "",
     appcastUrl: "",
+    minimumSystemVersion: "",
     rollbackSelectedBuild: "",
     rollbackSelectedUrl: "",
     rollbackRemovedBuilds: [],
@@ -1606,7 +1614,8 @@ async function main() {
           INLINE_VERSION: ctx.version,
           INLINE_CHANNEL: ctx.channel,
           INLINE_DMG_URL: ctx.dmgUrl,
-          INLINE_MIN_MACOS: "15.0",
+          // Sparkle must not offer an app to systems below the built app's actual floor.
+          INLINE_MIN_MACOS: ctx.minimumSystemVersion,
           INLINE_HARDWARE_REQUIREMENTS: macosReleaseArch,
           INLINE_COMMIT: ctx.commit,
           INLINE_COMMIT_LONG: ctx.commitLong,
@@ -1625,7 +1634,7 @@ async function main() {
     skipReason: taskEnabled(opts, "validate-appcast") ? undefined : "operator requested",
     dryRun: (ctx, ui) => {
       ui.info("Would run:");
-      ui.info("  python3 scripts/macos/validate_appcast.py --appcast <temp>/appcast_new.xml --require-build <build> --require-url <dmg-url> --require-hardware arm64");
+      ui.info("  python3 scripts/macos/validate_appcast.py --appcast <temp>/appcast_new.xml --require-build <build> --require-url <dmg-url> --require-hardware arm64 --require-minimum-system-version <from app plist>");
     },
     run: async (ctx, ui) => {
       if (!ctx.buildNumber || !ctx.dmgUrl) {
@@ -1635,7 +1644,7 @@ async function main() {
         ctx.dmgUrl = `${ctx.baseUrl}/mac/${ctx.channel}/${ctx.buildNumber}/Inline.dmg`;
       }
 
-      await runStreaming(ui, ["python3", resolve(ctx.rootDir, "scripts/macos/validate_appcast.py"), "--appcast", ctx.appcastOutputPath, "--require-build", ctx.buildNumber, "--require-url", ctx.dmgUrl, "--require-hardware", macosReleaseArch], {
+      await runStreaming(ui, ["python3", resolve(ctx.rootDir, "scripts/macos/validate_appcast.py"), "--appcast", ctx.appcastOutputPath, "--require-build", ctx.buildNumber, "--require-url", ctx.dmgUrl, "--require-hardware", macosReleaseArch, "--require-minimum-system-version", ctx.minimumSystemVersion], {
         cwd: ctx.rootDir,
       });
     },
