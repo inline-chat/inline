@@ -165,7 +165,6 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   public var baseURL: String { Self.baseURL }
 
   private let decoder = JSONDecoder()
-  private let maxLoggedErrorBodyLength = 2_000
 
   private func parseAPIError(_ data: Data) -> APIError? {
     guard !data.isEmpty else {
@@ -181,37 +180,25 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     return nil
   }
 
-  private func formatErrorBody(_ data: Data) -> String {
-    guard !data.isEmpty else {
-      return "<empty>"
-    }
-
-    guard let body = String(data: data, encoding: .utf8)?
-      .trimmingCharacters(in: .whitespacesAndNewlines),
-      !body.isEmpty
-    else {
-      return "<non-utf8 body: \(data.count) bytes>"
-    }
-
-    if body.count <= maxLoggedErrorBodyLength {
-      return body
-    }
-
-    let endIdx = body.index(body.startIndex, offsetBy: maxLoggedErrorBodyLength)
-    return "\(body[..<endIdx])… (truncated, \(body.count) chars)"
-  }
-
   private func logHTTPError(
     method: String,
-    url: URL,
+    path: Path,
     response: HTTPURLResponse,
     data: Data
   ) {
     let requestId = response.value(forHTTPHeaderField: "x-request-id")
       ?? response.value(forHTTPHeaderField: "X-Request-Id")
       ?? "n/a"
-    let body = formatErrorBody(data)
-    log.error("HTTP \(response.statusCode) \(method) \(url.absoluteString) requestId=\(requestId) body=\(body)")
+    log.error(
+      event: "http_request_failed",
+      fields: [
+        .diagnosticIdentifier("method", method),
+        .diagnosticIdentifier("endpoint", path.rawValue),
+        .diagnostic("status_code", response.statusCode),
+        .diagnosticIdentifier("request_id", requestId),
+        .diagnostic("response_bytes", data.count),
+      ]
+    )
   }
 
   private func request<T: Decodable & Sendable>(
@@ -261,7 +248,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
           if let apiError = parseAPIError(data) {
             logHTTPError(
               method: request.httpMethod ?? "GET",
-              url: url,
+              path: path,
               response: httpResponse,
               data: data
             )
@@ -270,7 +257,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
           logHTTPError(
             method: request.httpMethod ?? "GET",
-            url: url,
+            path: path,
             response: httpResponse,
             data: data
           )
@@ -327,7 +314,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
           if let apiError = parseAPIError(data) {
             logHTTPError(
               method: request.httpMethod ?? "POST",
-              url: url,
+              path: path,
               response: httpResponse,
               data: data
             )
@@ -336,7 +323,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
           logHTTPError(
             method: request.httpMethod ?? "POST",
-            url: url,
+            path: path,
             response: httpResponse,
             data: data
           )

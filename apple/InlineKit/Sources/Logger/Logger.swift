@@ -13,7 +13,7 @@ public enum LogLevel: String, Codable, Sendable {
   var osLogType: OSLogType {
     switch self {
       case .error: .error
-      case .warning: .fault
+      case .warning: .default
       case .info: .info
       case .debug: .debug
       case .trace: .debug
@@ -87,10 +87,193 @@ public struct LogEntry: Codable, Identifiable, Sendable, Equatable {
 public struct LogEvent: @unchecked Sendable {
   public let entry: LogEntry
   public let error: Error?
+  public let eventName: String
+  public let fields: [LogField]
+  public let isStructured: Bool
 
-  public init(entry: LogEntry, error: Error?) {
+  public init(
+    entry: LogEntry,
+    error: Error?,
+    eventName: String = "unstructured_log",
+    fields: [LogField] = [],
+    isStructured: Bool = false
+  ) {
     self.entry = entry
     self.error = error
+    self.eventName = eventName
+    self.fields = fields
+    self.isStructured = isStructured
+  }
+
+  /// The only message default remote/public sinks may export. The original
+  /// message remains available to explicitly local sinks through `entry`.
+  public var exportedMessage: String {
+    var components = [
+      "scope=\(exportedScope)",
+      "event=\(LogExportSanitizer.identifier(eventName, fallback: "unstructured_log"))",
+      "source=\(LogExportSanitizer.source(fileName: entry.fileName, line: entry.line))",
+    ]
+    components.append(contentsOf: exportedFields.map { "\($0.name)=\($0.value)" })
+    return components.joined(separator: " ")
+  }
+
+  public var exportedScope: String {
+    LogExportSanitizer.identifier(entry.scope, fallback: "unknown")
+  }
+
+  public var exportedFields: [LogExportField] {
+    fields
+      .compactMap(LogExportSanitizer.export)
+      .sorted { lhs, rhs in lhs.name < rhs.name }
+  }
+
+  public var exportedError: LogExportError? {
+    guard let error else { return nil }
+    let nsError = error as NSError
+    return LogExportError(
+      type: LogExportSanitizer.identifier(
+        String(describing: type(of: error)),
+        fallback: "Error"
+      ),
+      domain: LogExportSanitizer.identifier(nsError.domain, fallback: "unknown"),
+      code: nsError.code
+    )
+  }
+}
+
+public enum LogFieldPrivacy: String, Sendable, Equatable {
+  /// A deliberately non-sensitive value that can be emitted to remote/public sinks.
+  case diagnostic
+  /// A value retained only in the local `LogEntry` representation.
+  case sensitive
+}
+
+public struct LogField: Sendable, Equatable {
+  public let name: String
+  public let value: String
+  public let privacy: LogFieldPrivacy
+
+  private init(name: StaticString, value: String, privacy: LogFieldPrivacy) {
+    self.name = String(describing: name)
+    self.value = value
+    self.privacy = privacy
+  }
+
+  public static func diagnostic(_ name: StaticString, _ value: StaticString) -> LogField {
+    LogField(name: name, value: String(describing: value), privacy: .diagnostic)
+  }
+
+  public static func diagnostic(_ name: StaticString, _ value: Int) -> LogField {
+    LogField(name: name, value: String(value), privacy: .diagnostic)
+  }
+
+  public static func diagnostic(_ name: StaticString, _ value: Int64) -> LogField {
+    LogField(name: name, value: String(value), privacy: .diagnostic)
+  }
+
+  public static func diagnostic(_ name: StaticString, _ value: Double) -> LogField {
+    LogField(name: name, value: String(value), privacy: .diagnostic)
+  }
+
+  public static func diagnostic(_ name: StaticString, _ value: Bool) -> LogField {
+    LogField(name: name, value: String(value), privacy: .diagnostic)
+  }
+
+  /// An explicitly reviewed runtime identifier. Prefer the typed or
+  /// `StaticString` overloads; export sanitization is still applied.
+  public static func diagnosticIdentifier(_ name: StaticString, _ value: String) -> LogField {
+    LogField(name: name, value: value, privacy: .diagnostic)
+  }
+
+  public static func sensitive(_ name: StaticString, _ value: some CustomStringConvertible) -> LogField {
+    LogField(name: name, value: String(describing: value), privacy: .sensitive)
+  }
+}
+
+public struct LogExportField: Sendable, Equatable {
+  public let name: String
+  public let value: String
+}
+
+public struct LogExportError: Sendable, Equatable {
+  public let type: String
+  public let domain: String
+  public let code: Int
+}
+
+public enum LogPrivacy {
+  /// Keeps route-level diagnostics while removing credentials, query values,
+  /// fragments, and URL user info.
+  public static func redactedURL(_ value: String) -> String {
+    guard var components = URLComponents(string: value),
+          let scheme = components.scheme,
+          scheme == "http" || scheme == "https" else {
+      return "redacted_url"
+    }
+    components.user = nil
+    components.password = nil
+    components.query = nil
+    components.fragment = nil
+    return components.string ?? "redacted_url"
+  }
+}
+
+private enum LogExportSanitizer {
+  private static let identifierScalars = CharacterSet(
+    charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-/"
+  )
+  private static let sensitiveFieldNames: Set<String> = [
+    "authorization", "body", "challenge", "challenge_token", "code", "content", "cookie",
+    "email", "file", "file_path", "invite", "invite_code", "message", "otp", "password",
+    "path", "phone", "query", "response_body", "secret", "subtitle", "text", "title", "token",
+    "url", "user_text",
+  ]
+
+  static func export(_ field: LogField) -> LogExportField? {
+    guard field.privacy == .diagnostic else { return nil }
+    let name = identifier(field.name, fallback: "field")
+    guard !isSensitiveFieldName(name) else { return nil }
+    return LogExportField(name: name, value: value(field.value))
+  }
+
+  static func identifier(_ value: String, fallback: String) -> String {
+    guard !value.isEmpty, value.count <= 160 else { return fallback }
+    guard value.unicodeScalars.allSatisfy(identifierScalars.contains) else { return fallback }
+    return value
+  }
+
+  static func source(fileName: String, line: Int) -> String {
+    "\(identifier(fileName, fallback: "unknown.swift")):\(max(0, line))"
+  }
+
+  private static func isSensitiveFieldName(_ value: String) -> Bool {
+    let normalized = value.lowercased().replacingOccurrences(of: "-", with: "_")
+    return sensitiveFieldNames.contains(normalized)
+  }
+
+  private static func value(_ value: String) -> String {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return "empty" }
+
+    if trimmed.hasPrefix("/") || trimmed.hasPrefix("~/") || trimmed.hasPrefix("file:") {
+      return "redacted_path"
+    }
+
+    if let components = URLComponents(string: trimmed),
+       let scheme = components.scheme,
+       scheme == "http" || scheme == "https" {
+      return LogPrivacy.redactedURL(components.string ?? trimmed)
+    }
+
+    if trimmed.contains("@") {
+      return "redacted_email"
+    }
+
+    let singleLine = trimmed.replacingOccurrences(of: "\n", with: " ")
+    if singleLine.count <= 256 {
+      return singleLine
+    }
+    return "\(singleLine.prefix(256))…"
   }
 }
 
@@ -122,9 +305,9 @@ public final class ConsoleLogSink: LogSink, @unchecked Sendable {
 
   public func write(_ event: LogEvent) {
     let entry = event.entry
-    logger(for: entry.scope).log(
+    logger(for: event.exportedScope).log(
       level: entry.level.osLogType,
-      "\(entry.consoleMessage, privacy: .public)"
+      "\(entry.level.rawValue, privacy: .public) | \(event.exportedMessage, privacy: .public) | details=\(entry.message, privacy: .private)"
     )
   }
 
@@ -151,7 +334,7 @@ public final class SentryLogSink: LogSink, @unchecked Sendable {
     let entry = event.entry
 
     if entry.level == .info {
-      SentrySDK.logger.info(entry.message)
+      SentrySDK.logger.info(event.exportedMessage)
     }
 
     guard entry.level == .error else { return }
@@ -160,11 +343,11 @@ public final class SentryLogSink: LogSink, @unchecked Sendable {
       if let error = event.error {
         await SentryReporter.shared.reportError(
           error,
-          entry: entry
+          event: event
         )
       } else {
         await SentryReporter.shared.reportMessage(
-          entry
+          event
         )
       }
     }
@@ -229,6 +412,9 @@ public final class Log: @unchecked Sendable {
     _ message: String,
     level: LogLevel,
     error: Error? = nil,
+    eventName: String = "unstructured_log",
+    fields: [LogField] = [],
+    isStructured: Bool = false,
     file: String = #file,
     function: String = #function,
     line: Int = #line
@@ -257,10 +443,80 @@ public final class Log: @unchecked Sendable {
       line: line
     )
 
-    let event = LogEvent(entry: entry, error: error)
+    let event = LogEvent(
+      entry: entry,
+      error: error,
+      eventName: eventName,
+      fields: fields,
+      isStructured: isStructured
+    )
     for sink in Self.registry.snapshot() {
       sink.write(event)
     }
+  }
+
+  private func log(
+    event: StaticString,
+    fields: [LogField],
+    level: LogLevel,
+    error: Error? = nil,
+    file: String,
+    function: String,
+    line: Int
+  ) {
+    let eventName = String(describing: event)
+    let localFields = fields.map { "\($0.name)=\($0.value)" }.joined(separator: " ")
+    let localMessage = localFields.isEmpty ? eventName : "\(eventName) \(localFields)"
+    log(
+      localMessage,
+      level: level,
+      error: error,
+      eventName: eventName,
+      fields: fields,
+      isStructured: true,
+      file: file,
+      function: function,
+      line: line
+    )
+  }
+
+  public func error(
+    event: StaticString,
+    fields: [LogField] = [],
+    error: Error? = nil,
+    file: String = #file,
+    function: String = #function,
+    line: Int = #line
+  ) {
+    log(
+      event: event,
+      fields: fields,
+      level: .error,
+      error: error,
+      file: file,
+      function: function,
+      line: line
+    )
+  }
+
+  public func warning(
+    event: StaticString,
+    fields: [LogField] = [],
+    file: String = #file,
+    function: String = #function,
+    line: Int = #line
+  ) {
+    log(event: event, fields: fields, level: .warning, file: file, function: function, line: line)
+  }
+
+  public func info(
+    event: StaticString,
+    fields: [LogField] = [],
+    file: String = #file,
+    function: String = #function,
+    line: Int = #line
+  ) {
+    log(event: event, fields: fields, level: .info, file: file, function: function, line: line)
   }
 }
 
@@ -343,37 +599,47 @@ private actor SentryReporter {
 
   func reportError(
     _ error: Error,
-    entry: LogEntry
+    event: LogEvent
   ) async {
     guard SentrySDK.isEnabled else { return }
     guard shouldReport(error) else { return }
 
     await MainActor.run {
-      _ = SentrySDK.capture(error: error) { sentryScope in
-        sentryScope.setTag(value: entry.scope, key: "scope")
-        sentryScope.setExtra(value: entry.message, key: "message")
-        sentryScope.setExtra(value: entry.file, key: "file")
-        sentryScope.setExtra(value: entry.function, key: "function")
-        sentryScope.setExtra(value: entry.line, key: "line")
+      _ = SentrySDK.capture(message: event.exportedMessage) { sentryScope in
+        Self.configure(scope: sentryScope, for: event)
       }
     }
   }
 
   func reportMessage(
-    _ entry: LogEntry
+    _ event: LogEvent
   ) async {
     guard SentrySDK.isEnabled else { return }
 
     await MainActor.run {
-      _ = SentrySDK.capture(message: entry.message) { sentryScope in
-        sentryScope.setTag(value: entry.scope, key: "scope")
-        sentryScope.setExtra(value: entry.file, key: "file")
-        sentryScope.setExtra(value: entry.function, key: "function")
-        sentryScope.setExtra(value: entry.line, key: "line")
-        if let error = entry.error {
-          sentryScope.setExtra(value: error, key: "error")
-        }
+      _ = SentrySDK.capture(message: event.exportedMessage) { sentryScope in
+        Self.configure(scope: sentryScope, for: event)
       }
+    }
+  }
+
+  private nonisolated static func configure(scope: Scope, for event: LogEvent) {
+    let entry = event.entry
+    scope.setTag(
+      value: event.exportedScope,
+      key: "scope"
+    )
+    scope.setTag(value: event.isStructured ? "structured" : "legacy", key: "log_contract")
+    scope.setExtra(value: entry.fileName, key: "file_name")
+    scope.setExtra(value: entry.function, key: "function")
+    scope.setExtra(value: entry.line, key: "line")
+    for field in event.exportedFields {
+      scope.setExtra(value: field.value, key: field.name)
+    }
+    if let error = event.exportedError {
+      scope.setExtra(value: error.type, key: "error_type")
+      scope.setExtra(value: error.domain, key: "error_domain")
+      scope.setExtra(value: error.code, key: "error_code")
     }
   }
 }

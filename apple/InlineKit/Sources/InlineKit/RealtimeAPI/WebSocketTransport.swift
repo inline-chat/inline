@@ -730,14 +730,11 @@ actor WebSocketTransport: NSObject, Sendable {
         httpStatus: httpStatus
       ) {
         await captureTransportIssue(
-          message: "WebSocket disconnected with error",
           origin: origin,
           error: error,
           closeCode: closeCode,
           httpStatus: httpStatus,
-          data: [
-            "details": details,
-          ]
+          data: [:]
         )
       }
     } else if shouldCaptureIssue(
@@ -748,7 +745,6 @@ actor WebSocketTransport: NSObject, Sendable {
       httpStatus: httpStatus
     ) {
       await captureTransportIssue(
-        message: "WebSocket closed unexpectedly",
         origin: origin,
         closeCode: closeCode,
         httpStatus: httpStatus,
@@ -1019,7 +1015,6 @@ private extension WebSocketTransport {
   }
 
   func captureTransportIssue(
-    message: String,
     origin: TransportOrigin,
     error: Error? = nil,
     closeCode: URLSessionWebSocketTask.CloseCode? = nil,
@@ -1037,22 +1032,13 @@ private extension WebSocketTransport {
     )
     let tags = sentryTags(origin: origin, error: error, closeCode: closeCode)
     let fingerprint = sentryFingerprint(origin: origin, error: error, closeCode: closeCode, httpStatus: httpStatus)
+    let message = "Realtime transport \(transportEvent(origin: origin, error: error, closeCode: closeCode))"
 
-    if let error {
-      _ = SentrySDK.capture(error: error) { scope in
-        scope.setLevel(.error)
-        scope.setFingerprint(fingerprint)
-        tags.forEach { scope.setTag(value: $1, key: $0) }
-        sentryData.forEach { scope.setExtra(value: $1, key: $0) }
-        scope.setExtra(value: message, key: "message")
-      }
-    } else {
-      _ = SentrySDK.capture(message: message) { scope in
-        scope.setLevel(.warning)
-        scope.setFingerprint(fingerprint)
-        tags.forEach { scope.setTag(value: $1, key: $0) }
-        sentryData.forEach { scope.setExtra(value: $1, key: $0) }
-      }
+    _ = SentrySDK.capture(message: message) { scope in
+      scope.setLevel(error == nil ? .warning : .error)
+      scope.setFingerprint(fingerprint)
+      tags.forEach { scope.setTag(value: $1, key: $0) }
+      sentryData.forEach { scope.setExtra(value: $1, key: $0) }
     }
   }
 
@@ -1188,7 +1174,7 @@ private extension WebSocketTransport {
       "reconnect_attempt": reconnectionAttempts,
       "ping_in_flight": pingInFlight.load(ordering: .relaxed),
       "request_timeout_s": 30,
-      "url": urlString,
+      "url": LogPrivacy.redactedURL(urlString),
     ]
 
     if let scheduledReconnectDelay {

@@ -40,7 +40,7 @@ public enum PerformanceTrace {
         log: log,
         name: name,
         signpostID: id,
-        "%{public}s",
+        "%{private}s",
         message()
       )
     }
@@ -66,7 +66,7 @@ public enum PerformanceTrace {
       log: log,
       name: name,
       signpostID: id,
-      "%{public}s",
+      "%{private}s",
       message()
     )
     return Span(log: log, id: id, name: name)
@@ -81,28 +81,28 @@ public enum PerformanceTrace {
       .event,
       log: osLog(for: category),
       name: name,
-      "%{public}s",
+      "%{private}s",
       message()
     )
   }
 
   public static func breadcrumb(
-    _ message: String,
-    category: String,
+    _ message: StaticString,
+    category: StaticString,
     level: BreadcrumbLevel = .info,
     data: [String: Any] = [:]
   ) {
     guard SentrySDK.isEnabled else { return }
 
-    let crumb = Breadcrumb(level: level.sentryLevel, category: category)
-    crumb.message = message
+    let crumb = Breadcrumb(level: level.sentryLevel, category: String(describing: category))
+    crumb.message = String(describing: message)
     crumb.data = data
     SentrySDK.addBreadcrumb(crumb)
   }
 
   public static func slowBreadcrumb(
-    _ message: String,
-    category: String,
+    _ message: StaticString,
+    category: StaticString,
     durationMs: Int,
     thresholdMs: Int,
     data: @autoclosure () -> [String: Any] = [:]
