@@ -122,4 +122,24 @@ struct AccountGenerationSupervisorTests {
     #expect(AccountPersistenceScope(accountID: 10) == AccountPersistenceScope(accountID: 10))
     #expect(AccountPersistenceScope(accountID: 10) != AccountPersistenceScope(accountID: 20))
   }
+
+  @Test("completed children are pruned before generation teardown")
+  func completedChildrenArePruned() async {
+    let supervisor = AccountGenerationSupervisor()
+    let finished = AsyncStream.makeStream(of: Void.self)
+    let generation = await supervisor.begin(accountID: 10)
+
+    #expect(await supervisor.startChild(for: generation) {
+      finished.continuation.yield()
+    })
+    var iterator = finished.stream.makeAsyncIterator()
+    _ = await iterator.next()
+
+    for _ in 0 ..< 100 {
+      guard await supervisor.snapshot().ownedChildCount > 0 else { break }
+      await Task.yield()
+    }
+
+    #expect(await supervisor.snapshot().ownedChildCount == 0)
+  }
 }

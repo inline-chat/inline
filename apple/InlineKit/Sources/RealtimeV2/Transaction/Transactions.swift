@@ -33,15 +33,20 @@ actor Transactions {
 
   init(
     persistenceHandler: TransactionPersistenceHandler? = nil,
-    blockerResolver: (any TransactionBlockerResolver)? = nil
+    blockerResolver: (any TransactionBlockerResolver)? = nil,
+    loadPersistedTransactionsOnInit: Bool = true
   ) {
     self.persistenceHandler = persistenceHandler
     self.blockerResolver = blockerResolver
-    Task {
-      // load all transactions from disk into queue
-      await loadAllFromDisk()
-      // signal the run loop
-      await queueStream.send(())
+    if loadPersistedTransactionsOnInit {
+      Task {
+        // Preserve the existing fire-and-forget load ordering for current callers.
+        // AccountTransactionRuntime opts out and explicitly awaits recovery.
+        Task {
+          await loadPersistedTransactions()
+        }
+        await queueStream.send(())
+      }
     }
   }
 
@@ -67,6 +72,25 @@ actor Transactions {
   func enqueue(transaction: some Transaction, transactionId: TransactionId) {
     let wrapper = TransactionWrapper(id: transactionId, date: Date(), transaction: transaction)
     enqueue(wrapper)
+  }
+
+  /// Queue a transaction only after its durable mutation has reached the persistence boundary.
+  ///
+  /// The existing enqueue APIs intentionally preserve their fire-and-forget behavior. Account-scoped
+  /// runtimes use this compatibility seam so logout can drain persistence before another account starts.
+  func enqueueDurably(transaction: some Transaction) async throws -> TransactionId {
+    let transactionId = TransactionId.generate()
+    let wrapper = TransactionWrapper(id: transactionId, date: Date(), transaction: transaction)
+
+    log.trace("Durably queuing transaction \(transactionId): \(wrapper.transaction.debugDescription)")
+    // Do not publish executable work until its durable save succeeds. This actor can reenter while
+    // persistence suspends, so inserting first would let a concurrent dequeue run uncommitted work.
+    try await persistToDisk(transaction: wrapper)
+    _queue[transactionId] = wrapper
+    Task {
+      await queueStream.send(())
+    }
+    return transactionId
   }
 
   private func enqueue(_ wrapper: TransactionWrapper) {
@@ -362,16 +386,38 @@ actor Transactions {
 
     Task.detached { [transaction, log, persistenceHandler] in
       do {
-        if let persistenceHandler {
-          log.trace("Saving transaction \(transaction.id) to disk: \(transaction.transaction.debugDescription)")
-          try await persistenceHandler.saveTransaction(transaction)
-          log.trace("Successfully saved transaction \(transaction.id) to disk")
-        } else {
-          log.trace("No persistence handler available, skipping save for transaction \(transaction.id)")
-        }
+        try await Self.performPersistenceSave(
+          transaction: transaction,
+          persistenceHandler: persistenceHandler,
+          log: log
+        )
       } catch {
         log.error("Failed to save transaction \(transaction.id) to disk", error: error)
       }
+    }
+  }
+
+  private func persistToDisk(transaction: TransactionWrapper) async throws {
+    guard shouldSaveToDisk(transaction: transaction) else { return }
+
+    try await Self.performPersistenceSave(
+      transaction: transaction,
+      persistenceHandler: persistenceHandler,
+      log: log
+    )
+  }
+
+  private nonisolated static func performPersistenceSave(
+    transaction: TransactionWrapper,
+    persistenceHandler: TransactionPersistenceHandler?,
+    log: Log
+  ) async throws {
+    if let persistenceHandler {
+      log.trace("Saving transaction \(transaction.id) to disk: \(transaction.transaction.debugDescription)")
+      try await persistenceHandler.saveTransaction(transaction)
+      log.trace("Successfully saved transaction \(transaction.id) to disk")
+    } else {
+      log.trace("No persistence handler available, skipping save for transaction \(transaction.id)")
     }
   }
 
@@ -394,53 +440,49 @@ actor Transactions {
     }
   }
 
-  private func loadAllFromDisk() {
-    Task { [weak self, log, persistenceHandler] in
-      guard let self else { return }
+  func loadPersistedTransactions() async {
+    do {
+      if let persistenceHandler {
+        log.trace("Starting to load transactions from disk")
+        let allTransactions = try await persistenceHandler.loadTransactions()
+        log.trace("Loaded \(allTransactions.count) raw transactions from disk")
 
-      do {
-        if let persistenceHandler {
-          log.trace("Starting to load transactions from disk")
-          let allTransactions = try await persistenceHandler.loadTransactions()
-          log.trace("Loaded \(allTransactions.count) raw transactions from disk")
+        // Separate valid and expired transactions
+        let expirationDate = Date().addingTimeInterval(-10 * 60) // 10 minutes
+        var validTransactions: [TransactionWrapper] = []
+        var expiredTransactions: [TransactionWrapper] = []
 
-          // Separate valid and expired transactions
-          let expirationDate = Date().addingTimeInterval(-10 * 60) // 10 minutes
-          var validTransactions: [TransactionWrapper] = []
-          var expiredTransactions: [TransactionWrapper] = []
-
-          for transaction in allTransactions {
-            if transaction.date < expirationDate {
-              log.trace("Transaction \(transaction.id) expired (created: \(transaction.date))")
-              expiredTransactions.append(transaction)
-            } else {
-              validTransactions.append(transaction)
-            }
+        for transaction in allTransactions {
+          if transaction.date < expirationDate {
+            log.trace("Transaction \(transaction.id) expired (created: \(transaction.date))")
+            expiredTransactions.append(transaction)
+          } else {
+            validTransactions.append(transaction)
           }
-
-          // Trigger failed() for expired transactions
-          for expiredTransaction in expiredTransactions {
-          log.trace("Transaction \(expiredTransaction.id) expired, calling failed()")
-            await expiredTransaction.transaction.failed(error: .timeout)
-
-            // Delete expired transaction from disk
-            try? await persistenceHandler.deleteTransaction(expiredTransaction.id)
-          }
-
-          // Sort valid transactions by creation date
-          validTransactions.sort { $0.date < $1.date }
-          log.trace("Sorted \(validTransactions.count) valid transactions by creation date")
-
-          // Add loaded transactions to queue
-          await addLoadedTransactions(validTransactions)
-
-          log.info("Loaded \(validTransactions.count) transactions from disk, expired \(expiredTransactions.count)")
-        } else {
-          log.trace("No persistence handler available, skipping load from disk")
         }
-      } catch {
-        log.error("Failed to load transactions from disk", error: error)
+
+        // Trigger failed() for expired transactions
+        for expiredTransaction in expiredTransactions {
+          log.trace("Transaction \(expiredTransaction.id) expired, calling failed()")
+          await expiredTransaction.transaction.failed(error: .timeout)
+
+          // Delete expired transaction from disk
+          try? await persistenceHandler.deleteTransaction(expiredTransaction.id)
+        }
+
+        // Sort valid transactions by creation date
+        validTransactions.sort { $0.date < $1.date }
+        log.trace("Sorted \(validTransactions.count) valid transactions by creation date")
+
+        // Add loaded transactions to queue
+        addLoadedTransactions(validTransactions)
+
+        log.info("Loaded \(validTransactions.count) transactions from disk, expired \(expiredTransactions.count)")
+      } else {
+        log.trace("No persistence handler available, skipping load from disk")
       }
+    } catch {
+      log.error("Failed to load transactions from disk", error: error)
     }
   }
 

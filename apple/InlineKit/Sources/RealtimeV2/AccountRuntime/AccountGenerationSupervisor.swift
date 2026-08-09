@@ -62,9 +62,13 @@ public actor AccountGenerationSupervisor {
     operation: @escaping @Sendable () async -> Void
   ) -> Bool {
     guard currentGeneration == generation else { return false }
-    children[UUID()] = OwnedChild(
+    let id = UUID()
+    children[id] = OwnedChild(
       generation: generation,
-      task: Task(operation: operation)
+      task: Task { [weak self] in
+        await operation()
+        await self?.childFinished(id: id, generation: generation)
+      }
     )
     return true
   }
@@ -146,11 +150,16 @@ public actor AccountGenerationSupervisor {
       await cleanup.operation()
     }
   }
+
+  private func childFinished(id: UUID, generation: AccountGeneration) {
+    guard children[id]?.generation == generation else { return }
+    children[id] = nil
+  }
 }
 
 /// Persistence is scoped to account identity, while generation tokens fence in-memory work.
 /// Keeping the two concepts separate permits safe relaunch recovery without cross-account replay.
-public struct AccountPersistenceScope: Equatable, Sendable {
+public struct AccountPersistenceScope: Hashable, Sendable {
   public let accountID: Int64
 
   public init(accountID: Int64) {
