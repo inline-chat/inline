@@ -28,6 +28,7 @@ public struct AppDependencies {
   let unreadCounts = UnreadCountsModel.shared
   let userSettings = INUserSettings.current
   let gridRuntime = GridRuntime.shared
+  let commandBarCatalog = CommandBarCatalogService(database: AppDatabase.shared)
   var grid: GridRoomService { gridRuntime.rooms }
 
   // Per window

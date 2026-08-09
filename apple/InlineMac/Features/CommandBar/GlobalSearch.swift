@@ -1,7 +1,7 @@
 import InlineKit
 import SwiftUI
 
-enum GlobalSearchResult: Hashable, Identifiable {
+enum GlobalSearchResult: Hashable, Identifiable, Sendable {
   case users(ApiUser)
 
   var id: Int64 {

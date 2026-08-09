@@ -63,6 +63,7 @@
 		D1A0B1C32F10432100A1B2C3 /* InlineIOSUI in Frameworks */ = {isa = PBXBuildFile; productRef = D1A0B1C22F10432100A1B2C3 /* InlineIOSUI */; };
 		D4ACD0012F1B000000000001 /* MacDevtools in Frameworks */ = {isa = PBXBuildFile; productRef = D4ACD0022F1B000000000001 /* MacDevtools */; };
 		D4B53A112F1C000100000001 /* InlineSearch in Frameworks */ = {isa = PBXBuildFile; productRef = D4B53A102F1C000100000001 /* InlineSearch */; };
+		D4B53A132F1C000100000001 /* InlineSearch in Frameworks */ = {isa = PBXBuildFile; productRef = D4B53A122F1C000100000001 /* InlineSearch */; };
 		E95DD2F1FC76F473B6D31EB6 /* InlineMacWindow in Frameworks */ = {isa = PBXBuildFile; productRef = 7BABF642C785B35DB0C34BF2 /* InlineMacWindow */; };
 /* End PBXBuildFile section */
 
@@ -274,6 +275,7 @@
 			files = (
 				A9E100042F50000100000001 /* MemojiKit in Frameworks */,
 				A9E100052F50000100000001 /* MemojiPickerUI in Frameworks */,
+				D4B53A132F1C000100000001 /* InlineSearch in Frameworks */,
 				D7A0C0022F50000100000001 /* InlineRTC in Frameworks */,
 				F17C11012F9A000100000001 /* InlineCLIInstaller in Frameworks */,
 				CD092C4D2EDC6F4A00E867E5 /* InlineMacUI in Frameworks */,
@@ -494,6 +496,7 @@
 			packageProductDependencies = (
 				A9E100022F50000100000001 /* MemojiKit */,
 				A9E100032F50000100000001 /* MemojiPickerUI */,
+				D4B53A122F1C000100000001 /* InlineSearch */,
 				D7A0C0012F50000100000001 /* InlineRTC */,
 				C38C905F2CB9432200B78B8A /* InlineKit */,
 				CDE960152CB94C4F004C541C /* SwiftUIIntrospect */,
@@ -1989,6 +1992,10 @@
 			productName = MacDevtools;
 		};
 		D4B53A102F1C000100000001 /* InlineSearch */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineSearch;
+		};
+		D4B53A122F1C000100000001 /* InlineSearch */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineSearch;
 		};

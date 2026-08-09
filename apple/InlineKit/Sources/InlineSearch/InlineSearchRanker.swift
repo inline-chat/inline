@@ -11,62 +11,20 @@ enum InlineSearchRanker {
     }
   }
 
-  struct PreparedQuery: Sendable, Equatable {
-    let raw: String
-    let normalized: String
-    let compact: String
-    let tokens: [String]
-  }
+  typealias PreparedQuery = InlineSearchPreparedQuery
 
   static func prepare(_ query: String) -> PreparedQuery? {
-    let raw = query.trimmingCharacters(in: .whitespacesAndNewlines)
-    let normalized = normalize(raw)
-    let compactQuery = compact(normalized)
-    guard compactQuery.isEmpty == false else { return nil }
-
-    let tokens = normalized
-      .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
-      .map(String.init)
-      .filter { compact($0).isEmpty == false }
-
-    return PreparedQuery(
-      raw: raw,
-      normalized: normalized,
-      compact: compactQuery,
-      tokens: tokens.isEmpty ? [normalized] : tokens
-    )
+    InlineSearchMatcher.prepare(query)
   }
 
   static func score(query: PreparedQuery, fields: [Field]) -> Int? {
-    var best = 0
-    var tokenMatches = Set<String>()
-
-    for field in fields {
-      guard let value = field.text else { continue }
-      let normalized = normalize(value)
-      guard normalized.isEmpty == false else { continue }
-
-      let compactValue = compact(normalized)
-      let fieldScore = scoreField(
-        normalized,
-        compactValue: compactValue,
-        query: query
-      )
-
-      if fieldScore > 0 {
-        best = max(best, fieldScore * field.weight)
-      }
-
-      for token in query.tokens where normalized.contains(token) || compactValue.contains(compact(token)) {
-        tokenMatches.insert(token)
-      }
+    let searchableFields = fields.map { field in
+      InlineSearchField(field.text, priority: field.weight * 100)
     }
-
-    if tokenMatches.count == query.tokens.count {
-      best = max(best, 260)
+    guard let match = InlineSearchMatcher.match(query: query, fields: searchableFields) else {
+      return nil
     }
-
-    return best > 0 ? best : nil
+    return match.tier.rawValue * 10_000 + match.fieldPriority - min(match.position, 500)
   }
 
   static func activityScore(messageCount: Int, lastDate: Date, now: Date = Date()) -> Int {
@@ -95,58 +53,10 @@ enum InlineSearchRanker {
   }
 
   static func normalize(_ text: String) -> String {
-    text
-      .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-      .lowercased()
-      .trimmingCharacters(in: .whitespacesAndNewlines)
+    InlineSearchMatcher.normalize(text)
   }
 
   static func compact(_ text: String) -> String {
-    String(String.UnicodeScalarView(text.unicodeScalars.filter {
-      CharacterSet.alphanumerics.contains($0)
-    }))
-  }
-
-  private static func scoreField(
-    _ value: String,
-    compactValue: String,
-    query: PreparedQuery
-  ) -> Int {
-    if value == query.normalized {
-      return 1_000
-    }
-
-    if compactValue == query.compact {
-      return 940
-    }
-
-    if value.hasPrefix(query.normalized) {
-      return 820
-    }
-
-    if startsWithWord(value, query: query.normalized) {
-      return 700
-    }
-
-    if value.contains(query.normalized) {
-      return 520
-    }
-
-    if compactValue.contains(query.compact) {
-      return 430
-    }
-
-    let matchedTokens = query.tokens.filter { token in
-      value.contains(token) || compactValue.contains(compact(token))
-    }
-
-    guard matchedTokens.isEmpty == false else { return 0 }
-    return matchedTokens.count == query.tokens.count ? 360 : 140
-  }
-
-  private static func startsWithWord(_ value: String, query: String) -> Bool {
-    value
-      .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
-      .contains { $0.hasPrefix(query) }
+    InlineSearchMatcher.compact(text)
   }
 }

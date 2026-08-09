@@ -70,6 +70,44 @@ struct InlineSearchViewModelTests {
     #expect(model.globalUsers.map(\.id) == [42])
   }
 
+  @Test("command bar catalog matches rich chat identity and ordering without message hydration")
+  func commandBarCatalogUsesCompactSnapshots() async throws {
+    let (queue, appDatabase) = try makeInMemoryDB()
+    let directUserId: Int64 = 31
+    let directChatId: Int64 = 5031
+    let roomId: Int64 = 6031
+    let unreferencedSpaceId: Int64 = 78
+
+    try await queue.write { db in
+      try seedUser(db, id: directUserId, firstName: "Alexander", lastName: nil, username: "alexander")
+      try seedPrivateChat(db, chatId: directChatId, userId: directUserId)
+      try seedSpace(db, id: spaceId)
+      try seedSpace(db, id: unreferencedSpaceId)
+      try seedThread(db, id: roomId, title: "Dena planning", spaceId: spaceId)
+      try seedDialog(db, chat: try Chat.fetchOne(db, id: roomId)!)
+
+      try seedMessage(db, chatId: directChatId, messageId: 20, fromUserId: directUserId, text: "direct")
+      try seedMessage(db, chatId: roomId, messageId: 30, fromUserId: directUserId, text: "room")
+      try setLastMessage(db, chatId: directChatId, messageId: 20)
+      try setLastMessage(db, chatId: roomId, messageId: 30)
+    }
+
+    let commandBarSnapshot = try await appDatabase.fetchCommandBarCatalogSnapshot()
+    let compact = commandBarSnapshot.chats
+    let rich = try await queue.read { db in
+      try HomeChatListItemSnapshot.snapshots(from: HomeChatItem.all().fetchAll(db), db: db)
+    }
+
+    #expect(compact.map(\.peerId) == rich.map(\.peerId))
+    #expect(compact.map(\.title) == rich.map(\.title))
+    #expect(compact.map(\.spaceTitle) == rich.map(\.spaceTitle))
+    #expect(compact.map(\.sortDate) == rich.map(\.sortDate))
+    #expect(compact.allSatisfy { $0.item.lastMessage == nil })
+    #expect(compact.allSatisfy { $0.preview.isEmpty })
+    #expect(compact.first { $0.peerId == .user(id: directUserId) }?.item.user?.user.username == "alexander")
+    #expect(Set(commandBarSnapshot.spaces.map(\.id)) == [spaceId, unreferencedSpaceId])
+  }
+
   @Test("chat search does not match reply thread parent title")
   func chatSearchDoesNotMatchReplyThreadParentTitle() async throws {
     let (queue, db) = try makeInMemoryDB()
@@ -218,6 +256,147 @@ struct InlineSearchViewModelTests {
     ))
   }
 
+  @Test("chat catalog uses switch frequency within the same match tier")
+  func chatCatalogUsesSwitchFrequencyWithinTier() async throws {
+    let (queue, _) = try makeInMemoryDB()
+    let alexanderId: Int64 = 10
+    let alexThreadId: Int64 = 7010
+
+    try await queue.write { db in
+      try seedUser(db, id: alexanderId, firstName: "Alexander", lastName: nil, username: "alexander")
+      try seedPrivateChat(db, chatId: 5010, userId: alexanderId)
+      try seedThread(db, id: alexThreadId, title: "Alex's xyz", spaceId: nil)
+      try seedDialog(db, chat: try Chat.fetchOne(db, id: alexThreadId)!)
+    }
+
+    let snapshots = try await queue.read { db in
+      try HomeChatListItemSnapshot.snapshots(from: HomeChatItem.all().fetchAll(db), db: db)
+    }
+    let catalog = InlineSearchChatCatalog()
+    await catalog.replace(snapshots)
+
+    let projection = await catalog.project(
+      query: "alex",
+      usage: [
+        .user(id: alexanderId): InlineSearchUsageSignal(switchFrecency: 50),
+        .thread(id: alexThreadId): InlineSearchUsageSignal(switchFrecency: 1),
+      ],
+      currentPeer: nil,
+      scope: InlineSearchScope(includeArchived: true)
+    )
+
+    #expect(projection.chats.map(\.peer).prefix(2) == [
+      .user(id: alexanderId),
+      .thread(id: alexThreadId),
+    ])
+  }
+
+  @Test("chat catalog query affinity learns the selected Dena")
+  func chatCatalogUsesQueryAffinity() async throws {
+    let (queue, _) = try makeInMemoryDB()
+    let preferredId: Int64 = 20
+    let otherId: Int64 = 21
+
+    try await queue.write { db in
+      try seedUser(db, id: preferredId, firstName: "Dena", lastName: "Preferred", username: "denap")
+      try seedPrivateChat(db, chatId: 5020, userId: preferredId)
+      try seedUser(db, id: otherId, firstName: "Dena", lastName: "Other", username: "denao")
+      try seedPrivateChat(db, chatId: 5021, userId: otherId)
+    }
+
+    let snapshots = try await queue.read { db in
+      try HomeChatListItemSnapshot.snapshots(from: HomeChatItem.all().fetchAll(db), db: db)
+    }
+    let catalog = InlineSearchChatCatalog()
+    await catalog.replace(snapshots)
+
+    let projection = await catalog.project(
+      query: "dena",
+      usage: [
+        .user(id: preferredId): InlineSearchUsageSignal(queryAffinity: 8),
+        .user(id: otherId): InlineSearchUsageSignal(queryAffinity: 1),
+      ],
+      currentPeer: nil,
+      scope: InlineSearchScope(includeArchived: true)
+    )
+
+    #expect(projection.chats.first?.peer == .user(id: preferredId))
+  }
+
+  @Test("chat catalog never lets usage outrank text relevance")
+  func chatCatalogKeepsTextTierAheadOfUsage() async throws {
+    let (queue, _) = try makeInMemoryDB()
+    let exactThreadId: Int64 = 7020
+    let heavilyUsedUserId: Int64 = 22
+
+    try await queue.write { db in
+      try seedThread(db, id: exactThreadId, title: "Alex", spaceId: nil)
+      try seedDialog(db, chat: try Chat.fetchOne(db, id: exactThreadId)!)
+      try seedUser(db, id: heavilyUsedUserId, firstName: "Alexander", lastName: nil, username: "alexander")
+      try seedPrivateChat(db, chatId: 5022, userId: heavilyUsedUserId)
+    }
+
+    let snapshots = try await queue.read { db in
+      try HomeChatListItemSnapshot.snapshots(from: HomeChatItem.all().fetchAll(db), db: db)
+    }
+    let catalog = InlineSearchChatCatalog()
+    await catalog.replace(snapshots)
+
+    let projection = await catalog.project(
+      query: "alex",
+      usage: [
+        .user(id: heavilyUsedUserId): InlineSearchUsageSignal(
+          switchFrecency: 1_000_000,
+          queryAffinity: 1_000_000
+        )
+      ],
+      currentPeer: nil,
+      scope: InlineSearchScope(includeArchived: true)
+    )
+
+    #expect(projection.chats.map(\.peer).prefix(2) == [
+      .thread(id: exactThreadId),
+      .user(id: heavilyUsedUserId),
+    ])
+  }
+
+  @Test("empty chat catalog returns suggestions then deduped chats")
+  func chatCatalogEmptyProjection() async throws {
+    let (queue, _) = try makeInMemoryDB()
+    let firstId: Int64 = 30
+    let secondId: Int64 = 31
+    let currentId: Int64 = 32
+
+    try await queue.write { db in
+      for (id, name) in [(firstId, "First"), (secondId, "Second"), (currentId, "Current")] {
+        try seedUser(db, id: id, firstName: name, lastName: nil, username: name.lowercased())
+        try seedPrivateChat(db, chatId: 5_000 + id, userId: id)
+      }
+    }
+
+    let snapshots = try await queue.read { db in
+      try HomeChatListItemSnapshot.snapshots(from: HomeChatItem.all().fetchAll(db), db: db)
+    }
+    let catalog = InlineSearchChatCatalog()
+    await catalog.replace(snapshots)
+
+    let projection = await catalog.project(
+      query: "",
+      usage: [
+        .user(id: firstId): InlineSearchUsageSignal(switchFrecency: 10),
+        .user(id: secondId): InlineSearchUsageSignal(switchFrecency: 5),
+        .user(id: currentId): InlineSearchUsageSignal(switchFrecency: 100),
+      ],
+      currentPeer: .user(id: currentId),
+      scope: InlineSearchScope(includeArchived: false),
+      suggestionLimit: 1,
+      chatLimit: 5
+    )
+
+    #expect(projection.suggestions.map(\.peer) == [.user(id: firstId)])
+    #expect(projection.chats.map(\.peer) == [.user(id: secondId)])
+  }
+
   nonisolated private func makeInMemoryDB() throws -> (DatabaseQueue, AppDatabase) {
     let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
     let appDatabase = try AppDatabase(queue)
@@ -304,6 +483,16 @@ struct InlineSearchViewModelTests {
       chatId: chatId
     )
     try message.saveMessage(db)
+  }
+
+  nonisolated private func setLastMessage(
+    _ db: Database,
+    chatId: Int64,
+    messageId: Int64
+  ) throws {
+    guard var chat = try Chat.fetchOne(db, id: chatId) else { return }
+    chat.lastMsgId = messageId
+    try chat.update(db)
   }
 
   private func waitUntil(

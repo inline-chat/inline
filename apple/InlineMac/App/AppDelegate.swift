@@ -487,6 +487,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       Transactions.shared.clearAll()
       ObjectCache.shared.clear()
       try await FileCache.shared.clearCache()
+      await dependencies.commandBarCatalog.reset()
       try AppDatabase.clearDB()
     } catch {
       dependencies.viewModel.navigate(restoreRoute)
@@ -807,6 +808,9 @@ extension AppDelegate {
     }
 
     Analytics.logout()
+
+    await QuickSearchUsageStore.shared.clearCurrentAccount()
+    await dependencies.commandBarCatalog.reset()
 
     // Clear database
     try? AppDatabase.loggedOut()

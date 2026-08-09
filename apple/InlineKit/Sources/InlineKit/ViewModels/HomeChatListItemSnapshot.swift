@@ -21,19 +21,21 @@ public struct HomeChatListItemSnapshot: Hashable, Identifiable, Sendable {
   public init(
     item: HomeChatItem,
     titleOverride: String? = nil,
-    parentTitle: String? = nil
+    parentTitle: String? = nil,
+    previewOverride: String? = nil,
+    sortDateOverride: Date? = nil
   ) {
     id = item.id
     self.item = item
     peerId = item.peerId
     chatId = item.dialog.chatId ?? item.chat?.id
     self.parentTitle = parentTitle
-    preview = Self.preview(for: item)
+    preview = previewOverride ?? Self.preview(for: item)
     spaceTitle = item.space?.displayName
     unread = (item.dialog.unreadCount ?? 0) > 0 || item.dialog.unreadMark == true
     pinned = item.dialog.pinned == true
     archived = item.dialog.archived == true
-    sortDate = item.lastMessage?.message.date ?? item.chat?.date ?? Date.distantPast
+    sortDate = sortDateOverride ?? item.lastMessage?.message.date ?? item.chat?.date ?? Date.distantPast
     title = Self.title(for: item, titleOverride: titleOverride)
     searchText = Self.normalizedSearchText(
       [
