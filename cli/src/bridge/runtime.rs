@@ -121,7 +121,6 @@ pub(super) struct InboundRoute {
     pub provider_id: ProviderId,
     pub policy: Arc<RwLock<OperatorPolicy>>,
     pub owner_user_id: i64,
-    pub owner_label: String,
     pub host_label: String,
     pub owner_dm_chat_id: i64,
     pub bot_user_id: i64,
@@ -132,6 +131,7 @@ pub(super) struct InboundRoute {
     pub accept_messages_after: i64,
     pub deferred_inbound_tx: tokio::sync::mpsc::Sender<InboundRecord>,
     pub pending_voice_messages: Arc<std::sync::Mutex<HashSet<(i64, i64)>>>,
+    pub claude_history: Option<ClaudeHistoryRuntime>,
 }
 
 impl InboundRoute {
@@ -216,6 +216,14 @@ pub(super) async fn accept_idle_delivery<D: AgentDriver + 'static>(
     settings: &SettingsRuntime<'_, D>,
     deferred_by_capacity: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if handle_claude_history_action(bot, delivery.event(), route).await? {
+        delivery.ack().await?;
+        return Ok(());
+    }
+    if handle_claude_history_import_thread_message(bot, delivery.event(), route).await? {
+        delivery.ack().await?;
+        return Ok(());
+    }
     if handle_allowlist_action(bot, delivery.event(), route).await? {
         delivery.ack().await?;
         return Ok(());
@@ -278,6 +286,10 @@ pub(super) async fn accept_idle_delivery<D: AgentDriver + 'static>(
     }
     if let Some(record) = inbound_from_delivery(bot, &delivery, route).await? {
         if handle_terminal_question_reply(bot, delivery.event(), &record, route).await? {
+            delivery.ack().await?;
+            return Ok(());
+        }
+        if handle_claude_history_command(bot, &record, route).await? {
             delivery.ack().await?;
             return Ok(());
         }
@@ -447,7 +459,7 @@ pub(super) async fn inbound_from_delivery(
     let conversation = match conversation_for_chat(route, message.chat_id.get()) {
         Ok(conversation) => conversation.snapshot(),
         Err(ConversationResolutionError::MissingWorkspace) => {
-            let notice = missing_workspace_message(&route.provider_id);
+            let notice = BridgeNotice::MissingWorkspace.message().to_string();
             send_text_reply(
                 bot,
                 message.chat_id.get(),
@@ -702,7 +714,9 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + 'static>(
         record.message_id,
         record.sender_user_id
     );
-    if handle_allowlist_command(bot, &record, route).await? {
+    if handle_claude_history_command(bot, &record, route).await?
+        || handle_allowlist_command(bot, &record, route).await?
+    {
         return Ok(());
     }
     let (instruction, command_acknowledgement) = match resolve_idle_command(
@@ -1110,7 +1124,7 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + 'static>(
                             provider_approval_id: request.approval_id.clone(),
                             turn_id: request.turn_id.clone(),
                             origin_chat_id: binding.chat_id,
-                            action_chat_id: route.owner_dm_chat_id,
+                            action_chat_id: binding.chat_id,
                             message_id: None,
                             origin_status_message_id: None,
                             decisions: approval_decisions(&request),
@@ -1119,34 +1133,18 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + 'static>(
                         };
                         if store.insert_approval(&pending)? {
                             pending_approvals.insert(token.clone());
-                            let from_shared_chat = binding.chat_id != route.owner_dm_chat_id;
                             let workspace_label = workspace
                                 .file_name()
                                 .and_then(|name| name.to_str())
                                 .unwrap_or("the selected project");
-                            if from_shared_chat
-                                && let Some(message_id) = send_shared_approval_waiting(
-                                    bot,
-                                    binding.chat_id,
-                                    &route.owner_label,
-                                    &token,
-                                )
-                                .await?
-                            {
-                                store.attach_approval_origin_status_message(
-                                    &token,
-                                    message_id.get(),
-                                )?;
-                            }
                             let message_id = send_approval(
                                 bot,
-                                route.owner_dm_chat_id,
+                                binding.chat_id,
                                 &request,
                                 provider_display_name(sessions.provider_id().as_str())
                                     .unwrap_or("Agent"),
                                 &route.host_label,
                                 workspace_label,
-                                from_shared_chat,
                             )
                             .await?;
                             store.attach_approval_message(&token, message_id.get())?;
@@ -1828,6 +1826,10 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + 'static>(
     typing: &mut TypingIndicator<'_, InlineClient>,
     stop_confirmed: &mut bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if handle_active_claude_history_action(bot, delivery.event(), route).await? {
+        delivery.ack().await?;
+        return Ok(());
+    }
     if handle_allowlist_action(bot, delivery.event(), route).await? {
         delivery.ack().await?;
         return Ok(());
@@ -2077,6 +2079,10 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + 'static>(
             };
             if let Some(mut record) = inbound_from_delivery(bot, &delivery, route).await? {
                 if handle_terminal_question_reply(bot, delivery.event(), &record, route).await? {
+                    delivery.ack().await?;
+                    return Ok(());
+                }
+                if handle_active_claude_history_command(bot, &record, route).await? {
                     delivery.ack().await?;
                     return Ok(());
                 }

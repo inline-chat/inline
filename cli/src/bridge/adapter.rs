@@ -163,6 +163,66 @@ pub(super) fn prepare_pinned_adapter(
     }))
 }
 
+/// Revalidates a persisted adapter executable against the manifests embedded
+/// in this CLI. Service startup uses this instead of trusting directory names
+/// or a setup-time check from an older CLI version.
+pub(super) fn verify_pinned_adapter_executable(
+    provider_id: &str,
+    executable: &Path,
+) -> Result<PathBuf, String> {
+    let support = inline_agent_driver_acp::provider_support(provider_id)
+        .ok_or_else(|| format!("{provider_id} has no curated ACP adapter"))?;
+    let (version, npm_distribution, embedded_distribution) = match support.distribution {
+        AcpDistribution::Native => {
+            return Err(format!("{provider_id} does not use a pinned ACP adapter"));
+        }
+        AcpDistribution::NpmAdapter(distribution) => {
+            let integrity = distribution.integrity.ok_or_else(|| {
+                format!(
+                    "{} adapter has no verified integrity pin",
+                    support.display_name
+                )
+            })?;
+            (
+                distribution.registry_version,
+                Some((distribution, integrity)),
+                None,
+            )
+        }
+        AcpDistribution::EmbeddedAdapter(distribution) => {
+            (distribution.version, None, Some(distribution))
+        }
+    };
+    let executable = fs::canonicalize(executable)
+        .map_err(|_| "adapter executable is missing after installation".to_string())?;
+    let install_root = executable
+        .ancestors()
+        .find(|candidate| {
+            candidate.file_name().is_some_and(|name| name == version)
+                && candidate
+                    .parent()
+                    .and_then(Path::file_name)
+                    .is_some_and(|name| name == provider_id)
+                && candidate
+                    .parent()
+                    .and_then(Path::parent)
+                    .and_then(Path::file_name)
+                    .is_some_and(|name| name == "adapters")
+        })
+        .ok_or_else(|| "adapter executable is outside Inline's pinned install".to_string())?;
+    let verified = verify_adapter_install(
+        install_root,
+        support.executable,
+        npm_distribution,
+        embedded_distribution,
+        pinned_adapter_manifest(provider_id)?,
+    )?;
+    if verified != executable {
+        return Err("adapter executable does not match Inline's pinned install".to_string());
+    }
+    Ok(verified)
+}
+
 fn pinned_adapter_manifest(provider_id: &str) -> Result<PinnedAdapterManifest, String> {
     match provider_id {
         "claude" => Ok(PinnedAdapterManifest {
@@ -373,6 +433,39 @@ mod tests {
         )
         .expect("verified adapter");
         assert!(executable.starts_with(fs::canonicalize(root.path()).expect("root")));
+    }
+
+    #[test]
+    fn persisted_claude_executable_is_revalidated_against_the_current_cli_pin() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let install = root.path().join("adapters/claude/0.63.0");
+        let package = install.join("node_modules/@agentclientprotocol/claude-agent-acp");
+        let bin = install.join("node_modules/.bin");
+        fs::create_dir_all(package.join("dist")).expect("package directory");
+        fs::create_dir_all(&bin).expect("bin directory");
+        fs::write(install.join("package.json"), CLAUDE_PACKAGE_JSON).expect("manifest");
+        fs::write(install.join("package-lock.json"), CLAUDE_PACKAGE_LOCK).expect("lock");
+        let target = package.join("dist/index.js");
+        fs::write(&target, "#!/usr/bin/env node\n").expect("adapter executable");
+        let mut permissions = fs::metadata(&target).expect("metadata").permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&target, permissions).expect("executable mode");
+        symlink(
+            "../@agentclientprotocol/claude-agent-acp/dist/index.js",
+            bin.join("claude-agent-acp"),
+        )
+        .expect("adapter symlink");
+
+        assert_eq!(
+            verify_pinned_adapter_executable("claude", &target).expect("verified persisted pin"),
+            fs::canonicalize(&target).expect("canonical target")
+        );
+        fs::write(install.join("package-lock.json"), b"{}\n").expect("tampered lock");
+        assert!(
+            verify_pinned_adapter_executable("claude", &target)
+                .expect_err("tampered lock must be rejected")
+                .contains("does not match Inline's pin")
+        );
     }
 
     #[test]

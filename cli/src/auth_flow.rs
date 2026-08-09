@@ -65,6 +65,7 @@ pub(crate) async fn handle_login(
     let code_stdin = args.code_stdin;
     let challenge_token = args.challenge_token.clone();
     let mac_app_bootstrap = args.mac_app_bootstrap;
+    let expected_user_id = args.expected_user_id;
     let mut contact = contact_from_args(args)?;
 
     if mac_app_bootstrap {
@@ -72,7 +73,14 @@ pub(crate) async fn handle_login(
             return Err(CliError::invalid_args("--mac-app-bootstrap requires --json").into());
         }
 
-        if let Some(output) = existing_saved_login(auth_store, local_db)? {
+        if expected_user_id.is_some_and(|user_id| user_id <= 0) {
+            return Err(CliError::invalid_args("--expected-user-id must be positive").into());
+        }
+
+        if let Some(output) =
+            verified_existing_saved_login(auth_store, local_db, realtime_url, expected_user_id)
+                .await?
+        {
             output::print_json(&output, json_format)?;
             return Ok(());
         }
@@ -88,6 +96,7 @@ pub(crate) async fn handle_login(
         .await?
         {
             LoginOutcome::Token { token, user_id } => {
+                ensure_expected_mac_app_user(expected_user_id, user_id)?;
                 finish_login_with_token(
                     &token,
                     user_id,
@@ -282,6 +291,16 @@ pub(crate) async fn handle_login(
     }
 }
 
+fn ensure_expected_mac_app_user(
+    expected_user_id: Option<i64>,
+    actual_user_id: i64,
+) -> Result<(), CliError> {
+    if expected_user_id.is_some_and(|expected| expected != actual_user_id) {
+        return Err(CliError::mac_app_auth_user_mismatch());
+    }
+    Ok(())
+}
+
 fn existing_saved_login(
     auth_store: &AuthStore,
     local_db: &LocalDb,
@@ -305,6 +324,45 @@ fn existing_saved_login(
         profile_loaded: user.is_some(),
         user,
         warning: None,
+    }))
+}
+
+async fn verified_existing_saved_login(
+    auth_store: &AuthStore,
+    local_db: &LocalDb,
+    realtime_url: &str,
+    expected_user_id: Option<i64>,
+) -> Result<Option<AuthLoginOutput>, Box<dyn std::error::Error>> {
+    let Some(existing) = existing_saved_login(auth_store, local_db)? else {
+        return Ok(None);
+    };
+    if expected_user_id.is_some_and(|expected| expected != existing.user_id) {
+        return Ok(None);
+    }
+    let Some(token) = auth_store.load_saved_token()? else {
+        return Ok(None);
+    };
+    let Ok(mut realtime) = client_info::connect_realtime(realtime_url, &token).await else {
+        return Ok(None);
+    };
+    let Ok(user) = fetch_me(&mut realtime).await else {
+        return Ok(None);
+    };
+    if user.id != existing.user_id || expected_user_id.is_some_and(|expected| expected != user.id) {
+        return Ok(None);
+    }
+
+    let warning = local_db
+        .set_current_user(user.clone())
+        .err()
+        .map(|_| "Authenticated, but the local profile cache could not be refreshed.".to_string());
+    Ok(Some(AuthLoginOutput {
+        status: "authenticated",
+        user_id: user.id,
+        token_saved: true,
+        profile_loaded: true,
+        user: Some(user),
+        warning,
     }))
 }
 
@@ -703,6 +761,7 @@ mod tests {
                 code_stdin: false,
                 challenge_token: None,
                 mac_app_bootstrap: false,
+                expected_user_id: None,
             },
             &ApiClient::try_new(api_url).unwrap(),
             &auth_store,
@@ -730,6 +789,7 @@ mod tests {
                 code_stdin: false,
                 challenge_token: Some("challenge-123".to_string()),
                 mac_app_bootstrap: false,
+                expected_user_id: None,
             },
             &ApiClient::try_new(api_url).unwrap(),
             &auth_store,
@@ -788,6 +848,14 @@ mod tests {
         assert!(output.token_saved);
         assert!(!output.profile_loaded);
         assert!(output.user.is_none());
+    }
+
+    #[test]
+    fn mac_app_handoff_must_match_the_expected_user_before_token_persistence() {
+        assert!(ensure_expected_mac_app_user(Some(42), 42).is_ok());
+        assert!(ensure_expected_mac_app_user(None, 42).is_ok());
+        let error = ensure_expected_mac_app_user(Some(42), 43).expect_err("mismatch");
+        assert_eq!(error.code, "mac_app_auth_user_mismatch");
     }
 
     #[test]

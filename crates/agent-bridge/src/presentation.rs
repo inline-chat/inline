@@ -579,43 +579,293 @@ pub fn sanitize_visible_command(value: &str) -> Option<String> {
     ))
 }
 
+/// Sanitizes multiline provider text before it is copied into an Inline
+/// transcript. This preserves line boundaries while applying the same
+/// credential, signed-URL, and local-path redaction used for visible commands.
+pub fn sanitize_visible_transcript(value: &str) -> Option<String> {
+    let sanitized = sanitize_visible_text(value);
+    let redacted = sanitized
+        .split('\n')
+        .map(redact_sensitive_transcript_line)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let redacted = redacted.trim();
+    (!redacted.is_empty()).then(|| redacted.to_string())
+}
+
+fn redact_sensitive_transcript_line(line: &str) -> String {
+    let line = redact_sensitive_command_arguments(line);
+    for (separator_index, separator) in line
+        .char_indices()
+        .filter(|(_, character)| matches!(character, ':' | '='))
+    {
+        let name_end = line[..separator_index].trim_end().len();
+        let name_start = line[..name_end]
+            .char_indices()
+            .rev()
+            .find_map(|(index, character)| {
+                matches!(character, ' ' | '\t' | '{' | '[' | '(' | ',')
+                    .then_some(index + character.len_utf8())
+            })
+            .unwrap_or(0);
+        let name = line[name_start..name_end].trim_matches(['\'', '"', '`']);
+        if standalone_sensitive_assignment_name(name) {
+            return format!("{}{} [redacted]", &line[..separator_index], separator);
+        }
+    }
+    line
+}
+
 fn redact_sensitive_command_arguments(command: &str) -> String {
     const SECRET_FLAGS: &[&str] = &[
         "--access-token",
         "--api-key",
         "--authorization",
+        "--oauth2-bearer",
         "--password",
+        "--proxy-user",
         "--refresh-token",
         "--secret",
         "--token",
+        "--user",
+        "-u",
     ];
+    let mut output = Vec::new();
     let mut redact_next = false;
-    command
-        .split_whitespace()
-        .map(|token| {
-            if redact_next {
-                redact_next = false;
-                return "[redacted]".to_string();
-            }
-            let normalized = token.trim_matches(['\'', '"', '`']).to_ascii_lowercase();
-            if SECRET_FLAGS.contains(&normalized.as_str()) {
-                redact_next = true;
-                return token.to_string();
-            }
-            if let Some((flag, _)) = token.split_once('=')
-                && (SECRET_FLAGS.contains(
-                    &flag
-                        .trim_matches(['\'', '"', '`'])
-                        .to_ascii_lowercase()
-                        .as_str(),
-                ) || sensitive_assignment_name(flag))
+    let mut inspect_header_next = false;
+    let mut redact_header_tail = 0_usize;
+    let mut sensitive_key_waiting_for_separator = false;
+    for token in shellish_command_words(command) {
+        if redact_next || redact_header_tail > 0 {
+            redact_next = false;
+            redact_header_tail = redact_header_tail.saturating_sub(1);
+            output.push("[redacted]".to_string());
+            continue;
+        }
+        if sensitive_key_waiting_for_separator {
+            sensitive_key_waiting_for_separator = false;
+            let separator_token = token.trim_matches(['\'', '"', '`']);
+            if let Some(separator) = separator_token
+                .chars()
+                .next()
+                .filter(|separator| matches!(separator, ':' | '='))
             {
-                return format!("{flag}=[redacted]");
+                let remainder =
+                    separator_token[separator.len_utf8()..].trim_matches(['\'', '"', '`']);
+                if remainder.is_empty() {
+                    output.push(token);
+                    redact_next = true;
+                } else {
+                    output.push(format!("{separator}[redacted]"));
+                }
+                continue;
             }
-            redact_http_url_credentials(token)
+            output.push("[redacted]".to_string());
+            continue;
+        }
+        if inspect_header_next {
+            inspect_header_next = false;
+            if sensitive_header_value(&token).is_some() {
+                output.push("[redacted]".to_string());
+                continue;
+            }
+        }
+        let normalized = token.trim_matches(['\'', '"', '`']).to_ascii_lowercase();
+        if SECRET_FLAGS.contains(&normalized.as_str()) {
+            redact_next = true;
+            output.push(token);
+            continue;
+        }
+        if matches!(normalized.as_str(), "-h" | "--header") {
+            inspect_header_next = true;
+            output.push(token);
+            continue;
+        }
+        if normalized.starts_with("-h")
+            && !normalized.starts_with("--")
+            && normalized.len() > 2
+            && sensitive_header_value(&token[2..]).is_some()
+        {
+            output.push(format!("{}[redacted]", &token[..2]));
+            continue;
+        }
+        if normalized.starts_with("-u") && !normalized.starts_with("--") && normalized.len() > 2 {
+            output.push(format!("{}[redacted]", &token[..2]));
+            continue;
+        }
+        let redacted_url = redact_url_credentials(&token);
+        if redacted_url != token {
+            output.push(redacted_url);
+            continue;
+        }
+        if let Some((flag, value)) = token.split_once('=') {
+            let normalized_flag = flag.trim_matches(['\'', '"', '`']).to_ascii_lowercase();
+            if SECRET_FLAGS.contains(&normalized_flag.as_str())
+                || sensitive_assignment_name(flag)
+                || (normalized_flag == "--header" && sensitive_header_value(value).is_some())
+            {
+                output.push(format!("{flag}=[redacted]"));
+                if value.trim_matches(['\'', '"', '`']).is_empty() {
+                    redact_next = true;
+                }
+                continue;
+            }
+        }
+        if standalone_sensitive_assignment_name(&token) {
+            sensitive_key_waiting_for_separator = true;
+            output.push(token);
+            continue;
+        }
+        if let Some(tail) = sensitive_header_value(&token) {
+            redact_header_tail = tail;
+            output.push(if tail == 0 {
+                "[redacted-header]".to_string()
+            } else {
+                token
+            });
+            continue;
+        }
+        let token = redact_url_credentials(&token);
+        output.push(redact_absolute_local_path(&token));
+    }
+    output.join(" ")
+}
+
+fn sensitive_header_value(value: &str) -> Option<usize> {
+    let normalized = value.trim_matches(['\'', '"', '`']).to_ascii_lowercase();
+    for (name, trailing_words) in [
+        ("authorization", 2),
+        ("proxy-authorization", 2),
+        ("cookie", 1),
+        ("set-cookie", 1),
+        ("password", 1),
+        ("secret", 1),
+        ("token", 1),
+        ("access-token", 1),
+        ("refresh-token", 1),
+        ("api-key", 1),
+        ("x-api-key", 1),
+        ("x-auth-token", 1),
+    ] {
+        let prefix = format!("{name}:");
+        if normalized == prefix {
+            return Some(trailing_words);
+        }
+        if normalized.starts_with(&prefix) {
+            let remainder = &normalized[prefix.len()..];
+            if matches!(name, "authorization" | "proxy-authorization")
+                && matches!(remainder, "basic" | "bearer" | "token")
+            {
+                return Some(1);
+            }
+            return Some(0);
+        }
+    }
+    if let Some((name, remainder)) = normalized.split_once(':') {
+        let name = name.trim_matches(|character| {
+            matches!(character, '\'' | '"' | '`' | '{' | '[' | '(' | ',' | ' ')
+        });
+        let name = name.trim_end_matches(['\'', '"', '`']);
+        if sensitive_assignment_name(name) {
+            let remainder = remainder.trim_matches(|character| {
+                matches!(character, '\'' | '"' | '`' | '}' | ']' | ')' | ',' | ' ')
+            });
+            return Some(usize::from(remainder.is_empty()));
+        }
+    }
+    None
+}
+
+fn shellish_command_words(command: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    for character in command.chars() {
+        if escaped {
+            word.push(character);
+            escaped = false;
+            continue;
+        }
+        if character == '\\' {
+            word.push(character);
+            escaped = true;
+            continue;
+        }
+        if let Some(active_quote) = quote {
+            word.push(character);
+            if character == active_quote {
+                quote = None;
+            }
+            continue;
+        }
+        if matches!(character, '\'' | '"') {
+            quote = Some(character);
+            word.push(character);
+        } else if character.is_whitespace() {
+            if !word.is_empty() {
+                words.push(std::mem::take(&mut word));
+            }
+        } else {
+            word.push(character);
+        }
+    }
+    if !word.is_empty() {
+        words.push(word);
+    }
+    words
+}
+
+fn redact_absolute_local_path(token: &str) -> String {
+    if parse_url_span(token).is_some() {
+        return token.to_string();
+    }
+    let boundary_before = |index: usize| {
+        index == 0
+            || token[..index].chars().next_back().is_some_and(|previous| {
+                matches!(
+                    previous,
+                    '=' | ':' | '@' | '\'' | '"' | '`' | '(' | '[' | '{' | '>' | '<'
+                )
+            })
+    };
+    let path_start = token
+        .find("file:///")
+        .into_iter()
+        .chain(
+            token
+                .match_indices("\\\\")
+                .filter_map(|(index, _)| boundary_before(index).then_some(index)),
+        )
+        .chain(token.char_indices().filter_map(|(index, character)| {
+            let suffix = &token[index..];
+            ((character == '/' && boundary_before(index))
+                || (character == '~' && suffix.starts_with("~/") && boundary_before(index))
+                || (character.is_ascii_alphabetic()
+                    && suffix
+                        .as_bytes()
+                        .get(1..3)
+                        .is_some_and(|next| matches!(next, [b':', b'/'] | [b':', b'\\']))
+                    && boundary_before(index)))
+            .then_some(index)
+        }))
+        .min();
+    let Some(path_start) = path_start else {
+        return token.to_string();
+    };
+    let suffix_start = token[path_start..]
+        .char_indices()
+        .rev()
+        .find_map(|(offset, character)| {
+            (!matches!(character, '\'' | '"' | '`' | ')' | ']' | '}' | ',' | ';'))
+                .then_some(path_start + offset + character.len_utf8())
         })
-        .collect::<Vec<_>>()
-        .join(" ")
+        .unwrap_or(path_start);
+    format!(
+        "{}[local-path]{}",
+        &token[..path_start],
+        &token[suffix_start..]
+    )
 }
 
 fn sensitive_assignment_name(name: &str) -> bool {
@@ -623,7 +873,7 @@ fn sensitive_assignment_name(name: &str) -> bool {
         .trim_matches(['\'', '"', '`'])
         .replace('-', "_")
         .to_ascii_lowercase();
-    [
+    let exact_or_suffix = [
         "access_token",
         "api_key",
         "authorization",
@@ -633,24 +883,42 @@ fn sensitive_assignment_name(name: &str) -> bool {
         "token",
     ]
     .iter()
-    .any(|component| normalized == *component || normalized.ends_with(&format!("_{component}")))
+    .any(|component| normalized == *component || normalized.ends_with(&format!("_{component}")));
+    exact_or_suffix
+        || normalized.contains("secret")
+        || normalized.contains("password")
+        || normalized.contains("credential")
+        || normalized.ends_with("access_key")
+        || normalized.ends_with("private_key")
+        || normalized.ends_with("auth_token")
+        || normalized.ends_with("cookie")
+        || normalized.ends_with("otp")
 }
 
-fn redact_http_url_credentials(token: &str) -> String {
-    let Some(start) = token.find("https://").or_else(|| token.find("http://")) else {
+fn standalone_sensitive_assignment_name(name: &str) -> bool {
+    let name = name.trim_matches(|character| {
+        matches!(
+            character,
+            '\'' | '"' | '`' | '{' | '}' | '[' | ']' | '(' | ')' | ',' | ' '
+        )
+    });
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
+        && sensitive_assignment_name(name)
+}
+
+fn redact_url_credentials(token: &str) -> String {
+    let Some((start, url_end, mut parsed)) = parse_url_span(token) else {
         return token.to_string();
     };
-    let url_end = token[start..]
-        .char_indices()
-        .rev()
-        .find_map(|(offset, character)| {
-            (!matches!(character, '\'' | '"' | '`' | ')' | ']' | '}' | ',' | ';'))
-                .then_some(start + offset + character.len_utf8())
-        })
-        .unwrap_or(start);
-    let Ok(mut parsed) = url::Url::parse(&token[start..url_end]) else {
-        return token.to_string();
-    };
+    if matches!(
+        parsed.scheme(),
+        "file" | "sqlite" | "vscode" | "vscode-insiders"
+    ) {
+        return format!("{}[local-path]{}", &token[..start], &token[url_end..]);
+    }
     let sensitive = !parsed.username().is_empty()
         || parsed.password().is_some()
         || parsed.query().is_some()
@@ -668,6 +936,36 @@ fn redact_http_url_credentials(token: &str) -> String {
         parsed,
         &token[url_end..]
     )
+}
+
+fn parse_url_span(token: &str) -> Option<(usize, usize, url::Url)> {
+    let delimiter = token.find("://")?;
+    let mut start = delimiter;
+    for (index, character) in token[..delimiter].char_indices().rev() {
+        if character.is_ascii_alphanumeric() || matches!(character, '+' | '-' | '.') {
+            start = index;
+        } else {
+            break;
+        }
+    }
+    if start == delimiter
+        || !token[start..delimiter]
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_ascii_alphabetic())
+    {
+        return None;
+    }
+    let url_end = token[start..]
+        .char_indices()
+        .rev()
+        .find_map(|(offset, character)| {
+            (!matches!(character, '\'' | '"' | '`' | ')' | ']' | '}' | ',' | ';'))
+                .then_some(start + offset + character.len_utf8())
+        })
+        .unwrap_or(start);
+    let parsed = url::Url::parse(&token[start..url_end]).ok()?;
+    Some((start, url_end, parsed))
 }
 
 fn markdown_code_span(value: &str) -> String {
@@ -894,15 +1192,127 @@ mod tests {
     #[test]
     fn visible_commands_redact_secret_flags_assignments_and_signed_urls() {
         let command = sanitize_visible_command(
-            "TOKEN=private deploy --api-key secret --refresh-token=other https://example.com/file?signature=private",
+            "TOKEN=private deploy --api-key secret --refresh-token=other /Users/alice/dev/inline/src/main.rs --cwd=/private/tmp/project file:///Users/alice/secret https://example.com/file?signature=private relative/path.rs",
         )
         .expect("visible command");
         assert!(command.contains("TOKEN=[redacted]"));
         assert!(command.contains("--api-key [redacted]"));
         assert!(command.contains("--refresh-token=[redacted]"));
         assert!(command.contains("https://example.com/file?[redacted]"));
+        assert_eq!(command.matches("[local-path]").count(), 3);
+        assert!(command.contains("relative/path.rs"));
+        assert!(!command.contains("/Users/alice"));
+        assert!(!command.contains("/private/tmp"));
         assert!(!command.contains("private"));
         assert!(!command.contains("other"));
+    }
+
+    #[test]
+    fn visible_commands_redact_quoted_values_paths_and_common_secret_environment_names() {
+        let command = sanitize_visible_command(
+            "AWS_SECRET_ACCESS_KEY='private value' deploy --password \"two words\" --cwd '/Users/alice/My Project' relative/path.rs",
+        )
+        .expect("visible command");
+        assert!(command.contains("AWS_SECRET_ACCESS_KEY=[redacted]"));
+        assert!(command.contains("--password [redacted]"));
+        assert!(command.contains("--cwd '[local-path]'"));
+        assert!(command.contains("relative/path.rs"));
+        for secret in [
+            "private",
+            "value",
+            "two words",
+            "/Users/alice",
+            "My Project",
+        ] {
+            assert!(!command.contains(secret));
+        }
+    }
+
+    #[test]
+    fn visible_commands_and_transcripts_redact_sensitive_headers_and_host_paths() {
+        let command = sanitize_visible_command(
+            "curl -H 'Authorization: Bearer secret-token' -HAuthorization:compact-secret --header='Cookie: session=private' -u user:password --oauth2-bearer oauth-secret --client-secret client-secret-value --aws-secret-access-key aws-secret-value AWS_SECRET_ACCESS_KEY bare-secret-value C:\\Users\\mo\\secret.txt ~/private.txt https://example.com",
+        )
+        .expect("visible command");
+        assert!(command.contains("-H [redacted]"));
+        assert!(command.contains("-H[redacted]"));
+        assert!(command.contains("--header=[redacted]"));
+        assert!(command.contains("-u [redacted]"));
+        assert!(command.contains("--oauth2-bearer [redacted]"));
+        assert_eq!(command.matches("[local-path]").count(), 2);
+        for secret in [
+            "secret-token",
+            "compact-secret",
+            "session=private",
+            "user:password",
+            "oauth-secret",
+            "client-secret-value",
+            "aws-secret-value",
+            "bare-secret-value",
+            "C:\\Users",
+            "~/private",
+        ] {
+            assert!(!command.contains(secret));
+        }
+
+        let transcript = sanitize_visible_transcript(
+            "Request\nAuthorization: Bearer historical-secret\nAuthorization:Bearer compact-historical-secret\nCookie: a=secret; b=also-secret\nPassword: two secret words\nToken: token-value\nSecret: secret-value\nAPI-Key: key-value\nANTHROPIC_API_KEY: anthropic-secret\nAWS_SECRET_ACCESS_KEY: aws-secret\naccess_token: access-secret\n{\"api_key\": \"json secret words\", \"safe\": \"must-not-survive\"}\nANTHROPIC_API_KEY = \"toml-secret\"\n\"api_key\" : \"pretty-json-secret\"\nANTHROPIC_API_KEY= \"empty-inline-secret\"\nAWS_SECRET_ACCESS_KEY =\"attached-separator-secret\"\nFix /Users/alice/private TOKEN=hidden-after-path\ncwd:/Users/alice/dev/private\nfile=@/Users/alice/other\nUNC: \\\\server\\share\\private\nExtended: \\\\?\\C:\\Users\\alice\\private\nSQLite: sqlite:///Users/alice/private.db\nEditor: vscode://file/Users/alice/private.rs\nFTP: ftp://user:password@host/path\nDB: postgresql://user:password@localhost/private?sslsecret=hidden\nURL: https://example.com/file?signature=hidden",
+        )
+        .expect("visible transcript");
+        assert_eq!(transcript.matches("Authorization: [redacted]").count(), 2);
+        assert!(transcript.contains("Cookie: [redacted]"));
+        assert!(transcript.contains("Password: [redacted]"));
+        assert!(transcript.contains("Token: [redacted]"));
+        assert!(transcript.contains("Secret: [redacted]"));
+        assert!(transcript.contains("API-Key: [redacted]"));
+        assert!(transcript.contains("ANTHROPIC_API_KEY: [redacted]"));
+        assert!(transcript.contains("AWS_SECRET_ACCESS_KEY: [redacted]"));
+        assert!(transcript.contains("access_token: [redacted]"));
+        assert!(transcript.contains("{\"api_key\": [redacted]"));
+        assert!(transcript.contains("ANTHROPIC_API_KEY = [redacted]"));
+        assert!(transcript.contains("\"api_key\" : [redacted]"));
+        assert!(transcript.contains("ANTHROPIC_API_KEY= [redacted]"));
+        assert!(transcript.contains("AWS_SECRET_ACCESS_KEY = [redacted]"));
+        assert!(transcript.contains("Fix [local-path] TOKEN= [redacted]"));
+        assert!(transcript.contains("cwd:[local-path]"));
+        assert!(transcript.contains("file=@[local-path]"));
+        assert!(transcript.contains("UNC: [local-path]"));
+        assert!(transcript.contains("Extended: [local-path]"));
+        assert!(transcript.contains("SQLite: [local-path]"));
+        assert!(transcript.contains("Editor: [local-path]"));
+        assert!(transcript.contains("ftp://host/path?[redacted]"));
+        assert!(
+            transcript.contains("postgresql://localhost/private?[redacted]"),
+            "{transcript}"
+        );
+        assert!(transcript.contains("https://example.com/file?[redacted]"));
+        for secret in [
+            "historical-secret",
+            "compact-historical-secret",
+            "also-secret",
+            "secret words",
+            "must-not-survive",
+            "token-value",
+            "secret-value",
+            "key-value",
+            "anthropic-secret",
+            "aws-secret",
+            "access-secret",
+            "json-secret",
+            "toml-secret",
+            "pretty-json-secret",
+            "empty-inline-secret",
+            "attached-separator-secret",
+            "hidden-after-path",
+            "/Users/alice",
+            "server\\share",
+            "?\\C:\\Users",
+            "user:password",
+            "sslsecret=hidden",
+            "signature=hidden",
+        ] {
+            assert!(!transcript.contains(secret));
+        }
     }
 
     #[test]

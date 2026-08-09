@@ -55,6 +55,7 @@ impl AgentDriver for FakeDriver {
                         description: None,
                         disabled: false,
                     }],
+                    default_permissions: Some("workspace".to_string()),
                 }),
                 CatalogBehavior::Pending => std::future::pending().await,
                 CatalogBehavior::ProcessExited => Err(DriverError::ProcessExited(
@@ -298,6 +299,7 @@ fn model_selection_uses_provider_default_then_first() {
     let catalog = DriverSettingsCatalog {
         models: vec![model("first", false), model("default", true)],
         permissions: Vec::new(),
+        default_permissions: None,
     };
     assert_eq!(
         selected_model(Some(&catalog), None).map(|model| model.value.as_str()),
@@ -503,6 +505,61 @@ async fn catalog_timeout_keeps_safe_controls_available_and_disables_provider_opt
         Some("Provider options are temporarily unavailable.")
     );
     assert!(!verbose.disabled);
+}
+
+#[tokio::test]
+async fn unset_permission_selection_names_the_effective_default() {
+    let fixture = Fixture::new(CatalogBehavior::Ready, false);
+    let request = BotInteractionEvent::ChatSettingsRequested {
+        request_id: 1,
+        chat_id: InlineId::new(fixture.snapshot.binding.chat_id),
+        actor_user_id: InlineId::new(fixture.identity.owner_user_id),
+        version: SETTINGS_VERSION,
+    };
+    let response =
+        resolve_settings_interaction(&request, &fixture.runtime(), fixture.snapshot.clone()).await;
+    let BotChatSettingsResponse::Document(document) = response.response else {
+        panic!("expected settings document");
+    };
+    let permissions = document
+        .sections
+        .iter()
+        .flat_map(|section| &section.items)
+        .find(|item| item.id == ITEM_PERMISSIONS)
+        .expect("permissions item");
+    let BotChatSettingsControl::Select { value, options } = &permissions.control else {
+        panic!("expected permissions select");
+    };
+    assert_eq!(value, DEFAULT_VALUE);
+    assert_eq!(options[0].value, DEFAULT_VALUE);
+    assert_eq!(options[0].label, "Workspace (default)");
+    assert!(
+        options
+            .iter()
+            .any(|option| { option.value == "workspace" && option.label == "Workspace" })
+    );
+}
+
+#[test]
+fn permission_status_and_reset_copy_name_the_effective_default() {
+    let catalog = DriverSettingsCatalog {
+        models: Vec::new(),
+        permissions: vec![DriverSettingOption {
+            value: "bypassPermissions".to_string(),
+            label: "Bypass Permissions".to_string(),
+            description: None,
+            disabled: false,
+        }],
+        default_permissions: Some("bypassPermissions".to_string()),
+    };
+    assert_eq!(
+        permission_selection_label(None, Some(&catalog)),
+        "Bypass Permissions (default)"
+    );
+    assert_eq!(
+        permission_selection_label(Some("bypassPermissions"), Some(&catalog)),
+        "Bypass Permissions"
+    );
 }
 
 #[tokio::test]

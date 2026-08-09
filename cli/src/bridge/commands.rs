@@ -16,8 +16,15 @@ pub(super) enum IdleCommandResolution {
     },
 }
 
-pub(super) fn static_command_help() -> String {
-    "Agent commands: /status, /new, /clear, /compact, /folder, /queue, /stop, /model, /reasoning, /permissions, /verbose, /threads, /follow, /unfollow, /allowlist <userid>.".to_string()
+pub(super) fn static_command_help(provider_id: &ProviderId) -> String {
+    let history = if provider_id.as_str() == "claude" {
+        ", /sessions, /open"
+    } else {
+        ""
+    };
+    format!(
+        "Agent commands: /status{history}, /new, /clear, /compact, /folder, /queue, /stop, /model, /reasoning, /permissions, /verbose, /threads, /follow, /unfollow, /allowlist <userid>."
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -59,7 +66,7 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
     }
     match name {
         "help" => {
-            let mut message = static_command_help();
+            let mut message = static_command_help(sessions.provider_id());
             if let Ok(commands) = provider_commands(sessions, binding).await
                 && !commands.is_empty()
             {
@@ -109,13 +116,29 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
                 Ok(policy) => format!("{} ({})", policy.mode.as_str(), policy.source.label()),
                 Err(_) => "unavailable".to_string(),
             };
+            let permissions_catalog = match sessions.settings_catalog(binding, now_seconds()).await
+            {
+                Ok(catalog) => Some(catalog),
+                Err(error) if session_error_ends_epoch(&error) => {
+                    return failed(
+                        "I couldn’t load the current permission settings.",
+                        error,
+                        true,
+                    );
+                }
+                Err(_) => None,
+            };
+            let permissions = permission_selection_label(
+                current.permissions.as_deref(),
+                permissions_catalog.as_ref(),
+            );
             handled(format!(
                 "Agent is {state}. Host: {}. Project: {}. Session: {session}. Model: {}. Reasoning: {}. Permissions: {}. Verbose: {}. Reply in threads: {reply_threads}. Inline tools: {inline_tools}.",
                 settings.identity.host_label,
                 workspace_label(workspace),
                 current.model.as_deref().unwrap_or("provider default"),
                 current.reasoning.as_deref().unwrap_or("provider default"),
-                current.permissions.as_deref().unwrap_or("provider default"),
+                permissions,
                 if current.verbose { "on" } else { "off" },
             ))
         }
@@ -346,6 +369,7 @@ mod tests {
         commands: Vec<inline_agent_bridge::DriverCommand>,
         compact_session: bool,
         resume_session: bool,
+        settings_catalog_process_exited: bool,
     }
 
     impl AgentDriver for FakeDriver {
@@ -364,6 +388,11 @@ mod tests {
             &'a self,
             _cwd: &'a Path,
         ) -> DriverFuture<'a, DriverSettingsCatalog> {
+            if self.settings_catalog_process_exited {
+                return Box::pin(async {
+                    Err(DriverError::ProcessExited("provider exited".to_string()))
+                });
+            }
             Box::pin(async {
                 Ok(DriverSettingsCatalog {
                     models: vec![DriverModelOption {
@@ -385,6 +414,7 @@ mod tests {
                         description: None,
                         disabled: false,
                     }],
+                    default_permissions: None,
                 })
             })
         }
@@ -957,6 +987,49 @@ mod tests {
         assert!(message.contains("current turn"));
         assert!(failure.is_none());
         assert!(driver.starts.lock().expect("starts").is_empty());
+    }
+
+    #[tokio::test]
+    async fn status_reports_provider_epoch_loss_while_loading_permission_defaults() {
+        let (directory, _driver, store, _manager, binding, workspace) = fixture(false);
+        let driver = Arc::new(FakeDriver {
+            settings_catalog_process_exited: true,
+            ..FakeDriver::default()
+        });
+        let manager = ProviderSessionManager::new(
+            driver,
+            Arc::clone(&store),
+            ProviderId::new("codex").expect("provider"),
+        );
+        let (active, identity) = settings_fixture(&binding, &workspace);
+
+        let resolution = resolve_idle_command(
+            &manager,
+            &store,
+            &binding,
+            &workspace,
+            &SettingsRuntime {
+                sessions: &manager,
+                store: &store,
+                active: &active,
+                identity: &identity,
+                turn_active: false,
+            },
+            identity.owner_user_id,
+            "mo_codex_bot",
+            "/status",
+        )
+        .await;
+
+        assert!(matches!(
+            resolution,
+            IdleCommandResolution::Handled {
+                failure: Some(_),
+                provider_epoch_ended: true,
+                ..
+            }
+        ));
+        drop(directory);
     }
 
     #[tokio::test]

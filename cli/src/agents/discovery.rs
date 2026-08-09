@@ -59,7 +59,16 @@ fn search_directories() -> Vec<PathBuf> {
         Some(PathBuf::from("/usr/local/bin")),
         home_bin(".local/bin"),
         home_bin(".bun/bin"),
+        home_bin(".volta/bin"),
+        home_bin(".asdf/shims"),
+        home_bin(".local/share/mise/shims"),
+        home_bin(".mise/shims"),
+        home_bin(".cargo/bin"),
+        home_bin(".fnm/current/bin"),
+        home_bin(".nodenv/shims"),
+        home_bin(".npm-global/bin"),
         home_bin(".local/share/pnpm"),
+        home_bin("Library/pnpm"),
         home_bin(".claude/local"),
         home_bin(".opencode/bin"),
         home_bin(".amp/bin"),
@@ -72,14 +81,64 @@ fn search_directories() -> Vec<PathBuf> {
             directories.push(directory);
         }
     }
+    if let Some(home) = home_directory() {
+        for directory in version_manager_bins(&home) {
+            if seen.insert(directory.clone()) {
+                directories.push(directory);
+            }
+        }
+    }
     directories
 }
 
 fn home_bin(relative: &str) -> Option<PathBuf> {
+    home_directory().map(|home| home.join(relative))
+}
+
+fn home_directory() -> Option<PathBuf> {
     env::var_os("HOME")
         .or_else(|| env::var_os("USERPROFILE"))
         .map(PathBuf::from)
-        .map(|home| home.join(relative))
+}
+
+fn version_manager_bins(home: &Path) -> Vec<PathBuf> {
+    let mut directories = Vec::new();
+    append_version_bins(&mut directories, &home.join(".nvm/versions/node"), "bin");
+    append_version_bins(
+        &mut directories,
+        &home.join(".local/share/fnm/node-versions"),
+        "installation/bin",
+    );
+    directories
+}
+
+fn append_version_bins(directories: &mut Vec<PathBuf>, root: &Path, suffix: &str) {
+    let Ok(entries) = root.read_dir() else { return };
+    let mut versions = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect::<Vec<_>>();
+    versions.sort_by(|left, right| {
+        let version = |path: &Path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.strip_prefix('v').unwrap_or(name))
+                .and_then(|name| semver::Version::parse(name).ok())
+        };
+        match (version(left), version(right)) {
+            (Some(left), Some(right)) => right.cmp(&left),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => right.cmp(left),
+        }
+    });
+    directories.extend(
+        versions
+            .into_iter()
+            .take(64)
+            .map(|version| version.join(suffix)),
+    );
 }
 
 #[cfg(unix)]
@@ -139,5 +198,28 @@ mod tests {
             find_executable_in("openclaw", [first.path().to_path_buf()]),
             None
         );
+    }
+
+    #[test]
+    fn version_manager_discovery_is_bounded_and_includes_nvm_and_fnm() {
+        let home = tempfile::tempdir().expect("home directory");
+        let nvm = home.path().join(".nvm/versions/node/v22.0.0/bin");
+        let older_nvm = home.path().join(".nvm/versions/node/v9.0.0/bin");
+        let fnm = home
+            .path()
+            .join(".local/share/fnm/node-versions/v20.0.0/installation/bin");
+        fs::create_dir_all(&nvm).expect("create nvm fixture");
+        fs::create_dir_all(&older_nvm).expect("create older nvm fixture");
+        fs::create_dir_all(&fnm).expect("create fnm fixture");
+
+        let directories = version_manager_bins(home.path());
+
+        assert!(directories.contains(&nvm));
+        assert!(directories.contains(&fnm));
+        assert!(
+            directories.iter().position(|path| path == &nvm)
+                < directories.iter().position(|path| path == &older_nvm)
+        );
+        assert!(directories.len() <= 128);
     }
 }

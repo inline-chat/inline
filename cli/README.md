@@ -98,6 +98,10 @@ inline agents setup
 inline agents setup --target openclaw --non-interactive --json
 inline agents setup --target hermes --profile work --non-interactive --json
 inline agents setup --target codex --folder /path/to/project --non-interactive --json
+
+# Equivalent shortcuts for gateway targets.
+inline setup openclaw --non-interactive --json
+inline setup hermes --profile work --non-interactive --json
 ```
 
 Supported installed targets are OpenClaw, Hermes, Codex, OpenCode, Claude, and
@@ -110,7 +114,9 @@ access mode is owner-only; automation can use `--access allowlist` with repeated
 as their workspace unless `--folder` is provided explicitly.
 
 Unified discovery and setup JSON include `protocolVersion` and
-`documentationUrl`. Errors use stable codes and safe hints so an app or agent
+`documentationUrl`. Setup failures also include `status`, `failedPhase`,
+`changes`, and `retry`; `status: "partial"` means setup may have changed state,
+while `changes` contains only confirmed completed work. Errors use stable codes and safe hints so an app or agent
 can offer a retry or send the user to the setup guide without parsing terminal
 output. The JSON never includes bot tokens or local executable/workspace paths.
 

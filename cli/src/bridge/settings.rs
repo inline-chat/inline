@@ -1541,18 +1541,25 @@ async fn command_status<D: AgentDriver + 'static>(
                 .map(|model| model.reasoning.iter().map(|option| option.value.as_str())),
             "/reasoning <value|default>",
         ),
-        "permissions" => format_setting_status(
-            "Permissions",
-            settings.permissions.as_deref(),
-            catalog.map(|catalog| {
-                catalog
-                    .permissions
-                    .iter()
-                    .filter(|option| !option.disabled)
-                    .map(|option| option.value.as_str())
-            }),
-            "/permissions <value|default>",
-        ),
+        "permissions" => {
+            let choices = catalog
+                .map(|catalog| {
+                    catalog
+                        .permissions
+                        .iter()
+                        .filter(|option| !option.disabled)
+                        .map(|option| option.value.as_str())
+                        .take(16)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .filter(|choices| !choices.is_empty())
+                .unwrap_or_else(|| "temporarily unavailable".to_string());
+            format!(
+                "Permissions: {}. Choices: {choices}. Use `/permissions <value|default>`.",
+                permission_selection_label(settings.permissions.as_deref(), catalog)
+            )
+        }
         "verbose" => format!(
             "Verbose is {}. Use `/verbose on` or `/verbose off`.",
             if settings.verbose { "on" } else { "off" }
@@ -1780,7 +1787,7 @@ fn command_value<D: AgentDriver + 'static>(
                     .flatten(),
                 "permission profile",
             )?;
-            let label = display_selected(value.as_deref()).to_string();
+            let label = permission_selection_label(value.as_deref(), catalog);
             Ok((
                 ITEM_PERMISSIONS,
                 Some(BotSettingsValue::String(
@@ -1904,6 +1911,34 @@ where
 
 fn display_selected(value: Option<&str>) -> &str {
     value.unwrap_or("provider default")
+}
+
+pub(super) fn permission_selection_label(
+    selected: Option<&str>,
+    catalog: Option<&DriverSettingsCatalog>,
+) -> String {
+    if let Some(selected) = selected {
+        return catalog
+            .and_then(|catalog| {
+                catalog
+                    .permissions
+                    .iter()
+                    .find(|option| option.value == selected)
+            })
+            .map_or_else(|| selected.to_string(), |option| option.label.clone());
+    }
+    catalog
+        .and_then(|catalog| {
+            let default = catalog.default_permissions.as_deref()?;
+            catalog
+                .permissions
+                .iter()
+                .find(|option| option.value == default)
+        })
+        .map_or_else(
+            || "provider default".to_string(),
+            |option| format!("{} (default)", option.label),
+        )
 }
 
 fn command_message(message: impl Into<String>) -> SettingsCommandResult {
@@ -2384,6 +2419,19 @@ async fn build_settings_document<D: AgentDriver + 'static>(
             })
             .as_str(),
     );
+    let permission_default_label = catalog
+        .and_then(|catalog| {
+            catalog.default_permissions.as_deref().and_then(|default| {
+                catalog
+                    .permissions
+                    .iter()
+                    .find(|option| option.value == default)
+            })
+        })
+        .map_or_else(
+            || "Provider default".to_string(),
+            |option| format!("{} (default)", option.label),
+        );
     let permission_options = select_options(
         catalog.map(|catalog| {
             catalog.permissions.iter().map(|option| {
@@ -2396,7 +2444,7 @@ async fn build_settings_document<D: AgentDriver + 'static>(
             })
         }),
         settings.permissions.as_deref(),
-        "Provider default",
+        &permission_default_label,
     );
     let catalog_reason = catalog
         .is_none()

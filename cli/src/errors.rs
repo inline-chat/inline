@@ -300,6 +300,16 @@ impl CliError {
         }
     }
 
+    pub(crate) fn mac_app_auth_user_mismatch() -> Self {
+        Self {
+            code: "mac_app_auth_user_mismatch",
+            message: "Inline for Mac returned credentials for a different Inline account."
+                .to_string(),
+            hint: Some("Keep the same Inline account active in the app and try again.".to_string()),
+            examples: Vec::new(),
+        }
+    }
+
     pub(crate) fn unexpected_api_response(
         context: impl Into<String>,
         detail: impl Into<String>,

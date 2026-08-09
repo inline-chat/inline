@@ -317,7 +317,7 @@ async fn creates_session_normalizes_stream_and_resolves_permission() {
         let event = next_event(&mut turn.events).await;
         if let AgentEvent::ApprovalRequested(request) = &event {
             assert_eq!(request.summary, "Use an agent tool");
-            assert_eq!(request.command.as_deref(), Some("cargo test"));
+            assert_eq!(request.command.as_deref(), Some("cargo test --test proof"));
             assert_eq!(request.cwd, None);
             assert_eq!(
                 request.options,
@@ -397,12 +397,25 @@ fn config_options(model: &str, reasoning: &str) -> Vec<acp::SessionConfigOption>
     ]
 }
 
+fn session_modes(current: &str) -> acp::SessionModeState {
+    acp::SessionModeState::new(
+        current.to_string(),
+        vec![
+            acp::SessionMode::new("default", "Manual"),
+            acp::SessionMode::new("plan", "Plan"),
+            acp::SessionMode::new("bypassPermissions", "Bypass Permissions"),
+        ],
+    )
+}
+
 #[tokio::test]
-async fn prewarms_settings_session_and_applies_model_and_reasoning() {
+async fn prewarms_settings_session_and_applies_model_reasoning_and_permission_mode() {
     let new_session_count = Arc::new(AtomicUsize::new(0));
     let observed_new_session_count = new_session_count.clone();
     let selections = Arc::new(Mutex::new(Vec::new()));
     let observed_selections = selections.clone();
+    let mode_selections = Arc::new(Mutex::new(Vec::new()));
+    let observed_mode_selections = Arc::clone(&mode_selections);
     let agent = Agent
         .builder()
         .on_receive_request(
@@ -416,8 +429,19 @@ async fn prewarms_settings_session_and_applies_model_and_reasoning() {
                 observed_new_session_count.fetch_add(1, Ordering::Relaxed);
                 responder.respond(
                     acp::NewSessionResponse::new("session-settings")
-                        .config_options(config_options("model-a", "low")),
+                        .config_options(config_options("model-a", "low"))
+                        .modes(session_modes("default")),
                 )
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: acp::SetSessionModeRequest, responder, _connection| {
+                observed_mode_selections
+                    .lock()
+                    .expect("mode selection capture poisoned")
+                    .push(request.mode_id.to_string());
+                responder.respond(acp::SetSessionModeResponse::default())
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -465,6 +489,14 @@ async fn prewarms_settings_session_and_applies_model_and_reasoning() {
     assert!(catalog.models[0].is_default);
     assert_eq!(catalog.models[0].default_reasoning.as_deref(), Some("low"));
     assert_eq!(catalog.models[0].reasoning.len(), 2);
+    assert_eq!(
+        catalog
+            .permissions
+            .iter()
+            .map(|option| option.value.as_str())
+            .collect::<Vec<_>>(),
+        ["default", "plan", "bypassPermissions"]
+    );
 
     let session = driver
         .start_session(SessionSpec { cwd })
@@ -482,6 +514,7 @@ async fn prewarms_settings_session_and_applies_model_and_reasoning() {
             TurnOptions {
                 model: Some("model-b".to_string()),
                 reasoning: Some("high".to_string()),
+                permissions: Some("plan".to_string()),
                 ..TurnOptions::default()
             },
         )
@@ -501,6 +534,39 @@ async fn prewarms_settings_session_and_applies_model_and_reasoning() {
             ("model".to_string(), "model-b".to_string()),
             ("reasoning".to_string(), "high".to_string()),
         ]
+    );
+    assert_eq!(
+        *mode_selections
+            .lock()
+            .expect("mode selection capture poisoned"),
+        vec!["plan".to_string()]
+    );
+    let mut repeated = driver
+        .start_turn(
+            &session,
+            TurnInput {
+                text: "Keep the selected settings".to_string(),
+                attachments: Vec::new(),
+                client_message_id: None,
+            },
+            TurnOptions {
+                permissions: Some("plan".to_string()),
+                ..TurnOptions::default()
+            },
+        )
+        .await
+        .expect("start repeated configured ACP turn");
+    while !matches!(
+        next_event(&mut repeated.events).await,
+        AgentEvent::TurnCompleted { .. }
+    ) {}
+    assert_eq!(
+        mode_selections
+            .lock()
+            .expect("mode selection capture poisoned")
+            .len(),
+        1,
+        "an already-active mode must not trigger another session/set_mode request"
     );
     driver.shutdown().await.expect("shutdown settings fixture");
 }

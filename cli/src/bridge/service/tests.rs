@@ -71,11 +71,11 @@ fn launch_agent_uses_single_absolute_arguments_and_escapes_xml() {
 fn systemd_unit_uses_absolute_args_restart_bounds_and_no_secrets() {
     let (mut account, _, mut paths) = fixture();
     paths.root = PathBuf::from("/tmp/A Project/%work");
-    account.provider_path = "/opt/bin:/home/mo/A $PATH/bin".to_string();
+    account.provider_path = "/opt/bin:/home/alice/A $PATH/bin".to_string();
     let unit = render_systemd_user_unit(&account, &paths).unwrap();
     assert!(unit.contains("ExecStart=\"/tmp/Inline & Bridge/bin/inline\" \"bridge\" \"run\""));
     assert!(unit.contains("WorkingDirectory=\"/tmp/A Project/%%work\""));
-    assert!(unit.contains("Environment=\"PATH=/opt/bin:/home/mo/A $PATH/bin\""));
+    assert!(unit.contains("Environment=\"PATH=/opt/bin:/home/alice/A $PATH/bin\""));
     assert!(unit.contains("Restart=on-failure"));
     assert!(unit.contains("RestartPreventExitStatus=78"));
     assert!(unit.contains("StartLimitIntervalSec=0"));

@@ -376,6 +376,15 @@ pub(super) async fn start_service(
         .into());
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        let definition = service_definition_path(&account.service_label)?;
+        if !definition.is_file() {
+            install_service(paths, account)?;
+            return wait_for_account_running(paths, secrets, READY_TIMEOUT).await;
+        }
+    }
+
     #[cfg(target_os = "macos")]
     {
         let domain = launchd_domain()?;
@@ -461,6 +470,14 @@ pub(super) async fn restart_service(
     secrets: &AccountBridgeSecrets,
 ) -> Result<(), Box<dyn std::error::Error>> {
     validate_service_paths(paths, account)?;
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        let definition = service_definition_path(&account.service_label)?;
+        if !definition.is_file() {
+            install_service(paths, account)?;
+            return wait_for_account_running(paths, secrets, READY_TIMEOUT).await;
+        }
+    }
     #[cfg(target_os = "macos")]
     {
         let installation = account.providers.first().ok_or_else(|| {

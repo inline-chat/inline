@@ -26,7 +26,8 @@ use tokio::sync::{oneshot, watch};
 use crate::host_tools::AcpHostToolProxy;
 use crate::mapping::{
     ToolCallSnapshots, available_commands, permission_command, permission_options,
-    permission_summary, select_config_id, session_update_events, settings_catalog, turn_outcome,
+    permission_summary, select_config_id, session_modes, session_update_events, settings_catalog,
+    turn_outcome,
 };
 
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(15);
@@ -211,6 +212,7 @@ type PendingApprovals = Arc<StdMutex<HashMap<String, PendingApproval>>>;
 struct SessionMetadata {
     cwd: PathBuf,
     config_options: Vec<acp::SessionConfigOption>,
+    modes: Option<acp::SessionModeState>,
     commands: Vec<DriverCommand>,
 }
 
@@ -321,6 +323,7 @@ pub struct AcpDriver {
     capabilities: DriverCapabilities,
     prompt_capabilities: acp::PromptCapabilities,
     resume_mode: ResumeMode,
+    default_permission_mode: Option<Arc<str>>,
     active_turns: ActiveTurns,
     approvals: PendingApprovals,
     sessions: Sessions,
@@ -351,6 +354,10 @@ impl AcpDriver {
     pub(crate) fn disable_durable_session_resume(&mut self) {
         self.resume_mode = ResumeMode::Unsupported;
         self.capabilities.resume_session = false;
+    }
+
+    pub(crate) fn set_default_permission_mode(&mut self, mode: impl Into<Arc<str>>) {
+        self.default_permission_mode = Some(mode.into());
     }
 
     /// Connects the driver to an already constructed ACP client transport.
@@ -493,6 +500,7 @@ impl AcpDriver {
             capabilities,
             prompt_capabilities,
             resume_mode,
+            default_permission_mode: None,
             active_turns,
             approvals,
             sessions,
@@ -559,6 +567,7 @@ impl AcpDriver {
             session_id.clone(),
             cwd,
             response.config_options.unwrap_or_default(),
+            response.modes,
         );
         Ok(session_id)
     }
@@ -610,17 +619,21 @@ impl AcpDriver {
         session_id: String,
         cwd: PathBuf,
         config_options: Vec<acp::SessionConfigOption>,
+        modes: Option<acp::SessionModeState>,
     ) {
+        let modes = session_modes(&config_options, modes.as_ref());
         let mut sessions = self.sessions.lock().expect("ACP session registry poisoned");
         if let Some(session) = sessions.sessions.get_mut(&session_id) {
             session.cwd = cwd;
             session.config_options = config_options;
+            session.modes = modes;
         } else {
             sessions.sessions.insert(
                 session_id,
                 SessionMetadata {
                     cwd,
                     config_options,
+                    modes,
                     commands: Vec::new(),
                 },
             );
@@ -665,9 +678,88 @@ impl AcpDriver {
             .sessions
             .get_mut(session_id)
         {
+            session.modes = session_modes(&response.config_options, session.modes.as_ref());
             session.config_options = response.config_options;
         }
         Ok(())
+    }
+
+    async fn apply_session_mode(&self, session_id: &str, value: &str) -> DriverResult<()> {
+        let (mode_id, already_selected) = {
+            let sessions = self.sessions.lock().expect("ACP session registry poisoned");
+            let session = sessions.sessions.get(session_id).ok_or_else(|| {
+                DriverError::InvalidSession("ACP session metadata is unavailable".to_string())
+            })?;
+            let modes = session.modes.as_ref().ok_or_else(|| {
+                DriverError::Rejected("ACP agent did not advertise permission modes".to_string())
+            })?;
+            let mode_id = modes
+                .available_modes
+                .iter()
+                .find(|mode| mode.id.to_string() == value)
+                .map(|mode| mode.id.clone())
+                .ok_or_else(|| {
+                    DriverError::Rejected(format!(
+                        "ACP agent did not offer the selected permission mode `{value}`"
+                    ))
+                })?;
+            let already_selected = modes.current_mode_id == mode_id;
+            (mode_id, already_selected)
+        };
+        if already_selected {
+            return Ok(());
+        }
+        mutating_request_with_timeout(
+            &self.lifecycle,
+            REQUEST_TIMEOUT,
+            "session/set_mode",
+            self.connection
+                .send_request(acp::SetSessionModeRequest::new(
+                    acp::SessionId::new(session_id.to_string()),
+                    mode_id.clone(),
+                ))
+                .block_task(),
+            |error| acp_request_error(error, &self.auth_methods),
+        )
+        .await?;
+        if let Some(modes) = self
+            .sessions
+            .lock()
+            .expect("ACP session registry poisoned")
+            .sessions
+            .get_mut(session_id)
+            .and_then(|session| session.modes.as_mut())
+        {
+            modes.current_mode_id = mode_id;
+        }
+        Ok(())
+    }
+
+    fn effective_permission_mode(
+        &self,
+        session_id: &str,
+        selected: Option<&str>,
+    ) -> DriverResult<Option<String>> {
+        if let Some(selected) = selected {
+            return Ok(Some(selected.to_string()));
+        }
+        let Some(default) = self.default_permission_mode.as_deref() else {
+            return Ok(None);
+        };
+        let sessions = self.sessions.lock().expect("ACP session registry poisoned");
+        let session = sessions.sessions.get(session_id).ok_or_else(|| {
+            DriverError::InvalidSession("ACP session metadata is unavailable".to_string())
+        })?;
+        Ok(session
+            .modes
+            .as_ref()
+            .filter(|modes| {
+                modes
+                    .available_modes
+                    .iter()
+                    .any(|mode| mode.id.to_string() == default)
+            })
+            .map(|_| default.to_string()))
     }
 }
 
@@ -706,7 +798,13 @@ impl AgentDriver for AcpDriver {
                     .sessions
                     .values()
                     .find(|session| session.cwd == cwd)
-                    .map(|session| settings_catalog(&session.config_options))
+                    .map(|session| {
+                        settings_catalog(
+                            &session.config_options,
+                            session.modes.as_ref(),
+                            self.default_permission_mode.as_deref(),
+                        )
+                    })
             } {
                 return Ok(catalog);
             }
@@ -720,6 +818,13 @@ impl AgentDriver for AcpDriver {
                         .get(&session_id)
                         .expect("new ACP session was not recorded")
                         .config_options,
+                    sessions
+                        .sessions
+                        .get(&session_id)
+                        .expect("new ACP session was not recorded")
+                        .modes
+                        .as_ref(),
+                    self.default_permission_mode.as_deref(),
                 )
             };
             Ok(catalog)
@@ -788,7 +893,12 @@ impl AgentDriver for AcpDriver {
                                 .as_ref()
                                 .map_or_else(Vec::new, SessionMcpAttachment::servers),
                         );
-                    self.record_session(spec.session_id.to_string(), spec.cwd.clone(), Vec::new());
+                    self.record_session(
+                        spec.session_id.to_string(),
+                        spec.cwd.clone(),
+                        Vec::new(),
+                        None,
+                    );
                     let response = match mutating_request_with_timeout(
                         &self.lifecycle,
                         REQUEST_TIMEOUT,
@@ -812,6 +922,7 @@ impl AgentDriver for AcpDriver {
                         spec.session_id.to_string(),
                         spec.cwd,
                         response.config_options.unwrap_or_default(),
+                        response.modes,
                     );
                     if let Some(attachment) = attachment {
                         attachment.bind(spec.session_id);
@@ -826,7 +937,12 @@ impl AgentDriver for AcpDriver {
                                 .as_ref()
                                 .map_or_else(Vec::new, SessionMcpAttachment::servers),
                         );
-                    self.record_session(spec.session_id.to_string(), spec.cwd.clone(), Vec::new());
+                    self.record_session(
+                        spec.session_id.to_string(),
+                        spec.cwd.clone(),
+                        Vec::new(),
+                        None,
+                    );
                     let response = match mutating_request_with_timeout(
                         &self.lifecycle,
                         REQUEST_TIMEOUT,
@@ -850,6 +966,7 @@ impl AgentDriver for AcpDriver {
                         spec.session_id.to_string(),
                         spec.cwd,
                         response.config_options.unwrap_or_default(),
+                        response.modes,
                     );
                     if let Some(attachment) = attachment {
                         attachment.bind(spec.session_id);
@@ -868,9 +985,6 @@ impl AgentDriver for AcpDriver {
         options: TurnOptions,
     ) -> DriverFuture<'a, StartedTurn> {
         Box::pin(async move {
-            if options.permissions.is_some() {
-                return Err(DriverError::Unsupported("ACP permission profile setting"));
-            }
             let session_key = session_id.to_string();
             if let Some(cwd) = options.cwd.as_ref() {
                 let sessions = self.sessions.lock().expect("ACP session registry poisoned");
@@ -898,6 +1012,11 @@ impl AgentDriver for AcpDriver {
                     reasoning,
                 )
                 .await?;
+            }
+            if let Some(permissions) =
+                self.effective_permission_mode(&session_key, options.permissions.as_deref())?
+            {
+                self.apply_session_mode(&session_key, &permissions).await?;
             }
             let prompt_blocks = acp_prompt_blocks(input, &self.prompt_capabilities).await?;
             let turn_id = TurnId::new(self.next_id("turn"))
@@ -1129,6 +1248,7 @@ async fn handle_session_update(
             .sessions
             .get_mut(&session_key)
     {
+        session.modes = session_modes(&update.config_options, session.modes.as_ref());
         session.config_options.clone_from(&update.config_options);
     }
     if let acp::SessionUpdate::AvailableCommandsUpdate(update) = &notification.update
@@ -1139,6 +1259,20 @@ async fn handle_session_update(
             .get_mut(&session_key)
     {
         session.commands = available_commands(&update.available_commands);
+    }
+    if let acp::SessionUpdate::CurrentModeUpdate(update) = &notification.update
+        && let Some(modes) = sessions
+            .lock()
+            .expect("ACP session registry poisoned")
+            .sessions
+            .get_mut(&session_key)
+            .and_then(|session| session.modes.as_mut())
+        && modes
+            .available_modes
+            .iter()
+            .any(|mode| mode.id == update.current_mode_id)
+    {
+        modes.current_mode_id = update.current_mode_id.clone();
     }
     let output_attachment = if active_turns
         .lock()
@@ -1948,6 +2082,7 @@ mod tests {
             SessionMetadata {
                 cwd: PathBuf::from("/workspace"),
                 config_options: Vec::new(),
+                modes: None,
                 commands: Vec::new(),
             },
         );
@@ -1976,6 +2111,49 @@ mod tests {
             .clone();
         assert_eq!(commands.len(), 1);
         assert_eq!(commands[0].name, "research_codebase");
+    }
+
+    #[tokio::test]
+    async fn current_mode_updates_only_accept_advertised_session_modes() {
+        let active_turns = ActiveTurns::default();
+        let sessions = Sessions::default();
+        sessions.lock().expect("sessions").sessions.insert(
+            "session-1".to_string(),
+            SessionMetadata {
+                cwd: PathBuf::from("/workspace"),
+                config_options: Vec::new(),
+                modes: Some(acp::SessionModeState::new(
+                    "default",
+                    vec![
+                        acp::SessionMode::new("default", "Manual"),
+                        acp::SessionMode::new("bypassPermissions", "Bypass Permissions"),
+                    ],
+                )),
+                commands: Vec::new(),
+            },
+        );
+        for mode in ["bypassPermissions", "unadvertised"] {
+            handle_session_update(
+                &active_turns,
+                &sessions,
+                None,
+                acp::SessionNotification::new(
+                    "session-1",
+                    acp::SessionUpdate::CurrentModeUpdate(acp::CurrentModeUpdate::new(mode)),
+                ),
+            )
+            .await;
+        }
+        let current = sessions
+            .lock()
+            .expect("sessions")
+            .sessions
+            .get("session-1")
+            .and_then(|session| session.modes.as_ref())
+            .expect("modes")
+            .current_mode_id
+            .to_string();
+        assert_eq!(current, "bypassPermissions");
     }
 
     #[tokio::test]

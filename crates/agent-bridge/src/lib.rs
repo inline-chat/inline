@@ -42,7 +42,7 @@ pub use presentation::{
     ActivityKind, NativeToolActivity, PresentationUpdate, SemanticActivity, StreamingPresenter,
     UpdatePriority, ValidationSummary, VisibilityMode, VisibilityPolicy, WORKING_CONTINUED_STATUS,
     WORKING_STATUS, format_elapsed_compact, native_tool_activity, render_completion_summary,
-    sanitize_visible_command, semantic_activity_title,
+    sanitize_visible_command, sanitize_visible_transcript, semantic_activity_title,
 };
 pub use process_host::{ProcessHostConfig, reap_stale_process_host, run_process_host};
 pub use session::{ProviderSessionManager, SessionManagerError, SessionOpenOutcome};
@@ -50,15 +50,15 @@ pub use store::{
     ApprovalClaim, ApprovalClaimContext, ApprovalClaimOutcome, ApprovalRecord, ApprovalState,
     BridgeStore, ChatSettingsRecord, CommandChoiceAction, CommandChoiceClaimContext,
     CommandChoiceClaimOutcome, CommandChoiceRequest, CommandChoiceState, DurableProgress,
-    HostToolCallClaim, HostToolCallRecord, InboundRecord, InboundState, InboundUndoOutcome,
-    InstallationRecord, InterruptedInbound, MAX_RECENT_WORKSPACES, OperatorAllowlistClaimContext,
-    OperatorAllowlistClaimOutcome, OperatorAllowlistDecision, OperatorAllowlistRequest,
-    OperatorAllowlistState, PendingApproval, PendingCommandChoiceRequest, PendingFinalSend,
-    PendingOperatorAllowlistRequest, PendingQuestion, QuestionClaimContext, QuestionClaimLocator,
-    QuestionClaimOutcome, QuestionRecord, QuestionResolution, QuestionState, QueueRecord,
-    QueueState, ReplyThreadMode, ReplyThreadOverride, ReplyThreadOverrideUpdateOutcome,
-    SettingsUpdateOutcome, StoreError, StoreResult, WorkspaceChoice, WorkspaceFilesystemIdentity,
-    WorkspaceRecord,
+    HistoryImportState, HostToolCallClaim, HostToolCallRecord, InboundRecord, InboundState,
+    InboundUndoOutcome, InstallationRecord, InterruptedInbound, MAX_RECENT_WORKSPACES,
+    OperatorAllowlistClaimContext, OperatorAllowlistClaimOutcome, OperatorAllowlistDecision,
+    OperatorAllowlistRequest, OperatorAllowlistState, PendingApproval, PendingCommandChoiceRequest,
+    PendingFinalSend, PendingOperatorAllowlistRequest, PendingQuestion, QuestionClaimContext,
+    QuestionClaimLocator, QuestionClaimOutcome, QuestionRecord, QuestionResolution, QuestionState,
+    QueueRecord, QueueState, ReplyThreadMode, ReplyThreadOverride,
+    ReplyThreadOverrideUpdateOutcome, SettingsUpdateOutcome, StoreError, StoreResult,
+    WorkspaceChoice, WorkspaceFilesystemIdentity, WorkspaceRecord,
 };
 pub use turn::{
     Acknowledgement, CoordinatorEffect, DirectionDisposition, RunState, TurnCoordinator,

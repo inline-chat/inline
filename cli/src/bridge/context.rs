@@ -336,7 +336,6 @@ mod tests {
             provider_id: ProviderId::new("codex").expect("provider"),
             policy: Arc::new(RwLock::new(OperatorPolicy::owner_only(7))),
             owner_user_id: 7,
-            owner_label: "Mo".to_string(),
             host_label: "Mo's Mac".to_string(),
             owner_dm_chat_id: 11,
             bot_user_id: 99,
@@ -347,6 +346,7 @@ mod tests {
             accept_messages_after: 0,
             deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
             pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
+            claude_history: None,
         };
 
         let prompt = build_turn_instruction(&route, &record, &record.direction.text)

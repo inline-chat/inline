@@ -7,7 +7,7 @@ use std::time::Duration;
 use super::bot::ManagedBot;
 use super::discovery::InstalledTarget;
 use super::process::{require_success, run};
-use super::{AccessMode, AgentsSetupArgs, GatewayPreflight, GatewaySetupOutcome};
+use super::{AccessMode, AgentsSetupArgs, GatewayPreflight, GatewaySetupOutcome, cli_error};
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(180);
@@ -46,8 +46,8 @@ pub(super) async fn preflight(
         PluginState::ManagedBroken if !args.no_install => {}
         PluginState::Foreign if args.replace && !args.no_install => {}
         PluginState::Foreign => {
-            return Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
+            return Err(cli_error(
+                "setup_conflict",
                 "the existing OpenClaw inline plugin has an unrecognized source; rerun with --replace to replace it",
             )
             .into());
@@ -163,8 +163,8 @@ pub(super) async fn setup(
         PluginState::Foreign => {
             require_plugin_install_allowed(args, "uses an unrecognized source")?;
             if !args.replace {
-                return Err(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
+                return Err(cli_error(
+                    "setup_conflict",
                     "the existing OpenClaw inline plugin has an unrecognized source; rerun with --replace to replace it",
                 )
                 .into());
@@ -363,8 +363,8 @@ fn require_plugin_install_allowed(
     reason: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if args.no_install {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
+        return Err(cli_error(
+            "plugin_unavailable",
             format!("the Inline OpenClaw plugin {reason} and --no-install was provided"),
         )
         .into());

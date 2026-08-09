@@ -483,7 +483,7 @@ fn callback_payload_round_trips_provider_choices() {
 }
 
 #[test]
-fn shared_approval_callback_routes_from_private_dm_to_origin_turn() {
+fn shared_approval_callback_stays_in_origin_thread() {
     let store = BridgeStore::open_in_memory().expect("store");
     let callback = ApprovalCallback {
         version: 1,
@@ -498,9 +498,9 @@ fn shared_approval_callback_routes_from_private_dm_to_origin_turn() {
             provider_approval_id: "provider-approval".to_string(),
             turn_id: inline_agent_bridge::TurnId::new("turn-1").expect("turn"),
             origin_chat_id: 708,
-            action_chat_id: 706,
+            action_chat_id: 708,
             message_id: Some(9),
-            origin_status_message_id: Some(10),
+            origin_status_message_id: None,
             decisions: vec![ApprovalDecision::ApproveOnce],
             created_at: 100,
             expires_at: 200,
@@ -508,7 +508,7 @@ fn shared_approval_callback_routes_from_private_dm_to_origin_turn() {
         .expect("insert approval");
     let mut event = ClientEvent::MessageActionInvoked {
         interaction_id: InlineId::new(1),
-        chat_id: InlineId::new(706),
+        chat_id: InlineId::new(708),
         message_id: InlineId::new(9),
         actor_user_id: InlineId::new(42),
         action_id: "bridge_approval_0".to_string(),
@@ -546,9 +546,9 @@ fn outsider_approval_callback_stays_pending_before_provider_dispatch() {
             provider_approval_id: "provider-approval".to_string(),
             turn_id: turn_id.clone(),
             origin_chat_id: 708,
-            action_chat_id: 706,
+            action_chat_id: 708,
             message_id: Some(9),
-            origin_status_message_id: Some(10),
+            origin_status_message_id: None,
             decisions: vec![ApprovalDecision::ApproveOnce],
             created_at: 100,
             expires_at: 200,
@@ -556,7 +556,7 @@ fn outsider_approval_callback_stays_pending_before_provider_dispatch() {
         .expect("insert approval");
     let event = ClientEvent::MessageActionInvoked {
         interaction_id: InlineId::new(1),
-        chat_id: InlineId::new(706),
+        chat_id: InlineId::new(708),
         message_id: InlineId::new(9),
         actor_user_id: InlineId::new(8),
         action_id: "bridge_approval_0".to_string(),
@@ -602,17 +602,8 @@ fn outsider_approval_callback_stays_pending_before_provider_dispatch() {
 }
 
 #[test]
-fn shared_approval_copy_keeps_details_private() {
-    assert_eq!(
-        shared_approval_waiting_text("Mo"),
-        "Waiting for Mo’s approval."
-    );
-    assert!(!shared_approval_waiting_text("Mo").contains("command"));
-}
-
-#[test]
 fn agent_command_catalog_is_stable_and_within_server_limits() {
-    let catalog = agent_command_catalog();
+    let catalog = agent_command_catalog("claude");
     let names = catalog
         .iter()
         .map(|command| command.command.as_str())
@@ -622,6 +613,8 @@ fn agent_command_catalog_is_stable_and_within_server_limits() {
         vec![
             "help",
             "status",
+            "sessions",
+            "open",
             "new",
             "clear",
             "compact",
@@ -650,6 +643,13 @@ fn agent_command_catalog_is_stable_and_within_server_limits() {
         assert!(!command.description.is_empty() && command.description.len() <= 256);
         assert_eq!(command.sort_order, i32::try_from(index).ok());
     }
+
+    let codex_names = agent_command_catalog("codex")
+        .into_iter()
+        .map(|command| command.command)
+        .collect::<Vec<_>>();
+    assert!(!codex_names.iter().any(|name| name == "sessions"));
+    assert!(!codex_names.iter().any(|name| name == "open"));
 }
 
 #[test]

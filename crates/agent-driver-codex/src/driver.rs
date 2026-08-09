@@ -691,6 +691,7 @@ where
         Ok(DriverSettingsCatalog {
             models,
             permissions,
+            default_permissions: None,
         })
     }
 }

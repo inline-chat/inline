@@ -14,20 +14,21 @@ use inline_agent_bridge::{
     ApprovalDecision, ApprovalOption, ApprovalRecord, BindingKey, BridgeStore, ChatSettingsRecord,
     CommandChoiceAction, CommandChoiceClaimContext, CommandChoiceClaimOutcome,
     CommandChoiceRequest, CommandInvocation, CoordinatorEffect, Direction, DirectionDisposition,
-    DirectionId, DriverError, DriverSettingsCatalog, FileChange, HostToolCall, HostToolCallClaim,
-    HostToolCallRecord, HostToolConfiguration, HostToolHandler, HostToolResult, HostToolSpec,
-    HostToolTransport, InboundEnvelope, InboundRecord, InboundState, InboundUndoOutcome,
-    InstallationId, InstallationRecord, OperatorAllowlistClaimContext,
+    DirectionId, DriverError, DriverSettingsCatalog, FileChange, HistoryImportState, HostToolCall,
+    HostToolCallClaim, HostToolCallRecord, HostToolConfiguration, HostToolHandler, HostToolResult,
+    HostToolSpec, HostToolTransport, InboundEnvelope, InboundRecord, InboundState,
+    InboundUndoOutcome, InstallationId, InstallationRecord, OperatorAllowlistClaimContext,
     OperatorAllowlistClaimOutcome, OperatorAllowlistDecision, OperatorPolicy, OutputAttachment,
     OutputAttachmentKind, PendingApproval, PendingCommandChoiceRequest,
     PendingOperatorAllowlistRequest, PendingQuestion, PlanStep, PlanStepStatus, ProviderId,
     ProviderSessionManager, Question, QuestionAnswer, QuestionClaimContext, QuestionClaimLocator,
     QuestionClaimOutcome, QuestionRequest, QuestionResolution, QuestionState, QueueItemId,
     ReplyThreadMode, ReplyThreadOverrideUpdateOutcome, SessionManagerError, SettingsUpdateOutcome,
-    SteeringSupport, StreamingPresenter, TriggerDecision, TriggerResolver, TurnCoordinator,
-    TurnInput, TurnOptions, TurnOutcome, TurnTiming, UpdatePriority, ValidationSummary,
-    VisibilityMode, WORKING_CONTINUED_STATUS, WORKING_STATUS, WorkspaceChoice, WorkspaceId,
-    format_elapsed_compact, parse_command, reap_stale_process_host, sanitize_visible_command,
+    SteeringSupport, StoreError, StreamingPresenter, TriggerDecision, TriggerResolver,
+    TurnCoordinator, TurnInput, TurnOptions, TurnOutcome, TurnTiming, UpdatePriority,
+    ValidationSummary, VisibilityMode, WORKING_CONTINUED_STATUS, WORKING_STATUS, WorkspaceChoice,
+    WorkspaceId, WorkspaceRecord, format_elapsed_compact, parse_command, reap_stale_process_host,
+    sanitize_visible_command, sanitize_visible_transcript,
 };
 use inline_client::{
     AnswerBotChatSettingsRequest, AuthCredential, AuthToken, BotCapability, BotCapabilityKind,
@@ -67,7 +68,7 @@ mod stream_ui;
 mod supervisor;
 use allowlist_ui::*;
 use approval_ui::*;
-use copy::{BridgeNotice, missing_workspace_message, session_open_notice};
+use copy::{BridgeNotice, session_open_notice};
 use inline_tools::*;
 pub(crate) use provider::bridge_provider_setup_descriptors;
 use provider::*;
@@ -102,6 +103,8 @@ mod account;
 use account::*;
 mod commands;
 use commands::*;
+mod claude_history;
+use claude_history::*;
 mod settings;
 use settings::*;
 mod owner_control;
@@ -1170,28 +1173,32 @@ async fn run_provider_installation(
         bot_store: bot_store.clone(),
         reply_thread_default,
     };
-    let owner_label = bot_store
-        .user(InlineId::new(account.owner_user_id))
-        .await?
-        .and_then(|user| {
-            user.first_name
-                .or(user.display_name)
-                .or(user.username)
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-        })
-        .unwrap_or_else(|| "the owner".to_string());
     let (deferred_inbound_tx, mut deferred_inbound_rx) =
         tokio::sync::mpsc::channel::<InboundRecord>(MAX_PENDING_VOICE_TRANSCRIPTS);
     let attachment_cache_dir = installation.state_dir.join("attachments");
     ensure_private_dir(&attachment_cache_dir)?;
+    let claude_history = if installation.provider_id == "claude" {
+        match adapter::verify_pinned_adapter_executable("claude", &installation.executable)
+            .map_err(|_| ClaudeHistoryError::SdkUnavailable)
+            .and_then(|executable| ClaudeHistoryRuntime::from_adapter_executable(&executable))
+        {
+            Ok(history) => Some(history),
+            Err(_) => {
+                eprintln!(
+                    "Claude session history is unavailable because the pinned local SDK could not be verified."
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
     let inbound_route = InboundRoute {
         store: bridge_store.clone(),
         installation_id: binding.installation_id.clone(),
         provider_id: ProviderId::new(installation.provider_id.clone())?,
         policy: Arc::new(RwLock::new(policy.clone())),
         owner_user_id: account.owner_user_id,
-        owner_label,
         host_label: settings_identity.host_label.clone(),
         owner_dm_chat_id: dm_chat_id.get(),
         bot_user_id: installation.bot_user_id,
@@ -1202,6 +1209,7 @@ async fn run_provider_installation(
         accept_messages_after: installation.accept_messages_after,
         deferred_inbound_tx,
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
+        claude_history,
     };
     let inline_tools = inline_tool_configuration(Arc::new(InlineToolHost::new(
         bot.clone(),
@@ -1434,6 +1442,12 @@ async fn run_provider_installation(
                     if accepted {
                         active_turns.remove(&promotion.source_chat_id);
                         active_turns.insert(promotion.delivery_chat_id, promotion.sender);
+                        repair_promoted_conversation_cache(
+                            &inbound_route,
+                            &mut conversations,
+                            promotion.source_chat_id,
+                            promotion.delivery_chat_id,
+                        )?;
                     }
                     let _ = promotion.acknowledged.send(accepted);
                 }
@@ -1513,9 +1527,7 @@ async fn run_provider_installation(
                                 continue 'runtime;
                             }
                             Ok(SettingsConversationResolution::Ready(conversation)) => {
-                                conversations
-                                    .entry(chat_id)
-                                    .or_insert_with(|| conversation.clone());
+                                conversations.insert(chat_id, conversation.clone());
                                 conversation
                             }
                                     Err(ConversationResolutionError::MissingWorkspace) => {
@@ -1755,6 +1767,9 @@ async fn run_provider_installation(
         readiness.mark_unavailable(&installation.installation_id);
     }
     health.mark_stopped();
+    if let Some(history) = inbound_route.claude_history.as_ref() {
+        history.cancel_imports(&bridge_store).await;
+    }
     let driver_shutdown = shutdown_provider_driver(driver.as_ref(), &installation).await;
     let bot_shutdown = bot.shutdown().await;
     let owner_control_shutdown = match owner_control.filter(|_| owns_owner_control) {

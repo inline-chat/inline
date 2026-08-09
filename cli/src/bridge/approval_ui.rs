@@ -31,7 +31,6 @@ pub(super) async fn send_approval(
     provider_name: &str,
     host_label: &str,
     workspace_label: &str,
-    from_shared_chat: bool,
 ) -> Result<InlineId, Box<dyn std::error::Error>> {
     let token = approval_token(request);
     let actions = approval_actions(request, &token)?;
@@ -46,13 +45,7 @@ pub(super) async fn send_approval(
         PeerRef::Chat {
             chat_id: InlineId::new(chat_id),
         },
-        approval_prompt_text(
-            request,
-            provider_name,
-            host_label,
-            workspace_label,
-            from_shared_chat,
-        ),
+        approval_prompt_text(request, provider_name, host_label, workspace_label),
     );
     message_request.external_id = Some(ExternalId::try_new(
         "agent-bridge",
@@ -117,64 +110,34 @@ fn approval_actions(
     })
 }
 
-pub(super) async fn send_shared_approval_waiting(
-    bot: &InlineClient,
-    chat_id: i64,
-    owner_label: &str,
-    token: &str,
-) -> Result<Option<InlineId>, Box<dyn std::error::Error>> {
-    let mut request = SendTextRequest::new(
-        PeerRef::Chat {
-            chat_id: InlineId::new(chat_id),
-        },
-        shared_approval_waiting_text(owner_label),
-    );
-    request.external_id = Some(ExternalId::try_new(
-        "agent-bridge",
-        format!("approval-waiting-{token}"),
-    )?);
-    request.notification_mode = BridgeNotificationClass::RoutineStatus.notification_mode();
-    Ok(send_text_with_retry(bot, request).await?.message_id)
-}
-
 pub(super) fn approval_prompt_text(
     request: &inline_agent_bridge::ApprovalRequest,
     provider_name: &str,
     host_label: &str,
     workspace_label: &str,
-    from_shared_chat: bool,
 ) -> String {
     let provider = bounded_approval_label(provider_name, "Agent");
     let host = bounded_approval_label(host_label, "this computer");
     let workspace = bounded_approval_label(workspace_label, "the selected project");
-    let mut text = format!("{provider} on {host} needs approval in `{workspace}`.");
-    if from_shared_chat {
-        text.push_str("\nRequested from a shared conversation.");
-    }
+    let mut text = format!(
+        "{provider} on {host} needs approval in `{workspace}`. Only the bot owner can approve."
+    );
 
     let summary = safe_diagnostic(&request.summary);
+    let summary = sanitize_visible_transcript(&summary).unwrap_or_default();
     if !summary.is_empty() && summary != "[redacted provider diagnostic]" {
         text.push_str("\n\n");
         text.push_str(&truncate(&summary, 240));
     }
-    if let Some(command) = request.command.as_deref()
-        && let Some(command) = approval_command_label(command)
+    if let Some(command) = request
+        .command
+        .as_deref()
+        .and_then(sanitize_visible_command)
     {
-        text.push_str("\n\nCommand: `");
-        text.push_str(command);
-        text.push('`');
+        text.push_str("\n\nCommand: ");
+        text.push_str(&markdown_code_span(&command));
     }
     text
-}
-
-fn approval_command_label(command: &str) -> Option<&str> {
-    match command {
-        "cargo test" | "cargo check" | "Clippy" | "cargo fmt" | "bun test" | "typecheck"
-        | "lint" | "npm test" | "swift test" | "xcodebuild test" | "git diff" | "git status" => {
-            Some(command)
-        }
-        _ => None,
-    }
 }
 
 fn bounded_approval_label(value: &str, fallback: &str) -> String {
@@ -185,15 +148,6 @@ fn bounded_approval_label(value: &str, fallback: &str) -> String {
     } else {
         truncate(&value, 80)
     }
-}
-
-pub(super) fn shared_approval_waiting_text(owner_label: &str) -> String {
-    let label = if owner_label.trim().is_empty() {
-        "the owner"
-    } else {
-        owner_label.trim()
-    };
-    format!("Waiting for {}’s approval.", truncate(label, 80))
 }
 
 pub(super) fn approval_resolution_text(decision: &ApprovalDecision) -> &'static str {
@@ -298,13 +252,28 @@ mod tests {
     }
 
     #[test]
-    fn private_card_has_bounded_context_without_absolute_cwd() {
-        let text = approval_prompt_text(&request(), "Codex", "Mo's MacBook", "inline", true);
+    fn card_has_bounded_context_and_sanitized_command_without_absolute_cwd() {
+        let mut request = request();
+        request.command = Some(
+            "TOKEN=private deploy --api-key secret /Users/alice/dev/inline https://example.com/run?signature=hidden"
+                .to_string(),
+        );
+        request.summary =
+            "Edit /Users/alice/private/project/src/lib.rs using https://user:opaque@example.com/run?signature=hidden"
+                .to_string();
+        let text = approval_prompt_text(&request, "Codex", "Mo's MacBook", "inline");
         assert!(text.contains("Codex on Mo's MacBook"));
         assert!(text.contains("in `inline`"));
-        assert!(text.contains("Requested from a shared conversation."));
-        assert!(text.contains("Run the focused test suite"));
-        assert!(!text.contains("cargo test -p inline-agent-bridge"));
+        assert!(text.contains("Only the bot owner can approve."));
+        assert!(text.contains("Edit [local-path] using https://example.com/run?[redacted]"));
+        assert!(text.contains("TOKEN=[redacted]"));
+        assert!(text.contains("--api-key [redacted]"));
+        assert!(text.contains("https://example.com/run?[redacted]"));
+        assert!(text.contains("[local-path]"));
+        assert!(!text.contains("/Users/alice"));
+        assert!(!text.contains("private"));
+        assert!(!text.contains("secret"));
+        assert!(!text.contains("hidden"));
         assert!(!text.contains("/private/project"));
     }
 

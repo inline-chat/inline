@@ -958,7 +958,7 @@ impl ActivityTracker {
             .take(MAX_TRACKED_PATHS_PER_ACTIVITY)
             .collect::<Vec<_>>();
         let title = truncate(&activity.title, 240);
-        let detail = activity
+        let incoming_detail = activity
             .detail
             .as_deref()
             .map(|detail| truncate(detail, 512));
@@ -969,7 +969,7 @@ impl ActivityTracker {
                 semantic_kind,
                 status,
                 title,
-                detail,
+                detail: existing_detail,
                 paths: existing_paths,
                 exit_code,
                 ..
@@ -978,8 +978,8 @@ impl ActivityTracker {
                 *semantic_kind = activity.kind;
                 *status = activity.status;
                 *title = title.clone();
-                if detail.is_some() {
-                    *detail = detail.clone();
+                if incoming_detail.is_some() {
+                    *existing_detail = incoming_detail.clone();
                 }
                 for path in paths {
                     if existing_paths.len() < MAX_TRACKED_PATHS_PER_ACTIVITY
@@ -996,7 +996,7 @@ impl ActivityTracker {
                 semantic_kind: activity.kind,
                 status: activity.status,
                 title,
-                detail,
+                detail: incoming_detail,
                 paths,
                 exit_code: activity.exit_code,
             });

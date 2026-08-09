@@ -617,6 +617,7 @@ fn version_ten_database_adds_durable_questions_forward() {
              DROP TABLE unauthorized_dm_notices;
              DROP TABLE command_choice_requests;
              DROP TABLE reply_thread_overrides;
+             DROP TABLE history_import_threads;
              ALTER TABLE inbound_directions DROP COLUMN terminal_output_attachments_json;
              ALTER TABLE inbound_directions DROP COLUMN delivery_chat_id;
              ALTER TABLE session_bindings DROP COLUMN session_configuration_fingerprint;
@@ -647,15 +648,43 @@ fn version_ten_database_adds_durable_questions_forward() {
 fn newer_schema_version_is_rejected() {
     let connection = Connection::open_in_memory().expect("connection");
     connection
-        .execute_batch("PRAGMA user_version = 23;")
+        .execute_batch("PRAGMA user_version = 24;")
         .expect("set schema version");
     assert!(matches!(
         migrate(&connection),
         Err(StoreError::UnsupportedSchemaVersion {
-            found: 23,
+            found: 24,
             supported: CURRENT_SCHEMA_VERSION
         })
     ));
+}
+
+#[test]
+fn version_twenty_two_database_adds_history_import_guards_forward() {
+    let connection = Connection::open_in_memory().expect("connection");
+    migrate(&connection).expect("initial migration");
+    connection
+        .execute_batch(
+            "DROP TABLE history_import_threads;
+             PRAGMA user_version = 22;",
+        )
+        .expect("simulate version twenty two");
+
+    migrate(&connection).expect("forward migration");
+
+    let table: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'table' AND name = 'history_import_threads'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("history import table");
+    assert_eq!(table, 1);
+    let version: i64 = connection
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .expect("schema version");
+    assert_eq!(version, CURRENT_SCHEMA_VERSION);
 }
 
 #[test]

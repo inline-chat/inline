@@ -343,6 +343,10 @@ enum SetupCommand {
     Claude(SetupAgentArgs),
     #[command(about = "Set up Amp as an experimental personal Inline bot")]
     Amp(SetupAgentArgs),
+    #[command(about = "Set up Hermes as an Inline bot")]
+    Hermes(agents::AgentsSetupArgs),
+    #[command(about = "Set up OpenClaw as an Inline bot")]
+    Openclaw(agents::AgentsSetupArgs),
 }
 
 #[derive(Subcommand)]
@@ -573,11 +577,14 @@ pub(crate) struct AuthLoginArgs {
     challenge_token: Option<String>,
 
     #[arg(
-        long,
-        hide = true,
-        conflicts_with_all = ["email", "phone", "send_code", "code", "code_stdin", "challenge_token"]
+      long,
+      hide = true,
+      conflicts_with_all = ["email", "phone", "send_code", "code", "code_stdin", "challenge_token"]
     )]
     mac_app_bootstrap: bool,
+
+    #[arg(long, hide = true, value_name = "ID", requires = "mac_app_bootstrap")]
+    expected_user_id: Option<i64>,
 }
 
 #[derive(Subcommand)]
@@ -1653,7 +1660,7 @@ async fn main() {
         }
     };
 
-    if let Err(error) = run(cli, started_at).await {
+    if let Err(error) = run_until_terminated(cli, started_at).await {
         if is_reported_cli_failure(error.as_ref()) {
             std::process::exit(1);
         }
@@ -1672,6 +1679,32 @@ async fn main() {
         }
         std::process::exit(1);
     }
+}
+
+#[cfg(unix)]
+async fn run_until_terminated(
+    cli: Cli,
+    started_at: Instant,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut termination =
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    tokio::select! {
+        result = run(cli, started_at) => result,
+        _ = termination.recv() => Err(CliError {
+            code: "setup_cancelled",
+            message: "The command was cancelled.".to_string(),
+            hint: None,
+            examples: Vec::new(),
+        }.into()),
+    }
+}
+
+#[cfg(not(unix))]
+async fn run_until_terminated(
+    cli: Cli,
+    started_at: Instant,
+) -> Result<(), Box<dyn std::error::Error>> {
+    run(cli, started_at).await
 }
 
 fn install_broken_pipe_handler() {
@@ -1727,95 +1760,102 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 }
             },
             Command::Setup { command } => {
-                let (provider_id, args) = match command {
-                    SetupCommand::Codex(args) => ("codex", args),
-                    SetupCommand::Opencode(args) => ("opencode", args),
-                    SetupCommand::Claude(args) => ("claude", args),
-                    SetupCommand::Amp(args) => ("amp", args),
-                };
-                let owner_token = match auth_store.load_token()? {
-                    Some(token) => token,
-                    None => {
-                        handle_login(
-                            AuthLoginArgs {
-                                email: None,
-                                phone: None,
-                                send_code: false,
-                                code: None,
-                                code_stdin: false,
-                                challenge_token: None,
-                                mac_app_bootstrap: false,
-                            },
-                            &api,
+                match command {
+                    SetupCommand::Hermes(mut args) => {
+                        if args.target.is_some() {
+                            return Err(CliError::invalid_args(
+                                "`inline setup hermes` already selects Hermes; omit --target",
+                            )
+                            .into());
+                        }
+                        args.target = Some(agents::AgentTarget::Hermes);
+                        run_agents_setup_command(
+                            &config,
                             &auth_store,
-                            &config.realtime_url,
+                            &api,
                             &local_db,
+                            args,
                             cli.json,
                             json_format,
                         )
                         .await?;
-                        require_token(&auth_store)?
                     }
-                };
-                bridge::setup_provider(
-                    &config,
-                    owner_token,
-                    provider_id,
-                    args.folder,
-                    args.name,
-                    cli.json,
-                    json_format,
-                )
-                .await?;
+                    SetupCommand::Openclaw(mut args) => {
+                        if args.target.is_some() {
+                            return Err(CliError::invalid_args(
+                                "`inline setup openclaw` already selects OpenClaw; omit --target",
+                            )
+                            .into());
+                        }
+                        args.target = Some(agents::AgentTarget::Openclaw);
+                        run_agents_setup_command(
+                            &config,
+                            &auth_store,
+                            &api,
+                            &local_db,
+                            args,
+                            cli.json,
+                            json_format,
+                        )
+                        .await?;
+                    }
+                    legacy => {
+                        let (provider_id, args) = match legacy {
+                            SetupCommand::Codex(args) => ("codex", args),
+                            SetupCommand::Opencode(args) => ("opencode", args),
+                            SetupCommand::Claude(args) => ("claude", args),
+                            SetupCommand::Amp(args) => ("amp", args),
+                            SetupCommand::Hermes(_) | SetupCommand::Openclaw(_) => unreachable!(),
+                        };
+                        let owner_token = match auth_store.load_token()? {
+                            Some(token) => token,
+                            None => {
+                                handle_login(
+                                    AuthLoginArgs {
+                                        email: None,
+                                        phone: None,
+                                        send_code: false,
+                                        code: None,
+                                        code_stdin: false,
+                                        challenge_token: None,
+                                        mac_app_bootstrap: false,
+                                        expected_user_id: None,
+                                    },
+                                    &api,
+                                    &auth_store,
+                                    &config.realtime_url,
+                                    &local_db,
+                                    cli.json,
+                                    json_format,
+                                )
+                                .await?;
+                                require_token(&auth_store)?
+                            }
+                        };
+                        bridge::setup_provider(
+                            &config,
+                            owner_token,
+                            provider_id,
+                            args.folder,
+                            args.name,
+                            cli.json,
+                            json_format,
+                        )
+                        .await?;
+                    }
+                }
             }
             Command::Agents { command } => match command {
                 agents::AgentsCommand::Discover => {
                     agents::discover(cli.json, json_format)?;
                 }
                 agents::AgentsCommand::Setup(args) => {
-                    let resolved = agents::resolve_setup(args, cli.json)?;
-                    if resolved.args.dry_run {
-                        agents::setup(
-                            &config,
-                            String::new(),
-                            resolved,
-                            cli.json,
-                            json_format,
-                        )
-                        .await?;
-                        return Ok(());
-                    }
-                    let owner_token = match auth_store.load_token()? {
-                        Some(token) => token,
-                        None if resolved.non_interactive => {
-                            return Err(CliError::not_authenticated().into());
-                        }
-                        None => {
-                            handle_login(
-                                AuthLoginArgs {
-                                    email: None,
-                                    phone: None,
-                                    send_code: false,
-                                    code: None,
-                                    code_stdin: false,
-                                    challenge_token: None,
-                                    mac_app_bootstrap: false,
-                                },
-                                &api,
-                                &auth_store,
-                                &config.realtime_url,
-                                &local_db,
-                                cli.json,
-                                json_format,
-                            )
-                            .await?;
-                            require_token(&auth_store)?
-                        }
-                    };
-                    agents::setup(
+                    run_agents_setup_command(
                         &config,
-                        owner_token,
-                        resolved,
+                        &auth_store,
+                        &api,
+                        &local_db,
+                        args,
                         cli.json,
                         json_format,
                     )
@@ -4109,6 +4149,50 @@ fn export_peer_from_input_peer(
     }
 }
 
+async fn run_agents_setup_command(
+    config: &Config,
+    auth_store: &AuthStore,
+    api: &ApiClient,
+    local_db: &LocalDb,
+    args: agents::AgentsSetupArgs,
+    json: bool,
+    json_format: output::JsonFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let resolved = agents::resolve_setup(args, json)?;
+    if resolved.args.dry_run {
+        return agents::setup(config, String::new(), resolved, json, json_format).await;
+    }
+    let owner_token = match auth_store.load_token()? {
+        Some(token) => token,
+        None if resolved.non_interactive => {
+            return Err(CliError::not_authenticated().into());
+        }
+        None => {
+            handle_login(
+                AuthLoginArgs {
+                    email: None,
+                    phone: None,
+                    send_code: false,
+                    code: None,
+                    code_stdin: false,
+                    challenge_token: None,
+                    mac_app_bootstrap: false,
+                    expected_user_id: None,
+                },
+                api,
+                auth_store,
+                &config.realtime_url,
+                local_db,
+                json,
+                json_format,
+            )
+            .await?;
+            require_token(auth_store)?
+        }
+    };
+    agents::setup(config, owner_token, resolved, json, json_format).await
+}
+
 fn require_token(auth_store: &AuthStore) -> Result<String, Box<dyn std::error::Error>> {
     match auth_store.load_token()? {
         Some(token) => Ok(token),
@@ -4863,6 +4947,50 @@ mod cli_parsing_tests {
     }
 
     #[test]
+    fn parses_gateway_setup_shortcuts() {
+        let hermes = Cli::try_parse_from([
+            "inline",
+            "setup",
+            "hermes",
+            "--profile",
+            "work",
+            "--non-interactive",
+            "--dry-run",
+        ])
+        .expect("Hermes setup shortcut parses");
+        assert!(matches!(
+            hermes.command,
+            Command::Setup {
+                command: SetupCommand::Hermes(agents::AgentsSetupArgs {
+                    profile: Some(profile),
+                    non_interactive: true,
+                    dry_run: true,
+                    ..
+                })
+            } if profile == "work"
+        ));
+
+        let openclaw = Cli::try_parse_from([
+            "inline",
+            "setup",
+            "openclaw",
+            "--non-interactive",
+            "--dry-run",
+        ])
+        .expect("OpenClaw setup shortcut parses");
+        assert!(matches!(
+            openclaw.command,
+            Command::Setup {
+                command: SetupCommand::Openclaw(agents::AgentsSetupArgs {
+                    non_interactive: true,
+                    dry_run: true,
+                    ..
+                })
+            }
+        ));
+    }
+
+    #[test]
     fn parses_non_interactive_login_phases() {
         let cli = Cli::try_parse_from([
             "inline",
@@ -4933,6 +5061,8 @@ mod cli_parsing_tests {
             "auth",
             "login",
             "--mac-app-bootstrap",
+            "--expected-user-id",
+            "42",
             "--json",
             "--compact",
         ])
@@ -4940,9 +5070,27 @@ mod cli_parsing_tests {
         match cli.command {
             Command::Auth {
                 command: AuthCommand::Login(args),
-            } => assert!(args.mac_app_bootstrap),
+            } => {
+                assert!(args.mac_app_bootstrap);
+                assert_eq!(args.expected_user_id, Some(42));
+            }
             _ => panic!("expected auth login command"),
         }
+
+        let error = Cli::try_parse_from([
+            "inline",
+            "auth",
+            "login",
+            "--expected-user-id",
+            "42",
+            "--json",
+        ])
+        .err()
+        .expect("expected user id is scoped to Mac app bootstrap");
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::MissingRequiredArgument
+        );
 
         use clap::CommandFactory;
         let mut command = Cli::command();
@@ -5053,6 +5201,7 @@ mod cli_parsing_tests {
                 code_stdin: false,
                 challenge_token: None,
                 mac_app_bootstrap: false,
+                expected_user_id: None,
             },
             &api,
             &auth_store,
@@ -5081,6 +5230,7 @@ mod cli_parsing_tests {
             code_stdin: false,
             challenge_token: None,
             mac_app_bootstrap: false,
+            expected_user_id: None,
         };
         let err = auth_flow::contact_from_args(args)
             .err()

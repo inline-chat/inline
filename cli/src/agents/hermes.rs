@@ -6,7 +6,7 @@ use std::time::Duration;
 use super::bot::ManagedBot;
 use super::discovery::{InstalledTarget, find_executable};
 use super::process::{require_success, require_success_with_environment, run_with_environment};
-use super::{AccessMode, AgentsSetupArgs, GatewayPreflight, GatewaySetupOutcome};
+use super::{AccessMode, AgentsSetupArgs, GatewayPreflight, GatewaySetupOutcome, cli_error};
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(180);
@@ -47,8 +47,8 @@ pub(super) async fn preflight(
             let status = run_machine_status(installed, &profile.environment, true).await?;
             let bot_id = status_bot_id(&status.stdout).filter(|_| status.success);
             if bot_id.is_none() && !args.replace {
-                return Err(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
+                return Err(cli_error(
+                    "setup_conflict",
                     "the existing Hermes Inline credential cannot be verified; rerun with --replace to replace it",
                 )
                 .into());
@@ -68,22 +68,22 @@ pub(super) async fn preflight(
         None => legacy_plugin_configured(installed, &profile.environment).await?,
     };
     if legacy_configured && !args.replace {
-        return Err(io::Error::new(
-            io::ErrorKind::AlreadyExists,
+        return Err(cli_error(
+            "setup_conflict",
             "the existing Hermes Inline plugin is configured but cannot report its bot identity; rerun with --replace to upgrade and replace it",
         )
         .into());
     }
     if args.no_install {
         if installer.is_none() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
+            return Err(cli_error(
+                "plugin_unavailable",
                 "inline-hermes is not installed and --no-install was provided",
             )
             .into());
         }
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
+        return Err(cli_error(
+            "plugin_unavailable",
             "the Inline Hermes plugin does not support machine setup and --no-install was provided",
         )
         .into());

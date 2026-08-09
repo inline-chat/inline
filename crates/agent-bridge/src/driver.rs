@@ -470,6 +470,9 @@ pub struct DriverSettingsCatalog {
     pub models: Vec<DriverModelOption>,
     /// Permission modes available to the current provider account.
     pub permissions: Vec<DriverSettingOption>,
+    /// Effective permission mode when a conversation has no explicit selection.
+    #[serde(default)]
+    pub default_permissions: Option<String>,
 }
 
 /// One provider model and its supported reasoning choices.

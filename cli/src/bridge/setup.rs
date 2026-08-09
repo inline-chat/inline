@@ -454,7 +454,7 @@ pub(super) async fn provision_dev_bot(
     } else {
         (None, None)
     };
-    sync_agent_command_catalog(&mut owner, bot.id).await?;
+    sync_agent_command_catalog(&mut owner, bot.id, provider.provider_id).await?;
 
     let stored_secret = saved.as_ref().and_then(|saved| {
         account_secrets
@@ -592,8 +592,8 @@ pub(super) async fn provision_dev_bot(
     })
 }
 
-pub(super) fn agent_command_catalog() -> Vec<proto::BotCommand> {
-    [
+pub(super) fn agent_command_catalog(provider_id: &str) -> Vec<proto::BotCommand> {
+    let mut commands = vec![
         ("help", "Show agent commands"),
         ("status", "Show bridge and session status"),
         ("new", "Start a fresh agent session"),
@@ -610,22 +610,33 @@ pub(super) fn agent_command_catalog() -> Vec<proto::BotCommand> {
         ("verbose", "Toggle detailed agent activity"),
         ("threads", "Configure Inline reply-thread routing"),
         ("allowlist", "Allow another user to drive this agent"),
-    ]
-    .into_iter()
-    .enumerate()
-    .map(|(index, (command, description))| proto::BotCommand {
-        command: command.to_string(),
-        description: description.to_string(),
-        sort_order: i32::try_from(index).ok(),
-    })
-    .collect()
+    ];
+    if provider_id == "claude" {
+        commands.splice(
+            2..2,
+            [
+                ("sessions", "Import a recent local Claude session"),
+                ("open", "Import a recent local Claude session"),
+            ],
+        );
+    }
+    commands
+        .into_iter()
+        .enumerate()
+        .map(|(index, (command, description))| proto::BotCommand {
+            command: command.to_string(),
+            description: description.to_string(),
+            sort_order: i32::try_from(index).ok(),
+        })
+        .collect()
 }
 
 async fn sync_agent_command_catalog(
     owner: &mut inline_sdk::RealtimeClient,
     bot_user_id: i64,
+    provider_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let commands = agent_command_catalog();
+    let commands = agent_command_catalog(provider_id);
     let result = owner
         .call(proto::SetBotCommandsInput {
             bot_user_id,

@@ -9,8 +9,8 @@ use crate::config::Config;
 use crate::identity::connect_realtime;
 use inline_protocol::proto;
 
-use super::AgentsSetupArgs;
 use super::catalog::TargetDescriptor;
+use super::{AgentsSetupArgs, cli_error};
 
 pub(super) struct ManagedBot {
     pub(super) owner_user_id: i64,
@@ -63,8 +63,8 @@ pub(super) async fn ensure_gateway_bot(
             .find(|bot| bot.id == bot_id)
             .cloned()
             .ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::NotFound,
+                cli_error(
+                    "setup_conflict",
                     format!("bot {bot_id} is not owned by the authenticated Inline user"),
                 )
             })?
@@ -81,8 +81,8 @@ pub(super) async fn ensure_gateway_bot(
             )
             .unwrap_or_default(),
             None => {
-                return Err(io::Error::new(
-                    io::ErrorKind::NotFound,
+                return Err(cli_error(
+                    "mapped_bot_missing",
                     "the saved setup bot is no longer available; rerun with --replace to create a replacement",
                 )
                 .into());
@@ -97,8 +97,8 @@ pub(super) async fn ensure_gateway_bot(
             )
             .unwrap_or_default(),
             None => {
-                return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
+                return Err(cli_error(
+                    "setup_conflict",
                     "the gateway's configured Inline bot is not owned by the authenticated user; rerun with --replace to replace it",
                 )
                 .into());
@@ -135,8 +135,8 @@ pub(super) async fn ensure_gateway_bot(
 
     let (mut bot, created_token) = if selected.id > 0 {
         if bot_username(&selected) != username && args.bot_username.is_some() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
+            return Err(cli_error(
+                "setup_conflict",
                 "--bot-username does not match the selected existing bot",
             )
             .into());
@@ -272,8 +272,8 @@ fn ensure_configured_bot_compatible(
         .is_some_and(|(configured_bot_id, requested_bot_id)| configured_bot_id != requested_bot_id)
         && !replace
     {
-        return Err(io::Error::new(
-            io::ErrorKind::AlreadyExists,
+        return Err(cli_error(
+            "setup_conflict",
             "the gateway is configured for a different Inline bot; rerun with --replace to change it",
         )
         .into());

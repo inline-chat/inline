@@ -1,6 +1,6 @@
 //! Canonical concise copy for provider-neutral bridge states.
 
-use inline_agent_bridge::{ProviderId, SessionOpenOutcome};
+use inline_agent_bridge::SessionOpenOutcome;
 use inline_client::{ClientErrorCategory, ClientFailure, ClientStatus};
 
 /// A user-visible bridge state shared by messages, commands, and settings.
@@ -49,7 +49,7 @@ impl BridgeNotice {
                 "The local agent isn’t ready — I queued this. Run /status for details."
             }
             Self::MissingWorkspace => {
-                "No project folder is available. Choose one in Agent Settings or add one on the host."
+                "The selected project folder is unavailable. Choose another in Agent Settings."
             }
             Self::SessionCompactionUnsupported => {
                 "This agent doesn’t support session compaction here."
@@ -65,13 +65,6 @@ impl BridgeNotice {
             }
         }
     }
-}
-
-pub(super) fn missing_workspace_message(provider_id: &ProviderId) -> String {
-    format!(
-        "No project folder is available. Run `inline bridge workspace add \"$HOME\" --provider {}` on the host.",
-        provider_id.as_str()
-    )
 }
 
 /// Selects the one lifecycle notice that must accompany automatic replacement.
@@ -185,12 +178,13 @@ mod tests {
     }
 
     #[test]
-    fn missing_workspace_copy_includes_an_exact_provider_scoped_command() {
-        let message = missing_workspace_message(&ProviderId::new("codex").expect("provider"));
+    fn unavailable_workspace_copy_describes_the_selected_folder() {
+        let message = BridgeNotice::MissingWorkspace.message();
         assert_eq!(
             message,
-            "No project folder is available. Run `inline bridge workspace add \"$HOME\" --provider codex` on the host."
+            "The selected project folder is unavailable. Choose another in Agent Settings."
         );
+        assert!(!message.contains("No project folder is available"));
         assert!(!message.contains("/Users/"));
         assert!(!message.to_ascii_lowercase().contains("token"));
     }

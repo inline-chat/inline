@@ -13,7 +13,7 @@ use dialoguer::{Confirm, Select};
 
 use crate::bridge;
 use crate::config::Config;
-use crate::errors::CliError;
+use crate::errors::{CliError, JsonCliError, ReportedCliFailure};
 use crate::output::JsonFormat;
 
 pub(crate) use catalog::AgentTarget;
@@ -293,21 +293,25 @@ pub(crate) async fn setup(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let target = resolved.installed.descriptor.target;
     if resolved.args.dry_run {
-        match target {
-            AgentTarget::Openclaw => {
-                openclaw::preflight(&resolved.installed, &resolved.args).await?;
-            }
-            AgentTarget::Hermes => {
-                hermes::preflight(&resolved.installed, &resolved.args).await?;
-            }
+        let preflight = match target {
+            AgentTarget::Openclaw => openclaw::preflight(&resolved.installed, &resolved.args)
+                .await
+                .map(|_| ()),
+            AgentTarget::Hermes => hermes::preflight(&resolved.installed, &resolved.args)
+                .await
+                .map(|_| ()),
             AgentTarget::Codex | AgentTarget::Opencode | AgentTarget::Claude | AgentTarget::Amp => {
+                Ok(())
             }
+        };
+        if let Err(error) = preflight {
+            return report_setup_failure(error, target, "preflight", &[], false, json, json_format);
         }
         return print_dry_run(&resolved, json, json_format);
     }
     match target {
         AgentTarget::Codex | AgentTarget::Opencode | AgentTarget::Claude | AgentTarget::Amp => {
-            let outcome = bridge::setup_provider_core(
+            let outcome = match bridge::setup_provider_core(
                 config,
                 owner_token,
                 target.descriptor().id,
@@ -320,21 +324,47 @@ pub(crate) async fn setup(
                     operator_user_ids: Some(resolved.args.allow_users),
                 },
             )
-            .await?;
+            .await
+            {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    return report_setup_failure(
+                        error,
+                        target,
+                        "configure",
+                        &[],
+                        true,
+                        json,
+                        json_format,
+                    );
+                }
+            };
             print_bridge_result(outcome, json, json_format)
         }
         AgentTarget::Openclaw | AgentTarget::Hermes => {
             let preflight = match target {
                 AgentTarget::Openclaw => {
-                    openclaw::preflight(&resolved.installed, &resolved.args).await?
+                    openclaw::preflight(&resolved.installed, &resolved.args).await
                 }
-                AgentTarget::Hermes => {
-                    hermes::preflight(&resolved.installed, &resolved.args).await?
-                }
+                AgentTarget::Hermes => hermes::preflight(&resolved.installed, &resolved.args).await,
                 _ => unreachable!(),
             };
+            let preflight = match preflight {
+                Ok(preflight) => preflight,
+                Err(error) => {
+                    return report_setup_failure(
+                        error,
+                        target,
+                        "preflight",
+                        &[],
+                        false,
+                        json,
+                        json_format,
+                    );
+                }
+            };
             let instance = gateway_instance(resolved.args.profile.as_deref());
-            let bot = bot::ensure_gateway_bot(
+            let bot = match bot::ensure_gateway_bot(
                 config,
                 &owner_token,
                 resolved.installed.descriptor,
@@ -342,15 +372,43 @@ pub(crate) async fn setup(
                 &resolved.args,
                 preflight.configured_bot_id,
             )
-            .await?;
+            .await
+            {
+                Ok(bot) => bot,
+                Err(error) => {
+                    return report_setup_failure(
+                        error,
+                        target,
+                        "bot",
+                        &[],
+                        true,
+                        json,
+                        json_format,
+                    );
+                }
+            };
             let outcome = match target {
                 AgentTarget::Openclaw => {
-                    openclaw::setup(&resolved.installed, &bot, &resolved.args).await?
+                    openclaw::setup(&resolved.installed, &bot, &resolved.args).await
                 }
                 AgentTarget::Hermes => {
-                    hermes::setup(&resolved.installed, &bot, &resolved.args).await?
+                    hermes::setup(&resolved.installed, &bot, &resolved.args).await
                 }
                 _ => unreachable!(),
+            };
+            let outcome = match outcome {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    return report_setup_failure(
+                        error,
+                        target,
+                        "integration",
+                        &["bot_reconciled"],
+                        true,
+                        json,
+                        json_format,
+                    );
+                }
             };
             print_gateway_result(
                 resolved.installed.descriptor,
@@ -362,6 +420,81 @@ pub(crate) async fn setup(
             )
         }
     }
+}
+
+fn report_setup_failure(
+    error: Box<dyn std::error::Error>,
+    target: AgentTarget,
+    phase: &'static str,
+    changes: &[&'static str],
+    may_have_mutated: bool,
+    json: bool,
+    json_format: JsonFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct FailureOutput<'a> {
+        protocol_version: u32,
+        ok: bool,
+        action: &'static str,
+        status: &'static str,
+        documentation_url: &'static str,
+        target: &'a str,
+        failed_phase: &'static str,
+        changes: &'a [&'static str],
+        retry: String,
+        error: JsonCliError,
+    }
+
+    let payload = if let Some(error) = error.downcast_ref::<CliError>() {
+        JsonCliError {
+            code: error.code.to_string(),
+            message: error.message.clone(),
+            status: None,
+            api_error: None,
+            api_error_code: None,
+            body: None,
+            hint: error.hint.clone(),
+            examples: error.examples.clone(),
+        }
+    } else {
+        JsonCliError::new(
+            "agent_setup_failed",
+            format!(
+                "{} setup could not finish during {phase}.",
+                target.descriptor().display_name
+            ),
+        )
+    };
+    let retry = format!(
+        "inline agents setup --target {} --non-interactive",
+        target.descriptor().id
+    );
+    let status = if may_have_mutated || !changes.is_empty() {
+        "partial"
+    } else {
+        "failed"
+    };
+    if json {
+        let output = FailureOutput {
+            protocol_version: AGENTS_PROTOCOL_VERSION,
+            ok: false,
+            action: "agents.setup",
+            status,
+            documentation_url: AGENTS_DOCUMENTATION_URL,
+            target: target.descriptor().id,
+            failed_phase: phase,
+            changes,
+            retry,
+            error: payload,
+        };
+        eprintln!("{}", crate::output::json_string(&output, json_format)?);
+    } else {
+        eprintln!("Agent setup failed during {phase}: {}", payload.message);
+        eprintln!("Retry: {retry}");
+        eprintln!("Setup guide: {AGENTS_DOCUMENTATION_URL}");
+    }
+    Err(ReportedCliFailure.into())
 }
 
 fn print_bridge_result(
@@ -640,7 +773,7 @@ fn validate_target_args(
     Ok(())
 }
 
-fn cli_error(code: &'static str, message: impl Into<String>) -> CliError {
+pub(super) fn cli_error(code: &'static str, message: impl Into<String>) -> CliError {
     CliError {
         code,
         message: message.into(),

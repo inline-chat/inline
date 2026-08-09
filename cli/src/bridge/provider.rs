@@ -721,7 +721,7 @@ impl ProviderLaunch {
             Self::Acp(descriptor) => {
                 let spawned = spawn_acp_driver(descriptor.clone(), bridge_version).await?;
                 Ok(SpawnedProvider {
-                    driver: ProviderDriver::Acp(spawned.driver),
+                    driver: ProviderDriver::Acp(Box::new(spawned.driver)),
                     process_status: ProviderProcessStatus::Acp(spawned.process_status),
                 })
             }
@@ -762,7 +762,7 @@ pub(super) struct SpawnedProvider {
 #[derive(Debug)]
 pub(super) enum ProviderDriver {
     Codex(CodexAppServerDriver<ChildStdin>),
-    Acp(AcpDriver),
+    Acp(Box<AcpDriver>),
 }
 
 impl AgentDriver for ProviderDriver {

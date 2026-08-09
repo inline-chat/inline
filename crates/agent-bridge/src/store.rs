@@ -11,6 +11,7 @@ use crate::{
 
 mod approval;
 mod command_choice;
+mod history_import;
 mod host_tool;
 mod inbound_scan;
 mod operator_allowlist;
@@ -33,6 +34,7 @@ pub use command_choice::{
     CommandChoiceAction, CommandChoiceClaimContext, CommandChoiceClaimOutcome,
     CommandChoiceRequest, CommandChoiceState, PendingCommandChoiceRequest,
 };
+pub use history_import::HistoryImportState;
 pub use host_tool::{HostToolCallClaim, HostToolCallRecord};
 pub use inbound_scan::InboundUndoOutcome;
 pub use operator_allowlist::{
@@ -52,7 +54,7 @@ pub use workspace::{
     WorkspaceRecord,
 };
 
-const CURRENT_SCHEMA_VERSION: i64 = 22;
+const CURRENT_SCHEMA_VERSION: i64 = 23;
 const DEFAULT_QUEUE_LEASE_SECONDS: i64 = 300;
 const DEFAULT_INBOUND_LEASE_SECONDS: i64 = 300;
 
@@ -88,6 +90,10 @@ pub enum StoreError {
     UnknownOperatorAllowlistState(String),
     #[error("bridge state contains an unknown command choice state: {0}")]
     UnknownCommandChoiceState(String),
+    #[error("bridge state contains an unknown history import state: {0}")]
+    UnknownHistoryImportState(String),
+    #[error("history import thread {chat_id} is already owned by another import")]
+    HistoryImportConflict { chat_id: i64 },
     #[error("bridge state contains an unknown reply-thread mode: {0}")]
     UnknownReplyThreadMode(String),
     #[error("reply-thread settings require a positive chat ID")]
@@ -1232,6 +1238,10 @@ fn migrate(connection: &Connection) -> StoreResult<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version == 21 {
         pending_final_send::migrate_v22(connection)?;
+    }
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 22 {
+        history_import::migrate_v23(connection)?;
     }
     Ok(())
 }

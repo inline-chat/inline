@@ -72,7 +72,7 @@ async fn handle_provider_unavailable_command(
         return Ok(false);
     }
     let message = match command.name.as_str() {
-        "help" if command.arguments.is_empty() => static_command_help(),
+        "help" if command.arguments.is_empty() => static_command_help(&route.provider_id),
         "status" if command.arguments.is_empty() => {
             "Agent is connected to Inline, but its local provider is restarting. New work will remain queued."
                 .to_string()
@@ -120,6 +120,14 @@ pub(in crate::bridge) async fn accept_provider_unavailable_delivery(
     delivery: LosslessEventDelivery,
     route: &InboundRoute,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if handle_claude_history_action(bot, delivery.event(), route).await? {
+        delivery.ack().await?;
+        return Ok(());
+    }
+    if handle_claude_history_import_thread_message(bot, delivery.event(), route).await? {
+        delivery.ack().await?;
+        return Ok(());
+    }
     if handle_allowlist_action(bot, delivery.event(), route).await? {
         delivery.ack().await?;
         return Ok(());
@@ -152,6 +160,10 @@ pub(in crate::bridge) async fn accept_provider_unavailable_delivery(
         return Ok(());
     }
     if let Some(record) = inbound_from_delivery(bot, &delivery, route).await? {
+        if handle_claude_history_command(bot, &record, route).await? {
+            delivery.ack().await?;
+            return Ok(());
+        }
         if handle_allowlist_command(bot, &record, route).await? {
             delivery.ack().await?;
             return Ok(());

@@ -8,7 +8,7 @@ use agent_client_protocol::schema::v1::{
 use inline_agent_bridge::{
     ActivitySemanticKind, ActivityStatus, ActivityUpsert, AgentEvent, ApprovalOption,
     DriverCommand, DriverModelOption, DriverSettingOption, DriverSettingsCatalog, FileChange,
-    PlanStep, PlanStepStatus, TurnId, TurnOutcome, native_tool_activity,
+    PlanStep, PlanStepStatus, TurnId, TurnOutcome, native_tool_activity, sanitize_visible_command,
 };
 
 const MAX_PLAN_STEPS: usize = 32;
@@ -93,46 +93,39 @@ pub(crate) fn permission_summary(request: &RequestPermissionRequest) -> String {
 }
 
 pub(crate) fn permission_command(request: &RequestPermissionRequest) -> Option<String> {
-    let raw = request.tool_call.fields.raw_input.as_ref()?;
+    let fields = &request.tool_call.fields;
+    command_preview(fields.raw_input.as_ref()).or_else(|| {
+        matches!(fields.kind, Some(ToolKind::Execute))
+            .then(|| fields.title.as_deref().and_then(command_title_preview))
+            .flatten()
+    })
+}
+
+fn command_preview(raw: Option<&serde_json::Value>) -> Option<String> {
+    let raw = raw?;
     for key in ["command", "cmd"] {
         if let Some(command) = raw.get(key).and_then(serde_json::Value::as_str)
             && !command.trim().is_empty()
         {
-            return safe_command_label(command).map(str::to_string);
+            return sanitize_visible_command(command);
         }
     }
     None
 }
 
-fn safe_command_label(command: &str) -> Option<&'static str> {
-    let command = command.trim_start().to_ascii_lowercase();
-    [
-        ("cargo test", "cargo test"),
-        ("cargo check", "cargo check"),
-        ("cargo clippy", "Clippy"),
-        ("cargo fmt", "cargo fmt"),
-        ("bun test", "bun test"),
-        ("bun run test", "bun test"),
-        ("bun run typecheck", "typecheck"),
-        ("bun run lint", "lint"),
-        ("npm test", "npm test"),
-        ("npm run test", "npm test"),
-        ("npm run typecheck", "typecheck"),
-        ("npm run lint", "lint"),
-        ("swift test", "swift test"),
-        ("xcodebuild test", "xcodebuild test"),
-        ("git diff", "git diff"),
-        ("git status", "git status"),
-    ]
-    .into_iter()
-    .find_map(|(prefix, label)| {
-        command
-            .strip_prefix(prefix)
-            .filter(|remainder| {
-                remainder.is_empty() || remainder.chars().next().is_some_and(char::is_whitespace)
-            })
-            .map(|_| label)
-    })
+fn command_title_preview(title: &str) -> Option<String> {
+    let generic = title
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    if matches!(
+        generic.as_str(),
+        "bash" | "command" | "execute" | "run command" | "running command" | "terminal"
+    ) {
+        return None;
+    }
+    sanitize_visible_command(title)
 }
 
 pub(crate) fn session_update_events(
@@ -266,11 +259,19 @@ fn retain_tool_call(tool_calls: &mut ToolCallSnapshots, mut call: ToolCall) {
         return;
     }
 
+    let command = if activity_kind(call.kind) == ActivitySemanticKind::Execute {
+        command_preview(call.raw_input.as_ref()).or_else(|| command_title_preview(&call.title))
+    } else {
+        None
+    };
     call.title = native_tool_activity(&call.title, activity_kind(call.kind))
         .title
         .to_string();
     call.content.clear();
-    call.raw_input = None;
+    // Retain only the already-sanitized, bounded command preview so a later
+    // status-only patch can keep verbose progress useful without retaining the
+    // provider's raw tool payload.
+    call.raw_input = command.map(|command| serde_json::json!({ "command": command }));
     call.raw_output = None;
     call.meta = None;
     call.locations.retain(|location| {
@@ -350,10 +351,20 @@ fn activity_upsert(call: &ToolCall) -> Option<ActivityUpsert> {
         activity_status(call.status),
         presentation.title,
     )
-    // ACP's raw title, input, output, and content can carry rendered command
-    // arguments or other sensitive tool data. Only semantic kind/known-name
-    // labels plus the structured status/locations surface reach chat progress.
+    // ACP's raw title, input, output, and content can carry sensitive tool data.
+    // Only semantic labels, structured status/locations, and the bridge's
+    // sanitized bounded command preview reach chat progress.
     .map(|activity| {
+        let activity = if presentation.kind == ActivitySemanticKind::Execute {
+            match command_preview(call.raw_input.as_ref())
+                .or_else(|| command_title_preview(&call.title))
+            {
+                Some(command) => activity.with_detail(command),
+                None => activity,
+            }
+        } else {
+            activity
+        };
         activity.with_paths(call.locations.iter().map(|location| location.path.clone()))
     })
 }
@@ -396,6 +407,8 @@ pub(crate) fn turn_outcome(reason: StopReason) -> TurnOutcome {
 
 pub(crate) fn settings_catalog(
     options: &[agent_client_protocol::schema::v1::SessionConfigOption],
+    modes: Option<&agent_client_protocol::schema::v1::SessionModeState>,
+    default_permissions: Option<&str>,
 ) -> DriverSettingsCatalog {
     use agent_client_protocol::schema::v1::SessionConfigOptionCategory as Category;
 
@@ -426,10 +439,53 @@ pub(crate) fn settings_catalog(
             })
         })
         .unwrap_or_default();
+    let permissions = modes
+        .map(|modes| {
+            modes
+                .available_modes
+                .iter()
+                .map(|mode| DriverSettingOption {
+                    value: mode.id.to_string(),
+                    label: mode.name.clone(),
+                    description: mode.description.clone(),
+                    disabled: false,
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let default_permissions = default_permissions
+        .filter(|default| permissions.iter().any(|option| option.value == *default))
+        .map(str::to_string);
     DriverSettingsCatalog {
         models,
-        permissions: Vec::new(),
+        permissions,
+        default_permissions,
     }
+}
+
+pub(crate) fn session_modes(
+    options: &[agent_client_protocol::schema::v1::SessionConfigOption],
+    fallback: Option<&agent_client_protocol::schema::v1::SessionModeState>,
+) -> Option<agent_client_protocol::schema::v1::SessionModeState> {
+    use agent_client_protocol::schema::v1::{
+        SessionConfigOptionCategory as Category, SessionMode, SessionModeState,
+    };
+
+    let Some(option) = options
+        .iter()
+        .find(|option| matches!(option.category, Some(Category::Mode)))
+    else {
+        return fallback.cloned();
+    };
+    let current = current_select_value(option)?;
+    let available_modes = select_setting(option)?
+        .into_iter()
+        .map(|option| SessionMode::new(option.value, option.label).description(option.description))
+        .collect::<Vec<_>>();
+    available_modes
+        .iter()
+        .any(|mode| mode.id.to_string() == current)
+        .then(|| SessionModeState::new(current, available_modes))
 }
 
 pub(crate) fn select_config_id(
@@ -501,8 +557,9 @@ fn select_setting(
 mod tests {
     use agent_client_protocol::schema::v1::{
         AvailableCommand, AvailableCommandInput, PermissionOption, PermissionOptionKind, Plan,
-        PlanEntry, PlanEntryPriority, PlanEntryStatus, TextContent, ToolCall, ToolCallLocation,
-        ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind, UnstructuredCommandInput,
+        PlanEntry, PlanEntryPriority, PlanEntryStatus, SessionMode, SessionModeState, TextContent,
+        ToolCall, ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+        UnstructuredCommandInput,
     };
 
     use super::*;
@@ -662,7 +719,7 @@ mod tests {
     }
 
     #[test]
-    fn valid_tool_identity_does_not_expose_or_retain_raw_provider_title() {
+    fn execute_title_is_exposed_only_as_a_sanitized_command_preview() {
         let turn_id = TurnId::new("turn-1").expect("turn id");
         let mut tool_calls = ToolCallSnapshots::new();
         let raw_title = "cargo test --token must-not-appear";
@@ -679,9 +736,123 @@ mod tests {
             events.as_slice(),
             [AgentEvent::ActivityUpsert { activity, .. }]
                 if activity.title == "Running command"
-                    && !activity.title.contains("must-not-appear")
+                    && activity.detail.as_deref() == Some("cargo test --token [redacted]")
         ));
         assert_eq!(tool_calls["tool-1"].title, "Running command");
+        assert_eq!(
+            tool_calls["tool-1"]
+                .raw_input
+                .as_ref()
+                .and_then(|input| input.get("command"))
+                .and_then(serde_json::Value::as_str),
+            Some("cargo test --token [redacted]")
+        );
+    }
+
+    #[test]
+    fn execute_activity_retains_only_a_sanitized_command_preview_across_updates() {
+        let turn_id = TurnId::new("turn-1").expect("turn id");
+        let mut tool_calls = ToolCallSnapshots::new();
+        let events = session_update_events(
+            &turn_id,
+            &mut tool_calls,
+            SessionUpdate::ToolCall(
+                ToolCall::new("tool-1", "Bash")
+                    .kind(ToolKind::Execute)
+                    .status(ToolCallStatus::InProgress)
+                    .raw_input(serde_json::json!({
+                        "command": "TOKEN=private deploy --api-key secret src/main.rs"
+                    })),
+            ),
+        );
+        assert!(matches!(
+            events.as_slice(),
+            [AgentEvent::ActivityUpsert { activity, .. }]
+                if activity.detail.as_deref()
+                    == Some("TOKEN=[redacted] deploy --api-key [redacted] src/main.rs")
+        ));
+        let retained = tool_calls["tool-1"]
+            .raw_input
+            .as_ref()
+            .expect("sanitized command preview");
+        assert_eq!(
+            retained.get("command").and_then(serde_json::Value::as_str),
+            Some("TOKEN=[redacted] deploy --api-key [redacted] src/main.rs")
+        );
+        assert!(!retained.to_string().contains("private"));
+        assert!(!retained.to_string().contains("secret"));
+
+        let events = session_update_events(
+            &turn_id,
+            &mut tool_calls,
+            SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                "tool-1",
+                ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
+            )),
+        );
+        assert!(matches!(
+            events.as_slice(),
+            [AgentEvent::ActivityUpsert { activity, .. }]
+                if activity.status == ActivityStatus::Completed
+                    && activity.detail.as_deref()
+                        == Some("TOKEN=[redacted] deploy --api-key [redacted] src/main.rs")
+        ));
+    }
+
+    #[test]
+    fn advertised_session_modes_become_permission_settings() {
+        let modes = SessionModeState::new(
+            "default",
+            vec![
+                SessionMode::new("default", "Manual")
+                    .description("Ask before sensitive operations"),
+                SessionMode::new("bypassPermissions", "Bypass Permissions")
+                    .description("Run tools without approval prompts"),
+            ],
+        );
+        let catalog = settings_catalog(&[], Some(&modes), Some("bypassPermissions"));
+        assert_eq!(catalog.permissions.len(), 2);
+        assert_eq!(catalog.permissions[0].value, "default");
+        assert_eq!(catalog.permissions[0].label, "Manual");
+        assert_eq!(catalog.permissions[1].value, "bypassPermissions");
+        assert_eq!(
+            catalog.default_permissions.as_deref(),
+            Some("bypassPermissions")
+        );
+        assert_eq!(
+            catalog.permissions[1].description.as_deref(),
+            Some("Run tools without approval prompts")
+        );
+        let unavailable = settings_catalog(&[], None, Some("bypassPermissions"));
+        assert!(unavailable.permissions.is_empty());
+        assert_eq!(unavailable.default_permissions, None);
+    }
+
+    #[test]
+    fn mode_config_options_replace_stale_legacy_mode_state() {
+        use agent_client_protocol::schema::v1::{
+            SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption,
+        };
+
+        let legacy = SessionModeState::new(
+            "auto",
+            vec![
+                SessionMode::new("default", "Manual"),
+                SessionMode::new("auto", "Auto"),
+            ],
+        );
+        let config = SessionConfigOption::select(
+            "mode",
+            "Mode",
+            "default",
+            vec![SessionConfigSelectOption::new("default", "Manual")],
+        )
+        .category(SessionConfigOptionCategory::Mode);
+
+        let reconciled = session_modes(&[config], Some(&legacy)).expect("mode state");
+        assert_eq!(reconciled.current_mode_id.to_string(), "default");
+        assert_eq!(reconciled.available_modes.len(), 1);
+        assert_eq!(reconciled.available_modes[0].id.to_string(), "default");
     }
 
     #[test]
@@ -766,7 +937,7 @@ mod tests {
                     && activity.status == ActivityStatus::Completed
                     && activity.title == "Running command"
                     && activity.paths == [std::path::PathBuf::from("/workspace")]
-                    && activity.detail.is_none()
+                    && activity.detail.as_deref() == Some("Run focused checks")
         ));
     }
 

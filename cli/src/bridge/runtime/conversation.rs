@@ -58,35 +58,10 @@ pub(in crate::bridge) fn conversation_for_chat(
                 }
                 error => ConversationResolutionError::Store(error),
             })?,
-        Some(workspace) => {
-            if workspace.missing_since.is_none() {
-                route.store.mark_workspace_unavailable(
-                    &route.installation_id,
-                    &workspace.workspace_id,
-                    now_seconds(),
-                )?;
-            }
-            return Err(ConversationResolutionError::MissingWorkspace);
-        }
+        Some(_) => return Err(ConversationResolutionError::MissingWorkspace),
         None => {
-            route
-                .store
-                .refresh_workspace_availability(&route.installation_id, now_seconds())?;
-            let Some(workspace) = route.store.default_workspace(&route.installation_id)? else {
-                return Err(ConversationResolutionError::MissingWorkspace);
-            };
-            match route.store.bind_chat_workspace(
-                &route.installation_id,
-                chat_id,
-                &workspace.workspace_id,
-                now_seconds(),
-            ) {
-                Ok(workspace) => workspace,
-                Err(inline_agent_bridge::StoreError::WorkspaceUnavailable { .. }) => {
-                    return Err(ConversationResolutionError::MissingWorkspace);
-                }
-                Err(error) => return Err(error.into()),
-            }
+            let workspace = default_workspace_or_home(route)?;
+            bind_chat_workspace(route, chat_id, workspace)?
         }
     };
     Ok(ActiveConversation::new(
@@ -97,6 +72,57 @@ pub(in crate::bridge) fn conversation_for_chat(
         },
         workspace.path,
     ))
+}
+
+fn default_workspace_or_home(
+    route: &InboundRoute,
+) -> Result<WorkspaceRecord, ConversationResolutionError> {
+    let selected_at = now_seconds();
+    route
+        .store
+        .refresh_workspace_availability(&route.installation_id, selected_at)?;
+    if let Some(workspace) = route.store.default_workspace(&route.installation_id)? {
+        match route.store.verified_workspace(
+            &route.installation_id,
+            &workspace.workspace_id,
+            selected_at,
+        ) {
+            Ok(workspace) => return Ok(workspace),
+            Err(inline_agent_bridge::StoreError::WorkspaceUnavailable { .. }) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+
+    home_workspace(route)
+}
+
+fn home_workspace(route: &InboundRoute) -> Result<WorkspaceRecord, ConversationResolutionError> {
+    let selected_at = now_seconds();
+    let home =
+        resolve_setup_workspace(None).map_err(|_| ConversationResolutionError::MissingWorkspace)?;
+    let home_id = workspace_id(&home).map_err(|_| ConversationResolutionError::MissingWorkspace)?;
+    Ok(route
+        .store
+        .select_workspace(&route.installation_id, &home_id, &home, selected_at)?)
+}
+
+fn bind_chat_workspace(
+    route: &InboundRoute,
+    chat_id: i64,
+    workspace: WorkspaceRecord,
+) -> Result<WorkspaceRecord, ConversationResolutionError> {
+    match route.store.bind_chat_workspace(
+        &route.installation_id,
+        chat_id,
+        &workspace.workspace_id,
+        now_seconds(),
+    ) {
+        Ok(workspace) => Ok(workspace),
+        Err(inline_agent_bridge::StoreError::WorkspaceUnavailable { .. }) => {
+            Err(ConversationResolutionError::MissingWorkspace)
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 pub(in crate::bridge) fn conversation_for_settings_event(
@@ -116,8 +142,51 @@ pub(in crate::bridge) fn conversation_for_settings_event(
     }
     let chat_id = actionable_event_chat_id(event)
         .expect("bot settings events always carry an actionable chat id");
-    if let Some(existing) = existing {
+    if let Some(existing) = existing
+        && existing.snapshot().binding.chat_id == chat_id
+    {
         return Ok(SettingsConversationResolution::Ready(existing.clone()));
     }
-    conversation_for_chat(route, chat_id).map(SettingsConversationResolution::Ready)
+    match conversation_for_chat(route, chat_id) {
+        Ok(conversation) => Ok(SettingsConversationResolution::Ready(conversation)),
+        Err(ConversationResolutionError::MissingWorkspace) => {
+            // Settings are the explicit recovery surface for a disappeared or
+            // replaced folder. Preserve the unavailable binding for display
+            // and folder selection only; normal turns still fail closed in
+            // `conversation_for_chat` until the owner chooses a verified path.
+            let Some(workspace) = route
+                .store
+                .bound_chat_workspace(&route.installation_id, chat_id)?
+            else {
+                return Err(ConversationResolutionError::MissingWorkspace);
+            };
+            Ok(SettingsConversationResolution::Ready(
+                ActiveConversation::new(
+                    BindingKey {
+                        installation_id: route.installation_id.clone(),
+                        chat_id,
+                        workspace_id: workspace.workspace_id,
+                    },
+                    workspace.path,
+                ),
+            ))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+pub(in crate::bridge) fn repair_promoted_conversation_cache(
+    route: &InboundRoute,
+    conversations: &mut HashMap<i64, ActiveConversation>,
+    source_chat_id: i64,
+    delivery_chat_id: i64,
+) -> Result<(), ConversationResolutionError> {
+    if let Some(promoted) = conversations.remove(&source_chat_id)
+        && promoted.snapshot().binding.chat_id == delivery_chat_id
+    {
+        conversations.insert(delivery_chat_id, promoted);
+    }
+    let source = conversation_for_chat(route, source_chat_id)?;
+    conversations.insert(source_chat_id, source);
+    Ok(())
 }

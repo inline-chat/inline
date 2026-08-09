@@ -59,7 +59,6 @@ fn pending_voice_registry_deduplicates_replacements_and_cancels_per_chat() {
         provider_id: ProviderId::new("codex").expect("provider"),
         policy: Arc::new(RwLock::new(OperatorPolicy::owner_only(7))),
         owner_user_id: 7,
-        owner_label: "Mo".to_string(),
         host_label: "Test Mac".to_string(),
         owner_dm_chat_id: 706,
         bot_user_id: 17,
@@ -70,6 +69,7 @@ fn pending_voice_registry_deduplicates_replacements_and_cancels_per_chat() {
         accept_messages_after: 0,
         deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
+        claude_history: None,
     };
 
     assert_eq!(
@@ -97,7 +97,6 @@ fn pending_voice_registry_is_bounded() {
         provider_id: ProviderId::new("codex").expect("provider"),
         policy: Arc::new(RwLock::new(OperatorPolicy::owner_only(7))),
         owner_user_id: 7,
-        owner_label: "Mo".to_string(),
         host_label: "Test Mac".to_string(),
         owner_dm_chat_id: 706,
         bot_user_id: 17,
@@ -108,6 +107,7 @@ fn pending_voice_registry_is_bounded() {
         accept_messages_after: 0,
         deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
+        claude_history: None,
     };
 
     for message_id in 1..=MAX_PENDING_VOICE_TRANSCRIPTS as i64 {
@@ -173,14 +173,24 @@ fn ordinary_progress_is_top_level_but_explicit_status_can_reply() {
 }
 
 #[test]
-fn missing_workspace_is_typed_and_has_canonical_recovery_copy() {
+fn unbound_chat_without_a_default_workspace_binds_the_user_home() {
+    let store = Arc::new(BridgeStore::open_in_memory().expect("bridge store"));
+    let installation_id = InstallationId::new("codex").expect("installation");
+    store
+        .put_installation(&InstallationRecord {
+            installation_id: installation_id.clone(),
+            provider_id: ProviderId::new("codex").expect("provider"),
+            display_name: "Codex".to_string(),
+            created_at: 1,
+            updated_at: 1,
+        })
+        .expect("put installation");
     let route = InboundRoute {
-        store: Arc::new(BridgeStore::open_in_memory().expect("bridge store")),
-        installation_id: InstallationId::new("codex").expect("installation"),
+        store: store.clone(),
+        installation_id: installation_id.clone(),
         provider_id: ProviderId::new("codex").expect("provider"),
         policy: Arc::new(RwLock::new(OperatorPolicy::owner_only(7))),
         owner_user_id: 7,
-        owner_label: "Mo".to_string(),
         host_label: "Test Mac".to_string(),
         owner_dm_chat_id: 706,
         bot_user_id: 17,
@@ -191,22 +201,74 @@ fn missing_workspace_is_typed_and_has_canonical_recovery_copy() {
         accept_messages_after: 0,
         deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
+        claude_history: None,
     };
 
-    let error = conversation_for_chat(&route, 706).expect_err("workspace should be required");
-    assert!(matches!(
-        &error,
-        ConversationResolutionError::MissingWorkspace
-    ));
-    assert_eq!(error.to_string(), BridgeNotice::MissingWorkspace.message());
+    let conversation = conversation_for_chat(&route, 706).expect("home workspace");
+    let home = resolve_setup_workspace(None).expect("test home");
+    let snapshot = conversation.snapshot();
+    assert_eq!(snapshot.workspace, home);
     assert_eq!(
-        missing_workspace_message(&route.provider_id),
-        "No project folder is available. Run `inline bridge workspace add \"$HOME\" --provider codex` on the host."
+        store
+            .bound_chat_workspace(&installation_id, 706)
+            .expect("bound workspace")
+            .expect("home binding")
+            .workspace_id,
+        snapshot.binding.workspace_id
     );
 }
 
 #[test]
-fn unbound_chats_use_the_only_workspace_and_settings_remain_owner_only() {
+fn unbound_chat_with_a_replaced_default_workspace_binds_the_user_home() {
+    let store = Arc::new(BridgeStore::open_in_memory().expect("bridge store"));
+    let installation_id = InstallationId::new("codex").expect("installation");
+    store
+        .put_installation(&InstallationRecord {
+            installation_id: installation_id.clone(),
+            provider_id: ProviderId::new("codex").expect("provider"),
+            display_name: "Codex".to_string(),
+            created_at: 1,
+            updated_at: 1,
+        })
+        .expect("put installation");
+    let root = tempfile::tempdir().expect("workspace root");
+    let workspace = root.path().join("project");
+    let original = root.path().join("project-original");
+    fs::create_dir(&workspace).expect("workspace");
+    let workspace_id = WorkspaceId::new("workspace-inline").expect("workspace id");
+    store
+        .select_workspace(&installation_id, &workspace_id, &workspace, 1)
+        .expect("select workspace");
+    fs::rename(&workspace, &original).expect("move original workspace");
+    fs::create_dir(&workspace).expect("replacement workspace");
+    let route = InboundRoute {
+        store: store.clone(),
+        installation_id: installation_id.clone(),
+        provider_id: ProviderId::new("codex").expect("provider"),
+        policy: Arc::new(RwLock::new(OperatorPolicy::owner_only(7))),
+        owner_user_id: 7,
+        host_label: "Test Mac".to_string(),
+        owner_dm_chat_id: 706,
+        bot_user_id: 17,
+        bot_username: "mo_codex_bot".to_string(),
+        bot_store: SqliteStore::open_in_memory().expect("bot store"),
+        attachment_cache_dir: PathBuf::from("/tmp/inline-agent-bridge-test-attachments"),
+        owner_control: None,
+        accept_messages_after: 0,
+        deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
+        pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
+        claude_history: None,
+    };
+
+    let conversation = conversation_for_chat(&route, 707).expect("home fallback");
+    let home = resolve_setup_workspace(None).expect("test home");
+    let snapshot = conversation.snapshot();
+    assert_eq!(snapshot.workspace, home);
+    assert_ne!(snapshot.binding.workspace_id, workspace_id);
+}
+
+#[test]
+fn unbound_chat_settings_stay_owner_only_and_repair_promoted_cache() {
     let store = Arc::new(BridgeStore::open_in_memory().expect("bridge store"));
     let installation_id = InstallationId::new("codex").expect("installation");
     let workspace_id = WorkspaceId::new("workspace-inline").expect("workspace");
@@ -229,7 +291,6 @@ fn unbound_chats_use_the_only_workspace_and_settings_remain_owner_only() {
         provider_id: ProviderId::new("codex").expect("provider"),
         policy: Arc::new(RwLock::new(OperatorPolicy::owner_only(7))),
         owner_user_id: 7,
-        owner_label: "Mo".to_string(),
         host_label: "Test Mac".to_string(),
         owner_dm_chat_id: 706,
         bot_user_id: 17,
@@ -240,6 +301,7 @@ fn unbound_chats_use_the_only_workspace_and_settings_remain_owner_only() {
         accept_messages_after: 0,
         deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
+        claude_history: None,
     };
 
     let conversation = conversation_for_chat(&route, 998).expect("unbound chat should resolve");
@@ -277,31 +339,76 @@ fn unbound_chats_use_the_only_workspace_and_settings_remain_owner_only() {
             .is_none()
     );
 
-    let owner_shared_event =
-        ClientEvent::BotInteraction(BotInteractionEvent::ChatSettingsRequested {
-            request_id: 2,
-            chat_id: InlineId::new(999),
-            actor_user_id: InlineId::new(route.owner_user_id),
-            version: 1,
-        });
-    let resolution = conversation_for_settings_event(&route, &owner_shared_event, None)
-        .expect("owner thread settings should resolve");
+    let owner_dm_event = ClientEvent::BotInteraction(BotInteractionEvent::ChatSettingsRequested {
+        request_id: 2,
+        chat_id: InlineId::new(route.owner_dm_chat_id),
+        actor_user_id: InlineId::new(route.owner_user_id),
+        version: 1,
+    });
+    let resolution = conversation_for_settings_event(&route, &owner_dm_event, None)
+        .expect("owner DM settings should resolve");
     let SettingsConversationResolution::Ready(conversation) = resolution else {
         panic!("owner thread settings should be ready");
     };
     let snapshot = conversation.snapshot();
-    assert_eq!(snapshot.binding.chat_id, 999);
+    assert_eq!(snapshot.binding.chat_id, route.owner_dm_chat_id);
     assert_eq!(snapshot.binding.workspace_id, workspace_id);
     assert!(
         store
-            .bound_chat_workspace(&installation_id, 999)
+            .bound_chat_workspace(&installation_id, route.owner_dm_chat_id)
             .expect("read binding")
             .is_some()
+    );
+
+    let reply_thread_binding = BindingKey {
+        installation_id: installation_id.clone(),
+        chat_id: 1_000,
+        workspace_id: workspace_id.clone(),
+    };
+    conversation.replace(reply_thread_binding.clone(), workspace.path().to_path_buf());
+
+    let mut conversations = HashMap::from([(route.owner_dm_chat_id, conversation.clone())]);
+    repair_promoted_conversation_cache(
+        &route,
+        &mut conversations,
+        route.owner_dm_chat_id,
+        reply_thread_binding.chat_id,
+    )
+    .expect("promotion should preserve exact-chat cache entries");
+    assert_eq!(
+        conversations
+            .get(&route.owner_dm_chat_id)
+            .expect("repaired DM cache")
+            .snapshot()
+            .binding
+            .chat_id,
+        route.owner_dm_chat_id
+    );
+    assert_eq!(
+        conversations
+            .get(&reply_thread_binding.chat_id)
+            .expect("promoted thread cache")
+            .snapshot()
+            .binding,
+        reply_thread_binding
+    );
+
+    let resolution = conversation_for_settings_event(&route, &owner_dm_event, Some(&conversation))
+        .expect("stale cached settings conversation should be repaired");
+    let SettingsConversationResolution::Ready(repaired) = resolution else {
+        panic!("owner DM settings should remain ready after reply-thread promotion");
+    };
+    assert_eq!(repaired.snapshot().binding.chat_id, route.owner_dm_chat_id);
+    assert_eq!(repaired.snapshot().binding.workspace_id, workspace_id);
+    assert_eq!(
+        conversation.snapshot().binding,
+        reply_thread_binding,
+        "repairing the cache must not mutate the conversation held by the active reply-thread turn"
     );
 }
 
 #[test]
-fn unavailable_bound_workspace_does_not_silently_switch_projects() {
+fn unavailable_bound_workspace_does_not_silently_switch_to_home() {
     let store = Arc::new(BridgeStore::open_in_memory().expect("bridge store"));
     let installation_id = InstallationId::new("codex").expect("installation");
     let workspace_id = WorkspaceId::new("workspace-inline").expect("workspace");
@@ -331,12 +438,11 @@ fn unavailable_bound_workspace_does_not_silently_switch_projects() {
             .expect("mark unavailable")
     );
     let route = InboundRoute {
-        store,
-        installation_id,
+        store: store.clone(),
+        installation_id: installation_id.clone(),
         provider_id: ProviderId::new("codex").expect("provider"),
         policy: Arc::new(RwLock::new(OperatorPolicy::owner_only(7))),
         owner_user_id: 7,
-        owner_label: "Mo".to_string(),
         host_label: "Test Mac".to_string(),
         owner_dm_chat_id: 706,
         bot_user_id: 17,
@@ -347,6 +453,7 @@ fn unavailable_bound_workspace_does_not_silently_switch_projects() {
         accept_messages_after: 0,
         deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
+        claude_history: None,
     };
 
     let error = conversation_for_chat(&route, 706).expect_err("workspace should be unavailable");
@@ -354,6 +461,35 @@ fn unavailable_bound_workspace_does_not_silently_switch_projects() {
         error,
         ConversationResolutionError::MissingWorkspace
     ));
+    assert_eq!(
+        store
+            .bound_chat_workspace(&installation_id, 706)
+            .expect("bound workspace")
+            .expect("original binding")
+            .workspace_id,
+        workspace_id
+    );
+
+    let settings_event = ClientEvent::BotInteraction(BotInteractionEvent::ChatSettingsRequested {
+        request_id: 3,
+        chat_id: InlineId::new(706),
+        actor_user_id: InlineId::new(route.owner_user_id),
+        version: 1,
+    });
+    let resolution = conversation_for_settings_event(&route, &settings_event, None)
+        .expect("owner settings should remain available for explicit folder recovery");
+    let SettingsConversationResolution::Ready(recovery) = resolution else {
+        panic!("missing workspace recovery should open settings");
+    };
+    assert_eq!(recovery.snapshot().binding.workspace_id, workspace_id);
+    assert_eq!(
+        store
+            .bound_chat_workspace(&installation_id, 706)
+            .expect("preserved recovery binding")
+            .expect("original binding")
+            .workspace_id,
+        workspace_id
+    );
 }
 
 #[derive(Debug)]
@@ -797,6 +933,39 @@ fn verbose_activity_ledger_keeps_order_and_updates_rows_in_place() {
         .expect("verbose ledger");
     assert_eq!(rendered.matches("cargo test").count(), 1);
     assert!(rendered.find("cargo test").unwrap() < rendered.find("Reading runtime.rs").unwrap());
+}
+
+#[test]
+fn verbose_activity_ledger_adds_command_detail_from_a_later_provider_update() {
+    let mut tracker = ActivityTracker::default();
+    let workspace = Path::new("/workspace");
+    tracker.apply(
+        activity_snapshot(
+            "command-1",
+            ActivitySemanticKind::Execute,
+            ActivityStatus::Pending,
+            "Running command",
+        ),
+        VisibilityMode::Verbose,
+        workspace,
+    );
+
+    let rendered = tracker
+        .apply(
+            activity_snapshot(
+                "command-1",
+                ActivitySemanticKind::Execute,
+                ActivityStatus::InProgress,
+                "Running command",
+            )
+            .with_detail("printf 'VISIBLE_COMMAND\\n'"),
+            VisibilityMode::Verbose,
+            workspace,
+        )
+        .status
+        .expect("verbose ledger");
+
+    assert!(rendered.contains("`printf 'VISIBLE_COMMAND\\n'`"));
 }
 
 #[test]
