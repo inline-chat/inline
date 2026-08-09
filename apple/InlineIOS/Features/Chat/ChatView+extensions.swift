@@ -6,12 +6,12 @@ import SwiftUI
 struct ChatToolbarLeadingView: View {
   let peerId: Peer
   let contextSpaceId: Int64?
+  let router: Router
   let onOpenChatInfo: (SpaceChatItem) -> Void
   @Binding private var isChatHeaderPressed: Bool
 
   @EnvironmentObject private var fullChatViewModel: FullChatViewModel
   @EnvironmentObject private var realtimeState: RealtimeState
-  @Environment(Router.self) private var router
 
   @ObservedObject private var composeActions: ComposeActions
   @State private var toolbarContext: ReplyThreadToolbarContext?
@@ -19,12 +19,14 @@ struct ChatToolbarLeadingView: View {
   init(
     peerId: Peer,
     contextSpaceId: Int64? = nil,
+    router: Router,
     isChatHeaderPressed: Binding<Bool>,
     onOpenChatInfo: @escaping (SpaceChatItem) -> Void,
     composeActions: ComposeActions = .shared
   ) {
     self.peerId = peerId
     self.contextSpaceId = contextSpaceId
+    self.router = router
     self.onOpenChatInfo = onOpenChatInfo
     _isChatHeaderPressed = isChatHeaderPressed
     _composeActions = ObservedObject(initialValue: composeActions)

@@ -134,6 +134,7 @@ struct ChatView: View {
             ChatToolbarLeadingView(
               peerId: peerId,
               contextSpaceId: contextSpaceId,
+              router: router,
               isChatHeaderPressed: $isChatHeaderPressed,
               onOpenChatInfo: { presentedChatInfo = $0 }
             )
@@ -145,6 +146,7 @@ struct ChatView: View {
             ChatToolbarLeadingView(
               peerId: peerId,
               contextSpaceId: contextSpaceId,
+              router: router,
               isChatHeaderPressed: $isChatHeaderPressed,
               onOpenChatInfo: { presentedChatInfo = $0 }
             )
