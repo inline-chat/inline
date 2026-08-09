@@ -96,6 +96,10 @@ struct MacGridWebRTCAudioBridgeTests {
     // 480-frame packets plus a 32-frame packetizer remainder. This exceeds
     // the callback packet ring's capacity and proves the worker bypasses it.
     #expect(upstream.waitForCapture(count: 17))
+    #expect(waitUntil {
+      let snapshot = bridge.snapshot()
+      return snapshot.capturedPacketCount == 17 && snapshot.captureQueuedFrames == 32
+    })
     let snapshot = bridge.snapshot()
     #expect(snapshot.capturedPacketCount == 17)
     #expect(snapshot.captureOverflowCount == 0)

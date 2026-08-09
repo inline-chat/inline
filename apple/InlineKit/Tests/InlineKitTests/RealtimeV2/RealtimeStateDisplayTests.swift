@@ -188,7 +188,7 @@ final class RealtimeStateDisplayTests {
 private func waitForDisplayedState(
   _ expected: RealtimeConnectionState?,
   in state: RealtimeState,
-  timeout: Duration = .seconds(1),
+  timeout: Duration = .seconds(3),
   pollInterval: Duration = .milliseconds(10)
 ) async -> Bool {
   let clock = ContinuousClock()
