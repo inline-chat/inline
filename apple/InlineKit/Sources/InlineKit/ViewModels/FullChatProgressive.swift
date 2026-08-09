@@ -10,6 +10,25 @@ import Logger
 
 @MainActor
 public class MessagesProgressiveViewModel {
+  struct ChatOpenReconciliationPolicy: Sendable {
+    enum ActivationDecision: Equatable, Sendable {
+      case reuseInitialWindow
+      case reload
+    }
+
+    private var initialWindowRevision: UInt64?
+
+    init(initialWindowRevision: UInt64?) {
+      self.initialWindowRevision = initialWindowRevision
+    }
+
+    mutating func activationDecision(currentRevision: UInt64) -> ActivationDecision {
+      defer { initialWindowRevision = nil }
+      guard initialWindowRevision == currentRevision else { return .reload }
+      return .reuseInitialWindow
+    }
+  }
+
   // props
   public var peer: Peer
   public var reversed: Bool = false
@@ -40,6 +59,8 @@ public class MessagesProgressiveViewModel {
     public let newestLoadedMessageId: Int64?
     public let canLoadOlderFromLocal: Bool
     public let canLoadNewerFromLocal: Bool
+    /// Revision captured with this state. `nil` means activation must reconcile from the database.
+    public let reconciliationRevision: UInt64?
 
     public init(
       messages: [FullMessage],
@@ -47,7 +68,8 @@ public class MessagesProgressiveViewModel {
       oldestLoadedMessageId: Int64?,
       newestLoadedMessageId: Int64?,
       canLoadOlderFromLocal: Bool,
-      canLoadNewerFromLocal: Bool
+      canLoadNewerFromLocal: Bool,
+      reconciliationRevision: UInt64? = nil
     ) {
       self.messages = messages
       self.threadAnchor = threadAnchor
@@ -55,6 +77,7 @@ public class MessagesProgressiveViewModel {
       self.newestLoadedMessageId = newestLoadedMessageId
       self.canLoadOlderFromLocal = canLoadOlderFromLocal
       self.canLoadNewerFromLocal = canLoadNewerFromLocal
+      self.reconciliationRevision = reconciliationRevision
     }
   }
 
@@ -84,23 +107,56 @@ public class MessagesProgressiveViewModel {
 
   private let log = Log.scoped("MessagesViewModel", level: .info)
   private let db = AppDatabase.shared
+  private let chatOpenRenderTrace: ChatOpenRenderTrace?
   private var cancellable = Set<AnyCancellable>()
   private var callback: ((_ changeSet: MessagesChangeSet) -> Void)?
+  private var chatOpenReconciliation = ChatOpenReconciliationPolicy(initialWindowRevision: nil)
 
   // Note:
   // limit, cursor, range, etc are internals to this module. the view layer should not care about this.
-  public init(peer: Peer, reversed: Bool = false, initialState: InitialState? = nil) {
+  public init(
+    peer: Peer,
+    reversed: Bool = false,
+    initialState: InitialState? = nil,
+    chatOpenRenderTrace: ChatOpenRenderTrace? = nil
+  ) {
     self.peer = peer
     self.reversed = reversed
+    self.chatOpenRenderTrace = chatOpenRenderTrace
     if let initialState {
       applyInitialState(initialState)
+      chatOpenRenderTrace?.recordInitialWindow(
+        source: .preparedPayload,
+        messageCount: initialState.messages.count,
+        succeeded: true
+      )
+      chatOpenReconciliation = ChatOpenReconciliationPolicy(
+        initialWindowRevision: MessagesPublisher.shared.revisionEligibleForNextActivation(
+          peer: peer,
+          loadedRevision: initialState.reconciliationRevision
+        )
+      )
       if threadAnchor == nil {
         loadThreadAnchorFromLocalIfNeeded()
       }
     } else {
       loadThreadAnchorFromLocalIfNeeded()
       // get initial batch
-      loadMessages(.limit(initialLimit))
+      let didLoadInitialWindow = loadMessages(.limit(initialLimit))
+      chatOpenRenderTrace?.recordInitialWindow(
+        source: .database,
+        messageCount: messages.count,
+        succeeded: didLoadInitialWindow
+      )
+      let loadedRevision = didLoadInitialWindow
+        ? MessagesPublisher.shared.currentRevision(peer: peer)
+        : nil
+      chatOpenReconciliation = ChatOpenReconciliationPolicy(
+        initialWindowRevision: MessagesPublisher.shared.revisionEligibleForNextActivation(
+          peer: peer,
+          loadedRevision: loadedRevision
+        )
+      )
     }
 
     // subscribe to changes
@@ -265,6 +321,33 @@ public class MessagesProgressiveViewModel {
 
     //    log.trace("Applying changes: \(update)")
     switch update {
+      case let .activated(activatedPeer, revision):
+        guard activatedPeer == peer else { return nil }
+
+        switch chatOpenReconciliation.activationDecision(currentRevision: revision) {
+          case .reuseInitialWindow:
+            chatOpenRenderTrace?.recordActivation(.reusedInitialWindow)
+            PerformanceTrace.event(
+              "MessagesActivationReconciliation",
+              category: .messages,
+              "outcome=reuse_initial_window"
+            )
+            return nil
+          case .reload:
+            chatOpenRenderTrace?.recordActivation(.reloadedChangedWindow)
+            PerformanceTrace.event(
+              "MessagesActivationReconciliation",
+              category: .messages,
+              "outcome=reload_revision_changed"
+            )
+            if atBottom {
+              loadMessages(.limit(initialLimit))
+            } else {
+              refetchCurrentRange()
+            }
+            return MessagesChangeSet.reload(animated: false)
+        }
+
       case let .add(messageAdd):
         if messageAdd.peer == peer {
           // Check if we have it to not add it again
@@ -916,7 +999,8 @@ public class MessagesProgressiveViewModel {
     }
   }
 
-  private func loadMessages(_ loadMode: LoadMode) {
+  @discardableResult
+  private func loadMessages(_ loadMode: LoadMode) -> Bool {
     let prevCount = messages.count
     let label = loadModeLogLabel(loadMode)
     let startedAt = Date()
@@ -955,9 +1039,11 @@ public class MessagesProgressiveViewModel {
 
       updateRange()
       updateLoadedWindowMetadata()
+      return true
 
     } catch {
       Log.shared.error("Failed to get messages \(error)")
+      return false
     }
   }
 
@@ -1092,6 +1178,7 @@ public final class MessagesPublisher {
   }
 
   public enum UpdateType {
+    case activated(peer: Peer, revision: UInt64)
     case add(MessageAdd)
     case update(MessageUpdate)
     case delete(MessageDelete)
@@ -1102,6 +1189,24 @@ public final class MessagesPublisher {
 
   private let db = AppDatabase.shared
   let publisher = PassthroughSubject<UpdateType, Never>()
+  private var peerRevisions: [Peer: UInt64] = [:]
+
+  func currentRevision(peer: Peer) -> UInt64 {
+    peerRevisions[peer, default: 0]
+  }
+
+  private func recordMutation(peer: Peer) {
+    peerRevisions[peer, default: 0] &+= 1
+  }
+
+  func revisionEligibleForNextActivation(peer: Peer, loadedRevision: UInt64?) -> UInt64? {
+#if os(iOS)
+    guard !isChatActive(peer: peer) else { return nil }
+    return loadedRevision
+#else
+    return nil
+#endif
+  }
 
 #if os(iOS)
   private var activeChatTokens: [UUID: Peer] = [:]
@@ -1115,7 +1220,7 @@ public final class MessagesPublisher {
     activePeerCounts[peer, default: 0] += 1
 
     if wasInactive {
-      publisher.send(.reload(peer: peer, animated: false))
+      publisher.send(.activated(peer: peer, revision: currentRevision(peer: peer)))
     }
 
     return token
@@ -1148,6 +1253,7 @@ public final class MessagesPublisher {
   // Static methods to publish update
   func messageAdded(message: Message, peer: Peer) async {
 //    Log.shared.debug("Message added: \(message)")
+    recordMutation(peer: peer)
     guard shouldPublish(peer: peer) else { return }
 
     let startedAt = Date()
@@ -1190,6 +1296,7 @@ public final class MessagesPublisher {
 
   // Static methods to publish update
   func messageAddedSync(fullMessage: FullMessage, peer: Peer) {
+    recordMutation(peer: peer)
     guard shouldPublish(peer: peer) else { return }
 
     publisher.send(.add(MessageAdd(messages: [fullMessage], peer: peer)))
@@ -1197,6 +1304,7 @@ public final class MessagesPublisher {
 
   // Message IDs not Global IDs
   public func messagesDeleted(messageIds: [Int64], peer: Peer) {
+    recordMutation(peer: peer)
     guard shouldPublish(peer: peer) else { return }
 
     publisher.send(.delete(MessageDelete(messageIds: messageIds, peer: peer)))
@@ -1205,6 +1313,7 @@ public final class MessagesPublisher {
   public func messageUpdated(message: Message, peer: Peer, animated: Bool?) async {
     //    Log.shared.debug("Message updated: \(message)")
     //    Log.shared.debug("Message updated: \(message.messageId)")
+    recordMutation(peer: peer)
     guard shouldPublish(peer: peer) else { return }
 
     let startedAt = Date()
@@ -1250,6 +1359,7 @@ public final class MessagesPublisher {
   }
 
   public func messageUpdatedSync(message: Message, peer: Peer, animated: Bool?) {
+    recordMutation(peer: peer)
     guard shouldPublish(peer: peer) else { return }
 
     Log.shared.trace("Message updated: \(message)")
@@ -1298,6 +1408,7 @@ public final class MessagesPublisher {
   }
 
   public func messagesReload(peer: Peer, animated: Bool?) {
+    recordMutation(peer: peer)
     guard shouldPublish(peer: peer) else { return }
 
     PerformanceTrace.event(
@@ -1309,6 +1420,7 @@ public final class MessagesPublisher {
   }
 
   public func messageUpdatedWithId(messageId: Int64, chatId: Int64, peer: Peer, animated: Bool?) {
+    recordMutation(peer: peer)
     guard shouldPublish(peer: peer) else { return }
 
     let startedAt = Date()
@@ -1357,6 +1469,8 @@ public extension MessagesProgressiveViewModel {
 private extension MessagesPublisher.UpdateType {
   var traceLabel: String {
     switch self {
+      case .activated:
+        "activated"
       case .add:
         "add"
       case .update:

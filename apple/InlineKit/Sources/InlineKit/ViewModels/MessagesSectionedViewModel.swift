@@ -56,12 +56,14 @@ public class MessagesSectionedViewModel {
   public init(
     peer: Peer,
     reversed: Bool = false,
-    initialState: MessagesProgressiveViewModel.InitialState? = nil
+    initialState: MessagesProgressiveViewModel.InitialState? = nil,
+    chatOpenRenderTrace: ChatOpenRenderTrace? = nil
   ) {
     progressiveViewModel = MessagesProgressiveViewModel(
       peer: peer,
       reversed: reversed,
-      initialState: initialState
+      initialState: initialState,
+      chatOpenRenderTrace: chatOpenRenderTrace
     )
 
     // Setup observer for progressive view model changes

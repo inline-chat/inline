@@ -185,6 +185,41 @@ struct MessagesProgressiveViewModelOrderingTests {
     #expect(indexSet == [0])
     #expect(viewModel.messages.map(\.id) == [added.id, existing.id])
   }
+
+  @Test("chat open reuses a matching initial window exactly once")
+  func testChatOpenReusesMatchingInitialWindowOnce() {
+    var policy = MessagesProgressiveViewModel.ChatOpenReconciliationPolicy(
+      initialWindowRevision: 41
+    )
+
+    #expect(policy.activationDecision(currentRevision: 41) == .reuseInitialWindow)
+    #expect(policy.activationDecision(currentRevision: 41) == .reload)
+  }
+
+  @Test("chat open reloads when its initial window may be stale")
+  func testChatOpenReloadsStaleOrUnversionedWindow() {
+    var stale = MessagesProgressiveViewModel.ChatOpenReconciliationPolicy(
+      initialWindowRevision: 41
+    )
+    var unversioned = MessagesProgressiveViewModel.ChatOpenReconciliationPolicy(
+      initialWindowRevision: nil
+    )
+
+    #expect(stale.activationDecision(currentRevision: 42) == .reload)
+    #expect(unversioned.activationDecision(currentRevision: 0) == .reload)
+  }
+
+  @Test("message mutations advance the chat-open revision")
+  @MainActor
+  func testMessageMutationAdvancesChatOpenRevision() {
+    let peer = Peer.user(id: 8_500_001)
+    let before = MessagesPublisher.shared.currentRevision(peer: peer)
+
+    MessagesPublisher.shared.messagesReload(peer: peer, animated: false)
+
+    #expect(MessagesPublisher.shared.currentRevision(peer: peer) == before &+ 1)
+  }
+
 }
 
 private func makeFullMessage(

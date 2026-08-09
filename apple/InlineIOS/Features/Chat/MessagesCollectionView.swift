@@ -813,7 +813,9 @@ private extension MessagesCollectionView {
     private var currentCollectionView: UICollectionView?
     let viewModel: MessagesSectionedViewModel
     private let translationViewModel: TranslationViewModel
+    private let chatOpenRenderTrace: ChatOpenRenderTrace
     private var hasAnalyzedInitialMessages = false
+    private var hasDeliveredInitialTranslation = false
     private let peerId: Peer
     private let chatId: Int64
     private let spaceId: Int64?
@@ -1874,7 +1876,13 @@ private extension MessagesCollectionView {
       self.sendAnimationCoordinator = sendAnimationCoordinator
       collapsedHistoryMarker = initialCollapsedHistoryMarker
       isCollapsedHistoryExpanded = initialCollapsedHistoryMarker != nil && initiallyExpandCollapsedHistory
-      viewModel = MessagesSectionedViewModel(peer: peerId, reversed: true)
+      let chatOpenRenderTrace = ChatOpenRenderTrace(kind: isPreview ? .preview : .route)
+      self.chatOpenRenderTrace = chatOpenRenderTrace
+      viewModel = MessagesSectionedViewModel(
+        peer: peerId,
+        reversed: true,
+        chatOpenRenderTrace: chatOpenRenderTrace
+      )
       translationViewModel = TranslationViewModel(peerId: peerId)
 
       super.init()
@@ -1918,6 +1926,7 @@ private extension MessagesCollectionView {
       remoteOlderTask = nil
       threadAnchorFetchTask?.cancel()
       threadAnchorFetchTask = nil
+      chatOpenRenderTrace.cancel()
       mediaWarmupTask?.cancel()
       mediaWarmupTask = nil
       let thumbnailWarmups = mediaWarmups
@@ -2270,7 +2279,10 @@ private extension MessagesCollectionView {
       }
 
       // Set initial data after configuring the data source
-      setInitialData()
+      setInitialData(afterApply: { [weak self] in
+        self?.chatOpenRenderTrace.recordFirstUIApply()
+        self?.deliverInitialMessagesForTranslationIfNeeded()
+      })
     }
 
     private func isFirstInGroup(at indexPath: IndexPath) -> Bool {
@@ -2295,7 +2307,8 @@ private extension MessagesCollectionView {
     private func setInitialData(
       animated: Bool? = false,
       reconfigureExisting: Bool = true,
-      preservingCollapsedHistoryViewport: Bool = false
+      preservingCollapsedHistoryViewport: Bool = false,
+      afterApply: (() -> Void)? = nil
     ) {
       let startedAt = Date()
       let collapsedHistoryViewport = preservingCollapsedHistoryViewport
@@ -2345,6 +2358,13 @@ private extension MessagesCollectionView {
         snapshot.reconfigureItems(idsToReconfigure)
       }
 
+      if afterApply != nil {
+        chatOpenRenderTrace.recordCachedSnapshot(
+          sectionCount: snapshot.sectionIdentifiers.count,
+          itemCount: snapshot.itemIdentifiers.count
+        )
+      }
+
       let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
       span.end(
         "sections=\(snapshot.sectionIdentifiers.count) items=\(snapshot.itemIdentifiers.count) duration_ms=\(durationMs)"
@@ -2370,6 +2390,7 @@ private extension MessagesCollectionView {
         DispatchQueue.main.async {
           self?.scheduleHideDateSeparators()
         }
+        afterApply?()
       }
 
       // Cached messages are the primary first-frame content. Applying their snapshot must not
@@ -4536,9 +4557,33 @@ extension MessagesCollectionView.Coordinator: InlineKit.NotionTaskManagerDelegat
 
   // MARK: - Translation Handling
 
+  private func deliverInitialMessagesForTranslationIfNeeded() {
+    guard !isPreview,
+          !hasDeliveredInitialTranslation,
+          !viewModel.messages.isEmpty
+    else { return }
+
+    handleTranslationForUpdate(.reload(animated: false))
+  }
+
   private func handleTranslationForUpdate(_ update: MessagesSectionedViewModel.SectionedMessagesChangeSet) {
+    let initialMessageCount = viewModel.messages.count
+    let tracesInitialFollowUp: Bool
+    if case .reload = update,
+       !hasDeliveredInitialTranslation,
+       initialMessageCount > 0 {
+      hasDeliveredInitialTranslation = true
+      tracesInitialFollowUp = chatOpenRenderTrace.recordTranslationStarted(
+        messageCount: initialMessageCount
+      )
+    } else {
+      tracesInitialFollowUp = false
+    }
     Task {
       await handleTranslationForUpdateInner(update)
+      if tracesInitialFollowUp {
+        chatOpenRenderTrace.recordTranslationFinished(messageCount: initialMessageCount)
+      }
     }
   }
 
