@@ -47,26 +47,29 @@ final class AuthConnectionAdapter {
         observationProbe.recordObserved(snapshot)
         let nextAuthAvailable = snapshot.token != nil
         let changed = nextAuthAvailable != authAvailable
+        let tokenChanged = snapshot.token != appliedToken
         log.info(
           "Realtime auth observer received snapshot sequence=\(sequence)" +
             " status=\(diagnosticName(for: snapshot.status))" +
-            " available=\(nextAuthAvailable ? 1 : 0) changed=\(changed ? 1 : 0)"
+            " available=\(nextAuthAvailable ? 1 : 0)" +
+            " changed=\(changed ? 1 : 0) token_changed=\(tokenChanged ? 1 : 0)"
         )
-        guard changed else {
-          if snapshot.token == appliedToken {
-            observationProbe.recordApplied(snapshot)
-          }
+        guard changed || tokenChanged else {
+          observationProbe.recordApplied(snapshot)
           continue
         }
-        authAvailable = nextAuthAvailable
 
         if nextAuthAvailable {
+          if authAvailable, tokenChanged {
+            await manager.stop()
+          }
           await manager.setAuthAvailable(true)
           await manager.connectNow()
         } else {
           await manager.setAuthAvailable(false)
           await manager.stop()
         }
+        authAvailable = nextAuthAvailable
         appliedToken = snapshot.token
         observationProbe.recordApplied(snapshot)
         log.info(

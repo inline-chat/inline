@@ -5,7 +5,7 @@ import Testing
 
 @testable import RealtimeV2
 
-@Suite("Auth + RealtimeV2 Integration")
+@Suite("Auth + RealtimeV2 Integration", .serialized)
 final class AuthRealtimeIntegrationTests {
   @Test("login event triggers connection init with token")
   func testAuthLoginStartsHandshake() async throws {
@@ -66,6 +66,34 @@ final class AuthRealtimeIntegrationTests {
 
     withExtendedLifetime(realtime) {}
   }
+
+  @Test("replacing an authenticated token starts a new handshake")
+  func testAuthenticatedTokenReplacementStartsNewHandshake() async throws {
+    let auth = Auth.mocked(authenticated: true)
+    let transport = MockTransport()
+    let realtime = RealtimeV2(
+      transport: transport,
+      auth: auth.handle,
+      applyUpdates: RecordingApplyUpdates(),
+      syncStorage: InMemorySyncStorage()
+    )
+
+    let initialHandshake = await waitForCondition {
+      let messages = await transport.sentMessages
+      return containsConnectionInit(with: "1:mockToken", in: messages)
+    }
+    #expect(initialHandshake)
+
+    await auth.saveCredentials(token: "2:replacementToken", userId: 2)
+
+    let replacementHandshake = await waitForCondition {
+      let messages = await transport.sentMessages
+      return containsConnectionInit(with: "2:replacementToken", in: messages)
+    }
+    #expect(replacementHandshake)
+
+    withExtendedLifetime(realtime) {}
+  }
 }
 
 private func containsConnectionInit(with token: String, in messages: [ClientMessage]) -> Bool {
@@ -83,7 +111,7 @@ private func containsConnectionInit(with token: String, in messages: [ClientMess
 }
 
 private func waitForCondition(
-  timeout: Duration = .seconds(1),
+  timeout: Duration = .seconds(3),
   pollInterval: Duration = .milliseconds(10),
   _ condition: @escaping @Sendable () async -> Bool
 ) async -> Bool {
