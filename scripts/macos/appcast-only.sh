@@ -142,6 +142,9 @@ done
 echo "• Generate appcast"
 INFO_PLIST="${APP_PATH}/Contents/Info.plist"
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "${INFO_PLIST}")
+MINIMUM_SYSTEM_VERSION=$(bun run "${ROOT_DIR}/scripts/macos/app-release-metadata.ts" \
+  --app-path "${APP_PATH}" \
+  --field minimum-system-version)
 COMMIT=$(git -C "${ROOT_DIR}" rev-parse --short HEAD)
 COMMIT_LONG=$(git -C "${ROOT_DIR}" rev-parse HEAD)
 
@@ -157,7 +160,7 @@ INLINE_BUILD="${BUILD_NUMBER}" \
 INLINE_VERSION="${VERSION}" \
 INLINE_CHANNEL="${CHANNEL}" \
 INLINE_DMG_URL="${DMG_URL}" \
-INLINE_MIN_MACOS="15.0" \
+INLINE_MIN_MACOS="${MINIMUM_SYSTEM_VERSION}" \
 INLINE_HARDWARE_REQUIREMENTS="arm64" \
 INLINE_COMMIT="${COMMIT}" \
 INLINE_COMMIT_LONG="${COMMIT_LONG}" \
@@ -171,7 +174,8 @@ python3 "${ROOT_DIR}/scripts/macos/validate_appcast.py" \
   --appcast "${APPCAST_OUTPUT_PATH}" \
   --require-build "${BUILD_NUMBER}" \
   --require-url "${DMG_URL}" \
-  --require-hardware arm64
+  --require-hardware arm64 \
+  --require-minimum-system-version "${MINIMUM_SYSTEM_VERSION}"
 
 echo "• Upload appcast to R2"
 UPLOAD_MODE="appcast" CHANNEL="${CHANNEL}" APPCAST_PATH="${APPCAST_OUTPUT_PATH}" \

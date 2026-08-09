@@ -2,6 +2,20 @@ import { spawnSync } from "bun";
 import { appendFileSync, existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "fs";
 import { basename, resolve } from "path";
 import { createInterface } from "node:readline";
+import { readBuiltAppMetadata } from "./app-release-metadata";
+import type { BuiltAppMetadata } from "./app-release-metadata";
+import {
+  buildReleaseEvidence,
+  collectSourceFileEvidence,
+  collectToolchainEvidence,
+  extractDwarfUUIDs,
+  releaseEvidenceIntegrationMode,
+  sha256File,
+  v2HistoryPath,
+  withValidationEvidence,
+  writeReleaseEvidenceHistory,
+} from "./release-evidence-v2";
+import type { ReleaseEvidenceV2, ValidationEvidence } from "./release-evidence-v2";
 
 const sparkleVersion = "2.9.3";
 const macosReleaseArch = "arm64";
@@ -31,6 +45,7 @@ type ReleaseOptions = {
   skip: Set<string>;
   fromTask: string;
   dryRun: boolean;
+  releaseEvidenceV2: boolean;
   rollback: boolean;
   rollbackToBuild: string;
   rollbackStepsBack: number;
@@ -56,15 +71,6 @@ type PruneMetadata = {
   remainingBuilds: string[];
 };
 
-type BuiltAppMetadata = {
-  infoPlist: string;
-  buildNumber: string;
-  version: string;
-  commit: string;
-  feedUrl: string;
-  minimumSystemVersion: string;
-};
-
 type ReleaseContext = ReleaseOptions & {
   rootDir: string;
   tempDir: string;
@@ -83,6 +89,7 @@ type ReleaseContext = ReleaseOptions & {
   dmgUrl: string;
   appcastUrl: string;
   minimumSystemVersion: string;
+  releaseEvidence: ReleaseEvidenceV2 | undefined;
   rollbackSelectedBuild: string;
   rollbackSelectedUrl: string;
   rollbackRemovedBuilds: string[];
@@ -115,6 +122,7 @@ function usage(): string {
     "  --drop-build <build>             Remove one non-latest build from the live appcast and republish it",
     "  --upload-sentry-dsyms            Upload dSYMs to Sentry (disabled by default while the upload flow is broken)",
     "  --dry-run                         Print what would run, without executing the pipeline",
+    "  --release-evidence-v2              Opt in to clean-source, artifact, executable/dSYM, toolchain, and validation evidence",
     "  --skip-build                      Alias for --skip build",
     "  -h, --help                       Show help",
     "",
@@ -142,6 +150,7 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   const skip = new Set<string>();
   let fromTask = "";
   let dryRun = false;
+  let releaseEvidenceV2 = false;
   let rollback = false;
   let rollbackToBuild = "";
   let rollbackStepsBack = 1;
@@ -232,6 +241,10 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
       dryRun = true;
       continue;
     }
+    if (arg === "--release-evidence-v2") {
+      releaseEvidenceV2 = true;
+      continue;
+    }
     if (arg === "--upload-sentry-dsyms") {
       uploadSentryDsyms = true;
       continue;
@@ -270,6 +283,12 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   }
   if (dropBuild && uploadSentryDsyms) {
     die("--upload-sentry-dsyms is not supported with --drop-build.");
+  }
+  if ((rollback || dropBuild) && releaseEvidenceV2) {
+    die("--release-evidence-v2 records built release artifacts and is not supported with appcast-only rollback/prune operations.");
+  }
+  if (allowDirty && releaseEvidenceV2 && !dryRun) {
+    die("--release-evidence-v2 requires a clean source tree and cannot be combined with --allow-dirty.");
   }
   if (!rollback && !dropBuild) {
     if (uploadSentryDsyms && skip.has("upload-sentry-dsyms")) {
@@ -325,6 +344,7 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
     skip,
     fromTask,
     dryRun,
+    releaseEvidenceV2,
     rollback,
     rollbackToBuild,
     rollbackStepsBack,
@@ -369,16 +389,6 @@ function defaultDerivedDataPath(rootDir: string): string {
   return existsSync(reusablePath) ? realpathSync(reusablePath) : reusablePath;
 }
 
-function readPlistString(plistPath: string, key: string): string {
-  const res = spawnSync({
-    cmd: ["/usr/libexec/PlistBuddy", "-c", `Print :${key}`, plistPath],
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  if (res.exitCode !== 0) return "";
-  return new TextDecoder().decode(res.stdout).trim();
-}
-
 function git(rootDir: string, args: string[]): string {
   const res = spawnSync({ cmd: ["git", "-C", rootDir, ...args], stdout: "pipe", stderr: "pipe" });
   if (res.exitCode !== 0) return "";
@@ -398,31 +408,8 @@ function defaultAppcastUrl(ctx: ReleaseContext): string {
   return `${baseUrl}/mac/${ctx.channel}/appcast.xml`;
 }
 
-function readBuiltAppMetadata(ctx: ReleaseContext): BuiltAppMetadata {
-  if (!existsSync(ctx.appPath)) throw new Error(`App not found at ${ctx.appPath}`);
-  const infoPlist = resolve(ctx.appPath, "Contents/Info.plist");
-  const buildNumber = readPlistString(infoPlist, "CFBundleVersion");
-  const version = readPlistString(infoPlist, "CFBundleShortVersionString");
-  const commit = readPlistString(infoPlist, "InlineCommit");
-  const feedUrl = readPlistString(infoPlist, "SUFeedURL");
-  const minimumSystemVersion = readPlistString(infoPlist, "LSMinimumSystemVersion");
-
-  const missing = [
-    ["CFBundleVersion", buildNumber],
-    ["CFBundleShortVersionString", version],
-    ["InlineCommit", commit],
-    ["SUFeedURL", feedUrl],
-    ["LSMinimumSystemVersion", minimumSystemVersion],
-  ].flatMap(([key, value]) => (value ? [] : [key]));
-  if (missing.length) {
-    throw new Error(`Built app metadata missing in ${infoPlist}: ${missing.join(", ")}`);
-  }
-
-  return { infoPlist, buildNumber, version, commit, feedUrl, minimumSystemVersion };
-}
-
 function verifyBuiltAppMetadata(ctx: ReleaseContext, ui: Ui): BuiltAppMetadata {
-  const metadata = readBuiltAppMetadata(ctx);
+  const metadata = readBuiltAppMetadata(ctx.appPath);
   const expectedBuild = git(ctx.rootDir, ["rev-list", "--count", "HEAD"]);
   const expectedCommit = git(ctx.rootDir, ["rev-parse", "--short", "HEAD"]);
   const expectedFeedUrl = defaultAppcastUrl(ctx);
@@ -462,7 +449,11 @@ function stableReleaseNeedsCleanWorktree(opts: ReleaseOptions): boolean {
   return !opts.rollback && !opts.dropBuild && opts.channel === "stable";
 }
 
-function writeReleaseHistory(ctx: ReleaseContext, action: "release" | "rollback" | "drop-build", ui: Ui) {
+function writeReleaseHistory(
+  ctx: ReleaseContext,
+  action: "release" | "rollback" | "drop-build",
+  ui: Ui,
+): string {
   const build = ctx.buildNumber || ctx.rollbackSelectedBuild || ctx.pruneLatestBuild || ctx.dropBuild || "unknown";
   const path = resolve(ctx.historyDir, `${nowIsoCompact()}-${ctx.channel}-${action}-${build}.json`);
   const payload = {
@@ -476,6 +467,7 @@ function writeReleaseHistory(ctx: ReleaseContext, action: "release" | "rollback"
     commitLong: ctx.commitLong || undefined,
     dmgUrl: ctx.dmgUrl || undefined,
     appcastUrl: ctx.appcastUrl || undefined,
+    minimumSystemVersion: ctx.minimumSystemVersion || undefined,
     releaseTag: ctx.releaseTag || undefined,
     appPath: ctx.appPath,
     dmgPath: ctx.dmgPath,
@@ -500,6 +492,7 @@ function writeReleaseHistory(ctx: ReleaseContext, action: "release" | "rollback"
   mkdirSync(ctx.historyDir, { recursive: true });
   writeFileSync(path, `${JSON.stringify(payload, null, 2)}\n`);
   ui.info(`Wrote release history: ${path}`);
+  return path;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -673,6 +666,23 @@ class Ui {
 
   getCurrentTaskId(): string {
     return this.currentTaskId;
+  }
+
+  validationEvidence(): ValidationEvidence[] {
+    return this.tasks.map((task) => {
+      let status: ValidationEvidence["status"] = "skipped";
+      if (task.status === "failed" || task.note === "continued after failure") status = "failed";
+      else if (task.status === "success") status = "passed";
+      return {
+        name: task.id,
+        status,
+        detail:
+          task.note
+          ?? (task.status === "pending" || task.status === "running"
+            ? `status was ${task.status} when evidence was captured`
+            : undefined),
+      };
+    });
   }
 }
 
@@ -862,6 +872,7 @@ function buildResumeCommand(ctx: ReleaseContext, fromTask: string): string {
   if (ctx.skipGithubRelease) args.push("--skip-github-release");
   if (concreteSkipIds.length) args.push("--skip", concreteSkipIds.join(","));
   if (ctx.allowDirty) args.push("--allow-dirty");
+  if (ctx.releaseEvidenceV2) args.push("--release-evidence-v2");
   if (!ctx.rollback && !ctx.dropBuild && !ctx.skip.has("upload-sentry-dsyms")) args.push("--upload-sentry-dsyms");
   if (ctx.derivedData !== defaultDerivedData) args.push("--derived-data", ctx.derivedData);
   if (ctx.appPath !== defaultAppPath) args.push("--app-path", ctx.appPath);
@@ -906,6 +917,7 @@ async function main() {
     skip: parsed0.skip,
     fromTask: parsed0.fromTask,
     dryRun: parsed0.dryRun,
+    releaseEvidenceV2: parsed0.releaseEvidenceV2,
     rollback: parsed0.rollback,
     rollbackToBuild: parsed0.rollbackToBuild,
     rollbackStepsBack: parsed0.rollbackStepsBack,
@@ -937,6 +949,7 @@ async function main() {
     dmgUrl: "",
     appcastUrl: "",
     minimumSystemVersion: "",
+    releaseEvidence: undefined,
     rollbackSelectedBuild: "",
     rollbackSelectedUrl: "",
     rollbackRemovedBuilds: [],
@@ -957,7 +970,7 @@ async function main() {
       ? `Rollback  Channel: ${opts.channel}${opts.rollbackToBuild ? `  Build: ${opts.rollbackToBuild}` : `  Steps back: ${opts.rollbackStepsBack}`}${opts.fromTask ? `  From: ${opts.fromTask}` : ""}${opts.dryRun ? "  Dry run" : ""}`
       : opts.dropBuild
         ? `Drop build  Channel: ${opts.channel}  Build: ${opts.dropBuild}${opts.dryRun ? "  Dry run" : ""}`
-        : `Release  Channel: ${opts.channel}${opts.releaseTag ? `  Tag: ${opts.releaseTag}` : ""}${opts.fromTask ? `  From: ${opts.fromTask}` : ""}${opts.allowDirty ? "  Allow dirty" : ""}${opts.dryRun ? "  Dry run" : ""}`,
+        : `Release  Channel: ${opts.channel}${opts.releaseTag ? `  Tag: ${opts.releaseTag}` : ""}${opts.fromTask ? `  From: ${opts.fromTask}` : ""}${opts.allowDirty ? "  Allow dirty" : ""}${opts.releaseEvidenceV2 ? "  Evidence V2" : ""}${opts.dryRun ? "  Dry run" : ""}`,
   );
   const logFiles = [{ label: "release", path: releaseLogPath }];
   if (!opts.rollback && !opts.dropBuild) {
@@ -972,11 +985,15 @@ async function main() {
 
   const runPreflight: Task["run"] = async (ctx, ui) => {
     if (!ctx.rollback && !ctx.dropBuild) {
-      const configuredVersion = readConfiguredMarketingVersion(ctx.rootDir, ui);
+      // A dry run must not trigger Xcode package resolution just to print a plan.
+      const configuredVersion = ctx.dryRun ? "" : readConfiguredMarketingVersion(ctx.rootDir, ui);
       const plannedBuild = git(ctx.rootDir, ["rev-list", "--count", "HEAD"]);
       const plannedCommit = git(ctx.rootDir, ["rev-parse", "--short", "HEAD"]);
       if (configuredVersion) ctx.version = configuredVersion;
-      ui.detail("Version", `${configuredVersion || "unknown"}${plannedBuild ? ` (build ${plannedBuild})` : ""}`);
+      ui.detail(
+        "Version",
+        `${configuredVersion || (ctx.dryRun ? "not queried in dry run" : "unknown")}${plannedBuild ? ` (build ${plannedBuild})` : ""}`,
+      );
       ui.detail("Tag", ctx.releaseTag || "none");
       ui.detail("Channel", ctx.channel);
       if (plannedCommit) ui.detail("Commit", plannedCommit);
@@ -1453,6 +1470,71 @@ async function main() {
       },
     });
 
+    const evidenceIntegrationMode = releaseEvidenceIntegrationMode(opts.releaseEvidenceV2, opts.dryRun);
+    tasks.push({
+      id: "capture-evidence-v2",
+      title: "Capture reproducible release evidence V2",
+      enabled: evidenceIntegrationMode !== "disabled",
+      skipReason: evidenceIntegrationMode === "disabled" ? "not opted in" : undefined,
+      dryRun: (ctx, ui) => {
+        ui.info("Would fail closed unless the source tree is clean, then record:");
+        ui.info("  secret-filtered per-file source SHA-256 evidence and aggregate source fingerprint");
+        ui.info("  app executable and DMG SHA-256 hashes");
+        ui.info("  exact executable/dSYM Mach-O UUID equality");
+        ui.info("  Xcode, Swift, and macOS toolchain versions plus pipeline check statuses");
+        ui.info("Dry runs never write either V1 history or the additive V2 sidecar.");
+        if (ctx.fromTask) ui.info(`Resume keeps this pre-upload gate enabled before --from ${ctx.fromTask}.`);
+      },
+      run: (ctx, ui) => {
+        const dirtyEntries = gitLines(ctx.rootDir, ["status", "--porcelain", "--untracked-files=all"]);
+        if (dirtyEntries.length) {
+          throw new Error(
+            `Release Evidence V2 requires a clean source tree so resume can reproduce the built source. Found ${dirtyEntries.length} dirty entries.`,
+          );
+        }
+
+        const metadata = verifyBuiltAppMetadata(ctx, ui);
+        if (!existsSync(ctx.dmgPath)) throw new Error(`DMG not found at ${ctx.dmgPath}`);
+        if (!existsSync(metadata.executablePath)) {
+          throw new Error(`Release executable not found at ${metadata.executablePath}`);
+        }
+        const dSYMPath = `${ctx.appPath}.dSYM`;
+        if (!existsSync(dSYMPath)) throw new Error(`Release dSYM not found at ${dSYMPath}`);
+
+        const source = collectSourceFileEvidence(ctx.rootDir);
+        const finalCommit = git(ctx.rootDir, ["rev-parse", "HEAD"]);
+        const dirtyAfterCapture = gitLines(ctx.rootDir, ["status", "--porcelain", "--untracked-files=all"]);
+        if (finalCommit !== ctx.commitLong || dirtyAfterCapture.length) {
+          throw new Error("Source changed while Release Evidence V2 was hashing it; rebuild from a stable clean tree.");
+        }
+        const executableUUIDs = extractDwarfUUIDs(metadata.executablePath, ctx.rootDir);
+        const dSYMUUIDs = extractDwarfUUIDs(dSYMPath, ctx.rootDir);
+        ctx.releaseEvidence = buildReleaseEvidence({
+          channel: ctx.channel,
+          version: ctx.version,
+          buildNumber: ctx.buildNumber,
+          commit: ctx.commitLong,
+          feedURL: metadata.feedUrl,
+          minimumSystemVersion: metadata.minimumSystemVersion,
+          clean: true,
+          sourceFiles: source.files,
+          sourceEnumeration: source.enumeration,
+          executableSha256: sha256File(metadata.executablePath),
+          dmgSha256: sha256File(ctx.dmgPath),
+          executableUUIDs,
+          dSYMUUIDs,
+          toolchain: collectToolchainEvidence(ctx.rootDir),
+          validation: ui.validationEvidence(),
+          createdAt: new Date().toISOString(),
+          resumedFromTask: ctx.fromTask || undefined,
+        });
+        ui.detail(
+          "Evidence V2",
+          `${source.files.length} source paths, ${executableUUIDs.length} matching executable/dSYM UUID(s)`,
+        );
+      },
+    });
+
     tasks.push({
       id: "upload-dmg",
     title: "Upload DMG to R2",
@@ -1778,7 +1860,8 @@ async function main() {
       if (opts.fromTask && task.id === opts.fromTask) {
         reachedFrom = true;
       }
-      if (opts.fromTask && task.id !== "preflight" && !reachedFrom) {
+      const isResumeInvariant = task.id === "preflight" || task.id === "capture-evidence-v2";
+      if (opts.fromTask && !isResumeInvariant && !reachedFrom) {
         ui.setSkipped(task.id, `resume from ${opts.fromTask}`);
         continue;
       }
@@ -1822,7 +1905,17 @@ async function main() {
   }
 
   if (!opts.dryRun) {
-    writeReleaseHistory(ctx, opts.rollback ? "rollback" : opts.dropBuild ? "drop-build" : "release", ui);
+    const historyPath = writeReleaseHistory(
+      ctx,
+      opts.rollback ? "rollback" : opts.dropBuild ? "drop-build" : "release",
+      ui,
+    );
+    if (ctx.releaseEvidence) {
+      const evidencePath = v2HistoryPath(historyPath);
+      const finalEvidence = withValidationEvidence(ctx.releaseEvidence, ui.validationEvidence());
+      writeReleaseEvidenceHistory(evidencePath, finalEvidence);
+      ui.info(`Wrote additive release evidence: ${evidencePath}`);
+    }
   }
   ui.info(opts.rollback ? "Rollback appcast publish complete." : opts.dropBuild ? "Appcast prune publish complete." : "Release pipeline complete.");
 }

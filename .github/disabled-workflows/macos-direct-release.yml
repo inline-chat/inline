@@ -291,6 +291,9 @@ jobs:
           APP_PATH="build/InlineMacDirect/Build/Products/Release/Inline.app"
           INFO_PLIST="${APP_PATH}/Contents/Info.plist"
           VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "${INFO_PLIST}")
+          MINIMUM_SYSTEM_VERSION=$(bun run scripts/macos/app-release-metadata.ts \
+            --app-path "${APP_PATH}" \
+            --field minimum-system-version)
           BASE_URL="${PUBLIC_RELEASES_R2_PUBLIC_BASE_URL%/}"
           DMG_URL="${BASE_URL}/mac/${CHANNEL}/${BUILD_NUMBER}/Inline.dmg"
           APPCAST_URL="${BASE_URL}/mac/${CHANNEL}/appcast.xml"
@@ -304,19 +307,21 @@ jobs:
             rm -f appcast.xml
           fi
 
-          INLINE_BUILD="${BUILD_NUMBER}" \\
-          INLINE_VERSION="${VERSION}" \\
-          INLINE_CHANNEL="${CHANNEL}" \\
-          INLINE_DMG_URL="${DMG_URL}" \\
-          INLINE_MIN_MACOS="15.0" \\
-          INLINE_COMMIT="${COMMIT}" \\
-          INLINE_COMMIT_LONG="${COMMIT_LONG}" \\
+          INLINE_BUILD="${BUILD_NUMBER}" \
+          INLINE_VERSION="${VERSION}" \
+          INLINE_CHANNEL="${CHANNEL}" \
+          INLINE_DMG_URL="${DMG_URL}" \
+          INLINE_MIN_MACOS="${MINIMUM_SYSTEM_VERSION}" \
+          INLINE_COMMIT="${COMMIT}" \
+          INLINE_COMMIT_LONG="${COMMIT_LONG}" \
           python3 scripts/macos/update_appcast.py
 
-          python3 scripts/macos/validate_appcast.py \\
-            --appcast appcast_new.xml \\
-            --require-build "${BUILD_NUMBER}" \\
-            --require-url "${DMG_URL}"
+          python3 scripts/macos/validate_appcast.py \
+            --appcast appcast_new.xml \
+            --require-build "${BUILD_NUMBER}" \
+            --require-url "${DMG_URL}" \
+            --require-hardware arm64 \
+            --require-minimum-system-version "${MINIMUM_SYSTEM_VERSION}"
 
       - name: Upload Appcast to R2
         env:

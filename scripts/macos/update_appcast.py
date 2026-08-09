@@ -10,7 +10,7 @@ Environment:
   - INLINE_VERSION
   - INLINE_CHANNEL
   - INLINE_DMG_URL
-  - INLINE_MIN_MACOS (optional, default: 15.0)
+  - INLINE_MIN_MACOS
   - INLINE_HARDWARE_REQUIREMENTS (optional, default: arm64)
   - INLINE_COMMIT (optional)
   - INLINE_COMMIT_LONG (optional)
@@ -31,7 +31,9 @@ channel = os.environ.get("INLINE_CHANNEL", "stable")
 if channel not in {"stable", "beta", "tip"}:
     raise SystemExit(f"Invalid INLINE_CHANNEL: {channel}")
 dmg_url = os.environ["INLINE_DMG_URL"]
-min_macos = os.environ.get("INLINE_MIN_MACOS", "15.0")
+min_macos = os.environ.get("INLINE_MIN_MACOS", "").strip()
+if not min_macos:
+    raise SystemExit("Missing required environment variable: INLINE_MIN_MACOS")
 hardware_requirements = os.environ.get("INLINE_HARDWARE_REQUIREMENTS", "arm64").strip()
 commit = os.environ.get("INLINE_COMMIT", "")
 commit_long = os.environ.get("INLINE_COMMIT_LONG", "")
