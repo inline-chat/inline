@@ -300,6 +300,7 @@ private struct MainWindowRoot: View {
         )
       } detail: {
         MainContentView()
+          .toastOverlayHost(dependencies?.overlay)
       }
       .toolbar {
         MainWindowToolbar(nav: nav3)
@@ -307,7 +308,6 @@ private struct MainWindowRoot: View {
 
       CommandBar()
     }
-    .toastOverlayHost(dependencies?.overlay)
     .modifier(ForwardMessagesPresentation(dependencies: dependencies))
     .onAppear {
       updateWindowMinSize()
