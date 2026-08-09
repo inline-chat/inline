@@ -64,6 +64,83 @@ describe("updateDialogNotificationSettings", () => {
     expect(latestUserUpdate).toBeDefined()
   })
 
+  test("setting All follows and shows a thread without undoing the follow later", async () => {
+    const user = await testUtils.createUser("dialog-notif-all-follow@example.com")
+    const chat = await testUtils.createChat(null, "Engineering", "thread", false, user.id)
+    if (!chat) throw new Error("Thread chat not created")
+
+    await testUtils.addParticipant(chat.id, user.id)
+    await db.insert(dialogs).values({
+      chatId: chat.id,
+      userId: user.id,
+      followMode: "unfollowed",
+      chatListHidden: true,
+      open: false,
+      archived: true,
+    })
+
+    const peerId: InputPeer = {
+      type: {
+        oneofKind: "chat",
+        chat: { chatId: BigInt(chat.id) },
+      },
+    }
+
+    const allResult = await updateDialogNotificationSettings(
+      {
+        peerId,
+        notificationSettings: {
+          mode: DialogNotificationSettings_Mode.ALL,
+        },
+      },
+      testUtils.functionContext({ userId: user.id, sessionId: 1 }),
+    )
+
+    expect(allResult.updates.map((update) => update.update.oneofKind)).toEqual([
+      "dialogNotificationSettings",
+      "dialogFollowMode",
+      "chatOpen",
+    ])
+
+    let [dialogRow] = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, user.id)))
+      .limit(1)
+
+    expect(decodeDialogNotificationSettings(dialogRow?.notificationSettings)?.mode).toBe(
+      DialogNotificationSettings_Mode.ALL,
+    )
+    expect(dialogRow?.followMode).toBe("following")
+    expect(dialogRow?.chatListHidden).toBeNull()
+    expect(dialogRow?.open).toBe(true)
+    expect(dialogRow?.order).toBeTruthy()
+    expect(dialogRow?.archived).toBe(false)
+
+    const mentionsResult = await updateDialogNotificationSettings(
+      {
+        peerId,
+        notificationSettings: {
+          mode: DialogNotificationSettings_Mode.MENTIONS,
+        },
+      },
+      testUtils.functionContext({ userId: user.id, sessionId: 1 }),
+    )
+
+    expect(mentionsResult.updates.map((update) => update.update.oneofKind)).toEqual([
+      "dialogNotificationSettings",
+    ])
+
+    ;[dialogRow] = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, user.id)))
+      .limit(1)
+
+    expect(dialogRow?.followMode).toBe("following")
+    expect(dialogRow?.open).toBe(true)
+  })
+
   test("clears dialog notification settings to inherit global", async () => {
     const userA = await testUtils.createUser("dialog-notif-clear-a@example.com")
     const userB = await testUtils.createUser("dialog-notif-clear-b@example.com")

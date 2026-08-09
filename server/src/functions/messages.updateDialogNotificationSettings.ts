@@ -1,4 +1,6 @@
 import {
+  DialogFollowMode,
+  DialogNotificationSettings_Mode,
   type DialogNotificationSettings,
   type InputPeer,
   type Update,
@@ -20,6 +22,8 @@ import type { ServerUpdate } from "@in/server/protocol/server"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { isLinkedSubthread } from "@in/server/modules/subthreads"
 import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
+import { canUseThreadFollowMode } from "@in/server/modules/threadAutoFollow"
+import { updateDialogFollowMode } from "@in/server/functions/messages.updateDialogFollowMode"
 
 type Input = {
   peerId: InputPeer
@@ -132,8 +136,19 @@ export const updateDialogNotificationSettings = async (input: Input, context: Fu
     return true
   })
 
+  // Keep this outside the notification no-op guard so a retry repairs a follow step that previously failed.
+  const followUpdates =
+    normalizedSettings?.mode === DialogNotificationSettings_Mode.ALL && canUseThreadFollowMode(chat)
+      ? (
+          await updateDialogFollowMode(
+            { peerId: input.peerId, followMode: DialogFollowMode.FOLLOWING },
+            context,
+          )
+        ).updates
+      : []
+
   if (!didUpdate) {
-    return { updates: [] }
+    return { updates: followUpdates }
   }
 
   const realtimeUpdate: Update = {
@@ -151,6 +166,6 @@ export const updateDialogNotificationSettings = async (input: Input, context: Fu
   })
 
   return {
-    updates: [realtimeUpdate],
+    updates: [realtimeUpdate, ...followUpdates],
   }
 }
