@@ -978,12 +978,12 @@ final class AppMenu: NSObject {
 #endif
 
   @MainActor @objc private func handleCLIInstallerMenuAction(_ sender: Any?) {
-    guard let dependencies else { return }
+    installCLI(sender: sender)
+  }
 
-    Task { @MainActor [weak self] in
-      let result = await dependencies.cliInstaller.install()
-      await self?.presentCLIInstallResult(result)
-    }
+  @MainActor func installCLI(sender: Any? = nil) {
+    guard let dependencies else { return }
+    CLIInstallerWindowController.show(using: dependencies, sender: sender)
   }
 
   @MainActor private func bindCLIInstallerMenuItemState() {
@@ -999,161 +999,6 @@ final class AppMenu: NSObject {
     }
   }
 
-  @MainActor private func presentCLIInstallResult(_ result: CLIInstallResult) async {
-    switch result {
-    case let .installed(installation):
-      await presentCLIInstallSuccess(installation, alreadyInstalled: false)
-    case let .alreadyInstalled(installation):
-      await presentCLIInstallSuccess(installation, alreadyInstalled: true)
-    case let .failed(failure):
-      let alert = NSAlert()
-      alert.alertStyle = .warning
-      alert.messageText = failure.title
-      alert.informativeText = failure.message
-      alert.addButton(withTitle: "Install Manually")
-      alert.addButton(withTitle: "OK")
-      if alert.runModal() == .alertFirstButtonReturn {
-        NSWorkspace.shared.open(failure.recoveryURL)
-      }
-    }
-  }
-
-  @MainActor private func presentCLIInstallSuccess(
-    _ installation: CLIInstallation,
-    alreadyInstalled: Bool
-  ) async {
-    guard let dependencies else { return }
-
-    guard CLIAuthBootstrapper.isSupportedInCurrentProcess else {
-      presentCLIAuthFallback(
-        installation,
-        alreadyInstalled: alreadyInstalled,
-        reason: "Automatic sign-in is not available in this build of Inline for Mac."
-      )
-      return
-    }
-
-    guard dependencies.auth.getIsLoggedIn() else {
-      presentCLIAuthFallback(
-        installation,
-        alreadyInstalled: alreadyInstalled,
-        reason: "Inline for Mac is not signed in."
-      )
-      return
-    }
-
-    do {
-      let result = try await authenticateCLI(installation, dependencies: dependencies)
-      presentCLIInstallCompletion(
-        installation,
-        alreadyInstalled: alreadyInstalled,
-        authentication: result
-      )
-    } catch {
-      presentCLIAuthFallback(
-        installation,
-        alreadyInstalled: alreadyInstalled,
-        reason: error.localizedDescription
-      )
-    }
-  }
-
-  @MainActor private func presentCLIInstallCompletion(
-    _ installation: CLIInstallation,
-    alreadyInstalled: Bool,
-    authentication: CLIAuthBootstrapResult
-  ) {
-    let alert = NSAlert()
-    alert.alertStyle = .informational
-    alert.messageText = alreadyInstalled ? "Inline CLI Is Ready" : "Inline CLI Installed and Signed In"
-
-    let version = installation.version.map { " version \($0)" } ?? ""
-    var details = "Inline CLI\(version) is available at:\n\(installation.executableURL.path)"
-    details += "\n\nThe CLI is signed in with its own revocable Inline session."
-    if let warning = authentication.warning {
-      details += "\n\n\(warning)"
-    }
-    if !installation.isOnPath {
-      details += "\n\nIts directory is not currently on PATH. See the installation guide for shell setup."
-    }
-    alert.informativeText = details
-    alert.addButton(withTitle: "Done")
-    if !installation.isOnPath {
-      alert.addButton(withTitle: "Installation Guide")
-    }
-
-    let response = alert.runModal()
-    if !installation.isOnPath, response == .alertSecondButtonReturn {
-      NSWorkspace.shared.open(CLIInstallerConfiguration.production.documentationURL)
-    }
-  }
-
-  @MainActor private func presentCLIAuthFallback(
-    _ installation: CLIInstallation,
-    alreadyInstalled: Bool,
-    reason: String
-  ) {
-    let alert = NSAlert()
-    alert.alertStyle = .warning
-    alert.messageText = alreadyInstalled
-      ? "Inline CLI Sign-In Needed"
-      : "Inline CLI Installed — Sign-In Needed"
-    alert.informativeText = """
-    Automatic sign-in could not finish: \(reason)
-
-    Run this command in Terminal:
-    \(manualLoginCommand(for: installation))
-
-    If that does not work, follow the online CLI guide.
-    """
-    alert.addButton(withTitle: "Open CLI Guide")
-    alert.addButton(withTitle: "Done")
-    if alert.runModal() == .alertFirstButtonReturn {
-      NSWorkspace.shared.open(CLIInstallerConfiguration.production.documentationURL)
-    }
-  }
-
-  private func manualLoginCommand(for installation: CLIInstallation) -> String {
-    guard !installation.isOnPath else { return "inline login" }
-    let escapedPath = installation.executableURL.path.replacingOccurrences(of: "'", with: "'\\''")
-    return "'\(escapedPath)' login"
-  }
-
-  @MainActor private func authenticateCLI(
-    _ installation: CLIInstallation,
-    dependencies: AppDependencies
-  ) async throws -> CLIAuthBootstrapResult {
-    let bootstrapper = CLIAuthBootstrapper()
-    var deliveredSessionID: Int64?
-    do {
-      let result = try await bootstrapper.authenticate(installation: installation) { request in
-        guard let endpoint = LocalCLIAuthBroker.Endpoint(url: request.callbackURL) else {
-          throw CLIAuthBootstrapError.invalidHandshake
-        }
-        do {
-          let client = try await LocalCLIAuthBroker.probe(endpoint)
-          deliveredSessionID = try await LocalCLIAuthBroker.createAndDeliverSession(
-            endpoint,
-            client: client,
-            realtime: dependencies.realtimeV2
-          )
-        } catch {
-          await LocalCLIAuthBroker.cancel(
-            endpoint,
-            detail: "Inline for Mac could not complete the request."
-          )
-          throw error
-        }
-      }
-      deliveredSessionID = nil
-      return result
-    } catch {
-      if let deliveredSessionID {
-        _ = try? await dependencies.realtimeV2.revokeSession(deliveredSessionID)
-      }
-      throw error
-    }
-  }
 }
 
 extension AppMenu: NSMenuItemValidation {

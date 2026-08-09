@@ -33,6 +33,33 @@ struct CLIAuthBootstrapperTests {
     #expect(!result.profileLoaded)
   }
 
+  @Test("uses the expected-user extension only with a compatible CLI")
+  func gatesExpectedUserArgumentByVersion() {
+    let releasedArguments = CLIAuthBootstrapper.authenticationArguments(
+      cliVersion: "0.7.2",
+      expectedUserID: 42
+    )
+    let extendedArguments = CLIAuthBootstrapper.authenticationArguments(
+      cliVersion: "0.7.3",
+      expectedUserID: 42
+    )
+
+    #expect(!releasedArguments.contains("--expected-user-id"))
+    #expect(extendedArguments.suffix(2) == ["--expected-user-id", "42"])
+  }
+
+  @Test("accepts an authenticated result only for the expected account")
+  func validatesExpectedUser() throws {
+    let result = CLIAuthBootstrapResult(userID: 42, profileLoaded: true, warning: nil)
+
+    #expect(
+      try CLIAuthBootstrapper.validateResult(result, expectedUserID: 42) == result
+    )
+    #expect(throws: CLIAuthBootstrapError.self) {
+      try CLIAuthBootstrapper.validateResult(result, expectedUserID: 7)
+    }
+  }
+
   @Test("removes Inline overrides from the child environment")
   func sanitizesEnvironment() {
     let environment = CLIAuthBootstrapper.sanitizedEnvironment([

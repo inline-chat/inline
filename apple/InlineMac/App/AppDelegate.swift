@@ -101,6 +101,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     MainActor.assumeIsolated {
       dockBadgeService.prepareForTermination()
+      CLIInstallerWindowController.prepareForApplicationTermination()
     }
     Drafts2.shared.flushBlocking()
     return .terminateNow

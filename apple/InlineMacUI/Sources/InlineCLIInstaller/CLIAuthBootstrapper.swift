@@ -26,6 +26,7 @@ public enum CLIAuthBootstrapError: LocalizedError, Equatable, Sendable {
   case unavailableInSandbox
   case couldNotLaunch
   case invalidHandshake
+  case unexpectedUser
   case timedOut
   case commandFailed(String?)
 
@@ -37,6 +38,8 @@ public enum CLIAuthBootstrapError: LocalizedError, Equatable, Sendable {
       "Inline could not launch the installed CLI."
     case .invalidHandshake:
       "The installed CLI returned an invalid sign-in response. Update it and try again."
+    case .unexpectedUser:
+      "Inline CLI is signed in to a different Inline account. Run `inline logout`, then try setup again."
     case .timedOut:
       "The installed CLI did not finish signing in within two minutes."
     case let .commandFailed(detail):
@@ -49,7 +52,6 @@ public struct CLIAuthBootstrapper: Sendable {
   private static let protocolVersion = 1
   private static let maximumReadyBytes = 8 * 1_024
   private static let maximumResultBytes = 256 * 1_024
-  private static let maximumErrorBytes = 8 * 1_024
   private static let maximumRuntime: TimeInterval = 125
 
   private let configuration: CLIInstallerConfiguration
@@ -64,6 +66,7 @@ public struct CLIAuthBootstrapper: Sendable {
 
   @concurrent public func authenticate(
     installation: CLIInstallation,
+    expectedUserID: Int64,
     authorize: @escaping @MainActor @Sendable (CLIAuthBootstrapRequest) async throws -> Void
   ) async throws -> CLIAuthBootstrapResult {
     guard Self.isSupportedInCurrentProcess else {
@@ -77,27 +80,78 @@ public struct CLIAuthBootstrapper: Sendable {
     guard FileManager.default.isExecutableFile(atPath: installation.executableURL.path) else {
       throw CLIAuthBootstrapError.couldNotLaunch
     }
+    guard expectedUserID > 0 else {
+      throw CLIAuthBootstrapError.unexpectedUser
+    }
 
     let process = Process()
     let standardOutput = Pipe()
     let standardError = Pipe()
     process.executableURL = installation.executableURL
-    process.arguments = [
+    process.arguments = Self.authenticationArguments(
+      cliVersion: installation.version,
+      expectedUserID: expectedUserID
+    )
+    process.environment = Self.sanitizedEnvironment(ProcessInfo.processInfo.environment)
+    process.standardInput = FileHandle.nullDevice
+    process.standardOutput = standardOutput
+    process.standardError = standardError
+
+    let cancellationState = CancellationState(process: process)
+    return try await withTaskCancellationHandler {
+      try Task.checkCancellation()
+      guard !cancellationState.isCancelled else { throw CancellationError() }
+      do {
+        try process.run()
+        try? standardOutput.fileHandleForWriting.close()
+        try? standardError.fileHandleForWriting.close()
+      } catch {
+        throw CLIAuthBootstrapError.couldNotLaunch
+      }
+      if cancellationState.isCancelled {
+        Self.stop(process)
+        throw CancellationError()
+      }
+
+      return try await authenticateRunningProcess(
+        process,
+        standardOutput: standardOutput,
+        standardError: standardError,
+        expectedUserID: expectedUserID,
+        authorize: authorize
+      )
+    } onCancel: {
+      cancellationState.cancel()
+      DispatchQueue.global(qos: .utility).async {
+        Self.stop(process)
+      }
+    }
+  }
+
+  static func authenticationArguments(cliVersion: String?, expectedUserID: Int64) -> [String] {
+    var arguments = [
       "--json",
       "--compact",
       "auth",
       "login",
       "--mac-app-bootstrap",
     ]
-    process.environment = Self.sanitizedEnvironment(ProcessInfo.processInfo.environment)
-    process.standardInput = FileHandle.nullDevice
-    process.standardOutput = standardOutput
-    process.standardError = standardError
+    if let cliVersion,
+       !CLIInstallerService.isOlder(cliVersion, than: "0.7.3") {
+      arguments.append(contentsOf: ["--expected-user-id", String(expectedUserID)])
+    }
+    return arguments
+  }
 
-    do {
-      try process.run()
-    } catch {
-      throw CLIAuthBootstrapError.couldNotLaunch
+  private func authenticateRunningProcess(
+    _ process: Process,
+    standardOutput: Pipe,
+    standardError: Pipe,
+    expectedUserID: Int64,
+    authorize: @escaping @MainActor @Sendable (CLIAuthBootstrapRequest) async throws -> Void
+  ) async throws -> CLIAuthBootstrapResult {
+    DispatchQueue.global(qos: .utility).async {
+      Self.drain(standardError.fileHandleForReading)
     }
 
     let timeoutState = TimeoutState()
@@ -112,13 +166,29 @@ public struct CLIAuthBootstrapper: Sendable {
     )
     defer { timeoutTask.cancel() }
 
-    let request: CLIAuthBootstrapRequest
+    let initialData: Data
     do {
-      let readyData = try Self.readLine(
+      initialData = try Self.readLine(
         from: standardOutput.fileHandleForReading,
         maximumBytes: Self.maximumReadyBytes
       )
-      request = try Self.parseReady(readyData)
+    } catch {
+      Self.stop(process)
+      throw timeoutState.didTimeOut ? CLIAuthBootstrapError.timedOut : CLIAuthBootstrapError.invalidHandshake
+    }
+
+    if let existing = try? Self.parseResult(initialData) {
+      process.waitUntilExit()
+      guard !timeoutState.didTimeOut else { throw CLIAuthBootstrapError.timedOut }
+      guard process.terminationStatus == 0 else {
+        throw CLIAuthBootstrapError.commandFailed(nil)
+      }
+      return try Self.validateResult(existing, expectedUserID: expectedUserID)
+    }
+
+    let request: CLIAuthBootstrapRequest
+    do {
+      request = try Self.parseReady(initialData)
     } catch {
       Self.stop(process)
       throw timeoutState.didTimeOut ? CLIAuthBootstrapError.timedOut : CLIAuthBootstrapError.invalidHandshake
@@ -142,8 +212,7 @@ public struct CLIAuthBootstrapper: Sendable {
       if timeoutState.didTimeOut {
         throw CLIAuthBootstrapError.timedOut
       }
-      let detail = Self.readError(from: standardError.fileHandleForReading)
-      throw CLIAuthBootstrapError.commandFailed(detail)
+      throw CLIAuthBootstrapError.commandFailed(nil)
     }
 
     process.waitUntilExit()
@@ -151,10 +220,22 @@ public struct CLIAuthBootstrapper: Sendable {
       throw CLIAuthBootstrapError.timedOut
     }
     guard process.terminationStatus == 0 else {
-      let detail = Self.readError(from: standardError.fileHandleForReading)
-      throw CLIAuthBootstrapError.commandFailed(detail)
+      throw CLIAuthBootstrapError.commandFailed(nil)
     }
-    return try Self.parseResult(resultData)
+    return try Self.validateResult(
+      Self.parseResult(resultData),
+      expectedUserID: expectedUserID
+    )
+  }
+
+  static func validateResult(
+    _ result: CLIAuthBootstrapResult,
+    expectedUserID: Int64
+  ) throws -> CLIAuthBootstrapResult {
+    guard expectedUserID > 0, result.userID == expectedUserID else {
+      throw CLIAuthBootstrapError.unexpectedUser
+    }
+    return result
   }
 
   private struct ReadyPayload: Decodable {
@@ -234,14 +315,12 @@ public struct CLIAuthBootstrapper: Sendable {
     throw CLIAuthBootstrapError.invalidHandshake
   }
 
-  private static func readError(from handle: FileHandle) -> String? {
-    let data = (try? handle.read(upToCount: maximumErrorBytes)) ?? Data()
-    let detail = (String(data: data, encoding: .utf8) ?? "")
-      .unicodeScalars
-      .filter { !CharacterSet.controlCharacters.contains($0) }
-      .prefix(500)
-    let normalized = String(String.UnicodeScalarView(detail)).trimmingCharacters(in: .whitespacesAndNewlines)
-    return normalized.isEmpty ? nil : normalized
+  private static func drain(_ handle: FileHandle) {
+    do {
+      while let chunk = try handle.read(upToCount: 64 * 1_024) {
+        if chunk.isEmpty { break }
+      }
+    } catch {}
   }
 
   private static func stop(_ process: Process) {
@@ -269,6 +348,27 @@ public struct CLIAuthBootstrapper: Sendable {
             nil
           ) else { return false }
     return value as? Bool == true
+  }
+}
+
+private final class CancellationState: @unchecked Sendable {
+  private let lock = NSLock()
+  private let process: Process
+  private var cancelled = false
+
+  init(process: Process) {
+    self.process = process
+  }
+
+  var isCancelled: Bool {
+    lock.withLock { cancelled }
+  }
+
+  func cancel() {
+    lock.withLock { cancelled = true }
+    if process.isRunning {
+      process.terminate()
+    }
   }
 }
 
