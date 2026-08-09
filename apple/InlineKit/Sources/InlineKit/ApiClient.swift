@@ -166,6 +166,19 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
   private let decoder = JSONDecoder()
 
+  /// Supersession is control flow, not a failed network request. Preserve it so
+  /// callers can avoid alerts, retry, and error telemetry for intentionally
+  /// cancelled search/navigation/auth work.
+  static func normalizeTransportError(_ error: Error) -> Error {
+    if error is CancellationError {
+      return CancellationError()
+    }
+    if let urlError = error as? URLError, urlError.code == .cancelled {
+      return CancellationError()
+    }
+    return APIError.networkError
+  }
+
   private func parseAPIError(_ data: Data) -> APIError? {
     guard !data.isEmpty else {
       return nil
@@ -189,14 +202,14 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     let requestId = response.value(forHTTPHeaderField: "x-request-id")
       ?? response.value(forHTTPHeaderField: "X-Request-Id")
       ?? "n/a"
-    log.error(
-      event: "http_request_failed",
+    log.telemetry(
+      .httpRequestFailed,
       fields: [
-        .diagnosticIdentifier("method", method),
-        .diagnosticIdentifier("endpoint", path.rawValue),
-        .diagnostic("status_code", response.statusCode),
-        .diagnosticIdentifier("request_id", requestId),
-        .diagnostic("response_bytes", data.count),
+        .method(TelemetryHTTPMethod(rawValue: method) ?? .other),
+        .endpoint(TelemetryIdentifier(path.rawValue)),
+        .statusCode(response.statusCode),
+        .requestID(TelemetryIdentifier(requestId)),
+        .responseBytes(data.count),
       ]
     )
   }
@@ -268,7 +281,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     } catch let apiError as APIError {
       throw apiError
     } catch {
-      throw APIError.networkError
+      throw Self.normalizeTransportError(error)
     }
   }
 
@@ -291,50 +304,56 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
     do {
       request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-      let (data, response) = try await URLSession.shared.data(for: request)
-
-      guard let httpResponse = response as? HTTPURLResponse else {
-        throw APIError.invalidResponse
-      }
-
-      switch httpResponse.statusCode {
-        case 200 ... 299:
-          let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
-          switch apiResponse {
-            case let .success(data):
-              return data
-            case let .error(error, errorCode, description):
-              log.error("Error \(error): \(description ?? "")")
-              throw APIError.error(error: error, errorCode: errorCode, description: description)
-          }
-        case 429:
-          throw APIError.rateLimited
-        default:
-          if let apiError = parseAPIError(data) {
-            logHTTPError(
-              method: request.httpMethod ?? "POST",
-              path: path,
-              response: httpResponse,
-              data: data
-            )
-            throw apiError
-          }
-
-          logHTTPError(
-            method: request.httpMethod ?? "POST",
-            path: path,
-            response: httpResponse,
-            data: data
-          )
-          throw APIError.httpError(statusCode: httpResponse.statusCode)
-      }
+      return try await performJSONRequest(request, path: path)
     } catch let decodingError as DecodingError {
       throw APIError.decodingError(decodingError)
     } catch let apiError as APIError {
       throw apiError
     } catch {
-      throw APIError.networkError
+      throw Self.normalizeTransportError(error)
+    }
+  }
+
+  private func performJSONRequest<T: Decodable & Sendable>(
+    _ request: URLRequest,
+    path: Path
+  ) async throws -> T {
+    let (data, response) = try await URLSession.shared.data(for: request)
+
+    guard let httpResponse = response as? HTTPURLResponse else {
+      throw APIError.invalidResponse
+    }
+
+    switch httpResponse.statusCode {
+    case 200 ... 299:
+      let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
+      switch apiResponse {
+      case let .success(data):
+        return data
+      case let .error(error, errorCode, description):
+        log.error("Error \(error): \(description ?? "")")
+        throw APIError.error(error: error, errorCode: errorCode, description: description)
+      }
+    case 429:
+      throw APIError.rateLimited
+    default:
+      if let apiError = parseAPIError(data) {
+        logHTTPError(
+          method: request.httpMethod ?? "POST",
+          path: path,
+          response: httpResponse,
+          data: data
+        )
+        throw apiError
+      }
+
+      logHTTPError(
+        method: request.httpMethod ?? "POST",
+        path: path,
+        response: httpResponse,
+        data: data
+      )
+      throw APIError.httpError(statusCode: httpResponse.statusCode)
     }
   }
 
@@ -366,34 +385,45 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     challengeToken: String? = nil,
     inviteCode: String? = nil
   ) async throws -> VerifyCode {
-    var queryItems: [URLQueryItem] = [
-      URLQueryItem(name: "code", value: code), URLQueryItem(name: "email", value: email),
-    ]
-
-    if let challengeToken, !challengeToken.isEmpty {
-      queryItems.append(URLQueryItem(name: "challengeToken", value: challengeToken))
-    }
-
-    if let inviteCode, !inviteCode.isEmpty {
-      queryItems.append(URLQueryItem(name: "inviteCode", value: inviteCode))
-    }
-
-    if let sessionInfo = await SessionInfo.get() {
-      queryItems.append(URLQueryItem(name: "clientType", value: sessionInfo.clientType))
-      queryItems.append(URLQueryItem(name: "clientVersion", value: sessionInfo.clientVersion))
-      queryItems.append(URLQueryItem(name: "osVersion", value: sessionInfo.osVersion))
-      queryItems.append(URLQueryItem(name: "deviceName", value: sessionInfo.deviceName))
-      queryItems.append(URLQueryItem(name: "timezone", value: sessionInfo.timezone))
-    }
-
+    let sessionInfo = await SessionInfo.get()
     let deviceId = try await DeviceIdentifier.shared.getIdentifier()
-    queryItems.append(URLQueryItem(name: "deviceId", value: deviceId))
-
-    return try await request(
-      .verifyCode,
-      queryItems: queryItems,
-      includeToken: false
+    let payload = EmailCodeVerificationPayload(
+      email: email,
+      code: code,
+      challengeToken: challengeToken?.nilIfEmpty,
+      inviteCode: inviteCode?.nilIfEmpty,
+      deviceId: deviceId,
+      clientType: sessionInfo?.clientType,
+      clientVersion: sessionInfo?.clientVersion,
+      osVersion: sessionInfo?.osVersion,
+      deviceName: sessionInfo?.deviceName,
+      timezone: sessionInfo?.timezone
     )
+    let request = try Self.makeEmailCodeVerificationRequest(payload: payload)
+
+    do {
+      return try await performJSONRequest(request, path: .verifyCode)
+    } catch let decodingError as DecodingError {
+      throw APIError.decodingError(decodingError)
+    } catch let apiError as APIError {
+      throw apiError
+    } catch {
+      throw Self.normalizeTransportError(error)
+    }
+  }
+
+  static func makeEmailCodeVerificationRequest(
+    payload: EmailCodeVerificationPayload,
+    baseURL: String = ApiClient.baseURL
+  ) throws -> URLRequest {
+    guard let url = URL(string: "\(baseURL)/\(Path.verifyCode.rawValue)") else {
+      throw APIError.invalidURL
+    }
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.httpBody = try JSONEncoder().encode(payload)
+    return request
   }
 
   public func verifySmsCode(code: String, phoneNumber: String, inviteCode: String? = nil) async throws -> VerifyCode {
@@ -1157,7 +1187,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     } catch let apiError as APIError {
       throw apiError
     } catch {
-      throw APIError.networkError
+      throw Self.normalizeTransportError(error)
     }
   }
 
@@ -1189,8 +1219,8 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       throw APIError.decodingError(decodingError)
     } catch let apiError as APIError {
       throw apiError
-    } catch is URLError {
-      throw APIError.networkError
+    } catch let urlError as URLError {
+      throw Self.normalizeTransportError(urlError)
     }
   }
 
@@ -1591,6 +1621,25 @@ struct SessionInfo: Codable, Sendable {
     #else
     return nil
     #endif
+  }
+}
+
+struct EmailCodeVerificationPayload: Codable, Equatable, Sendable {
+  let email: String
+  let code: String
+  let challengeToken: String?
+  let inviteCode: String?
+  let deviceId: String
+  let clientType: String?
+  let clientVersion: String?
+  let osVersion: String?
+  let deviceName: String?
+  let timezone: String?
+}
+
+private extension String {
+  var nilIfEmpty: String? {
+    isEmpty ? nil : self
   }
 }
 

@@ -518,6 +518,50 @@ public final class Log: @unchecked Sendable {
   ) {
     log(event: event, fields: fields, level: .info, file: file, function: function, line: line)
   }
+
+  /// Emits only catalogued event names and fields to public/remote sinks.
+  /// Invalid schemas are contained as a metadata-only warning rather than
+  /// crashing the caller or exporting the rejected value.
+  public func telemetry(
+    _ event: TelemetryEvent,
+    fields: [TelemetryField] = [],
+    error: Error? = nil,
+    file: String = #file,
+    function: String = #function,
+    line: Int = #line
+  ) {
+    let record: TelemetryRecord
+    do {
+      record = try TelemetryRecord(event: event, fields: fields)
+    } catch {
+      log(
+        "telemetry_schema_violation rejected_event=\(event.rawValue)",
+        level: .warning,
+        eventName: "telemetry_schema_violation",
+        fields: [.diagnosticIdentifier("rejected_event", event.rawValue)],
+        isStructured: true,
+        file: file,
+        function: function,
+        line: line
+      )
+      return
+    }
+
+    let logFields = record.logFields
+    let localFields = logFields.map { "\($0.name)=\($0.value)" }.joined(separator: " ")
+    let localMessage = localFields.isEmpty ? event.rawValue : "\(event.rawValue) \(localFields)"
+    log(
+      localMessage,
+      level: event.level,
+      error: error,
+      eventName: event.rawValue,
+      fields: logFields,
+      isStructured: true,
+      file: file,
+      function: function,
+      line: line
+    )
+  }
 }
 
 extension Log: Logging {
