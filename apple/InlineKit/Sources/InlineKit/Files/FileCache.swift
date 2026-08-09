@@ -615,7 +615,7 @@ private func generateThumbnailImage(from asset: AVAsset) async throws -> Platfor
   imageGenerator.appliesPreferredTrackTransform = true
   let duration = try await asset.load(.duration)
   let time = CMTime(seconds: min(1.0, CMTimeGetSeconds(duration)), preferredTimescale: 600)
-  let cgImage = try imageGenerator.copyCGImage(at: time, actualTime: nil)
+  let cgImage = try await AVFoundationAsyncOperations.image(using: imageGenerator, at: time)
 
   #if os(iOS)
   return UIImage(cgImage: cgImage)
@@ -625,10 +625,6 @@ private func generateThumbnailImage(from asset: AVAsset) async throws -> Platfor
 }
 
 private func exportVideoToMp4(asset: AVAsset, destinationURL: URL) async throws {
-  if FileManager.default.fileExists(atPath: destinationURL.path) {
-    try FileManager.default.removeItem(at: destinationURL)
-  }
-
   guard let exportSession = AVAssetExportSession(
     asset: asset,
     presetName: AVAssetExportPresetHighestQuality
@@ -636,31 +632,8 @@ private func exportVideoToMp4(asset: AVAsset, destinationURL: URL) async throws 
     throw FileCacheError.failedToSave
   }
 
-  exportSession.outputURL = destinationURL
-  exportSession.outputFileType = .mp4
   exportSession.shouldOptimizeForNetworkUse = true
-
-  let sessionBox = ExportSessionBox(exportSession)
-  try await withCheckedThrowingContinuation { continuation in
-    sessionBox.session.exportAsynchronously {
-      switch sessionBox.session.status {
-      case .completed:
-        continuation.resume()
-      case .failed, .cancelled:
-        continuation.resume(throwing: sessionBox.session.error ?? FileCacheError.failedToSave)
-      default:
-        continuation.resume(throwing: FileCacheError.failedToSave)
-      }
-    }
-  }
-}
-
-private final class ExportSessionBox: @unchecked Sendable {
-  let session: AVAssetExportSession
-
-  init(_ session: AVAssetExportSession) {
-    self.session = session
-  }
+  try await AVFoundationAsyncOperations.export(using: exportSession, to: destinationURL, as: .mp4)
 }
 
 // MARK: - Clear Cache

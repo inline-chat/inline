@@ -81,7 +81,7 @@ private final class AssetWriterBox: @unchecked Sendable {
   }
 }
 
-private func makeTestVideoURL(
+func makeTestVideoURL(
   size: CGSize = CGSize(width: 64, height: 64),
   frameCount: Int = 2,
   fps: Int32 = 10,

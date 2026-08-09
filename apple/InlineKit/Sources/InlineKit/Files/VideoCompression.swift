@@ -212,10 +212,6 @@ public actor VideoCompressor {
   }
 
   private func export(asset: AVAsset, presetName: String, destinationURL: URL) async throws {
-    if FileManager.default.fileExists(atPath: destinationURL.path) {
-      try FileManager.default.removeItem(at: destinationURL)
-    }
-
     guard let exportSession = AVAssetExportSession(asset: asset, presetName: presetName) else {
       throw VideoCompressionError.exportFailed
     }
@@ -224,29 +220,8 @@ public actor VideoCompressor {
       throw VideoCompressionError.unsupportedOutputType
     }
 
-    exportSession.outputURL = destinationURL
-    exportSession.outputFileType = .mp4
     exportSession.shouldOptimizeForNetworkUse = true
-
-    let sessionBox = ExportSessionBox(exportSession)
-    try await withTaskCancellationHandler {
-      try await withCheckedThrowingContinuation { continuation in
-        sessionBox.session.exportAsynchronously {
-          switch sessionBox.session.status {
-          case .completed:
-            continuation.resume()
-          case .cancelled:
-            continuation.resume(throwing: CancellationError())
-          case .failed:
-            continuation.resume(throwing: sessionBox.session.error ?? VideoCompressionError.exportFailed)
-          default:
-            continuation.resume(throwing: VideoCompressionError.exportFailed)
-          }
-        }
-      }
-    } onCancel: {
-      sessionBox.session.cancelExport()
-    }
+    try await AVFoundationAsyncOperations.export(using: exportSession, to: destinationURL, as: .mp4)
   }
 
   private func transcodeTelegramStyle(
@@ -679,14 +654,6 @@ public actor VideoCompressor {
     }
 
     return preferredPresets.first { compatiblePresets.contains($0) }
-  }
-}
-
-private final class ExportSessionBox: @unchecked Sendable {
-  let session: AVAssetExportSession
-
-  init(_ session: AVAssetExportSession) {
-    self.session = session
   }
 }
 
