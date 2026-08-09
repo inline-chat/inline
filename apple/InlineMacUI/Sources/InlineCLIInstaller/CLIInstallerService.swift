@@ -1,5 +1,4 @@
 import CryptoKit
-import Darwin
 import Foundation
 
 public actor CLIInstallerService: CLIInstalling {
@@ -18,7 +17,13 @@ public actor CLIInstallerService: CLIInstalling {
     let status: Int32
     let standardOutput: String
     let standardError: String
+    let standardOutputWasTruncated: Bool
+    let standardErrorWasTruncated: Bool
   }
+
+  private static let processTimeout: TimeInterval = 10
+  private static let maximumProcessOutputBytes = 256 * 1_024
+  private static let maximumVersionOutputBytes = 8 * 1_024
 
   private let configuration: CLIInstallerConfiguration
   private let fileManager: FileManager
@@ -36,7 +41,7 @@ public actor CLIInstallerService: CLIInstalling {
 
   public func check(progress: @escaping CLIInstallerProgress) async throws -> CLIInstallPlan {
     await progress(.checkingLocal)
-    let localInstallation = inspectLocalInstallation()
+    let localInstallation = try await inspectLocalInstallation()
 
     await progress(.checkingRemote)
     let release = try await fetchRelease()
@@ -104,10 +109,10 @@ public actor CLIInstallerService: CLIInstalling {
 
     await progress(.verifying(version: plan.release.version))
     try verifyChecksum(of: archiveURL, expected: plan.release.sha256)
-    let executableURL = try extractExecutable(from: archiveURL, in: workDirectory)
+    let executableURL = try await extractExecutable(from: archiveURL, in: workDirectory)
     try verifySignature(of: executableURL)
 
-    let downloadedVersion = try readVersion(at: executableURL)
+    let downloadedVersion = try await readVersion(at: executableURL)
     guard downloadedVersion == plan.release.version else {
       throw failure(
         .invalidArchive,
@@ -120,7 +125,7 @@ public actor CLIInstallerService: CLIInstalling {
     try installExecutable(executableURL, at: destinationURL)
     try verifySignature(of: destinationURL)
 
-    let installedVersion = try readVersion(at: destinationURL)
+    let installedVersion = try await readVersion(at: destinationURL)
     guard installedVersion == plan.release.version else {
       throw failure(
         .installationFailed,
@@ -194,7 +199,7 @@ public actor CLIInstallerService: CLIInstalling {
     )
   }
 
-  private func inspectLocalInstallation() -> CLIInstallation? {
+  private func inspectLocalInstallation() async throws -> CLIInstallation? {
     for candidate in localCandidateURLs() {
       guard fileManager.fileExists(atPath: candidate.path) else { continue }
 
@@ -215,7 +220,20 @@ public actor CLIInstallerService: CLIInstalling {
         source = .inline
       }
 
-      let version = source == .external ? nil : try? readVersion(at: candidate)
+      let version: String?
+      if source == .external {
+        version = nil
+      } else {
+        do {
+          version = try await readVersion(at: candidate)
+        } catch is CancellationError {
+          throw CancellationError()
+        } catch {
+          // A locally installed CLI can still be classified safely when its
+          // version command fails; only structured cancellation must escape.
+          version = nil
+        }
+      }
       return CLIInstallation(
         executableURL: candidate,
         version: version,
@@ -374,12 +392,13 @@ public actor CLIInstallerService: CLIInstalling {
     }
   }
 
-  private func extractExecutable(from archiveURL: URL, in workDirectory: URL) throws -> URL {
-    let listing = try runProcess(
+  private func extractExecutable(from archiveURL: URL, in workDirectory: URL) async throws -> URL {
+    let listing = try await runProcess(
       executableURL: URL(fileURLWithPath: "/usr/bin/tar"),
-      arguments: ["-tzf", archiveURL.path]
+      arguments: ["-tzf", archiveURL.path],
+      maximumOutputBytes: Self.maximumProcessOutputBytes
     )
-    guard listing.status == 0 else {
+    guard listing.status == 0, !listing.standardOutputWasTruncated else {
       throw invalidArchive("The downloaded archive could not be inspected.")
     }
 
@@ -390,9 +409,10 @@ public actor CLIInstallerService: CLIInstalling {
 
     let extractionDirectory = workDirectory.appending(path: "extracted", directoryHint: .isDirectory)
     try fileManager.createDirectory(at: extractionDirectory, withIntermediateDirectories: false)
-    let extraction = try runProcess(
+    let extraction = try await runProcess(
       executableURL: URL(fileURLWithPath: "/usr/bin/tar"),
-      arguments: ["-xzf", archiveURL.path, "-C", extractionDirectory.path, entries[0]]
+      arguments: ["-xzf", archiveURL.path, "-C", extractionDirectory.path, entries[0]],
+      maximumOutputBytes: Self.maximumProcessOutputBytes
     )
     guard extraction.status == 0 else {
       throw invalidArchive("The downloaded archive could not be extracted.")
@@ -458,43 +478,61 @@ public actor CLIInstallerService: CLIInstalling {
     }
   }
 
-  private func readVersion(at executableURL: URL) throws -> String? {
-    let output = try runProcess(executableURL: executableURL, arguments: ["--version"])
-    guard output.status == 0 else { return nil }
+  private func readVersion(at executableURL: URL) async throws -> String? {
+    let output = try await runProcess(
+      executableURL: executableURL,
+      arguments: ["--version"],
+      maximumOutputBytes: Self.maximumVersionOutputBytes
+    )
+    guard output.status == 0,
+          !output.standardOutputWasTruncated,
+          !output.standardErrorWasTruncated else { return nil }
     return Self.versionString(in: output.standardOutput + " " + output.standardError)
   }
 
-  private func runProcess(executableURL: URL, arguments: [String]) throws -> ProcessOutput {
-    let process = Process()
-    let standardOutput = Pipe()
-    let standardError = Pipe()
-    let completion = DispatchSemaphore(value: 0)
-    process.executableURL = executableURL
-    process.arguments = arguments
-    process.standardOutput = standardOutput
-    process.standardError = standardError
-    process.terminationHandler = { _ in completion.signal() }
-
-    try process.run()
-    if completion.wait(timeout: .now() + 10) == .timedOut {
-      process.terminate()
-      if completion.wait(timeout: .now() + 1) == .timedOut {
-        kill(process.processIdentifier, SIGKILL)
-        _ = completion.wait(timeout: .now() + 1)
-      }
+  private func runProcess(
+    executableURL: URL,
+    arguments: [String],
+    maximumOutputBytes: Int
+  ) async throws -> ProcessOutput {
+    let result: CLIInstallerProcessResult
+    do {
+      result = try await CLIInstallerProcessAdapter.run(
+        executableURL: executableURL,
+        arguments: arguments,
+        environment: Self.processEnvironment(ProcessInfo.processInfo.environment),
+        timeout: Self.processTimeout,
+        maximumOutputBytes: maximumOutputBytes
+      )
+    } catch CLIInstallerProcessFailure.cancelled {
+      throw CancellationError()
+    } catch CLIInstallerProcessFailure.timedOut {
       throw failure(
         .installationFailed,
         title: "Inline CLI Check Timed Out",
         message: "\(executableURL.lastPathComponent) did not finish in time."
       )
+    } catch CLIInstallerProcessFailure.launchFailed {
+      throw failure(
+        .installationFailed,
+        title: "Couldn’t Run Inline CLI Check",
+        message: "\(executableURL.lastPathComponent) could not be launched."
+      )
     }
-    let outputData = standardOutput.fileHandleForReading.readDataToEndOfFile()
-    let errorData = standardError.fileHandleForReading.readDataToEndOfFile()
+
     return ProcessOutput(
-      status: process.terminationStatus,
-      standardOutput: String(data: outputData, encoding: .utf8) ?? "",
-      standardError: String(data: errorData, encoding: .utf8) ?? ""
+      status: result.status,
+      standardOutput: String(data: result.standardOutput, encoding: .utf8) ?? "",
+      standardError: String(data: result.standardError, encoding: .utf8) ?? "",
+      standardOutputWasTruncated: result.standardOutputWasTruncated,
+      standardErrorWasTruncated: result.standardErrorWasTruncated
     )
+  }
+
+  static func processEnvironment(_ environment: [String: String]) -> [String: String] {
+    var sanitized = environment.filter { !$0.key.hasPrefix("INLINE_") }
+    sanitized["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+    return sanitized
   }
 
   private func pathContains(_ directoryURL: URL) -> Bool {

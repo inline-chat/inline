@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import Security
 
@@ -78,83 +77,60 @@ public struct CLIAuthBootstrapper: Sendable {
       throw CLIAuthBootstrapError.couldNotLaunch
     }
 
-    let process = Process()
-    let standardOutput = Pipe()
-    let standardError = Pipe()
-    process.executableURL = installation.executableURL
-    process.arguments = [
-      "--json",
-      "--compact",
-      "auth",
-      "login",
-      "--mac-app-bootstrap",
-    ]
-    process.environment = Self.sanitizedEnvironment(ProcessInfo.processInfo.environment)
-    process.standardInput = FileHandle.nullDevice
-    process.standardOutput = standardOutput
-    process.standardError = standardError
-
+    let processResult: CLIAuthHandshakeProcessResult
     do {
-      try process.run()
-    } catch {
+      processResult = try await CLIAuthHandshakeProcess.run(
+        executableURL: installation.executableURL,
+        arguments: [
+          "--json",
+          "--compact",
+          "auth",
+          "login",
+          "--mac-app-bootstrap",
+        ],
+        environment: Self.sanitizedEnvironment(ProcessInfo.processInfo.environment),
+        configuration: CLIAuthHandshakeProcess.Configuration(
+          timeout: Self.maximumRuntime,
+          maximumReadyBytes: Self.maximumReadyBytes,
+          maximumResultBytes: Self.maximumResultBytes,
+          maximumErrorBytes: Self.maximumErrorBytes
+        )
+      ) { readyData in
+        let request = try Self.parseReady(readyData)
+        try await authorize(request)
+      }
+    } catch CLIAuthHandshakeProcessFailure.launchFailed {
       throw CLIAuthBootstrapError.couldNotLaunch
-    }
-
-    let timeoutState = TimeoutState()
-    let timeoutTask = DispatchWorkItem {
-      guard process.isRunning else { return }
-      timeoutState.markTimedOut()
-      Self.terminate(process)
-    }
-    DispatchQueue.global(qos: .utility).asyncAfter(
-      deadline: .now() + Self.maximumRuntime,
-      execute: timeoutTask
-    )
-    defer { timeoutTask.cancel() }
-
-    let request: CLIAuthBootstrapRequest
-    do {
-      let readyData = try Self.readLine(
-        from: standardOutput.fileHandleForReading,
-        maximumBytes: Self.maximumReadyBytes
+    } catch CLIAuthHandshakeProcessFailure.timedOut {
+      throw CLIAuthBootstrapError.timedOut
+    } catch CLIAuthHandshakeProcessFailure.cancelled {
+      throw CancellationError()
+    } catch CLIAuthHandshakeProcessFailure.invalidOutputLine(let index, let result) {
+      if index == 0 {
+        throw CLIAuthBootstrapError.invalidHandshake
+      }
+      throw CLIAuthBootstrapError.commandFailed(
+        Self.commandFailureDetail(
+          standardError: result.standardError,
+          wasTruncated: result.standardErrorWasTruncated
+        )
       )
-      request = try Self.parseReady(readyData)
     } catch {
-      Self.stop(process)
-      throw timeoutState.didTimeOut ? CLIAuthBootstrapError.timedOut : CLIAuthBootstrapError.invalidHandshake
-    }
-
-    do {
-      try await authorize(request)
-    } catch {
-      Self.stop(process)
       throw error
     }
 
-    let resultData: Data
-    do {
-      resultData = try Self.readLine(
-        from: standardOutput.fileHandleForReading,
-        maximumBytes: Self.maximumResultBytes
+    guard processResult.status == 0 else {
+      throw CLIAuthBootstrapError.commandFailed(
+        Self.commandFailureDetail(
+          standardError: processResult.standardError,
+          wasTruncated: processResult.standardErrorWasTruncated
+        )
       )
-    } catch {
-      Self.stop(process)
-      if timeoutState.didTimeOut {
-        throw CLIAuthBootstrapError.timedOut
-      }
-      let detail = Self.readError(from: standardError.fileHandleForReading)
-      throw CLIAuthBootstrapError.commandFailed(detail)
     }
-
-    process.waitUntilExit()
-    guard !timeoutState.didTimeOut else {
-      throw CLIAuthBootstrapError.timedOut
+    guard let resultLine = processResult.resultLine else {
+      throw CLIAuthBootstrapError.invalidHandshake
     }
-    guard process.terminationStatus == 0 else {
-      let detail = Self.readError(from: standardError.fileHandleForReading)
-      throw CLIAuthBootstrapError.commandFailed(detail)
-    }
-    return try Self.parseResult(resultData)
+    return try Self.parseResult(resultLine)
   }
 
   private struct ReadyPayload: Decodable {
@@ -222,43 +198,15 @@ public struct CLIAuthBootstrapper: Sendable {
     return sanitized
   }
 
-  private static func readLine(from handle: FileHandle, maximumBytes: Int) throws -> Data {
-    var data = Data()
-    while data.count < maximumBytes {
-      guard let byte = try handle.read(upToCount: 1), !byte.isEmpty else {
-        throw CLIAuthBootstrapError.invalidHandshake
-      }
-      if byte[0] == 0x0A { return data }
-      data.append(byte)
+  static func commandFailureDetail(
+    standardError: Data,
+    wasTruncated: Bool
+  ) -> String? {
+    guard !standardError.isEmpty || wasTruncated else { return nil }
+    if wasTruncated {
+      return "The installed CLI reported an authentication error. Its diagnostics were truncated."
     }
-    throw CLIAuthBootstrapError.invalidHandshake
-  }
-
-  private static func readError(from handle: FileHandle) -> String? {
-    let data = (try? handle.read(upToCount: maximumErrorBytes)) ?? Data()
-    let detail = (String(data: data, encoding: .utf8) ?? "")
-      .unicodeScalars
-      .filter { !CharacterSet.controlCharacters.contains($0) }
-      .prefix(500)
-    let normalized = String(String.UnicodeScalarView(detail)).trimmingCharacters(in: .whitespacesAndNewlines)
-    return normalized.isEmpty ? nil : normalized
-  }
-
-  private static func stop(_ process: Process) {
-    Self.terminate(process)
-    process.waitUntilExit()
-  }
-
-  private static func terminate(_ process: Process) {
-    guard process.isRunning else { return }
-    process.terminate()
-    let deadline = Date().addingTimeInterval(1)
-    while process.isRunning, Date() < deadline {
-      Thread.sleep(forTimeInterval: 0.02)
-    }
-    if process.isRunning {
-      kill(process.processIdentifier, SIGKILL)
-    }
+    return "The installed CLI reported an authentication error."
   }
 
   private static func isCurrentProcessSandboxed() -> Bool {
@@ -269,18 +217,5 @@ public struct CLIAuthBootstrapper: Sendable {
             nil
           ) else { return false }
     return value as? Bool == true
-  }
-}
-
-private final class TimeoutState: @unchecked Sendable {
-  private let lock = NSLock()
-  private var timedOut = false
-
-  var didTimeOut: Bool {
-    lock.withLock { timedOut }
-  }
-
-  func markTimedOut() {
-    lock.withLock { timedOut = true }
   }
 }
