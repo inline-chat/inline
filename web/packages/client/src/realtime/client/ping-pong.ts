@@ -23,14 +23,14 @@ export class PingPongService {
 
   start() {
     if (this.running) return
-    this.log.debug("starting ping pong service")
+    this.log.debug("ping_pong.started", {})
     this.running = true
     this.reset()
     void this.loop()
   }
 
   stop() {
-    this.log.debug("stopping ping pong service")
+    this.log.debug("ping_pong.stopped", {})
     this.running = false
     this.clearSleep()
     this.reset()
@@ -42,22 +42,26 @@ export class PingPongService {
     if (client.state !== "open") return
 
     const nonce = this.randomNonce()
-    this.log.debug("ping sent with nonce", nonce)
+    this.log.debug("ping_pong.ping.sent", {})
     await client.sendPing(nonce)
     this.pings.set(nonce, Date.now())
   }
 
   pong(nonce: bigint) {
-    this.log.debug("pong received for nonce", nonce)
+    this.log.debug("ping_pong.pong.received", {})
     const pingDate = this.pings.get(nonce)
     if (!pingDate) {
-      this.log.trace("pong received for unknown ping nonce", nonce)
+      this.log.trace("ping_pong.pong.unmatched", {
+        pendingCount: this.pings.size,
+      })
       return
     }
 
     this.pings.delete(nonce)
     this.recordLatency(pingDate)
-    this.log.debug("avg latency", this.avgLatencyMs(), "ms")
+    this.log.debug("ping_pong.latency.updated", {
+      averageMs: this.avgLatencyMs(),
+    })
   }
 
   private async loop() {
@@ -78,8 +82,12 @@ export class PingPongService {
   }
 
   private getNextPingDelayMs() {
-    if (this.avgLatencyMs() > 2000) {
-      this.log.debug("avg latency is high, increasing ping interval")
+    const averageMs = this.avgLatencyMs()
+    if (averageMs > 2000) {
+      this.log.debug("ping_pong.latency.high", {
+        averageMs,
+        nextIntervalMs: 25_000,
+      })
       return 25_000
     }
     return 10_000

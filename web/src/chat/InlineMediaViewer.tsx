@@ -17,7 +17,7 @@ import {
 
 type ViewerMedia = Extract<
   ChatMessageMediaPresentation,
-  { kind: "photo" | "video" }
+  { kind: "photo" | "video" | "sticker" }
 >
 
 const rectFromElement = (element: HTMLElement): InlineMediaViewerRect => {
@@ -72,7 +72,11 @@ export function InlineMediaViewer({
       ),
     [media.height, media.width],
   )
-  const downloadName = media.kind === "photo" ? "Inline photo.jpg" : "Inline video.mp4"
+  const downloadName = media.kind === "video"
+    ? "Inline video.mp4"
+    : media.kind === "sticker"
+      ? "Inline sticker.webp"
+      : "Inline photo.jpg"
   const download = useInlineMediaDownload(downloadUrl, downloadName)
 
   useLayoutEffect(() => {
@@ -247,11 +251,11 @@ export function InlineMediaViewer({
           Download failed. Try again.
         </span>
       ) : null}
-      {media.kind === "photo" ? (
+      {media.kind !== "video" ? (
         <img
           ref={mediaElement as React.RefObject<HTMLImageElement>}
           src={url}
-          alt="Photo"
+          alt={media.label}
           draggable={false}
           style={frame(settledRect, 4)}
           {...stylex.props(styles.media)}

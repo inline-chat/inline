@@ -310,6 +310,48 @@ export function useChatHistory(
     ],
   )
 
+  const loadLatest = useCallback(async () => {
+    if (chatId == null || loadingNewer) return false
+    setLoadingNewer(true)
+    setError(undefined)
+    newerAfterCursorKey.current = undefined
+    try {
+      const residentCount = await db.hydrateMessageWindow(chatId, {
+        limit: initialLimit,
+      })
+      try {
+        const result = await realtime.query(
+          getChatHistory({
+            peerId: inputPeer(peer),
+            mode: GetChatHistoryMode.HISTORY_MODE_LATEST,
+            limit: initialLimit,
+          }),
+        )
+        if (result?.oneofKind === "getChatHistory") {
+          setHasOlder(result.getChatHistory.messages.length >= initialLimit)
+          return result.getChatHistory.messages.length > 0 || residentCount > 0
+        }
+        throw new Error("Could not refresh the latest messages.")
+      } catch (cause) {
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : "Could not refresh the latest messages.",
+        )
+        return false
+      }
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not return to the latest messages.",
+      )
+      return false
+    } finally {
+      setLoadingNewer(false)
+    }
+  }, [chatId, db, loadingNewer, peer.peerId, peer.peerKind, realtime])
+
   return {
     initialLoading,
     loadingOlder,
@@ -319,5 +361,6 @@ export function useChatHistory(
     loadOlder,
     loadNewer,
     loadAround,
+    loadLatest,
   }
 }

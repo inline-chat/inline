@@ -1,6 +1,11 @@
 import type { UserID } from "@inline/ids"
 import { authSession } from "../auth/auth-session-core"
 import { InlineAccountCore } from "./InlineAccountCore"
+import { inlineLog } from "../logging/InlineLogging"
+import {
+  createInlineCoreAccountOwnershipAcquirer,
+  type InlineCoreLockManager,
+} from "./InlineCoreAccountOwnership"
 
 export type InlineAccountCoreOwner = {
   readonly accountId: UserID
@@ -54,7 +59,9 @@ export class InlineAccountCoreRegistry<
       entry.stopTimer = null
     }
     entry.references += 1
-    void core.start()
+    void core.start().catch(() => {
+      // The account core publishes its actionable failure through its snapshot.
+    })
 
     let released = false
     return () => {
@@ -76,19 +83,40 @@ export class InlineAccountCoreRegistry<
         }
         void core.stop().then(
           removeStoppedCore,
-          removeStoppedCore,
+          () => {
+            // A failed close can still own the account lock. Retain the core
+            // so a remount sees its reload-required snapshot instead of
+            // creating a second writer that conflicts with it.
+          },
         )
       }, 0)
     }
   }
 }
 
-const registry = new InlineAccountCoreRegistry(
-  (accountId) =>
-    new InlineAccountCore(accountId, {
-      auth: authSession,
-    }),
-)
+const browserLocks =
+  typeof navigator !== "undefined" && navigator.locks
+    ? (navigator.locks as unknown as InlineCoreLockManager)
+    : undefined
+const acquireAccountOwnership =
+  createInlineCoreAccountOwnershipAcquirer(browserLocks)
+
+const registry = new InlineAccountCoreRegistry((accountId) => {
+  const session = authSession.getState()
+  if (
+    session.currentUserId !== accountId ||
+    session.token == null
+  ) {
+    throw new Error(
+      "Inline account core requires the current authenticated session",
+    )
+  }
+  return new InlineAccountCore(accountId, {
+    auth: authSession,
+    logger: inlineLog.withScope("Core"),
+    acquireAccountOwnership,
+  })
+})
 
 export const getInlineAccountCore = (accountId: UserID) =>
   registry.get(accountId)

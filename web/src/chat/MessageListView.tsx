@@ -43,6 +43,10 @@ import type { ChatMessageRow } from "./ChatRowListModel"
 import type { InlinePeerRoute } from "~/inline/data/peer"
 import { useInlineAppearancePreferences } from "~/inline/preferences/InlineAppearancePreferencesContext"
 import { InlineSpinner } from "~/ui/InlineSpinner"
+import type { InlineMessageEntityActions } from "./InlineMessageTextView"
+import { inlineLog } from "~/inline/logging/InlineLogging"
+
+const log = inlineLog.withScope("UI.MessageList")
 
 type PendingLayoutAnchor = {
   messageId: string
@@ -109,10 +113,16 @@ export const MessageListView = forwardRef<MessageListViewHandle, {
   onOpenReplyThread: (chatId: ChatID) => void
   onResendMessage: (messageId: MessageID) => void
   onReplyMessage: (message: ChatMessageRow) => void
+  onReplyThreadMessage: (message: ChatMessageRow) => void
+  onEditMessage: (message: ChatMessageRow) => void
+  onDeleteMessage: (message: ChatMessageRow) => void
+  onForwardMessage: (message: ChatMessageRow) => void
+  onAddReaction: (message: ChatMessageRow) => void
   onTogglePinMessage: (message: ChatMessageRow) => void
   pinnedMessageIds?: readonly string[]
   peer: InlinePeerRoute
   currentUserId: UserID
+  entityActions?: InlineMessageEntityActions
 }>(function MessageListView({
   rows,
   loading,
@@ -133,10 +143,16 @@ export const MessageListView = forwardRef<MessageListViewHandle, {
   onOpenReplyThread,
   onResendMessage,
   onReplyMessage,
+  onReplyThreadMessage,
+  onEditMessage,
+  onDeleteMessage,
+  onForwardMessage,
+  onAddReaction,
   onTogglePinMessage,
   pinnedMessageIds,
   peer,
   currentUserId,
+  entityActions,
 }, forwardedRef) {
   const { preferences, subscribeBeforeChange } =
     useInlineAppearancePreferences()
@@ -276,11 +292,12 @@ export const MessageListView = forwardRef<MessageListViewHandle, {
       recordReadiness("reported")
       return true
     }
+    if (loadingRef.current) {
+      recordReadiness("waiting-for-data")
+      return false
+    }
     if (rowCountRef.current === 0) {
-      if (
-        loadingRef.current ||
-        expectedInitialRowCountRef.current > 0
-      ) {
+      if (expectedInitialRowCountRef.current > 0) {
         recordReadiness("waiting-for-rows")
         return false
       }
@@ -345,6 +362,11 @@ export const MessageListView = forwardRef<MessageListViewHandle, {
     }
     didReportFirstLayout.current = true
     recordReadiness("reported")
+    log.debug("scroll.first_layout.ready", {
+      rowCount: rowCountRef.current,
+      restoreMode: restoreTarget.mode,
+      hasNewer: hasNewerRef.current,
+    })
     onFirstLayoutRef.current?.()
     return true
   }, [restoreTarget])
@@ -356,6 +378,11 @@ export const MessageListView = forwardRef<MessageListViewHandle, {
     }
     if (lastReportedBottom.current === next) return
     lastReportedBottom.current = next
+    log.trace("scroll.bottom.changed", {
+      logicalBottom: next,
+      hasNewer: hasNewerRef.current,
+      rowCount: rowCountRef.current,
+    })
     onBottomStateChangeRef.current?.(next)
   }, [])
 
@@ -729,13 +756,20 @@ export const MessageListView = forwardRef<MessageListViewHandle, {
         list.findItemIndex(offset + list.viewportSize),
       )
       const first = rows.at(0)
-      if (firstIndex < 8 && first && hasOlder && !loadingOlder) {
+      if (
+        !loading &&
+        firstIndex < 8 &&
+        first &&
+        hasOlder &&
+        !loadingOlder
+      ) {
         onLoadOlder(messageWindowCursor(first))
       }
       const last = rows.at(-1)
       if (
         lastIndex >= rows.length - 8 &&
         last &&
+        !loading &&
         hasNewer &&
         !loadingNewer
       ) {
@@ -759,6 +793,7 @@ export const MessageListView = forwardRef<MessageListViewHandle, {
     [
       hasNewer,
       hasOlder,
+      loading,
       loadingNewer,
       loadingOlder,
       onLoadNewer,
@@ -823,6 +858,11 @@ export const MessageListView = forwardRef<MessageListViewHandle, {
               onOpenReplyThread={onOpenReplyThread}
               onResendMessage={onResendMessage}
               onReplyMessage={onReplyMessage}
+              onReplyThreadMessage={onReplyThreadMessage}
+              onEditMessage={onEditMessage}
+              onDeleteMessage={onDeleteMessage}
+              onForwardMessage={onForwardMessage}
+              onAddReaction={onAddReaction}
               onTogglePinMessage={onTogglePinMessage}
               pinned={Boolean(
                 pinnedMessageIds?.includes(String(message.messageId)),
@@ -830,6 +870,7 @@ export const MessageListView = forwardRef<MessageListViewHandle, {
               peer={peer}
               currentUserId={currentUserId}
               messageStyle={messageStyle}
+              entityActions={entityActions}
             />
           )}
         </Virtualizer>

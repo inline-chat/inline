@@ -6,14 +6,11 @@ import {
 } from "react"
 import type { MessageEntities } from "@inline-chat/protocol/core"
 import { messageDraftPeer, type InlinePeerRoute } from "~/inline/data/peer"
-import { InlineCoreProtocolError } from "~/inline/core/InlineCoreRendererClient"
 import { useInlineMessageDrafts } from "~/inline/drafts/InlineMessageDraftsContext"
+import { inlineLog } from "~/inline/logging/InlineLogging"
 
 const SAVE_DELAY_MS = 300
-
-const isRetiredCoreOwner = (error: unknown) =>
-  error instanceof InlineCoreProtocolError &&
-  error.code === "owner-failed"
+const log = inlineLog.withScope("UI.Draft")
 
 export const useMessageDraftText = (peer: InlinePeerRoute) => {
   const drafts = useInlineMessageDrafts()
@@ -35,9 +32,7 @@ export const useMessageDraftText = (peer: InlinePeerRoute) => {
   const persist = useCallback(
     (value: string, valueEntities?: MessageEntities) =>
       drafts.update(draftPeer, value, valueEntities).catch((error) => {
-        if (!isRetiredCoreOwner(error)) {
-          console.error("Could not persist Inline message draft", error)
-        }
+        log.warn("ui.draft.persist.failed", { error })
       }),
     [draftPeer.peerKind, peer.peerId, drafts],
   )
@@ -68,9 +63,7 @@ export const useMessageDraftText = (peer: InlinePeerRoute) => {
         setEntitiesState(draft?.entities)
       })
       .catch((error) => {
-        if (!isRetiredCoreOwner(error)) {
-          console.error("Could not load Inline message draft", error)
-        }
+        log.warn("ui.draft.load.failed", { error })
       })
     return () => {
       active = false

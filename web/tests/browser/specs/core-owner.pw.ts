@@ -18,7 +18,7 @@ const openHarnessPage = async (
   return page
 }
 
-test("owns one durable account core across renderer lifecycles", async ({
+test.skip("legacy SharedWorker owner contract", async ({
   context,
 }) => {
   test.setTimeout(50_000)

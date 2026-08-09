@@ -1,4 +1,5 @@
 import type { InlineMediaCache } from "./cache/InlineMediaCache"
+import type { Log } from "@inline/log"
 
 export type InlineMediaResource =
   | {
@@ -18,6 +19,7 @@ export type InlineMediaFetcher = (
 export type InlineMediaLoaderOptions = {
   cache: InlineMediaCache
   fetcher?: InlineMediaFetcher
+  logger?: Log
 }
 
 export type InlineMediaLoadOptions = {
@@ -34,6 +36,45 @@ type PendingCacheRead = {
   operation: Promise<Blob | undefined>
 }
 
+const assertValidMediaKey = (key: string) => {
+  if (
+    typeof key !== "string" ||
+    key.length === 0 ||
+    key.length > 1_024
+  ) {
+    throw new TypeError("Invalid Inline media cache key")
+  }
+}
+
+const assertValidRemoteMediaUrl = (remoteUrl: string) => {
+  if (
+    typeof remoteUrl !== "string" ||
+    remoteUrl.length === 0 ||
+    remoteUrl.length > 16_384
+  ) {
+    throw new TypeError("Invalid Inline remote media URL")
+  }
+  try {
+    const base = globalThis.location?.href
+    const url = base
+      ? new URL(remoteUrl, base)
+      : new URL(remoteUrl)
+    if (url.protocol !== "https:" && url.protocol !== "http:") {
+      throw new TypeError("Invalid Inline remote media URL")
+    }
+  } catch (error) {
+    if (
+      error instanceof TypeError &&
+      error.message === "Invalid Inline remote media URL"
+    ) {
+      throw error
+    }
+    throw new TypeError("Invalid Inline remote media URL", {
+      cause: error,
+    })
+  }
+}
+
 export class InlineMediaLoadCancelled extends Error {
   constructor() {
     super("Inline media load was cancelled")
@@ -42,14 +83,15 @@ export class InlineMediaLoadCancelled extends Error {
 }
 
 /**
- * Account-owner media loader. The SharedWorker owns one instance, which makes
- * cache access and download deduplication origin-wide rather than per tab.
- * It returns bytes, never an object URL: blob URL lifetime belongs to the
- * renderer that displays those bytes.
+ * Account-owner media loader. The direct Alpha core owns one instance, so
+ * cache access and download deduplication share the account runtime without a
+ * worker coordination layer. It returns bytes, never an object URL: blob URL
+ * lifetime belongs to the renderer repository that displays those bytes.
  */
 export class InlineMediaLoader {
   private readonly cache: InlineMediaCache
   private readonly fetcher: InlineMediaFetcher
+  private readonly log: Log | undefined
   private readonly pending = new Map<
     string,
     PendingMediaLoad
@@ -62,9 +104,11 @@ export class InlineMediaLoader {
   constructor({
     cache,
     fetcher = globalThis.fetch.bind(globalThis),
+    logger,
   }: InlineMediaLoaderOptions) {
     this.cache = cache
     this.fetcher = fetcher
+    this.log = logger
   }
 
   load(
@@ -72,6 +116,8 @@ export class InlineMediaLoader {
     remoteUrl: string,
     options: InlineMediaLoadOptions = {},
   ): Promise<InlineMediaResource> {
+    assertValidMediaKey(key)
+    assertValidRemoteMediaUrl(remoteUrl)
     let pending = this.pending.get(key)
     if (!pending) {
       const controller = new AbortController()
@@ -110,6 +156,7 @@ export class InlineMediaLoader {
     key: string,
     options: InlineMediaLoadOptions = {},
   ): Promise<InlineMediaResource | undefined> {
+    assertValidMediaKey(key)
     const cached = await this.withOptionalCancellation(
       this.readCached(key),
       options.signal,
@@ -119,6 +166,11 @@ export class InlineMediaLoader {
   }
 
   cancelAll() {
+    if (this.pending.size > 0) {
+      this.log?.debug("media.load.cancelled", {
+        pendingCount: this.pending.size,
+      })
+    }
     for (const pending of this.pending.values()) {
       pending.controller.abort()
     }
@@ -134,6 +186,7 @@ export class InlineMediaLoader {
       const cached = await this.loadCached(key, { signal })
       this.throwIfCancelled(signal)
       if (cached) {
+        this.log?.debug("media.cache.hit")
         return cached
       }
 
@@ -144,17 +197,32 @@ export class InlineMediaLoader {
       })
       this.throwIfCancelled(signal)
       if (!response.ok) {
+        this.log?.warn("media.fetch.http_failed", {
+          status: response.status,
+        })
         return { kind: "remote", url: remoteUrl }
       }
       const blob = await response.blob()
       this.throwIfCancelled(signal)
-      await this.cache.put(key, blob).catch(() => undefined)
+      let persisted = true
+      try {
+        await this.cache.put(key, blob)
+      } catch (error) {
+        persisted = false
+        this.log?.warn("media.cache.write_failed", { error })
+      }
       this.throwIfCancelled(signal)
+      this.log?.debug("media.fetch.completed", {
+        byteCount: blob.size,
+        persisted,
+      })
       return { kind: "blob", blob }
-    } catch {
+    } catch (error) {
       if (signal.aborted) {
+        this.log?.debug("media.load.cancelled")
         throw new InlineMediaLoadCancelled()
       }
+      this.log?.warn("media.fetch.failed", { error })
       return { kind: "remote", url: remoteUrl }
     }
   }
@@ -162,7 +230,10 @@ export class InlineMediaLoader {
   private readCached(key: string) {
     let pending = this.pendingCacheReads.get(key)
     if (!pending) {
-      const operation = this.cache.get(key).catch(() => undefined)
+      const operation = this.cache.get(key).catch((error: unknown) => {
+        this.log?.warn("media.cache.read_failed", { error })
+        return undefined
+      })
       pending = { operation }
       this.pendingCacheReads.set(key, pending)
       const created = pending

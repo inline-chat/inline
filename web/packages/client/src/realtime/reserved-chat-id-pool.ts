@@ -25,7 +25,7 @@ export type ReservedChatIDConsumption<T> =
 export class ReservedChatIDPool {
   private readonly lowWatermark = 1
   private readonly targetCount = 3
-  private readonly log = new Log("ReservedChatIDPool")
+  private readonly log: Log
   private hydrated = false
   private hydrateTask: Promise<void> | null = null
   private refillTask: Promise<void> | null = null
@@ -34,7 +34,10 @@ export class ReservedChatIDPool {
   constructor(
     private readonly db: Db,
     private readonly realtime: Pick<RealtimeService, "mutate">,
-  ) {}
+    logger?: Log,
+  ) {
+    this.log = logger ?? db.logger.withScope("ReservedChatIDPool")
+  }
 
   consumeCached<T>(
     consumer: ReservationConsumer<T>,
@@ -53,7 +56,9 @@ export class ReservedChatIDPool {
     )
     const scheduleRefill = () => {
       void this.refillIfNeeded().catch((error: unknown) => {
-        this.log.warn("Failed to refill reserved chat IDs", error)
+        this.log.warn("reserved_chat_id_pool.refill.failed", {
+          error,
+        })
       })
     }
     void operation.then(scheduleRefill, scheduleRefill)

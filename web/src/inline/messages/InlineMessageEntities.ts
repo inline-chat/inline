@@ -31,9 +31,14 @@ const validEntityPayload = (value: unknown) => {
     case "threadTitle":
       return (
         typeof nested.spaceId === "bigint" &&
-        nested.spaceId > 0n &&
+        nested.spaceId >= 0n &&
         typeof nested.title === "string" &&
         nested.title.length <= 1_024
+      )
+    case "botCommand":
+      return (
+        typeof nested.botUserId === "bigint" &&
+        nested.botUserId >= 0n
       )
     default:
       return false
@@ -58,6 +63,8 @@ const payloadMatchesType = (
       return oneofKind === "thread"
     case MessageEntity_Type.THREAD_TITLE:
       return oneofKind === "threadTitle"
+    case MessageEntity_Type.BOT_COMMAND:
+      return oneofKind === "botCommand" || oneofKind === undefined
     default:
       return oneofKind === undefined
   }
@@ -75,7 +82,7 @@ const isUtf16Boundary = (text: string, offset: number) => {
   )
 }
 
-/** Validates untrusted renderer entity input at the SharedWorker boundary.
+/** Validates entity input at the account-owned draft/message boundary.
  * Offsets are protocol UTF-16 offsets, matching JavaScript string indices and
  * Inline Apple's NSString/NSRange entity contract. */
 export const isInlineMessageEntities = (

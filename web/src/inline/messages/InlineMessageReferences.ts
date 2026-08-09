@@ -8,7 +8,11 @@ import {
   type RealtimeService,
 } from "@inline/client/core"
 import type { InputPeer } from "@inline-chat/protocol/core"
-import type { ChatID, MessageID } from "@inline/ids"
+import {
+  parseInlineId,
+  type ChatID,
+  type MessageID,
+} from "@inline/ids"
 
 export type InlineMessageReferenceRequest = {
   peerId: InputPeer
@@ -28,6 +32,45 @@ export interface InlineMessageReferencesService {
 }
 
 const MAX_RESIDENT_REFERENCES = 500
+export const MAX_MESSAGE_REFERENCE_BATCH = 64
+
+const validateReferenceRequest = (
+  request: InlineMessageReferenceRequest,
+): InlineMessageReferenceRequest => {
+  const chatId = parseInlineId<"chat">(request?.chatId, {
+    positive: true,
+  })
+  const messageIds = Array.isArray(request?.messageIds)
+    ? request.messageIds.map((id) =>
+        parseInlineId<"message">(id, { positive: true }),
+      )
+    : []
+  const peer = request?.peerId?.type
+  const peerValid =
+    peer?.oneofKind === "user"
+      ? parseInlineId<"user">(peer.user.userId, {
+          positive: true,
+        }) != null
+      : peer?.oneofKind === "chat"
+        ? parseInlineId<"chat">(peer.chat.chatId, {
+            positive: true,
+          }) != null
+        : false
+  if (
+    chatId == null ||
+    !peerValid ||
+    messageIds.length === 0 ||
+    messageIds.length > MAX_MESSAGE_REFERENCE_BATCH ||
+    messageIds.some((id) => id == null)
+  ) {
+    throw new TypeError("Invalid Inline message reference request")
+  }
+  return {
+    peerId: request.peerId,
+    chatId,
+    messageIds: messageIds as MessageID[],
+  }
+}
 
 /** A bounded, renderer-safe side cache. It never joins Db's history query. */
 export class InlineMessageReferences
@@ -52,6 +95,7 @@ export class InlineMessageReferences
   getSnapshot = () => this.revision
 
   async load(request: InlineMessageReferenceRequest) {
+    request = validateReferenceRequest(request)
     const uniqueIds = Array.from(new Set(request.messageIds))
     const missing = uniqueIds.filter(
       (id) => !this.objects.has(messageKey(request.chatId, id)),
@@ -99,7 +143,9 @@ export const createOwnedMessageReferenceLoader = (
   db: Db,
   realtime: RealtimeService,
 ): InlineMessageReferenceLoader =>
-  async ({ peerId, chatId, messageIds }) => {
+  async (request) => {
+    const { peerId, chatId, messageIds } =
+      validateReferenceRequest(request)
     const keys = messageIds.map((id) => messageKey(chatId, id))
     const stored = await db.readStoredObjects(
       DbObjectKind.Message,

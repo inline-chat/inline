@@ -49,4 +49,19 @@ describe("inlineDownloadFileName", () => {
       totalBytes: 3,
     })
   })
+
+  it("rejects executable download URLs before opening a save surface", async () => {
+    const picker = vi.fn()
+    Object.defineProperty(window, "showSaveFilePicker", {
+      configurable: true,
+      value: picker,
+    })
+    const fetcher = vi.spyOn(globalThis, "fetch")
+
+    await expect(
+      downloadInlineMedia("javascript:alert(1)", "unsafe.txt"),
+    ).rejects.toThrow("Invalid Inline media download URL")
+    expect(picker).not.toHaveBeenCalled()
+    expect(fetcher).not.toHaveBeenCalled()
+  })
 })

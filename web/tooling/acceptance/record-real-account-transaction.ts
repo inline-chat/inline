@@ -24,6 +24,7 @@ const appOrigin = new URL(
 ).origin
 const selfUserId = Number(option("self-user-id"))
 const offlineMs = Number(option("offline-ms", "0"))
+const foregroundPage = option("foreground", "false") === "true"
 const outputPath = resolve(
   option(
     "output",
@@ -42,7 +43,7 @@ if (!Number.isFinite(offlineMs) || offlineMs < 0) {
 
 const connection = await CdpConnection.open(debuggerOrigin)
 let networkSessionIds: string[] = []
-let workerNetworkSessionId: string | undefined
+let realtimeNetworkSessionId: string | undefined
 let realtimeSocketCreated = false
 let realtimeSocketClosed = false
 let exceptions = 0
@@ -113,58 +114,19 @@ try {
     connection.call("Runtime.enable", {}, sessionId),
     connection.call("Page.enable", {}, sessionId),
     connection.call("Network.enable", {}, sessionId),
-    connection.call("Page.bringToFront", {}, sessionId),
-    connection.call(
-      "Emulation.setFocusEmulationEnabled",
-      { enabled: true },
-      sessionId,
-    ),
   ])
-  networkSessionIds = [sessionId]
-  for (const value of targetInfos) {
-    if (
-      !isRecord(value) ||
-      value.type !== "shared_worker" ||
-      typeof value.targetId !== "string" ||
-      typeof value.url !== "string" ||
-      new URL(value.url).origin !== appOrigin
-    ) {
-      continue
-    }
-    const workerAttached = await connection.call(
-      "Target.attachToTarget",
-      { targetId: value.targetId, flatten: true },
-    )
-    if (typeof workerAttached.sessionId !== "string") continue
-    const workerSessionId = workerAttached.sessionId
-    const workerReady = await Promise.race([
-      connection
-        .call("Runtime.enable", {}, workerSessionId)
-        .then(() =>
-          evaluate<{ holdsAccountLock: boolean }>(
-            workerSessionId,
-            `navigator.locks.query().then((snapshot) => ({
-              holdsAccountLock: snapshot.held.some(
-                (lock) => lock.name === ${JSON.stringify(`inline-core-account-${selfUserId}`)},
-              ),
-            }))`,
-            true,
-          ),
-        )
-        .catch(() => undefined),
-      Bun.sleep(500).then(() => undefined),
+  if (foregroundPage) {
+    await Promise.all([
+      connection.call("Page.bringToFront", {}, sessionId),
+      connection.call(
+        "Emulation.setFocusEmulationEnabled",
+        { enabled: true },
+        sessionId,
+      ),
     ])
-    if (workerReady?.holdsAccountLock !== true) continue
-    await connection.call("Network.enable", {}, workerSessionId)
-    networkSessionIds.push(workerSessionId)
-    workerNetworkSessionId = workerSessionId
-    break
   }
-  if (networkSessionIds.length !== 2) {
-    throw new Error(
-      "Could not attach the lock-holding Inline SharedWorker",
-    )
-  }
+  networkSessionIds = [sessionId]
+  realtimeNetworkSessionId = sessionId
   const setOffline = async (offline: boolean) => {
     await Promise.all(
       networkSessionIds.map((targetSessionId) =>
@@ -190,13 +152,13 @@ try {
   }
   connection.onMessage((message) => {
     if (
-      message.sessionId === workerNetworkSessionId &&
+      message.sessionId === realtimeNetworkSessionId &&
       message.method === "Network.webSocketCreated"
     ) {
       realtimeSocketCreated = true
     }
     if (
-      message.sessionId === workerNetworkSessionId &&
+      message.sessionId === realtimeNetworkSessionId &&
       message.method === "Network.webSocketClosed"
     ) {
       realtimeSocketClosed = true

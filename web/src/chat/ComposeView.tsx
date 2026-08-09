@@ -20,8 +20,10 @@ import {
 import type { InlineComposeDocument } from "./compose/InlineComposeDocument"
 import type { ChatMessageRow } from "./ChatRowListModel"
 import { ComposeReplyTargetView } from "./ComposeReplyTargetView"
+import { inlineLog } from "~/inline/logging/InlineLogging"
 
 const allUsers = () => true
+const log = inlineLog.withScope("UI.Compose")
 
 export function ComposeView({
   peer,
@@ -115,7 +117,7 @@ export function ComposeView({
     const cleared = await draft
       .clearIfUnchanged(submittedRevision)
       .catch((cause) => {
-        console.error("Could not clear Inline message draft", cause)
+        log.warn("ui.compose.draft_clear.failed", { error: cause })
         return false
       })
     if (cleared) editor.current?.clear()

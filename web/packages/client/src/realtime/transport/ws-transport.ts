@@ -33,7 +33,9 @@ export class WebSocketTransport implements Transport {
 
   async start() {
     if (this.state !== "idle") {
-      this.log.error("Not starting transport because state is not idle", this.state)
+      this.log.error("transport.start.rejected", {
+        state: this.state,
+      })
       return
     }
 
@@ -52,8 +54,11 @@ export class WebSocketTransport implements Transport {
       throw TransportError.notConnected()
     }
 
-    this.log.trace("sending message", message)
     const payload = ClientMessage.toBinary(message)
+    this.log.trace("transport.frame.sent", {
+      frameKind: message.body.oneofKind || "unknown",
+      byteLength: payload.byteLength,
+    })
     try {
       if (payload.buffer instanceof ArrayBuffer) {
         this.socket.send(new Uint8Array(payload.buffer, payload.byteOffset, payload.byteLength))
@@ -83,7 +88,9 @@ export class WebSocketTransport implements Transport {
       if (this.state !== "connecting") return
       if (this.socket !== socket) return
 
-      this.log.debug("Connection attempt timed out after 10 seconds")
+      this.log.debug("transport.connect.timed_out", {
+        timeoutMs: CONNECTION_TIMEOUT_MS,
+      })
       socket.close()
       void this.handleError(new Error("Connection attempt timed out"))
     }, CONNECTION_TIMEOUT_MS)
@@ -96,15 +103,17 @@ export class WebSocketTransport implements Transport {
   }
 
   private async openConnection() {
-    this.log.trace("Opening connection")
+    this.log.trace("transport.connect.started", {})
 
     if (this.state === "idle") {
-      this.log.debug("Not opening connection because state is idle")
+      this.log.debug("transport.connect.skipped", {
+        state: this.state,
+      })
       return
     }
 
     if (typeof WebSocket === "undefined") {
-      this.log.error("WebSocket is not available in this environment")
+      this.log.error("transport.unavailable", {})
       await this.setDisconnected("websocket-unavailable")
       return
     }
@@ -137,13 +146,15 @@ export class WebSocketTransport implements Transport {
 
   private async handleMessage(socket: WebSocket, event: MessageEvent) {
     if (this.socket !== socket) {
-      this.log.trace("Ignoring message for stale WebSocket")
+      this.log.trace("transport.frame.stale", {})
       return
     }
 
     const { data } = event
     if (typeof data === "string") {
-      this.log.warn("Received string frame, expected binary data")
+      this.log.warn("transport.frame.invalid_type", {
+        actualType: "string",
+      })
       return
     }
 
@@ -152,7 +163,7 @@ export class WebSocketTransport implements Transport {
       const message = ServerProtocolMessage.fromBinary(payload)
       await this.events.send({ type: "message", message })
     } catch (error) {
-      this.log.error("Failed to decode message", error)
+      this.log.error("transport.frame.decode_failed", { error })
     }
   }
 
@@ -167,14 +178,16 @@ export class WebSocketTransport implements Transport {
 
   private async handleError(error: unknown, socket?: WebSocket) {
     if (socket && this.socket !== socket) {
-      this.log.trace("Ignoring error for stale WebSocket", error)
+      this.log.trace("transport.error.stale", {})
       return
     }
 
-    this.log.error("WebSocket connection error", error)
+    this.log.warn("transport.socket.interrupted", { error })
 
     if (this.state === "idle") {
-      this.log.trace("Ignoring error because state is idle")
+      this.log.trace("transport.error.ignored", {
+        state: this.state,
+      })
       return
     }
 
@@ -186,17 +199,22 @@ export class WebSocketTransport implements Transport {
 
   private async handleClose(socket: WebSocket, event: CloseEvent) {
     if (this.socket !== socket) {
-      this.log.trace("Ignoring close for stale WebSocket")
+      this.log.trace("transport.close.stale", {})
       return
     }
 
-    this.log.trace("WebSocket closed", event.code, event.reason)
-    await this.handleError(new Error(`WebSocket closed ${event.code} ${event.reason}`), socket)
+    this.log.trace("transport.socket.closed", {
+      code: event.code,
+    })
+    await this.handleError(
+      new Error(`WebSocket closed with code ${event.code}`),
+      socket,
+    )
   }
 
   private async connectionDidOpen(socket: WebSocket) {
     if (this.socket !== socket) {
-      this.log.trace("Ignoring didOpen for stale WebSocket")
+      this.log.trace("transport.open.stale", {})
       return
     }
 
@@ -207,7 +225,7 @@ export class WebSocketTransport implements Transport {
   private async setConnected() {
     if (this.state === "connected") return
     this.state = "connected"
-    this.log.trace("Transport connected")
+    this.log.trace("transport.connected", {})
     await this.events.send({ type: "connected" })
   }
 
@@ -220,7 +238,7 @@ export class WebSocketTransport implements Transport {
   private async setIdle() {
     if (this.state === "idle") return
     this.state = "idle"
-    this.log.trace("Transport stopping")
+    this.log.trace("transport.stopping", {})
     await this.events.send({ type: "stopping" })
   }
 

@@ -160,7 +160,7 @@ describe("Inline SharedWorker module boundary", () => {
     ).toBe(false)
   })
 
-  it("uses only the SharedWorker registry in the product runtime", () => {
+  it("uses the direct account core in the product runtime", () => {
     const entry = resolve(
       webRoot,
       "src/inline/runtime/InlineRuntimeCore.ts",
@@ -172,13 +172,13 @@ describe("Inline SharedWorker module boundary", () => {
     )
 
     expect(specifiers).not.toContain(
-      "../core/InlineBroadcastCoreRegistry",
+      "../core/InlineCoreRendererRegistry",
     )
     expect(paths).not.toContain(
-      "src/inline/core/InlineBroadcastCoreRegistry.ts",
+      "src/inline/core/createInlineCoreRendererClient.ts",
     )
     expect(paths).toContain(
-      "src/inline/core/createInlineCoreRendererClient.ts",
+      "src/inline/core/InlineAccountCore.ts",
     )
   })
 })

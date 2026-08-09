@@ -66,6 +66,21 @@ export interface Transaction<Context = unknown> {
   readonly blockers?: readonly TransactionBlocker[]
   /** Dependencies made durable by a successful apply. */
   readonly satisfiedBlockersOnSuccess?: readonly TransactionBlocker[]
+  /** Capture owner-local ordering state before this execution is queued. */
+  beforeExecute?: (db: Db) => void
+  /**
+   * Update non-durable owner state only after the database recipe commits.
+   * This hook must not throw and must not perform network or storage work.
+   */
+  afterCommit?: (
+    result: RpcResult["result"] | undefined,
+    db: Db,
+  ) => void
+  /** Resident-window policy applied after local durable acceptance. */
+  readonly messageWindowIntent?: {
+    type: "promote-latest"
+    chatId: ChatID
+  }
 
   input(context: Context): RpcCall["input"]
   /**
@@ -85,8 +100,8 @@ export interface Transaction<Context = unknown> {
    * metadata. Network or other async work does not belong in this hook.
    */
   optimistic?: (db: Db, auth: AuthStore) => void
-  failed?: (error: TransactionError, db: Db, auth: AuthStore) => Promise<void> | void
-  cancelled?: (db: Db, auth: AuthStore) => Promise<void> | void
+  failed?: (error: TransactionError, db: Db, auth: AuthStore) => void
+  cancelled?: (db: Db, auth: AuthStore) => void
   describe?: () => string
 }
 

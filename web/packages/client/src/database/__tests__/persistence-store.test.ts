@@ -122,13 +122,14 @@ const createMemoryPersistenceStore = () => {
       rows = next
     },
   )
+  const close = vi.fn(async () => {})
   const store: InlinePersistenceStore = {
     open: async () => {},
     collection,
     write,
-    close: async () => {},
+    close,
   }
-  return { collection, store, write }
+  return { close, collection, store, write }
 }
 
 describe("Inline persistence store boundary", () => {
@@ -245,5 +246,85 @@ describe("Inline persistence store boundary", () => {
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+
+  it("closes the durable handle even when pending persistence failed", async () => {
+    const persistence = createMemoryPersistenceStore()
+    const db = new Db({
+      autoHydrate: false,
+      persistenceStore: persistence.store,
+    })
+    persistence.write.mockRejectedValueOnce(
+      new Error("replica write failed"),
+    )
+
+    db.insert({
+      kind: DbObjectKind.User,
+      id: userId(7),
+      firstName: "Dena",
+    })
+
+    await expect(db.closePersistence()).rejects.toThrow(
+      "Inline database persistence failed",
+    )
+    expect(persistence.close).toHaveBeenCalledOnce()
+  })
+
+  it("drains accepted commits and rejects new writers before closing", async () => {
+    const persistence = createMemoryPersistenceStore()
+    let signalWriteStarted!: () => void
+    const writeStarted = new Promise<void>((resolve) => {
+      signalWriteStarted = resolve
+    })
+    let finishWrite!: () => void
+    const writeFinished = new Promise<void>((resolve) => {
+      finishWrite = resolve
+    })
+    persistence.write.mockImplementationOnce(async () => {
+      signalWriteStarted()
+      await writeFinished
+    })
+    const db = new Db({
+      autoHydrate: false,
+      persistenceStore: persistence.store,
+    })
+
+    const accepted = db.commit(() => {
+      db.insert({
+        kind: DbObjectKind.User,
+        id: userId(7),
+        firstName: "Dena",
+      })
+    })
+    await writeStarted
+    const closing = db.closePersistence()
+
+    await Promise.resolve()
+    expect(persistence.close).not.toHaveBeenCalled()
+    await expect(
+      db.commit(() => {
+        db.insert({
+          kind: DbObjectKind.User,
+          id: userId(8),
+          firstName: "Late",
+        })
+      }),
+    ).rejects.toThrow("Inline database is closing")
+
+    finishWrite()
+    await expect(accepted).resolves.toBeUndefined()
+    await expect(closing).resolves.toBeUndefined()
+    expect(persistence.close).toHaveBeenCalledOnce()
+
+    await db.openPersistence()
+    await expect(
+      db.commit(() => {
+        db.insert({
+          kind: DbObjectKind.User,
+          id: userId(9),
+          firstName: "Reopened",
+        })
+      }),
+    ).resolves.toBeUndefined()
   })
 })

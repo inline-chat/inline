@@ -30,6 +30,7 @@ export class SendMessageTransaction implements Transaction<SendMessageContext> {
     type: "send_message",
     replayPolicy: "idempotent" as const,
   }
+  readonly messageWindowIntent
   readonly context: SendMessageContext
 
   constructor(context: SendMessageContext) {
@@ -39,6 +40,10 @@ export class SendMessageTransaction implements Transaction<SendMessageContext> {
       temporaryMessageId: context.temporaryMessageId ?? generateTempId(),
       temporarySendDate:
         context.temporarySendDate ?? Math.floor(Date.now() / 1000),
+    }
+    this.messageWindowIntent = {
+      type: "promote-latest" as const,
+      chatId: this.context.chatId,
     }
   }
 
@@ -96,7 +101,7 @@ export class SendMessageTransaction implements Transaction<SendMessageContext> {
     applyUpdates(db, result.sendMessage.updates)
   }
 
-  async failed(_error: unknown, db: Db, _auth: AuthStore): Promise<void> {
+  failed(_error: unknown, db: Db, _auth: AuthStore) {
     const messageId = this.context.temporaryMessageId
     if (messageId == null) return
     const ref = db.ref(DbObjectKind.Message, messageKey(this.context.chatId, messageId))
@@ -109,7 +114,7 @@ export class SendMessageTransaction implements Transaction<SendMessageContext> {
     }
   }
 
-  async cancelled(db: Db, _auth: AuthStore): Promise<void> {
+  cancelled(db: Db, _auth: AuthStore) {
     const messageId = this.context.temporaryMessageId
     if (messageId == null) return
     db.delete(db.ref(DbObjectKind.Message, messageKey(this.context.chatId, messageId)))

@@ -1,4 +1,7 @@
-import type { RpcResult } from "@inline-chat/protocol/core"
+import type {
+  MessageActionResponseUi,
+  RpcResult,
+} from "@inline-chat/protocol/core"
 import type {
   ChatID,
   MessageID,
@@ -33,9 +36,24 @@ export interface RealtimeService {
     chatId: ChatID,
     messageId: MessageID,
   ): Promise<RpcResult["result"] | undefined>
+  /** Cancel a queued or failed durable send before it is server-confirmed. */
+  cancelPendingMessage?(
+    chatId: ChatID,
+    messageId: MessageID,
+  ): Promise<boolean>
   onConnectionState(
     listener: (state: RealtimeConnectionState) => void,
   ): () => void
+  /** Await the bot's asynchronous UI response after invoking a message action. */
+  waitForMessageActionAnswer?(
+    interactionId: bigint,
+    options?: { timeoutMs?: number },
+  ): Promise<MessageActionAnswer | undefined>
+}
+
+export type MessageActionAnswer = {
+  interactionId: bigint
+  ui?: MessageActionResponseUi
 }
 
 export type CreateThreadInput = {

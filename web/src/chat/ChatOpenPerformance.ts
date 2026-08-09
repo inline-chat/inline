@@ -1,5 +1,7 @@
 import type { MessageID } from "@inline/ids"
+import type { Log } from "@inline/log"
 import type { InlinePeerRoute } from "../inline/data/peer"
+import { inlineLog } from "../inline/logging/InlineLogging"
 
 export type ChatOpenTraceSource = "latest" | "around" | "missing"
 export type ChatOpenTraceOutcome = "preparing" | "painted" | "failed"
@@ -60,6 +62,7 @@ export class ChatOpenPerformance {
   constructor(
     private readonly clock: ChatOpenPerformanceClock = browserClock(),
     private readonly maxTraces = 32,
+    private readonly log?: Log,
   ) {}
 
   begin(peer: InlinePeerRoute, targetMessageId?: MessageID) {
@@ -115,6 +118,19 @@ export class ChatOpenPerformance {
     if (!trace || trace.firstPaintAt != null) return
     this.mark(id, "firstPaintAt", "inline.chat-open.first-paint")
     trace.outcome = "painted"
+    const snapshot = this.snapshot(trace)
+    this.log?.debug("chat_open.painted", {
+      peerKind: snapshot.peerKind,
+      hasTargetMessage: snapshot.hasTargetMessage,
+      source: snapshot.source,
+      preparedMessageCount: snapshot.preparedMessageCount,
+      promotedMediaCount: snapshot.promotedMediaCount,
+      renderedMessageCount: snapshot.renderedMessageCount,
+      cacheReadyMs: snapshot.cacheReadyMs,
+      projectionReadyMs: snapshot.projectionReadyMs,
+      firstLayoutMs: snapshot.firstLayoutMs,
+      firstPaintMs: snapshot.firstPaintMs,
+    })
   }
 
   markFailed(
@@ -125,6 +141,11 @@ export class ChatOpenPerformance {
     if (!trace || trace.outcome !== "preparing") return
     trace.outcome = "failed"
     trace.failurePhase = failurePhase
+    this.log?.warn("chat_open.failed", {
+      peerKind: trace.peerKind,
+      hasTargetMessage: trace.hasTargetMessage,
+      failurePhase,
+    })
   }
 
   get(id: string): ChatOpenTraceSnapshot | undefined {
@@ -163,4 +184,8 @@ export class ChatOpenPerformance {
   }
 }
 
-export const chatOpenPerformance = new ChatOpenPerformance()
+export const chatOpenPerformance = new ChatOpenPerformance(
+  browserClock(),
+  32,
+  inlineLog.withScope("Performance.ChatOpen"),
+)

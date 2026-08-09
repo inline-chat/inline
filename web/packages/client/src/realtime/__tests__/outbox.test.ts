@@ -74,9 +74,27 @@ describe("durable transaction outbox", () => {
     vi.unstubAllGlobals()
   })
 
+  it("rejects malformed resend identities before realtime work", async () => {
+    const transport = new MockTransport()
+    const client = new RealtimeClient({
+      auth: new AuthStore(),
+      db: new Db({ autoHydrate: false, persistence: false }),
+      transport,
+      sync: false,
+    })
+
+    await expect(
+      client.resendMessage(chatId(0), messageId(1)),
+    ).rejects.toThrow("Invalid Inline failed-message identity")
+    await expect(
+      client.resendMessage(chatId(10), messageId(0)),
+    ).rejects.toThrow("Invalid Inline failed-message identity")
+    expect(transport.sent).toEqual([])
+  })
+
   it("rolls the optimistic message back when the outbox cannot persist", async () => {
     const auth = new AuthStore()
-    auth.login({ token: "token", userId: userId(7) })
+    await auth.login({ token: "token", userId: userId(7) })
     const db = new Db({
       autoHydrate: false,
       storageByKind: {
@@ -97,6 +115,7 @@ describe("durable transaction outbox", () => {
       transport: new MockTransport(),
       sync: false,
     })
+    await client.start()
 
     await expect(
       client.execute(
@@ -128,6 +147,7 @@ describe("durable transaction outbox", () => {
         DbObjectKind.PendingTransaction,
       ),
     ).toEqual([])
+    await client.stop()
   })
 
   it("captures dialog rollback state before persisting its optimistic outbox", async () => {
@@ -457,6 +477,87 @@ describe("durable transaction outbox", () => {
       message: "Survives restart",
       status: "sent",
     })
+    await secondClient.stop()
+  })
+
+  it("fails startup instead of stranding an outbox row when restore persistence fails", async () => {
+    const pendingRows = new Map<string, PendingTransaction>()
+    const messageRows = new Map<string, Message>()
+    let failNextMessagePut = false
+    const pendingStorage: CollectionStorage<PendingTransaction> = {
+      init: async () => undefined,
+      get: async (id) => pendingRows.get(id),
+      getAll: async () => Array.from(pendingRows.values()),
+      put: async (record) => {
+        pendingRows.set(record.id, record)
+      },
+      delete: async (id) => {
+        pendingRows.delete(id)
+      },
+    }
+    const messageStorage: CollectionStorage<Message> = {
+      init: async () => undefined,
+      get: async (id) => messageRows.get(id),
+      getAll: async () => Array.from(messageRows.values()),
+      put: async (message) => {
+        if (failNextMessagePut) {
+          failNextMessagePut = false
+          throw new Error("message replica unavailable")
+        }
+        messageRows.set(message.id, message)
+      },
+      delete: async (id) => {
+        messageRows.delete(id)
+      },
+    }
+    const createDb = () =>
+      new Db({
+        autoHydrate: false,
+        persistence: false,
+        storageByKind: {
+          [DbObjectKind.PendingTransaction]: pendingStorage,
+          [DbObjectKind.Message]: messageStorage,
+        },
+      })
+
+    const firstClient = new RealtimeClient({
+      auth: new AuthStore(),
+      db: createDb(),
+      transport: new MockTransport(),
+      sync: false,
+    })
+    await firstClient.startSession({ token: "token", userId: userId(7) })
+    const firstResult = firstClient.execute(
+      sendMessage({
+        chatId: chatId(10),
+        peerId,
+        text: "restore me",
+      }),
+    )
+    void firstResult.catch(() => undefined)
+    await waitFor(() => pendingRows.size === 1)
+    await firstClient.stop()
+
+    const secondTransport = new MockTransport()
+    const secondClient = new RealtimeClient({
+      auth: new AuthStore(),
+      db: createDb(),
+      transport: secondTransport,
+      sync: false,
+    })
+    failNextMessagePut = true
+    await expect(
+      secondClient.startSession({
+        token: "token",
+        userId: userId(7),
+      }),
+    ).rejects.toThrow("message replica unavailable")
+    expect(pendingRows.size).toBe(1)
+
+    await secondClient.start()
+    await connectAndOpen(secondTransport)
+    await waitFor(() => secondTransport.sent.some(rpcCall))
+    expect(pendingRows.size).toBe(1)
     await secondClient.stop()
   })
 
@@ -791,6 +892,104 @@ describe("durable transaction outbox", () => {
       message: "Retry exactly once",
       status: MessageSendingStatus.Sent,
     })
+    await client.stop()
+  })
+
+  it("keeps the message and outbox failure transition atomic", async () => {
+    vi.stubGlobal("indexedDB", new IDBFactory())
+    vi.stubGlobal("IDBKeyRange", IDBKeyRange)
+    const namespace = `outbox-failure-${crypto.randomUUID()}`
+    const db = new Db({
+      autoHydrate: false,
+      storageNamespace: namespace,
+    })
+    const transport = new MockTransport()
+    const client = new RealtimeClient({
+      auth: new AuthStore(),
+      db,
+      transport,
+      sync: false,
+    })
+    await client.startSession({ token: "token", userId: userId(7) })
+    await connectAndOpen(transport)
+
+    const result = client.execute(
+      sendMessage({
+        chatId: chatId(10),
+        peerId,
+        text: "Failure state is all or nothing",
+      }),
+    )
+    await waitFor(() => transport.sent.filter(rpcCall).length === 1)
+    const request = transport.sent.find(rpcCall)
+    if (!request) throw new Error("Missing failed send request")
+
+    const [optimistic] = db.queryCollection<
+      DbObjectKind.Message,
+      Message,
+      DbQueryPlanType.Objects
+    >(DbQueryPlanType.Objects, DbObjectKind.Message)
+    const [outbox] = db.queryCollection<
+      DbObjectKind.PendingTransaction,
+      PendingTransaction,
+      DbQueryPlanType.Objects
+    >(
+      DbQueryPlanType.Objects,
+      DbObjectKind.PendingTransaction,
+    )
+    expect(optimistic?.status).toBe(MessageSendingStatus.Sending)
+    expect(outbox?.status).toBe("pending")
+
+    vi.spyOn(
+      IDBObjectStore.prototype,
+      "put",
+    ).mockImplementationOnce(() => {
+      throw new DOMException("disk full", "QuotaExceededError")
+    })
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 2n,
+        body: {
+          oneofKind: "rpcError",
+          rpcError: {
+            reqMsgId: request.id,
+            code: 400,
+            errorCode: RpcError_Code.BAD_REQUEST,
+            message: "SEND_FAILED",
+          },
+        },
+      }),
+    )
+    await expect(result).rejects.toBeDefined()
+
+    expect(
+      db.get(db.ref(DbObjectKind.Message, optimistic!.id))?.status,
+    ).toBe(MessageSendingStatus.Sending)
+    expect(
+      db.get(
+        db.ref(DbObjectKind.PendingTransaction, outbox!.id),
+      )?.status,
+    ).toBe("pending")
+
+    const reloaded = new Db({
+      autoHydrate: false,
+      storageNamespace: namespace,
+    })
+    await reloaded.hydrateKinds([DbObjectKind.PendingTransaction])
+    await reloaded.hydrateMessageWindow(chatId(10), { limit: 50 })
+    expect(
+      reloaded.get(
+        reloaded.ref(DbObjectKind.Message, optimistic!.id),
+      )?.status,
+    ).toBe(MessageSendingStatus.Sending)
+    expect(
+      reloaded.get(
+        reloaded.ref(
+          DbObjectKind.PendingTransaction,
+          outbox!.id,
+        ),
+      )?.status,
+    ).toBe("pending")
     await client.stop()
   })
 

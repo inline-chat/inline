@@ -71,6 +71,13 @@ export class InlinePersistenceCapabilityError extends Error {
   }
 }
 
+export class InlinePersistenceClosedError extends Error {
+  constructor() {
+    super("Inline persistence is closed")
+    this.name = "InlinePersistenceClosedError"
+  }
+}
+
 class InlineStartupPersistenceCollection<K extends DbObjectKind>
   implements InlinePersistenceCollection<DbModels[K]>
 {
@@ -191,6 +198,7 @@ export class InlineStartupPersistenceStore
   implements InlinePersistenceStore
 {
   private selectionPromise: Promise<InlinePersistenceStore> | null = null
+  private operationsAllowed = true
   private readonly collections = new Map<
     DbObjectKind,
     InlinePersistenceCollection<any>
@@ -206,6 +214,7 @@ export class InlineStartupPersistenceStore
   }
 
   async open(): Promise<void> {
+    this.operationsAllowed = true
     await this.selectedStore()
   }
 
@@ -223,6 +232,7 @@ export class InlineStartupPersistenceStore
   }
 
   async close() {
+    this.operationsAllowed = false
     const selection = this.selectionPromise
     this.selectionPromise = null
     if (selection) {
@@ -233,6 +243,9 @@ export class InlineStartupPersistenceStore
   }
 
   selectedStore(): Promise<InlinePersistenceStore> {
+    if (!this.operationsAllowed) {
+      return Promise.reject(new InlinePersistenceClosedError())
+    }
     if (!this.selectionPromise) {
       this.selectionPromise = this.selectStore()
     }

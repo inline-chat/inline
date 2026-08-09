@@ -30,6 +30,8 @@ type VisibleMessageAnchor = {
   top: number
 }
 
+const productSeedHarnessPath = "/__inline-harness/product-seed"
+
 const installFirstFrameTrace = async (context: BrowserContext) => {
   await context.addInitScript(() => {
     Object.defineProperty(window.navigator, "onLine", {
@@ -136,6 +138,14 @@ const paintFrames = (page: Page, count = 2) =>
     count,
   )
 
+const waitForPresentedChat = async (page: Page, path: string) => {
+  await expect(page).toHaveURL(path)
+  await expect(
+    page.locator("[data-inline-route-presentation]"),
+  ).toHaveCount(0)
+  await paintFrames(page)
+}
+
 const focusByTab = async (
   page: Page,
   target: ReturnType<Page["locator"]>,
@@ -222,7 +232,7 @@ test("opens cached product routes as coherent first frames", async ({
     if (message.type() === "error") browserErrors.push(message.text())
   })
 
-  await page.goto("/login")
+  await page.goto(productSeedHarnessPath)
   const seed = await page.evaluate<ProductRouteSeed>(`(async () => {
     const harness = await import("/src/testing/product/InlineProductRouteBrowserHarnessPage.ts")
     return await harness.seedInlineProductRouteCache()
@@ -266,6 +276,7 @@ test("opens cached product routes as coherent first frames", async ({
 
   await resetFrameTrace(page)
   await page.locator(`[data-inline-sidebar] a[href="${seed.alphaPath}"]`).click()
+  await waitForPresentedChat(page, seed.alphaPath)
   await expect(
     page.locator("[data-inline-app-detail]").getByText("First cached message"),
   ).toBeVisible()
@@ -332,11 +343,12 @@ test("opens cached product routes as coherent first frames", async ({
     .getByRole("button", { name: "Forward" })
   await expect(allChatsForward).toBeEnabled()
   await allChatsForward.click()
-  await expect(page).toHaveURL(seed.alphaPath)
+  await waitForPresentedChat(page, seed.alphaPath)
   await expect(photoSource).toBeVisible()
 
   await resetFrameTrace(page)
   await page.locator(`[data-inline-sidebar] a[href="${seed.betaPath}"]`).click()
+  await waitForPresentedChat(page, seed.betaPath)
   await expect(
     page.locator("[data-inline-app-detail]").getByText("Second cached message"),
   ).toBeVisible()
@@ -353,6 +365,7 @@ test("opens cached product routes as coherent first frames", async ({
 
   await resetFrameTrace(page)
   await page.goBack()
+  await waitForPresentedChat(page, seed.alphaPath)
   await expect(
     page.locator("[data-inline-app-detail]").getByText("First cached message"),
   ).toBeVisible()
@@ -413,7 +426,7 @@ test("preserves a bounded real-route window through resize and repeated switchin
     }
   })
 
-  await page.goto("/login")
+  await page.goto(productSeedHarnessPath)
   const seed = await page.evaluate<ProductRouteSeed>(`(async () => {
     const harness = await import("/src/testing/product/InlineProductRouteBrowserHarnessPage.ts")
     return await harness.seedInlineProductRouteCache()
@@ -422,11 +435,12 @@ test("preserves a bounded real-route window through resize and repeated switchin
 
   await page.goto("/chats")
   await page.locator(`[data-inline-sidebar] a[href="${seed.alphaPath}"]`).click()
+  await waitForPresentedChat(page, seed.alphaPath)
   const detail = page.locator("[data-inline-app-detail]")
   await expect(detail.getByText("First cached message")).toBeVisible()
   await expect(
-    detail.locator('[data-inline-chat-message-count="60"]'),
-  ).toBeVisible()
+    detail.locator("[data-inline-chat-message-count]"),
+  ).toHaveAttribute("data-inline-chat-message-count", "60")
 
   const viewport = detail.locator('[data-inline-message-list="viewport"]')
   await viewport.evaluate((element) => {
@@ -450,12 +464,14 @@ test("preserves a bounded real-route window through resize and repeated switchin
   expect(Math.abs(afterResize!.top - beforeResize!.top)).toBeLessThanOrEqual(1)
 
   await page.locator(`[data-inline-sidebar] a[href="${seed.betaPath}"]`).click()
+  await waitForPresentedChat(page, seed.betaPath)
   await expect(detail.getByText("Second cached message")).toBeVisible()
   await expect(
-    detail.locator('[data-inline-chat-message-count="60"]'),
-  ).toBeVisible()
+    detail.locator("[data-inline-chat-message-count]"),
+  ).toHaveAttribute("data-inline-chat-message-count", "60")
 
   await page.goBack()
+  await waitForPresentedChat(page, seed.alphaPath)
   await expect(
     detail.locator(`[data-message-id="${beforeResize!.messageId}"]`),
   ).toBeVisible()
@@ -465,11 +481,13 @@ test("preserves a bounded real-route window through resize and repeated switchin
   expect(Math.abs(restored!.top - afterResize!.top)).toBeLessThanOrEqual(1)
 
   await page.goForward()
+  await waitForPresentedChat(page, seed.betaPath)
   await expect(detail.getByText("Second cached message")).toBeVisible()
 
   for (let index = 0; index < 3; index += 1) {
     await resetFrameTrace(page)
     await page.locator(`[data-inline-sidebar] a[href="${seed.alphaPath}"]`).click()
+    await waitForPresentedChat(page, seed.alphaPath)
     await expect(detail.getByRole("heading", { name: "Alpha thread" })).toBeVisible()
     await expect.poll(() =>
       detail.locator("[data-message-id]").count(),
@@ -486,6 +504,7 @@ test("preserves a bounded real-route window through resize and repeated switchin
 
     await resetFrameTrace(page)
     await page.locator(`[data-inline-sidebar] a[href="${seed.betaPath}"]`).click()
+    await waitForPresentedChat(page, seed.betaPath)
     await expect(detail.getByRole("heading", { name: "Beta thread" })).toBeVisible()
     await expect.poll(() =>
       detail.locator("[data-message-id]").count(),
@@ -500,6 +519,36 @@ test("preserves a bounded real-route window through resize and repeated switchin
       ),
     ).toBe(false)
   }
+
+  await page.locator(`[data-inline-sidebar] a[href="${seed.alphaPath}"]`).click()
+  await waitForPresentedChat(page, seed.alphaPath)
+  await expect(
+    detail.locator(`[data-message-id="${seed.alphaNewestMessageId}"]`),
+  ).toHaveCount(0)
+  const latestViewport = detail.locator(
+    '[data-inline-message-list="viewport"]',
+  )
+  await latestViewport.evaluate((element) => {
+    element.dispatchEvent(
+      new WheelEvent("wheel", { bubbles: true, deltaY: -1 }),
+    )
+    element.scrollTop = Math.max(
+      0,
+      (element.scrollHeight - element.clientHeight) * 0.3,
+    )
+  })
+  const latestButton = detail.getByRole("button", {
+    name: "Return to latest messages",
+  })
+  await expect(latestButton).toBeVisible()
+  await latestButton.click()
+  await expect.poll(() => latestViewport.getAttribute(
+    "data-inline-logical-bottom",
+  )).toBe("true")
+  await expect(
+    detail.locator(`[data-message-id="${seed.alphaNewestMessageId}"]`),
+  ).toBeVisible()
+  await expect(latestButton).toHaveCount(0)
 
   expect(remoteRequests).toEqual([])
   expect(browserErrors).toEqual([])
@@ -525,18 +574,20 @@ test("reloads a cached chat offline and persists logout", async ({
     if (message.type() === "error") browserErrors.push(message.text())
   })
 
-  await page.goto("/login")
+  await page.goto(productSeedHarnessPath)
   const seed = await page.evaluate<ProductRouteSeed>(`(async () => {
     const harness = await import("/src/testing/product/InlineProductRouteBrowserHarnessPage.ts")
     return await harness.seedInlineProductRouteCache()
   })()`)
 
   await page.goto(seed.alphaPath)
+  await waitForPresentedChat(page, seed.alphaPath)
   const detail = page.locator("[data-inline-app-detail]")
   await expect(detail.getByText("First cached message")).toBeVisible()
   await expect(detail.getByAltText("Photo")).toHaveAttribute("src", /^blob:/)
 
   await page.reload()
+  await waitForPresentedChat(page, seed.alphaPath)
   await expect(detail.getByText("First cached message")).toBeVisible()
   await expect(detail.getByAltText("Photo")).toHaveAttribute("src", /^blob:/)
   const reloadFrames = framesForPath(await frameTrace(page), seed.alphaPath)
@@ -603,12 +654,13 @@ test("accepts primary dialog actions locally while offline", async ({
     if (message.type() === "error") browserErrors.push(message.text())
   })
 
-  await page.goto("/login")
+  await page.goto(productSeedHarnessPath)
   const seed = await page.evaluate<ProductRouteSeed>(`(async () => {
     const harness = await import("/src/testing/product/InlineProductRouteBrowserHarnessPage.ts")
     return await harness.seedInlineProductRouteCache()
   })()`)
   await page.goto(seed.alphaPath)
+  await waitForPresentedChat(page, seed.alphaPath)
   await expect(
     page.locator("[data-inline-app-detail]").getByText("First cached message"),
   ).toBeVisible()
@@ -706,7 +758,7 @@ test("keeps the primary Mac-shaped actions keyboard operable", async ({
     if (message.type() === "error") browserErrors.push(message.text())
   })
 
-  await page.goto("/login")
+  await page.goto(productSeedHarnessPath)
   const seed = await page.evaluate<ProductRouteSeed>(`(async () => {
     const harness = await import("/src/testing/product/InlineProductRouteBrowserHarnessPage.ts")
     return await harness.seedInlineProductRouteCache()
@@ -742,7 +794,7 @@ test("keeps the primary Mac-shaped actions keyboard operable", async ({
   const alphaLink = alphaRow.getByRole("link", { name: /Alpha thread/ })
   await focusByTab(page, alphaLink)
   await page.keyboard.press("Enter")
-  await expect(page).toHaveURL(seed.alphaPath)
+  await waitForPresentedChat(page, seed.alphaPath)
   await expect(page.getByText("First cached message").first()).toBeVisible()
 
   const more = page
@@ -753,6 +805,9 @@ test("keeps the primary Mac-shaped actions keyboard operable", async ({
   await expect(page.getByRole("menuitem", { name: "Mark Unread" })).toBeVisible()
   await page.keyboard.press("End")
   await page.keyboard.press("Enter")
+  await expect(
+    page.getByRole("menuitem", { name: "Mark Unread", exact: true }),
+  ).toHaveCount(0)
   await expect(alphaRow).toHaveAttribute("data-inline-dialog-unread", "true")
 
   await focusByTab(page, more, { backward: true })
@@ -760,6 +815,9 @@ test("keeps the primary Mac-shaped actions keyboard operable", async ({
   await expect(page.getByRole("menuitem", { name: "Mark Read" })).toBeVisible()
   await page.keyboard.press("End")
   await page.keyboard.press("Enter")
+  await expect(
+    page.getByRole("menuitem", { name: "Mark Read", exact: true }),
+  ).toHaveCount(0)
   await expect(alphaRow).toHaveAttribute("data-inline-dialog-unread", "false")
 
   await focusByTab(page, alphaLink, { backward: true })
@@ -767,6 +825,9 @@ test("keeps the primary Mac-shaped actions keyboard operable", async ({
   await expect(page.getByRole("menuitem", { name: "Mark Unread" })).toBeVisible()
   await page.keyboard.press("End")
   await page.keyboard.press("Enter")
+  await expect(
+    page.getByRole("menuitem", { name: "Mark Unread", exact: true }),
+  ).toHaveCount(0)
   await expect(alphaRow).toHaveAttribute("data-inline-dialog-unread", "true")
 
   await focusByTab(page, alphaLink, { backward: true })
@@ -774,6 +835,9 @@ test("keeps the primary Mac-shaped actions keyboard operable", async ({
   await expect(page.getByRole("menuitem", { name: "Mark Read" })).toBeVisible()
   await page.keyboard.press("End")
   await page.keyboard.press("Enter")
+  await expect(
+    page.getByRole("menuitem", { name: "Mark Read", exact: true }),
+  ).toHaveCount(0)
   await expect(alphaRow).toHaveAttribute("data-inline-dialog-unread", "false")
 
   const messages = page.getByLabel("Messages")
@@ -781,7 +845,7 @@ test("keeps the primary Mac-shaped actions keyboard operable", async ({
   await page.keyboard.press("ArrowUp")
   await expect(page.locator('[aria-label="Message actions"]:focus')).toHaveCount(1)
   await page.keyboard.press("Shift+F10")
-  const reply = page.getByRole("menuitem", { name: "Reply" })
+  const reply = page.getByRole("menuitem", { name: "Reply", exact: true })
   await expect(reply).toBeVisible()
   await expect(reply).toBeFocused()
   await page.keyboard.press("Enter")
@@ -815,7 +879,7 @@ test("persists the Mac appearance modes without losing the cached chat bottom", 
     if (message.type() === "error") browserErrors.push(message.text())
   })
 
-  await page.goto("/login")
+  await page.goto(productSeedHarnessPath)
   const seed = await page.evaluate<ProductRouteSeed>(`(async () => {
     const harness = await import("/src/testing/product/InlineProductRouteBrowserHarnessPage.ts")
     return await harness.seedInlineProductRouteCache()
@@ -841,6 +905,7 @@ test("persists the Mac appearance modes without losing the cached chat bottom", 
   expect((await alphaRow.getByRole("link").boundingBox())?.height).toBe(30)
 
   await alphaRow.getByRole("link").click()
+  await waitForPresentedChat(page, seed.alphaPath)
   const chat = page.locator("[data-inline-chat-at-bottom]")
   const messages = page.locator('[data-inline-message-list="viewport"]')
   await expect(messages).toHaveAttribute("data-inline-message-style", "minimal")
@@ -848,6 +913,7 @@ test("persists the Mac appearance modes without losing the cached chat bottom", 
   await expect(page.getByText("First cached message").last()).toBeVisible()
 
   await page.reload()
+  await waitForPresentedChat(page, seed.alphaPath)
   await expect(root).toHaveAttribute("data-inline-appearance", "dark")
   await expect(sidebar).toHaveAttribute(
     "data-inline-sidebar-item-size",

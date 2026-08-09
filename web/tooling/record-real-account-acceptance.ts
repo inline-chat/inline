@@ -130,6 +130,11 @@ if (!Number.isInteger(switchCount) || switchCount < 0) {
 if (!Number.isFinite(offlineMs) || offlineMs < 0) {
   throw new TypeError("--offline-ms must be a non-negative number")
 }
+if (terminateOwner) {
+  throw new TypeError(
+    "--terminate-owner is retired with the direct single-tab core; use a controlled page reload test instead",
+  )
+}
 
 const endpoint = (value: string) => {
   try {
@@ -137,7 +142,10 @@ const endpoint = (value: string) => {
     if (!["http:", "https:", "ws:", "wss:"].includes(url.protocol)) {
       return "non-network-url"
     }
-    return `${url.origin}${url.pathname}`
+    // Acceptance artifacts are meant to identify a failing service, not a
+    // user-owned resource. Paths can contain message, media, and peer IDs even
+    // when the query string has already been excluded.
+    return `${url.origin}/<resource>`
   } catch {
     return "invalid-url"
   }
@@ -166,6 +174,18 @@ const binaryFrame = (params: JsonRecord | undefined) => {
 
 const errorCategory = (value: string) => {
   const normalized = value.toLowerCase()
+  if (normalized.includes("transport.socket.interrupted")) {
+    return "websocket-connection-error"
+  }
+  if (normalized.includes("protocol.ping.interrupted")) {
+    return "websocket-connection-error"
+  }
+  if (normalized.includes("storage.open.failed")) {
+    return "storage-open-failed"
+  }
+  if (normalized.includes("runtime.owner.acquire_failed")) {
+    return "core-owner"
+  }
   if (normalized.includes("failed to send transaction")) {
     return "failed-to-send-transaction"
   }
@@ -196,7 +216,15 @@ const sanitizedDiagnostic = (value: string) =>
   value
     .trim()
     .split(/\r?\n/, 1)[0]!
-    .replace(/https?:\/\/\S+/g, "<url>")
+    .replace(/\bBearer\s+[^\s,;]+/gi, "Bearer <redacted>")
+    .replace(/\bBasic\s+[^\s,;]+/gi, "Basic <redacted>")
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "<email>")
+    .replace(/(?:https?|wss?|file):\/\/\S+/gi, "<url>")
+    .replace(/(?:blob|data):\S+/gi, "<url>")
+    .replace(/(?:\/Users|\/home|\/private|\/tmp|\/var|\/Volumes)\/[^\s):]+/g, "<path>")
+    .replace(/(^|[\s(])\/(?:[^/\s:()]+\/)+[^/\s:()]+/g, "$1<path>")
+    .replace(/[A-Z]:\\[^\s)]+/gi, "<path>")
+    .replace(/([?&](?:access_?token|auth|code|key|password|secret|token)=)[^\s&#]*/gi, "$1<redacted>")
     .replace(/\b\d{4,}\b/g, "<number>")
     .slice(0, 240)
 
@@ -495,6 +523,49 @@ const pageEvidenceSource = String.raw`(() => {
   }
 })()`
 
+const structuredLogEvidenceSource = String.raw`(() => {
+  const diagnostics = globalThis.__inlineDiagnostics
+  if (!diagnostics || typeof diagnostics.read !== "function") {
+    return { available: false, dropped: 0, entries: [] }
+  }
+  const safeMessage = (fields) => {
+    if (!fields || typeof fields !== "object") return undefined
+    for (const candidate of [fields.error, fields.reason]) {
+      if (candidate && typeof candidate === "object" &&
+          typeof candidate.message === "string") {
+        return candidate.message
+      }
+      if (typeof candidate === "string") return candidate
+    }
+    return undefined
+  }
+  const records = diagnostics.read()
+  const entries = Array.isArray(records)
+    ? records.slice(-1000).flatMap((record) => {
+        if (!record || typeof record !== "object" ||
+            typeof record.level !== "string" ||
+            typeof record.scope !== "string" ||
+            typeof record.event !== "string") {
+          return []
+        }
+        return [{
+          level: record.level,
+          scope: record.scope,
+          event: record.event,
+          message: safeMessage(record.fields),
+        }]
+      })
+    : []
+  const stats = typeof diagnostics.stats === "function"
+    ? diagnostics.stats()
+    : undefined
+  return {
+    available: true,
+    dropped: Number(stats?.dropped || 0),
+    entries,
+  }
+})()`
+
 const authPersistenceEvidenceSource = String.raw`(async () => {
   const logoutPending = (() => {
     try {
@@ -637,6 +708,9 @@ const receivedEnvelopeTypes = new Map<string, number>()
 const sentEnvelopeTypes = new Map<string, number>()
 const targetCounts = new Map<string, number>()
 const errorCategories = new Map<string, number>()
+const structuredLogEvents = new Map<string, number>()
+let structuredLogPages = 0
+let structuredLogDropped = 0
 let socketCloses = 0
 let socketErrors = 0
 let exceptions = 0
@@ -647,8 +721,7 @@ let logWarnings = 0
 const diagnostics: string[] = []
 
 const relevantTarget = (target: TargetInfo) =>
-  ["page", "shared_worker", "worker"].includes(target.type) &&
-  sameAppOrigin(target.url)
+  target.type === "page" && sameAppOrigin(target.url)
 
 const targets = async () => {
   const result = await connection.call("Target.getTargets")
@@ -1176,7 +1249,7 @@ const frameEvidence: FrameEvidence[] = []
 const pageEvidence: PageEvidence[] = []
 for (const session of sessions.values()) {
   if (session.type !== "page") continue
-  const [pageResult, authPersistenceResult] = await Promise.all([
+  const [pageResult, authPersistenceResult, structuredLogResult] = await Promise.all([
     connection
       .call(
         "Runtime.evaluate",
@@ -1195,6 +1268,16 @@ for (const session of sessions.values()) {
         session.sessionId,
       )
       .catch(() => undefined),
+    connection
+      .call(
+        "Runtime.evaluate",
+        {
+          expression: structuredLogEvidenceSource,
+          returnByValue: true,
+        },
+        session.sessionId,
+      )
+      .catch(() => undefined),
   ])
   const pageRuntime = pageResult?.result
   const pageValue = isRecord(pageRuntime) && isRecord(pageRuntime.value)
@@ -1206,6 +1289,37 @@ for (const session of sessions.values()) {
     isRecord(authPersistenceRuntime.value)
       ? authPersistenceRuntime.value
       : undefined
+  const structuredLogRuntime = structuredLogResult?.result
+  const structuredLogValue =
+    isRecord(structuredLogRuntime) &&
+    isRecord(structuredLogRuntime.value)
+      ? structuredLogRuntime.value
+      : undefined
+  if (structuredLogValue?.available === true) {
+    structuredLogPages += 1
+    structuredLogDropped +=
+      numberValue(structuredLogValue, "dropped") ?? 0
+    if (Array.isArray(structuredLogValue.entries)) {
+      for (const entry of structuredLogValue.entries) {
+        if (!isRecord(entry)) continue
+        const level = stringValue(entry, "level")
+        const scope = stringValue(entry, "scope")
+        const event = stringValue(entry, "event")
+        if (!level || !scope || !event) continue
+        increment(structuredLogEvents, `${level} ${scope} ${event}`)
+        if (
+          (level === "error" || level === "warn") &&
+          diagnostics.length < 12
+        ) {
+          const detail = stringValue(entry, "message")
+          const diagnostic = sanitizedDiagnostic(
+            detail ? `${scope} ${event}: ${detail}` : `${scope} ${event}`,
+          )
+          if (diagnostic) diagnostics.push(diagnostic)
+        }
+      }
+    }
+  }
   if (pageValue) {
     pageEvidence.push({
       route: stringValue(pageValue, "route") ?? "unknown",
@@ -1310,7 +1424,7 @@ for (const session of sessions.values()) {
 
 const workerEvidence: WorkerEvidence[] = []
 for (const session of sessions.values()) {
-  if (session.type !== "shared_worker") continue
+  if (session.type !== "page") continue
   const result = await Promise.race([
     connection.call(
       "Runtime.evaluate",
@@ -1389,12 +1503,17 @@ const report = {
     logErrors,
     logWarnings,
     errorCategories: Object.fromEntries(errorCategories),
+    structuredLogs: {
+      observedPages: structuredLogPages,
+      dropped: structuredLogDropped,
+      events: Object.fromEntries(structuredLogEvents),
+    },
     diagnostics,
   },
   exercise,
   frames: frameEvidence,
   pages: pageEvidence,
-  workers: workerEvidence,
+  owners: workerEvidence,
   coreOwnership: {
     accountLockHolders,
     pendingAccountLocks,
@@ -1402,7 +1521,7 @@ const report = {
   },
   privacy: {
     captured:
-      "target types, normalized routes, DOM readiness counters, auth record and tombstone counts, sanitized origins/pathnames, aggregate errors, sanitized first-line exception diagnostics, and protobuf envelope type counts including connection error enums",
+      "target types, normalized routes, DOM readiness counters, auth record and tombstone counts, network origins, aggregate errors, sanitized structured log event counts and first-line diagnostics, and protobuf envelope type counts including connection error enums",
     excluded:
       "headers, cookies, credentials, tokens, request or response fields, query strings, raw WebSocket frame payloads, message text, names, and peer identifiers",
   },

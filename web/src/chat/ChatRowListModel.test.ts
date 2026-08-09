@@ -178,4 +178,75 @@ describe("ChatRowListModel", () => {
     })
     expect(() => JSON.stringify(makeChatMessageRow(message))).not.toThrow()
   })
+
+  it("projects playable voice, sticker, and bot action rows", () => {
+    const rich: Message = {
+      kind: DbObjectKind.Message,
+      id: messageKey(chatId(10), messageId(25)),
+      messageId: messageId(25),
+      chatId: chatId(10),
+      fromId: userId(30),
+      media: {
+        media: {
+          oneofKind: "voice",
+          voice: {
+            voice: {
+              id: 55n,
+              date: 1n,
+              duration: 9,
+              size: 100,
+              mimeType: "audio/ogg",
+              cdnUrl: "https://cdn.inline.chat/voice.ogg",
+              waveform: new Uint8Array([2, 4]),
+            },
+          },
+        },
+      },
+      actions: {
+        rows: [{
+          actions: [
+            {
+              actionId: "approve",
+              text: "Approve",
+              action: {
+                oneofKind: "callback",
+                callback: { data: new Uint8Array([1, 2, 3]) },
+              },
+            },
+            {
+              actionId: "copy",
+              text: "Copy ID",
+              action: {
+                oneofKind: "copyText",
+                copyText: { text: "ENG-42" },
+              },
+            },
+          ],
+        }],
+      },
+    }
+    const row = makeChatMessageRow(rich)
+    expect(row.presentation.media).toMatchObject({
+      kind: "voice",
+      mediaKey: "voice:55",
+      remoteUrl: "https://cdn.inline.chat/voice.ogg",
+    })
+    expect(row.actions).toEqual({
+      rows: [[
+        { id: "approve", label: "Approve", kind: "callback" },
+        { id: "copy", label: "Copy ID", kind: "copyText", text: "ENG-42" },
+      ]],
+    })
+    expect(JSON.stringify(row)).not.toContain("data")
+
+    const sticker = makeChatMessageRow({
+      ...rich,
+      id: messageKey(chatId(10), messageId(26)),
+      messageId: messageId(26),
+      isSticker: true,
+      media: { media: { oneofKind: "photo", photo: {} } },
+      actions: undefined,
+    })
+    expect(sticker.presentation.media?.kind).toBe("sticker")
+  })
 })

@@ -72,6 +72,17 @@ export class InlineProjectionDb extends Db {
     )
   }
 
+  override loadLocalWindowAroundMessageForIntent(
+    chatId: ChatID,
+    options: LocalMessageWindowAroundOptions,
+    _intentVersion: number | undefined,
+  ) {
+    return this.remoteLoadLocalWindowAroundMessage(
+      chatId,
+      options,
+    )
+  }
+
   override isMessageInHistoryWindow(
     _chatId: ChatID,
     key: MessageKey,

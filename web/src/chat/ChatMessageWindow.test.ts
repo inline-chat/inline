@@ -22,7 +22,7 @@ describe("loadChatWindowAroundMessage", () => {
   it("uses the bounded local window without touching realtime", async () => {
     const db = new Db({ autoHydrate: false, persistence: false })
     const local = vi
-      .spyOn(db, "loadLocalWindowAroundMessage")
+      .spyOn(db, "loadLocalWindowAroundMessageForIntent")
       .mockResolvedValue(true)
     const query = vi.fn()
 
@@ -35,17 +35,21 @@ describe("loadChatWindowAroundMessage", () => {
         targetMessageId,
       }),
     ).resolves.toBe(true)
-    expect(local).toHaveBeenCalledWith(chatId(10), {
-      messageId: targetMessageId,
-      ...chatAroundWindow,
-    })
+    expect(local).toHaveBeenCalledWith(
+      chatId(10),
+      {
+        messageId: targetMessageId,
+        ...chatAroundWindow,
+      },
+      undefined,
+    )
     expect(query).not.toHaveBeenCalled()
   })
 
   it("requests one protocol around window on a local miss, then compacts the projection", async () => {
     const db = new Db({ autoHydrate: false, persistence: false })
     const local = vi
-      .spyOn(db, "loadLocalWindowAroundMessage")
+      .spyOn(db, "loadLocalWindowAroundMessageForIntent")
       .mockResolvedValueOnce(false)
       .mockResolvedValueOnce(true)
     const query = vi.fn(async (transaction) => {
@@ -79,7 +83,7 @@ describe("loadChatWindowAroundMessage", () => {
   it("reports a real miss without paging older history in a loop", async () => {
     const db = new Db({ autoHydrate: false, persistence: false })
     const local = vi
-      .spyOn(db, "loadLocalWindowAroundMessage")
+      .spyOn(db, "loadLocalWindowAroundMessageForIntent")
       .mockResolvedValue(false)
     const query = vi.fn(async () => ({
       oneofKind: "getChatHistory" as const,

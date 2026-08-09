@@ -1,6 +1,11 @@
 import { Menu } from "@base-ui/react/menu"
 import * as stylex from "@stylexjs/stylex"
-import { Fragment, type ReactElement, type ReactNode } from "react"
+import {
+  Fragment,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactElement,
+  type ReactNode,
+} from "react"
 import { colors } from "../styles/tokens.stylex"
 import { Icon, type IconName } from "./Icon"
 
@@ -37,6 +42,28 @@ const itemContent = (item: InlineMenuItem) => (
   </>
 )
 
+const focusMenuBoundary = (
+  event: ReactKeyboardEvent<HTMLDivElement>,
+) => {
+  if (event.key !== "Home" && event.key !== "End") return
+  const items = Array.from(
+    event.currentTarget.querySelectorAll<HTMLElement>(
+      '[role^="menuitem"]',
+    ),
+  ).filter(
+    (item) => item.getAttribute("aria-disabled") !== "true",
+  )
+  const target =
+    event.key === "Home" ? items.at(0) : items.at(-1)
+  if (!target) return
+  // Base UI's item registry settles after the portal DOM in some cold opens.
+  // Resolve these absolute keys from the mounted menu so a fast keyboard
+  // sequence cannot activate the previously focused item.
+  event.preventDefault()
+  event.stopPropagation()
+  target.focus({ preventScroll: true })
+}
+
 /** Inline-owned menu surface. Product views own actions and labels while Base
  * UI owns focus, dismissal, keyboard navigation, and trigger positioning. */
 export function InlineMenu({
@@ -62,7 +89,10 @@ export function InlineMenu({
           sideOffset={5}
           {...stylex.props(styles.positioner)}
         >
-          <Menu.Popup {...stylex.props(styles.popup)}>
+          <Menu.Popup
+            onKeyDownCapture={focusMenuBoundary}
+            {...stylex.props(styles.popup)}
+          >
             {items?.map((item) => (
               <Fragment key={item.label}>
                 {item.separatorBefore ? (

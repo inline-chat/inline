@@ -283,10 +283,10 @@ export class SyncEngine {
       },
       (error: unknown) => {
         if (!this.connected || this.stopped) return
-        this.log.warn(
-          `Bucket sync paused for ${syncBucketId(work.key)}`,
+        this.log.warn("sync.bucket.paused", {
+          bucketKind: work.key.kind,
           error,
-        )
+        })
         this.scheduleRetry(work)
       },
     ).finally(() => {
@@ -524,9 +524,16 @@ export class SyncEngine {
           return await this.storage.setBucketState(key, next)
         })()
     if (!committed) {
-      throw new Error(`Could not persist cursor for ${syncBucketId(key)}`)
+      throw new Error("Could not persist sync cursor")
     }
     await this.updateLastSyncDate(next.date)
+    this.log.debug("sync.bucket.committed", {
+      bucketKind: key.kind,
+      source,
+      updateCount: updates.length,
+      previousSeq: previous.seq,
+      nextSeq: next.seq,
+    })
     return next
   }
 
@@ -622,9 +629,14 @@ export class SyncEngine {
           return await this.storage.setBucketState(key, next)
         })()
     if (!committed) {
-      throw new Error(`Could not persist repaired cursor for ${syncBucketId(key)}`)
+      throw new Error("Could not persist repaired sync cursor")
     }
     await this.updateLastSyncDate(targetDate)
+    this.log.debug("sync.bucket.repaired", {
+      bucketKind: key.kind,
+      messageCount: historyResult.getChatHistory.messages.length,
+      nextSeq: next.seq,
+    })
     return next
   }
 
@@ -682,7 +694,7 @@ export class SyncEngine {
         return
       } catch (error) {
         if (attempt === delays.length - 1) {
-          this.log.warn("Bucket discovery failed", error)
+          this.log.warn("sync.discovery.failed", { error })
         }
       }
     }

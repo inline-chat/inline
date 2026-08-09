@@ -1,21 +1,24 @@
 import {
   DbObjectKind,
   messageKey,
+  messageDraftKey,
   type Chat,
   type Dialog,
   type Message,
+  type MessageDraft,
   type Space,
   type User,
 } from "@inline/client"
 import { useLocation } from "@tanstack/react-router"
 import * as stylex from "@stylexjs/stylex"
-import { dialogPeerRoute } from "~/inline/data/peer"
+import { dialogPeerRoute, messageDraftPeer } from "~/inline/data/peer"
 import { useInlineObject } from "~/inline/data/react"
 import { useInlineChatTitle } from "~/inline/data/useInlineChatTitle"
 import { ThreadAvatar, UserAvatar } from "~/ui/Avatar"
 import { colors } from "../styles/tokens.stylex"
 import { allChatsRowTime } from "./AllChatsDate"
 import { InlineChatLink } from "~/ui/InlineChatLink"
+import { chatListPreview } from "./ChatListPreview"
 
 export type AllChatsRowLayout = "twoLine" | "titlePreviewLine"
 
@@ -41,16 +44,25 @@ export function AllChatsItemView({
     dialog.spaceId ?? chat?.spaceId,
   )
   const peer = dialogPeerRoute(dialog)
+  const draft = useInlineObject<DbObjectKind.MessageDraft, MessageDraft>(
+    DbObjectKind.MessageDraft,
+    messageDraftKey(messageDraftPeer(peer)),
+  )
   const path = `/chat/${peer.peerKind}/${peer.peerId}`
   const threadTitle = useInlineChatTitle(chat)
   const title =
     (user && ([user.firstName, user.lastName].filter(Boolean).join(" ") || user.username)) ||
     threadTitle
-  const preview = message?.message?.replaceAll(/\s+/g, " ").trim() || "No messages"
   const senderName =
     !message?.out && !user
       ? [sender?.firstName, sender?.lastName].filter(Boolean).join(" ") || sender?.username
       : undefined
+  const preview = chatListPreview({
+    message,
+    draft,
+    senderName,
+    replyThread: chat?.parentChatId != null,
+  })
   const time = allChatsRowTime(message?.date ?? chat?.date ?? 0)
   const unread = Boolean(dialog.unreadMark || (dialog.unreadCount ?? 0) > 0)
 
@@ -75,8 +87,6 @@ export function AllChatsItemView({
           <span {...stylex.props(styles.title, unread && styles.unreadTitle)}>{title}</span>
           {layout === "titlePreviewLine" ? (
             <span {...stylex.props(styles.inlinePreview)}>
-              {senderName ? `${senderName}: ` : null}
-              {message?.out ? "You: " : null}
               {preview}
             </span>
           ) : null}
@@ -88,8 +98,6 @@ export function AllChatsItemView({
         </span>
         {layout === "twoLine" ? (
           <span {...stylex.props(styles.previewLine)}>
-            {senderName ? <span {...stylex.props(styles.sender)}>{senderName}: </span> : null}
-            {message?.out ? "You: " : null}
             {preview}
           </span>
         ) : null}

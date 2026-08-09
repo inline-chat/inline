@@ -41,7 +41,10 @@ const waitFor = async (predicate: () => boolean, timeoutMs = 300) => {
   throw new Error("Timed out waiting for condition")
 }
 
-const connectAndOpen = async (transport: MockTransport) => {
+const connectAndOpen = async (
+  transport: MockTransport,
+  client: RealtimeClient,
+) => {
   await transport.connect()
   await transport.emitMessage(
     ServerProtocolMessage.create({
@@ -49,6 +52,7 @@ const connectAndOpen = async (transport: MockTransport) => {
       body: { oneofKind: "connectionOpen", connectionOpen: {} },
     }),
   )
+  await waitFor(() => client.connectionState === "connected")
 }
 
 const inputPeer: InputPeer = { type: { oneofKind: "chat", chat: { chatId: 10n } } }
@@ -95,7 +99,7 @@ describe("realtime transactions", () => {
       message: "React here",
     })
     await client.startSession({ token: "test-token", userId: userId(7) })
-    await connectAndOpen(transport)
+    await connectAndOpen(transport, client)
 
     const resultPromise = client.execute(addReaction({
       emoji: "👍",
@@ -161,7 +165,7 @@ describe("realtime transactions", () => {
     })
 
     await client.startSession({ token: "test-token", userId: userId(7) })
-    await connectAndOpen(transport)
+    await connectAndOpen(transport, client)
 
     const resultPromise = client.execute(
       sendMessage({
@@ -257,7 +261,7 @@ describe("realtime transactions", () => {
     })
 
     await client.startSession({ token: "test-token", userId: userId(7) })
-    await connectAndOpen(transport)
+    await connectAndOpen(transport, client)
 
     const resultPromise = client.execute(
       sendMessage({
@@ -323,7 +327,7 @@ describe("realtime transactions", () => {
     })
 
     await client.startSession({ token: "test-token", userId: userId(1) })
-    await connectAndOpen(transport)
+    await connectAndOpen(transport, client)
 
     const resultPromise = client.execute(
       editMessage({
@@ -408,7 +412,7 @@ describe("realtime transactions", () => {
     })
 
     await client.startSession({ token: "test-token", userId: userId(1) })
-    await connectAndOpen(transport)
+    await connectAndOpen(transport, client)
 
     const resultPromise = client.execute(
       deleteMessages({
@@ -477,7 +481,7 @@ describe("realtime transactions", () => {
     })
 
     await client.startSession({ token: "test-token", userId: userId(1) })
-    await connectAndOpen(transport)
+    await connectAndOpen(transport, client)
 
     const resultPromise = client.execute(
       getChatHistory({
@@ -582,7 +586,7 @@ describe("realtime transactions", () => {
     })
 
     await client.startSession({ token: "test-token", userId: userId(1) })
-    await connectAndOpen(transport)
+    await connectAndOpen(transport, client)
 
     const resultPromise = client.execute(
       getMessages({ peerId: inputPeer, messageIds: [messageId(42)] }),

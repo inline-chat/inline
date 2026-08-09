@@ -146,6 +146,29 @@ describe("reserved chat create and chatCreated blocker", () => {
     vi.unstubAllGlobals()
   })
 
+  it("rejects malformed create input before consuming a reservation", async () => {
+    const transport = new MockTransport()
+    const db = new Db({ autoHydrate: false, persistence: false })
+    db.insert(reservation())
+    const client = new RealtimeClient({
+      auth: new AuthStore(),
+      db,
+      transport,
+      sync: false,
+    })
+
+    await expect(
+      client.createThread({
+        isPublic: false,
+        participants: [],
+      }),
+    ).rejects.toThrow("Invalid Inline create-thread input")
+    expect(
+      db.get(db.ref(DbObjectKind.ReservedChatID, chatId(901))),
+    ).toBeDefined()
+    expect(transport.sent).toEqual([])
+  })
+
   it("sends create before Inbox open and releases the blocker only after apply", async () => {
     const transport = new MockTransport()
     const auth = new AuthStore()
@@ -261,6 +284,7 @@ describe("reserved chat create and chatCreated blocker", () => {
       transport: new MockTransport(),
       sync: false,
     })
+    await firstClient.start()
     await firstClient.mutateAccepted(
       createChat({
         isPublic: false,

@@ -13,6 +13,11 @@ export function MessageContextMenu({
   message,
   pinned,
   onReply,
+  onReplyThread,
+  onEdit,
+  onDelete,
+  onForward,
+  onAddReaction,
   onTogglePin,
   onResend,
 }: {
@@ -20,12 +25,26 @@ export function MessageContextMenu({
   message: ChatMessageRow
   pinned: boolean
   onReply: (message: ChatMessageRow) => void
+  onReplyThread: (message: ChatMessageRow) => void
+  onEdit: (message: ChatMessageRow) => void
+  onDelete: (message: ChatMessageRow) => void
+  onForward: (message: ChatMessageRow) => void
+  onAddReaction: (message: ChatMessageRow) => void
   onTogglePin: (message: ChatMessageRow) => void
   onResend: (messageId: ChatMessageRow["messageId"]) => void
 }) {
   const toast = useInlineToast()
   const text = message.presentation.text
   const canReference = BigInt(message.messageId) > 0n
+  const confirmedOwnMessage =
+    canReference &&
+    message.out &&
+    message.status !== MessageSendingStatus.Sending &&
+    message.status !== MessageSendingStatus.Failed
+  const localSend =
+    message.out &&
+    (message.status === MessageSendingStatus.Sending ||
+      message.status === MessageSendingStatus.Failed)
   const items = useMemo<readonly InlineContextMenuItem[]>(
     () => [
       ...(canReference
@@ -33,6 +52,10 @@ export function MessageContextMenu({
             {
               label: "Reply",
               onSelect: () => onReply(message),
+            },
+            {
+              label: "Reply in Thread",
+              onSelect: () => onReplyThread(message),
             },
           ]
         : []),
@@ -62,6 +85,27 @@ export function MessageContextMenu({
             },
           ]
         : []),
+      ...(canReference
+        ? [
+            {
+              label: "Add Reaction",
+              onSelect: () => onAddReaction(message),
+            },
+            {
+              label: "Forward…",
+              onSelect: () => onForward(message),
+            },
+          ]
+        : []),
+      ...(confirmedOwnMessage && text
+        ? [
+            {
+              label: "Edit…",
+              onSelect: () => onEdit(message),
+              separatorBefore: true,
+            },
+          ]
+        : []),
       ...(message.status === MessageSendingStatus.Failed
         ? [
             {
@@ -80,11 +124,28 @@ export function MessageContextMenu({
             },
           ]
         : []),
+      ...(confirmedOwnMessage || localSend
+        ? [
+            {
+              label: localSend ? "Cancel Send" : "Delete…",
+              onSelect: () => onDelete(message),
+              destructive: true,
+              separatorBefore: true,
+            },
+          ]
+        : []),
     ],
     [
       canReference,
       message,
+      confirmedOwnMessage,
+      localSend,
+      onAddReaction,
+      onDelete,
+      onEdit,
+      onForward,
       onReply,
+      onReplyThread,
       onResend,
       onTogglePin,
       pinned,

@@ -65,3 +65,29 @@ export const closeSidebarChat = ({
     }),
   )
 }
+
+/** Close one visible Inbox tree using the same durable per-dialog mutation as
+ * native clients. Detached replies are excluded by InboxProjection. */
+export const closeSidebarChatGroup = async ({
+  dialogs,
+  currentPath,
+  openAllChats,
+  realtime,
+}: {
+  dialogs: readonly Dialog[]
+  currentPath: string
+  openAllChats: () => void
+  realtime: RealtimeService
+}) => {
+  if (dialogs.some((dialog) => currentPath === sidebarChatPath(dialog))) {
+    openAllChats()
+  }
+  for (const dialog of dialogs) {
+    await realtime.mutateAccepted(
+      updateDialogOpen({
+        peerId: inputPeer(dialogPeerRoute(dialog)),
+        open: false,
+      }),
+    )
+  }
+}

@@ -21,4 +21,14 @@ describe("InlineCoreRecoveryView", () => {
     )
     expect(onReload).toHaveBeenCalledOnce()
   })
+
+  it("explains the deliberate single-tab tradeoff", () => {
+    const view = render(
+      <InlineCoreRecoveryView failureCode="owner-unavailable" />,
+    )
+
+    expect(view.container).toHaveTextContent(
+      "Inline is open in another tab. Close it, then reload this tab.",
+    )
+  })
 })

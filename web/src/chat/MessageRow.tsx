@@ -12,6 +12,7 @@ import type { ChatID, MessageID, UserID } from "@inline/ids"
 import type { InlinePeerRoute } from "~/inline/data/peer"
 import { MessageContextMenu } from "./MessageContextMenu"
 import type { InlineMessageStyle } from "~/inline/preferences/InlineAppearancePreferences"
+import type { InlineMessageEntityActions } from "./InlineMessageTextView"
 
 const sameGroup = (
   first?: ChatMessageRow,
@@ -46,11 +47,17 @@ export function MessageRow({
   onOpenReplyThread,
   onResendMessage,
   onReplyMessage,
+  onReplyThreadMessage,
+  onEditMessage,
+  onDeleteMessage,
+  onForwardMessage,
+  onAddReaction,
   onTogglePinMessage,
   pinned,
   peer,
   currentUserId,
   messageStyle,
+  entityActions,
 }: {
   message: ChatMessageRow
   previous?: ChatMessageRow
@@ -64,11 +71,17 @@ export function MessageRow({
   onOpenReplyThread: (chatId: ChatID) => void
   onResendMessage: (messageId: MessageID) => void
   onReplyMessage: (message: ChatMessageRow) => void
+  onReplyThreadMessage: (message: ChatMessageRow) => void
+  onEditMessage: (message: ChatMessageRow) => void
+  onDeleteMessage: (message: ChatMessageRow) => void
+  onForwardMessage: (message: ChatMessageRow) => void
+  onAddReaction: (message: ChatMessageRow) => void
   onTogglePinMessage: (message: ChatMessageRow) => void
   pinned: boolean
   peer: InlinePeerRoute
   currentUserId: UserID
   messageStyle: InlineMessageStyle
+  entityActions?: InlineMessageEntityActions
 }) {
   const minimal = messageStyle === "minimal"
   const user = useInlineObject<DbObjectKind.User, User>(DbObjectKind.User, message.fromId)
@@ -131,6 +144,11 @@ export function MessageRow({
               message={message}
               pinned={pinned}
               onReply={onReplyMessage}
+              onReplyThread={onReplyThreadMessage}
+              onEdit={onEditMessage}
+              onDelete={onDeleteMessage}
+              onForward={onForwardMessage}
+              onAddReaction={onAddReaction}
               onTogglePin={onTogglePinMessage}
               onResend={onResendMessage}
             >
@@ -142,6 +160,7 @@ export function MessageRow({
                 onResendMessage={onResendMessage}
                 peer={peer}
                 currentUserId={currentUserId}
+                entityActions={entityActions}
               />
             </MessageContextMenu>
           </div>

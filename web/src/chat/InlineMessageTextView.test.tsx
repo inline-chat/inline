@@ -2,7 +2,7 @@ import {
   MessageEntity_Type,
   type MessageEntity,
 } from "@inline-chat/protocol/core"
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   InlineMessageTextView,
@@ -86,5 +86,47 @@ describe("InlineMessageTextView", () => {
     )
     expect(container.querySelector("a")).toBeNull()
     expect(screen.getByText("click")).toBeInTheDocument()
+  })
+
+  it("routes thread, mention, and bot-command entities through typed actions", () => {
+    const openChat = vi.fn()
+    const openUser = vi.fn()
+    const sendCommand = vi.fn()
+    render(
+      <InlineMessageTextView
+        text="Thread Dena /help"
+        entities={{
+          entities: [
+            {
+              ...entity(MessageEntity_Type.THREAD, 0, 6),
+              entity: {
+                oneofKind: "thread",
+                thread: { chatId: 44n },
+              },
+            },
+            {
+              ...entity(MessageEntity_Type.MENTION, 7, 4),
+              entity: {
+                oneofKind: "mention",
+                mention: { userId: 7n },
+              },
+            },
+            entity(MessageEntity_Type.BOT_COMMAND, 12, 5),
+          ],
+        }}
+        entityActions={{
+          onOpenChat: openChat,
+          onOpenUser: openUser,
+          onSendBotCommand: sendCommand,
+        }}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Thread" }))
+    fireEvent.click(screen.getByRole("button", { name: "Dena" }))
+    fireEvent.click(screen.getByRole("button", { name: "/help" }))
+    expect(openChat).toHaveBeenCalledWith("44")
+    expect(openUser).toHaveBeenCalledWith("7")
+    expect(sendCommand).toHaveBeenCalledWith("/help", undefined)
   })
 })

@@ -10,6 +10,8 @@ import { ForwardHeaderView } from "./ForwardHeaderView"
 import type { InlinePeerRoute } from "~/inline/data/peer"
 import { MessageReactionsView } from "./MessageReactionsView"
 import type { InlineMessageStyle } from "~/inline/preferences/InlineAppearancePreferences"
+import { MessageActionRowsView } from "./MessageActionRowsView"
+import type { InlineMessageEntityActions } from "./InlineMessageTextView"
 
 const messageTime = (date?: number) => {
   if (!date) return ""
@@ -27,6 +29,7 @@ export function MessageBubble({
   onResendMessage,
   peer,
   currentUserId,
+  entityActions,
 }: {
   message: ChatMessageRow
   style: InlineMessageStyle
@@ -35,6 +38,7 @@ export function MessageBubble({
   onResendMessage: (messageId: MessageID) => void
   peer: InlinePeerRoute
   currentUserId: UserID
+  entityActions?: InlineMessageEntityActions
 }) {
   return (
     <div
@@ -63,7 +67,18 @@ export function MessageBubble({
           onOpen={onOpenMessage}
         />
       ) : null}
-      <MessageContentView presentation={message.presentation} />
+      <MessageContentView
+        presentation={message.presentation}
+        entityActions={entityActions}
+      />
+      {message.actions ? (
+        <MessageActionRowsView
+          actions={message.actions}
+          chatId={message.chatId}
+          messageId={message.messageId}
+          peer={peer}
+        />
+      ) : null}
       {message.reactions ? (
         <MessageReactionsView
           reactions={message.reactions}

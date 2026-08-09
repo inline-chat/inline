@@ -5,12 +5,27 @@ import {
 } from "@inline-chat/protocol/core"
 import * as stylex from "@stylexjs/stylex"
 import type { HTMLAttributes, ReactNode } from "react"
+import {
+  parseInlineId,
+  type ChatID,
+  type SpaceID,
+  type UserID,
+} from "@inline/ids"
 import { colors } from "../styles/tokens.stylex"
 
 type InlineTextEntityRange = {
   entity: MessageEntity
   start: number
   end: number
+}
+
+export type InlineMessageEntityActions = {
+  onOpenUser?: (userId: UserID) => void
+  onOpenUsername?: (username: string) => void
+  onOpenChat?: (chatId: ChatID) => void
+  onOpenThreadTitle?: (spaceId: SpaceID, title: string) => void
+  onOpenGroupMention?: (groupId: bigint) => void
+  onSendBotCommand?: (command: string, botUserId?: UserID) => void
 }
 
 const isUtf16Boundary = (text: string, offset: number) => {
@@ -85,6 +100,7 @@ const wrapSegment = (
   ranges: readonly InlineTextEntityRange[],
   segmentStart: number,
   segmentEnd: number,
+  actions: InlineMessageEntityActions,
 ) => {
   const active = ranges.filter(
     (range) =>
@@ -120,16 +136,6 @@ const wrapSegment = (
       entity.type === MessageEntity_Type.GROUP_MENTION ||
       entity.type === MessageEntity_Type.USERNAME_MENTION,
   )
-  if (mention) {
-    content = (
-      <span
-        data-inline-mention={mention.entity.type}
-        {...stylex.props(styles.mention)}
-      >
-        {content}
-      </span>
-    )
-  }
   const linked = active.find((range) =>
     Boolean(linkForEntity(text, range)),
   )
@@ -145,6 +151,130 @@ const wrapSegment = (
         {content}
       </a>
     )
+    return content
+  }
+  const thread = active.find(
+    ({ entity }) =>
+      entity.type === MessageEntity_Type.THREAD &&
+      entity.entity.oneofKind === "thread",
+  )
+  const threadId = thread?.entity.entity.oneofKind === "thread"
+    ? parseInlineId<"chat">(
+        thread.entity.entity.thread.chatId,
+        { positive: true },
+      )
+    : undefined
+  if (threadId && actions.onOpenChat) {
+    content = (
+      <button
+        type="button"
+        onClick={() => actions.onOpenChat?.(threadId)}
+        {...stylex.props(styles.entityButton)}
+      >
+        {content}
+      </button>
+    )
+    return content
+  }
+  const threadTitle = active.find(
+    ({ entity }) =>
+      entity.type === MessageEntity_Type.THREAD_TITLE &&
+      entity.entity.oneofKind === "threadTitle",
+  )
+  if (
+    threadTitle?.entity.entity.oneofKind === "threadTitle" &&
+    actions.onOpenThreadTitle
+  ) {
+    const target = threadTitle.entity.entity.threadTitle
+    const exactSpaceId = parseInlineId<"space">(target.spaceId)
+    if (!exactSpaceId || BigInt(exactSpaceId) < 0n) return content
+    content = (
+      <button
+        type="button"
+        onClick={() =>
+          actions.onOpenThreadTitle?.(exactSpaceId, target.title)
+        }
+        {...stylex.props(styles.entityButton)}
+      >
+        {content}
+      </button>
+    )
+    return content
+  }
+  const botCommand = active.find(
+    ({ entity }) => entity.type === MessageEntity_Type.BOT_COMMAND,
+  )
+  if (botCommand && actions.onSendBotCommand) {
+    const target =
+      botCommand.entity.entity.oneofKind === "botCommand" &&
+      botCommand.entity.entity.botCommand.botUserId > 0n
+        ? parseInlineId<"user">(
+            botCommand.entity.entity.botCommand.botUserId,
+            { positive: true },
+          )
+        : undefined
+    const command = text.slice(botCommand.start, botCommand.end)
+    content = (
+      <button
+        type="button"
+        onClick={() => actions.onSendBotCommand?.(command, target)}
+        {...stylex.props(styles.entityButton)}
+      >
+        {content}
+      </button>
+    )
+    return content
+  }
+  if (mention) {
+    const entity = mention.entity
+    const onClick = (() => {
+      if (
+        entity.entity.oneofKind === "mention" &&
+        actions.onOpenUser
+      ) {
+        const id = parseInlineId<"user">(
+          entity.entity.mention.userId,
+          { positive: true },
+        )
+        return id ? () => actions.onOpenUser?.(id) : undefined
+      }
+      if (
+        entity.entity.oneofKind === "groupMention" &&
+        actions.onOpenGroupMention
+      ) {
+        const id = entity.entity.groupMention.groupId
+        return id > 0n
+          ? () => actions.onOpenGroupMention?.(id)
+          : undefined
+      }
+      if (
+        entity.type === MessageEntity_Type.USERNAME_MENTION &&
+        actions.onOpenUsername
+      ) {
+        const username = text
+          .slice(mention.start, mention.end)
+          .replace(/^@/, "")
+        return () => actions.onOpenUsername?.(username)
+      }
+      return undefined
+    })()
+    content = onClick ? (
+      <button
+        type="button"
+        data-inline-mention={entity.type}
+        onClick={onClick}
+        {...stylex.props(styles.entityButton, styles.mention)}
+      >
+        {content}
+      </button>
+    ) : (
+      <span
+        data-inline-mention={entity.type}
+        {...stylex.props(styles.mention)}
+      >
+        {content}
+      </span>
+    )
   }
   return content
 }
@@ -152,10 +282,12 @@ const wrapSegment = (
 export function InlineMessageTextView({
   text,
   entities,
+  entityActions = {},
   ...props
 }: {
   text: string
   entities?: MessageEntities
+  entityActions?: InlineMessageEntityActions
 } & HTMLAttributes<HTMLSpanElement>) {
   const ranges = inlineTextEntityRanges(text, entities)
   if (ranges.length === 0) return <span {...props}>{text}</span>
@@ -173,7 +305,7 @@ export function InlineMessageTextView({
         const end = boundaries[index + 1]!
         return (
           <span key={`${start}:${end}`}>
-            {wrapSegment(text, ranges, start, end)}
+            {wrapSegment(text, ranges, start, end, entityActions)}
           </span>
         )
       })}
@@ -185,6 +317,19 @@ const styles = stylex.create({
   mention: {
     color: colors.accent,
     fontWeight: 600,
+  },
+  entityButton: {
+    display: "inline",
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    color: colors.accent,
+    font: "inherit",
+    textAlign: "inherit",
+    textDecorationLine: "underline",
+    textDecorationThickness: "from-font",
+    cursor: "pointer",
   },
   link: {
     color: "inherit",

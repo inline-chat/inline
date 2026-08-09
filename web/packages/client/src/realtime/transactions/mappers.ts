@@ -252,4 +252,5 @@ export const upsertMessage = (db: Db, message: Message) => {
       date: model.date ?? chat.date,
     })
   }
+  db.includeMessageInActiveLatestWindow(model)
 }

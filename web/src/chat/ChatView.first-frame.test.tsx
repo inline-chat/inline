@@ -11,7 +11,14 @@ import {
   messageId,
   userId,
 } from "@inline/ids"
-import { cleanup, render, screen } from "@testing-library/react"
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react"
 import { useLayoutEffect } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { PreparedChatPayload } from "./ChatOpenPreloader"
@@ -24,6 +31,8 @@ const runtime = vi.hoisted(() => ({
   activateChat: vi.fn(() => vi.fn()),
   updateVisibleRange: vi.fn(),
   finishRoutePresentation: vi.fn(),
+  loadLatest: vi.fn(async () => true),
+  atBottom: true,
 }))
 
 const cachedDialog: Dialog = {
@@ -142,13 +151,14 @@ vi.mock("./useChatHistory", () => ({
     loadOlder: vi.fn(),
     loadNewer: vi.fn(),
     loadAround: vi.fn(async () => false),
+    loadLatest: runtime.loadLatest,
   }),
 }))
 
 vi.mock("./useChatReadState", () => ({
   useChatReadState: () => ({
     active: true,
-    atBottom: true,
+    atBottom: runtime.atBottom,
     needsRead: false,
     latestMessageId: undefined,
     onBottomStateChange: vi.fn(),
@@ -212,6 +222,10 @@ vi.mock("./PinnedMessageHeaderView", () => ({
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  runtime.atBottom = true
+  runtime.loadLatest.mockResolvedValue(true)
+  cachedDialog.unreadCount = 0
+  cachedChat.lastMsgId = undefined
 })
 
 describe("ChatView prepared first frame", () => {
@@ -245,6 +259,9 @@ describe("ChatView prepared first frame", () => {
       "view lease",
       "prepared lease released",
     ])
+    expect(runtime.finishRoutePresentation).toHaveBeenCalledWith(
+      "/chat/chat/10",
+    )
   })
 
   it("rejects a prepared payload from another route or account", () => {
@@ -261,5 +278,36 @@ describe("ChatView prepared first frame", () => {
         peerId: chatId(11),
       }),
     ).toBe(false)
+  })
+
+  it("exposes the Latest unread count and pending state accessibly", async () => {
+    runtime.atBottom = false
+    cachedDialog.unreadCount = 3
+    cachedChat.lastMsgId = messageId(2)
+    let settle: ((value: boolean) => void) | undefined
+    runtime.loadLatest.mockImplementationOnce(
+      () => new Promise<boolean>((resolve) => {
+        settle = resolve
+      }),
+    )
+
+    render(<ChatView peer={peer} prepared={prepared} />)
+
+    const latest = screen.getByRole("button", {
+      name: "Return to latest messages, 3 new",
+    })
+    expect(latest).not.toHaveAttribute("aria-busy")
+    fireEvent.click(latest)
+
+    const loading = screen.getByRole("button", {
+      name: "Loading latest messages",
+    })
+    expect(loading).toHaveAttribute("aria-busy", "true")
+    expect(loading).toBeDisabled()
+
+    await act(async () => settle?.(true))
+    await waitFor(() => expect(screen.getByRole("button", {
+      name: "Return to latest messages, 3 new",
+    })).not.toHaveAttribute("aria-busy"))
   })
 })

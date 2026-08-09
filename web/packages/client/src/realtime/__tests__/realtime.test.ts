@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   ConnectionError_Reason,
   ServerProtocolMessage,
+  Update,
   type ClientMessage,
 } from "@inline-chat/protocol/core"
 import { chatId, dialogId, messageId, userId } from "@inline/ids"
@@ -493,6 +494,11 @@ describe("realtime connection flow", () => {
       ),
     ).toHaveLength(1)
 
+    await waitFor(
+      () =>
+        client.connectionState === "connecting" &&
+        transport.state === "connecting",
+    )
     await connectAndOpen(transport)
     await waitFor(() => transport.rpcSendAttempts === 2)
 
@@ -538,6 +544,7 @@ describe("realtime connection flow", () => {
 
     await client.startSession({ token: "test-token", userId: userId(1) })
     await connectAndOpen(transport)
+    await waitFor(() => client.connectionState === "connected")
 
     const result = client.execute(
       editMessage({
@@ -637,6 +644,248 @@ describe("realtime connection flow", () => {
     expect(client.connectionState).toBe("connected")
     expect(transport.state).toBe("connected")
 
+    await client.stop()
+  })
+
+  it("ignores realtime updates admitted after stop", async () => {
+    const db = new Db({ autoHydrate: false, persistence: false })
+    const client = new RealtimeClient({
+      auth: new AuthStore(),
+      db,
+      transport: new MockTransport(),
+      sync: false,
+    })
+    await client.startSession({ token: "token", userId: userId(7) })
+    await client.stop()
+
+    await client.connection.events.send({
+      type: "updates",
+      updates: {
+        updates: [
+          Update.create({
+            update: {
+              oneofKind: "newMessage",
+              newMessage: {
+                message: {
+                  id: 88n,
+                  chatId: 10n,
+                  fromId: 7n,
+                  out: false,
+                  date: 88n,
+                  message: "late",
+                },
+              },
+            },
+          }),
+        ],
+      },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(
+      db.get(
+        db.ref(
+          DbObjectKind.Message,
+          messageKey(chatId(10), messageId(88)),
+        ),
+      ),
+    ).toBeUndefined()
+  })
+
+  it("rejects new durable mutations after stop without changing the database", async () => {
+    const db = new Db({ autoHydrate: false, persistence: false })
+    const client = new RealtimeClient({
+      auth: new AuthStore(),
+      db,
+      transport: new MockTransport(),
+      sync: false,
+    })
+    await client.startSession({ token: "token", userId: userId(7) })
+    await client.stop()
+
+    await expect(
+      client.execute(
+        sendMessage({
+          chatId: chatId(10),
+          text: "too late",
+        }),
+      ),
+    ).rejects.toMatchObject({ kind: "stopped" })
+    expect(
+      db.queryCollection(
+        DbQueryPlanType.Objects,
+        DbObjectKind.PendingTransaction,
+      ),
+    ).toEqual([])
+    expect(
+      db.queryCollection(
+        DbQueryPlanType.Objects,
+        DbObjectKind.Message,
+      ),
+    ).toEqual([])
+  })
+
+  it("rejects transient mutations immediately while disconnected", async () => {
+    const targetChatId = chatId(10)
+    const targetMessageId = messageId(55)
+    const db = new Db({ autoHydrate: false, persistence: false })
+    db.insert({
+      kind: DbObjectKind.Message,
+      id: messageKey(targetChatId, targetMessageId),
+      messageId: targetMessageId,
+      chatId: targetChatId,
+      fromId: userId(7),
+      date: 1,
+      message: "before",
+    })
+    const client = new RealtimeClient({
+      auth: new AuthStore(),
+      db,
+      transport: new MockTransport(),
+      sync: false,
+    })
+    await client.startSession({ token: "token", userId: userId(7) })
+
+    await expect(
+      client.execute(
+        editMessage({
+          chatId: targetChatId,
+          messageId: targetMessageId,
+          text: "after",
+        }),
+      ),
+    ).rejects.toMatchObject({ kind: "not-connected" })
+    expect(
+      db.get(
+        db.ref(
+          DbObjectKind.Message,
+          messageKey(targetChatId, targetMessageId),
+        ),
+      )?.message,
+    ).toBe("before")
+    await client.stop()
+  })
+
+  it("waits for an admitted realtime update before stop resolves", async () => {
+    let signalHydrationStarted!: () => void
+    const hydrationStarted = new Promise<void>((resolve) => {
+      signalHydrationStarted = resolve
+    })
+    let finishHydration!: () => void
+    const hydrationFinished = new Promise<void>((resolve) => {
+      finishHydration = resolve
+    })
+    const db = new Db({
+      autoHydrate: false,
+      persistence: false,
+      storageByKind: {
+        [DbObjectKind.DeferredUpdate]: {
+          init: async () => undefined,
+          get: async () => undefined,
+          getAll: async () => [],
+          put: async () => undefined,
+          delete: async () => undefined,
+          getDeferredUpdatesByTargetKeys: async () => {
+            signalHydrationStarted()
+            await hydrationFinished
+            return []
+          },
+        },
+      },
+    })
+    const client = new RealtimeClient({
+      auth: new AuthStore(),
+      db,
+      transport: new MockTransport(),
+      sync: false,
+    })
+    await client.startSession({ token: "token", userId: userId(7) })
+    await client.connection.events.send({
+      type: "updates",
+      updates: {
+        updates: [
+          Update.create({
+            update: {
+              oneofKind: "newMessage",
+              newMessage: {
+                message: {
+                  id: 89n,
+                  chatId: 10n,
+                  fromId: 7n,
+                  out: false,
+                  date: 89n,
+                  message: "admitted",
+                },
+              },
+            },
+          }),
+        ],
+      },
+    })
+    await hydrationStarted
+    const stopping = client.stop()
+    let stopped = false
+    void stopping.then(() => {
+      stopped = true
+    })
+    await Promise.resolve()
+    expect(stopped).toBe(false)
+
+    finishHydration()
+    await stopping
+    expect(
+      db.get(
+        db.ref(
+          DbObjectKind.Message,
+          messageKey(chatId(10), messageId(89)),
+        ),
+      ),
+    ).toBeDefined()
+  })
+
+  it("delivers asynchronous message-action answers to the invoking UI", async () => {
+    const client = new RealtimeClient({
+      auth: new AuthStore(),
+      db: new Db({ autoHydrate: false, persistence: false }),
+      transport: new MockTransport(),
+      sync: false,
+    })
+    await client.startSession({ token: "token", userId: userId(7) })
+    const answer = client.waitForMessageActionAnswer(42n, {
+      timeoutMs: 100,
+    })
+
+    await client.connection.events.send({
+      type: "updates",
+      updates: {
+        updates: [
+          Update.create({
+            update: {
+              oneofKind: "messageActionAnswered",
+              messageActionAnswered: {
+                interactionId: 42n,
+                ui: {
+                  kind: {
+                    oneofKind: "toast",
+                    toast: { text: "Approved" },
+                  },
+                },
+              },
+            },
+          }),
+        ],
+      },
+    })
+
+    await expect(answer).resolves.toMatchObject({
+      interactionId: 42n,
+      ui: {
+        kind: {
+          oneofKind: "toast",
+          toast: { text: "Approved" },
+        },
+      },
+    })
     await client.stop()
   })
 })

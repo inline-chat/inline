@@ -7,6 +7,9 @@ import { Icon } from "~/ui/Icon"
 import { colors } from "../styles/tokens.stylex"
 import { makeMessagePresentation } from "./MessageContent"
 import { useInlineToast } from "~/ui/InlineToast"
+import { inlineLog } from "~/inline/logging/InlineLogging"
+
+const log = inlineLog.withScope("UI.PinnedMessage")
 
 export type PinnedMessageHeaderPresentation = {
   label: string
@@ -77,7 +80,7 @@ export function PinnedMessageHeaderView({
             setUnpinPending(true)
             void onUnpin(messageId)
               .catch((cause: unknown) => {
-                console.error("Could not unpin Inline message", cause)
+                log.warn("ui.message.unpin.failed", { error: cause })
                 toast.show("Could not unpin message", "error")
               })
               .finally(() => setUnpinPending(false))

@@ -64,18 +64,23 @@ export function useInlineClientProvider({
 
 export function useDbHasHydrated(db?: Db): boolean {
   const resolvedDb = db ?? useClientDb()
+  const reactLog = resolvedDb.logger.withScope("React")
   const [hydrated, setHydrated] = useState(resolvedDb.hasHydrated)
 
   useEffect(() => {
     let active = true
     if (resolvedDb.hasHydrated) {
       if (resolvedDb.hydrationState === "pending") {
-        console.error("db hasHydrated true while hydration pending", resolvedDb.hydrationState)
+        reactLog.error("storage.hydration.invalid_state", {
+          hydrationState: resolvedDb.hydrationState,
+        })
       }
       if (resolvedDb.hydrationState === "failed") {
-        console.error("db hydration failed", resolvedDb.hydrationState)
+        reactLog.error("storage.hydration.failed", {
+          hydrationState: resolvedDb.hydrationState,
+        })
       }
-      console.log("db already hydrated", resolvedDb.hasHydrated)
+      reactLog.debug("storage.hydration.already_ready")
       setHydrated(true)
       return () => {
         active = false
@@ -84,9 +89,11 @@ export function useDbHasHydrated(db?: Db): boolean {
 
     void resolvedDb.ready.then(() => {
       if (resolvedDb.hydrationState === "failed") {
-        console.error("db hydration failed", resolvedDb.hydrationState)
+        reactLog.error("storage.hydration.failed", {
+          hydrationState: resolvedDb.hydrationState,
+        })
       }
-      console.log("db hydrated", resolvedDb.hasHydrated)
+      reactLog.debug("storage.hydration.ready")
       if (active) setHydrated(true)
     })
 

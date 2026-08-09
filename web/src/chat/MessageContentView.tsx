@@ -11,6 +11,7 @@ import type {
 import { messageMediaDisplaySize } from "./MessageContent"
 import { MessageAttachmentsView } from "./MessageAttachmentsView"
 import { InlineMessageTextView } from "./InlineMessageTextView"
+import type { InlineMessageEntityActions } from "./InlineMessageTextView"
 import { useRef, useState } from "react"
 import { InlineMediaViewer } from "./InlineMediaViewer"
 import { InlineFileDownloadView } from "./InlineFileDownloadView"
@@ -25,7 +26,10 @@ function MediaFrame({
   media,
   hasCaption,
 }: {
-  media: Extract<ChatMessageMediaPresentation, { kind: "photo" | "video" }>
+  media: Extract<
+    ChatMessageMediaPresentation,
+    { kind: "photo" | "video" | "sticker" }
+  >
   hasCaption: boolean
 }) {
   const source = useRef<HTMLButtonElement>(null)
@@ -36,8 +40,8 @@ function MediaFrame({
     hasCaption,
   )
   const cachedOrPhotoUrl = useInlineMediaUrl(
-    media.kind === "photo" ? media.mediaKey : undefined,
-    media.kind === "photo" ? media.remoteUrl : undefined,
+    media.kind !== "video" ? media.mediaKey : undefined,
+    media.kind !== "video" ? media.remoteUrl : undefined,
   )
   const streamingVideoUrl = useInlineStreamingMediaUrl(
     media.kind === "video" ? media.mediaKey : undefined,
@@ -94,10 +98,10 @@ function MediaFrame({
         {...stylex.props(styles.fullMedia)}
       />
       ) : null}
-      {url && media.kind === "photo" ? (
+      {url && media.kind !== "video" ? (
         <img
           src={url}
-          alt="Photo"
+          alt={media.label}
           width={media.width}
           height={media.height}
           loading="eager"
@@ -130,40 +134,71 @@ function MessageMediaContent({
   switch (media.kind) {
     case "photo":
     case "video":
+    case "sticker":
       return <MediaFrame media={media} hasCaption={hasCaption} />
     case "document":
       return <InlineFileDownloadView media={media} />
     case "voice":
-      return (
-        <span aria-label={media.label} {...stylex.props(styles.voice)}>
-          <span {...stylex.props(styles.waveform)}>
-            {Array.from({ length: 18 }, (_, index) => (
-              <i
-                key={index}
-                style={{
-                  height: Math.max(3, media.waveform[index] ?? ((index * 7) % 13) + 3),
-                }}
-                {...stylex.props(styles.waveformBar)}
-              />
-            ))}
-          </span>
-          <span {...stylex.props(styles.voiceLabel)}>
-            <span>{media.label}</span>
-            {media.duration ? (
-              <span {...stylex.props(styles.detail)}>{formatDuration(media.duration)}</span>
-            ) : null}
-          </span>
-        </span>
-      )
+      return <VoiceMessageContent media={media} />
     case "nudge":
       return <span {...stylex.props(styles.nudge)}>👋 Nudge</span>
   }
 }
 
+function VoiceMessageContent({
+  media,
+}: {
+  media: Extract<ChatMessageMediaPresentation, { kind: "voice" }>
+}) {
+  const voiceUrl = useInlineStreamingMediaUrl(
+    media.mediaKey,
+    media.remoteUrl,
+  )
+  return (
+    <span aria-label={media.label} {...stylex.props(styles.voice)}>
+      <span {...stylex.props(styles.waveform)}>
+        {Array.from({ length: 18 }, (_, index) => (
+          <i
+            key={index}
+            style={{
+              height: Math.max(
+                3,
+                media.waveform[index] ?? ((index * 7) % 13) + 3,
+              ),
+            }}
+            {...stylex.props(styles.waveformBar)}
+          />
+        ))}
+      </span>
+      <span {...stylex.props(styles.voiceLabel)}>
+        <span>{media.label}</span>
+        {media.duration ? (
+          <span {...stylex.props(styles.detail)}>
+            {formatDuration(media.duration)}
+          </span>
+        ) : null}
+      </span>
+      {voiceUrl ? (
+        <audio
+          src={voiceUrl}
+          controls
+          preload="metadata"
+          aria-label="Play voice message"
+          {...stylex.props(styles.voicePlayer)}
+        />
+      ) : (
+        <span {...stylex.props(styles.detail)}>Audio unavailable</span>
+      )}
+    </span>
+  )
+}
+
 export function MessageContentView({
   presentation,
+  entityActions,
 }: {
   presentation: ChatMessagePresentation
+  entityActions?: InlineMessageEntityActions
 }) {
   const hasText = Boolean(presentation.text)
   return (
@@ -175,8 +210,17 @@ export function MessageContentView({
         <InlineMessageTextView
           text={presentation.text}
           entities={presentation.entities}
+          entityActions={entityActions}
           {...stylex.props(styles.text)}
         />
+      ) : null}
+      {presentation.service ? (
+        <span
+          aria-label="Service message"
+          {...stylex.props(styles.text, styles.service)}
+        >
+          {presentation.service}
+        </span>
       ) : null}
       {presentation.fallback ? (
         <span {...stylex.props(styles.text, styles.contentFallback)}>
@@ -204,6 +248,11 @@ const styles = stylex.create({
   },
   contentFallback: {
     color: colors.textSecondary,
+  },
+  service: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    fontStyle: "italic",
   },
   mediaFrame: {
     maxWidth: "min(320px, calc(100vw - 104px))",
@@ -247,10 +296,11 @@ const styles = stylex.create({
     whiteSpace: "nowrap",
   },
   voice: {
-    width: 220,
+    width: 280,
     maxWidth: "calc(100vw - 124px)",
     display: "flex",
     alignItems: "center",
+    flexWrap: "wrap",
     gap: 8,
     paddingBlock: 2,
   },
@@ -265,6 +315,7 @@ const styles = stylex.create({
     display: "flex",
     alignItems: "center",
     flex: 1,
+    minWidth: 100,
     gap: 2,
     overflow: "hidden",
   },
@@ -276,6 +327,11 @@ const styles = stylex.create({
     borderRadius: 1,
     backgroundColor: "currentColor",
     opacity: 0.4,
+  },
+  voicePlayer: {
+    width: "100%",
+    height: 28,
+    display: "block",
   },
   nudge: {
     fontWeight: 500,

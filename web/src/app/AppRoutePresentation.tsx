@@ -13,6 +13,10 @@ import {
   useRouter,
   useRouterState,
 } from "@tanstack/react-router"
+import { inlineLog } from "~/inline/logging/InlineLogging"
+
+const presentationTimeoutMs = 5_000
+const log = inlineLog.withScope("UI.RoutePresentation")
 
 type AppRoutePresentationValue = {
   targetPath?: string
@@ -43,6 +47,7 @@ export function AppRoutePresentationProvider({
   const resolvedPathRef = useRef(resolvedPath)
   resolvedPathRef.current = resolvedPath
   const begin = useCallback((nextTargetPath: string) => {
+    if (nextTargetPath === resolvedPathRef.current) return
     setTargetPath(nextTargetPath)
   }, [])
   const finish = useCallback((finishedTargetPath: string) => {
@@ -59,13 +64,28 @@ export function AppRoutePresentationProvider({
     return router.history.subscribe(() => {
       const nextPath = router.history.location.pathname
       if (nextPath === resolvedPathRef.current) return
-      if (!nextPath.startsWith("/chat/")) return
+      if (!nextPath.startsWith("/chat/")) {
+        setTargetPath(undefined)
+        return
+      }
       // This subscription can run while TanStack is committing a navigation.
       // A normal state update joins the pending route work and commits before
       // the browser's next paint; forcing a nested React flush here is invalid.
       begin(nextPath)
     })
   }, [begin, router])
+
+  useEffect(() => {
+    if (!targetPath) return
+    const timeout = setTimeout(() => {
+      setTargetPath((current) => {
+        if (current !== targetPath) return current
+        log.warn("ui.route.presentation.timeout")
+        return undefined
+      })
+    }, presentationTimeoutMs)
+    return () => clearTimeout(timeout)
+  }, [targetPath])
 
   return (
     <AppRoutePresentationContext.Provider value={value}>

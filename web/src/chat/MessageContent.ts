@@ -44,9 +44,21 @@ export type ChatMessageMediaPresentation =
     }
   | {
       kind: "voice"
+      mediaKey: string
+      remoteUrl?: string
+      mimeType?: string
       duration?: number
       waveform: number[]
       label: "Voice message"
+    }
+  | {
+      kind: "sticker"
+      mediaKey: string
+      remoteUrl?: string
+      tinyThumbnailUrl?: string
+      width: number
+      height: number
+      label: "Sticker"
     }
   | {
       kind: "nudge"
@@ -95,7 +107,11 @@ export const messagePresentationMediaDescriptors = (
 ): InlineMediaDescriptor[] => {
   const descriptors: InlineMediaDescriptor[] = []
   const media = presentation.media
-  if (media?.kind === "photo" || media?.kind === "video") {
+  if (
+    media?.kind === "photo" ||
+    media?.kind === "video" ||
+    media?.kind === "sticker"
+  ) {
     descriptors.push({ key: media.mediaKey })
     if (media.kind === "video" && media.posterKey) {
       descriptors.push({ key: media.posterKey })
@@ -178,21 +194,28 @@ export const messageMediaDisplaySize = (
   }
 }
 
-const photoPresentation = (photo: Photo | undefined) => {
+const photoPresentation = (
+  photo: Photo | undefined,
+  sticker = false,
+) : Extract<
+  ChatMessageMediaPresentation,
+  { kind: "photo" | "sticker" }
+> => {
   const size = bestPhotoSize(photo)
   const tinyThumbnail =
     photo?.sizes.find(
       (candidate) => candidate.type === "s" && candidate.bytes?.length,
     ) ?? photo?.sizes.find((candidate) => candidate.bytes?.length)
   const dimensions = mediaDimensions(size?.w, size?.h)
-  return {
-    kind: "photo" as const,
+  const shared = {
     mediaKey: `photo:${photo?.id.toString() ?? "unknown"}:${size?.type ?? "unknown"}`,
-    remoteUrl: size?.cdnUrl,
+    remoteUrl: safeHttpUrl(size?.cdnUrl),
     tinyThumbnailUrl: inlineTinyThumbnailDataUrl(tinyThumbnail?.bytes),
     ...dimensions,
-    label: "Photo" as const,
   }
+  return sticker
+    ? { ...shared, kind: "sticker", label: "Sticker" }
+    : { ...shared, kind: "photo", label: "Photo" }
 }
 
 const safeHttpUrl = (value?: string) => {
@@ -278,7 +301,7 @@ const urlPreviewPresentation = (
     thumbnail: photo
       ? {
           mediaKey: `photo:${photo.id.toString()}:${size?.type ?? "unknown"}`,
-          remoteUrl: size?.cdnUrl,
+          remoteUrl: safeHttpUrl(size?.cdnUrl),
         }
       : undefined,
   }
@@ -335,7 +358,10 @@ export const makeMessagePresentation = (
 
   switch (media?.oneofKind) {
     case "photo":
-      return { ...content, media: photoPresentation(media.photo.photo) }
+      return {
+        ...content,
+        media: photoPresentation(media.photo.photo, Boolean(message.isSticker)),
+      }
     case "video": {
       const video = media.video.video
       const poster = bestPhotoSize(video?.photo)
@@ -354,11 +380,11 @@ export const makeMessagePresentation = (
         media: {
           kind: "video",
           mediaKey: `video:${video?.id.toString() ?? "unknown"}`,
-          remoteUrl: video?.cdnUrl,
+          remoteUrl: safeHttpUrl(video?.cdnUrl),
           posterKey: poster
             ? `photo:${video?.photo?.id.toString() ?? "unknown"}:${poster.type}`
             : undefined,
-          posterUrl: poster?.cdnUrl,
+          posterUrl: safeHttpUrl(poster?.cdnUrl),
           tinyThumbnailUrl: inlineTinyThumbnailDataUrl(
             tinyThumbnail?.bytes,
           ),
@@ -377,7 +403,7 @@ export const makeMessagePresentation = (
         media: {
           kind: "document",
           mediaKey: `document:${document?.id.toString() ?? "unknown"}`,
-          remoteUrl: document?.cdnUrl,
+          remoteUrl: safeHttpUrl(document?.cdnUrl),
           fileName,
           mimeType: document?.mimeType || undefined,
           size: document?.size || undefined,
@@ -391,6 +417,9 @@ export const makeMessagePresentation = (
         ...content,
         media: {
           kind: "voice",
+          mediaKey: `voice:${voice?.id.toString() ?? "unknown"}`,
+          remoteUrl: safeHttpUrl(voice?.cdnUrl),
+          mimeType: voice?.mimeType || undefined,
           duration: voice?.duration || undefined,
           waveform: voice ? Array.from(voice.waveform) : [],
           label: "Voice message",

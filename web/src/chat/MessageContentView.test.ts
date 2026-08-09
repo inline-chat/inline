@@ -128,6 +128,53 @@ describe("messageContentLabel", () => {
     )
   })
 
+  it("drops unsafe playable and downloadable media URLs", () => {
+    const photo = makeMessagePresentation(message({
+      media: {
+        media: {
+          oneofKind: "photo",
+          photo: {
+            photo: {
+              id: 1n,
+              date: 1n,
+              format: 1,
+              sizes: [{
+                type: "d",
+                w: 100,
+                h: 100,
+                size: 10,
+                cdnUrl: "javascript:alert(1)",
+              }],
+            },
+          },
+        },
+      },
+    }))
+    const document = makeMessagePresentation(message({
+      media: {
+        media: {
+          oneofKind: "document",
+          document: {
+            document: {
+              id: 2n,
+              date: 1n,
+              fileName: "unsafe.pdf",
+              mimeType: "application/pdf",
+              size: 10,
+              cdnUrl: "data:text/html,unsafe",
+            },
+          },
+        },
+      },
+    }))
+
+    expect(photo.media).toMatchObject({ kind: "photo", remoteUrl: undefined })
+    expect(document.media).toMatchObject({
+      kind: "document",
+      remoteUrl: undefined,
+    })
+  })
+
   it("collects stable primary, poster, and attachment media identities for first-frame promotion", () => {
     expect(
       messagePresentationMediaDescriptors({

@@ -18,6 +18,9 @@ import {
   type MessageReactionGroup,
 } from "./MessageReactions"
 import { useInlineToast } from "~/ui/InlineToast"
+import { inlineLog } from "~/inline/logging/InlineLogging"
+
+const log = inlineLog.withScope("UI.Reaction")
 
 function ReactionAvatar({ userId }: { userId: UserID }) {
   const user = useInlineObject<DbObjectKind.User, User>(
@@ -102,7 +105,7 @@ export function MessageReactionsView({
       ? deleteReaction(context)
       : addReaction(context)
     void realtime.mutate(transaction).catch((cause) => {
-      console.error("Could not update Inline reaction", cause)
+      log.warn("ui.message.reaction.failed", { error: cause })
       toast.show("Could not update reaction", "error")
     })
   }

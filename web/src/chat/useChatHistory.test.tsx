@@ -1,3 +1,5 @@
+import type { RpcResult } from "@inline-chat/protocol/core"
+import type { Transaction } from "@inline/client"
 import { chatId, userId } from "@inline/ids"
 import { act, renderHook } from "@testing-library/react"
 import { StrictMode, type PropsWithChildren } from "react"
@@ -5,7 +7,11 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { useChatHistory } from "./useChatHistory"
 
 const hydrateMessageWindow = vi.fn(async () => 0)
-const query = vi.fn(async () => undefined)
+const query = vi.fn(
+  async (
+    _transaction: Transaction,
+  ): Promise<RpcResult["result"] | undefined> => undefined,
+)
 const mutate = vi.fn(async () => undefined)
 const mutateAccepted = vi.fn(async () => undefined)
 const client = {
@@ -176,5 +182,68 @@ describe("useChatHistory prepared initial state", () => {
     expect(mutateAccepted).toHaveBeenCalledTimes(2)
     expect(mutate).not.toHaveBeenCalled()
     expect(query).not.toHaveBeenCalled()
+  })
+
+  it("intentionally replaces old history with the latest bounded window", async () => {
+    const id = chatId(88)
+    hydrateMessageWindow.mockResolvedValueOnce(12)
+    query.mockResolvedValueOnce({
+      oneofKind: "getChatHistory",
+      getChatHistory: { messages: [] },
+    })
+    const hook = renderHook(() =>
+      useChatHistory(peer, id, id, { open: true }),
+    )
+
+    let loaded = false
+    await act(async () => {
+      loaded = await hook.result.current.loadLatest()
+    })
+
+    expect(loaded).toBe(true)
+    expect(hydrateMessageWindow).toHaveBeenCalledWith(id, { limit: 60 })
+    const transaction = query.mock.calls[0]![0]
+    expect(transaction.input(transaction.context)).toMatchObject({
+      oneofKind: "getChatHistory",
+      getChatHistory: { limit: 60, mode: 1 },
+    })
+    expect(hook.result.current.loadingNewer).toBe(false)
+  })
+
+  it("does not report stale resident history as a successful latest load", async () => {
+    const id = chatId(89)
+    hydrateMessageWindow.mockResolvedValueOnce(12)
+    query.mockRejectedValueOnce(new Error("latest unavailable"))
+    const hook = renderHook(() =>
+      useChatHistory(peer, id, id, { open: true }),
+    )
+
+    let loaded = true
+    await act(async () => {
+      loaded = await hook.result.current.loadLatest()
+    })
+
+    expect(loaded).toBe(false)
+    expect(hook.result.current.error).toBe("latest unavailable")
+    expect(hook.result.current.loadingNewer).toBe(false)
+  })
+
+  it("rejects an invalid latest-history response even with resident rows", async () => {
+    const id = chatId(90)
+    hydrateMessageWindow.mockResolvedValueOnce(12)
+    query.mockResolvedValueOnce(undefined)
+    const hook = renderHook(() =>
+      useChatHistory(peer, id, id, { open: true }),
+    )
+
+    let loaded = true
+    await act(async () => {
+      loaded = await hook.result.current.loadLatest()
+    })
+
+    expect(loaded).toBe(false)
+    expect(hook.result.current.error).toBe(
+      "Could not refresh the latest messages.",
+    )
   })
 })

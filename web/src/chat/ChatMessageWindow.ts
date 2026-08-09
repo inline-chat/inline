@@ -32,7 +32,14 @@ export async function loadChatWindowAroundMessage({
     messageId: targetMessageId,
     ...chatAroundWindow,
   }
-  if (await db.loadLocalWindowAroundMessage(chatId, window)) {
+  const intentVersion = db.beginResidentMessageWindowIntent(chatId)
+  if (
+    await db.loadLocalWindowAroundMessageForIntent(
+      chatId,
+      window,
+      intentVersion,
+    )
+  ) {
     return true
   }
 
@@ -50,6 +57,10 @@ export async function loadChatWindowAroundMessage({
   const responseContainsTarget = result.getChatHistory.messages.some(
     (message) => message.id.toString() === targetMessageId,
   )
-  const compacted = await db.loadLocalWindowAroundMessage(chatId, window)
+  const compacted = await db.loadLocalWindowAroundMessageForIntent(
+    chatId,
+    window,
+    intentVersion,
+  )
   return compacted || responseContainsTarget
 }

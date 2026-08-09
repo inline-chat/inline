@@ -1,9 +1,7 @@
 import { InlineClientProvider } from "@inline/client/react"
 import type { UserID } from "@inline/ids"
 import {
-  useEffect,
   useLayoutEffect,
-  useRef,
   useState,
   useSyncExternalStore,
   type ReactNode,
@@ -15,7 +13,6 @@ import { InlineCoreRecoveryView } from "./InlineCoreRecoveryView"
 import { AppBootView } from "~/app/AppBootView"
 import {
   getInlineRuntimeCoreBinding,
-  replaceUnresponsiveInlineRuntimeCore,
   type InlineRuntimeCoreBinding,
 } from "./InlineRuntimeCore"
 import {
@@ -44,10 +41,9 @@ function InlineRuntimeForAccount({
   userId: UserID
   children: ReactNode
 }) {
-  const [binding, setBinding] = useState<InlineRuntimeCoreBinding>(() =>
+  const [binding] = useState<InlineRuntimeCoreBinding>(() =>
     getInlineRuntimeCoreBinding(userId),
   )
-  const replacementAttempted = useRef(false)
   const { core } = binding
   const state = useSyncExternalStore(
     core.subscribe,
@@ -59,31 +55,7 @@ function InlineRuntimeForAccount({
     return binding.retain()
   }, [binding])
 
-  useEffect(() => {
-    void core.start().catch(() => {
-      // The core publishes the actionable failure through its snapshot.
-    })
-  }, [core])
-
-  const replaceableBootFailure =
-    state.blockingFailure != null &&
-    core.canReplaceUnresponsiveBootOwner()
-
-  useEffect(() => {
-    if (!replaceableBootFailure || replacementAttempted.current) return
-    replacementAttempted.current = true
-    const replacement = replaceUnresponsiveInlineRuntimeCore(core)
-    if (!replacement) return
-    setBinding({
-      core: replacement,
-      retain: () => getInlineRuntimeCoreBinding(userId).retain(),
-    })
-  }, [core, replaceableBootFailure, userId])
-
-  if (
-    state.blockingFailure?.recoveryAction === "reload" &&
-    !replaceableBootFailure
-  ) {
+  if (state.blockingFailure?.recoveryAction === "reload") {
     return (
       <InlineCoreRecoveryView
         failureCode={state.blockingFailure.code}

@@ -13,6 +13,7 @@ export function InlineCoreRecoveryView({
   failureMessage?: string
   onReload?: () => void
 }) {
+  const ownerUnavailable = failureCode === "owner-unavailable"
   return (
     <div
       role="alert"
@@ -21,7 +22,11 @@ export function InlineCoreRecoveryView({
       {...stylex.props(styles.root)}
     >
       <RoutePlaceholderView
-        title="Inline couldn’t continue. Please reload the app."
+        title={
+          ownerUnavailable
+            ? "Inline is open in another tab. Close it, then reload this tab."
+            : "Inline couldn’t continue. Please reload the app."
+        }
         actionTitle="Reload Inline"
         onAction={onReload}
       />

@@ -55,4 +55,19 @@ describe("Transaction blockers", () => {
     })
     expect(queue.dequeue(() => "satisfied")).toBeNull()
   })
+
+  it("cancels only work that has not crossed the transport boundary", () => {
+    const queue = new Transactions()
+    queue.enqueue(transaction("queued"), { id: "queued" })
+    expect(queue.cancelQueued(({ id }) => id === "queued")).toMatchObject([
+      { id: "queued" },
+    ])
+
+    queue.enqueue(transaction("sent"), { id: "sent" })
+    expect(queue.dequeue(() => "satisfied")).toMatchObject({
+      state: "ready",
+      wrapper: { id: "sent" },
+    })
+    expect(queue.cancelQueued(({ id }) => id === "sent")).toEqual([])
+  })
 })

@@ -18,6 +18,19 @@
   "overrides": [
     {
       "files": [
+        "web/src/**/*.{ts,tsx}",
+        "web/packages/client/src/**/*.{ts,tsx}"
+      ],
+      "excludeFiles": [
+        "web/src/testing/**",
+        "**/*.{test,spec}.{ts,tsx}"
+      ],
+      "rules": {
+        "no-console": "error"
+      }
+    },
+    {
+      "files": [
         "server/src/core/**/*.{ts,tsx}",
         "server/src/modules/effect/**/*.{ts,tsx}",
         "server/src/**/*.effect.{ts,tsx}",

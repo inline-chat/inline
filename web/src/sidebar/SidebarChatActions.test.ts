@@ -9,6 +9,7 @@ import { chatId, dialogId } from "@inline/ids"
 import { describe, expect, it, vi } from "vitest"
 import {
   closeSidebarChat,
+  closeSidebarChatGroup,
   sidebarChatPath,
   toggleSidebarChatPinned,
   toggleSidebarChatRead,
@@ -97,6 +98,38 @@ describe("SidebarChatActions", () => {
     expect(openAllChats).not.toHaveBeenCalled()
     expect(mutate).not.toHaveBeenCalled()
     expect(mutateAccepted).toHaveBeenCalledOnce()
+  })
+
+  it("closes every attached reply while navigating away only once", async () => {
+    const child: Dialog = {
+      ...thread,
+      id: dialogId(-802),
+      chatId: chatId(802),
+      peerThreadId: chatId(802),
+    }
+    const openAllChats = vi.fn()
+    const mutate = vi.fn<RealtimeService["mutate"]>(async () => undefined)
+    const mutateAccepted = vi.fn<RealtimeService["mutateAccepted"]>(
+      async () => undefined,
+    )
+
+    await closeSidebarChatGroup({
+      dialogs: [thread, child],
+      currentPath: sidebarChatPath(child),
+      openAllChats,
+      realtime: realtimeService(mutate, mutateAccepted),
+    })
+
+    expect(openAllChats).toHaveBeenCalledOnce()
+    expect(mutateAccepted).toHaveBeenCalledTimes(2)
+    expect(
+      mutateAccepted.mock.calls.map(([transaction]) =>
+        transaction.input(transaction.context),
+      ),
+    ).toMatchObject([
+      { updateDialogOpen: { peerId: { type: { chat: { chatId: 801n } } } } },
+      { updateDialogOpen: { peerId: { type: { chat: { chatId: 802n } } } } },
+    ])
   })
 
   it("maps Pin and Unpin to Inline's dialog-order state setter", async () => {

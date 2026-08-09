@@ -16,6 +16,7 @@ function dependenciesAreEqual(a: unknown[] | null | undefined, b: unknown[] | nu
 
 export const useQuery = (query: Transaction, options: UseQueryOptions = {}) => {
   const client = useInlineClient()
+  const queryLog = client.db.logger.withScope("React.Query")
 
   const state = useRef<{
     initial: boolean
@@ -30,14 +31,17 @@ export const useQuery = (query: Transaction, options: UseQueryOptions = {}) => {
     state.current.dependencies = options.dependencies ?? []
     state.current.inFlight = true
 
-    console.log("querying", query.method)
+    queryLog.debug("query.started", { method: query.method })
     client.realtime
       .query(query)
       .catch((error: unknown) => {
-        console.log("failed to query", error)
+        queryLog.warn("query.failed", {
+          method: query.method,
+          error,
+        })
       })
       .finally(() => {
-        console.log("finished querying", query.method)
+        queryLog.debug("query.finished", { method: query.method })
         state.current.inFlight = false
       })
   }, [client.realtime, query.method, ...(options.dependencies ?? [])])

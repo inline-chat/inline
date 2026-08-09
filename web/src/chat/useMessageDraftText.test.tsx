@@ -17,7 +17,7 @@ import type {
   InlineMessageDraftsService,
 } from "../inline/drafts/InlineMessageDrafts"
 import { useMessageDraftText } from "./useMessageDraftText"
-import { InlineCoreProtocolError } from "../inline/core/InlineCoreRendererClient"
+import { inlineLogBuffer } from "../inline/logging/InlineLogging"
 
 const routePeer = {
   peerKind: "user" as const,
@@ -119,16 +119,11 @@ describe("useMessageDraftText", () => {
     )
   })
 
-  it("hands dirty text to a replacement core without logging the retired owner", async () => {
+  it("hands dirty text to a replacement draft service", async () => {
     vi.useFakeTimers()
-    const consoleError = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined)
+    inlineLogBuffer.clear()
     const retiredUpdate = vi.fn(async () => {
-      throw new InlineCoreProtocolError(
-        "Inline core worker stopped responding",
-        "owner-failed",
-      )
+      throw new Error("Draft service retired")
     })
     const replacementUpdate = vi.fn(async () => undefined)
     const retired: InlineMessageDraftsService = {
@@ -166,8 +161,11 @@ describe("useMessageDraftText", () => {
       "survives recovery",
       undefined,
     )
-    expect(consoleError).not.toHaveBeenCalled()
-    consoleError.mockRestore()
+    expect(
+      inlineLogBuffer
+        .snapshot()
+        .some((record) => record.event === "ui.draft.persist.failed"),
+    ).toBe(true)
   })
 
   it("suppresses a late restoration after an explicit clear", async () => {

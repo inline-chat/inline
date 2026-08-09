@@ -3,6 +3,7 @@ import {
   DbObjectKind,
   DbQueryPlanType,
   RealtimeClient,
+  TransactionFailure,
   getChats,
   getMe,
   messageKey,
@@ -14,6 +15,7 @@ import {
   type RealtimeConnectionState,
 } from "@inline/client/core"
 import type { UserID } from "@inline/ids"
+import { Log } from "@inline/log"
 import {
   hydrateReplyThreadAnchors,
   refreshMissingReplyThreadAnchors,
@@ -36,6 +38,10 @@ import {
   type FullChatProgressiveService,
 } from "./FullChatProgressiveService"
 import { createInlinePersistenceStore } from "../data/createInlinePersistenceStore"
+import type {
+  InlineCoreAccountOwnership,
+  InlineCoreAccountOwnershipAcquirer,
+} from "./InlineCoreAccountOwnership"
 
 type SnapshotListener = () => void
 
@@ -44,6 +50,8 @@ export type InlineAccountCoreOptions = {
   observeBrowserLifecycle?: boolean
   mediaLoader?: InlineMediaLoader
   persistenceStore?: InlinePersistenceStore | null
+  logger?: Log
+  acquireAccountOwnership?: InlineCoreAccountOwnershipAcquirer
 }
 
 const makeOwnerId = () => {
@@ -57,6 +65,9 @@ const makeOwnerId = () => {
     .toString(36)
     .slice(2)}`
 }
+
+const isStoppedTransactionFailure = (error: unknown) =>
+  error instanceof TransactionFailure && error.kind === "stopped"
 
 /**
  * The in-page implementation of an authenticated account core. React binds
@@ -76,6 +87,11 @@ export class InlineAccountCore {
   readonly fullChatProgressive: FullChatProgressiveService
   readonly client: InlineClientContextValue
 
+  private readonly hasDurablePersistence: boolean
+  private readonly log: Log
+  private readonly acquireAccountOwnership:
+    | InlineCoreAccountOwnershipAcquirer
+    | undefined
   private readonly browserLifecycle:
     | BrowserConnectionLifecycle
     | undefined
@@ -87,6 +103,7 @@ export class InlineAccountCore {
   private stopTask: Promise<void> | null = null
   private detachBrowserLifecycle: (() => void) | null = null
   private unsubscribeConnection: (() => void) | null = null
+  private ownership: InlineCoreAccountOwnership | undefined
 
   constructor(
     accountId: UserID,
@@ -95,21 +112,28 @@ export class InlineAccountCore {
     this.accountId = accountId
     this.ownerId = makeOwnerId()
     this.auth = options.auth
+    this.log = options.logger ?? new Log("InlineAccountCore")
+    this.acquireAccountOwnership = options.acquireAccountOwnership
+    const persistenceStore =
+      options.persistenceStore !== undefined
+        ? options.persistenceStore
+        : createInlinePersistenceStore({ accountId })
+    this.hasDurablePersistence = persistenceStore != null
     this.db = new Db({
       autoHydrate: false,
-      persistenceStore:
-        options.persistenceStore !== undefined
-          ? options.persistenceStore
-          : createInlinePersistenceStore({ accountId }),
+      persistenceStore,
+      logger: this.log.withScope("Database"),
     })
     this.realtime = new RealtimeClient({
       auth: this.auth,
       db: this.db,
+      logger: this.log.withScope("Realtime"),
     })
     this.mediaLoader =
       options.mediaLoader ??
       new InlineMediaLoader({
         cache: createInlineMediaCache({ accountId }),
+        logger: this.log.withScope("Media"),
       })
     this.mediaRepository = new InlineMediaRepository(
       this.mediaLoader,
@@ -178,8 +202,16 @@ export class InlineAccountCore {
     if (this.running) {
       return this.startTask ?? Promise.resolve()
     }
+    if (this.snapshot.blockingFailure?.recoveryAction === "reload") {
+      return Promise.reject(
+        new Error(this.snapshot.blockingFailure.message),
+      )
+    }
 
     this.running = true
+    this.log.info("core.start.requested", {
+      generation: this.generation + 1,
+    })
     const generation = ++this.generation
     this.detachBrowserLifecycle =
       this.browserLifecycle?.attach() ?? null
@@ -224,22 +256,85 @@ export class InlineAccountCore {
   }
 
   private async finishStop() {
-    await this.realtime.stop()
-    await this.db.closePersistence()
-    this.updateSnapshot({
-      phase: "stopped",
-      connectionState: "idle",
-    })
+    const errors: unknown[] = []
+    let persistenceClosed = false
+    const startTask = this.startTask
+    try {
+      await this.realtime.stop()
+    } catch (error) {
+      errors.push(error)
+    }
+    if (startTask) {
+      try {
+        await startTask
+      } catch (error) {
+        if (!errors.includes(error)) errors.push(error)
+      }
+    }
+    try {
+      await this.messageDrafts.drain()
+    } catch (error) {
+      errors.push(error)
+    }
+    try {
+      await this.db.closePersistence()
+      persistenceClosed = true
+    } catch (error) {
+      errors.push(error)
+    }
+    const ownership = persistenceClosed
+      ? this.ownership
+      : undefined
+    if (persistenceClosed) this.ownership = undefined
+    if (ownership) {
+      try {
+        await ownership.release()
+      } catch (error) {
+        errors.push(error)
+      }
+    }
+    this.updateSnapshot(
+      persistenceClosed
+        ? {
+            phase: "stopped",
+            connectionState: "idle",
+          }
+        : {
+            phase: "error",
+            connectionState: "idle",
+            blockingFailure: {
+              code: "storage-unavailable",
+              message:
+                "Inline could not safely close its local replica. Reload before reopening this account.",
+              recoveryAction: "reload",
+            },
+          },
+    )
+    this.log.info("core.stopped", { errorCount: errors.length })
+    if (errors.length === 1) throw errors[0]
+    if (errors.length > 1) {
+      throw new AggregateError(
+        errors,
+        "Inline account core could not stop cleanly",
+      )
+    }
   }
 
   private async bootstrap(generation: number) {
+    if (!(await this.acquireOwnership(generation))) return
     try {
       this.updateSnapshot({
         phase: "openingStorage",
         blockingFailure: undefined,
         syncIssue: undefined,
       })
+      if (!this.hasDurablePersistence) {
+        throw new Error(
+          "Inline requires durable browser storage to start.",
+        )
+      }
       await this.db.openPersistence()
+      this.log.info("storage.open.ready", { generation })
       if (!this.isCurrent(generation)) return
       await this.db.hydrateKinds([
         DbObjectKind.User,
@@ -272,8 +367,20 @@ export class InlineAccountCore {
         phase: "cacheReady",
         cacheReady: true,
       })
+      this.log.info("runtime.cache.ready", { generation })
     } catch (error) {
       if (!this.isCurrent(generation)) return
+      if (isStoppedTransactionFailure(error)) {
+        this.updateSnapshot({
+          phase: "cacheReady",
+          connectionState: "idle",
+          syncIssue: undefined,
+        })
+        this.log.debug("runtime.initial_sync.cancelled", {
+          generation,
+        })
+        return
+      }
       this.updateSnapshot({
         phase: "error",
         blockingFailure: {
@@ -284,6 +391,10 @@ export class InlineAccountCore {
               : "Inline’s local cache could not open.",
           recoveryAction: "reload",
         },
+      })
+      this.log.error("storage.open.failed", {
+        generation,
+        error,
       })
       return
     }
@@ -314,8 +425,20 @@ export class InlineAccountCore {
         phase: "ready",
         syncIssue: undefined,
       })
+      this.log.info("runtime.sync.ready", { generation })
     } catch (error) {
       if (!this.isCurrent(generation)) return
+      if (isStoppedTransactionFailure(error)) {
+        this.updateSnapshot({
+          phase: "cacheReady",
+          connectionState: "idle",
+          syncIssue: undefined,
+        })
+        this.log.debug("runtime.initial_sync.cancelled", {
+          generation,
+        })
+        return
+      }
       this.updateSnapshot({
         phase: "cacheReady",
         syncIssue: {
@@ -326,7 +449,50 @@ export class InlineAccountCore {
               : "Inline could not refresh yet.",
         },
       })
+      this.log.warn("runtime.initial_sync.unavailable", {
+        generation,
+        error,
+      })
     }
+  }
+
+  private async acquireOwnership(generation: number) {
+    if (!this.acquireAccountOwnership || this.ownership) return true
+    let ownership: InlineCoreAccountOwnership | null
+    try {
+      ownership = await this.acquireAccountOwnership(this.accountId)
+    } catch (error) {
+      if (!this.isCurrent(generation)) return false
+      this.updateSnapshot({
+        phase: "error",
+        blockingFailure: {
+          code: "owner-unavailable",
+          message: "Inline could not acquire its browser storage lock.",
+          recoveryAction: "reload",
+        },
+      })
+      this.log.error("runtime.owner.acquire_failed", { error })
+      return false
+    }
+    if (!this.isCurrent(generation)) {
+      await ownership?.release().catch(() => undefined)
+      return false
+    }
+    if (!ownership) {
+      this.updateSnapshot({
+        phase: "error",
+        blockingFailure: {
+          code: "owner-unavailable",
+          message: "Inline is already open in another tab.",
+          recoveryAction: "reload",
+        },
+      })
+      this.log.warn("runtime.owner.unavailable")
+      return false
+    }
+    this.ownership = ownership
+    this.log.info("runtime.owner.acquired")
+    return true
   }
 
   private handleConnectionState(

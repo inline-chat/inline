@@ -28,6 +28,9 @@ import {
   toggleReplyThreadFollow,
 } from "./ChatToolbarFollowAction"
 import { InlineNavigationControls } from "~/ui/InlineNavigationControls"
+import { inlineLog } from "~/inline/logging/InlineLogging"
+
+const log = inlineLog.withScope("UI.ChatToolbar")
 
 export function ChatToolbar({
   peer,
@@ -66,7 +69,7 @@ export function ChatToolbar({
     setFollowPending(true)
     void toggleReplyThreadFollow({ dialog, realtime })
       .catch((cause: unknown) => {
-        console.error("Could not update Inline reply-thread follow mode", cause)
+        log.warn("ui.chat.follow_mode.failed", { error: cause })
         toast.show("Could not update follow mode", "error")
       })
       .finally(() => setFollowPending(false))
@@ -74,7 +77,10 @@ export function ChatToolbar({
   const unread = Boolean(dialog?.unreadMark || (dialog?.unreadCount ?? 0) > 0)
   const runDialogAction = (action: () => Promise<unknown>, failure: string) => {
     void action().catch((cause: unknown) => {
-      console.error(failure, cause)
+      log.warn("ui.chat.dialog_action.failed", {
+        action: failure,
+        error: cause,
+      })
       toast.show(failure, "error")
     })
   }

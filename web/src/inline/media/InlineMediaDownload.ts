@@ -45,6 +45,25 @@ const anchorDownload = (url: string, fileName: string) => {
   anchor.click()
 }
 
+const validatedDownloadUrl = (value: string) => {
+  let url: URL
+  try {
+    url = new URL(value, window.location.href)
+  } catch (cause) {
+    throw new TypeError("Invalid Inline media download URL", {
+      cause,
+    })
+  }
+  if (
+    url.protocol !== "https:" &&
+    url.protocol !== "http:" &&
+    url.protocol !== "blob:"
+  ) {
+    throw new TypeError("Invalid Inline media download URL")
+  }
+  return url.href
+}
+
 /**
  * Streams remote media directly to a user-selected file in Chromium when the
  * File System Access API is available. Blob URLs and fallback browsers use the
@@ -59,18 +78,19 @@ export async function downloadInlineMedia(
   } = {},
 ): Promise<InlineMediaDownloadResult> {
   const fileName = inlineDownloadFileName(requestedFileName)
+  const downloadUrl = validatedDownloadUrl(url)
   const savePicker = (
     window as typeof window & {
       showSaveFilePicker?: InlineSaveFilePicker
     }
   ).showSaveFilePicker
-  if (!savePicker || url.startsWith("blob:")) {
-    anchorDownload(url, fileName)
+  if (!savePicker || downloadUrl.startsWith("blob:")) {
+    anchorDownload(downloadUrl, fileName)
     return { method: "native" }
   }
 
   const handle = await savePicker({ suggestedName: fileName })
-  const response = await fetch(url, {
+  const response = await fetch(downloadUrl, {
     credentials: "omit",
     signal: options.signal,
   })

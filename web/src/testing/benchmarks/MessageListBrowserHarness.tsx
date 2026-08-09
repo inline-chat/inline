@@ -659,6 +659,11 @@ function Harness({
           }}
           onOpenReplyThread={() => undefined}
           onReplyMessage={() => undefined}
+          onReplyThreadMessage={() => undefined}
+          onEditMessage={() => undefined}
+          onDeleteMessage={() => undefined}
+          onForwardMessage={() => undefined}
+          onAddReaction={() => undefined}
           onTogglePinMessage={() => undefined}
           onResendMessage={(messageId) => {
             resendCount.current += 1

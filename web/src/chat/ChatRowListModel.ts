@@ -31,6 +31,24 @@ export type ChatMessageRow = {
   replyThreadSummary?: ChatMessageReplyThreadSummary
   forwardHeader?: ChatMessageForwardHeader
   reactions?: ChatMessageReactions
+  actions?: ChatMessageActionRows
+}
+
+export type ChatMessageAction =
+  | {
+      id: string
+      label: string
+      kind: "callback"
+    }
+  | {
+      id: string
+      label: string
+      kind: "copyText"
+      text: string
+    }
+
+export type ChatMessageActionRows = {
+  rows: readonly (readonly ChatMessageAction[])[]
 }
 
 export type ChatMessageReaction = {
@@ -124,6 +142,32 @@ const makeReactions = (
     : undefined
 }
 
+const makeActions = (
+  message: Message,
+): ChatMessageActionRows | undefined => {
+  const rows = (message.actions?.rows ?? []).flatMap((row) => {
+    const actions = row.actions.flatMap<ChatMessageAction>((action) => {
+      const id = action.actionId.trim().slice(0, 256)
+      const label = action.text.trim().slice(0, 120)
+      if (!id || !label) return []
+      if (action.action.oneofKind === "callback") {
+        return [{ id, label, kind: "callback" }]
+      }
+      if (action.action.oneofKind === "copyText") {
+        return [{
+          id,
+          label,
+          kind: "copyText",
+          text: action.action.copyText.text.slice(0, 100_000),
+        }]
+      }
+      return []
+    })
+    return actions.length > 0 ? [actions] : []
+  })
+  return rows.length > 0 ? { rows } : undefined
+}
+
 export const makeChatMessageRow = (
   message: Message,
   repliedToMessage?: Message,
@@ -140,6 +184,7 @@ export const makeChatMessageRow = (
     status: message.status,
     forwardHeader: makeForwardHeader(message),
     reactions: makeReactions(message),
+    actions: makeActions(message),
     embeddedReply: message.replyToMsgId
       ? repliedToMessage
         ? {

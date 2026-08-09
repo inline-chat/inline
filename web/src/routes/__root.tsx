@@ -7,6 +7,10 @@ import {
 } from "~/app/RoutePlaceholderView"
 import { resizeObserverErrorSuppressionScript } from "~/platform/browser/BrowserResizeObserverErrors"
 import { inlineAppearanceBootstrapScript } from "~/inline/preferences/InlineAppearancePreferences"
+import {
+  logInlineRouteError,
+  retainInlineGlobalLogging,
+} from "~/inline/logging/InlineLogging"
 import appIcon from "../../../apple/InlineMac/Assets.xcassets/AppIcon.imageset/AppIcon-128.png?url"
 
 export const Route = createRootRoute({
@@ -30,7 +34,37 @@ export const Route = createRootRoute({
     ],
   }),
   component: RootComponent,
-  errorComponent: ({ error, reset }) => (
+  errorComponent: RootRouteError,
+  notFoundComponent: () => (
+    <RoutePlaceholderView title="This page isn’t available." />
+  ),
+})
+
+function RootComponent() {
+  useEffect(() => {
+    const releaseLogging = retainInlineGlobalLogging()
+    if (import.meta.env.DEV) void import("virtual:stylex:runtime")
+    return releaseLogging
+  }, [])
+
+  return (
+    <RootDocument>
+      <Outlet />
+    </RootDocument>
+  )
+}
+
+function RootRouteError({
+  error,
+  reset,
+}: {
+  error: unknown
+  reset: () => void
+}) {
+  useEffect(() => {
+    logInlineRouteError("root", error)
+  }, [error])
+  return (
     <RootDocument>
       <RoutePlaceholderView
         title={inlineRouteErrorTitle(
@@ -40,21 +74,6 @@ export const Route = createRootRoute({
         actionTitle="Try Again"
         onAction={reset}
       />
-    </RootDocument>
-  ),
-  notFoundComponent: () => (
-    <RoutePlaceholderView title="This page isn’t available." />
-  ),
-})
-
-function RootComponent() {
-  useEffect(() => {
-    if (import.meta.env.DEV) void import("virtual:stylex:runtime")
-  }, [])
-
-  return (
-    <RootDocument>
-      <Outlet />
     </RootDocument>
   )
 }

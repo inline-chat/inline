@@ -7,6 +7,7 @@ import { SidebarView } from "~/sidebar/SidebarView"
 import { colors, metrics } from "../styles/tokens.stylex"
 import { InlineAppearancePreferencesProvider } from "~/inline/preferences/InlineAppearancePreferencesContext"
 import { InlineToastProvider } from "~/ui/InlineToast"
+import { AppRoutePresentationProvider } from "./AppRoutePresentation"
 
 export function AppShell() {
   const [selectedSpaceId, selectSpace] = useState<SpaceID>()
@@ -16,12 +17,14 @@ export function AppShell() {
     <InlineAppearancePreferencesProvider>
       <InlineToastProvider>
         <AppSpaceContext.Provider value={space}>
-          <div data-inline-app-shell {...stylex.props(styles.window)}>
-            <SidebarView />
-            <main data-inline-app-detail {...stylex.props(styles.detail)}>
-              <AppRouteOutlet />
-            </main>
-          </div>
+          <AppRoutePresentationProvider>
+            <div data-inline-app-shell {...stylex.props(styles.window)}>
+              <SidebarView />
+              <main data-inline-app-detail {...stylex.props(styles.detail)}>
+                <AppRouteOutlet />
+              </main>
+            </div>
+          </AppRoutePresentationProvider>
         </AppSpaceContext.Provider>
       </InlineToastProvider>
     </InlineAppearancePreferencesProvider>

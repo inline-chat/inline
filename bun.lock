@@ -335,6 +335,7 @@
         "@inline/client": "workspace:*",
         "@inline/config": "workspace:*",
         "@inline/ids": "workspace:*",
+        "@inline/log": "workspace:*",
         "@lexical/react": "0.44.0",
         "@stylexjs/stylex": "^0.19.0",
         "@tanstack/react-router": "^1.170.18",

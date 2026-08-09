@@ -1,24 +1,24 @@
 import type { UserID } from "@inline/ids"
-import { authSession } from "../auth/auth-session-core"
-import { InlineCoreRendererRegistry } from "../core/InlineCoreRendererRegistry"
-import type { InlineCoreRendererClient } from "../core/InlineCoreRendererClient"
+import {
+  getInlineAccountCore,
+  retainInlineAccountCore,
+} from "../core/InlineAccountCoreRegistry"
+import type { InlineAccountCore } from "../core/InlineAccountCore"
 
-export type InlineRuntimeCore = InlineCoreRendererClient
+export type InlineRuntimeCore = InlineAccountCore
 
 export type InlineRuntimeCoreBinding = {
   core: InlineRuntimeCore
   retain: () => () => void
 }
 
-const rendererRegistry = new InlineCoreRendererRegistry()
-
 export const getInlineRuntimeCoreBinding = (
   userId: UserID,
 ): InlineRuntimeCoreBinding => {
-  const core = rendererRegistry.get(userId, authSession)
+  const core = getInlineAccountCore(userId)
   return {
     core,
-    retain: () => rendererRegistry.retain(core),
+    retain: () => retainInlineAccountCore(core),
   }
 }
 
@@ -29,7 +29,3 @@ export const acquireInlineRuntimeCore = (userId: UserID) => {
     release: binding.retain(),
   }
 }
-
-export const replaceUnresponsiveInlineRuntimeCore = (
-  core: InlineRuntimeCore,
-) => rendererRegistry.replaceUnresponsiveBootOwner(core, authSession)

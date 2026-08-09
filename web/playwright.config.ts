@@ -15,6 +15,7 @@ export default defineConfig({
     ...devices["Desktop Chrome"],
     baseURL: origin,
     channel: "chrome",
+    headless: true,
     trace: "retain-on-failure",
   },
   webServer: {

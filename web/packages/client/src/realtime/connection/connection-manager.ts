@@ -188,7 +188,9 @@ export class ConnectionManager {
 
   async reconnectNow(reason = "requested") {
     if (!this.userWantsConnection) return
-    this.log.debug(`Forcing reconnect: ${reason}`)
+    this.log.debug("connection.reconnect.forced", {
+      trigger: reason,
+    })
     this.generation += 1
     this.attempt = 0
     this.cancelConnectionTimers()
@@ -217,7 +219,7 @@ export class ConnectionManager {
         await this.handleSessionEvent(event)
       }
     })().catch((error) => {
-      this.log.error("Connection manager listener crashed", error)
+      this.log.error("connection.listener.crashed", { error })
     })
   }
 
@@ -306,6 +308,12 @@ export class ConnectionManager {
       case "rpcError":
       case "updates":
       case "authInvalidated":
+        if (
+          this.state !== "open" ||
+          !this.constraintsSatisfied()
+        ) {
+          return
+        }
         await this.events.send(event)
         return
     }
@@ -354,7 +362,7 @@ export class ConnectionManager {
   }
 
   private async handleConstraintLoss(reason: string) {
-    this.log.debug(`Connection constraint lost: ${reason}`)
+    this.log.debug("connection.constraint.lost", { reason })
     this.lifecycleGeneration += 1
     this.generation += 1
     this.backgroundGraceActive = false
@@ -385,12 +393,12 @@ export class ConnectionManager {
       ) {
         return
       }
-      this.log.warn("Transport start failed", error)
+      this.log.warn("connection.transport.start_failed", { error })
       await this.scheduleReconnect("transport-start-failed")
     }
   }
 
-  private async scheduleReconnect(reason: string) {
+  private async scheduleReconnect(_reason: string) {
     if (
       !this.userWantsConnection ||
       this.state === "stopped" ||
@@ -411,9 +419,10 @@ export class ConnectionManager {
     this.attempt += 1
     const generation = ++this.generation
     const delay = this.backoffDelayMs(this.attempt)
-    this.log.debug(
-      `Reconnect attempt ${this.attempt} in ${delay}ms: ${reason}`,
-    )
+    this.log.debug("connection.reconnect.scheduled", {
+      attempt: this.attempt,
+      delayMs: delay,
+    })
     await this.events.send({ type: "connecting" })
     await this.session.stopTransport()
     if (

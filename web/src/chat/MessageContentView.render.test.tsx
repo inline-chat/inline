@@ -13,6 +13,18 @@ vi.mock("@stylexjs/stylex", () => ({
 afterEach(cleanup)
 
 describe("MessageContentView first frame", () => {
+  it("renders service messages as meaningful content", () => {
+    render(
+      <MessageContentView
+        presentation={{ service: "Pinned a message" }}
+      />,
+    )
+
+    expect(screen.getByLabelText("Service message")).toHaveTextContent(
+      "Pinned a message",
+    )
+  })
+
   it("lays out final media geometry with the tiny thumbnail already rendered", () => {
     const tinyThumbnailUrl =
       "data:image/jpeg;base64,/9j/2Q=="

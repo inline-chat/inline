@@ -15,6 +15,9 @@ import {
   ChatReadStateCoordinator,
   isChatDocumentActive,
 } from "./ChatReadState"
+import { inlineLog } from "~/inline/logging/InlineLogging"
+
+const log = inlineLog.withScope("UI.ChatReadState")
 
 const currentDocumentActive = () =>
   typeof document !== "undefined" &&
@@ -46,7 +49,7 @@ export const useChatReadState = ({
           )
         },
         onError: (error) => {
-          console.error("Could not mark Inline chat as read", error)
+          log.warn("ui.chat.mark_read.failed", { error })
         },
       }),
     [peer.peerId, peer.peerKind, realtime],

@@ -1,4 +1,9 @@
-import { type ChatID, type MessageID } from "@inline/ids"
+import {
+  parseInlineId,
+  type ChatID,
+  type MessageID,
+} from "@inline/ids"
+import { Log } from "@inline/log"
 import {
   type DbModel,
   DbModels,
@@ -18,6 +23,7 @@ import type {
 import { type DbObjectId, DbObjectRef, DbQueryPlan, DbQueryPlanType } from "./types"
 import {
   compareMessagesByWindow,
+  parseMessageWindowCursor,
   type MessageWindowCursor,
 } from "./message-window"
 
@@ -40,6 +46,8 @@ export type DbOptions = {
    * renderer mirror of the SharedWorker-owned account core).
    */
   persistence?: boolean
+  /** Shared account logger so database diagnostics follow the live controller. */
+  logger?: Log
 }
 
 export type MessageWindowOptions = {
@@ -53,6 +61,8 @@ export type LocalMessageWindowAroundOptions = {
   beforeLimit: number
   afterLimit: number
 }
+
+export const MAX_RESIDENT_MESSAGE_WINDOW_LOAD = 200
 
 export type DbResidentChange = {
   kind: DbObjectKind
@@ -112,6 +122,7 @@ export class Db {
   querySubscriptions = new Queries()
   objectSubscriptions = new ObjectSubscriptions()
   ready: Promise<void>
+  readonly logger: Log
   hasHydrated = false
   hydrationState: "pending" | "skipped" | "done" | "failed"
 
@@ -127,12 +138,20 @@ export class Db {
   private pendingPersistence = new Set<Promise<void>>()
   private persistenceErrors: unknown[] = []
   private commitQueue: Promise<void> = Promise.resolve()
+  private persistenceState: "open" | "closing" | "closed" = "open"
+  private closePersistenceTask: Promise<void> | null = null
+  private acceptedCommitRecipeActive = false
   private residentRevision = 0
+  private readonly messageWindowIntentVersions = new Map<
+    ChatID,
+    number
+  >()
   private residentChangeListeners = new Set<
     (batch: DbResidentChangeBatch) => void
   >()
 
   constructor(options: DbOptions = {}) {
+    this.logger = options.logger ?? new Log("Client.Database")
     const autoHydrate = options.autoHydrate ?? true
     this.storageByKind = options.storageByKind
     this.persistenceStore =
@@ -149,17 +168,20 @@ export class Db {
   }
 
   insert<K extends DbObjectKind, O extends DbModels[K]>(object: O) {
+    this.assertWritable()
     this.collection(object.kind).insert(object)
     this.notify(this.ref(object.kind, object.id))
   }
 
   /** Replace a complete object, including clearing optional fields. */
   replace<K extends DbObjectKind, O extends DbModels[K]>(object: O) {
+    this.assertWritable()
     this.collection(object.kind).replace(object)
     this.notify(this.ref(object.kind, object.id))
   }
 
   delete(ref: DbObjectRef<DbObjectKind>) {
+    this.assertWritable()
     this.collection(ref.kind).delete(ref.id)
     this.notify(ref)
   }
@@ -170,6 +192,7 @@ export class Db {
    * during a later selective hydration.
    */
   clearMessagesForChat(chatId: ChatID) {
+    this.assertWritable()
     const collection = this.collection<
       DbObjectKind.Message,
       DbModels[DbObjectKind.Message]
@@ -183,6 +206,7 @@ export class Db {
   }
 
   update<K extends DbObjectKind, O extends DbModels[K]>(object: O) {
+    this.assertWritable()
     this.collection(object.kind).update(object)
     this.notify(this.ref(object.kind, object.id))
   }
@@ -194,6 +218,7 @@ export class Db {
    */
   batch(fn: () => void): void {
     const outermost = this.batchDepth === 0
+    if (outermost) this.assertWritable()
     if (outermost) {
       this.undoJournal.clear()
       this.pendingPersistenceOperations = []
@@ -227,6 +252,11 @@ export class Db {
    * provide cross-adapter disk atomicity.
    */
   commit(fn: () => void): Promise<void> {
+    if (this.persistenceState !== "open") {
+      return Promise.reject(
+        new Error("Inline database is closing"),
+      )
+    }
     const operation = this.commitQueue.then(() =>
       this.performCommit(fn),
     )
@@ -247,12 +277,15 @@ export class Db {
     this.pendingFallbackOperations = []
     this.pendingRefs.clear()
     this.batchDepth = 1
+    this.acceptedCommitRecipeActive = true
     try {
       fn()
     } catch (error) {
       this.batchDepth = 0
       this.rollbackBatch()
       throw error
+    } finally {
+      this.acceptedCommitRecipeActive = false
     }
     this.batchDepth = 0
 
@@ -485,6 +518,22 @@ export class Db {
     chatId: ChatID,
     options: MessageWindowOptions,
   ): Promise<{ count: number; messageKeys: MessageKey[] }> {
+    this.validateMessageWindowOptions(options)
+    const intentVersion = this.beginResidentMessageWindowIntent(
+      chatId,
+    )
+    return await this.hydrateMessageWindowDetailsForIntent(
+      chatId,
+      options,
+      intentVersion,
+    )
+  }
+
+  private async hydrateMessageWindowDetailsForIntent(
+    chatId: ChatID,
+    options: MessageWindowOptions,
+    intentVersion: number | undefined,
+  ): Promise<{ count: number; messageKeys: MessageKey[] }> {
     const collection = this.collection<DbObjectKind.Message, DbModels[DbObjectKind.Message]>(
       DbObjectKind.Message,
     )
@@ -498,24 +547,31 @@ export class Db {
     const deferred = await this.loadDeferredUpdatesForMessageKeys(
       objects.map((message) => message.id),
     )
-    if (this.fullChatWindows.isActive(chatId)) {
-      const beforeKeys = this.fullChatWindows.keys(chatId)
+    if (
+      intentVersion != null &&
+      this.isCurrentResidentMessageWindowIntent(
+        chatId,
+        intentVersion,
+      )
+    ) {
+      const messageKeys = objects.map((message) => message.id)
       if (options.before == null && options.after == null) {
-        this.fullChatWindows.replace(
+        this.replaceResidentMessageWindow(
           chatId,
-          objects.map((message) => message.id),
+          this.messageKeysRetainingLocalSends(
+            chatId,
+            messageKeys,
+          ),
           true,
+          intentVersion,
         )
       } else {
-        this.fullChatWindows.extend(
+        this.extendResidentMessageWindow(
           chatId,
-          objects.map((message) => message.id),
+          messageKeys,
+          intentVersion,
         )
       }
-      this.notifyMessageWindowMembership(
-        beforeKeys,
-        this.fullChatWindows.keys(chatId),
-      )
     }
     this.notifyHydrated([
       { kind: DbObjectKind.DeferredUpdate, objects: deferred },
@@ -547,6 +603,11 @@ export class Db {
     const currentLastMessageId = this.get(chatRef)?.lastMsgId
     if (
       this.fullChatWindows.isActive(chatId) &&
+      intentVersion != null &&
+      this.isCurrentResidentMessageWindowIntent(
+        chatId,
+        intentVersion,
+      ) &&
       options.after != null &&
       currentLastMessageId != null &&
       objects.some(
@@ -575,6 +636,23 @@ export class Db {
       await this.loadLocalWindowAroundMessageDetails(
         chatId,
         options,
+        true,
+        this.beginResidentMessageWindowIntent(chatId),
+      )
+    ).found
+  }
+
+  async loadLocalWindowAroundMessageForIntent(
+    chatId: ChatID,
+    options: LocalMessageWindowAroundOptions,
+    intentVersion: number | undefined,
+  ): Promise<boolean> {
+    return (
+      await this.loadLocalWindowAroundMessageDetails(
+        chatId,
+        options,
+        true,
+        intentVersion,
       )
     ).found
   }
@@ -583,7 +661,10 @@ export class Db {
     chatId: ChatID,
     options: LocalMessageWindowAroundOptions,
     replaceResidentWindow = true,
+    expectedIntentVersion =
+      this.beginResidentMessageWindowIntent(chatId),
   ): Promise<{ found: boolean; messageKeys: MessageKey[] }> {
+    this.validateLocalMessageWindowAroundOptions(options)
     const collection = this.collection<
       DbObjectKind.Message,
       DbModels[DbObjectKind.Message]
@@ -598,20 +679,26 @@ export class Db {
       return { found: false, messageKeys: [] }
     }
 
+    if (
+      expectedIntentVersion != null &&
+      !this.isCurrentResidentMessageWindowIntent(
+        chatId,
+        expectedIntentVersion,
+      )
+    ) {
+      return { found: false, messageKeys: [] }
+    }
+
     const deferred = await this.loadDeferredUpdatesForMessageKeys(
       objects.map((message) => message.id),
     )
 
     if (this.fullChatWindows.isActive(chatId)) {
-      const beforeKeys = this.fullChatWindows.keys(chatId)
-      this.fullChatWindows.replace(
+      this.replaceResidentMessageWindow(
         chatId,
         objects.map((message) => message.id),
         false,
-      )
-      this.notifyMessageWindowMembership(
-        beforeKeys,
-        this.fullChatWindows.keys(chatId),
+        expectedIntentVersion,
       )
     }
 
@@ -659,6 +746,7 @@ export class Db {
    */
   releaseResidentMessageWindow(chatId: ChatID): number {
     this.fullChatWindows.release(chatId)
+    this.invalidateResidentMessageWindowIntent(chatId)
     const collection = this.collection<
       DbObjectKind.Message,
       DbModels[DbObjectKind.Message]
@@ -695,11 +783,164 @@ export class Db {
       DbObjectKind.Message,
       DbModels[DbObjectKind.Message]
     >(DbObjectKind.Message)
-    return this.fullChatWindows.activate(
+    const activated = this.fullChatWindows.activate(
       chatId,
       collection
         .getAll((message) => message.chatId === chatId)
         .map((message) => message.id),
+    )
+    if (activated) this.invalidateResidentMessageWindowIntent(chatId)
+    return activated
+  }
+
+  beginResidentMessageWindowIntent(chatId: ChatID) {
+    if (!this.fullChatWindows.isActive(chatId)) return undefined
+    const next =
+      (this.messageWindowIntentVersions.get(chatId) ?? 0) + 1
+    this.messageWindowIntentVersions.set(chatId, next)
+    return next
+  }
+
+  captureResidentMessageWindowIntents() {
+    return new Map(this.messageWindowIntentVersions)
+  }
+
+  replaceResidentMessageWindow(
+    chatId: ChatID,
+    messageKeys: readonly MessageKey[],
+    atLatest: boolean,
+    expectedIntentVersion?: number,
+  ) {
+    if (
+      expectedIntentVersion != null &&
+      !this.isCurrentResidentMessageWindowIntent(
+        chatId,
+        expectedIntentVersion,
+      )
+    ) {
+      return false
+    }
+    const beforeKeys = this.fullChatWindows.keys(chatId)
+    if (!this.fullChatWindows.replace(chatId, messageKeys, atLatest)) {
+      return false
+    }
+    this.notifyMessageWindowMembership(
+      beforeKeys,
+      this.fullChatWindows.keys(chatId),
+    )
+    return true
+  }
+
+  replaceResidentMessageWindowWithLatest(
+    chatId: ChatID,
+    messageKeys: readonly MessageKey[],
+    expectedIntentVersion?: number,
+  ) {
+    return this.replaceResidentMessageWindow(
+      chatId,
+      this.messageKeysRetainingLocalSends(chatId, messageKeys),
+      true,
+      expectedIntentVersion,
+    )
+  }
+
+  extendResidentMessageWindow(
+    chatId: ChatID,
+    messageKeys: readonly MessageKey[],
+    expectedIntentVersion?: number,
+  ) {
+    if (
+      expectedIntentVersion != null &&
+      !this.isCurrentResidentMessageWindowIntent(
+        chatId,
+        expectedIntentVersion,
+      )
+    ) {
+      return false
+    }
+    const beforeKeys = this.fullChatWindows.keys(chatId)
+    if (!this.fullChatWindows.extend(chatId, messageKeys)) {
+      return false
+    }
+    this.notifyMessageWindowMembership(
+      beforeKeys,
+      this.fullChatWindows.keys(chatId),
+    )
+    return true
+  }
+
+  setResidentMessageWindowAtLatest(
+    chatId: ChatID,
+    expectedIntentVersion?: number,
+  ) {
+    if (
+      expectedIntentVersion != null &&
+      !this.isCurrentResidentMessageWindowIntent(
+        chatId,
+        expectedIntentVersion,
+      )
+    ) {
+      return false
+    }
+    return this.fullChatWindows.setAtLatest(chatId, true)
+  }
+
+  includeMessageInActiveLatestWindow(
+    message: DbModels[DbObjectKind.Message],
+  ) {
+    if (!this.fullChatWindows.isAtLatest(message.chatId)) return false
+    const chat = this.get(
+      this.ref(DbObjectKind.Chat, message.chatId),
+    )
+    if (chat?.lastMsgId !== message.messageId) return false
+    return this.extendResidentMessageWindow(message.chatId, [
+      message.id,
+    ])
+  }
+
+  /** Keep visible-window membership stable while a local message gets its server ID. */
+  migrateResidentMessageWindowKey(
+    chatId: ChatID,
+    previousKey: MessageKey,
+    nextKey: MessageKey,
+  ) {
+    if (!this.fullChatWindows.contains(chatId, previousKey)) {
+      return false
+    }
+    const beforeKeys = this.fullChatWindows.keys(chatId)
+    const nextKeys = beforeKeys.map((key) =>
+      key === previousKey ? nextKey : key,
+    )
+    const atLatest = this.fullChatWindows.isAtLatest(chatId)
+    if (!this.fullChatWindows.replace(chatId, nextKeys, atLatest)) {
+      return false
+    }
+    this.notifyMessageWindowMembership(
+      beforeKeys,
+      this.fullChatWindows.keys(chatId),
+    )
+    return true
+  }
+
+  async promoteResidentMessageWindowToLatest(
+    chatId: ChatID,
+    limit = 60,
+  ) {
+    this.validateMessageWindowOptions({ limit })
+    const intentVersion = this.beginResidentMessageWindowIntent(
+      chatId,
+    )
+    if (intentVersion == null) return
+    this.replaceResidentMessageWindow(
+      chatId,
+      this.messageKeysRetainingLocalSends(chatId, []),
+      true,
+      intentVersion,
+    )
+    await this.hydrateMessageWindowDetailsForIntent(
+      chatId,
+      { limit },
+      intentVersion,
     )
   }
 
@@ -766,6 +1007,76 @@ export class Db {
     )
     for (const id of removedIds) {
       this.notify(this.ref(DbObjectKind.Message, id))
+    }
+  }
+
+  private isCurrentResidentMessageWindowIntent(
+    chatId: ChatID,
+    intentVersion: number,
+  ) {
+    return (
+      this.fullChatWindows.isActive(chatId) &&
+      this.messageWindowIntentVersions.get(chatId) === intentVersion
+    )
+  }
+
+  private invalidateResidentMessageWindowIntent(chatId: ChatID) {
+    const next =
+      (this.messageWindowIntentVersions.get(chatId) ?? 0) + 1
+    this.messageWindowIntentVersions.set(chatId, next)
+    return next
+  }
+
+  private messageKeysRetainingLocalSends(
+    chatId: ChatID,
+    messageKeys: readonly MessageKey[],
+  ) {
+    const pendingKeys = this.collection<
+      DbObjectKind.Message,
+      DbModels[DbObjectKind.Message]
+    >(DbObjectKind.Message)
+      .getAll(
+        (message) =>
+          message.chatId === chatId &&
+          (message.status === MessageSendingStatus.Sending ||
+            message.status === MessageSendingStatus.Failed),
+      )
+      .map((message) => message.id)
+    return Array.from(new Set([...messageKeys, ...pendingKeys]))
+  }
+
+  private validateMessageWindowOptions(
+    options: MessageWindowOptions,
+  ) {
+    if (
+      !Number.isSafeInteger(options.limit) ||
+      options.limit < 1 ||
+      options.limit > MAX_RESIDENT_MESSAGE_WINDOW_LOAD ||
+      (options.before != null &&
+        parseMessageWindowCursor(options.before) == null) ||
+      (options.after != null &&
+        parseMessageWindowCursor(options.after) == null) ||
+      (options.before != null && options.after != null)
+    ) {
+      throw new RangeError("Invalid Inline message window")
+    }
+  }
+
+  private validateLocalMessageWindowAroundOptions(
+    options: LocalMessageWindowAroundOptions,
+  ) {
+    if (
+      parseInlineId<"message">(options.messageId, {
+        positive: true,
+      }) == null ||
+      !Number.isSafeInteger(options.beforeLimit) ||
+      options.beforeLimit < 0 ||
+      !Number.isSafeInteger(options.afterLimit) ||
+      options.afterLimit < 0 ||
+      options.beforeLimit + options.afterLimit + 1 >
+        MAX_RESIDENT_MESSAGE_WINDOW_LOAD
+    ) {
+      throw new RangeError("Invalid Inline around-message window")
     }
   }
 
@@ -841,6 +1152,7 @@ export class Db {
   storeNonResidentObject<K extends DbObjectKind>(
     object: DbModels[K],
   ) {
+    this.assertWritable()
     const collection = this.collection<K, DbModels[K]>(
       object.kind as K,
     )
@@ -876,7 +1188,11 @@ export class Db {
 
   /** Open and migrate the account-owned store before product hydration. */
   async openPersistence(): Promise<void> {
+    const closing = this.closePersistenceTask
+    if (closing) await closing
     await this.persistenceStore?.open()
+    this.persistenceState = "open"
+    this.closePersistenceTask = null
   }
 
   /**
@@ -884,8 +1200,43 @@ export class Db {
    * The adapter may reopen if the same core is started again.
    */
   async closePersistence(): Promise<void> {
-    await this.flushPersistence()
-    await this.persistenceStore?.close()
+    if (this.closePersistenceTask) return this.closePersistenceTask
+    this.persistenceState = "closing"
+    const acceptedCommits = this.commitQueue
+    const task = (async () => {
+      const errors: unknown[] = []
+      try {
+        await acceptedCommits
+        await this.flushPersistence()
+      } catch (error) {
+        errors.push(error)
+      }
+      try {
+        await this.persistenceStore?.close()
+      } catch (error) {
+        errors.push(error)
+      } finally {
+        this.persistenceState = "closed"
+      }
+      if (errors.length === 1) throw errors[0]
+      if (errors.length > 1) {
+        throw new AggregateError(
+          errors,
+          "Inline database could not close cleanly",
+        )
+      }
+    })()
+    this.closePersistenceTask = task
+    return task
+  }
+
+  private assertWritable() {
+    if (
+      this.persistenceState !== "open" &&
+      !this.acceptedCommitRecipeActive
+    ) {
+      throw new Error("Inline database is closing")
+    }
   }
 
   private notifyHydrated(results: Array<{ kind: DbObjectKind; objects: DbModels[DbObjectKind][] }>) {
@@ -932,6 +1283,7 @@ export class Db {
           ),
         (collection, id, previous) =>
           this.recordUndo(collection, id, previous),
+        this.logger.withScope(`Collection.${kind}`),
       )
     }
     return this.collections[kind] as Collection<K, O>
@@ -1107,6 +1459,7 @@ class Collection<K extends DbObjectKind, O extends DbModels[K] = DbModels[K]> {
       id: DbModel["id"],
       previous: DbModel | undefined,
     ) => void,
+    private readonly logger: Log,
   ) {
     this.kind = kind
     this.storage = storage
@@ -1237,7 +1590,9 @@ class Collection<K extends DbObjectKind, O extends DbModels[K] = DbModels[K]> {
 
   async hydrate(): Promise<O[]> {
     if (!this.storage) {
-      console.error("No storage for collection", this.kind)
+      this.logger.debug("storage.collection.unavailable", {
+        kind: this.kind,
+      })
       this.hasHydrated = true
       return []
     }

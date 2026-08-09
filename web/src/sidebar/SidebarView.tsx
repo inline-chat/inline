@@ -6,7 +6,8 @@ import {
 } from "@inline/client"
 import { useLocation, useNavigate } from "@tanstack/react-router"
 import * as stylex from "@stylexjs/stylex"
-import { useCallback, useMemo } from "react"
+import { useCallback, useMemo, useState } from "react"
+import type { DialogID } from "@inline/ids"
 import { useAppSpace } from "~/app/AppSpaceContext"
 import { isSidebarChatListDialog, sortSidebarDialogs } from "~/inline/data/chat-list"
 import { useInlineQuery } from "~/inline/data/react"
@@ -17,7 +18,7 @@ import { SidebarChatItem } from "./SidebarChatItem"
 import { SidebarFooter } from "./SidebarFooter"
 import { SidebarTopBar } from "./SidebarTopBar"
 import {
-  closeSidebarChat,
+  closeSidebarChatGroup,
   toggleSidebarChatPinned,
   toggleSidebarChatRead,
 } from "./SidebarChatActions"
@@ -26,8 +27,12 @@ import { SidebarNewThreadRow } from "./SidebarNewThreadRow"
 import { useInlineAppearancePreferences } from "~/inline/preferences/InlineAppearancePreferencesContext"
 import { useInlineToast } from "~/ui/InlineToast"
 import { SidebarLoadingRowsView } from "./SidebarLoadingRowsView"
+import { inlineLog } from "~/inline/logging/InlineLogging"
+import { projectInbox } from "./InboxProjection"
+import { sidebarChatPath } from "./SidebarChatActions"
 
 const allChats = () => true
+const log = inlineLog.withScope("UI.Sidebar")
 
 export function SidebarView() {
   const navigate = useNavigate()
@@ -38,6 +43,9 @@ export function SidebarView() {
   const { preferences } = useInlineAppearancePreferences()
   const toast = useInlineToast()
   const largeItems = preferences.sidebarItemSize === "large"
+  const [collapsedDialogIds, setCollapsedDialogIds] = useState<Set<DialogID>>(
+    () => new Set(),
+  )
   const predicate = useCallback(
     (dialog: Dialog) => isSidebarChatListDialog(dialog, selectedSpaceId ?? undefined),
     [selectedSpaceId],
@@ -52,14 +60,23 @@ export function SidebarView() {
     DbObjectKind.Chat,
     allChats,
   )
-  const ordered = useMemo(() => {
+  const projected = useMemo(() => {
     const chatsById = new Map(chats.map((chat) => [chat.id, chat]))
-    return sortSidebarDialogs(dialogs, chatsById)
-  }, [chats, dialogs])
+    const ordered = sortSidebarDialogs(dialogs, chatsById)
+    const selectedDialogId = ordered.find(
+      (dialog) => sidebarChatPath(dialog) === location.pathname,
+    )?.id
+    return projectInbox({
+      dialogs: ordered,
+      chatsById,
+      collapsedDialogIds,
+      selectedDialogId,
+    })
+  }, [chats, collapsedDialogIds, dialogs, location.pathname])
   const closeChat = useCallback(
-    (dialog: Dialog) => {
-      void closeSidebarChat({
-        dialog,
+    (dialog: Dialog, closeGroupDialogs?: readonly Dialog[]) => {
+      void closeSidebarChatGroup({
+        dialogs: closeGroupDialogs ?? [dialog],
         currentPath: location.pathname,
         openAllChats: () => {
           void navigate({ to: "/chats" })
@@ -67,17 +84,25 @@ export function SidebarView() {
         realtime,
       })
         .catch((cause: unknown) => {
-          console.error("Could not close Inline chat from sidebar", cause)
+          log.warn("ui.sidebar.close.failed", { error: cause })
           toast.show("Could not close chat", "error")
         })
     },
     [location.pathname, navigate, realtime, toast],
   )
+  const toggleExpanded = useCallback((dialogId: DialogID) => {
+    setCollapsedDialogIds((current) => {
+      const next = new Set(current)
+      if (next.has(dialogId)) next.delete(dialogId)
+      else next.add(dialogId)
+      return next
+    })
+  }, [])
   const togglePinned = useCallback(
     (dialog: Dialog) => {
       void toggleSidebarChatPinned({ dialog, realtime }).catch(
         (cause: unknown) => {
-          console.error("Could not update Inline sidebar pin", cause)
+          log.warn("ui.sidebar.pin.failed", { error: cause })
           toast.show("Could not update pin", "error")
         },
       )
@@ -88,7 +113,7 @@ export function SidebarView() {
     (dialog: Dialog) => {
       void toggleSidebarChatRead({ dialog, realtime }).catch(
         (cause: unknown) => {
-          console.error("Could not update Inline chat read state", cause)
+          log.warn("ui.sidebar.read_state.failed", { error: cause })
           toast.show("Could not update read state", "error")
         },
       )
@@ -129,12 +154,18 @@ export function SidebarView() {
         <div {...stylex.props(styles.separator)} />
         {!cacheReady ? <SidebarLoadingRowsView /> : null}
         {cacheReady
-          ? ordered.map((dialog) => (
+          ? projected.map((row) => (
               <SidebarChatItem
-                key={dialog.id}
-                dialog={dialog}
+                key={row.dialog.id}
+                dialog={row.dialog}
                 large={largeItems}
+                depth={row.depth}
+                childCount={row.childCount}
+                expanded={row.isExpanded}
+                detached={row.detached}
+                closeGroupDialogs={row.closeGroupDialogs}
                 onClose={closeChat}
+                onToggleExpanded={toggleExpanded}
                 onTogglePinned={togglePinned}
                 onToggleRead={toggleRead}
               />

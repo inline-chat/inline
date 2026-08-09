@@ -29,6 +29,21 @@ export { LogOutTransaction, logOut } from "./log-out"
 export { SendMessageTransaction, sendMessage } from "./send-message"
 export { EditMessageTransaction, editMessage } from "./edit-message"
 export { DeleteMessagesTransaction, deleteMessages } from "./delete-messages"
+export {
+  ForwardMessagesTransaction,
+  forwardMessages,
+  type ForwardMessagesContext,
+} from "./forward-messages"
+export {
+  InvokeMessageActionTransaction,
+  invokeMessageAction,
+  type InvokeMessageActionContext,
+} from "./invoke-message-action"
+export {
+  CreateSubthreadTransaction,
+  createSubthread,
+  type CreateSubthreadContext,
+} from "./create-subthread"
 export { GetChatTransaction, getChat } from "./get-chat"
 export {
   GetChatHistoryMode,

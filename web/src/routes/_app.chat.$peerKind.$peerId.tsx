@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, useLocation } from "@tanstack/react-router"
 import { ChatView } from "~/chat/ChatView"
 import {
   inlineRouteErrorTitle,
@@ -6,6 +6,9 @@ import {
 } from "~/app/RoutePlaceholderView"
 import { parsePeerRoute } from "~/inline/data/peer"
 import { parseInlineId, type MessageID } from "@inline/ids"
+import { useEffect } from "react"
+import { logInlineRouteError } from "~/inline/logging/InlineLogging"
+import { useAppRoutePresentationReady } from "~/app/AppRoutePresentation"
 
 type ChatRouteSearch = {
   messageId?: MessageID
@@ -19,7 +22,25 @@ export const Route = createFileRoute("/_app/chat/$peerKind/$peerId")({
   }),
   loaderDeps: ({ search }) => ({ messageId: search.messageId }),
   component: ChatRoute,
-  errorComponent: ({ error, reset }) => (
+  errorComponent: ChatRouteError,
+  head: () => ({
+    meta: [{ title: "Inline" }],
+  }),
+})
+
+function ChatRouteError({
+  error,
+  reset,
+}: {
+  error: unknown
+  reset: () => void
+}) {
+  const location = useLocation()
+  useAppRoutePresentationReady(location.pathname)
+  useEffect(() => {
+    logInlineRouteError("chat", error)
+  }, [error])
+  return (
     <RoutePlaceholderView
       title={inlineRouteErrorTitle(
         error,
@@ -28,18 +49,15 @@ export const Route = createFileRoute("/_app/chat/$peerKind/$peerId")({
       actionTitle="Try Again"
       onAction={reset}
     />
-  ),
-  head: () => ({
-    meta: [{ title: "Inline" }],
-  }),
-})
+  )
+}
 
 function ChatRoute() {
   const params = Route.useParams()
   const search = Route.useSearch()
   const peer = parsePeerRoute(params.peerKind, params.peerId)
   if (!peer) {
-    return <RoutePlaceholderView title="This chat isn’t available." />
+    return <InvalidChatRoute />
   }
   return (
     <ChatView
@@ -48,4 +66,10 @@ function ChatRoute() {
       targetMessageId={search.messageId}
     />
   )
+}
+
+function InvalidChatRoute() {
+  const location = useLocation()
+  useAppRoutePresentationReady(location.pathname)
+  return <RoutePlaceholderView title="This chat isn’t available." />
 }

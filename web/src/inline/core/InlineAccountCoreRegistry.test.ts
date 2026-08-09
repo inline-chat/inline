@@ -9,6 +9,7 @@ class FakeAccountCore implements InlineAccountCoreOwner {
   running = false
   starts = 0
   stops = 0
+  stopError: Error | undefined
 
   constructor(readonly accountId: UserID) {}
 
@@ -22,6 +23,7 @@ class FakeAccountCore implements InlineAccountCoreOwner {
     if (!this.running) return
     this.running = false
     this.stops += 1
+    if (this.stopError) throw this.stopError
   }
 }
 
@@ -62,5 +64,22 @@ describe("InlineAccountCoreRegistry", () => {
     secondRelease()
     await vi.runAllTimersAsync()
     expect(core.stops).toBe(1)
+  })
+
+  it("retains an owner whose persistence close failed", async () => {
+    vi.useFakeTimers()
+    const registry = new InlineAccountCoreRegistry(
+      (accountId) => new FakeAccountCore(accountId),
+    )
+    const core = registry.get(userId(7))
+    core.stopError = new Error("close failed")
+
+    const release = registry.retain(core)
+    await Promise.resolve()
+    release()
+    await vi.runAllTimersAsync()
+
+    expect(core.stops).toBe(1)
+    expect(registry.get(userId(7))).toBe(core)
   })
 })

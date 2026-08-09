@@ -7,6 +7,7 @@ import type {
 } from "react"
 import { prepareChatOpenIntent } from "~/chat/ChatOpenPreloader"
 import type { InlinePeerRoute } from "~/inline/data/peer"
+import { useAppRoutePresentation } from "~/app/AppRoutePresentation"
 
 type InlineChatLinkProps = Omit<
   ComponentPropsWithoutRef<"a">,
@@ -39,6 +40,7 @@ export function InlineChatLink({
   ...props
 }: InlineChatLinkProps) {
   const navigate = useNavigate()
+  const presentation = useAppRoutePresentation()
   const href = `/chat/${peer.peerKind}/${peer.peerId}`
   const prepare = () => prepareChatOpenIntent(peer)
   const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
@@ -47,6 +49,7 @@ export function InlineChatLink({
       return
     }
     event.preventDefault()
+    presentation.begin(href)
     // Intent warming is an optional first-frame optimization. Never make the
     // user's navigation wait for cache hydration or owner recovery: the route
     // adopts a preparation only when pointer/focus warming already completed.

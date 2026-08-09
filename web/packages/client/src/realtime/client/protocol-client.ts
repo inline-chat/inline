@@ -77,7 +77,7 @@ export class ProtocolClient {
     try {
       await this.transport.send(message)
     } catch (error) {
-      this.log.error("Failed to send ping", error)
+      this.log.warn("protocol.ping.interrupted", { error })
     }
   }
 
@@ -133,7 +133,7 @@ export class ProtocolClient {
       for await (const event of this.transport.events) {
         switch (event.type) {
           case "connected":
-            this.log.trace("Protocol client: Transport connected")
+            this.log.trace("protocol.transport.connected", {})
             await this.events.send({
               type: "transportConnected",
             })
@@ -141,7 +141,9 @@ export class ProtocolClient {
             break
 
           case "message":
-            this.log.trace("Protocol client received transport message", event.message)
+            this.log.trace("protocol.frame.received", {
+              frameKind: event.message.body.oneofKind || "unknown",
+            })
             await this.handleTransportMessage(event.message)
             break
 
@@ -154,13 +156,13 @@ export class ProtocolClient {
             break
 
           case "stopping":
-            this.log.trace("Protocol client: Transport stopping. Resetting state")
+            this.log.trace("protocol.transport.stopping", {})
             await this.reset()
             break
         }
       }
     })().catch((error) => {
-      this.log.error("Protocol client listener crashed", error)
+      this.log.error("protocol.listener.crashed", { error })
     })
   }
 
@@ -168,7 +170,7 @@ export class ProtocolClient {
     switch (message.body.oneofKind) {
       case "connectionOpen":
         await this.connectionOpen()
-        this.log.info("Protocol client: Connection established")
+        this.log.info("protocol.connection.established", {})
         break
 
       case "rpcResult":
@@ -190,21 +192,24 @@ export class ProtocolClient {
         break
 
       case "ack":
-        this.log.trace("Received ack", message.body.ack.msgId)
+        this.log.trace("protocol.ack.received", {})
         await this.events.send({ type: "ack", msgId: message.body.ack.msgId })
         break
 
       case "message":
-        this.log.trace("Received server message", message.body.message)
+        this.log.trace("protocol.server_message.received", {
+          payloadKind:
+            message.body.message.payload.oneofKind || "unknown",
+        })
         if (message.body.message.payload.oneofKind === "update") {
           await this.events.send({ type: "updates", updates: message.body.message.payload.update })
         } else {
-          this.log.trace("Protocol client: Unhandled message type")
+          this.log.trace("protocol.server_message.unhandled", {})
         }
         break
 
       case "pong":
-        this.log.trace("Received pong", message.body.pong.nonce)
+        this.log.trace("protocol.pong.received", {})
         this.pingPong.pong(message.body.pong.nonce)
         await this.events.send({
           type: "pong",
@@ -213,10 +218,9 @@ export class ProtocolClient {
         break
 
       case "connectionError":
-        this.log.error(
-          "Protocol client: connection error",
-          message.body.connectionError.reason,
-        )
+        this.log.error("protocol.connection.rejected", {
+          reasonCode: message.body.connectionError.reason,
+        })
         await this.events.send({
           type: "connectionError",
           reason: message.body.connectionError.reason,
@@ -224,7 +228,9 @@ export class ProtocolClient {
         break
 
       default:
-        this.log.trace("Protocol client: Unhandled message type", message.body)
+        this.log.trace("protocol.frame.unhandled", {
+          frameKind: message.body.oneofKind || "unknown",
+        })
         break
     }
   }
@@ -232,7 +238,7 @@ export class ProtocolClient {
   private async sendConnectionInit(
     connectionInit: ConnectionInit,
   ) {
-    this.log.trace("sending connection init")
+    this.log.trace("protocol.auth.send_started", {})
 
     const message = this.wrapMessage({
       oneofKind: "connectionInit",
@@ -240,13 +246,13 @@ export class ProtocolClient {
     })
 
     await this.transport.send(message)
-    this.log.trace("connection init sent successfully")
+    this.log.trace("protocol.auth.sent", {})
   }
 
   private async authenticate() {
     const connectionInit = this.getConnectionInit()
     if (!connectionInit) {
-      this.log.error("No token available for connection init")
+      this.log.error("protocol.auth.missing", {})
       await this.events.send({
         type: "failure",
         reason: "authentication-missing",
@@ -256,12 +262,9 @@ export class ProtocolClient {
 
     try {
       await this.sendConnectionInit(connectionInit)
-      this.log.trace("Sent authentication message")
+      this.log.trace("protocol.auth.completed", {})
     } catch (error) {
-      this.log.error(
-        "Failed to write connection init to transport",
-        error,
-      )
+      this.log.error("protocol.auth.send_failed", { error })
       await this.events.send({
         type: "failure",
         reason: "transport-send",

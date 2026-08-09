@@ -360,14 +360,20 @@ const applyUpdate = (
       }
       if (existing.messageId === messageId) return "applied"
 
+      const nextMessageKey = messageKey(existing.chatId, messageId)
       db.delete(db.ref(DbObjectKind.Message, existing.id))
       db.insert({
         ...existing,
-        id: messageKey(existing.chatId, messageId),
+        id: nextMessageKey,
         messageId,
         randomId: undefined,
         status: MessageSendingStatus.Sent,
       })
+      db.migrateResidentMessageWindowKey(
+        existing.chatId,
+        existing.id,
+        nextMessageKey,
+      )
       const chatRef = db.ref(DbObjectKind.Chat, existing.chatId)
       const chat = db.get(chatRef)
       if (chat?.lastMsgId === existing.messageId) {

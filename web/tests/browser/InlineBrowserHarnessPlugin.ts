@@ -4,6 +4,7 @@ import type { Plugin } from "vite"
 const mediaCacheHarnessPath = "/__inline-harness/media-cache"
 const messageListHarnessPath = "/__inline-harness/message-list"
 const composeHarnessPath = "/__inline-harness/compose"
+const productSeedHarnessPath = "/__inline-harness/product-seed"
 
 export const inlineBrowserHarnessPlugin = (): Plugin => ({
   name: "inline-browser-harnesses",
@@ -21,6 +22,8 @@ export const inlineBrowserHarnessPlugin = (): Plugin => ({
           ? "../fixtures/message-list-harness.html"
           : pathname === composeHarnessPath
             ? "../fixtures/compose-harness.html"
+            : pathname === productSeedHarnessPath
+              ? "../fixtures/product-seed-harness.html"
           : undefined
       if (!fixture) {
         next()

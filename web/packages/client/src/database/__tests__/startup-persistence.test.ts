@@ -146,6 +146,28 @@ describe("InlineStartupPersistenceStore", () => {
     expect(store.getSelectionSnapshot()).toEqual({ phase: "primary" })
   })
 
+  it("does not implicitly reopen through a collection after close", async () => {
+    const primary = createStore({ storedUser: user })
+    const store = new InlineStartupPersistenceStore({
+      primary: () => primary.store,
+      fallback: () => null,
+      canFallback: () => false,
+    })
+    const users = store.collection(DbObjectKind.User)
+
+    await store.open()
+    await store.close()
+
+    await expect(users.get(user.id)).rejects.toThrow(
+      "Inline persistence is closed",
+    )
+    expect(primary.open).toHaveBeenCalledTimes(1)
+
+    await store.open()
+    await expect(users.get(user.id)).resolves.toEqual(user)
+    expect(primary.open).toHaveBeenCalledTimes(2)
+  })
+
   it("fails closed when replica preparation fails after primary open", async () => {
     const preparationError = new InlineSqliteUnavailableError(
       "opfs-permission-denied",

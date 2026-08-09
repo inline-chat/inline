@@ -79,6 +79,41 @@ describe("InlineMessageDrafts", () => {
     ).toBeUndefined()
   })
 
+  it("rejects malformed draft input before touching storage", async () => {
+    const db = new Db({ autoHydrate: false, persistence: false })
+    const drafts = new InlineMessageDrafts(db)
+
+    await expect(
+      drafts.load({
+        peerKind: "user",
+        peerUserId: userId(0),
+      }),
+    ).rejects.toThrow("Invalid Inline message draft peer")
+    await expect(
+      drafts.update(peer, "x".repeat(100_001)),
+    ).rejects.toThrow("Invalid Inline message draft content")
+    await expect(
+      drafts.update(peer, "short", {
+        entities: [
+          {
+            type: MessageEntity_Type.BOLD,
+            offset: 4n,
+            length: 5n,
+            entity: { oneofKind: undefined },
+          },
+        ],
+      }),
+    ).rejects.toThrow("Invalid Inline message draft content")
+    expect(
+      db.get(
+        db.ref(
+          DbObjectKind.MessageDraft,
+          messageDraftKey(peer),
+        ),
+      ),
+    ).toBeUndefined()
+  })
+
   it("serializes clear behind an in-flight save", async () => {
     const rows = new Map<string, MessageDraft>()
     let signalFirstPutStarted: (() => void) | undefined
@@ -121,6 +156,48 @@ describe("InlineMessageDrafts", () => {
 
     expect(rows.size).toBe(0)
     expect(await drafts.load(peer)).toBeUndefined()
+  })
+
+  it("drains a save that is still waiting on persistence", async () => {
+    let signalPutStarted!: () => void
+    const putStarted = new Promise<void>((resolve) => {
+      signalPutStarted = resolve
+    })
+    let finishPut!: () => void
+    const putFinished = new Promise<void>((resolve) => {
+      finishPut = resolve
+    })
+    const storage: CollectionStorage<MessageDraft> = {
+      init: async () => undefined,
+      get: async () => undefined,
+      getAll: async () => [],
+      put: async () => {
+        signalPutStarted()
+        await putFinished
+      },
+      delete: async () => undefined,
+    }
+    const db = new Db({
+      autoHydrate: false,
+      storageByKind: {
+        [DbObjectKind.MessageDraft]: storage,
+      },
+    })
+    const drafts = new InlineMessageDrafts(db)
+
+    void drafts.update(peer, "pending")
+    await putStarted
+    const draining = drafts.drain()
+    let drained = false
+    void draining.then(() => {
+      drained = true
+    })
+    await Promise.resolve()
+    expect(drained).toBe(false)
+
+    finishPut()
+    await draining
+    expect(drained).toBe(true)
   })
 
   it("does not rehydrate a stale row while its clear is committing", async () => {

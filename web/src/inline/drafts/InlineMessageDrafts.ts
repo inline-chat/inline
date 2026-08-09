@@ -6,6 +6,8 @@ import {
   type MessageDraftPeer,
 } from "@inline/client/core"
 import type { MessageEntities } from "@inline-chat/protocol/core"
+import { parseInlineId } from "@inline/ids"
+import { isInlineMessageEntities } from "../messages/InlineMessageEntities"
 
 export type InlineMessageDraftsService = {
   load(peer: MessageDraftPeer): Promise<MessageDraft | undefined>
@@ -15,10 +17,38 @@ export type InlineMessageDraftsService = {
     entities?: MessageEntities,
   ): Promise<void>
   clear(peer: MessageDraftPeer): Promise<void>
+  drain?(): Promise<void>
 }
 
 const normalizedText = (text: string) =>
   text.replaceAll("\r\n", "\n")
+
+const assertValidDraftPeer = (peer: MessageDraftPeer) => {
+  const valid =
+    peer?.peerKind === "user"
+      ? parseInlineId<"user">(peer.peerUserId, {
+          positive: true,
+        }) != null
+      : peer?.peerKind === "chat"
+        ? parseInlineId<"chat">(peer.peerThreadId, {
+            positive: true,
+          }) != null
+        : false
+  if (!valid) throw new TypeError("Invalid Inline message draft peer")
+}
+
+const assertValidDraftContent = (
+  text: string,
+  entities?: MessageEntities,
+) => {
+  if (
+    typeof text !== "string" ||
+    text.length > 100_000 ||
+    !isInlineMessageEntities(entities, text)
+  ) {
+    throw new TypeError("Invalid Inline message draft content")
+  }
+}
 
 /**
  * Single-owner local draft actor. Operations are serialized so a clear can
@@ -36,8 +66,9 @@ export class InlineMessageDrafts
 
   constructor(private readonly db: Db) {}
 
-  load(peer: MessageDraftPeer) {
-    return this.operationQueue.then(() => this.loadNow(peer))
+  async load(peer: MessageDraftPeer) {
+    assertValidDraftPeer(peer)
+    return await this.operationQueue.then(() => this.loadNow(peer))
   }
 
   private loadNow(peer: MessageDraftPeer) {
@@ -65,12 +96,14 @@ export class InlineMessageDrafts
     return task
   }
 
-  update(
+  async update(
     peer: MessageDraftPeer,
     text: string,
     entities?: MessageEntities,
   ) {
-    return this.enqueue(async () => {
+    assertValidDraftPeer(peer)
+    assertValidDraftContent(text, entities)
+    return await this.enqueue(async () => {
       const existing = await this.loadNow(peer)
       const value = normalizedText(text)
       if (value.trim().length === 0) {
@@ -105,8 +138,9 @@ export class InlineMessageDrafts
     })
   }
 
-  clear(peer: MessageDraftPeer) {
-    return this.enqueue(async () => {
+  async clear(peer: MessageDraftPeer) {
+    assertValidDraftPeer(peer)
+    return await this.enqueue(async () => {
       await this.loadNow(peer)
       const ref = this.db.ref(
         DbObjectKind.MessageDraft,
@@ -115,6 +149,15 @@ export class InlineMessageDrafts
       if (!this.db.get(ref)) return
       await this.db.commit(() => this.db.delete(ref))
     })
+  }
+
+  /** Wait until every draft operation admitted before this call settles. */
+  async drain() {
+    while (true) {
+      const current = this.operationQueue
+      await current
+      if (current === this.operationQueue) return
+    }
   }
 
   private enqueue(operation: () => Promise<void>) {

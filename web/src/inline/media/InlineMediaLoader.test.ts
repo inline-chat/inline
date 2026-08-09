@@ -81,6 +81,24 @@ describe("InlineMediaLoader", () => {
     expect(cache.put).not.toHaveBeenCalled()
   })
 
+  it("rejects malformed media requests before cache or network access", async () => {
+    const cache = memoryCache()
+    const fetcher = vi.fn()
+    const loader = new InlineMediaLoader({ cache, fetcher })
+
+    expect(() =>
+      loader.load("", "https://cdn.inline.chat/photo"),
+    ).toThrow("Invalid Inline media cache key")
+    expect(() =>
+      loader.load("photo-1", "data:text/plain,unsafe"),
+    ).toThrow("Invalid Inline remote media URL")
+    await expect(
+      loader.loadCached("x".repeat(1_025)),
+    ).rejects.toThrow("Invalid Inline media cache key")
+    expect(cache.get).not.toHaveBeenCalled()
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
   it("deduplicates a cache-only promotion with a normal media load", async () => {
     let resolveCache: ((value: Blob | undefined) => void) | undefined
     const cached = new Blob(["cached-avatar"])

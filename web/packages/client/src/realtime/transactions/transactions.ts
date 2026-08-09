@@ -18,6 +18,7 @@ export class Transactions {
   private sent = new Map<TransactionId, TransactionWrapper>()
   private rpcMap = new Map<bigint, TransactionId>()
   private satisfiedBlockers = new Set<string>()
+  private heldQueueIds = new Set<TransactionId>()
 
   private readonly log: Log
 
@@ -45,6 +46,7 @@ export class Transactions {
     | { state: "failed"; wrapper: TransactionWrapper }
     | null {
     for (const wrapper of this.queue.values()) {
+      if (this.heldQueueIds.has(wrapper.id)) continue
       const state = this.blockerState(
         wrapper.transaction,
         resolveBlocker,
@@ -74,7 +76,7 @@ export class Transactions {
   running(transactionId: TransactionId, rpcMsgId: bigint) {
     const wrapper = this.inFlight.get(transactionId)
     if (!wrapper) {
-      this.log.trace("Transaction missing when marking running", transactionId)
+      this.log.trace("transactions.running.missing", {})
       return
     }
     this.rpcMap.set(rpcMsgId, transactionId)
@@ -160,6 +162,7 @@ export class Transactions {
       cancelled.push(wrapper)
       cancelledIds.add(id)
       this.queue.delete(id)
+      this.heldQueueIds.delete(id)
     }
     for (const [id, wrapper] of this.inFlight) {
       if (!where(wrapper)) continue
@@ -183,6 +186,49 @@ export class Transactions {
     return cancelled
   }
 
+  /** Cancel only work that has not crossed the transport boundary. */
+  cancelQueued(
+    where: (wrapper: TransactionWrapper) => boolean,
+  ): TransactionWrapper[] {
+    const cancelled: TransactionWrapper[] = []
+    for (const [id, wrapper] of this.queue) {
+      if (!where(wrapper)) continue
+      cancelled.push(wrapper)
+      this.queue.delete(id)
+      this.heldQueueIds.delete(id)
+    }
+    return cancelled
+  }
+
+  /** Reserve queued work while its durable cancellation is committing. */
+  holdQueued(
+    where: (wrapper: TransactionWrapper) => boolean,
+  ): TransactionWrapper[] {
+    const held: TransactionWrapper[] = []
+    for (const [id, wrapper] of this.queue) {
+      if (this.heldQueueIds.has(id) || !where(wrapper)) continue
+      this.heldQueueIds.add(id)
+      held.push(wrapper)
+    }
+    return held
+  }
+
+  removeHeldQueued(id: TransactionId): TransactionWrapper | null {
+    if (!this.heldQueueIds.delete(id)) return null
+    const wrapper = this.queue.get(id)
+    if (!wrapper) return null
+    this.queue.delete(id)
+    return wrapper
+  }
+
+  releaseHeldQueued(ids: readonly TransactionId[]) {
+    let released = false
+    for (const id of ids) {
+      released = this.heldQueueIds.delete(id) || released
+    }
+    if (released) void this.queueStream.send(undefined)
+  }
+
   reset(): TransactionWrapper[] {
     const wrappers = [...this.queue.values(), ...this.inFlight.values(), ...this.sent.values()]
     this.queue.clear()
@@ -190,6 +236,7 @@ export class Transactions {
     this.sent.clear()
     this.rpcMap.clear()
     this.satisfiedBlockers.clear()
+    this.heldQueueIds.clear()
     return wrappers
   }
 
