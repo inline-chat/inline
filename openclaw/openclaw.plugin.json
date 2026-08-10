@@ -106,7 +106,7 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "requireMention": { "type": "boolean" },
+                "requireMention": { "type": "boolean", "default": true },
                 "replyThreadMode": { "type": "string", "enum": ["auto", "thread", "main"] },
                 "replyThreadAutoCreateMinMessages": { "type": "integer", "minimum": 0 },
                 "replyThreadRequireExplicitMention": { "type": "boolean" },
@@ -141,7 +141,7 @@
               }
             }
           },
-          "requireMention": { "type": "boolean" },
+          "requireMention": { "type": "boolean", "default": true },
           "replyThreadMode": { "type": "string", "enum": ["auto", "thread", "main"] },
           "replyThreadAutoCreateMinMessages": { "type": "integer", "minimum": 0 },
           "replyThreadRequireExplicitMention": { "type": "boolean" },
@@ -462,7 +462,8 @@
                       "additionalProperties": false,
                       "properties": {
                         "requireMention": {
-                          "type": "boolean"
+                          "type": "boolean",
+                          "default": true
                         },
                         "replyThreadMode": {
                           "type": "string",
@@ -557,7 +558,8 @@
                     }
                   },
                   "requireMention": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "default": true
                   },
                   "replyThreadMode": {
                     "type": "string",
@@ -970,6 +972,14 @@
           "label": "Inline",
           "help": "Inline channel configuration for bot tokens, direct messages, group chats, and Inline-specific reply behavior."
         },
+        "name": {
+          "label": "Inline Account Name",
+          "help": "Optional display name for this Inline bot account in OpenClaw status and setup surfaces."
+        },
+        "enabled": {
+          "label": "Inline Account Enabled",
+          "help": "Enable or disable this Inline bot account without removing its configuration. Defaults to enabled."
+        },
         "baseUrl": {
           "label": "Inline API Base URL",
           "help": "Inline API base URL. Defaults to https://api.inline.chat."
@@ -1004,7 +1014,7 @@
         },
         "requireMention": {
           "label": "Inline Require Mention",
-          "help": "Require an explicit bot mention in group chats before routing a message to the agent."
+          "help": "Require an explicit bot mention in group chats before routing a message to the agent. Defaults to true."
         },
         "replyToBotWithoutMention": {
           "label": "Inline Reply Mention Bypass",
@@ -1013,6 +1023,10 @@
         "capabilities.replyThreads": {
           "label": "Inline Reply Threads (Legacy)",
           "help": "Legacy compatibility flag. Inline reply-thread tools are available for bot accounts; use replyThreadMode to control automatic routing."
+        },
+        "capabilities": {
+          "label": "Inline Capabilities (Legacy)",
+          "help": "Legacy compatibility settings. Inline reply-thread tools are available by default; use replyThreadMode for automatic routing."
         },
         "replyThreadMode": {
           "label": "Inline Reply Thread Mode",
@@ -1034,6 +1048,10 @@
           "label": "Inline Group Overrides",
           "help": "Per-group settings keyed by Inline chat ID, including sender allowlist, mention, reply-thread mode, reply-thread mention/history policy, deprecated threshold compatibility, and tool policy overrides."
         },
+        "systemPrompt": {
+          "label": "Inline System Prompt",
+          "help": "Additional system guidance applied to agent turns from this Inline account. Per-group systemPrompt values can override it."
+        },
         "accounts": {
           "label": "Inline Accounts",
           "help": "Named Inline bot accounts. Account entries accept the same token, access, group, reply-thread, command, and streaming fields as channels.inline."
@@ -1041,6 +1059,22 @@
         "actions": {
           "label": "Inline Message Actions",
           "help": "Enable or disable Inline message-tool action groups such as send, reactions, read, search, translate, edit, participants, message pins, and permissions."
+        },
+        "historyLimit": {
+          "label": "Inline Group History Limit",
+          "help": "Maximum recent group messages included as agent context. Uses the OpenClaw group-history default when unset."
+        },
+        "dmHistoryLimit": {
+          "label": "Inline DM History Limit",
+          "help": "Maximum recent direct-message messages included as agent context. Uses the OpenClaw DM-history default when unset."
+        },
+        "parseMarkdown": {
+          "label": "Inline Markdown",
+          "help": "Parse OpenClaw Markdown into Inline formatting for outgoing text. Defaults to true."
+        },
+        "mediaMaxMb": {
+          "label": "Inline Media Limit",
+          "help": "Maximum media size in megabytes accepted for Inline upload and send actions. Must be greater than zero."
         },
         "reactionNotifications": {
           "label": "Inline Reaction Notifications",
@@ -1061,6 +1095,10 @@
         "commands.native": {
           "label": "Inline Bot Command Sync",
           "help": "Controls startup sync for Inline bot commands."
+        },
+        "commands": {
+          "label": "Inline Bot Commands",
+          "help": "Configure startup synchronization of OpenClaw native and skill commands to the Inline bot command menu."
         },
         "commands.nativeSkills": {
           "label": "Inline Skill Command Sync",
@@ -1093,6 +1131,34 @@
         "streaming": {
           "label": "Inline Streaming Mode",
           "help": "Unified Inline stream mode: \"off\" | \"partial\" | \"block\" | \"progress\". \"partial\" edits visible answer previews; \"progress\" sends a silent temporary progress message, edits it while OpenClaw works, and deletes it before the final reply."
+        },
+        "textChunkLimit": {
+          "label": "Inline Text Chunk Limit",
+          "help": "Maximum characters per outgoing Inline text chunk. Must be greater than zero."
+        },
+        "chunkMode": {
+          "label": "Inline Chunk Mode",
+          "help": "Choose length-based or newline-aware splitting for outgoing Inline text chunks."
+        },
+        "streamMode": {
+          "label": "Inline Stream Mode (Legacy)",
+          "help": "Legacy alias for the Inline streaming mode. Prefer streaming.mode for new configuration."
+        },
+        "draftChunk": {
+          "label": "Inline Draft Chunking (Legacy)",
+          "help": "Legacy partial-preview chunk thresholds. Prefer streaming.preview.chunk for new configuration."
+        },
+        "blockStreaming": {
+          "label": "Inline Block Streaming (Legacy)",
+          "help": "Legacy switch for block-style streaming. Prefer streaming.mode=\"block\" and streaming.block.enabled."
+        },
+        "streamViaEditMessage": {
+          "label": "Inline Edit Streaming (Legacy)",
+          "help": "Legacy switch for editing one Inline message during partial streaming. Prefer streaming.mode=\"partial\"."
+        },
+        "blockStreamingCoalesce": {
+          "label": "Inline Block Coalescing (Legacy)",
+          "help": "Legacy block coalescing thresholds. Prefer streaming.block.coalesce for new configuration."
         },
         "streaming.mode": {
           "label": "Inline Streaming Mode",

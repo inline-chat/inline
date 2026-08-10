@@ -4947,6 +4947,35 @@ mod cli_parsing_tests {
     }
 
     #[test]
+    fn agents_setup_help_describes_every_public_option() {
+        let help = match Cli::try_parse_from(["inline", "agents", "setup", "--help"]) {
+            Ok(_) => panic!("agents setup help exits before parsing"),
+            Err(error) => error.to_string(),
+        };
+
+        for description in [
+            "Agent harness to configure",
+            "Named harness profile",
+            "Workspace folder",
+            "Reuse an existing Inline bot",
+            "Display name for a bot",
+            "Username for a bot",
+            "Who may invoke",
+            "Additional Inline user ID",
+            "Refuse to install or upgrade",
+            "without restarting",
+            "Replace a conflicting",
+            "without changing the harness or Inline",
+            "Disable prompts",
+        ] {
+            assert!(
+                help.contains(description),
+                "missing help text: {description}"
+            );
+        }
+    }
+
+    #[test]
     fn parses_gateway_setup_shortcuts() {
         let hermes = Cli::try_parse_from([
             "inline",

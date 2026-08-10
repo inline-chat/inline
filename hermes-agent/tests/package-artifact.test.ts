@@ -56,7 +56,7 @@ describe("packed artifact", () => {
     const pkg = JSON.parse(await readFile(path.join(packageRoot, "package.json"), "utf8")) as {
       bin?: Record<string, string>
       engines?: Record<string, string>
-      inlineHermes?: Record<string, string | number>
+      inlineHermes?: Record<string, unknown>
       repository?: { directory?: string }
       scripts?: Record<string, string>
     }
@@ -69,10 +69,11 @@ describe("packed artifact", () => {
     expect(pkg.inlineHermes).toMatchObject({
       pluginId: "inline",
       pluginPath: "plugin/inline",
+      install: { npmSpec: "@inline-chat/hermes-agent-adapter" },
       machineSetupProtocol: 1,
       minHermesVersion: "0.17.0",
-      testedHermesVersion: "0.19.1",
-      testedHermesCommit: "cc4cab2",
+      testedHermesVersion: "0.20.0",
+      testedHermesCommit: "3c27eb6",
     })
 
     const installJs = await readFile(path.join(packageRoot, "dist/install.js"), "utf8")
@@ -97,10 +98,10 @@ describe("packed artifact", () => {
     const release = await readFile(path.join(packageRoot, "RELEASE.md"), "utf8")
     expect(release).toContain("## Manual Live Test")
     expect(release).toContain("https://inline.chat/docs/creating-a-bot")
-    expect(release).toContain("VERSION=\"$(node -p \"require('./package.json').version\")\"")
-    expect(release).toContain("mkdir -p .tmp/manual-pack")
-    expect(release).toContain("inline-chat-hermes-agent-adapter-${VERSION}.tgz")
-    expect(release).toContain("npm publish --access public --tag alpha")
+    expect(release).toContain("Hermes release artifact:")
+    expect(release).toContain("npm install -g \"/absolute/path/to/inline-chat-hermes-agent-adapter-<version>.tgz\"")
+    expect(release).toContain("bun run release:npm hermes-agent")
+    expect(release).toContain("artifact path, SHA-256, and file list")
 
     const sidecar = await readFile(path.join(packageRoot, "plugin/inline/sidecar/index.mjs"), "utf8")
     expect(sidecar).toContain("inline-sidecar")
@@ -154,7 +155,7 @@ describe("packed artifact", () => {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       }).trim()
-      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.7")
+      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.8")
 
       const install = execFileSync(bin, ["install", "--hermes-home", hermesHome, "--force", "--json"], {
         cwd: packageRoot,

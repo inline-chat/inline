@@ -11,7 +11,8 @@ use super::{AccessMode, AgentsSetupArgs, GatewayPreflight, GatewaySetupOutcome, 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(180);
 const MACHINE_SETUP_PROTOCOL_VERSION: u64 = 1;
-const MIN_MACHINE_PLUGIN_VERSION: &str = "0.0.7";
+const HERMES_PLUGIN_VERSION: &str = "0.0.8";
+const HERMES_PLUGIN_PACKAGE_SPEC: &str = "@inline-chat/hermes-agent-adapter@0.0.8";
 
 struct HermesProfile {
     home: Option<PathBuf>,
@@ -269,7 +270,7 @@ async fn ensure_plugin(
         )
         .into());
     }
-    let version = install_latest_plugin(hermes_home).await?;
+    let version = install_exact_plugin(hermes_home).await?;
     Ok(PluginSetup {
         action: if installer.is_some() {
             "repaired"
@@ -280,7 +281,7 @@ async fn ensure_plugin(
     })
 }
 
-async fn install_latest_plugin(
+async fn install_exact_plugin(
     hermes_home: Option<&Path>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let npm = find_executable("npm").ok_or_else(|| {
@@ -289,17 +290,41 @@ async fn install_latest_plugin(
             "npm is required to install the Inline Hermes plugin",
         )
     })?;
+    let install_args = exact_plugin_install_args(hermes_home);
+    let install_refs = install_args.iter().map(String::as_str).collect::<Vec<_>>();
+    let output = require_success(&npm, &[], &install_refs, None, INSTALL_TIMEOUT).await?;
+    let installed_version = plugin_package_version(&output).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "the exact Inline Hermes installer returned no package version",
+        )
+    })?;
+    if installed_version != HERMES_PLUGIN_VERSION {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "the Inline Hermes installer returned {installed_version}, expected {HERMES_PLUGIN_VERSION}"
+            ),
+        )
+        .into());
+    }
+    Ok(installed_version)
+}
+
+fn exact_plugin_install_args(hermes_home: Option<&Path>) -> Vec<String> {
     let mut install_args = vec![
         "exec".to_string(),
         "--yes".to_string(),
-        "--package=@inline-chat/hermes-agent-adapter@latest".to_string(),
+        format!("--package={HERMES_PLUGIN_PACKAGE_SPEC}"),
         "--".to_string(),
         "inline-hermes".to_string(),
     ];
-    install_args.extend(installer_args("install", hermes_home, &["--json"]));
-    let install_refs = install_args.iter().map(String::as_str).collect::<Vec<_>>();
-    let output = require_success(&npm, &[], &install_refs, None, INSTALL_TIMEOUT).await?;
-    Ok(plugin_package_version(&output).unwrap_or_else(|| "latest".to_string()))
+    install_args.extend(installer_args(
+        "install",
+        hermes_home,
+        &["--force", "--json"],
+    ));
+    install_args
 }
 
 fn plugin_package_version(output: &str) -> Option<String> {
@@ -336,9 +361,9 @@ fn plugin_status_healthy(success: bool, output: &str) -> bool {
         .get("packageVersion")
         .and_then(serde_json::Value::as_str)
         .and_then(|version| semver::Version::parse(version).ok());
-    let minimum = semver::Version::parse(MIN_MACHINE_PLUGIN_VERSION)
-        .expect("machine plugin minimum must be valid semver");
-    reported_ok && version.is_some_and(|version| version >= minimum)
+    let expected = semver::Version::parse(HERMES_PLUGIN_VERSION)
+        .expect("machine plugin version must be valid semver");
+    reported_ok && version == Some(expected)
 }
 
 async fn plugin_has_configured_credential(
@@ -348,18 +373,24 @@ async fn plugin_has_configured_credential(
     let args = installer_args("status", hermes_home, &["--json"]);
     let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
     let status = super::process::run(installer, &[], &refs, None, COMMAND_TIMEOUT).await?;
-    if !status.success {
-        return Ok(false);
-    }
-    let configured = serde_json::from_str::<serde_json::Value>(&status.stdout)
+    Ok(plugin_status_has_configured_credential(
+        status.success,
+        &status.stdout,
+    ))
+}
+
+fn plugin_status_has_configured_credential(_success: bool, output: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(output)
         .ok()
         .and_then(|value| {
             value
                 .pointer("/activation/tokenConfigured")
                 .and_then(serde_json::Value::as_bool)
         })
-        == Some(true);
-    Ok(configured)
+        // An old, broken, or malformed installer must not erase evidence of a
+        // possibly configured credential. Requiring --replace is recoverable;
+        // silently overwriting the credential is not.
+        .unwrap_or(true)
 }
 
 async fn machine_plugin_status(
@@ -404,13 +435,26 @@ fn parse_machine_plugin_status(success: bool, output: &str) -> Option<MachinePlu
         .get("pluginVersion")
         .and_then(serde_json::Value::as_str)
         .and_then(|version| semver::Version::parse(version).ok())?;
-    let minimum = semver::Version::parse(MIN_MACHINE_PLUGIN_VERSION)
-        .expect("machine plugin minimum must be valid semver");
+    let expected = semver::Version::parse(HERMES_PLUGIN_VERSION)
+        .expect("machine plugin version must be valid semver");
     let sidecar_bundled = value
         .get("sidecarBundled")
         .and_then(serde_json::Value::as_bool)
         == Some(true);
-    if protocol < MACHINE_SETUP_PROTOCOL_VERSION || version < minimum || !sidecar_bundled {
+    let sidecar_usable = value
+        .pointer("/sidecar/ok")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true);
+    let node_usable = value
+        .pointer("/node/ok")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true);
+    if protocol < MACHINE_SETUP_PROTOCOL_VERSION
+        || version != expected
+        || !sidecar_bundled
+        || !sidecar_usable
+        || !node_usable
+    {
         return None;
     }
     Some(MachinePluginStatus {
@@ -574,11 +618,11 @@ mod tests {
     fn plugin_health_requires_the_machine_setup_contract_version() {
         assert!(plugin_status_healthy(
             true,
-            r#"{"ok":true,"packageVersion":"0.0.7"}"#
+            r#"{"ok":true,"packageVersion":"0.0.8"}"#
         ));
         assert!(!plugin_status_healthy(
             true,
-            r#"{"ok":true,"packageVersion":"0.0.6"}"#
+            r#"{"ok":true,"packageVersion":"0.0.7"}"#
         ));
         assert!(!plugin_status_healthy(
             false,
@@ -587,26 +631,80 @@ mod tests {
     }
 
     #[test]
+    fn outdated_managed_plugin_is_repaired_with_the_exact_package_and_force() {
+        assert!(!plugin_status_healthy(
+            true,
+            r#"{"ok":true,"packageVersion":"0.0.7"}"#
+        ));
+        assert_eq!(
+            exact_plugin_install_args(Some(Path::new("/tmp/hermes-profile"))),
+            vec![
+                "exec",
+                "--yes",
+                "--package=@inline-chat/hermes-agent-adapter@0.0.8",
+                "--",
+                "inline-hermes",
+                "install",
+                "--hermes-home",
+                "/tmp/hermes-profile",
+                "--force",
+                "--json",
+            ]
+        );
+    }
+
+    #[test]
+    fn configured_credential_survives_nonzero_or_malformed_installer_status() {
+        assert!(plugin_status_has_configured_credential(
+            false,
+            r#"{"ok":false,"activation":{"tokenConfigured":true}}"#,
+        ));
+        assert!(!plugin_status_has_configured_credential(
+            false,
+            r#"{"ok":false,"activation":{"tokenConfigured":false}}"#,
+        ));
+        assert!(plugin_status_has_configured_credential(false, "not json"));
+        assert!(plugin_status_has_configured_credential(
+            true,
+            r#"{"ok":true}"#
+        ));
+    }
+
+    #[test]
     fn live_machine_contract_is_independent_of_installer_state() {
         let status = parse_machine_plugin_status(
             true,
-            r#"{"ok":false,"setupProtocolVersion":1,"pluginVersion":"0.0.7","configured":false,"sidecarBundled":true}"#,
+            r#"{"ok":false,"setupProtocolVersion":1,"pluginVersion":"0.0.8","configured":false,"sidecarBundled":true,"sidecar":{"ok":true},"node":{"ok":true}}"#,
         )
         .expect("unconfigured live plugin still provides setup capability");
-        assert_eq!(status.version, "0.0.7");
+        assert_eq!(status.version, "0.0.8");
         assert!(!status.configured);
 
         assert!(
             parse_machine_plugin_status(
                 true,
-                r#"{"ok":true,"setupProtocolVersion":1,"pluginVersion":"0.0.6","configured":true,"sidecarBundled":true}"#,
+                r#"{"ok":true,"setupProtocolVersion":1,"pluginVersion":"0.0.7","configured":true,"sidecarBundled":true,"sidecar":{"ok":true},"node":{"ok":true}}"#,
             )
             .is_none()
         );
         assert!(
             parse_machine_plugin_status(
                 true,
-                r#"{"ok":true,"setupProtocolVersion":1,"pluginVersion":"0.0.7","configured":true,"sidecarBundled":false}"#,
+                r#"{"ok":true,"setupProtocolVersion":1,"pluginVersion":"0.0.8","configured":true,"sidecarBundled":false,"sidecar":{"ok":true},"node":{"ok":true}}"#,
+            )
+            .is_none()
+        );
+        assert!(
+            parse_machine_plugin_status(
+                true,
+                r#"{"ok":true,"setupProtocolVersion":1,"pluginVersion":"0.0.8","configured":true,"sidecarBundled":true,"sidecar":{"ok":false},"node":{"ok":true}}"#,
+            )
+            .is_none()
+        );
+        assert!(
+            parse_machine_plugin_status(
+                true,
+                r#"{"ok":true,"setupProtocolVersion":1,"pluginVersion":"0.0.8","configured":true,"sidecarBundled":true,"sidecar":{"ok":true},"node":{"ok":false}}"#,
             )
             .is_none()
         );

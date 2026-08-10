@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest"
-import { InlineAccountSchema, InlineConfigSchema, InlineRuntimeConfigSchema } from "./config-schema"
+import {
+  INLINE_DEFAULT_REQUIRE_MENTION,
+  InlineAccountSchema,
+  InlineConfigSchema,
+  InlineRuntimeConfigSchema,
+} from "./config-schema"
 
 describe("inline/config-schema", () => {
-  it("defaults group access to open while leaving mention overrides explicit", () => {
+  it("defaults group access to open and effective mention gating to true", () => {
     const parsed = InlineConfigSchema.parse({})
 
     expect(parsed.groupPolicy).toBe("open")
     expect(parsed.requireMention).toBeUndefined()
+    expect(INLINE_DEFAULT_REQUIRE_MENTION).toBe(true)
   })
 
   it("accepts top-level reply thread capability config", () => {

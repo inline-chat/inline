@@ -11,7 +11,8 @@ const sourceOnly = process.argv.includes("--source-only")
 const packages = [
   {
     directory: "openclaw",
-    rustConstant: "MIN_SETUP_PLUGIN_VERSION",
+    rustConstant: "SETUP_PLUGIN_VERSION",
+    rustPackageSpecConstant: "SETUP_PLUGIN_SPEC",
     validate(manifest) {
       if (manifest.openclaw?.install?.npmSpec !== "@inline-openclaw/inline") {
         throw new Error("OpenClaw package is missing its canonical external install contract")
@@ -20,18 +21,22 @@ const packages = [
   },
   {
     directory: "hermes-agent",
-    rustConstant: "MIN_MACHINE_PLUGIN_VERSION",
+    rustConstant: "HERMES_PLUGIN_VERSION",
+    rustPackageSpecConstant: "HERMES_PLUGIN_PACKAGE_SPEC",
     validate(manifest) {
       if (manifest.inlineHermes?.machineSetupProtocol !== 1) {
         throw new Error("Hermes package must advertise machineSetupProtocol 1")
+      }
+      if (manifest.inlineHermes?.install?.npmSpec !== manifest.name) {
+        throw new Error("Hermes package is missing its canonical external npm install contract")
       }
     },
   },
 ]
 
 const rustSources = new Map([
-  ["MIN_SETUP_PLUGIN_VERSION", readFileSync(path.join(root, "cli/src/agents/openclaw.rs"), "utf8")],
-  ["MIN_MACHINE_PLUGIN_VERSION", readFileSync(path.join(root, "cli/src/agents/hermes.rs"), "utf8")],
+  ["SETUP_PLUGIN_VERSION", readFileSync(path.join(root, "cli/src/agents/openclaw.rs"), "utf8")],
+  ["HERMES_PLUGIN_VERSION", readFileSync(path.join(root, "cli/src/agents/hermes.rs"), "utf8")],
 ])
 
 for (const entry of packages) {
@@ -46,6 +51,23 @@ for (const entry of packages) {
     throw new Error(
       `${entry.rustConstant} must match ${manifest.name}@${manifest.version}, found ${match?.[1] ?? "missing"}`,
     )
+  }
+
+  if (entry.rustPackageSpecConstant) {
+    const specMatch = source?.match(new RegExp(`const ${entry.rustPackageSpecConstant}: &str = "([^"]+)";`))
+    const npmSpec =
+      entry.directory === "openclaw"
+        ? manifest.openclaw.install.npmSpec
+        : manifest.inlineHermes.install.npmSpec
+    const expectedSpec = `${npmSpec}@${manifest.version}`
+    if (specMatch?.[1] !== expectedSpec) {
+      throw new Error(
+        `${entry.rustPackageSpecConstant} must be exact external spec ${expectedSpec}, found ${specMatch?.[1] ?? "missing"}`,
+      )
+    }
+    if (/include_(?:bytes|str)!\s*\([^)]*(?:openclaw|hermes-agent|plugin\/inline|adapter\.py|sidecar\/index\.mjs)/i.test(source)) {
+      throw new Error("Inline CLI must install external agent packages and must not embed plugin payload files")
+    }
   }
 
   if (!sourceOnly) {

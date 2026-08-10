@@ -335,16 +335,16 @@ def _run_inline_json(inline_bin: str, args: list[str]) -> tuple[dict | None, str
 
 def register_cli(parser: argparse.ArgumentParser) -> None:
     subs = parser.add_subparsers(dest="inline_command", required=False)
-    setup = subs.add_parser("setup", help="Configure Inline")
-    setup.add_argument("--non-interactive", action="store_true")
-    setup.add_argument("--token-stdin", action="store_true")
-    setup.add_argument("--owner-user-id")
-    setup.add_argument("--access", choices=["owner", "allowlist", "open", "disabled"], default="owner")
-    setup.add_argument("--allow-user", action="append", default=[], type=_positive_user_id)
-    setup.add_argument("--json", action="store_true")
-    status = subs.add_parser("status", help="Show Inline adapter status")
-    status.add_argument("--json", action="store_true")
-    status.add_argument("--probe", action="store_true")
+    setup = subs.add_parser("setup", help="Configure Inline", description="Configure the Inline platform and its access policy.")
+    setup.add_argument("--non-interactive", action="store_true", help="Run prompt-free machine setup; requires the token on stdin.")
+    setup.add_argument("--token-stdin", action="store_true", help="Read one bounded Inline token from stdin instead of argv.")
+    setup.add_argument("--owner-user-id", help="Positive Inline user ID that owns the configured bot.")
+    setup.add_argument("--access", choices=["owner", "allowlist", "open", "disabled"], default="owner", help="Who may invoke Hermes through Inline (default: owner).")
+    setup.add_argument("--allow-user", action="append", default=[], type=_positive_user_id, help="Additional positive Inline user ID to allow; repeatable.")
+    setup.add_argument("--json", action="store_true", help="Print compact machine-readable setup output.")
+    status = subs.add_parser("status", help="Show Inline adapter status", description="Check Inline configuration, sidecar, Node runtime, and optional credential identity.")
+    status.add_argument("--json", action="store_true", help="Print compact machine-readable status output.")
+    status.add_argument("--probe", action="store_true", help="Verify the configured Inline credential and bot identity.")
     parser.set_defaults(func=dispatch)
 
 
@@ -418,15 +418,27 @@ def _status(args) -> int:
     configured = bool(token)
     probe_requested = bool(getattr(args, "probe", False))
     probe = _probe_inline_token(token) if configured and probe_requested else None
-    ready = configured and (not probe_requested or bool(probe and probe.get("ok")))
+    node = _node_status()
+    sidecar = _sidecar_status(node)
+    sidecar_bundled = bool(
+        sidecar["exists"]
+        and sidecar["regularFile"]
+        and sidecar["readable"]
+        and sidecar["size"] > 0
+    )
+    runtime_usable = bool(sidecar["ok"] and node["ok"])
+    ready = runtime_usable and configured and (not probe_requested or bool(probe and probe.get("ok")))
     result = {
         "ok": ready,
+        "ready": ready,
         "action": "inline.status",
         "setupProtocolVersion": _MACHINE_SETUP_PROTOCOL_VERSION,
         "pluginVersion": _plugin_version(),
         "configured": configured,
-        "sidecarBundled": _SIDECAR_ENTRY.exists(),
-        "node": _node_status(),
+        "runtimeUsable": runtime_usable,
+        "sidecarBundled": sidecar_bundled,
+        "sidecar": sidecar,
+        "node": node,
         "probeRequested": probe_requested,
         **({"probe": probe} if probe is not None else {}),
     }
@@ -434,14 +446,15 @@ def _status(args) -> int:
         print(json.dumps(result, separators=(",", ":")))
     else:
         print(f"Inline configured: {'yes' if configured else 'no'}")
-        print(f"Inline sidecar bundled: {'yes' if _SIDECAR_ENTRY.exists() else 'no'}")
-        print(f"Node available: {_node_status()}")
+        print(f"Inline sidecar usable: {'yes' if sidecar['ok'] else 'no'}")
+        print(f"Node available: {_node_status_text(node)}")
+        print(f"Inline runtime ready: {'yes' if ready else 'no'}")
         if not configured:
             print("Next: run `hermes inline setup` for guided bot setup.")
         elif probe_requested:
             print(f"Inline credential probe: {'ready' if ready else 'failed'}")
         print("Advanced diagnostics: inline-hermes doctor --json")
-    return 0 if not probe_requested or ready else 1
+    return 0 if runtime_usable and (not probe_requested or ready) else 1
 
 
 def _plugin_version() -> str:
@@ -514,10 +527,17 @@ def _find_node_bin() -> str | None:
     return shutil.which("node")
 
 
-def _node_status() -> str:
+def _node_status() -> dict:
     node_bin = _find_node_bin()
     if not node_bin:
-        return "no"
+        return {
+            "ok": False,
+            "path": None,
+            "version": None,
+            "major": None,
+            "minimumMajor": _MIN_NODE_MAJOR,
+            "error": "Node.js was not found.",
+        }
     try:
         result = subprocess.run(
             [node_bin, "--version"],
@@ -528,12 +548,88 @@ def _node_status() -> str:
             check=False,
         )
     except Exception as exc:
-        return f"no ({exc})"
+        return {
+            "ok": False,
+            "path": node_bin,
+            "version": None,
+            "major": None,
+            "minimumMajor": _MIN_NODE_MAJOR,
+            "error": f"Node.js could not run: {exc}",
+        }
     version = (result.stdout or result.stderr or "").strip()
     if result.returncode != 0:
-        return f"no ({version or f'exited with status {result.returncode}'})"
+        return {
+            "ok": False,
+            "path": node_bin,
+            "version": version or None,
+            "major": None,
+            "minimumMajor": _MIN_NODE_MAJOR,
+            "error": f"Node.js exited with status {result.returncode}.",
+        }
     match = re.search(r"\bv?(\d+)(?:\.\d+){0,2}\b", version)
-    major = int(match.group(1)) if match else 0
-    if major < _MIN_NODE_MAJOR:
-        return f"no ({version or 'unknown version'}, requires >=20)"
-    return f"yes ({version})"
+    major = int(match.group(1)) if match else None
+    ok = major is not None and major >= _MIN_NODE_MAJOR
+    return {
+        "ok": ok,
+        "path": node_bin,
+        "version": version or None,
+        "major": major,
+        "minimumMajor": _MIN_NODE_MAJOR,
+        "error": None if ok else f"Node.js {version or 'version'} is incompatible; requires >= {_MIN_NODE_MAJOR}.",
+    }
+
+
+def _sidecar_status(node: dict) -> dict:
+    try:
+        info = _SIDECAR_ENTRY.stat()
+        exists = True
+        regular_file = _SIDECAR_ENTRY.is_file()
+        readable = os.access(_SIDECAR_ENTRY, os.R_OK)
+        size = info.st_size
+    except OSError:
+        exists = False
+        regular_file = False
+        readable = False
+        size = 0
+
+    syntax_checked = False
+    syntax_ok = False
+    error = None
+    if not exists:
+        error = "The packaged Inline sidecar is missing."
+    elif not regular_file or not readable or size <= 0:
+        error = "The packaged Inline sidecar is not a readable non-empty file."
+    elif node.get("ok"):
+        syntax_checked = True
+        try:
+            checked = subprocess.run(
+                [str(node["path"]), "--check", str(_SIDECAR_ENTRY)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+                check=False,
+            )
+            syntax_ok = checked.returncode == 0
+            if not syntax_ok:
+                error = "The packaged Inline sidecar failed Node.js syntax validation."
+        except (OSError, subprocess.TimeoutExpired):
+            error = "The packaged Inline sidecar could not be validated by Node.js."
+    else:
+        error = "The packaged Inline sidecar cannot run without compatible Node.js."
+
+    return {
+        "ok": bool(exists and regular_file and readable and size > 0 and syntax_checked and syntax_ok),
+        "exists": exists,
+        "regularFile": regular_file,
+        "readable": readable,
+        "size": size,
+        "syntaxChecked": syntax_checked,
+        "syntaxOk": syntax_ok,
+        "error": error,
+    }
+
+
+def _node_status_text(node: dict) -> str:
+    if node.get("ok"):
+        return f"yes ({node.get('version') or 'unknown version'})"
+    return f"no ({node.get('error') or 'unknown error'})"

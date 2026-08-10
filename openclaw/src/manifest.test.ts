@@ -93,6 +93,8 @@ describe("plugin manifest", () => {
 
     expect(schema?.properties).toHaveProperty("accounts")
     expect(schema?.properties).toHaveProperty("streaming")
+    expect((schema?.properties?.groupPolicy as { default?: unknown } | undefined)?.default).toBe("open")
+    expect((schema?.properties?.requireMention as { default?: unknown } | undefined)?.default).toBe(true)
     expect(collectRefs(schema)).toEqual([])
     expect(schema?.additionalProperties).not.toBe(false)
     expect(accounts?.additionalProperties?.type).toBe("object")
@@ -154,6 +156,13 @@ describe("plugin manifest", () => {
       "Named Inline bot accounts",
     )
     expect(json.channelConfigs?.inline?.uiHints?.token?.help).toContain("INLINE_BOT_TOKEN")
+    const rootFieldsWithoutHelp = Object.keys(schema?.properties ?? {}).filter((field) => {
+      const help = json.channelConfigs?.inline?.uiHints?.[field]?.help
+      return typeof help !== "string" || help.trim().length === 0
+    })
+    expect(rootFieldsWithoutHelp).toEqual([])
+    expect(json.channelConfigs?.inline?.uiHints?.groupPolicy?.help).toContain("open by default")
+    expect(json.channelConfigs?.inline?.uiHints?.requireMention?.help).toContain("Defaults to true")
     expect(schema?.properties?.allowFrom).toEqual({
       type: "array",
       items: { anyOf: [{ type: "string" }, { type: "number" }] },
@@ -331,5 +340,25 @@ describe("plugin manifest", () => {
     ])
     expect(json.openclaw?.channel?.configuredState?.specifier).toBe("./dist/configured-state.js")
     expect(json.openclaw?.channel?.configuredState?.exportName).toBe("hasInlineConfiguredState")
+  })
+
+  it("keeps release docs, compatibility history, and bounded tests aligned with package defaults", async () => {
+    const packageDir = path.resolve(__dirname, "..")
+    const packageJson = JSON.parse(await readFile(path.join(packageDir, "package.json"), "utf8")) as {
+      version?: string
+      scripts?: { test?: string }
+    }
+    const readme = await readFile(path.join(packageDir, "README.md"), "utf8")
+    const setup = await readFile(path.join(packageDir, "docs", "openclaw-setup.md"), "utf8")
+    const compatibilityVersions = [...readme.matchAll(/^\| `(\d+\.\d+\.\d+)` \|/gm)].map(
+      (match) => match[1],
+    )
+
+    expect(readme).toContain('`groupPolicy` defaults to `"open"`, and `requireMention` defaults to `true`')
+    expect(setup).toContain('Groups use `groupPolicy: "open"` and `requireMention: true` by default')
+    expect(compatibilityVersions[0]).toBe(packageJson.version)
+    expect(compatibilityVersions).toHaveLength(6)
+    expect(new Set(compatibilityVersions).size).toBe(compatibilityVersions.length)
+    expect(packageJson.scripts?.test).toContain("--maxWorkers=2")
   })
 })

@@ -2814,11 +2814,105 @@ describe("inline/actions", () => {
       scope: "all",
       count: 2,
       groupsCount: 1,
-      peersCount: 2,
+      peersCount: 1,
       chats: expect.arrayContaining([expect.objectContaining({ id: "7", target: "chat:7" })]),
       groups: expect.arrayContaining([expect.objectContaining({ id: "8", target: "chat:8" })]),
-      peers: expect.arrayContaining([expect.objectContaining({ id: "99", target: "user:99", name: "Alice" })]),
+      peers: [
+        expect.objectContaining({
+          id: "99",
+          target: "user:99",
+          chatId: "7",
+          chatTarget: "chat:7",
+          name: "Alice",
+        }),
+      ],
     })
+  })
+
+  it("filters, activity-sorts, limits, and projects channel-list from one chat selection", async () => {
+    vi.resetModules()
+
+    const groupChat = (id: bigint, title: string, lastMsgId?: bigint) => ({
+      id,
+      title,
+      ...(lastMsgId != null ? { lastMsgId } : {}),
+      peerId: { type: { oneofKind: "chat", chat: { chatId: id } } },
+    })
+    const invokeRaw = vi.fn(async (method: number) => {
+      if (method === 17) {
+        return {
+          oneofKind: "getChats",
+          getChats: {
+            chats: [
+              groupChat(8n, "Engineering Alpha", 80n),
+              groupChat(12n, "Unrelated Recent", 120n),
+              groupChat(10n, "Engineering No Messages"),
+              groupChat(9n, "Engineering Beta", 90n),
+            ],
+            dialogs: [],
+            users: [],
+            messages: [
+              { id: 80n, date: 1_700_000_100n },
+              { id: 90n, date: 1_700_000_100n },
+              { id: 120n, date: 1_800_000_000n },
+            ],
+          },
+        }
+      }
+      throw new Error(`unexpected method ${String(method)}`)
+    })
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: { GET_CHATS: 17 },
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = vi.fn(async () => {})
+        close = vi.fn(async () => {})
+        invokeRaw = invokeRaw
+      },
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+    const cfg = {
+      channels: { inline: { token: "token", baseUrl: "https://api.inline.chat" } },
+    } satisfies OpenClawConfig
+
+    const result = await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "channel-list",
+      cfg,
+      params: { scope: "groups", query: "engineering", limit: 2 },
+    } as any)
+
+    expect(result?.details).toMatchObject({
+      ok: true,
+      count: 3,
+      groupsCount: 3,
+      peersCount: 0,
+      chats: [],
+      peers: [],
+      groups: [
+        expect.objectContaining({ id: "9", lastMessageDate: 1_700_000_100_000 }),
+        expect.objectContaining({ id: "8", lastMessageDate: 1_700_000_100_000 }),
+      ],
+    })
+
+    const unbounded = await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "channel-list",
+      cfg,
+      params: { query: "engineering", limit: 4 },
+    } as any)
+    expect((unbounded?.details as any)?.chats.map((entry: any) => entry.id)).toEqual([
+      "9",
+      "8",
+      "10",
+    ])
+    expect((unbounded?.details as any)?.groups.map((entry: any) => entry.id)).toEqual([
+      "9",
+      "8",
+      "10",
+    ])
   })
 
   it("supports channel-list scope filtering for peers", async () => {

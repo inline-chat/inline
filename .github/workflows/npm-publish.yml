@@ -182,7 +182,8 @@ jobs:
               bun run --cwd "$PACKAGE_DIR" test
               ;;
             hermes-agent)
-              bun run --cwd hermes-agent release:preflight
+              # The next step validates and dry-runs the exact tarball that is published.
+              :
               ;;
           esac
 
@@ -190,20 +191,35 @@ jobs:
         if: inputs.package == 'hermes-agent'
         id: hermes
         run: |
+          artifact_dir="$RUNNER_TEMP/hermes-release-artifact"
+          mkdir -p "$artifact_dir"
           stage_log="$(mktemp)"
-          node hermes-agent/scripts/release-stage.mjs --prepare-only | tee "$stage_log"
-          stage_dir="$(sed -n 's/^Hermes release stage: //p' "$stage_log" | tail -1)"
-          if [[ -z "$stage_dir" || ! -f "$stage_dir/package.json" ]]; then
-            echo "Hermes release stage was not created" >&2
+          node hermes-agent/scripts/release-stage.mjs --dry-run --output-dir "$artifact_dir" | tee "$stage_log"
+          artifact="$(sed -n 's/^Hermes release artifact: //p' "$stage_log" | tail -1)"
+          artifact_sha256="$(sed -n 's/^Hermes release artifact sha256: //p' "$stage_log" | tail -1)"
+          if [[ -z "$artifact" || -z "$artifact_sha256" || ! -f "$artifact" ]]; then
+            echo "Hermes release artifact was not created" >&2
             exit 1
           fi
-          echo "package-dir=$stage_dir" >> "$GITHUB_OUTPUT"
+          echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
+          echo "artifact-sha256=$artifact_sha256" >> "$GITHUB_OUTPUT"
 
       - name: Publish with npm trusted publishing
         env:
-          PACKAGE_DIR: ${{ inputs.package == 'hermes-agent' && steps.hermes.outputs.package-dir || steps.release.outputs.package-dir }}
+          PACKAGE_DIR: ${{ steps.release.outputs.package-dir }}
+          HERMES_ARTIFACT: ${{ steps.hermes.outputs.artifact }}
+          HERMES_ARTIFACT_SHA256: ${{ steps.hermes.outputs.artifact-sha256 }}
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
+          if [[ -n "$HERMES_ARTIFACT" ]]; then
+            actual_sha256="$(sha256sum "$HERMES_ARTIFACT" | awk '{print $1}')"
+            if [[ "$actual_sha256" != "$HERMES_ARTIFACT_SHA256" ]]; then
+              echo "Hermes artifact changed after preflight" >&2
+              exit 1
+            fi
+            npm publish --ignore-scripts --access public --tag "$RELEASE_TAG" "$HERMES_ARTIFACT"
+            exit 0
+          fi
           cd "$PACKAGE_DIR"
           npm publish --access public --tag "$RELEASE_TAG"
 

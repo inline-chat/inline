@@ -23,6 +23,8 @@ except Exception:  # pragma: no cover - used by lightweight package tests
 _DEFAULT_SIDECAR_PORT = 8794
 _DEFAULT_SIDECAR_BIND = "127.0.0.1"
 _MAX_HISTORY_LIMIT = 100
+_MAX_MESSAGE_IDS = 100
+_MAX_INLINE_ID = 9_223_372_036_854_775_807
 _DEFAULT_HISTORY_LIMIT = 20
 _MAX_TEXT_CHARS = 4000
 _MAX_QUERY_CHARS = 500
@@ -179,6 +181,7 @@ INLINE_TOOL_SCHEMA = {
             "message_ids": {
                 "type": "array",
                 "items": {"type": "string"},
+                "maxItems": _MAX_MESSAGE_IDS,
                 "description": "Inline message IDs for get_messages.",
             },
             "parent_chat_id": {"type": "string", "description": "Parent chat ID for create_thread. Defaults to the current chat."},
@@ -460,11 +463,21 @@ def _message_ids(args: Dict[str, Any]) -> list[str]:
         values = _str(raw).split(",")
     else:
         values = []
-    ids = [_inline_id(value) for value in values]
-    single = _inline_id(args.get("message_id"))
-    if single:
-        ids.append(single)
-    return [item for item in ids if item]
+    items = list(values)
+    single_value = args.get("message_id")
+    if _str(single_value):
+        items.append(single_value)
+    if len(items) > _MAX_MESSAGE_IDS:
+        raise InlineToolError(f"message_ids supports at most {_MAX_MESSAGE_IDS} items", "bad_format")
+    ids: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        inline_id = _inline_id(item)
+        if not inline_id or inline_id in seen:
+            continue
+        seen.add(inline_id)
+        ids.append(inline_id)
+    return ids
 
 
 def _message_id_or_current(args: Dict[str, Any]) -> str:
@@ -746,13 +759,20 @@ def _inline_id(value: Any) -> str:
         prefix, rest = text.split(":", 1)
         if prefix.lower() in {"chat", "thread", "user", "space", "message", "msg"}:
             text = rest.strip()
-    return text
+    if not text.isdigit():
+        raise InlineToolError("Inline IDs must be positive signed 64-bit integers", "bad_format")
+    parsed = int(text)
+    if parsed <= 0 or parsed > _MAX_INLINE_ID:
+        raise InlineToolError("Inline IDs must be positive signed 64-bit integers", "bad_format")
+    return str(parsed)
 
 
 def _id_list(value: Any, *, max_items: int) -> list[str]:
     if value is None:
         return []
-    items = value if isinstance(value, (list, tuple, set)) else [value]
+    items = list(value) if isinstance(value, (list, tuple)) else [value]
+    if len(items) > max_items:
+        raise InlineToolError(f"too many IDs (max {max_items})", "bad_format")
     ids: list[str] = []
     seen: set[str] = set()
     for item in items:
@@ -761,8 +781,6 @@ def _id_list(value: Any, *, max_items: int) -> list[str]:
             continue
         seen.add(inline_id)
         ids.append(inline_id)
-        if len(ids) > max_items:
-            raise InlineToolError(f"too many IDs (max {max_items})", "bad_format")
     return ids
 
 

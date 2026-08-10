@@ -41,7 +41,7 @@ Notes:
 - If you add an explicit `plugins.entries` block, the plugin entry id is `inline`.
 - For multi-bubble replies, enable `channels.inline.blockStreaming: true`.
 - For reply-driven group flows, set `channels.inline.replyToBotWithoutMention: true`.
-- Group mention requirement is off by default; set `channels.inline.requireMention: true` if you want strict mentions.
+- Groups use `groupPolicy: "open"` and `requireMention: true` by default, so any group can reach the channel but only an explicit mention wakes the bot unless configured otherwise.
 - Inline uses OpenClaw's group-history default; set `channels.inline.historyLimit` to override it, or use `messages.groupChat.historyLimit` as a global fallback.
 - Inline reply-thread handling is available by default, so OpenClaw `threadId` can map to real Inline reply-thread chats.
 - `replyToId` is still a message reply id. Inline reply-thread behavior does not replace ordinary message replies.
@@ -60,8 +60,8 @@ Access defaults:
 - DMs use `dmPolicy: "pairing"` unless configured.
 - For private bots, use `dmPolicy: "allowlist"` with your Inline user id in `allowFrom`.
 - For public/demo bots, use `dmPolicy: "open"` with `allowFrom: ["*"]`.
-- Groups use `groupPolicy: "allowlist"` unless configured.
-- For broad group access, use `groups: { "*": { requireMention: true } }` so the bot only answers mentions.
+- Groups use `groupPolicy: "open"` unless configured.
+- Group messages require a bot mention by default (`requireMention: true`). Use `groups` to override mention behavior for selected chats.
 - For selected groups, list numeric chat ids under `groups`.
 - Use `groupAllowFrom` for an account-wide group sender allowlist, or `groups.<chat>.allowFrom` for per-group sender allowlists.
 - `groupAllowFrom` is optional; use it only when specific senders inside allowed groups should be able to trigger the bot.

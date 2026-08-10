@@ -10,6 +10,8 @@ export type GenericSenderProfile = {
 }
 export type SecretRedaction = { value: string | null | undefined; label: string }
 
+export const MAX_INLINE_ID = 9_223_372_036_854_775_807n
+
 const sensitiveUrlParams = new Set([
   "access_token",
   "auth",
@@ -29,11 +31,11 @@ export class SidecarError extends Error {
 
 export function parseTarget(record: Record<string, unknown>): Target {
   const targetRecord = asOptionalRecord(record.target) ?? record
-  const chatId = readOptionalString(targetRecord, "chatId")
-  const userId = readOptionalString(targetRecord, "userId")
+  const chatId = readOptionalInlineId(targetRecord, "chatId")
+  const userId = readOptionalInlineId(targetRecord, "userId")
   if (chatId && userId) throw new SidecarError("target cannot include both chatId and userId", "bad_format")
-  if (chatId) return { chatId: parseInlineId(chatId, "chatId") }
-  if (userId) return { userId: parseInlineId(userId, "userId") }
+  if (chatId) return { chatId }
+  if (userId) return { userId }
   throw new SidecarError("target requires chatId or userId", "bad_format")
 }
 
@@ -244,6 +246,45 @@ export function readOptionalNumber(record: Record<string, unknown>, key: string)
   return undefined
 }
 
+export function readRequiredInlineId(record: Record<string, unknown>, key: string): bigint {
+  const value = readOptionalInlineId(record, key)
+  if (value == null) throw new SidecarError(`missing ${key}`, "bad_format")
+  return value
+}
+
+export function readOptionalInlineId(record: Record<string, unknown>, key: string): bigint | undefined {
+  const value = record[key]
+  if (value == null || value === "") return undefined
+  return parseInlineId(value, key)
+}
+
+export function readInlineIdArray(
+  record: Record<string, unknown>,
+  key: string,
+  maxItems: number,
+  required = false,
+): bigint[] {
+  const value = record[key]
+  if (value == null) {
+    if (required) throw new SidecarError(`missing ${key}`, "bad_format")
+    return []
+  }
+  if (!Array.isArray(value)) throw new SidecarError(`${key} must be an array`, "bad_format")
+  if (value.length === 0 && required) throw new SidecarError(`${key} must not be empty`, "bad_format")
+  if (value.length > maxItems) throw new SidecarError(`${key} supports at most ${maxItems} items`, "bad_format")
+
+  const ids: bigint[] = []
+  const seen = new Set<string>()
+  for (let index = 0; index < value.length; index += 1) {
+    const id = parseInlineId(value[index], `${key}[${index}]`)
+    const normalized = id.toString()
+    if (seen.has(normalized)) continue
+    seen.add(normalized)
+    ids.push(id)
+  }
+  return ids
+}
+
 export function parseOptionalInt(value: string | undefined): number | undefined {
   const raw = (value || "").trim()
   if (!raw || !/^\d+$/.test(raw)) return undefined
@@ -251,13 +292,21 @@ export function parseOptionalInt(value: string | undefined): number | undefined 
   return Number.isSafeInteger(parsed) ? parsed : undefined
 }
 
-function parseInlineId(value: string, field: string): bigint {
+export function parseInlineId(value: unknown, field: string): bigint {
   try {
-    const parsed = BigInt(value)
-    if (parsed <= 0n) throw new Error("must be positive")
+    if (typeof value === "number" && (!Number.isSafeInteger(value) || value <= 0)) {
+      throw new Error("unsafe number")
+    }
+    const raw = typeof value === "string" ? value.trim() : value
+    if (typeof raw === "string" && !/^[1-9][0-9]*$/.test(raw)) throw new Error("invalid digits")
+    if (typeof raw !== "string" && typeof raw !== "bigint" && typeof raw !== "number") {
+      throw new Error("invalid type")
+    }
+    const parsed = BigInt(raw)
+    if (parsed <= 0n || parsed > MAX_INLINE_ID) throw new Error("out of range")
     return parsed
   } catch {
-    throw new SidecarError(`invalid ${field}`, "bad_format")
+    throw new SidecarError(`${field} must be a positive signed 64-bit integer`, "bad_format")
   }
 }
 

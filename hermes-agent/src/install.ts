@@ -13,6 +13,7 @@ import { parse as parseYaml } from "yaml"
 import { redactText, redactUrl, type SecretRedaction } from "./sidecar/contract.js"
 
 type Command = "install" | "status" | "doctor" | "test-send" | "help" | "version"
+type RuntimeCommand = Exclude<Command, "help" | "version">
 
 type InstallOptions = {
   command: Command
@@ -27,6 +28,7 @@ type InstallOptions = {
   baseUrl?: string
   statePath?: string
   timeoutMs: number
+  helpTopic?: RuntimeCommand
 }
 
 type PackageInfo = {
@@ -76,7 +78,7 @@ const minNodeMajor = 20
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   const opts = parseArgs(argv)
   if (opts.command === "help") {
-    printHelp()
+    printHelp(opts.helpTopic)
     return 0
   }
 
@@ -96,7 +98,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     } else {
       printStatus(status)
     }
-    return status.ok ? 0 : opts.command === "doctor" ? 1 : 0
+    return status.ok ? 0 : 1
   }
 
   if (opts.command === "test-send") {
@@ -153,7 +155,15 @@ async function installPlugin(params: {
 }): Promise<InstallResult> {
   const before = await inspectInstall(params)
   if (!before.sourceValid) return { ...before, action: "install", installed: false }
-  if (params.opts.dryRun) return { ...before, action: "install", installed: false }
+  if (params.opts.dryRun) {
+    return {
+      ...before,
+      ok: before.sourceReady,
+      action: "install",
+      installed: false,
+      issues: before.sourceReady ? [] : before.issues,
+    }
+  }
 
   await mkdir(path.dirname(params.target), { recursive: true })
 
@@ -188,7 +198,7 @@ async function installPlugin(params: {
   return {
     ...after,
     action: "install",
-    installed: after.targetValid,
+    installed: after.installedReady,
   }
 }
 
@@ -217,6 +227,14 @@ async function inspectInstall(params: {
   const activation = await inspectActivation(params.opts.hermesHome, params.target)
   const issues: string[] = []
   const warnings: string[] = []
+  const sidecarMatches = Boolean(
+    targetSidecar?.exists
+      && sourceSidecar.sha256
+      && targetSidecar.sha256
+      && sourceSidecar.sha256 === targetSidecar.sha256,
+  )
+  const sourceReady = sourceValid && sourceSidecar.exists && node.ok
+  const installedReady = targetExists && targetValid && sidecarMatches && node.ok
 
   if (!sourceValid) {
     issues.push(`plugin source is incomplete: ${params.source}`)
@@ -224,7 +242,7 @@ async function inspectInstall(params: {
   if (targetExists && !targetValid) {
     issues.push(`installed plugin is incomplete: ${params.target}`)
   }
-  if (params.opts.command === "doctor" && !targetExists) {
+  if ((params.opts.command === "status" || params.opts.command === "doctor") && !targetExists) {
     issues.push(`plugin is not installed: ${params.target}`)
   }
   if (targetSidecar?.exists && sourceSidecar.sha256 && targetSidecar.sha256 && sourceSidecar.sha256 !== targetSidecar.sha256) {
@@ -247,7 +265,7 @@ async function inspectInstall(params: {
   }
 
   return {
-    ok: sourceValid && (!targetExists || targetValid) && node.ok && issues.length === 0,
+    ok: installedReady && issues.length === 0,
     action: "status" as "install" | "status",
     packageName: params.pkg.name,
     packageVersion: params.pkg.version,
@@ -256,14 +274,17 @@ async function inspectInstall(params: {
     source: params.source,
     sourceReal,
     sourceValid,
+    sourceReady,
     target: params.target,
     targetReal,
     targetExists,
     targetValid,
+    installedReady,
     targetLinked,
     sidecar: {
       source: sourceSidecar,
       target: targetSidecar,
+      matchesPackage: sidecarMatches,
     },
     node,
     activation,
@@ -379,22 +400,37 @@ async function testSend(params: {
 }
 
 function parseArgs(argv: string[]): InstallOptions {
-  const command = parseCommand(argv[0])
-  const opts: InstallOptions = {
-    command,
-    hermesHome: process.env.HERMES_HOME || path.join(os.homedir(), ".hermes"),
-    pluginId: defaultPluginId,
-    link: false,
-    dryRun: false,
-    force: false,
-    json: false,
-    text: "Inline Hermes test",
-    timeoutMs: 30_000,
+  if (argv[0] === "help") {
+    const helpTopic = argv[1] == null ? undefined : parseRuntimeCommand(argv[1])
+    if (argv.length > (helpTopic ? 2 : 1)) throw new Error(`unknown argument: ${argv[helpTopic ? 2 : 1]}`)
+    return defaultOptions("help", helpTopic)
+  }
+  if (argv[0] === "version") {
+    if (argv.length !== 1) throw new Error(`unknown argument: ${argv[1]}`)
+    return defaultOptions("version")
   }
 
   const firstArgIsFlag = argv[0]?.startsWith("-") ?? false
-  for (let i = argv[0] == null || firstArgIsFlag ? 0 : 1; i < argv.length; i += 1) {
+  const selectedCommand = firstArgIsFlag || argv[0] == null ? "install" : parseRuntimeCommand(argv[0])
+  const opts = defaultOptions(selectedCommand)
+  const startIndex = argv[0] == null || firstArgIsFlag ? 0 : 1
+
+  if (argv[startIndex] === "-v" || argv[startIndex] === "--version") {
+    if (startIndex !== 0 || argv.length !== 1) throw new Error("--version is only valid as a top-level flag")
+    opts.command = "version"
+    return opts
+  }
+
+  for (let i = startIndex; i < argv.length; i += 1) {
     const arg = argv[i]
+    if (arg == null) throw new Error("missing argument")
+    if (arg === "-h" || arg === "--help") {
+      if (argv.length !== i + 1) throw new Error(`${arg} must be the final argument`)
+      opts.command = "help"
+      if (startIndex !== 0) opts.helpTopic = selectedCommand
+      return opts
+    }
+    assertOptionAllowed(selectedCommand, arg)
     switch (arg) {
       case "--hermes-home":
         opts.hermesHome = requireValue(argv, ++i, arg)
@@ -429,14 +465,6 @@ function parseArgs(argv: string[]): InstallOptions {
       case "--timeout-ms":
         opts.timeoutMs = parsePositiveInt(requireValue(argv, ++i, arg), arg)
         break
-      case "-h":
-      case "--help":
-        opts.command = "help"
-        break
-      case "-v":
-      case "--version":
-        opts.command = "version"
-        break
       default:
         throw new Error(`unknown argument: ${arg}`)
     }
@@ -447,12 +475,39 @@ function parseArgs(argv: string[]): InstallOptions {
   return opts
 }
 
-function parseCommand(raw: string | undefined): Command {
-  if (raw == null || raw === "install") return "install"
-  if (raw === "status" || raw === "doctor" || raw === "test-send" || raw === "help" || raw === "version") return raw
-  if (raw === "-h" || raw === "--help") return "help"
-  if (raw === "-v" || raw === "--version") return "version"
+function defaultOptions(command: Command, helpTopic?: RuntimeCommand): InstallOptions {
+  const opts: InstallOptions = {
+    command,
+    hermesHome: process.env.HERMES_HOME || path.join(os.homedir(), ".hermes"),
+    pluginId: defaultPluginId,
+    link: false,
+    dryRun: false,
+    force: false,
+    json: false,
+    text: "Inline Hermes test",
+    timeoutMs: 30_000,
+    ...(helpTopic ? { helpTopic } : {}),
+  }
+  return opts
+}
+
+function parseRuntimeCommand(raw: string): RuntimeCommand {
+  if (raw === "install" || raw === "status" || raw === "doctor" || raw === "test-send") return raw
   throw new Error(`unknown command: ${raw}`)
+}
+
+const commandOptions: Readonly<Record<RuntimeCommand, ReadonlySet<string>>> = {
+  install: new Set(["--hermes-home", "--plugin-id", "--link", "--dry-run", "--force", "--json"]),
+  status: new Set(["--hermes-home", "--plugin-id", "--json"]),
+  doctor: new Set(["--hermes-home", "--plugin-id", "--json"]),
+  "test-send": new Set(["--hermes-home", "--dry-run", "--json", "--to", "--text", "--base-url", "--state-path", "--timeout-ms"]),
+}
+
+function assertOptionAllowed(command: RuntimeCommand, option: string): void {
+  if (!option.startsWith("-")) throw new Error(`unexpected positional argument for ${command}: ${option}`)
+  if (!commandOptions[command].has(option)) {
+    throw new Error(`${option} is not valid for inline-hermes ${command}`)
+  }
 }
 
 function requireValue(argv: string[], index: number, flag: string): string {
@@ -625,20 +680,19 @@ async function inspectInstallOwnership(hermesHome: string, target: string): Prom
     const homeInfo = await stat(hermesHome)
     const pluginsInfo = await stat(path.dirname(target))
     return pluginsInfo.uid === homeInfo.uid
-      && pluginsInfo.gid === homeInfo.gid
-      && await treeOwnershipMatches(target, homeInfo.uid, homeInfo.gid)
+      && await treeOwnershipMatches(target, homeInfo.uid)
   } catch {
     return false
   }
 }
 
-async function treeOwnershipMatches(target: string, uid: number, gid: number): Promise<boolean> {
+async function treeOwnershipMatches(target: string, uid: number): Promise<boolean> {
   const info = await lstat(target)
-  if (info.uid !== uid || info.gid !== gid) return false
+  if (info.uid !== uid) return false
   if (!info.isDirectory()) return true
   const entries = await readdir(target)
   for (const entry of entries) {
-    if (!await treeOwnershipMatches(path.join(target, entry), uid, gid)) return false
+    if (!await treeOwnershipMatches(path.join(target, entry), uid)) return false
   }
   return true
 }
@@ -1137,28 +1191,69 @@ function formatSidecarInfo(info: SidecarInfo): string {
   return `${info.path} (${info.size ?? 0} bytes, sha256 ${digest})`
 }
 
-function printHelp() {
-  console.log(`inline-hermes
+function printHelp(topic?: RuntimeCommand) {
+  if (topic === "install") {
+    console.log(`Usage: inline-hermes install [options]
 
-Usage:
-  inline-hermes install [--hermes-home <path>] [--link] [--force] [--dry-run]
-  inline-hermes status [--hermes-home <path>] [--json]
-  inline-hermes doctor [--hermes-home <path>] [--json]
-  inline-hermes test-send --to chat:<id>|user:<id> [--text <message>] [--json]
-  inline-hermes version
+Install the packaged Inline plugin into a Hermes home.
 
 Options:
   --hermes-home <path>  Hermes home directory. Defaults to HERMES_HOME or ~/.hermes.
-  --link                Symlink plugin source instead of copying it.
+  --plugin-id <id>      Installed plugin directory name. Defaults to inline.
+  --link                Symlink the packaged plugin for local development.
   --force               Replace an existing target plugin directory.
-  --dry-run             Print what would happen without writing files.
+  --dry-run             Validate packaged source and Node without writing files.
   --json                Print machine-readable output.
-  --to <target>          Inline target for test-send, for example chat:123.
-  --text <message>       Message for test-send. Defaults to "Inline Hermes test".
-  --base-url <url>       Inline API base URL for test-send.
-  --state-path <path>    Inline SDK state file for test-send.
-  --timeout-ms <ms>      test-send sidecar readiness timeout. Defaults to 30000.
-  -v, --version          Print package version.
+  -h, --help            Show this command help.
+`)
+    return
+  }
+  if (topic === "status" || topic === "doctor") {
+    console.log(`Usage: inline-hermes ${topic} [options]
+
+${topic === "doctor" ? "Diagnose" : "Inspect"} the installed Inline plugin, sidecar integrity, and Node runtime.
+
+Options:
+  --hermes-home <path>  Hermes home directory. Defaults to HERMES_HOME or ~/.hermes.
+  --plugin-id <id>      Installed plugin directory name. Defaults to inline.
+  --json                Print machine-readable output.
+  -h, --help            Show this command help.
+`)
+    return
+  }
+  if (topic === "test-send") {
+    console.log(`Usage: inline-hermes test-send --to chat:<id>|user:<id> [options]
+
+Probe the packaged sidecar with a bounded Inline send, or validate it with --dry-run.
+
+Options:
+  --hermes-home <path>  Hermes home used for token/config resolution.
+  --to <target>         Inline destination, for example chat:123 or user:42.
+  --text <message>      Message text. Defaults to "Inline Hermes test".
+  --base-url <url>      Inline API base URL. Defaults to https://api.inline.chat.
+  --state-path <path>   Inline SDK state file used by the probe sidecar.
+  --timeout-ms <ms>     Sidecar readiness timeout. Defaults to 30000.
+  --dry-run             Validate inputs without starting the sidecar or sending.
+  --json                Print machine-readable output.
+  -h, --help            Show this command help.
+`)
+    return
+  }
+
+  console.log(`inline-hermes
+
+Usage:
+  inline-hermes install [options]
+  inline-hermes status [--hermes-home <path>] [--json]
+  inline-hermes doctor [--hermes-home <path>] [--json]
+  inline-hermes test-send --to chat:<id>|user:<id> [options]
+  inline-hermes help [install|status|doctor|test-send]
+  inline-hermes version
+
+Run \`inline-hermes <command> --help\` for command-scoped options.
+Top-level options:
+  -h, --help     Show this help.
+  -v, --version  Print package version.
 
 After install, enable the external Hermes plugin with:
   hermes plugins enable ${pluginEnableKey}

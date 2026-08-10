@@ -669,6 +669,32 @@ try:
     }
     assert "raw" not in json.dumps(history_result)
 
+    exact_result = json.loads(ctx.tool["handler"]({
+        "action": "get_messages",
+        "chat_id": "chat:10",
+        "message_ids": ["msg:3", "1", "msg:3", "2"],
+    }))
+    assert exact_result["success"] is True
+    assert tool_calls[-1] == ("/messages", {
+        "target": {"chatId": "10"},
+        "messageIds": ["3", "1", "2"],
+    })
+
+    calls_before_invalid_ids = len(tool_calls)
+    for invalid_ids in [
+        ["-1"],
+        ["not-an-id"],
+        ["9223372036854775808"],
+        ["1"] * 101,
+    ]:
+        invalid_result = json.loads(ctx.tool["handler"]({
+            "action": "get_messages",
+            "chat_id": "chat:10",
+            "message_ids": invalid_ids,
+        }))
+        assert invalid_result["error_kind"] == "bad_format"
+    assert len(tool_calls) == calls_before_invalid_ids
+
     send_result = json.loads(ctx.tool["handler"]({
         "action": "send_message",
         "user_id": "user:42",
@@ -680,7 +706,7 @@ try:
     assert send_result["error"].startswith("inline: unknown action send_message")
     assert "send_message" not in send_result["allowed_actions"]
     assert "opt_in_env" not in send_result
-    assert tool_calls[-1][0] == "/history"
+    assert tool_calls[-1][0] == "/messages"
 
     typing_result = json.loads(ctx.tool["handler"]({
         "action": "set_typing",
@@ -689,7 +715,7 @@ try:
     }))
     assert typing_result["error"].startswith("inline: unknown action set_typing")
     assert "set_typing" not in typing_result["allowed_actions"]
-    assert tool_calls[-1][0] == "/history"
+    assert tool_calls[-1][0] == "/messages"
 
     presence_result = json.loads(ctx.tool["handler"]({
         "action": "set_presence",
@@ -867,6 +893,28 @@ finally:
 
 parser = argparse.ArgumentParser()
 inline_cli.register_cli(parser)
+for help_args, required_text in [
+    (["setup", "--help"], "Run prompt-free machine setup"),
+    (["status", "--help"], "Verify the configured Inline credential"),
+]:
+    help_output = io.StringIO()
+    with contextlib.redirect_stdout(help_output):
+        try:
+            parser.parse_args(help_args)
+            raise AssertionError("command help should exit after rendering")
+        except SystemExit as exc:
+            assert exc.code == 0
+    assert required_text in help_output.getvalue()
+for invalid_args in [
+    ["setup", "--probe"],
+    ["status", "--token-stdin"],
+]:
+    with contextlib.redirect_stderr(io.StringIO()):
+        try:
+            parser.parse_args(invalid_args)
+            raise AssertionError(f"irrelevant cross-command flag should fail: {invalid_args}")
+        except SystemExit as exc:
+            assert exc.code != 0
 with tempfile.TemporaryDirectory(prefix="inline-hermes-cli-bin-") as tmp:
     configured_inline = Path(tmp) / "inline"
     configured_inline.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -892,6 +940,33 @@ assert "Inline configured:" in status_text
 assert "Node available: yes (" in status_text
 assert "hermes inline setup" in status_text
 assert "Advanced diagnostics: inline-hermes doctor --json" in status_text
+real_sidecar_entry = inline_cli._SIDECAR_ENTRY
+try:
+    inline_cli._SIDECAR_ENTRY = Path("/definitely/missing/inline-sidecar.mjs")
+    missing_sidecar_output = io.StringIO()
+    with contextlib.redirect_stdout(missing_sidecar_output):
+        assert inline_cli.dispatch(parser.parse_args(["status", "--json"])) == 1
+    missing_sidecar_payload = json.loads(missing_sidecar_output.getvalue())
+    assert missing_sidecar_payload["ok"] is False
+    assert missing_sidecar_payload["runtimeUsable"] is False
+    assert missing_sidecar_payload["sidecarBundled"] is False
+    assert missing_sidecar_payload["sidecar"]["ok"] is False
+finally:
+    inline_cli._SIDECAR_ENTRY = real_sidecar_entry
+real_find_node_bin = inline_cli._find_node_bin
+try:
+    inline_cli._find_node_bin = lambda: None
+    missing_node_output = io.StringIO()
+    with contextlib.redirect_stdout(missing_node_output):
+        assert inline_cli.dispatch(parser.parse_args(["status", "--json"])) == 1
+    missing_node_payload = json.loads(missing_node_output.getvalue())
+    assert missing_node_payload["ok"] is False
+    assert missing_node_payload["runtimeUsable"] is False
+    assert missing_node_payload["sidecarBundled"] is True
+    assert missing_node_payload["sidecar"]["ok"] is False
+    assert missing_node_payload["node"]["ok"] is False
+finally:
+    inline_cli._find_node_bin = real_find_node_bin
 setup_args = parser.parse_args(["setup"])
 assert setup_args.inline_command == "setup"
 setup_prompt_values.extend(["1", "existing-bot-token", "101, 202"])
@@ -954,7 +1029,7 @@ assert json.loads(machine_output) == {
     "ok": True,
     "action": "inline.setup",
     "setupProtocolVersion": 1,
-    "pluginVersion": "0.0.7",
+    "pluginVersion": "0.0.8",
     "configured": True,
     "access": "allowlist",
     "ownerUserId": "42",
@@ -975,6 +1050,10 @@ try:
     inline_cli._find_inline_cli = lambda: "/usr/local/bin/inline"
     def fake_probe_run(command, **kwargs):
         probe_calls.append((command, kwargs))
+        if command[1:] == ["--version"]:
+            return types.SimpleNamespace(returncode=0, stdout="v22.0.0", stderr="")
+        if len(command) > 1 and command[1] == "--check":
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
         return types.SimpleNamespace(
             returncode=0,
             stdout=json.dumps({"id": "42", "username": "machine_bot"}),
@@ -990,21 +1069,27 @@ probe_output = probe_stdout.getvalue()
 assert machine_token not in probe_output
 probe_payload = json.loads(probe_output)
 assert probe_payload["setupProtocolVersion"] == 1
-assert probe_payload["pluginVersion"] == "0.0.7"
+assert probe_payload["pluginVersion"] == "0.0.8"
+assert probe_payload["ready"] is True
+assert probe_payload["runtimeUsable"] is True
+assert probe_payload["node"]["ok"] is True
+assert probe_payload["sidecar"]["ok"] is True
 assert probe_payload["probe"] == {
     "ok": True,
     "botUserId": "42",
     "botUsername": "machine_bot",
 }
-assert probe_calls[0][0] == [
+credential_probe_calls = [call for call in probe_calls if call[0][-2:] == ["auth", "me"]]
+assert len(credential_probe_calls) == 1
+assert credential_probe_calls[0][0] == [
     "/usr/local/bin/inline",
     "--json",
     "--compact",
     "auth",
     "me",
 ]
-assert probe_calls[0][1]["env"]["INLINE_TOKEN"] == machine_token
-assert "INLINE_BOT_TOKEN" not in probe_calls[0][1]["env"]
+assert credential_probe_calls[0][1]["env"]["INLINE_TOKEN"] == machine_token
+assert "INLINE_BOT_TOKEN" not in credential_probe_calls[0][1]["env"]
 
 setup_saved_env.clear()
 setup_config_writes.clear()

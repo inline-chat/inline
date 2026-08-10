@@ -7,6 +7,7 @@ import {
   BotCapability_Kind,
   DialogFollowMode,
   InlineSdkClient,
+  InlineSdkAuthenticationError,
   JsonFileStateStore,
   GetMeInput,
   GetChatInput,
@@ -42,6 +43,9 @@ import {
   normalizeError,
   normalizeUploadKind,
   parseOptionalInt,
+  readInlineIdArray,
+  readOptionalInlineId,
+  readRequiredInlineId,
   parseTarget,
   redactText,
   redactUrl,
@@ -115,6 +119,16 @@ const clientOptions: InlineSdkClientOptions = {
   token,
   baseUrl,
   state: new JsonFileStateStore(statePath),
+  onAuthenticationError: (error) => {
+    connected = false
+    connecting = false
+    connectError = redactError(error)
+    nextConnectRetryAt = null
+    process.exitCode = 3
+    console.error(
+      `inline-sidecar: terminal authentication failure: ${connectError}; reconnect disabled`,
+    )
+  },
   ...(rpcTimeoutMs != null ? { rpcTimeoutMs } : {}),
   logger: {
     debug: (...args) => log("debug", args),
@@ -161,6 +175,7 @@ async function connectClientLoop() {
       process.exitCode = 3
       await client.close().catch(() => {})
       if (stopping) return
+      if (error instanceof InlineSdkAuthenticationError) return
       nextConnectRetryAt = new Date(Date.now() + delayMs).toISOString()
       console.error(`inline-sidecar: connect attempt ${connectAttempts} failed: ${connectError}; retrying in ${delayMs}ms`)
       await sleep(delayMs)
@@ -308,7 +323,7 @@ async function endpointSend(res: ServerResponse, body: unknown) {
   const record = asRecord(body)
   const target = parseTarget(record)
   const text = readOptionalString(record, "text")
-  const replyToMsgId = readOptionalString(record, "replyToMsgId")
+  const replyToMsgId = readOptionalInlineId(record, "replyToMsgId")
   const parseMarkdown = readOptionalBoolean(record, "parseMarkdown") ?? true
   const actions = parseActions(record.actions)
   const sendMode = readOptionalString(record, "sendMode")
@@ -321,7 +336,7 @@ async function endpointSend(res: ServerResponse, body: unknown) {
   const params = {
     ...(text ? { text } : {}),
     ...(media ? { media } : {}),
-    ...(replyToMsgId ? { replyToMsgId: BigInt(replyToMsgId) } : {}),
+    ...(replyToMsgId ? { replyToMsgId } : {}),
     parseMarkdown,
     ...(actions ? { actions } : {}),
     ...(sendMode === "silent" ? { sendMode: "silent" as const } : {}),
@@ -335,7 +350,7 @@ async function endpointSend(res: ServerResponse, body: unknown) {
 async function endpointEdit(res: ServerResponse, body: unknown) {
   const record = asRecord(body)
   const target = parseTarget(record)
-  const messageId = readRequiredString(record, "messageId")
+  const messageId = readRequiredInlineId(record, "messageId")
   const text = readRequiredString(record, "text")
   const actions = parseActions(record.actions)
   const parseMarkdown = readOptionalBoolean(record, "parseMarkdown") ?? true
@@ -344,28 +359,28 @@ async function endpointEdit(res: ServerResponse, body: unknown) {
     oneofKind: "editMessage",
     editMessage: {
       peerId: inputPeerFromTarget(target),
-      messageId: BigInt(messageId),
+      messageId,
       text,
       parseMarkdown,
       ...(actions ? { actions } : {}),
     },
   })
-  writeJson(res, 200, { ok: true, result: { messageId } })
+  writeJson(res, 200, { ok: true, result: { messageId: messageId.toString() } })
 }
 
 async function endpointDelete(res: ServerResponse, body: unknown) {
   const record = asRecord(body)
   const target = parseTarget(record)
-  const messageId = readRequiredString(record, "messageId")
+  const messageId = readRequiredInlineId(record, "messageId")
 
   await client.invoke(Method.DELETE_MESSAGES, {
     oneofKind: "deleteMessages",
     deleteMessages: {
       peerId: inputPeerFromTarget(target),
-      messageIds: [BigInt(messageId)],
+      messageIds: [messageId],
     },
   })
-  writeJson(res, 200, { ok: true, result: { messageId } })
+  writeJson(res, 200, { ok: true, result: { messageId: messageId.toString() } })
 }
 
 async function endpointTyping(res: ServerResponse, body: unknown) {
@@ -399,7 +414,7 @@ async function endpointSendAttachment(res: ServerResponse, body: unknown) {
   const filePath = readRequiredString(record, "path")
   const kind = normalizeUploadKind(readOptionalString(record, "kind"), filePath)
   const caption = readOptionalString(record, "caption")
-  const replyToMsgId = readOptionalString(record, "replyToMsgId")
+  const replyToMsgId = readOptionalInlineId(record, "replyToMsgId")
   const fileName = readOptionalString(record, "fileName") || path.basename(filePath)
   const contentType = readOptionalString(record, "mimeType")
   const info = await statAttachment(filePath)
@@ -424,7 +439,7 @@ async function endpointSendAttachment(res: ServerResponse, body: unknown) {
   const sendParams = {
     media,
     ...(caption ? { text: caption, parseMarkdown: true } : {}),
-    ...(replyToMsgId ? { replyToMsgId: BigInt(replyToMsgId) } : {}),
+    ...(replyToMsgId ? { replyToMsgId } : {}),
   }
   const sent = "chatId" in target
     ? await client.sendMessage({ chatId: target.chatId, ...sendParams })
@@ -543,25 +558,25 @@ async function endpointFollowMode(res: ServerResponse, body: unknown) {
 async function endpointMessages(res: ServerResponse, body: unknown) {
   const record = asRecord(body)
   const target = parseTarget(record)
-  const rawIds = Array.isArray(record.messageIds) ? record.messageIds : []
-  const messageIds = rawIds.map((id) => BigInt(String(id)))
+  const messageIds = readInlineIdArray(record, "messageIds", 100, true)
   const result = "chatId" in target
     ? await client.getMessages({ chatId: target.chatId, messageIds })
     : await client.getMessages({ userId: target.userId, messageIds })
-  writeJson(res, 200, { ok: true, result: { messages: safeJson(await enrichMessages(result.messages, target)) } })
+  const ordered = orderMessagesByRequestedIds(result.messages, messageIds)
+  writeJson(res, 200, { ok: true, result: { messages: safeJson(await enrichMessages(ordered, target)) } })
 }
 
 async function endpointHistory(res: ServerResponse, body: unknown) {
   const record = asRecord(body)
   const target = parseTarget(record)
   const limit = readOptionalNumber(record, "limit") ?? 20
-  const anchorId = readOptionalString(record, "anchorId")
+  const anchorId = readOptionalInlineId(record, "anchorId")
   const result = await client.invoke(Method.GET_CHAT_HISTORY, {
     oneofKind: "getChatHistory",
     getChatHistory: {
       peerId: inputPeerFromTarget(target),
       limit,
-      ...(anchorId ? { anchorId: BigInt(anchorId), includeAnchor: true } : {}),
+      ...(anchorId ? { anchorId, includeAnchor: true } : {}),
     },
   })
   const history = result as { getChatHistory?: { messages?: unknown[] } }
@@ -575,14 +590,14 @@ async function endpointSearch(res: ServerResponse, body: unknown) {
   const query = readRequiredString(record, "query").trim()
   if (!query) throw new SidecarError("search requires query", "bad_format")
   const limit = clampResultLimit(readOptionalNumber(record, "limit") ?? 20, 100)
-  const offsetId = readOptionalString(record, "offsetId")
+  const offsetId = readOptionalInlineId(record, "offsetId")
   const result = await client.invokeUncheckedRaw(Method.SEARCH_MESSAGES, {
     oneofKind: "searchMessages",
     searchMessages: {
       peerId: inputPeerFromTarget(target),
       queries: [query],
       limit,
-      ...(offsetId ? { offsetId: BigInt(offsetId) } : {}),
+      ...(offsetId ? { offsetId } : {}),
     },
   })
   const typed = result as { oneofKind?: string; searchMessages?: { messages?: unknown[] } }
@@ -593,7 +608,7 @@ async function endpointSearch(res: ServerResponse, body: unknown) {
 async function endpointReaction(res: ServerResponse, body: unknown) {
   const record = asRecord(body)
   const target = parseTarget(record)
-  const messageId = readRequiredString(record, "messageId")
+  const messageId = readRequiredInlineId(record, "messageId")
   const emoji = readRequiredString(record, "emoji").trim()
   if (!emoji) throw new SidecarError("reaction requires emoji", "bad_format")
   const remove = readOptionalBoolean(record, "remove") ?? false
@@ -604,7 +619,7 @@ async function endpointReaction(res: ServerResponse, body: unknown) {
       deleteReaction: {
         emoji,
         peerId: inputPeerFromTarget(target),
-        messageId: BigInt(messageId),
+        messageId,
       },
     })
   } else {
@@ -612,21 +627,21 @@ async function endpointReaction(res: ServerResponse, body: unknown) {
       oneofKind: "addReaction",
       addReaction: {
         emoji,
-        messageId: BigInt(messageId),
+        messageId,
         peerId: inputPeerFromTarget(target),
       },
     })
   }
-  writeJson(res, 200, { ok: true, result: { messageId, emoji, removed: remove } })
+  writeJson(res, 200, { ok: true, result: { messageId: messageId.toString(), emoji, removed: remove } })
 }
 
 async function endpointReactions(res: ServerResponse, body: unknown) {
   const record = asRecord(body)
   const target = parseTarget(record)
-  const messageId = readRequiredString(record, "messageId")
+  const messageId = readRequiredInlineId(record, "messageId")
   const result = "chatId" in target
-    ? await client.getMessages({ chatId: target.chatId, messageIds: [BigInt(messageId)] })
-    : await client.getMessages({ userId: target.userId, messageIds: [BigInt(messageId)] })
+    ? await client.getMessages({ chatId: target.chatId, messageIds: [messageId] })
+    : await client.getMessages({ userId: target.userId, messageIds: [messageId] })
   const message = result.messages[0] ?? null
   const enriched = message == null ? null : (await enrichMessages([message], target))[0] ?? message
   writeJson(res, 200, {
@@ -641,17 +656,17 @@ async function endpointReactions(res: ServerResponse, body: unknown) {
 async function endpointPin(res: ServerResponse, body: unknown) {
   const record = asRecord(body)
   const target = parseTarget(record)
-  const messageId = readRequiredString(record, "messageId")
+  const messageId = readRequiredInlineId(record, "messageId")
   const unpin = readOptionalBoolean(record, "unpin") ?? false
   await client.invokeUncheckedRaw(Method.PIN_MESSAGE, {
     oneofKind: "pinMessage",
     pinMessage: {
       peerId: inputPeerFromTarget(target),
-      messageId: BigInt(messageId),
+      messageId,
       unpin,
     },
   })
-  writeJson(res, 200, { ok: true, result: { messageId, unpinned: unpin } })
+  writeJson(res, 200, { ok: true, result: { messageId: messageId.toString(), unpinned: unpin } })
 }
 
 async function endpointPins(res: ServerResponse, body: unknown) {
@@ -677,8 +692,8 @@ async function endpointPins(res: ServerResponse, body: unknown) {
 
 async function endpointCreateSubthread(res: ServerResponse, body: unknown) {
   const record = asRecord(body)
-  const parentChatId = readRequiredString(record, "parentChatId")
-  const parentMessageId = readOptionalString(record, "parentMessageId")
+  const parentChatId = readRequiredInlineId(record, "parentChatId")
+  const parentMessageId = readOptionalInlineId(record, "parentMessageId")
   const title = readOptionalString(record, "title")
   const description = readOptionalString(record, "description")
   const emoji = readOptionalString(record, "emoji")
@@ -686,9 +701,9 @@ async function endpointCreateSubthread(res: ServerResponse, body: unknown) {
   const result = await client.invokeUncheckedRaw(Method.CREATE_SUBTHREAD, {
     oneofKind: "createSubthread",
     createSubthread: {
-      parentChatId: BigInt(parentChatId),
+      parentChatId,
       participants: [],
-      ...(parentMessageId ? { parentMessageId: BigInt(parentMessageId) } : {}),
+      ...(parentMessageId ? { parentMessageId } : {}),
       ...(title ? { title } : {}),
       ...(description ? { description } : {}),
       ...(emoji ? { emoji } : {}),
@@ -713,9 +728,9 @@ async function endpointCreateChat(res: ServerResponse, body: unknown) {
   const title = readRequiredString(record, "title")
   const description = readOptionalString(record, "description")
   const emoji = readOptionalString(record, "emoji")
-  const spaceId = readOptionalPositiveId(record, "spaceId")
+  const spaceId = readOptionalInlineId(record, "spaceId")
   const isPublic = readOptionalBoolean(record, "isPublic") ?? false
-  const participantUserIds = readPositiveIdArray(record, "participantUserIds", 50)
+  const participantUserIds = readInlineIdArray(record, "participantUserIds", 50)
 
   if (title.length > 200) throw new SidecarError("create-chat title is too long", "bad_format")
   if (description && description.length > 1_000) {
@@ -758,36 +773,6 @@ async function endpointCreateChat(res: ServerResponse, body: unknown) {
       dialog: safeJson(typed.createChat.dialog ?? null),
     },
   })
-}
-
-function readOptionalPositiveId(record: Record<string, unknown>, key: string): bigint | undefined {
-  const value = readOptionalString(record, key)
-  if (!value) return undefined
-  try {
-    const parsed = BigInt(value)
-    if (parsed <= 0n) throw new Error("not positive")
-    return parsed
-  } catch {
-    throw new SidecarError(`${key} must be a positive integer`, "bad_format")
-  }
-}
-
-function readPositiveIdArray(record: Record<string, unknown>, key: string, maxItems: number): bigint[] {
-  const value = record[key]
-  if (value == null) return []
-  if (!Array.isArray(value)) throw new SidecarError(`${key} must be an array`, "bad_format")
-  if (value.length > maxItems) throw new SidecarError(`${key} supports at most ${maxItems} items`, "bad_format")
-  const ids: bigint[] = []
-  const seen = new Set<string>()
-  for (const item of value) {
-    const itemRecord = { [key]: item }
-    const id = readOptionalPositiveId(itemRecord, key)
-    if (id == null) throw new SidecarError(`${key} items must be positive integers`, "bad_format")
-    if (seen.has(id.toString())) continue
-    seen.add(id.toString())
-    ids.push(id)
-  }
-  return ids
 }
 
 async function getRawChatSnapshot(chatId: bigint): Promise<{
@@ -851,6 +836,19 @@ async function enrichMessages(messages: unknown[], target: Target): Promise<unkn
   }))
 }
 
+function orderMessagesByRequestedIds(messages: unknown[], requestedIds: bigint[]): unknown[] {
+  const byId = new Map<string, unknown>()
+  for (const message of messages) {
+    const record = asOptionalRecord(message)
+    const id = asPositiveBigInt(record?.id)
+    if (id && !byId.has(id.toString())) byId.set(id.toString(), message)
+  }
+  return requestedIds.flatMap((id) => {
+    const message = byId.get(id.toString())
+    return message == null ? [] : [message]
+  })
+}
+
 async function resolveInboundSender(event: GenericInboundEvent): Promise<GenericSenderProfile | undefined> {
   const message = asOptionalRecord(event.message)
   const reaction = asOptionalRecord(event.reaction)
@@ -896,10 +894,10 @@ function clampResultLimit(value: number, max: number): number {
 
 async function endpointAnswerAction(res: ServerResponse, body: unknown) {
   const record = asRecord(body)
-  const interactionId = readRequiredString(record, "interactionId")
+  const interactionId = readRequiredInlineId(record, "interactionId")
   const toastText = readOptionalString(record, "toast")
   await client.answerMessageAction({
-    interactionId: BigInt(interactionId),
+    interactionId,
     ...(toastText ? { ui: MessageActionResponseUi.create({
       kind: { oneofKind: "toast", toast: MessageActionToast.create({ text: toastText }) },
     }) } : {}),
@@ -909,9 +907,9 @@ async function endpointAnswerAction(res: ServerResponse, body: unknown) {
 
 async function endpointAnswerBotSettings(res: ServerResponse, body: unknown) {
   const record = asRecord(body)
-  const requestId = readRequiredString(record, "requestId")
+  const requestId = readRequiredInlineId(record, "requestId")
   const response = asRecord(record.response) as unknown as BotChatSettingsResponse
-  await client.answerBotChatSettings({ requestId: BigInt(requestId), response })
+  await client.answerBotChatSettings({ requestId, response })
   writeJson(res, 200, { ok: true, result: {} })
 }
 
@@ -1085,7 +1083,9 @@ class MockInlineClient implements SidecarClient {
   async getMessages(params: InlineSdkGetMessagesParams): Promise<{ messages: unknown[] }> {
     this.record("getMessages", params)
     return {
-      messages: params.messageIds.map((id) => ({
+      // Deliberately return server order opposite to requested order so the
+      // exact-ID endpoint must restore the caller's first-seen order.
+      messages: [...params.messageIds].reverse().map((id) => ({
         id: BigInt(id),
         fromId: 111n,
         chatId: "chatId" in params ? BigInt(params.chatId) : undefined,
@@ -1169,7 +1169,7 @@ class MockInlineClient implements SidecarClient {
         getChat: {
           chat,
           dialog: { chatId, followMode: chatId === 456n ? 1 : 0 },
-          pinnedMessageIds: [8801n],
+          pinnedMessageIds: [8805n, 8801n],
           anchorMessage: {
             id: 8801n,
             fromId: 111n,
@@ -1183,14 +1183,24 @@ class MockInlineClient implements SidecarClient {
     if (method === Method.GET_CHAT_HISTORY) {
       return {
         getChatHistory: {
-          messages: [{
-            id: 8801n,
-            fromId: 111n,
-            chatId: 123n,
-            peerId: { type: { oneofKind: "chat", chat: { chatId: 123n } } },
-            message: "mock history",
-            date: 124n,
-          }],
+          messages: [
+            {
+              id: 8700n,
+              fromId: 111n,
+              chatId: 123n,
+              peerId: { type: { oneofKind: "chat", chat: { chatId: 123n } } },
+              message: "mock history server-first",
+              date: 120n,
+            },
+            {
+              id: 8801n,
+              fromId: 111n,
+              chatId: 123n,
+              peerId: { type: { oneofKind: "chat", chat: { chatId: 123n } } },
+              message: "mock history server-second",
+              date: 124n,
+            },
+          ],
         },
       }
     }
@@ -1243,14 +1253,24 @@ class MockInlineClient implements SidecarClient {
       return {
         oneofKind: "searchMessages",
         searchMessages: {
-          messages: [{
-            id: 8802n,
-            fromId: 111n,
-            chatId,
-            peerId,
-            message: `mock search ${String(queries[0] ?? "")}`.trim(),
-            date: 127n,
-          }],
+          messages: [
+            {
+              id: 8802n,
+              fromId: 111n,
+              chatId,
+              peerId,
+              message: `mock search first ${String(queries[0] ?? "")}`.trim(),
+              date: 127n,
+            },
+            {
+              id: 8702n,
+              fromId: 111n,
+              chatId,
+              peerId,
+              message: `mock search second ${String(queries[0] ?? "")}`.trim(),
+              date: 125n,
+            },
+          ],
         },
       }
     }
@@ -1380,9 +1400,9 @@ function parseSendMedia(value: unknown): InlineSdkSendMessageMedia | undefined {
   const media = asOptionalRecord(value)
   if (!media) return undefined
   const kind = readRequiredString(media, "kind")
-  if (kind === "photo") return { kind, photoId: BigInt(readRequiredString(media, "photoId")) }
-  if (kind === "video") return { kind, videoId: BigInt(readRequiredString(media, "videoId")) }
-  if (kind === "document") return { kind, documentId: BigInt(readRequiredString(media, "documentId")) }
+  if (kind === "photo") return { kind, photoId: readRequiredInlineId(media, "photoId") }
+  if (kind === "video") return { kind, videoId: readRequiredInlineId(media, "videoId") }
+  if (kind === "document") return { kind, documentId: readRequiredInlineId(media, "documentId") }
   throw new SidecarError(`unsupported media kind: ${kind}`, "bad_format")
 }
 

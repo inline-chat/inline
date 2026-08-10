@@ -52,30 +52,43 @@ pub(crate) enum AccessMode {
 
 #[derive(Args)]
 pub(crate) struct AgentsSetupArgs {
+    /// Agent harness to configure. Prompts from installed harnesses when omitted.
     #[arg(long, value_enum)]
     pub(crate) target: Option<AgentTarget>,
+    /// Named harness profile to configure instead of its default profile.
     #[arg(long, value_name = "NAME")]
     pub(crate) profile: Option<String>,
+    /// Workspace folder for coding-agent harnesses.
     #[arg(long, value_name = "PATH")]
     pub(crate) folder: Option<PathBuf>,
+    /// Reuse an existing Inline bot by user ID.
     #[arg(long, value_name = "ID")]
     pub(crate) bot_id: Option<i64>,
+    /// Display name for a bot created during setup.
     #[arg(long, value_name = "NAME")]
     pub(crate) bot_name: Option<String>,
+    /// Username for a bot created during setup.
     #[arg(long, value_name = "USERNAME")]
     pub(crate) bot_username: Option<String>,
+    /// Who may invoke the configured agent through Inline.
     #[arg(long, value_enum, default_value = "owner")]
     pub(crate) access: AccessMode,
+    /// Additional Inline user ID to allow; may be repeated.
     #[arg(long = "allow-user", value_name = "ID")]
     pub(crate) allow_users: Vec<i64>,
+    /// Refuse to install or upgrade required external integrations.
     #[arg(long)]
     pub(crate) no_install: bool,
+    /// Configure the harness without restarting its managed service.
     #[arg(long)]
     pub(crate) no_restart: bool,
+    /// Replace a conflicting bot credential or foreign integration.
     #[arg(long)]
     pub(crate) replace: bool,
+    /// Validate and preview setup without changing the harness or Inline.
     #[arg(long)]
     pub(crate) dry_run: bool,
+    /// Disable prompts; all required selections must be provided as flags.
     #[arg(long)]
     pub(crate) non_interactive: bool,
 }

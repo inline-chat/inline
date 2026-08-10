@@ -81,7 +81,7 @@ Set up the Inline Hermes Agent adapter on this machine.
 Constraints:
 - Do not read, print, or edit .env files.
 - Do not print Inline tokens or other secrets.
-- Use an Inline token from INLINE_TOKEN or INLINE_BOT_TOKEN; if neither is present, stop and point me to https://inline.chat/docs/creating-a-bot.
+- Use an Inline token from INLINE_TOKEN or INLINE_BOT_TOKEN when already available; otherwise use Hermes's guided setup without exposing the token.
 
 Tasks:
 1. Verify Node.js is version 20 or newer and Hermes Agent is installed.
@@ -146,7 +146,7 @@ uv run ./hermes plugins list --plain --no-bundled
 Expected local output includes:
 
 ```text
-enabled      user     0.0.7    inline-platform
+enabled      user     0.0.8    inline-platform
 ```
 
 ## Update Or Reinstall
@@ -169,7 +169,7 @@ mismatch, rerun the same command after rebuilding or upgrading the package.
 
 - Hermes Agent: requires the external user plugin registry and native platform
   plugin loader available in Hermes Agent `0.17.x`. This package was validated
-  against Hermes Agent `0.19.1` from source commit `cc4cab2`.
+  against Hermes Agent `0.20.0` from source commit `3c27eb6`.
 - Node.js: `>=20` is required for the bundled sidecar. Hermes-managed Node 22,
   system Node, or an explicit `INLINE_NODE_BIN` path all work.
 - Inline transport: the sidecar uses `@inline-chat/realtime-sdk@0.0.14` and is
@@ -191,10 +191,10 @@ Before publishing, run:
 bun run release:preflight
 ```
 
-This runs `npm publish --dry-run --access public`. npm invokes
-`prepublishOnly`, so the dry-run must pass `bun run check`, rebuild the packed
-runtime files, verify the shipped `inline-hermes` binary, and print the final
-tarball contents without publishing.
+This creates an isolated registry-dependency stage, runs the full package
+check, packs one read-only tarball, and runs `npm publish --dry-run` against
+those exact bytes. It prints the artifact path, SHA-256, and file list so the
+trusted-publishing workflow can hash-check and publish the same artifact.
 
 Maintainers should also run the manual live-test and publish checklist in
 [`hermes-agent/RELEASE.md`](https://github.com/inline-chat/inline/blob/main/hermes-agent/RELEASE.md).

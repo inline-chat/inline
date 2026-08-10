@@ -4,8 +4,8 @@ OpenClaw channel plugin for interacting with an OpenClaw agent via **Inline**.
 
 Status: **beta** (solid foundation; expect iteration).
 
-Quick setup guide: `docs/openclaw-setup.md`.
-Create bot/token guide: `docs/create-inline-bot.md`.
+Quick setup guide: [docs/openclaw-setup.md](docs/openclaw-setup.md).
+Create bot/token guide: [docs/create-inline-bot.md](docs/create-inline-bot.md).
 
 Supports:
 
@@ -40,13 +40,12 @@ Requires OpenClaw `2026.6.11` or newer.
 
 | Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `0.0.56` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.14` | Current | Finalizes unified Inline CLI setup compatibility while preserving the separately installed OpenClaw plugin boundary. |
-| `0.0.55` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.14` | Previous | Enforces empty-payload nudges, canonical visible-text sanitizing, hard access-before-mention policy, explicit auto-threading, and clearer formatting guidance; explicitly admits npm's `2026.7.1-2` stable host version. |
+| `0.0.57` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.14` | Current | Hardens exact CLI-managed upgrades, deterministic channel listing, default/help consistency, and packed-artifact validation. |
+| `0.0.56` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.14` | Previous | Finalizes unified Inline CLI setup compatibility while preserving the separately installed OpenClaw plugin boundary. |
+| `0.0.55` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.14` | Stable | Enforces empty-payload nudges, canonical visible-text sanitizing, hard access-before-mention policy, explicit auto-threading, and clearer formatting guidance; explicitly admits npm's `2026.7.1-2` stable host version. |
 | `0.0.54` | `>=2026.6.11` | `0.0.13` | Stable | Keeps recovered WebSocket and best-effort cursor warnings out of healthy channel status; validated through OpenClaw `2026.7.1-2`. |
 | `0.0.53` | `>=2026.6.11` | `0.0.13` | Stable | Clears recovered Inline WebSocket errors from channel status after reconnect. |
 | `0.0.52` | `>=2026.6.11` | `0.0.13` | Stable | Patch release for the SDK protocol dependency. |
-| `0.0.51` | `>=2026.6.11` | `0.0.12` | Stable | Added follow-mode mention gating for eligible reply/fresh Inline threads. |
-| `0.0.50` | `>=2026.6.11` | `0.0.11` | Stable | Supported line for current stable OpenClaw. Uses focused plugin SDK entrypoints and canonical ClawHub install metadata. |
 
 From npm:
 
@@ -110,7 +109,7 @@ You can also leave `token` unset and provide `INLINE_TOKEN` in the gateway envir
 `baseUrl` defaults to `https://api.inline.chat`.
 `dmPolicy` defaults to `pairing` (recommended starting point).
 `defaultTo` is optional and gives outbound sends a fallback target when no explicit target is supplied.
-`requireMention` defaults to `false` for groups (set `true` to require explicit mentions).
+`groupPolicy` defaults to `"open"`, and `requireMention` defaults to `true`, so group chats are broadly available but only explicit mentions wake the bot unless configured otherwise.
 
 ### Who can talk to the bot?
 
@@ -122,8 +121,8 @@ Use these settings together:
 | DMs | `dmPolicy: "allowlist"` + `allowFrom` | Only listed Inline user ids can DM the bot. |
 | DMs | `dmPolicy: "open"` + `allowFrom: ["*"]` | Any Inline user can DM the bot. Use only for public/demo bots. |
 | DMs | `dmPolicy: "disabled"` | DM messages are ignored. |
-| Groups | `groupPolicy: "allowlist"` + `groups` | Only listed group chat ids can reach the bot. Setup defaults `groups["*"].requireMention` to `true` for broad mention-only access. |
-| Groups | `groupPolicy: "open"` | Any group chat can reach the bot. Pair with `requireMention: true` unless the bot should answer ambient messages. |
+| Groups | `groupPolicy: "open"` | Any group chat can reach the bot; this is the default. `requireMention` also defaults to `true`, so ambient messages do not wake it. |
+| Groups | `groupPolicy: "allowlist"` + `groups` | Only listed group chat ids can reach the bot. Setup keeps `requireMention: true` unless explicitly overridden. |
 | Groups | `groupPolicy: "disabled"` | Group messages are ignored. |
 | Group senders | `groupAllowFrom` or `groups.<chat>.allowFrom` | Optional sender allowlist inside allowed groups. Per-group entries override the account-wide list for that group. Leave empty to allow any sender in an allowed group. |
 
@@ -153,10 +152,10 @@ channels:
       target: "dm" # dm|channel|both
 
     # Group threads/chats:
-    groupPolicy: "allowlist" # allowlist|open|disabled
+    groupPolicy: "open" # open|allowlist|disabled; default open
     groupAllowFrom:
       - "inline:123" # or "user:123" or just "123"
-    requireMention: true # optional: default is false
+    requireMention: true # optional: default is true
     replyToBotWithoutMention: true # if true, replies to bot messages can bypass mention requirement
     replyThreadMode: "auto" # auto|thread|main; auto threads only explicit requests, thread always routes top-level turns
     replyThreadRequireExplicitMention: false # optional, default false; bot-participated reply threads continue without @mention

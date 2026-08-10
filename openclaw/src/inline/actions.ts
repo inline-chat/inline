@@ -2096,8 +2096,11 @@ function mapChatEntry(params: {
   chat: Chat
   dialogByChatId: Map<string, Dialog>
   usersById: Map<string, User>
+  messagesById: Map<string, Message>
 }) {
   const dialog = params.dialogByChatId.get(String(params.chat.id))
+  const lastMessage =
+    params.chat.lastMsgId != null ? params.messagesById.get(String(params.chat.lastMsgId)) : undefined
   const peer = params.chat.peerId?.type
   let peerUser: User | null = null
   if (peer?.oneofKind === "user") {
@@ -2112,6 +2115,7 @@ function mapChatEntry(params: {
     isPublic: params.chat.isPublic ?? false,
     createdBy: params.chat.createdBy != null ? String(params.chat.createdBy) : null,
     date: params.chat.date != null ? Number(params.chat.date) * 1000 : null,
+    lastMessageDate: lastMessage?.date != null ? Number(lastMessage.date) * 1000 : null,
     unreadCount: dialog?.unreadCount ?? 0,
     archived: Boolean(dialog?.archived),
     pinned: Boolean(dialog?.pinned),
@@ -2123,6 +2127,7 @@ function mapChatEntry(params: {
             target: `user:${String(peer.user.userId)}`,
             username: peerUser?.username ?? null,
             name: peerUser ? buildInlineUserDisplayName(peerUser) : null,
+            bot: peerUser?.bot ?? false,
           }
         : peer?.oneofKind === "chat"
           ? { kind: "chat", id: String(peer.chat.chatId), target: `chat:${String(peer.chat.chatId)}` }
@@ -2130,18 +2135,28 @@ function mapChatEntry(params: {
   }
 }
 
-function normalizeInlineListQuery(query: string | undefined): string {
-  return query?.trim().toLowerCase() ?? ""
+type InlineChatListEntry = ReturnType<typeof mapChatEntry>
+
+function compareInlineChatActivityDesc(left: InlineChatListEntry, right: InlineChatListEntry): number {
+  const activityOrder = (right.lastMessageDate ?? 0) - (left.lastMessageDate ?? 0)
+  if (activityOrder !== 0) return activityOrder
+  const leftId = BigInt(left.id)
+  const rightId = BigInt(right.id)
+  return rightId > leftId ? 1 : rightId < leftId ? -1 : 0
 }
 
-function mapUserPeerEntry(user: User) {
+function projectInlinePeer(entry: InlineChatListEntry) {
+  if (entry.peer?.kind !== "user") return null
   return {
-    id: String(user.id),
-    target: `user:${String(user.id)}`,
-    username: user.username ?? null,
-    name: buildInlineUserDisplayName(user),
-    bot: user.bot ?? false,
+    ...entry.peer,
+    chatId: entry.id,
+    chatTarget: entry.target,
+    lastMessageDate: entry.lastMessageDate,
   }
+}
+
+function normalizeInlineListQuery(query: string | undefined): string {
+  return query?.trim().toLowerCase() ?? ""
 }
 
 function mapPeerBotCommandGroup(group: {
@@ -4493,9 +4508,12 @@ export const inlineMessageActions = {
 
           const dialogByChatId = buildDialogMap(result.getChats.dialogs ?? [])
           const usersById = buildUserMap(result.getChats.users ?? [])
-          const chats = (result.getChats.chats ?? []).map((chat) => mapChatEntry({ chat, dialogByChatId, usersById }))
-          const groups = chats.filter((entry) => entry.peer?.kind !== "user")
-          const peers = (result.getChats.users ?? []).map((user) => mapUserPeerEntry(user))
+          const messagesById = new Map(
+            (result.getChats.messages ?? []).map((message) => [String(message.id), message]),
+          )
+          const chats = (result.getChats.chats ?? []).map((chat) =>
+            mapChatEntry({ chat, dialogByChatId, usersById, messagesById }),
+          )
 
           const normalizedQuery = normalizeInlineListQuery(query)
           const filteredChats = chats.filter((entry) =>
@@ -4506,12 +4524,34 @@ export const inlineMessageActions = {
               normalizedQuery,
             ),
           )
-          const filteredGroups = groups.filter((entry) =>
+          const filteredGroups = filteredChats.filter((entry) =>
+            entry.peer?.kind !== "user" &&
             matchesInlineListQuery([entry.id, entry.target, entry.title].join("\n"), normalizedQuery),
           )
-          const filteredPeers = peers.filter((entry) =>
-            matchesInlineListQuery([entry.id, entry.target, entry.username ?? "", entry.name ?? ""].join("\n"), normalizedQuery),
+          const filteredPeerChats = filteredChats.filter(
+            (entry) =>
+              entry.peer?.kind === "user" &&
+              matchesInlineListQuery(
+                [
+                  entry.id,
+                  entry.target,
+                  entry.peer.id,
+                  entry.peer.target,
+                  entry.peer.username ?? "",
+                  entry.peer.name ?? "",
+                ].join("\n"),
+                normalizedQuery,
+              ),
           )
+
+          const groupScope = ["groups", "group", "channels", "channel"].includes(scope)
+          const peerScope = ["peers", "peer", "members", "member", "users", "user"].includes(scope)
+          const scopedChats = groupScope ? filteredGroups : peerScope ? filteredPeerChats : filteredChats
+          const selectedChats = [...scopedChats].sort(compareInlineChatActivityDesc).slice(0, limit)
+          const selectedGroups = selectedChats.filter((entry) => entry.peer?.kind !== "user")
+          const selectedPeers = selectedChats
+            .map(projectInlinePeer)
+            .filter((entry): entry is NonNullable<typeof entry> => entry != null)
 
           return jsonResult(
             toJsonSafe({
@@ -4520,21 +4560,10 @@ export const inlineMessageActions = {
               query: query ?? null,
               count: filteredChats.length,
               groupsCount: filteredGroups.length,
-              peersCount: filteredPeers.length,
-              chats:
-                scope === "groups" || scope === "group" || scope === "channels" || scope === "channel"
-                  ? []
-                  : scope === "peers" || scope === "peer" || scope === "members" || scope === "member" || scope === "users" || scope === "user"
-                    ? []
-                    : filteredChats.slice(0, limit),
-              groups:
-                scope === "peers" || scope === "peer" || scope === "members" || scope === "member" || scope === "users" || scope === "user"
-                  ? []
-                  : filteredGroups.slice(0, limit),
-              peers:
-                scope === "groups" || scope === "group" || scope === "channels" || scope === "channel"
-                  ? []
-                  : filteredPeers.slice(0, limit),
+              peersCount: filteredPeerChats.length,
+              chats: groupScope || peerScope ? [] : selectedChats,
+              groups: peerScope ? [] : selectedGroups,
+              peers: groupScope ? [] : selectedPeers,
             }),
           )
         },

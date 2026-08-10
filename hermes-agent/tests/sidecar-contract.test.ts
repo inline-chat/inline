@@ -4,12 +4,14 @@ import {
   normalizeInboundEvent,
   normalizeError,
   normalizeUploadKind,
+  parseInlineId,
   parseOptionalInt,
   parseTarget,
   redactText,
   redactUrl,
   readOptionalBoolean,
   readOptionalNumber,
+  readInlineIdArray,
   readRequiredString,
   safeJson,
 } from "../src/sidecar/contract.js"
@@ -54,6 +56,20 @@ describe("sidecar contract helpers", () => {
         expect((error as SidecarError).errorKind).toBe("bad_format")
       }
     }
+  })
+
+  it("bounds signed 64-bit IDs and first-seen deduplicates bounded arrays", () => {
+    expect(parseInlineId("9223372036854775807", "messageId")).toBe(9_223_372_036_854_775_807n)
+    expect(readInlineIdArray({ messageIds: ["3", "1", "3", 2] }, "messageIds", 100, true))
+      .toEqual([3n, 1n, 2n])
+
+    for (const value of ["0", "-1", "+1", "1.5", "9223372036854775808", Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => parseInlineId(value, "messageId")).toThrow(SidecarError)
+    }
+    expect(() => readInlineIdArray({ messageIds: "1,2" }, "messageIds", 100, true)).toThrow(SidecarError)
+    expect(() => readInlineIdArray({ messageIds: [] }, "messageIds", 100, true)).toThrow(SidecarError)
+    expect(() => readInlineIdArray({ messageIds: Array.from({ length: 101 }, () => "1") }, "messageIds", 100, true))
+      .toThrow("messageIds supports at most 100 items")
   })
 
   it("normalizes upload kind from explicit values and file extensions", () => {

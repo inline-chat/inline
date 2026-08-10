@@ -17,13 +17,11 @@ cd hermes-agent
 bun run release:preflight
 ```
 
-This runs `npm publish --dry-run --access public`, which invokes
-`prepublishOnly`, rebuilds the installer and sidecar, runs typecheck/lint/tests,
-installs the packed tarball in a temp prefix, and prints the final npm tarball
-contents without publishing. The command first creates an isolated package
-stage and installs the exact registry SDK declared by `package.json`, so a
-dirty monorepo SDK or protocol checkout cannot leak into the bundled sidecar.
-The final output prints the retained staging directory for inspection.
+This creates an isolated stage, installs the exact registry dependencies from
+`package.json`, runs the full package check, packs one read-only tarball, and
+runs `npm publish --dry-run` against that exact tarball. The output prints the
+artifact path, SHA-256, and file list. Publication automation verifies the hash
+and publishes the same immutable bytes; it never repacks from the monorepo.
 
 Expected tarball shape:
 
@@ -45,10 +43,9 @@ Install from the locally packed tarball:
 
 ```sh
 cd hermes-agent
-VERSION="$(node -p "require('./package.json').version")"
-mkdir -p .tmp/manual-pack
-npm pack --pack-destination .tmp/manual-pack
-npm install -g ".tmp/manual-pack/inline-chat-hermes-agent-adapter-${VERSION}.tgz"
+bun run release:preflight
+# Use the exact path printed as `Hermes release artifact:` above.
+npm install -g "/absolute/path/to/inline-chat-hermes-agent-adapter-<version>.tgz"
 inline-hermes --version
 ```
 
@@ -91,21 +88,18 @@ Manual behavior checks:
 
 ## Publish
 
-After manual live testing passes and npm auth is active:
+After manual live testing passes, commit the scoped release group and dispatch
+the trusted-publishing workflow through the repository wrapper:
 
 ```sh
-cd hermes-agent
-npm whoami
-bun run release:preflight
-bun run release:stage
-cd <printed-hermes-release-stage>
-npm publish --access public --tag alpha --otp="<otp>"
+cd ..
+bun run release:npm hermes-agent --version 0.0.8 --tag latest
 npm view @inline-chat/hermes-agent-adapter version
 npm view @inline-chat/hermes-agent-adapter dist-tags --json
 ```
 
-For stable releases, omit `--tag alpha`. Never publish a prerelease without an
-explicit dist-tag; npm must not move `latest` to an alpha build.
+For prereleases, use the exact version-derived dist-tag. Never move `latest` to
+an alpha build.
 
 Never publish directly from the monorepo package directory. Bun links matching
 workspace package names by default, which can make the generated sidecar consume

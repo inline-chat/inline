@@ -18,7 +18,7 @@ var __toESM = (mod, isNodeMode, target) => {
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/json-typings.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/json-typings.js
 var require_json_typings = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.isJsonObject = exports.typeofJsonValue = undefined;
@@ -39,7 +39,7 @@ var require_json_typings = __commonJS((exports) => {
   exports.isJsonObject = isJsonObject;
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/base64.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/base64.js
 var require_base64 = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.base64encode = exports.base64decode = undefined;
@@ -131,7 +131,7 @@ var require_base64 = __commonJS((exports) => {
   exports.base64encode = base64encode;
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/protobufjs-utf8.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/protobufjs-utf8.js
 var require_protobufjs_utf8 = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.utf8read = undefined;
@@ -168,7 +168,7 @@ var require_protobufjs_utf8 = __commonJS((exports) => {
   exports.utf8read = utf8read;
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/binary-format-contract.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/binary-format-contract.js
 var require_binary_format_contract = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.WireType = exports.mergeBinaryOptions = exports.UnknownFieldHandler = undefined;
@@ -208,7 +208,7 @@ var require_binary_format_contract = __commonJS((exports) => {
   })(WireType = exports.WireType || (exports.WireType = {}));
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/goog-varint.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/goog-varint.js
 var require_goog_varint = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.varint32read = exports.varint32write = exports.int64toString = exports.int64fromString = exports.varint64write = exports.varint64read = undefined;
@@ -375,7 +375,7 @@ var require_goog_varint = __commonJS((exports) => {
   exports.varint32read = varint32read;
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/pb-long.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/pb-long.js
 var require_pb_long = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.PbLong = exports.PbULong = exports.detectBi = undefined;
@@ -559,7 +559,7 @@ var require_pb_long = __commonJS((exports) => {
   PbLong.ZERO = new PbLong(0, 0);
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/binary-reader.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/binary-reader.js
 var require_binary_reader = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.BinaryReader = exports.binaryReadOptions = undefined;
@@ -681,7 +681,7 @@ var require_binary_reader = __commonJS((exports) => {
   exports.BinaryReader = BinaryReader;
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/assert.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/assert.js
 var require_assert = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.assertFloat32 = exports.assertUInt32 = exports.assertInt32 = exports.assertNever = exports.assert = undefined;
@@ -725,7 +725,7 @@ var require_assert = __commonJS((exports) => {
   exports.assertFloat32 = assertFloat32;
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/binary-writer.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/binary-writer.js
 var require_binary_writer = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.BinaryWriter = exports.binaryWriteOptions = undefined;
@@ -880,7 +880,7 @@ var require_binary_writer = __commonJS((exports) => {
   exports.BinaryWriter = BinaryWriter;
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/json-format-contract.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/json-format-contract.js
 var require_json_format_contract = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.mergeJsonOptions = exports.jsonWriteOptions = exports.jsonReadOptions = undefined;
@@ -910,14 +910,14 @@ var require_json_format_contract = __commonJS((exports) => {
   exports.mergeJsonOptions = mergeJsonOptions;
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/message-type-contract.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/message-type-contract.js
 var require_message_type_contract = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.MESSAGE_TYPE = undefined;
   exports.MESSAGE_TYPE = Symbol.for("protobuf-ts/message-type");
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/lower-camel-case.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/lower-camel-case.js
 var require_lower_camel_case = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.lowerCamelCase = undefined;
@@ -945,7 +945,7 @@ var require_lower_camel_case = __commonJS((exports) => {
   exports.lowerCamelCase = lowerCamelCase;
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-info.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-info.js
 var require_reflection_info = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.readMessageOption = exports.readFieldOption = exports.readFieldOptions = exports.normalizeFieldInfo = exports.RepeatType = exports.LongType = exports.ScalarType = undefined;
@@ -1019,7 +1019,7 @@ var require_reflection_info = __commonJS((exports) => {
   exports.readMessageOption = readMessageOption;
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/oneof.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/oneof.js
 var require_oneof = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.getSelectedOneofValue = exports.clearOneofValue = exports.setUnknownOneofValue = exports.setOneofValue = exports.getOneofValue = exports.isOneofGroup = undefined;
@@ -1079,7 +1079,7 @@ var require_oneof = __commonJS((exports) => {
   exports.getSelectedOneofValue = getSelectedOneofValue;
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-type-check.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-type-check.js
 var require_reflection_type_check = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionTypeCheck = undefined;
@@ -1280,7 +1280,7 @@ var require_reflection_type_check = __commonJS((exports) => {
   exports.ReflectionTypeCheck = ReflectionTypeCheck;
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-long-convert.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-long-convert.js
 var require_reflection_long_convert = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionLongConvert = undefined;
@@ -1298,7 +1298,7 @@ var require_reflection_long_convert = __commonJS((exports) => {
   exports.reflectionLongConvert = reflectionLongConvert;
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-json-reader.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-json-reader.js
 var require_reflection_json_reader = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionJsonReader = undefined;
@@ -1572,7 +1572,7 @@ var require_reflection_json_reader = __commonJS((exports) => {
   exports.ReflectionJsonReader = ReflectionJsonReader;
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-json-writer.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-json-writer.js
 var require_reflection_json_writer = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionJsonWriter = undefined;
@@ -1775,7 +1775,7 @@ var require_reflection_json_writer = __commonJS((exports) => {
   exports.ReflectionJsonWriter = ReflectionJsonWriter;
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-scalar-default.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-scalar-default.js
 var require_reflection_scalar_default = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionScalarDefault = undefined;
@@ -1807,7 +1807,7 @@ var require_reflection_scalar_default = __commonJS((exports) => {
   exports.reflectionScalarDefault = reflectionScalarDefault;
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-binary-reader.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-binary-reader.js
 var require_reflection_binary_reader = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionBinaryReader = undefined;
@@ -1967,7 +1967,7 @@ var require_reflection_binary_reader = __commonJS((exports) => {
   exports.ReflectionBinaryReader = ReflectionBinaryReader;
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-binary-writer.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-binary-writer.js
 var require_reflection_binary_writer = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionBinaryWriter = undefined;
@@ -2165,7 +2165,7 @@ var require_reflection_binary_writer = __commonJS((exports) => {
   exports.ReflectionBinaryWriter = ReflectionBinaryWriter;
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-create.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-create.js
 var require_reflection_create = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionCreate = undefined;
@@ -2199,7 +2199,7 @@ var require_reflection_create = __commonJS((exports) => {
   exports.reflectionCreate = reflectionCreate;
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-merge-partial.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-merge-partial.js
 var require_reflection_merge_partial = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionMergePartial = undefined;
@@ -2266,7 +2266,7 @@ var require_reflection_merge_partial = __commonJS((exports) => {
   exports.reflectionMergePartial = reflectionMergePartial;
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-equals.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-equals.js
 var require_reflection_equals = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionEquals = undefined;
@@ -2334,7 +2334,7 @@ var require_reflection_equals = __commonJS((exports) => {
   }
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/message-type.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/message-type.js
 var require_message_type = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.MessageType = undefined;
@@ -2440,7 +2440,7 @@ var require_message_type = __commonJS((exports) => {
   exports.MessageType = MessageType;
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-contains-message-type.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-contains-message-type.js
 var require_reflection_contains_message_type = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.containsMessageType = undefined;
@@ -2451,7 +2451,7 @@ var require_reflection_contains_message_type = __commonJS((exports) => {
   exports.containsMessageType = containsMessageType;
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/enum-object.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/enum-object.js
 var require_enum_object = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.listEnumNumbers = exports.listEnumNames = exports.listEnumValues = exports.isEnumObject = undefined;
@@ -2503,7 +2503,7 @@ var require_enum_object = __commonJS((exports) => {
   exports.listEnumNumbers = listEnumNumbers;
 });
 
-// ../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/index.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/index.js
 var require_commonjs = __commonJS((exports) => {
   Object.defineProperty(exports, "__esModule", { value: true });
   var json_typings_1 = require_json_typings();
@@ -2686,7 +2686,7 @@ var require_commonjs = __commonJS((exports) => {
   } });
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/constants.js
+// node_modules/ws/lib/constants.js
 var require_constants = __commonJS((exports, module) => {
   var BINARY_TYPES = ["nodebuffer", "arraybuffer", "fragments"];
   var hasBlob = typeof Blob !== "undefined";
@@ -2706,7 +2706,7 @@ var require_constants = __commonJS((exports, module) => {
   };
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/buffer-util.js
+// node_modules/ws/lib/buffer-util.js
 var require_buffer_util = __commonJS((exports, module) => {
   var { EMPTY_BUFFER } = require_constants();
   var FastBuffer = Buffer[Symbol.species];
@@ -2784,7 +2784,7 @@ var require_buffer_util = __commonJS((exports, module) => {
   }
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/limiter.js
+// node_modules/ws/lib/limiter.js
 var require_limiter = __commonJS((exports, module) => {
   var kDone = Symbol("kDone");
   var kRun = Symbol("kRun");
@@ -2816,7 +2816,7 @@ var require_limiter = __commonJS((exports, module) => {
   module.exports = Limiter;
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/permessage-deflate.js
+// node_modules/ws/lib/permessage-deflate.js
 var require_permessage_deflate = __commonJS((exports, module) => {
   var zlib = __require("zlib");
   var bufferUtil = require_buffer_util();
@@ -2888,7 +2888,7 @@ var require_permessage_deflate = __commonJS((exports, module) => {
     acceptAsServer(offers) {
       const opts = this._options;
       const accepted = offers.find((params) => {
-        if (opts.serverNoContextTakeover === false && params.server_no_context_takeover || params.server_max_window_bits && (opts.serverMaxWindowBits === false || typeof opts.serverMaxWindowBits === "number" && opts.serverMaxWindowBits > params.server_max_window_bits) || typeof opts.clientMaxWindowBits === "number" && !params.client_max_window_bits) {
+        if (opts.serverNoContextTakeover === false && params.server_no_context_takeover || params.server_max_window_bits && (opts.serverMaxWindowBits === false || typeof opts.serverMaxWindowBits === "number" && opts.serverMaxWindowBits > params.server_max_window_bits) || typeof opts.clientMaxWindowBits === "number" && (typeof params.client_max_window_bits === "number" ? opts.clientMaxWindowBits > params.client_max_window_bits : !params.client_max_window_bits)) {
           return false;
         }
         return true;
@@ -3080,7 +3080,7 @@ var require_permessage_deflate = __commonJS((exports, module) => {
   }
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/validation.js
+// node_modules/ws/lib/validation.js
 var require_validation = __commonJS((exports, module) => {
   var { isUtf8 } = __require("buffer");
   var { hasBlob } = require_constants();
@@ -3267,7 +3267,7 @@ var require_validation = __commonJS((exports, module) => {
   }
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/receiver.js
+// node_modules/ws/lib/receiver.js
 var require_receiver = __commonJS((exports, module) => {
   var { Writable } = __require("stream");
   var PerMessageDeflate = require_permessage_deflate();
@@ -3311,6 +3311,7 @@ var require_receiver = __commonJS((exports, module) => {
       this._opcode = 0;
       this._totalPayloadLength = 0;
       this._messageLength = 0;
+      this._numFragments = 0;
       this._fragments = [];
       this._errored = false;
       this._loop = false;
@@ -3520,17 +3521,17 @@ var require_receiver = __commonJS((exports, module) => {
         this.controlMessage(data, cb);
         return;
       }
+      if (this._maxFragments > 0 && ++this._numFragments > this._maxFragments) {
+        const error = this.createError(RangeError, "Too many message fragments", false, 1008, "WS_ERR_TOO_MANY_BUFFERED_PARTS");
+        cb(error);
+        return;
+      }
       if (this._compressed) {
         this._state = INFLATING;
         this.decompress(data, cb);
         return;
       }
       if (data.length) {
-        if (this._maxFragments > 0 && this._fragments.length >= this._maxFragments) {
-          const error = this.createError(RangeError, "Too many message fragments", false, 1008, "WS_ERR_TOO_MANY_BUFFERED_PARTS");
-          cb(error);
-          return;
-        }
         this._messageLength = this._totalPayloadLength;
         this._fragments.push(data);
       }
@@ -3545,11 +3546,6 @@ var require_receiver = __commonJS((exports, module) => {
           this._messageLength += buf.length;
           if (this._messageLength > this._maxPayload && this._maxPayload > 0) {
             const error = this.createError(RangeError, "Max payload size exceeded", false, 1009, "WS_ERR_UNSUPPORTED_MESSAGE_LENGTH");
-            cb(error);
-            return;
-          }
-          if (this._maxFragments > 0 && this._fragments.length >= this._maxFragments) {
-            const error = this.createError(RangeError, "Too many message fragments", false, 1008, "WS_ERR_TOO_MANY_BUFFERED_PARTS");
             cb(error);
             return;
           }
@@ -3570,6 +3566,7 @@ var require_receiver = __commonJS((exports, module) => {
       this._totalPayloadLength = 0;
       this._messageLength = 0;
       this._fragmented = 0;
+      this._numFragments = 0;
       this._fragments = [];
       if (this._opcode === 2) {
         let data;
@@ -3664,7 +3661,7 @@ var require_receiver = __commonJS((exports, module) => {
   module.exports = Receiver;
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/sender.js
+// node_modules/ws/lib/sender.js
 var require_sender = __commonJS((exports, module) => {
   var { Duplex } = __require("stream");
   var { randomFillSync } = __require("crypto");
@@ -4023,7 +4020,7 @@ var require_sender = __commonJS((exports, module) => {
   }
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/event-target.js
+// node_modules/ws/lib/event-target.js
 var require_event_target = __commonJS((exports, module) => {
   var { kForOnEventAttribute, kListener } = require_constants();
   var kCode = Symbol("kCode");
@@ -4174,7 +4171,7 @@ var require_event_target = __commonJS((exports, module) => {
   }
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/extension.js
+// node_modules/ws/lib/extension.js
 var require_extension = __commonJS((exports, module) => {
   var { tokenChars } = require_validation();
   function push(dest, name, elem) {
@@ -4339,7 +4336,7 @@ var require_extension = __commonJS((exports, module) => {
   module.exports = { format, parse };
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/websocket.js
+// node_modules/ws/lib/websocket.js
 var require_websocket = __commonJS((exports, module) => {
   var EventEmitter = __require("events");
   var https = __require("https");
@@ -4704,8 +4701,8 @@ var require_websocket = __commonJS((exports, module) => {
       autoPong: true,
       closeTimeout: CLOSE_TIMEOUT,
       protocolVersion: protocolVersions[1],
-      maxBufferedChunks: 1024 * 1024,
-      maxFragments: 128 * 1024,
+      maxBufferedChunks: 256 * 1024,
+      maxFragments: 16 * 1024,
       maxPayload: 100 * 1024 * 1024,
       skipUTF8Validation: false,
       perMessageDeflate: true,
@@ -5111,7 +5108,7 @@ var require_websocket = __commonJS((exports, module) => {
   }
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/stream.js
+// node_modules/ws/lib/stream.js
 var require_stream = __commonJS((exports, module) => {
   var WebSocket = require_websocket();
   var { Duplex } = __require("stream");
@@ -5214,7 +5211,7 @@ var require_stream = __commonJS((exports, module) => {
   module.exports = createWebSocketStream;
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/subprotocol.js
+// node_modules/ws/lib/subprotocol.js
 var require_subprotocol = __commonJS((exports, module) => {
   var { tokenChars } = require_validation();
   function parse(header) {
@@ -5259,7 +5256,7 @@ var require_subprotocol = __commonJS((exports, module) => {
   module.exports = { parse };
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/websocket-server.js
+// node_modules/ws/lib/websocket-server.js
 var require_websocket_server = __commonJS((exports, module) => {
   var EventEmitter = __require("events");
   var http = __require("http");
@@ -5281,8 +5278,8 @@ var require_websocket_server = __commonJS((exports, module) => {
       options = {
         allowSynchronousEvents: true,
         autoPong: true,
-        maxBufferedChunks: 1024 * 1024,
-        maxFragments: 128 * 1024,
+        maxBufferedChunks: 256 * 1024,
+        maxFragments: 16 * 1024,
         maxPayload: 100 * 1024 * 1024,
         skipUTF8Validation: false,
         perMessageDeflate: false,
@@ -5576,7 +5573,7 @@ import { timingSafeEqual } from "node:crypto";
 import { mkdir, readFile as readFile2, stat } from "node:fs/promises";
 import path from "node:path";
 
-// ../packages/protocol/dist/core.js
+// node_modules/@inline-chat/protocol/dist/core.js
 var import_runtime = __toESM(require_commonjs(), 1);
 var import_runtime2 = __toESM(require_commonjs(), 1);
 var import_runtime3 = __toESM(require_commonjs(), 1);
@@ -27416,7 +27413,7 @@ class BotChatSettingsItemInvoked$Type extends import_runtime4.MessageType {
 }
 var BotChatSettingsItemInvoked = new BotChatSettingsItemInvoked$Type;
 
-// ../sdk/dist/ids.js
+// node_modules/@inline-chat/realtime-sdk/dist/ids.js
 class InlineIdError extends Error {
   constructor(message) {
     super(message);
@@ -27435,7 +27432,7 @@ var asInlineId = (value, fieldName = "id") => {
   return BigInt(value);
 };
 
-// ../sdk/dist/utils/async-channel.js
+// node_modules/@inline-chat/realtime-sdk/dist/utils/async-channel.js
 class AsyncChannel {
   queue = [];
   resolvers = [];
@@ -27478,7 +27475,7 @@ class AsyncChannel {
   }
 }
 
-// ../sdk/dist/realtime/ping-pong.js
+// node_modules/@inline-chat/realtime-sdk/dist/realtime/ping-pong.js
 class PingPongService {
   log;
   crypto;
@@ -27607,7 +27604,7 @@ class PingPongService {
 }
 var isCrypto = (value) => typeof value === "object" && value !== null && ("getRandomValues" in value) && typeof value.getRandomValues === "function";
 
-// ../sdk/dist/realtime/protocol-client.js
+// node_modules/@inline-chat/realtime-sdk/dist/realtime/protocol-client.js
 var emptyRpcInput = { oneofKind: undefined };
 var defaultRpcTimeoutMs = 30000;
 var assertValidRpcMethod = (method) => {
@@ -27985,7 +27982,7 @@ function describeConnectionError(error) {
   return `server connection error${suffix}: ${message}`;
 }
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/wrapper.mjs
+// node_modules/ws/wrapper.mjs
 var import_stream = __toESM(require_stream(), 1);
 var import_extension = __toESM(require_extension(), 1);
 var import_permessage_deflate = __toESM(require_permessage_deflate(), 1);
@@ -27995,7 +27992,7 @@ var import_subprotocol = __toESM(require_subprotocol(), 1);
 var import_websocket = __toESM(require_websocket(), 1);
 var import_websocket_server = __toESM(require_websocket_server(), 1);
 
-// ../sdk/dist/realtime/transport.js
+// node_modules/@inline-chat/realtime-sdk/dist/realtime/transport.js
 class TransportError extends Error {
   constructor(message) {
     super(message);
@@ -28006,7 +28003,7 @@ class TransportError extends Error {
   }
 }
 
-// ../sdk/dist/realtime/ws-transport.js
+// node_modules/@inline-chat/realtime-sdk/dist/realtime/ws-transport.js
 class WebSocketTransport {
   events = new AsyncChannel;
   url;
@@ -28245,7 +28242,7 @@ function redactUrlForDiagnostics(raw) {
   }
 }
 
-// ../sdk/dist/sdk/types.js
+// node_modules/@inline-chat/realtime-sdk/dist/sdk/types.js
 var rpcInputKindByMethod = {
   0: undefined,
   1: "getMe",
@@ -28363,10 +28360,10 @@ var rpcResultKindByMethod = {
   81: "answerBotChatSettings"
 };
 
-// ../sdk/dist/sdk/logger.js
+// node_modules/@inline-chat/realtime-sdk/dist/sdk/logger.js
 var noopLogger = {};
 
-// ../sdk/dist/sdk/sdk-version.js
+// node_modules/@inline-chat/realtime-sdk/dist/sdk/sdk-version.js
 import { readFileSync } from "node:fs";
 var cached = null;
 var getSdkVersion = () => {
@@ -28390,7 +28387,7 @@ var getSdkVersion = () => {
   return cached;
 };
 
-// ../sdk/dist/sdk/inline-sdk-client.js
+// node_modules/@inline-chat/realtime-sdk/dist/sdk/inline-sdk-client.js
 var nowSeconds = () => BigInt(Math.floor(Date.now() / 1000));
 var sdkLayer = 1;
 var defaultApiBaseUrl = "https://api.inline.chat";
@@ -29826,7 +29823,7 @@ var resolveUploadFileUrl = (baseUrl) => {
   return url;
 };
 var hasMethodMapping = (method) => Object.prototype.hasOwnProperty.call(rpcInputKindByMethod, method) && Object.prototype.hasOwnProperty.call(rpcResultKindByMethod, method);
-// ../sdk/dist/sdk/bot-capabilities.js
+// node_modules/@inline-chat/realtime-sdk/dist/sdk/bot-capabilities.js
 async function registerBotCapabilitiesWithRetry(params) {
   const retryDelaysMs = params.retryDelaysMs ?? [500, 2000, 5000];
   const wait = params.wait ?? ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)));
@@ -29845,10 +29842,10 @@ async function registerBotCapabilitiesWithRetry(params) {
     }
   }
 }
-// ../sdk/dist/state/json-file-state-store.js
+// node_modules/@inline-chat/realtime-sdk/dist/state/json-file-state-store.js
 import { readFile, rename, writeFile } from "node:fs/promises";
 
-// ../sdk/dist/state/serde.js
+// node_modules/@inline-chat/realtime-sdk/dist/state/serde.js
 var serializeStateV1 = (state) => {
   const json = {
     version: 1,
@@ -29898,7 +29895,7 @@ var isStateJsonV1 = (value) => {
   return true;
 };
 
-// ../sdk/dist/state/json-file-state-store.js
+// node_modules/@inline-chat/realtime-sdk/dist/state/json-file-state-store.js
 class JsonFileStateStore {
   path;
   constructor(path) {
@@ -29920,6 +29917,7 @@ class JsonFileStateStore {
   }
 }
 // src/sidecar/contract.ts
+var MAX_INLINE_ID = 9223372036854775807n;
 var sensitiveUrlParams = new Set([
   "access_token",
   "auth",
@@ -29937,14 +29935,14 @@ class SidecarError extends Error {
 }
 function parseTarget(record) {
   const targetRecord = asOptionalRecord(record.target) ?? record;
-  const chatId = readOptionalString(targetRecord, "chatId");
-  const userId = readOptionalString(targetRecord, "userId");
+  const chatId = readOptionalInlineId(targetRecord, "chatId");
+  const userId = readOptionalInlineId(targetRecord, "userId");
   if (chatId && userId)
     throw new SidecarError("target cannot include both chatId and userId", "bad_format");
   if (chatId)
-    return { chatId: parseInlineId(chatId, "chatId") };
+    return { chatId };
   if (userId)
-    return { userId: parseInlineId(userId, "userId") };
+    return { userId };
   throw new SidecarError("target requires chatId or userId", "bad_format");
 }
 function normalizeUploadKind(raw, filePath) {
@@ -30150,6 +30148,43 @@ function readOptionalNumber(record, key) {
   }
   return;
 }
+function readRequiredInlineId(record, key) {
+  const value = readOptionalInlineId(record, key);
+  if (value == null)
+    throw new SidecarError(`missing ${key}`, "bad_format");
+  return value;
+}
+function readOptionalInlineId(record, key) {
+  const value = record[key];
+  if (value == null || value === "")
+    return;
+  return parseInlineId(value, key);
+}
+function readInlineIdArray(record, key, maxItems, required = false) {
+  const value = record[key];
+  if (value == null) {
+    if (required)
+      throw new SidecarError(`missing ${key}`, "bad_format");
+    return [];
+  }
+  if (!Array.isArray(value))
+    throw new SidecarError(`${key} must be an array`, "bad_format");
+  if (value.length === 0 && required)
+    throw new SidecarError(`${key} must not be empty`, "bad_format");
+  if (value.length > maxItems)
+    throw new SidecarError(`${key} supports at most ${maxItems} items`, "bad_format");
+  const ids = [];
+  const seen = new Set;
+  for (let index = 0;index < value.length; index += 1) {
+    const id = parseInlineId(value[index], `${key}[${index}]`);
+    const normalized = id.toString();
+    if (seen.has(normalized))
+      continue;
+    seen.add(normalized);
+    ids.push(id);
+  }
+  return ids;
+}
 function parseOptionalInt(value) {
   const raw = (value || "").trim();
   if (!raw || !/^\d+$/.test(raw))
@@ -30159,12 +30194,21 @@ function parseOptionalInt(value) {
 }
 function parseInlineId(value, field) {
   try {
-    const parsed = BigInt(value);
-    if (parsed <= 0n)
-      throw new Error("must be positive");
+    if (typeof value === "number" && (!Number.isSafeInteger(value) || value <= 0)) {
+      throw new Error("unsafe number");
+    }
+    const raw = typeof value === "string" ? value.trim() : value;
+    if (typeof raw === "string" && !/^[1-9][0-9]*$/.test(raw))
+      throw new Error("invalid digits");
+    if (typeof raw !== "string" && typeof raw !== "bigint" && typeof raw !== "number") {
+      throw new Error("invalid type");
+    }
+    const parsed = BigInt(raw);
+    if (parsed <= 0n || parsed > MAX_INLINE_ID)
+      throw new Error("out of range");
     return parsed;
   } catch {
-    throw new SidecarError(`invalid ${field}`, "bad_format");
+    throw new SidecarError(`${field} must be a positive signed 64-bit integer`, "bad_format");
   }
 }
 function defaultErrorText(error) {
@@ -30531,7 +30575,7 @@ async function endpointSend(res, body) {
   const record = asRecord(body);
   const target = parseTarget(record);
   const text = readOptionalString(record, "text");
-  const replyToMsgId = readOptionalString(record, "replyToMsgId");
+  const replyToMsgId = readOptionalInlineId(record, "replyToMsgId");
   const parseMarkdown = readOptionalBoolean(record, "parseMarkdown") ?? true;
   const actions = parseActions(record.actions);
   const sendMode = readOptionalString(record, "sendMode");
@@ -30542,7 +30586,7 @@ async function endpointSend(res, body) {
   const params = {
     ...text ? { text } : {},
     ...media ? { media } : {},
-    ...replyToMsgId ? { replyToMsgId: BigInt(replyToMsgId) } : {},
+    ...replyToMsgId ? { replyToMsgId } : {},
     parseMarkdown,
     ...actions ? { actions } : {},
     ...sendMode === "silent" ? { sendMode: "silent" } : {}
@@ -30553,7 +30597,7 @@ async function endpointSend(res, body) {
 async function endpointEdit(res, body) {
   const record = asRecord(body);
   const target = parseTarget(record);
-  const messageId = readRequiredString(record, "messageId");
+  const messageId = readRequiredInlineId(record, "messageId");
   const text = readRequiredString(record, "text");
   const actions = parseActions(record.actions);
   const parseMarkdown = readOptionalBoolean(record, "parseMarkdown") ?? true;
@@ -30561,26 +30605,26 @@ async function endpointEdit(res, body) {
     oneofKind: "editMessage",
     editMessage: {
       peerId: inputPeerFromTarget(target),
-      messageId: BigInt(messageId),
+      messageId,
       text,
       parseMarkdown,
       ...actions ? { actions } : {}
     }
   });
-  writeJson(res, 200, { ok: true, result: { messageId } });
+  writeJson(res, 200, { ok: true, result: { messageId: messageId.toString() } });
 }
 async function endpointDelete(res, body) {
   const record = asRecord(body);
   const target = parseTarget(record);
-  const messageId = readRequiredString(record, "messageId");
+  const messageId = readRequiredInlineId(record, "messageId");
   await client.invoke(Method.DELETE_MESSAGES, {
     oneofKind: "deleteMessages",
     deleteMessages: {
       peerId: inputPeerFromTarget(target),
-      messageIds: [BigInt(messageId)]
+      messageIds: [messageId]
     }
   });
-  writeJson(res, 200, { ok: true, result: { messageId } });
+  writeJson(res, 200, { ok: true, result: { messageId: messageId.toString() } });
 }
 async function endpointTyping(res, body) {
   const record = asRecord(body);
@@ -30611,7 +30655,7 @@ async function endpointSendAttachment(res, body) {
   const filePath = readRequiredString(record, "path");
   const kind = normalizeUploadKind(readOptionalString(record, "kind"), filePath);
   const caption = readOptionalString(record, "caption");
-  const replyToMsgId = readOptionalString(record, "replyToMsgId");
+  const replyToMsgId = readOptionalInlineId(record, "replyToMsgId");
   const fileName = readOptionalString(record, "fileName") || path.basename(filePath);
   const contentType = readOptionalString(record, "mimeType");
   const info = await statAttachment(filePath);
@@ -30630,7 +30674,7 @@ async function endpointSendAttachment(res, body) {
   const sendParams = {
     media,
     ...caption ? { text: caption, parseMarkdown: true } : {},
-    ...replyToMsgId ? { replyToMsgId: BigInt(replyToMsgId) } : {}
+    ...replyToMsgId ? { replyToMsgId } : {}
   };
   const sent = "chatId" in target ? await client.sendMessage({ chatId: target.chatId, ...sendParams }) : await client.sendMessage({ userId: target.userId, ...sendParams });
   writeJson(res, 200, {
@@ -30729,22 +30773,22 @@ async function endpointFollowMode(res, body) {
 async function endpointMessages(res, body) {
   const record = asRecord(body);
   const target = parseTarget(record);
-  const rawIds = Array.isArray(record.messageIds) ? record.messageIds : [];
-  const messageIds = rawIds.map((id) => BigInt(String(id)));
+  const messageIds = readInlineIdArray(record, "messageIds", 100, true);
   const result = "chatId" in target ? await client.getMessages({ chatId: target.chatId, messageIds }) : await client.getMessages({ userId: target.userId, messageIds });
-  writeJson(res, 200, { ok: true, result: { messages: safeJson(await enrichMessages(result.messages, target)) } });
+  const ordered = orderMessagesByRequestedIds(result.messages, messageIds);
+  writeJson(res, 200, { ok: true, result: { messages: safeJson(await enrichMessages(ordered, target)) } });
 }
 async function endpointHistory(res, body) {
   const record = asRecord(body);
   const target = parseTarget(record);
   const limit = readOptionalNumber(record, "limit") ?? 20;
-  const anchorId = readOptionalString(record, "anchorId");
+  const anchorId = readOptionalInlineId(record, "anchorId");
   const result = await client.invoke(Method.GET_CHAT_HISTORY, {
     oneofKind: "getChatHistory",
     getChatHistory: {
       peerId: inputPeerFromTarget(target),
       limit,
-      ...anchorId ? { anchorId: BigInt(anchorId), includeAnchor: true } : {}
+      ...anchorId ? { anchorId, includeAnchor: true } : {}
     }
   });
   const history = result;
@@ -30758,14 +30802,14 @@ async function endpointSearch(res, body) {
   if (!query)
     throw new SidecarError("search requires query", "bad_format");
   const limit = clampResultLimit(readOptionalNumber(record, "limit") ?? 20, 100);
-  const offsetId = readOptionalString(record, "offsetId");
+  const offsetId = readOptionalInlineId(record, "offsetId");
   const result = await client.invokeUncheckedRaw(Method.SEARCH_MESSAGES, {
     oneofKind: "searchMessages",
     searchMessages: {
       peerId: inputPeerFromTarget(target),
       queries: [query],
       limit,
-      ...offsetId ? { offsetId: BigInt(offsetId) } : {}
+      ...offsetId ? { offsetId } : {}
     }
   });
   const typed = result;
@@ -30775,7 +30819,7 @@ async function endpointSearch(res, body) {
 async function endpointReaction(res, body) {
   const record = asRecord(body);
   const target = parseTarget(record);
-  const messageId = readRequiredString(record, "messageId");
+  const messageId = readRequiredInlineId(record, "messageId");
   const emoji = readRequiredString(record, "emoji").trim();
   if (!emoji)
     throw new SidecarError("reaction requires emoji", "bad_format");
@@ -30786,7 +30830,7 @@ async function endpointReaction(res, body) {
       deleteReaction: {
         emoji,
         peerId: inputPeerFromTarget(target),
-        messageId: BigInt(messageId)
+        messageId
       }
     });
   } else {
@@ -30794,18 +30838,18 @@ async function endpointReaction(res, body) {
       oneofKind: "addReaction",
       addReaction: {
         emoji,
-        messageId: BigInt(messageId),
+        messageId,
         peerId: inputPeerFromTarget(target)
       }
     });
   }
-  writeJson(res, 200, { ok: true, result: { messageId, emoji, removed: remove } });
+  writeJson(res, 200, { ok: true, result: { messageId: messageId.toString(), emoji, removed: remove } });
 }
 async function endpointReactions(res, body) {
   const record = asRecord(body);
   const target = parseTarget(record);
-  const messageId = readRequiredString(record, "messageId");
-  const result = "chatId" in target ? await client.getMessages({ chatId: target.chatId, messageIds: [BigInt(messageId)] }) : await client.getMessages({ userId: target.userId, messageIds: [BigInt(messageId)] });
+  const messageId = readRequiredInlineId(record, "messageId");
+  const result = "chatId" in target ? await client.getMessages({ chatId: target.chatId, messageIds: [messageId] }) : await client.getMessages({ userId: target.userId, messageIds: [messageId] });
   const message = result.messages[0] ?? null;
   const enriched = message == null ? null : (await enrichMessages([message], target))[0] ?? message;
   writeJson(res, 200, {
@@ -30819,17 +30863,17 @@ async function endpointReactions(res, body) {
 async function endpointPin(res, body) {
   const record = asRecord(body);
   const target = parseTarget(record);
-  const messageId = readRequiredString(record, "messageId");
+  const messageId = readRequiredInlineId(record, "messageId");
   const unpin = readOptionalBoolean(record, "unpin") ?? false;
   await client.invokeUncheckedRaw(Method.PIN_MESSAGE, {
     oneofKind: "pinMessage",
     pinMessage: {
       peerId: inputPeerFromTarget(target),
-      messageId: BigInt(messageId),
+      messageId,
       unpin
     }
   });
-  writeJson(res, 200, { ok: true, result: { messageId, unpinned: unpin } });
+  writeJson(res, 200, { ok: true, result: { messageId: messageId.toString(), unpinned: unpin } });
 }
 async function endpointPins(res, body) {
   const record = asRecord(body);
@@ -30851,17 +30895,17 @@ async function endpointPins(res, body) {
 }
 async function endpointCreateSubthread(res, body) {
   const record = asRecord(body);
-  const parentChatId = readRequiredString(record, "parentChatId");
-  const parentMessageId = readOptionalString(record, "parentMessageId");
+  const parentChatId = readRequiredInlineId(record, "parentChatId");
+  const parentMessageId = readOptionalInlineId(record, "parentMessageId");
   const title = readOptionalString(record, "title");
   const description = readOptionalString(record, "description");
   const emoji = readOptionalString(record, "emoji");
   const result = await client.invokeUncheckedRaw(Method.CREATE_SUBTHREAD, {
     oneofKind: "createSubthread",
     createSubthread: {
-      parentChatId: BigInt(parentChatId),
+      parentChatId,
       participants: [],
-      ...parentMessageId ? { parentMessageId: BigInt(parentMessageId) } : {},
+      ...parentMessageId ? { parentMessageId } : {},
       ...title ? { title } : {},
       ...description ? { description } : {},
       ...emoji ? { emoji } : {}
@@ -30882,9 +30926,9 @@ async function endpointCreateChat(res, body) {
   const title = readRequiredString(record, "title");
   const description = readOptionalString(record, "description");
   const emoji = readOptionalString(record, "emoji");
-  const spaceId = readOptionalPositiveId(record, "spaceId");
+  const spaceId = readOptionalInlineId(record, "spaceId");
   const isPublic = readOptionalBoolean(record, "isPublic") ?? false;
-  const participantUserIds = readPositiveIdArray(record, "participantUserIds", 50);
+  const participantUserIds = readInlineIdArray(record, "participantUserIds", 50);
   if (title.length > 200)
     throw new SidecarError("create-chat title is too long", "bad_format");
   if (description && description.length > 1000) {
@@ -30921,41 +30965,6 @@ async function endpointCreateChat(res, body) {
       dialog: safeJson(typed.createChat.dialog ?? null)
     }
   });
-}
-function readOptionalPositiveId(record, key) {
-  const value = readOptionalString(record, key);
-  if (!value)
-    return;
-  try {
-    const parsed = BigInt(value);
-    if (parsed <= 0n)
-      throw new Error("not positive");
-    return parsed;
-  } catch {
-    throw new SidecarError(`${key} must be a positive integer`, "bad_format");
-  }
-}
-function readPositiveIdArray(record, key, maxItems) {
-  const value = record[key];
-  if (value == null)
-    return [];
-  if (!Array.isArray(value))
-    throw new SidecarError(`${key} must be an array`, "bad_format");
-  if (value.length > maxItems)
-    throw new SidecarError(`${key} supports at most ${maxItems} items`, "bad_format");
-  const ids = [];
-  const seen = new Set;
-  for (const item of value) {
-    const itemRecord = { [key]: item };
-    const id = readOptionalPositiveId(itemRecord, key);
-    if (id == null)
-      throw new SidecarError(`${key} items must be positive integers`, "bad_format");
-    if (seen.has(id.toString()))
-      continue;
-    seen.add(id.toString());
-    ids.push(id);
-  }
-  return ids;
 }
 async function getRawChatSnapshot(chatId) {
   const result = await client.invoke(Method.GET_CHAT, {
@@ -31007,6 +31016,19 @@ async function enrichMessages(messages, target) {
     return sender ? { ...record, sender } : message;
   }));
 }
+function orderMessagesByRequestedIds(messages, requestedIds) {
+  const byId = new Map;
+  for (const message of messages) {
+    const record = asOptionalRecord(message);
+    const id = asPositiveBigInt(record?.id);
+    if (id && !byId.has(id.toString()))
+      byId.set(id.toString(), message);
+  }
+  return requestedIds.flatMap((id) => {
+    const message = byId.get(id.toString());
+    return message == null ? [] : [message];
+  });
+}
 async function resolveInboundSender(event) {
   const message = asOptionalRecord(event.message);
   const reaction = asOptionalRecord(event.reaction);
@@ -31044,10 +31066,10 @@ function clampResultLimit(value, max) {
 }
 async function endpointAnswerAction(res, body) {
   const record = asRecord(body);
-  const interactionId = readRequiredString(record, "interactionId");
+  const interactionId = readRequiredInlineId(record, "interactionId");
   const toastText = readOptionalString(record, "toast");
   await client.answerMessageAction({
-    interactionId: BigInt(interactionId),
+    interactionId,
     ...toastText ? { ui: MessageActionResponseUi.create({
       kind: { oneofKind: "toast", toast: MessageActionToast.create({ text: toastText }) }
     }) } : {}
@@ -31056,9 +31078,9 @@ async function endpointAnswerAction(res, body) {
 }
 async function endpointAnswerBotSettings(res, body) {
   const record = asRecord(body);
-  const requestId = readRequiredString(record, "requestId");
+  const requestId = readRequiredInlineId(record, "requestId");
   const response = asRecord(record.response);
-  await client.answerBotChatSettings({ requestId: BigInt(requestId), response });
+  await client.answerBotChatSettings({ requestId, response });
   writeJson(res, 200, { ok: true, result: {} });
 }
 function createClient(options) {
@@ -31182,7 +31204,7 @@ class MockInlineClient {
   async getMessages(params) {
     this.record("getMessages", params);
     return {
-      messages: params.messageIds.map((id) => ({
+      messages: [...params.messageIds].reverse().map((id) => ({
         id: BigInt(id),
         fromId: 111n,
         chatId: "chatId" in params ? BigInt(params.chatId) : undefined,
@@ -31258,7 +31280,7 @@ class MockInlineClient {
         getChat: {
           chat,
           dialog: { chatId, followMode: chatId === 456n ? 1 : 0 },
-          pinnedMessageIds: [8801n],
+          pinnedMessageIds: [8805n, 8801n],
           anchorMessage: {
             id: 8801n,
             fromId: 111n,
@@ -31272,14 +31294,24 @@ class MockInlineClient {
     if (method === Method.GET_CHAT_HISTORY) {
       return {
         getChatHistory: {
-          messages: [{
-            id: 8801n,
-            fromId: 111n,
-            chatId: 123n,
-            peerId: { type: { oneofKind: "chat", chat: { chatId: 123n } } },
-            message: "mock history",
-            date: 124n
-          }]
+          messages: [
+            {
+              id: 8700n,
+              fromId: 111n,
+              chatId: 123n,
+              peerId: { type: { oneofKind: "chat", chat: { chatId: 123n } } },
+              message: "mock history server-first",
+              date: 120n
+            },
+            {
+              id: 8801n,
+              fromId: 111n,
+              chatId: 123n,
+              peerId: { type: { oneofKind: "chat", chat: { chatId: 123n } } },
+              message: "mock history server-second",
+              date: 124n
+            }
+          ]
         }
       };
     }
@@ -31331,14 +31363,24 @@ class MockInlineClient {
       return {
         oneofKind: "searchMessages",
         searchMessages: {
-          messages: [{
-            id: 8802n,
-            fromId: 111n,
-            chatId,
-            peerId,
-            message: `mock search ${String(queries[0] ?? "")}`.trim(),
-            date: 127n
-          }]
+          messages: [
+            {
+              id: 8802n,
+              fromId: 111n,
+              chatId,
+              peerId,
+              message: `mock search first ${String(queries[0] ?? "")}`.trim(),
+              date: 127n
+            },
+            {
+              id: 8702n,
+              fromId: 111n,
+              chatId,
+              peerId,
+              message: `mock search second ${String(queries[0] ?? "")}`.trim(),
+              date: 125n
+            }
+          ]
         }
       };
     }
@@ -31466,11 +31508,11 @@ function parseSendMedia(value) {
     return;
   const kind = readRequiredString(media, "kind");
   if (kind === "photo")
-    return { kind, photoId: BigInt(readRequiredString(media, "photoId")) };
+    return { kind, photoId: readRequiredInlineId(media, "photoId") };
   if (kind === "video")
-    return { kind, videoId: BigInt(readRequiredString(media, "videoId")) };
+    return { kind, videoId: readRequiredInlineId(media, "videoId") };
   if (kind === "document")
-    return { kind, documentId: BigInt(readRequiredString(media, "documentId")) };
+    return { kind, documentId: readRequiredInlineId(media, "documentId") };
   throw new SidecarError(`unsupported media kind: ${kind}`, "bad_format");
 }
 function parseActions(value) {

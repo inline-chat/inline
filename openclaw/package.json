@@ -1,6 +1,6 @@
 {
   "name": "@inline-openclaw/inline",
-  "version": "0.0.56",
+  "version": "0.0.57",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -13,6 +13,8 @@
     "dist/*.js.map",
     "dist/index.d.ts",
     "dist/index.d.ts.map",
+    "README.md",
+    "docs/*.md",
     "LICENSE",
     "openclaw.plugin.json"
   ],
@@ -29,7 +31,7 @@
     "lint": "bunx oxlint --ignore-path ../.oxlintignore src vitest.config.ts",
     "prepack": "bun run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --coverage",
+    "test": "vitest run --coverage --maxWorkers=2",
     "check": "bun run typecheck && bun run lint && bun run test && bun run build"
   },
   "dependencies": {

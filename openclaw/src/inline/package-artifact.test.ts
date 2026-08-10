@@ -44,28 +44,65 @@ describe("packed artifact", () => {
 
     const packedPackageDir = path.join(extractDir, "package")
     const packedFiles = await readdir(packedPackageDir)
-    expect(packedFiles).toContain("LICENSE")
+    expect(packedFiles.sort()).toEqual([
+      "LICENSE",
+      "README.md",
+      "dist",
+      "docs",
+      "openclaw.plugin.json",
+      "package.json",
+    ])
     expect(await readFile(path.join(packedPackageDir, "LICENSE"), "utf8")).toContain(
       "Apache License",
     )
+    expect((await readdir(path.join(packedPackageDir, "docs"))).sort()).toEqual([
+      "create-inline-bot.md",
+      "openclaw-setup.md",
+    ])
+
+    const packedReadme = await readFile(path.join(packedPackageDir, "README.md"), "utf8")
+    const relativeReadmeLinks = [...packedReadme.matchAll(/(?<!!)\[[^\]]+\]\(([^)]+)\)/g)]
+      .map((match) => match[1]!.split("#", 1)[0]!)
+      .filter((target) => !/^(?:[a-z]+:|#)/i.test(target))
+    expect(relativeReadmeLinks.sort()).toEqual([
+      "docs/create-inline-bot.md",
+      "docs/openclaw-setup.md",
+    ])
+    for (const target of relativeReadmeLinks) {
+      const resolved = path.resolve(packedPackageDir, target)
+      expect(resolved.startsWith(`${packedPackageDir}${path.sep}`)).toBe(true)
+      expect((await readFile(resolved, "utf8")).length).toBeGreaterThan(0)
+    }
 
     const distDir = path.join(packedPackageDir, "dist")
     const jsFiles = await listJsFiles(distDir)
     expect(jsFiles.length).toBeGreaterThan(0)
 
     const distFiles = await readdir(distDir)
-    expect(distFiles).toContain("index.js")
-    expect(distFiles).toContain("configured-state.js")
-    expect(distFiles).toContain("setup-entry.js")
-    expect(distFiles).toContain("setup-plugin-api.js")
-    expect(distFiles).toContain("secret-contract-api.js")
-    expect(distFiles).toContain("channel-plugin-api.js")
-    expect(distFiles).toContain("approval-handler.runtime.js")
-    expect(distFiles).toContain("runtime-setter-api.js")
-    expect(distFiles).toContain("account-inspect-api.js")
-    expect(distFiles).toContain("runtime-register-api.js")
-    expect(distFiles).not.toContain("inline")
-    expect(distFiles).not.toContain("tsconfig.tsbuildinfo")
+    expect(distFiles.sort()).toEqual([
+      "account-inspect-api.js",
+      "account-inspect-api.js.map",
+      "approval-handler.runtime.js",
+      "approval-handler.runtime.js.map",
+      "channel-plugin-api.js",
+      "channel-plugin-api.js.map",
+      "configured-state.js",
+      "configured-state.js.map",
+      "index.d.ts",
+      "index.d.ts.map",
+      "index.js",
+      "index.js.map",
+      "runtime-register-api.js",
+      "runtime-register-api.js.map",
+      "runtime-setter-api.js",
+      "runtime-setter-api.js.map",
+      "secret-contract-api.js",
+      "secret-contract-api.js.map",
+      "setup-entry.js",
+      "setup-entry.js.map",
+      "setup-plugin-api.js",
+      "setup-plugin-api.js.map",
+    ])
 
     const mainEntry = await readFile(path.join(distDir, "index.js"), "utf8")
     expect(mainEntry).toContain("defineBundledChannelEntry")

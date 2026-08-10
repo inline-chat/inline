@@ -244,7 +244,7 @@ describe("sidecar runtime", () => {
       expect(resultOf(chat.body)).toMatchObject({
         chatId: "123",
         title: "Mock chat 123",
-        pinnedMessageIds: ["8801"],
+        pinnedMessageIds: ["8805", "8801"],
         anchorMessage: expect.objectContaining({
           id: "8801",
           message: "mock pinned message",
@@ -267,7 +267,7 @@ describe("sidecar runtime", () => {
         dialog: expect.objectContaining({ followMode: 1 }),
         dialogFollowMode: "1",
         untitled: true,
-        pinnedMessageIds: ["8801"],
+        pinnedMessageIds: ["8805", "8801"],
       })
 
       const follow = await post(port, "/follow-mode", {
@@ -305,28 +305,46 @@ describe("sidecar runtime", () => {
 
       const messages = await post(port, "/messages", {
         target: { chatId: "123" },
-        messageIds: ["9001"],
+        messageIds: ["9002", "9001", "9002"],
       }, auth)
       expect(messages.status).toBe(200)
       expect(resultOf(messages.body).messages).toEqual([
         expect.objectContaining({
-          id: "9001",
-          message: "mock message 9001",
+          id: "9002",
+          message: "mock message 9002",
           sender: { id: "111", firstName: "Ada", lastName: "Lovelace", username: "ada" },
         }),
+        expect.objectContaining({ id: "9001", message: "mock message 9001" }),
       ])
+
+      for (const messageIds of [
+        "9001",
+        [],
+        ["not-an-id"],
+        ["-1"],
+        ["9223372036854775808"],
+        Array.from({ length: 101 }, () => "9001"),
+      ]) {
+        const invalid = await post(port, "/messages", {
+          target: { chatId: "123" },
+          messageIds,
+        }, auth)
+        expect(invalid.status).toBe(400)
+        expect(invalid.body).toMatchObject({ ok: false, errorKind: "bad_format" })
+      }
 
       const history = await post(port, "/history", {
         target: { chatId: "123" },
-        limit: 1,
+        limit: 2,
       }, auth)
       expect(history.status).toBe(200)
       expect(resultOf(history.body).messages).toEqual([
         expect.objectContaining({
-          id: "8801",
-          message: "mock history",
+          id: "8700",
+          message: "mock history server-first",
           sender: { id: "111", firstName: "Ada", lastName: "Lovelace", username: "ada" },
         }),
+        expect.objectContaining({ id: "8801", message: "mock history server-second" }),
       ])
 
       const search = await post(port, "/search", {
@@ -339,9 +357,10 @@ describe("sidecar runtime", () => {
       expect(resultOf(search.body).messages).toEqual([
         expect.objectContaining({
           id: "8802",
-          message: "mock search deploy",
+          message: "mock search first deploy",
           sender: { id: "111", firstName: "Ada", lastName: "Lovelace", username: "ada" },
         }),
+        expect.objectContaining({ id: "8702", message: "mock search second deploy" }),
       ])
 
       const addReaction = await post(port, "/reaction", {
@@ -391,7 +410,7 @@ describe("sidecar runtime", () => {
       expect(pins.status).toBe(200)
       expect(resultOf(pins.body)).toMatchObject({
         chatId: "123",
-        pinnedMessageIds: ["8801"],
+        pinnedMessageIds: ["8805", "8801"],
         anchorMessage: expect.objectContaining({ id: "8801" }),
       })
 

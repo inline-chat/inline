@@ -44,6 +44,22 @@ describe("inline-hermes installer", () => {
     expect(text).toContain("inline-hermes version")
   })
 
+  it("renders command-scoped help and rejects irrelevant cross-command flags", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {})
+
+    for (const command of ["install", "status", "doctor", "test-send"] as const) {
+      log.mockClear()
+      await expect(main([command, "--help"])).resolves.toBe(0)
+      expect(log.mock.calls.map((call) => String(call[0])).join("\n"))
+        .toContain(`Usage: inline-hermes ${command}`)
+    }
+
+    await expect(main(["status", "--force"])).rejects.toThrow("--force is not valid for inline-hermes status")
+    await expect(main(["doctor", "--dry-run"])).rejects.toThrow("--dry-run is not valid for inline-hermes doctor")
+    await expect(main(["install", "--to", "chat:1"])).rejects.toThrow("--to is not valid for inline-hermes install")
+    await expect(main(["test-send", "--link"])).rejects.toThrow("--link is not valid for inline-hermes test-send")
+  })
+
   it("prints the package version from command or flag form", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {})
 
@@ -53,9 +69,9 @@ describe("inline-hermes installer", () => {
 
     const versions = log.mock.calls.map((call) => String(call[0]))
     expect(versions).toEqual([
-      "@inline-chat/hermes-agent-adapter@0.0.7",
-      "@inline-chat/hermes-agent-adapter@0.0.7",
-      "@inline-chat/hermes-agent-adapter@0.0.7",
+      "@inline-chat/hermes-agent-adapter@0.0.8",
+      "@inline-chat/hermes-agent-adapter@0.0.8",
+      "@inline-chat/hermes-agent-adapter@0.0.8",
     ])
   })
 
@@ -239,6 +255,34 @@ describe("inline-hermes installer", () => {
     const code = await main(["doctor", "--hermes-home", home])
 
     expect(code).toBe(1)
+  })
+
+  it("fails closed when status targets a missing or incomplete install", async () => {
+    const home = await tempDir()
+    const log = vi.spyOn(console, "log").mockImplementation(() => {})
+
+    expect(await main(["status", "--hermes-home", home, "--json"])).toBe(1)
+    const missing = JSON.parse(String(log.mock.calls.at(-1)?.[0]))
+    expect(missing).toMatchObject({
+      ok: false,
+      sourceReady: true,
+      targetExists: false,
+      targetValid: false,
+      installedReady: false,
+    })
+    expect(missing.issues).toContain(`plugin is not installed: ${path.join(home, "plugins", "inline")}`)
+
+    await mkdir(path.join(home, "plugins", "inline"), { recursive: true })
+    await writeFile(path.join(home, "plugins", "inline", "plugin.yaml"), "name: incomplete\n")
+    expect(await main(["status", "--hermes-home", home, "--json"])).toBe(1)
+    const incomplete = JSON.parse(String(log.mock.calls.at(-1)?.[0]))
+    expect(incomplete).toMatchObject({
+      ok: false,
+      targetExists: true,
+      targetValid: false,
+      installedReady: false,
+    })
+    expect(incomplete.issues).toContain(`installed plugin is incomplete: ${path.join(home, "plugins", "inline")}`)
   })
 
   it("reports source and installed sidecar hashes", async () => {
