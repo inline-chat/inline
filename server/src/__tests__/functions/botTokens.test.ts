@@ -104,6 +104,7 @@ describe("bot tokens", () => {
 
     expect(botUser).toBeDefined()
     expect(botUser?.deleted).toBe(true)
+    expect(botUser?.username).toBeNull()
 
     const listed = await listBots({}, creatorContext)
     expect(listed.bots.some((bot) => bot.id === botId)).toBe(false)
@@ -123,6 +124,13 @@ describe("bot tokens", () => {
     await expect(getUserIdFromToken(created.token)).rejects.toThrow()
     await expect(revealBotToken({ botUserId: botId }, creatorContext)).rejects.toThrow()
     await expect(rotateBotToken({ botUserId: botId }, creatorContext)).rejects.toThrow()
+
+    const replacement = await createBot(
+      { name: "Replacement Bot", username: "deletebot" },
+      creatorContext,
+    )
+    expect(replacement.bot?.username).toBe("deletebot")
+    expect(replacement.bot?.id).not.toBe(botId)
   })
 
   test("deleteBot rejects non-creator", async () => {

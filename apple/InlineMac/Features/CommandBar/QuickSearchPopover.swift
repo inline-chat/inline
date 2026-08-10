@@ -1750,7 +1750,7 @@ private struct QuickSearchRow: View {
                 .lineLimit(1)
             }
             Spacer(minLength: 0)
-            Text("User")
+            Text(user.bot == true ? "Bot" : "User")
               .foregroundStyle(.secondary)
               .lineLimit(1)
           }

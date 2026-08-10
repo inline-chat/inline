@@ -37,6 +37,7 @@ export const deleteBot = async (
     .set({
       deleted: true,
       online: false,
+      username: null,
     })
     .where(eq(users.id, botUserId))
 

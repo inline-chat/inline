@@ -8,6 +8,7 @@ import SwiftUI
 
 struct BotsSettingsDetailView: View {
   @Environment(\.auth) private var auth
+  @Environment(\.dependencies) private var dependencies
   @Environment(\.realtimeV2) private var realtimeV2
 
   @StateObject private var viewModel = BotsSettingsViewModel()
@@ -19,6 +20,8 @@ struct BotsSettingsDetailView: View {
   @State private var botToEditAvatar: BotAvatarEditItem?
   @State private var rotateConfirmBotId: Int64?
   @State private var deleteConfirmBot: BotDeleteItem?
+
+  private let log = Log.scoped("BotsSettings")
 
   var body: some View {
     Form {
@@ -113,6 +116,9 @@ struct BotsSettingsDetailView: View {
               isRotating: viewModel.rotatingBots.contains(bot.id),
               isDeleting: viewModel.deletingBots.contains(bot.id),
               isBusy: viewModel.isBusy(bot.id),
+              onOpen: {
+                Task { await openBot(bot) }
+              },
               onReveal: {
                 Task { await viewModel.revealToken(for: bot.id, realtimeV2: realtimeV2) }
               },
@@ -245,17 +251,29 @@ struct BotsSettingsDetailView: View {
     guard !trimmedName.isEmpty, !trimmedUsername.isEmpty else { return }
 
     Task {
-      let created = await viewModel.createBot(
+      guard let createdBot = await viewModel.createBot(
         name: trimmedName,
         username: trimmedUsername,
         realtimeV2: realtimeV2
-      )
+      ) else { return }
 
-      if created {
-        name = ""
-        username = ""
-        focusedField = .name
-      }
+      name = ""
+      username = ""
+      focusedField = .name
+      await openBot(createdBot)
+    }
+  }
+
+  private func openBot(_ bot: InlineProtocol.User) async {
+    let peer = Peer.user(id: bot.id)
+
+    do {
+      _ = try await realtimeV2.send(.getChat(peer: peer))
+      _ = try await realtimeV2.send(.updateDialogOpen(peerId: peer, open: true))
+      MainWindowOpenCoordinator.shared.openWindow(.chat(peer: peer))
+    } catch {
+      log.error("Failed to open bot chat", error: error)
+      dependencies?.overlay.showError(message: "The bot was saved, but its chat could not be opened.")
     }
   }
 
@@ -349,6 +367,7 @@ final class BotsSettingsViewModel: ObservableObject {
       }
 
       bots = response.bots
+      await saveBotsLocally(response.bots)
       let validIds = Set(bots.map(\.id))
       revealedTokens = revealedTokens.filter { validIds.contains($0.key) }
       deletingBots = deletingBots.filter { validIds.contains($0) }
@@ -361,8 +380,8 @@ final class BotsSettingsViewModel: ObservableObject {
     isLoading = false
   }
 
-  func createBot(name: String, username: String, realtimeV2: RealtimeV2) async -> Bool {
-    guard !isCreating else { return false }
+  func createBot(name: String, username: String, realtimeV2: RealtimeV2) async -> InlineProtocol.User? {
+    guard !isCreating else { return nil }
 
     isCreating = true
     createError = nil
@@ -381,6 +400,7 @@ final class BotsSettingsViewModel: ObservableObject {
         throw TransactionExecutionError.invalid
       }
 
+      await saveBotsLocally([response.bot])
       bots.append(response.bot)
       bots.sort { $0.id < $1.id }
       if !response.token.isEmpty {
@@ -388,12 +408,12 @@ final class BotsSettingsViewModel: ObservableObject {
       }
 
       isCreating = false
-      return true
+      return response.bot
     } catch {
       log.error("Failed to create bot", error: error)
       createError = "Failed to create bot."
       isCreating = false
-      return false
+      return nil
     }
   }
 
@@ -491,6 +511,18 @@ final class BotsSettingsViewModel: ObservableObject {
       bots.sort { $0.id < $1.id }
     }
   }
+
+  private func saveBotsLocally(_ bots: [InlineProtocol.User]) async {
+    do {
+      try await AppDatabase.shared.dbWriter.write { db in
+        for bot in bots {
+          _ = try User.save(db, user: bot)
+        }
+      }
+    } catch {
+      log.error("Failed to save managed bots locally", error: error)
+    }
+  }
 }
 
 private struct BotRow: View {
@@ -500,6 +532,7 @@ private struct BotRow: View {
   let isRotating: Bool
   let isDeleting: Bool
   let isBusy: Bool
+  let onOpen: () -> Void
   let onReveal: () -> Void
   let onHide: () -> Void
   let onRotateRequested: () -> Void
@@ -548,6 +581,12 @@ private struct BotRow: View {
 
   private var actionsMenu: some View {
     Menu {
+      Button("Open Chat") {
+        onOpen()
+      }
+
+      Divider()
+
       if token == nil {
         Button(isRevealing ? "Revealing..." : "Reveal Token") {
           onReveal()
@@ -576,7 +615,7 @@ private struct BotRow: View {
 
       Divider()
 
-      Button(isDeleting ? "Deleting..." : "Delete Bot...") {
+      Button(isDeleting ? "Deleting..." : "Delete Bot...", role: .destructive) {
         onDeleteRequested()
       }
       .disabled(isDeleting)

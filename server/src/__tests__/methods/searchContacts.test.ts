@@ -7,7 +7,7 @@ import { setupTestLifecycle, testUtils } from "../setup"
 describe("searchContacts", () => {
   setupTestLifecycle()
 
-  test("hides bots on partial username matches but allows exact bot username matches", async () => {
+  test("autocompletes owned bots while hiding other bots on partial matches", async () => {
     const viewer = await testUtils.createUser("search-viewer@example.com")
 
     await db.insert(users).values([
@@ -22,6 +22,7 @@ describe("searchContacts", () => {
         firstName: "Helper Bot",
         username: "helperbot",
         bot: true,
+        botCreatorId: viewer.id,
       },
       {
         email: "search-other-bot@example.com",
@@ -33,8 +34,15 @@ describe("searchContacts", () => {
 
     const partial = await handler({ q: "helper", limit: 20 }, { currentUserId: viewer.id })
     expect(partial.users.map((user) => user.username)).toContain("helperhuman")
-    expect(partial.users.map((user) => user.username)).not.toContain("helperbot")
+    expect(partial.users.map((user) => user.username)).toContain("helperbot")
     expect(partial.users.map((user) => user.username)).not.toContain("otherhelperbot")
+
+    const limited = await handler({ q: "helper", limit: 1 }, { currentUserId: viewer.id })
+    expect(limited.users.map((user) => user.username)).toEqual(["helperbot"])
+
+    const byName = await handler({ q: "Helper Bot", limit: 20 }, { currentUserId: viewer.id })
+    expect(byName.users.map((user) => user.username)).toContain("helperbot")
+    expect(byName.users.map((user) => user.username)).not.toContain("otherhelperbot")
 
     const exact = await handler({ q: "@helperbot", limit: 20 }, { currentUserId: viewer.id })
     expect(exact.users.map((user) => user.username)).toContain("helperbot")

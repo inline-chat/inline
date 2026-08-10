@@ -227,10 +227,12 @@ export class UsersModel {
     query,
     limit,
     excludeUserId,
+    includeBotCreatorId,
   }: {
     query: string
     limit: number
     excludeUserId?: number
+    includeBotCreatorId?: number
   }): Promise<Array<{ user: DbUser; photoFile?: DbFile | undefined }>> {
     const normalizedQuery = query.trim()
     if (normalizedQuery.length === 0) {
@@ -238,13 +240,39 @@ export class UsersModel {
     }
 
     const exactUsername = normalizedQuery.toLowerCase()
+    const partialMatch = `%${normalizedQuery}%`
+    const queryMatch = includeBotCreatorId
+      ? sql`(
+          ${users.username} ilike ${partialMatch}
+          or (
+            ${users.bot} is true
+            and ${users.botCreatorId} = ${includeBotCreatorId}
+            and concat_ws(' ', ${users.firstName}, ${users.lastName}) ilike ${partialMatch}
+          )
+        )`
+      : sql`${users.username} ilike ${partialMatch}`
+    const botVisibility = includeBotCreatorId
+      ? sql`(
+          ${users.bot} is not true
+          or lower(${users.username}) = ${exactUsername}
+          or ${users.botCreatorId} = ${includeBotCreatorId}
+        )`
+      : sql`(${users.bot} is not true or lower(${users.username}) = ${exactUsername})`
+    const searchOrder = includeBotCreatorId
+      ? sql`case
+          when lower(${users.username}) = ${exactUsername} then 0
+          when ${users.botCreatorId} = ${includeBotCreatorId} then 1
+          else 2
+        end`
+      : users.id
     const usersWithPhotos = await db._query.users.findMany({
       where: and(
-        sql`${users.username} ilike ${"%" + normalizedQuery + "%"}`,
-        sql`(${users.bot} is not true or lower(${users.username}) = ${exactUsername})`,
+        queryMatch,
+        botVisibility,
         excludeUserId ? not(eq(users.id, excludeUserId)) : undefined,
         userNotDeleted(),
       ),
+      orderBy: [searchOrder, users.id],
       limit,
       with: {
         photo: true,

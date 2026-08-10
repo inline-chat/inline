@@ -23,6 +23,7 @@ export const handler = async (
     query: input.q?.trim().replace(/^@+/, ""),
     limit: input.limit ?? 10,
     excludeUserId: currentUserId,
+    includeBotCreatorId: currentUserId,
   })
 
   return { users: users.map((u) => encodeMinUserInfo(u.user, { photoFile: u.photoFile ?? undefined })) }

@@ -28,15 +28,15 @@ export const updateBotProfile = async (
   if (input.photoFileUniqueId !== undefined) {
     const trimmed = input.photoFileUniqueId.trim()
     if (!trimmed) {
-      throw RealtimeRpcError.BadRequest()
-    }
+      updates.photoFileId = null
+    } else {
+      const file = await getFileByUniqueId(trimmed)
+      if (!file || file.userId !== context.currentUserId) {
+        throw RealtimeRpcError.BadRequest()
+      }
 
-    const file = await getFileByUniqueId(trimmed)
-    if (!file || file.userId !== context.currentUserId) {
-      throw RealtimeRpcError.BadRequest()
+      updates.photoFileId = file.id
     }
-
-    updates.photoFileId = file.id
   }
 
   // No-op updates are allowed (e.g. user opens sheet and presses save).

@@ -126,4 +126,39 @@ describe("bot profile", () => {
     expect(updated.bot?.id).toBe(BigInt(botUserId))
     expect(storedBot?.photoFileId).toBe(file.id)
   })
+
+  test("updateBotProfile clears a bot profile photo for its creator", async () => {
+    const created = await createBot({ name: "Clear Photo Bot", username: "clearphotobot" }, creatorContext)
+    const botUserId = Number(created.bot?.id ?? 0n)
+    const [file] = await db
+      .insert(schema.files)
+      .values({
+        fileUniqueId: `creator-bot-photo-${botUserId}`,
+        userId: creator.id,
+        fileType: "photo",
+        mimeType: "image/png",
+        fileSize: 123,
+      })
+      .returning()
+
+    if (!file) throw new Error("Failed to create creator-owned file")
+
+    await updateBotProfile(
+      { botUserId: BigInt(botUserId), photoFileUniqueId: file.fileUniqueId },
+      creatorContext,
+    )
+    const cleared = await updateBotProfile(
+      { botUserId: BigInt(botUserId), photoFileUniqueId: "" },
+      creatorContext,
+    )
+
+    const [storedBot] = await db
+      .select({ photoFileId: schema.users.photoFileId })
+      .from(schema.users)
+      .where(eq(schema.users.id, botUserId))
+      .limit(1)
+
+    expect(storedBot?.photoFileId).toBeNull()
+    expect(cleared.bot?.profilePhoto).toBeUndefined()
+  })
 })
