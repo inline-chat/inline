@@ -41,6 +41,12 @@ struct SidebarFooterView: View {
   let onCreateSpace: () -> Void
   let onNewThread: () -> Void
   let onInvite: () -> Void
+  let onOpenDocs: () -> Void
+  let onOpenTownHall: () -> Void
+  let onDMFounder: () -> Void
+  let onCheckForUpdates: (() -> Void)?
+  let onOpenWhatsNew: () -> Void
+  let onOpenStatus: () -> Void
 
   @State private var isNotificationHovering = false
 
@@ -93,6 +99,45 @@ struct SidebarFooterView: View {
           .accessibilityLabel("Notifications")
           .help("Notifications")
           .onHover { isNotificationHovering = $0 }
+      }
+
+      slot {
+        SidebarFooterMenu(
+          symbolName: "questionmark",
+          accessibilityLabel: "Help",
+          tint: iconTint
+        ) {
+          Button(action: onOpenDocs) {
+            Label("Docs", systemImage: "book.closed")
+            Text("Get started, set up agents, and develop")
+          }
+
+          Button(action: onOpenTownHall) {
+            Label("Join Town Hall", systemImage: "person.3")
+            Text("Inline’s early users community")
+          }
+
+          Button(action: onDMFounder) {
+            Label("DM the Founder", systemImage: "bubble.left")
+            Text("Start a DM with @mo")
+          }
+
+          Divider()
+
+          if let onCheckForUpdates {
+            Button(action: onCheckForUpdates) {
+              Label("Check for Updates", systemImage: "arrow.triangle.2.circlepath")
+            }
+          }
+
+          Button(action: onOpenWhatsNew) {
+            Label("What’s New", systemImage: "sparkles")
+          }
+
+          Button(action: onOpenStatus) {
+            Label("Status", systemImage: "antenna.radiowaves.left.and.right")
+          }
+        }
       }
 
       slot {

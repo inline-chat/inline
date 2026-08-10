@@ -643,8 +643,22 @@ struct SidebarView: View {
       },
       onInvite: {
         nav.open(.inviteToSpace(spaceId: activeSpaceId))
-      }
+      },
+      onOpenDocs: openDocs,
+      onOpenTownHall: openTownHall,
+      onDMFounder: dmFounder,
+      onCheckForUpdates: checkForUpdatesAction,
+      onOpenWhatsNew: openWhatsNew,
+      onOpenStatus: openStatus
     )
+  }
+
+  private var checkForUpdatesAction: (() -> Void)? {
+#if SPARKLE
+    { updates.checkForUpdates() }
+#else
+    nil
+#endif
   }
 
   @ViewBuilder
@@ -1278,6 +1292,55 @@ struct SidebarView: View {
 
   private func selectSpace(_ spaceId: Int64) {
     nav.selectSpace(spaceId)
+  }
+
+  private func openDocs() {
+    openExternalURL("https://inline.chat/docs")
+  }
+
+  private func openTownHall() {
+    let townHall = viewModel.spaces.first { space in
+      space.displayName
+        .lowercased()
+        .filter { $0.isLetter || $0.isNumber } == "townhall"
+    }
+
+    guard let townHall else {
+      ToastCenter.shared.showInfo("Town Hall isn’t available for this account yet.")
+      return
+    }
+
+    selectSpace(townHall.id)
+  }
+
+  private func dmFounder() {
+#if DEBUG
+    let moUserID: Int64 = 1_300
+#else
+    let moUserID: Int64 = 1_600
+#endif
+    let peer = Peer.user(id: moUserID)
+    guard let dependencies else {
+      nav.open(.chat(peer: peer))
+      return
+    }
+    Task(priority: .userInitiated) {
+      await dependencies.realtimeV2.sendQueued(.updateDialogOpen(peerId: peer, open: true))
+    }
+    dependencies.requestOpenChat(peer: peer)
+  }
+
+  private func openWhatsNew() {
+    openExternalURL("https://inline.chat/docs/changelog")
+  }
+
+  private func openStatus() {
+    openExternalURL("https://status.inline.chat/")
+  }
+
+  private func openExternalURL(_ string: String) {
+    guard let url = URL(string: string) else { return }
+    NSWorkspace.shared.open(url)
   }
 
   private func createNewThread() {
