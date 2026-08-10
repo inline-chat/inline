@@ -539,6 +539,20 @@ message Space {
 
   // Whether this is a public community space with stricter member privacy.
   optional bool is_public = 5;
+
+  // Public, case-insensitive address used for joining and links.
+  optional string handle = 6;
+}
+
+message JoinPublicSpaceInput {
+  // Public space handle, with or without a leading @.
+  string handle = 1;
+}
+
+message JoinPublicSpaceResult {
+  Space space = 1;
+  Member member = 2;
+  bool already_member = 3;
 }
 
 message UserGroup {
@@ -1041,6 +1055,7 @@ enum Method {
   SET_PROFILE_PHOTO = 94;
   GET_EXTERNAL_PROFILE_PHOTO = 95;
   GET_CHAT_TRANSCRIPT = 96;
+  JOIN_PUBLIC_SPACE = 98;
 }
 
 message RpcCall {
@@ -1142,6 +1157,7 @@ message RpcCall {
     SetProfilePhotoInput setProfilePhoto = 95;
     GetExternalProfilePhotoInput getExternalProfilePhoto = 96;
     GetChatTranscriptInput getChatTranscript = 97;
+    JoinPublicSpaceInput joinPublicSpace = 99;
   }
 }
 
@@ -1245,6 +1261,7 @@ message RpcResult {
     SetProfilePhotoResult setProfilePhoto = 95;
     GetExternalProfilePhotoResult getExternalProfilePhoto = 96;
     GetChatTranscriptResult getChatTranscript = 97;
+    JoinPublicSpaceResult joinPublicSpace = 99;
   }
 }
 

@@ -10,5 +10,6 @@ export function encodeSpace(space: DbSpace, { encodingForUserId }: { encodingFor
     creator: encodingForUserId === space.creatorId,
     date: encodeDateStrict(space.date),
     isPublic: space.isPublic,
+    handle: space.handle ?? undefined,
   }
 }

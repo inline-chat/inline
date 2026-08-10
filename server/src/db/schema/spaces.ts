@@ -1,30 +1,36 @@
 import { creationDate, date } from "@in/server/db/schema/common"
 import { members } from "@in/server/db/schema/members"
-import { users } from "@in/server/db/schema/users"
+import { lower, users } from "@in/server/db/schema/users"
 import { relations } from "drizzle-orm/_relations"
-import { boolean, pgTable, varchar, serial, integer, timestamp } from "drizzle-orm/pg-core"
+import { boolean, pgTable, varchar, serial, integer, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
 
-export const spaces = pgTable("spaces", {
-  id: serial().primaryKey(),
-  name: varchar({ length: 256 }).notNull(),
-  handle: varchar({ length: 32 }).unique(),
-  creatorId: integer().references(() => users.id),
-  isPublic: boolean("is_public").default(false).notNull(),
-  date: creationDate,
-  deleted: date,
+export const spaces = pgTable(
+  "spaces",
+  {
+    id: serial().primaryKey(),
+    name: varchar({ length: 256 }).notNull(),
+    handle: varchar({ length: 256 }),
+    creatorId: integer().references(() => users.id),
+    isPublic: boolean("is_public").default(false).notNull(),
+    date: creationDate,
+    deleted: date,
 
-  /** Sequence of the updates for the space */
-  updateSeq: integer("update_seq").default(0),
+    /** Sequence of the updates for the space */
+    updateSeq: integer("update_seq").default(0),
 
-  /** Date of the last update */
-  lastUpdateDate: timestamp("last_update_date", {
-    mode: "date",
-    precision: 3,
+    /** Date of the last update */
+    lastUpdateDate: timestamp("last_update_date", {
+      mode: "date",
+      precision: 3,
+    }),
+
+    /** Monotonic version of this Space's replaceable Grid snapshot. */
+    gridRevision: integer("grid_revision").default(0).notNull(),
+  },
+  (table) => ({
+    spacesHandleUnique: uniqueIndex("spaces_handle_unique").on(lower(table.handle)),
   }),
-
-  /** Monotonic version of this Space's replaceable Grid snapshot. */
-  gridRevision: integer("grid_revision").default(0).notNull(),
-})
+)
 
 export const spaceRelations = relations(spaces, ({ many }) => ({
   members: many(members),

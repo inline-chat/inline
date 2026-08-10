@@ -929,6 +929,18 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("space public handle") { db in
+      let columnNames = Set(try db.columns(in: "space").map(\.name))
+      try db.alter(table: "space") { t in
+        if !columnNames.contains("handle") {
+          t.add(column: "handle", .text)
+        }
+        if !columnNames.contains("isPublic") {
+          t.add(column: "isPublic", .boolean)
+        }
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

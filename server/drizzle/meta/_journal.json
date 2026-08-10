@@ -736,6 +736,13 @@
       "when": 1785594979100,
       "tag": "0104_email-campaign-from-address",
       "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1786380843724,
+      "tag": "0105_public-space-handles",
+      "breakpoints": true
     }
   ]
 }

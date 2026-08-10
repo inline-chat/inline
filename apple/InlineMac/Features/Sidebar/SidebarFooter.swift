@@ -68,7 +68,7 @@ struct SidebarFooterView: View {
           }
 
           Button(action: onOpenTownHall) {
-            Label("Town Hall", systemImage: "person.3")
+            Label("Join Town Hall", systemImage: "person.3")
             Text("Inline’s early users community")
           }
 

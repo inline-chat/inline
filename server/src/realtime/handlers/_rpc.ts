@@ -21,6 +21,7 @@ import { createChat } from "@in/server/realtime/handlers/messages.createChat"
 import { getSpaceMembers } from "@in/server/realtime/handlers/space.getSpaceMembers"
 import { deleteChatHandler } from "@in/server/realtime/handlers/messages.deleteChat"
 import { inviteToSpace } from "@in/server/functions/space.inviteToSpace"
+import { joinPublicSpace } from "@in/server/functions/space.joinPublicSpace"
 import { getChatParticipants } from "@in/server/realtime/handlers/messages.getChatParticipants"
 import { addChatParticipant } from "@in/server/realtime/handlers/messages.addChatParticipant"
 import { removeChatParticipant } from "@in/server/realtime/handlers/messages.removeChatParticipant"
@@ -421,6 +422,17 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
         currentSessionId: handlerContext.sessionId,
       })
       return { oneofKind: "inviteToSpace", inviteToSpace: result }
+    }
+
+    case Method.JOIN_PUBLIC_SPACE: {
+      if (call.input.oneofKind !== "joinPublicSpace") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await joinPublicSpace(call.input.joinPublicSpace, {
+        currentUserId: handlerContext.userId,
+        currentSessionId: handlerContext.sessionId,
+      })
+      return { oneofKind: "joinPublicSpace", joinPublicSpace: result }
     }
 
     case Method.GET_USER_GROUPS: {

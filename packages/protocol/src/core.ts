@@ -1430,6 +1430,40 @@ export interface Space {
      * @generated from protobuf field: optional bool is_public = 5;
      */
     isPublic?: boolean;
+    /**
+     * Public, case-insensitive address used for joining and links.
+     *
+     * @generated from protobuf field: optional string handle = 6;
+     */
+    handle?: string;
+}
+/**
+ * @generated from protobuf message JoinPublicSpaceInput
+ */
+export interface JoinPublicSpaceInput {
+    /**
+     * Public space handle, with or without a leading @.
+     *
+     * @generated from protobuf field: string handle = 1;
+     */
+    handle: string;
+}
+/**
+ * @generated from protobuf message JoinPublicSpaceResult
+ */
+export interface JoinPublicSpaceResult {
+    /**
+     * @generated from protobuf field: Space space = 1;
+     */
+    space?: Space;
+    /**
+     * @generated from protobuf field: Member member = 2;
+     */
+    member?: Member;
+    /**
+     * @generated from protobuf field: bool already_member = 3;
+     */
+    alreadyMember: boolean;
 }
 /**
  * @generated from protobuf message UserGroup
@@ -2962,6 +2996,12 @@ export interface RpcCall {
          */
         getChatTranscript: GetChatTranscriptInput;
     } | {
+        oneofKind: "joinPublicSpace";
+        /**
+         * @generated from protobuf field: JoinPublicSpaceInput joinPublicSpace = 99;
+         */
+        joinPublicSpace: JoinPublicSpaceInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -3546,6 +3586,12 @@ export interface RpcResult {
          * @generated from protobuf field: GetChatTranscriptResult getChatTranscript = 97;
          */
         getChatTranscript: GetChatTranscriptResult;
+    } | {
+        oneofKind: "joinPublicSpace";
+        /**
+         * @generated from protobuf field: JoinPublicSpaceResult joinPublicSpace = 99;
+         */
+        joinPublicSpace: JoinPublicSpaceResult;
     } | {
         oneofKind: undefined;
     };
@@ -9305,7 +9351,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: GET_CHAT_TRANSCRIPT = 96;
      */
-    GET_CHAT_TRANSCRIPT = 96
+    GET_CHAT_TRANSCRIPT = 96,
+    /**
+     * @generated from protobuf enum value: JOIN_PUBLIC_SPACE = 98;
+     */
+    JOIN_PUBLIC_SPACE = 98
 }
 /**
  * @generated from protobuf enum GridConnectionUnavailableReason
@@ -12784,7 +12834,8 @@ class Space$Type extends MessageType<Space> {
             { no: 2, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "creator", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 4, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 5, name: "is_public", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 5, name: "is_public", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 6, name: "handle", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Space>): Space {
@@ -12817,6 +12868,9 @@ class Space$Type extends MessageType<Space> {
                 case /* optional bool is_public */ 5:
                     message.isPublic = reader.bool();
                     break;
+                case /* optional string handle */ 6:
+                    message.handle = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -12844,6 +12898,9 @@ class Space$Type extends MessageType<Space> {
         /* optional bool is_public = 5; */
         if (message.isPublic !== undefined)
             writer.tag(5, WireType.Varint).bool(message.isPublic);
+        /* optional string handle = 6; */
+        if (message.handle !== undefined)
+            writer.tag(6, WireType.LengthDelimited).string(message.handle);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -12854,6 +12911,114 @@ class Space$Type extends MessageType<Space> {
  * @generated MessageType for protobuf message Space
  */
 export const Space = new Space$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class JoinPublicSpaceInput$Type extends MessageType<JoinPublicSpaceInput> {
+    constructor() {
+        super("JoinPublicSpaceInput", [
+            { no: 1, name: "handle", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<JoinPublicSpaceInput>): JoinPublicSpaceInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.handle = "";
+        if (value !== undefined)
+            reflectionMergePartial<JoinPublicSpaceInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: JoinPublicSpaceInput): JoinPublicSpaceInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string handle */ 1:
+                    message.handle = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: JoinPublicSpaceInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string handle = 1; */
+        if (message.handle !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.handle);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message JoinPublicSpaceInput
+ */
+export const JoinPublicSpaceInput = new JoinPublicSpaceInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class JoinPublicSpaceResult$Type extends MessageType<JoinPublicSpaceResult> {
+    constructor() {
+        super("JoinPublicSpaceResult", [
+            { no: 1, name: "space", kind: "message", T: () => Space },
+            { no: 2, name: "member", kind: "message", T: () => Member },
+            { no: 3, name: "already_member", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<JoinPublicSpaceResult>): JoinPublicSpaceResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.alreadyMember = false;
+        if (value !== undefined)
+            reflectionMergePartial<JoinPublicSpaceResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: JoinPublicSpaceResult): JoinPublicSpaceResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Space space */ 1:
+                    message.space = Space.internalBinaryRead(reader, reader.uint32(), options, message.space);
+                    break;
+                case /* Member member */ 2:
+                    message.member = Member.internalBinaryRead(reader, reader.uint32(), options, message.member);
+                    break;
+                case /* bool already_member */ 3:
+                    message.alreadyMember = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: JoinPublicSpaceResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Space space = 1; */
+        if (message.space)
+            Space.internalBinaryWrite(message.space, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* Member member = 2; */
+        if (message.member)
+            Member.internalBinaryWrite(message.member, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* bool already_member = 3; */
+        if (message.alreadyMember !== false)
+            writer.tag(3, WireType.Varint).bool(message.alreadyMember);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message JoinPublicSpaceResult
+ */
+export const JoinPublicSpaceResult = new JoinPublicSpaceResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UserGroup$Type extends MessageType<UserGroup> {
     constructor() {
@@ -14775,7 +14940,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 94, name: "createCliSession", kind: "message", oneof: "input", T: () => CreateCliSessionInput },
             { no: 95, name: "setProfilePhoto", kind: "message", oneof: "input", T: () => SetProfilePhotoInput },
             { no: 96, name: "getExternalProfilePhoto", kind: "message", oneof: "input", T: () => GetExternalProfilePhotoInput },
-            { no: 97, name: "getChatTranscript", kind: "message", oneof: "input", T: () => GetChatTranscriptInput }
+            { no: 97, name: "getChatTranscript", kind: "message", oneof: "input", T: () => GetChatTranscriptInput },
+            { no: 99, name: "joinPublicSpace", kind: "message", oneof: "input", T: () => JoinPublicSpaceInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -15364,6 +15530,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getChatTranscript: GetChatTranscriptInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getChatTranscript)
                     };
                     break;
+                case /* JoinPublicSpaceInput joinPublicSpace */ 99:
+                    message.input = {
+                        oneofKind: "joinPublicSpace",
+                        joinPublicSpace: JoinPublicSpaceInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).joinPublicSpace)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -15664,6 +15836,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetChatTranscriptInput getChatTranscript = 97; */
         if (message.input.oneofKind === "getChatTranscript")
             GetChatTranscriptInput.internalBinaryWrite(message.input.getChatTranscript, writer.tag(97, WireType.LengthDelimited).fork(), options).join();
+        /* JoinPublicSpaceInput joinPublicSpace = 99; */
+        if (message.input.oneofKind === "joinPublicSpace")
+            JoinPublicSpaceInput.internalBinaryWrite(message.input.joinPublicSpace, writer.tag(99, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -15773,7 +15948,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 94, name: "createCliSession", kind: "message", oneof: "result", T: () => CreateCliSessionResult },
             { no: 95, name: "setProfilePhoto", kind: "message", oneof: "result", T: () => SetProfilePhotoResult },
             { no: 96, name: "getExternalProfilePhoto", kind: "message", oneof: "result", T: () => GetExternalProfilePhotoResult },
-            { no: 97, name: "getChatTranscript", kind: "message", oneof: "result", T: () => GetChatTranscriptResult }
+            { no: 97, name: "getChatTranscript", kind: "message", oneof: "result", T: () => GetChatTranscriptResult },
+            { no: 99, name: "joinPublicSpace", kind: "message", oneof: "result", T: () => JoinPublicSpaceResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -16362,6 +16538,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getChatTranscript: GetChatTranscriptResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getChatTranscript)
                     };
                     break;
+                case /* JoinPublicSpaceResult joinPublicSpace */ 99:
+                    message.result = {
+                        oneofKind: "joinPublicSpace",
+                        joinPublicSpace: JoinPublicSpaceResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).joinPublicSpace)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -16662,6 +16844,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetChatTranscriptResult getChatTranscript = 97; */
         if (message.result.oneofKind === "getChatTranscript")
             GetChatTranscriptResult.internalBinaryWrite(message.result.getChatTranscript, writer.tag(97, WireType.LengthDelimited).fork(), options).join();
+        /* JoinPublicSpaceResult joinPublicSpace = 99; */
+        if (message.result.oneofKind === "joinPublicSpace")
+            JoinPublicSpaceResult.internalBinaryWrite(message.result.joinPublicSpace, writer.tag(99, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

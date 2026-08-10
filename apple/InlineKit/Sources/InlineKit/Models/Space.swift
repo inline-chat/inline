@@ -26,11 +26,16 @@ Sendable {
   // Are we creator of the space?
   public var creator: Bool?
 
+  public var handle: String?
+  public var isPublic: Bool?
+
   public enum Columns {
     public static let id = Column(CodingKeys.id)
     public static let name = Column(CodingKeys.name)
     public static let date = Column(CodingKeys.date)
     public static let creator = Column(CodingKeys.creator)
+    public static let handle = Column(CodingKeys.handle)
+    public static let isPublic = Column(CodingKeys.isPublic)
   }
 
   // Based on https://github.com/groue/GRDB.swift/discussions/1492, GRDB models can't be marked as sendable in GRDB < 6
@@ -55,12 +60,19 @@ Sendable {
   /// NOTE(@mo): `Int64.random(in: 1 ... 5000)` using this is dangerous because it can generate the same number for
   /// different spaces, and it will cause a conflict with the API.
   public init(
-    id: Int64 = Int64.random(in: 1 ... 5_000), name: String, date: Date, creator: Bool? = nil
+    id: Int64 = Int64.random(in: 1 ... 5_000),
+    name: String,
+    date: Date,
+    creator: Bool? = nil,
+    handle: String? = nil,
+    isPublic: Bool? = nil
   ) {
     self.id = id
     self.name = name
     self.date = date
     self.creator = creator
+    self.handle = handle
+    self.isPublic = isPublic
   }
 }
 
@@ -75,6 +87,8 @@ public extension Space {
     id = apiSpace.id
     name = apiSpace.name
     creator = apiSpace.creator
+    handle = nil
+    isPublic = nil
     date = Self.fromTimestamp(from: apiSpace.date)
   }
 
@@ -82,6 +96,8 @@ public extension Space {
     id = from.id
     name = from.name
     creator = from.creator
+    handle = from.hasHandle ? from.handle : nil
+    isPublic = from.hasIsPublic ? from.isPublic : nil
     date = Date(timeIntervalSince1970: Double(from.date))
   }
 

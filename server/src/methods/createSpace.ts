@@ -16,6 +16,7 @@ import { Log } from "@in/server/utils/log"
 import { Type } from "@sinclair/typebox"
 import type { Static } from "elysia"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
+import { isSpaceHandleUniqueError, normalizeSpaceHandle } from "@in/server/modules/spaces/spaceHandle"
 
 export const Input = Type.Object({
   name: Type.String(),
@@ -33,6 +34,11 @@ export const handler = async (
   input: Static<typeof Input>,
   context: HandlerContext,
 ): Promise<Static<typeof Response>> => {
+  const handle = input.handle === undefined ? null : normalizeSpaceHandle(input.handle)
+  if (input.handle !== undefined && !handle) {
+    throw new InlineError(InlineError.ApiError.USERNAME_INVALID)
+  }
+
   try {
     // Create the space
     let space = (
@@ -40,7 +46,7 @@ export const handler = async (
         .insert(spaces)
         .values({
           name: input.name,
-          handle: input.handle ?? null,
+          handle,
           creatorId: context.currentUserId,
         })
         .returning()
@@ -114,6 +120,12 @@ export const handler = async (
         .filter((d) => d !== undefined),
     }
   } catch (error) {
+    if (error instanceof InlineError) {
+      throw error
+    }
+    if (isSpaceHandleUniqueError(error)) {
+      throw new InlineError(InlineError.ApiError.USERNAME_TAKEN)
+    }
     Log.shared.error("Failed to create space", error)
     throw new InlineError(InlineError.ApiError.INTERNAL)
   }

@@ -1299,18 +1299,22 @@ struct SidebarView: View {
   }
 
   private func openTownHall() {
-    let townHall = viewModel.spaces.first { space in
-      space.displayName
-        .lowercased()
-        .filter { $0.isLetter || $0.isNumber } == "townhall"
-    }
-
-    guard let townHall else {
-      ToastCenter.shared.showInfo("Town Hall isn’t available for this account yet.")
+    guard let dependencies else {
+      ToastCenter.shared.showError("Couldn’t join Town Hall. Please try again.")
       return
     }
 
-    selectSpace(townHall.id)
+    Task(priority: .userInitiated) {
+      do {
+        let result = try await dependencies.realtimeV2.send(.joinPublicSpace(handle: "townhall"))
+        guard case let .joinPublicSpace(response) = result else {
+          throw TransactionExecutionError.invalid
+        }
+        selectSpace(response.space.id)
+      } catch {
+        ToastCenter.shared.showError("Couldn’t join Town Hall. Please try again.")
+      }
+    }
   }
 
   private func dmFounder() {
