@@ -56,6 +56,45 @@ struct SidebarFooterView: View {
 
   var body: some View {
     HStack(spacing: 0) {
+      slot {
+        SidebarFooterMenu(
+          symbolName: "questionmark",
+          accessibilityLabel: "Help",
+          tint: iconTint
+        ) {
+          Button(action: onOpenDocs) {
+            Label("Docs", systemImage: "book.closed")
+            Text("Get started, set up agents, and develop")
+          }
+
+          Button(action: onOpenTownHall) {
+            Label("Town Hall", systemImage: "person.3")
+            Text("Inline’s early users community")
+          }
+
+          Button(action: onDMFounder) {
+            Label("DM the Founder", systemImage: "bubble.left")
+            Text("Start a DM with @mo")
+          }
+
+          Divider()
+
+          if let onCheckForUpdates {
+            Button(action: onCheckForUpdates) {
+              Label("Check for Updates", systemImage: "arrow.triangle.2.circlepath")
+            }
+          }
+
+          Button(action: onOpenWhatsNew) {
+            Label("What’s New", systemImage: "sparkles")
+          }
+
+          Button(action: onOpenStatus) {
+            Label("Status", systemImage: "antenna.radiowaves.left.and.right")
+          }
+        }
+      }
+
       if showsArchive {
         slot {
           SidebarFooterButton(
@@ -99,45 +138,6 @@ struct SidebarFooterView: View {
           .accessibilityLabel("Notifications")
           .help("Notifications")
           .onHover { isNotificationHovering = $0 }
-      }
-
-      slot {
-        SidebarFooterMenu(
-          symbolName: "questionmark",
-          accessibilityLabel: "Help",
-          tint: iconTint
-        ) {
-          Button(action: onOpenDocs) {
-            Label("Docs", systemImage: "book.closed")
-            Text("Get started, set up agents, and develop")
-          }
-
-          Button(action: onOpenTownHall) {
-            Label("Join Town Hall", systemImage: "person.3")
-            Text("Inline’s early users community")
-          }
-
-          Button(action: onDMFounder) {
-            Label("DM the Founder", systemImage: "bubble.left")
-            Text("Start a DM with @mo")
-          }
-
-          Divider()
-
-          if let onCheckForUpdates {
-            Button(action: onCheckForUpdates) {
-              Label("Check for Updates", systemImage: "arrow.triangle.2.circlepath")
-            }
-          }
-
-          Button(action: onOpenWhatsNew) {
-            Label("What’s New", systemImage: "sparkles")
-          }
-
-          Button(action: onOpenStatus) {
-            Label("Status", systemImage: "antenna.radiowaves.left.and.right")
-          }
-        }
       }
 
       slot {
@@ -203,6 +203,7 @@ private struct SidebarFooterMenu<MenuContent: View>: View {
     Menu(content: content) {
       SidebarFooterIcon(symbolName: symbolName, tint: tint)
     }
+    .labelStyle(.titleAndIcon)
     .menuStyle(.button)
     .buttonStyle(SidebarFooterButtonStyle(isHovering: isHovering))
     .menuIndicator(.hidden)
