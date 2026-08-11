@@ -1,5 +1,6 @@
 import InlineKit
 import InlineMacUI
+import InlineUI
 import Logger
 import SwiftUI
 
@@ -105,7 +106,7 @@ struct SidebarChatItemView: Equatable, View {
   }
 
   private var showsPreview: Bool {
-    size == .large && item.preview.isEmpty == false && visibleParentTitle == nil
+    size == .large && visibleParentTitle == nil
   }
 
   private var titleAccessory: SidebarChatItemAccessory? {
@@ -162,11 +163,12 @@ struct SidebarChatItemView: Equatable, View {
 
           if showsPreview {
             HStack(spacing: 5) {
-              Text(item.preview)
-                .font(Self.subtitleFont)
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
+              SidebarComposeActivityPreview(
+                peer: peerId,
+                preview: item.preview,
+                font: Self.subtitleFont
+              )
+              .id(peerId)
 
               if let previewAccessory {
                 accessoryView(previewAccessory)
@@ -334,8 +336,15 @@ struct SidebarChatItemView: Equatable, View {
 
       if showsCloseControl {
         closeButton
-      } else if let titleAccessory {
-        accessoryView(titleAccessory)
+      } else {
+        if size == .compact {
+          ComposeActionCompactAccessory(peer: peerId)
+            .id(peerId)
+        }
+
+        if let titleAccessory {
+          accessoryView(titleAccessory)
+        }
       }
     }
   }
@@ -553,6 +562,60 @@ struct SidebarChatItemView: Equatable, View {
 
 private enum SidebarChatItemAccessory {
   case unread
+}
+
+@MainActor
+private struct SidebarComposeActivityPreview: View {
+  let peer: Peer
+  let preview: String
+  let font: Font
+
+  @State private var activityState: ComposeActionActivityState
+
+  init(peer: Peer, preview: String, font: Font) {
+    self.peer = peer
+    self.preview = preview
+    self.font = font
+    _activityState = State(initialValue: ComposeActions.shared.activityState(for: peer))
+  }
+
+  var body: some View {
+    ZStack(alignment: .leading) {
+      if let presentation = activityState.presentation {
+        HStack(alignment: .center, spacing: 5) {
+          ComposeActionActivityIndicator(
+            action: presentation.action,
+            color: .accentColor
+          )
+
+          Text(presentation.text)
+            .font(font)
+            .foregroundStyle(Color.accentColor)
+            .lineLimit(1)
+        }
+        .id("activity-\(presentation.action.rawValue)-\(presentation.text)")
+        .transition(Self.swapTransition)
+      } else {
+        Text(preview)
+          .font(font)
+          .foregroundStyle(.tertiary)
+          .lineLimit(1)
+          .id("preview")
+          .transition(Self.swapTransition)
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .frame(height: 13, alignment: .center)
+    .clipped()
+    .animation(.easeInOut(duration: 0.18), value: activityState.presentation)
+  }
+
+  private static var swapTransition: AnyTransition {
+    .asymmetric(
+      insertion: .opacity.combined(with: .offset(y: 2)),
+      removal: .opacity.combined(with: .offset(y: -2))
+    )
+  }
 }
 
 private struct SidebarOpenInteractionModifier: ViewModifier {

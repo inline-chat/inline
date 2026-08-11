@@ -42,8 +42,7 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
         VStack(alignment: .leading, spacing: metrics.textSpacing) {
           titleLine
 
-          if metrics.previewLines > 0,
-             resolvedPreviewText != nil || showsNumberedUnread {
+          if metrics.previewLines > 0 {
             previewLine
           }
         }
@@ -85,6 +84,8 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
       }
 
       if layoutMode == .compact {
+        ComposeActionCompactAccessory(peer: item.peer)
+
         numberedUnreadIndicator
       }
     }
@@ -92,19 +93,14 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
 
   private var previewLine: some View {
     HStack(alignment: .center, spacing: 8) {
-      if let previewText = resolvedPreviewText {
-        ChatListPreviewText(
-          senderName: item.previewSenderName,
-          text: previewText
-        )
-          .font(.system(size: 14))
-          .lineLimit(metrics.previewLines)
-          .truncationMode(.tail)
-          .frame(maxWidth: .infinity, alignment: .leading)
-      } else {
-        Color.clear
-          .frame(maxWidth: .infinity, minHeight: 1)
-      }
+      ChatListComposeActivityPreview(
+        peer: item.peer,
+        senderName: item.previewSenderName,
+        text: resolvedPreviewText,
+        layoutMode: layoutMode,
+        previewLines: metrics.previewLines
+      )
+      .frame(maxWidth: .infinity, alignment: .leading)
 
       numberedUnreadIndicator
     }
@@ -236,6 +232,85 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
     case .standard, .large:
       .system(size: 16, weight: item.isUnread ? .semibold : .medium)
     }
+  }
+}
+
+@MainActor
+private struct ChatListComposeActivityPreview: View {
+  let peer: Peer
+  let senderName: String?
+  let text: String?
+  let layoutMode: ChatListLayoutMode
+  let previewLines: Int
+
+  @ScaledMetric(relativeTo: .subheadline) private var singleLineHeight: CGFloat = 18
+  @ScaledMetric(relativeTo: .subheadline) private var largePreviewHeight: CGFloat = 38
+  @State private var activityState: ComposeActionActivityState
+
+  init(
+    peer: Peer,
+    senderName: String?,
+    text: String?,
+    layoutMode: ChatListLayoutMode,
+    previewLines: Int
+  ) {
+    self.peer = peer
+    self.senderName = senderName
+    self.text = text
+    self.layoutMode = layoutMode
+    self.previewLines = previewLines
+    _activityState = State(initialValue: ComposeActions.shared.activityState(for: peer))
+  }
+
+  var body: some View {
+    ZStack(alignment: .leading) {
+      if let presentation = activityState.presentation {
+        HStack(alignment: .center, spacing: 5) {
+          ComposeActionActivityIndicator(
+            action: presentation.action,
+            color: .accentColor
+          )
+
+          Text(presentation.text)
+            .font(.subheadline)
+            .foregroundStyle(Color.accentColor)
+            .lineLimit(1)
+        }
+        .id("activity-\(presentation.action.rawValue)-\(presentation.text)")
+        .transition(Self.swapTransition)
+      } else {
+        preview
+          .id("preview")
+          .transition(Self.swapTransition)
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .frame(height: previewHeight, alignment: .leading)
+    .clipped()
+    .animation(.easeInOut(duration: 0.18), value: activityState.presentation)
+  }
+
+  @ViewBuilder
+  private var preview: some View {
+    if let text {
+      ChatListPreviewText(senderName: senderName, text: text)
+        .font(.system(size: 14))
+        .lineLimit(previewLines)
+        .truncationMode(.tail)
+    } else {
+      Color.clear
+    }
+  }
+
+  private var previewHeight: CGFloat {
+    layoutMode == .large ? largePreviewHeight : singleLineHeight
+  }
+
+  private static var swapTransition: AnyTransition {
+    .asymmetric(
+      insertion: .opacity.combined(with: .offset(y: 2)),
+      removal: .opacity.combined(with: .offset(y: -2))
+    )
   }
 }
 

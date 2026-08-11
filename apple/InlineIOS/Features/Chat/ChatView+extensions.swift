@@ -418,8 +418,8 @@ struct ChatSubtitlePreview: View {
     ChatSubtitlePreview(subtitle: .connectionState(.connected))
 
     // Typing
-    ChatSubtitlePreview(subtitle: .typing("John is typing..."))
-    ChatSubtitlePreview(subtitle: .typing("John and Jane are typing..."))
+    ChatSubtitlePreview(subtitle: .typing("John is typing"))
+    ChatSubtitlePreview(subtitle: .typing("John and Jane are typing"))
 
     // Compose Actions
     ChatSubtitlePreview(subtitle: .composeAction(.uploadingPhoto))

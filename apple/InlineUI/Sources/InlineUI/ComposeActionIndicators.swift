@@ -1,5 +1,104 @@
 import Foundation
+import InlineKit
 import SwiftUI
+
+public enum ComposeActionAnimationKind: Equatable, Sendable {
+  case typing
+  case upload
+  case recordingVoice
+}
+
+public enum ComposeActionAnimationInventory {
+  public static func animation(for action: ApiComposeAction) -> ComposeActionAnimationKind? {
+    switch action {
+    case .typing:
+      .typing
+    case .uploadingPhoto, .uploadingDocument, .uploadingVideo:
+      .upload
+    case .recordingVoice:
+      .recordingVoice
+    @unknown default:
+      nil
+    }
+  }
+}
+
+public struct ComposeActionActivityIndicator: View {
+  private let action: ApiComposeAction
+  private let color: Color
+
+  public init(
+    action: ApiComposeAction,
+    color: Color = .accentColor
+  ) {
+    self.action = action
+    self.color = color
+  }
+
+  @ViewBuilder
+  public var body: some View {
+    switch ComposeActionAnimationInventory.animation(for: action) {
+    case .typing:
+      TypingActivityIndicator(
+        dotSize: 3,
+        spacing: 2,
+        color: color,
+        lift: 1.8
+      )
+    case .upload:
+      UploadActivityIndicator(
+        width: 14,
+        height: 4,
+        color: color
+      )
+    case .recordingVoice:
+      VoiceRecordingActivityIndicator(
+        barWidth: 2.2,
+        spacing: 2.2,
+        minBarHeight: 4,
+        maxBarHeight: 11,
+        color: color
+      )
+    case nil:
+      EmptyView()
+    }
+  }
+}
+
+@MainActor
+public struct ComposeActionCompactAccessory: View {
+  @State private var activityState: ComposeActionActivityState
+
+  public init(peer: Peer) {
+    _activityState = State(initialValue: ComposeActions.shared.activityState(for: peer))
+  }
+
+  public var body: some View {
+    ZStack {
+      if let presentation = visiblePresentation {
+        ComposeActionActivityIndicator(
+          action: presentation.action,
+          color: .accentColor
+        )
+        .id("activity-\(presentation.action.rawValue)")
+        .transition(.opacity.combined(with: .offset(y: 2)))
+      }
+    }
+    .frame(width: 16, height: 12)
+    .clipped()
+    .animation(.easeInOut(duration: 0.18), value: visiblePresentation)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(Text(visiblePresentation?.text ?? ""))
+    .accessibilityHidden(visiblePresentation == nil)
+  }
+
+  private var visiblePresentation: ComposeActionPresentation? {
+    guard let presentation = activityState.presentation,
+          ComposeActionAnimationInventory.animation(for: presentation.action) != nil
+    else { return nil }
+    return presentation
+  }
+}
 
 public struct TypingActivityIndicator: View {
   private let dotSize: CGFloat
@@ -152,5 +251,52 @@ public struct VoiceRecordingActivityIndicator: View {
   private static func smootherstep(_ value: Double) -> Double {
     let clamped = min(max(value, 0), 1)
     return clamped * clamped * clamped * (clamped * (clamped * 6 - 15) + 10)
+  }
+}
+
+public struct UploadActivityIndicator: View {
+  private let width: CGFloat
+  private let height: CGFloat
+  private let color: Color
+  private let cycleDuration: TimeInterval
+
+  public init(
+    width: CGFloat = 14,
+    height: CGFloat = 4,
+    color: Color = .accentColor,
+    cycleDuration: TimeInterval = 1.5
+  ) {
+    self.width = width
+    self.height = height
+    self.color = color
+    self.cycleDuration = cycleDuration
+  }
+
+  public var body: some View {
+    TimelineView(.animation) { context in
+      let phase = Self.normalizedPhase(
+        context.date.timeIntervalSinceReferenceDate / max(cycleDuration, 0.01)
+      )
+      let fillProgress = phase <= 0.5 ? phase * 2 : (1 - phase) * 2
+      let fillWidth = width * fillProgress
+      let fillOffset = phase <= 0.5 ? 0 : width - fillWidth
+
+      ZStack(alignment: .leading) {
+        RoundedRectangle(cornerRadius: height / 2, style: .continuous)
+          .fill(color.opacity(0.2))
+
+        RoundedRectangle(cornerRadius: height / 2, style: .continuous)
+          .fill(color.opacity(0.72))
+          .frame(width: fillWidth)
+          .offset(x: fillOffset)
+      }
+    }
+    .frame(width: width, height: height)
+    .accessibilityHidden(true)
+  }
+
+  private static func normalizedPhase(_ phase: Double) -> Double {
+    let wrapped = phase.truncatingRemainder(dividingBy: 1)
+    return wrapped >= 0 ? wrapped : wrapped + 1
   }
 }

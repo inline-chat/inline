@@ -1,12 +1,43 @@
 import Auth
 import Combine
 import Logger
+import Observation
 import SwiftUI
 
 public struct ComposeActionInfo {
   public var userId: Int64
   public var action: ApiComposeAction
   var expiresAt: Date
+}
+
+public struct ComposeActionPresentation: Equatable, Sendable {
+  public let action: ApiComposeAction
+  public let text: String
+
+  public init(action: ApiComposeAction, text: String) {
+    self.action = action
+    self.text = text
+  }
+}
+
+@MainActor
+@Observable
+public final class ComposeActionActivityState {
+  public let peer: Peer
+  public fileprivate(set) var presentation: ComposeActionPresentation?
+
+  fileprivate init(peer: Peer, presentation: ComposeActionPresentation?) {
+    self.peer = peer
+    self.presentation = presentation
+  }
+}
+
+private final class WeakComposeActionActivityState {
+  weak var value: ComposeActionActivityState?
+
+  init(_ value: ComposeActionActivityState) {
+    self.value = value
+  }
 }
 
 @MainActor
@@ -18,6 +49,8 @@ public class ComposeActions: ObservableObject {
   private var _activeUploads: Set<Peer> = []
 
   private var cancelTasks: [Peer: [Int64: Task<Void, Never>]] = [:]
+  private var activityStates: [Peer: WeakComposeActionActivityState] = [:]
+  private var activityStateLookupCount = 0
   private var log = Log.scoped("ComposeActions", enableTracing: false)
   private var lastTypingSent: [Peer: Date] = [:]
 
@@ -54,6 +87,7 @@ public class ComposeActions: ObservableObject {
     }
 
     actions[peer]![userId] = ComposeActionInfo(userId: userId, action: action, expiresAt: Date().addingTimeInterval(6))
+    refreshActivityState(for: peer)
 
     // Expire after 6s if not updated
     cancelTasks[peer]![userId] = Task {
@@ -75,6 +109,7 @@ public class ComposeActions: ObservableObject {
     if actions[peer]?.isEmpty == true {
       actions[peer] = nil
     }
+    refreshActivityState(for: peer)
 
     cancelTasks[peer]?[userId]?.cancel()
     cancelTasks[peer]?[userId] = nil
@@ -95,6 +130,7 @@ public class ComposeActions: ObservableObject {
 
     // Remove all actions for this peer
     actions[peer] = nil
+    refreshActivityState(for: peer)
   }
 
   // MARK: - Backwards Compatibility Methods
@@ -104,9 +140,62 @@ public class ComposeActions: ObservableObject {
     actions[peer]?.values.first
   }
 
+  /// Returns a narrowly observed, per-peer activity state for sidebar and list-row UI.
+  /// The cache is weak so rows do not permanently retain state for every peer they display.
+  public func activityState(for peer: Peer) -> ComposeActionActivityState {
+    activityStateLookupCount &+= 1
+    if activityStateLookupCount.isMultiple(of: 64) {
+      activityStates = activityStates.filter { $0.value.value != nil }
+    }
+
+    if let state = activityStates[peer]?.value {
+      return state
+    }
+
+    let state = ComposeActionActivityState(
+      peer: peer,
+      presentation: composeActionPresentation(for: peer)
+    )
+    activityStates[peer] = WeakComposeActionActivityState(state)
+    return state
+  }
+
   /// Remove compose action for peer (backwards compatibility - removes all)
   public func removeComposeAction(for peer: Peer) {
     removeAllComposeActions(for: peer)
+  }
+
+  private func composeActionPresentation(for peer: Peer) -> ComposeActionPresentation? {
+    guard let action = getComposeAction(for: peer)?.action else { return nil }
+
+    let textWithEllipsis: String
+    if action == .typing {
+      textWithEllipsis = getTypingDisplayText(for: peer, length: .short) ?? action.toHumanReadable()
+    } else {
+      textWithEllipsis = action.toHumanReadable()
+    }
+
+    return ComposeActionPresentation(
+      action: action,
+      text: Self.removingTrailingEllipsis(from: textWithEllipsis)
+    )
+  }
+
+  private static func removingTrailingEllipsis(from text: String) -> String {
+    var text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    while text.last == "." || text.last == "…" {
+      text.removeLast()
+    }
+    return text
+  }
+
+  private func refreshActivityState(for peer: Peer) {
+    guard let state = activityStates[peer]?.value else {
+      activityStates[peer] = nil
+      return
+    }
+
+    state.presentation = composeActionPresentation(for: peer)
   }
 
   // MARK: - Synchronous Typing Display Text Methods
