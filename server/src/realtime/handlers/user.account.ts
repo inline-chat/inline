@@ -16,7 +16,7 @@ import {
 } from "@inline-chat/protocol/core"
 import type { ServerUpdate } from "@in/server/protocol/server"
 import { db } from "@in/server/db"
-import { files, lower, users, type DbFile, type DbNewUser, type DbUser } from "@in/server/db/schema"
+import { files, users, type DbFile, type DbNewUser, type DbUser } from "@in/server/db/schema"
 import { getFileByUniqueId } from "@in/server/db/models/files"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
@@ -34,6 +34,10 @@ import {
 import { InMemoryRateLimiter } from "@in/server/modules/oauth/rateLimiter"
 import { eq } from "drizzle-orm"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
+import {
+  getPublicHandleAvailability,
+  lockPublicHandleNamespace,
+} from "@in/server/modules/spaces/spaceHandle"
 
 const USERNAME_UNIQUE_CONSTRAINT = "users_username_unique"
 const externalProfilePhotoRateLimiter = new InMemoryRateLimiter()
@@ -175,16 +179,9 @@ async function usernameAvailability(username: string, currentUserId: number): Pr
   }
 
   const normalized = username.toLowerCase()
-  const result = await db._query.users.findFirst({
-    where: eq(lower(users.username), normalized),
-    columns: { id: true },
-  })
-
-  if (result) {
-    return result.id === currentUserId
-      ? UsernameAvailability.USERNAME_CURRENT
-      : UsernameAvailability.USERNAME_TAKEN
-  }
+  const availability = await getPublicHandleAvailability(db, normalized, { userId: currentUserId })
+  if (availability === "current") return UsernameAvailability.USERNAME_CURRENT
+  if (availability === "taken") return UsernameAvailability.USERNAME_TAKEN
 
   if (isReservedUsername(normalized)) {
     return UsernameAvailability.USERNAME_RESERVED
@@ -198,6 +195,14 @@ async function updateUserAndPush(
   props: DbNewUser,
 ): Promise<{ user: DbUser; update: Update; completedSignup: boolean }> {
   const { user, update, completedSignup } = await db.transaction(async (tx) => {
+    if (typeof props.username === "string") {
+      await lockPublicHandleNamespace(tx, props.username)
+      const availability = await getPublicHandleAvailability(tx, props.username, { userId: context.userId })
+      if (availability === "taken") {
+        throw RealtimeRpcError.UsernameTaken()
+      }
+    }
+
     let wasPendingSetup = false
     if (props.pendingSetup === false) {
       const [previousUser] = await tx

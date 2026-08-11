@@ -10,6 +10,10 @@ import type { HandlerContext } from "@in/server/controllers/helpers"
 import { validateIanaTimezone } from "@in/server/utils/validate"
 import { normalizeUsername } from "@in/server/utils/normalize"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
+import {
+  getPublicHandleAvailability,
+  lockPublicHandleNamespace,
+} from "@in/server/modules/spaces/spaceHandle"
 
 export const Input = Type.Object({
   firstName: Type.Optional(Type.String()),
@@ -99,12 +103,20 @@ async function updateUserAndDetectSignupCompletion(
   userId: number,
   props: DbNewUser,
 ): Promise<{ user: DbUser | undefined; completedSignup: boolean }> {
-  if (props.pendingSetup !== false) {
+  if (props.pendingSetup !== false && typeof props.username !== "string") {
     const [user] = await db.update(users).set(props).where(eq(users.id, userId)).returning()
     return { user, completedSignup: false }
   }
 
   return db.transaction(async (tx) => {
+    if (typeof props.username === "string") {
+      await lockPublicHandleNamespace(tx, props.username)
+      const availability = await getPublicHandleAvailability(tx, props.username, { userId })
+      if (availability === "taken") {
+        throw new InlineError(InlineError.ApiError.USERNAME_TAKEN)
+      }
+    }
+
     const [previousUser] = await tx
       .select({ pendingSetup: users.pendingSetup })
       .from(users)

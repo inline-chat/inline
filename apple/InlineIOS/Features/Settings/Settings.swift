@@ -84,10 +84,10 @@ struct SettingsView: View {
 
       Section {
         SettingsNavigationRow(
-          title: "About Inline",
-          systemImage: "info.circle.fill",
+          title: "Help",
+          systemImage: "questionmark.circle.fill",
           color: .blue,
-          destination: AboutSettingsView()
+          destination: HelpSettingsView()
         )
       } footer: {
         SettingsReleaseSummary()

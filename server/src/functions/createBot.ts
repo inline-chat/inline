@@ -11,6 +11,10 @@ import { SpaceModel } from "@in/server/db/models/spaces"
 import { BotTokensModel } from "@in/server/db/models/botTokens"
 import { and, eq, sql } from "drizzle-orm"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
+import {
+  getPublicHandleAvailability,
+  lockPublicHandleNamespace,
+} from "@in/server/modules/spaces/spaceHandle"
 
 import { type CreateBotInput, type CreateBotResult } from "@inline-chat/protocol/core"
 import type { FunctionContext } from "@in/server/functions/_types"
@@ -59,25 +63,32 @@ export const createBot = async (input: CreateBotInput, context: FunctionContext)
   }
 
   // Create bot user
-  const botUser = await db
-    .insert(users)
-    .values({
-      firstName: trimmedName,
-      username: normalizedUsername,
-      bot: true,
-      botCreatorId: context.currentUserId,
-      pendingSetup: false,
-      emailVerified: false,
-      phoneVerified: false,
-    })
-    .returning()
+  const bot = await db.transaction(async (tx) => {
+    await lockPublicHandleNamespace(tx, normalizedUsername)
+    const availability = await getPublicHandleAvailability(tx, normalizedUsername)
+    if (availability === "taken") {
+      throw RealtimeRpcError.BadRequest()
+    }
 
-  if (!botUser[0]) {
+    const [botUser] = await tx
+      .insert(users)
+      .values({
+        firstName: trimmedName,
+        username: normalizedUsername,
+        bot: true,
+        botCreatorId: context.currentUserId,
+        pendingSetup: false,
+        emailVerified: false,
+        phoneVerified: false,
+      })
+      .returning()
+    return botUser
+  })
+
+  if (!bot) {
     log.error("Failed to create bot user", { input, currentUserId: context.currentUserId })
     throw RealtimeRpcError.InternalError()
   }
-
-  const bot = botUser[0]
 
   // Best-effort internal alert (should never affect the user action).
   BotAlerts.botCreated({ creatorUserId: context.currentUserId, botUserId: bot.id })

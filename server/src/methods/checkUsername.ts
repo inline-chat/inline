@@ -1,12 +1,11 @@
 import { db } from "@in/server/db"
-import { eq } from "drizzle-orm"
-import { lower, users } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { isReservedUsername } from "@in/server/modules/users/reservedUsernames"
 import { normalizeUsername } from "@in/server/utils/normalize"
+import { getPublicHandleAvailability } from "@in/server/modules/spaces/spaceHandle"
 
 export const Input = Type.Object({
   username: Type.String(),
@@ -32,14 +31,6 @@ export const handler = async (
 /// HELPER FUNCTIONS ///
 export const checkUsernameAvailable = async (username: string, context: { userId?: number }) => {
   const normalizedUsername = normalizeUsername(username).toLowerCase()
-  const result = await db._query.users.findFirst({
-    where: eq(lower(users.username), normalizedUsername),
-    columns: { id: true },
-  })
-
-  if (result) {
-    return result.id === context.userId
-  }
-
-  return !isReservedUsername(normalizedUsername)
+  const availability = await getPublicHandleAvailability(db, normalizedUsername, { userId: context.userId })
+  return availability !== "taken" && !isReservedUsername(normalizedUsername)
 }

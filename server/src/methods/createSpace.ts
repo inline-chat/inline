@@ -16,7 +16,12 @@ import { Log } from "@in/server/utils/log"
 import { Type } from "@sinclair/typebox"
 import type { Static } from "elysia"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
-import { isSpaceHandleUniqueError, normalizeSpaceHandle } from "@in/server/modules/spaces/spaceHandle"
+import {
+  getPublicHandleAvailability,
+  isSpaceHandleUniqueError,
+  lockPublicHandleNamespace,
+  normalizeSpaceHandle,
+} from "@in/server/modules/spaces/spaceHandle"
 
 export const Input = Type.Object({
   name: Type.String(),
@@ -41,16 +46,26 @@ export const handler = async (
 
   try {
     // Create the space
-    let space = (
-      await db
-        .insert(spaces)
-        .values({
-          name: input.name,
-          handle,
-          creatorId: context.currentUserId,
-        })
-        .returning()
-    )[0]
+    let space = await db.transaction(async (tx) => {
+      if (handle) {
+        await lockPublicHandleNamespace(tx, handle)
+        const availability = await getPublicHandleAvailability(tx, handle)
+        if (availability === "taken") {
+          throw new InlineError(InlineError.ApiError.USERNAME_TAKEN)
+        }
+      }
+
+      return (
+        await tx
+          .insert(spaces)
+          .values({
+            name: input.name,
+            handle,
+            creatorId: context.currentUserId,
+          })
+          .returning()
+      )[0]
+    })
 
     if (!space) {
       throw new InlineError(InlineError.ApiError.INTERNAL)
