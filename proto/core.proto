@@ -117,6 +117,30 @@ message PeerChat { int64 chat_id = 1; }
 
 message PeerUser { int64 user_id = 1; }
 
+// A caller-selected user or space boundary for scoped resources.
+message InputScope {
+  oneof type {
+    InputScopeUser user = 1;
+    InputScopeSpace space = 2;
+  }
+}
+
+message InputScopeUser { int64 user_id = 1; }
+
+message InputScopeSpace { int64 space_id = 1; }
+
+// The resolved user or space boundary returned to clients.
+message Scope {
+  oneof type {
+    ScopeUser user = 1;
+    ScopeSpace space = 2;
+  }
+}
+
+message ScopeUser { User user = 1; }
+
+message ScopeSpace { Space space = 1; }
+
 message BotAvatar {
   enum Kind {
     KIND_UNSPECIFIED = 0;
@@ -1055,7 +1079,11 @@ enum Method {
   SET_PROFILE_PHOTO = 94;
   GET_EXTERNAL_PROFILE_PHOTO = 95;
   GET_CHAT_TRANSCRIPT = 96;
+  SEARCH_EXTERNAL_RESOURCES = 97;
   JOIN_PUBLIC_SPACE = 98;
+  LIST_CONNECTORS = 100;
+  PREPARE_CONNECTOR_OAUTH = 101;
+  DISCONNECT_CONNECTOR = 102;
 }
 
 message RpcCall {
@@ -1157,7 +1185,11 @@ message RpcCall {
     SetProfilePhotoInput setProfilePhoto = 95;
     GetExternalProfilePhotoInput getExternalProfilePhoto = 96;
     GetChatTranscriptInput getChatTranscript = 97;
+    SearchExternalResourcesInput searchExternalResources = 98;
     JoinPublicSpaceInput joinPublicSpace = 99;
+    ListConnectorsInput listConnectors = 101;
+    PrepareConnectorOAuthInput prepareConnectorOAuth = 102;
+    DisconnectConnectorInput disconnectConnector = 103;
   }
 }
 
@@ -1261,7 +1293,11 @@ message RpcResult {
     SetProfilePhotoResult setProfilePhoto = 95;
     GetExternalProfilePhotoResult getExternalProfilePhoto = 96;
     GetChatTranscriptResult getChatTranscript = 97;
+    SearchExternalResourcesResult searchExternalResources = 98;
     JoinPublicSpaceResult joinPublicSpace = 99;
+    ListConnectorsResult listConnectors = 101;
+    PrepareConnectorOAuthResult prepareConnectorOAuth = 102;
+    DisconnectConnectorResult disconnectConnector = 103;
   }
 }
 
@@ -2472,6 +2508,94 @@ message SearchMessagesInput {
 }
 
 message SearchMessagesResult { repeated Message messages = 1; }
+
+enum ExternalResourceProvider {
+  EXTERNAL_RESOURCE_PROVIDER_UNSPECIFIED = 0;
+  NOTION = 1;
+  LINEAR = 2;
+  GITHUB = 3;
+}
+
+enum ExternalResourceKind {
+  EXTERNAL_RESOURCE_KIND_UNSPECIFIED = 0;
+  PAGE = 1;
+  DATABASE = 2;
+  ISSUE = 3;
+  PULL_REQUEST = 4;
+  REPOSITORY = 5;
+  OTHER = 6;
+}
+
+// Provider-neutral autocomplete result. V1 inserts this as a TEXT_URL entity;
+// this metadata is intentionally not persisted into the message yet.
+message ExternalResource {
+  string id = 1;
+  ExternalResourceProvider provider = 2;
+  ExternalResourceKind kind = 3;
+  string title = 4;
+  string url = 5;
+  optional string subtitle = 6;
+  optional string emoji = 7;
+}
+
+message SearchExternalResourcesInput {
+  InputPeer peer_id = 1;
+  string query = 2;
+  optional int32 limit = 3;
+}
+
+message SearchExternalResourcesResult { repeated ExternalResource resources = 1; }
+
+enum ConnectorProvider {
+  CONNECTOR_PROVIDER_UNSPECIFIED = 0;
+  CONNECTOR_PROVIDER_NOTION = 1;
+  CONNECTOR_PROVIDER_LINEAR = 2;
+  CONNECTOR_PROVIDER_GITHUB = 3;
+}
+
+message ConnectorScope {
+  Scope scope = 1;
+  bool can_manage = 2;
+  optional bool allows_connections = 3;
+}
+
+message ConnectorProviderInfo {
+  ConnectorProvider provider = 1;
+  bool available = 2;
+  bool supports_user_scope = 3;
+  bool supports_space_scope = 4;
+}
+
+message ConnectorConnection {
+  ConnectorProvider provider = 1;
+  Scope scope = 2;
+  int64 connected_at = 3;
+  User connected_by = 4;
+  bool needs_configuration = 5;
+}
+
+message ListConnectorsInput {}
+
+message ListConnectorsResult {
+  repeated ConnectorProviderInfo providers = 1;
+  repeated ConnectorScope scopes = 2;
+  repeated ConnectorConnection connections = 3;
+}
+
+message PrepareConnectorOAuthInput {
+  ConnectorProvider provider = 1;
+  InputScope scope = 2;
+  string callback_scheme = 3;
+}
+
+message PrepareConnectorOAuthResult { string authorization_url = 1; }
+
+message DisconnectConnectorInput {
+  ConnectorProvider provider = 1;
+  InputScope scope = 2;
+}
+
+message DisconnectConnectorResult {}
 
 message InputChatParticipant {
   optional int64 user_id = 1;

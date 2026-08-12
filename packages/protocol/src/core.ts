@@ -367,6 +367,92 @@ export interface PeerUser {
     userId: bigint;
 }
 /**
+ * A caller-selected user or space boundary for scoped resources.
+ *
+ * @generated from protobuf message InputScope
+ */
+export interface InputScope {
+    /**
+     * @generated from protobuf oneof: type
+     */
+    type: {
+        oneofKind: "user";
+        /**
+         * @generated from protobuf field: InputScopeUser user = 1;
+         */
+        user: InputScopeUser;
+    } | {
+        oneofKind: "space";
+        /**
+         * @generated from protobuf field: InputScopeSpace space = 2;
+         */
+        space: InputScopeSpace;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
+ * @generated from protobuf message InputScopeUser
+ */
+export interface InputScopeUser {
+    /**
+     * @generated from protobuf field: int64 user_id = 1;
+     */
+    userId: bigint;
+}
+/**
+ * @generated from protobuf message InputScopeSpace
+ */
+export interface InputScopeSpace {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+}
+/**
+ * The resolved user or space boundary returned to clients.
+ *
+ * @generated from protobuf message Scope
+ */
+export interface Scope {
+    /**
+     * @generated from protobuf oneof: type
+     */
+    type: {
+        oneofKind: "user";
+        /**
+         * @generated from protobuf field: ScopeUser user = 1;
+         */
+        user: ScopeUser;
+    } | {
+        oneofKind: "space";
+        /**
+         * @generated from protobuf field: ScopeSpace space = 2;
+         */
+        space: ScopeSpace;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
+ * @generated from protobuf message ScopeUser
+ */
+export interface ScopeUser {
+    /**
+     * @generated from protobuf field: User user = 1;
+     */
+    user?: User;
+}
+/**
+ * @generated from protobuf message ScopeSpace
+ */
+export interface ScopeSpace {
+    /**
+     * @generated from protobuf field: Space space = 1;
+     */
+    space?: Space;
+}
+/**
  * @generated from protobuf message BotAvatar
  */
 export interface BotAvatar {
@@ -2996,11 +3082,35 @@ export interface RpcCall {
          */
         getChatTranscript: GetChatTranscriptInput;
     } | {
+        oneofKind: "searchExternalResources";
+        /**
+         * @generated from protobuf field: SearchExternalResourcesInput searchExternalResources = 98;
+         */
+        searchExternalResources: SearchExternalResourcesInput;
+    } | {
         oneofKind: "joinPublicSpace";
         /**
          * @generated from protobuf field: JoinPublicSpaceInput joinPublicSpace = 99;
          */
         joinPublicSpace: JoinPublicSpaceInput;
+    } | {
+        oneofKind: "listConnectors";
+        /**
+         * @generated from protobuf field: ListConnectorsInput listConnectors = 101;
+         */
+        listConnectors: ListConnectorsInput;
+    } | {
+        oneofKind: "prepareConnectorOAuth";
+        /**
+         * @generated from protobuf field: PrepareConnectorOAuthInput prepareConnectorOAuth = 102;
+         */
+        prepareConnectorOAuth: PrepareConnectorOAuthInput;
+    } | {
+        oneofKind: "disconnectConnector";
+        /**
+         * @generated from protobuf field: DisconnectConnectorInput disconnectConnector = 103;
+         */
+        disconnectConnector: DisconnectConnectorInput;
     } | {
         oneofKind: undefined;
     };
@@ -3587,11 +3697,35 @@ export interface RpcResult {
          */
         getChatTranscript: GetChatTranscriptResult;
     } | {
+        oneofKind: "searchExternalResources";
+        /**
+         * @generated from protobuf field: SearchExternalResourcesResult searchExternalResources = 98;
+         */
+        searchExternalResources: SearchExternalResourcesResult;
+    } | {
         oneofKind: "joinPublicSpace";
         /**
          * @generated from protobuf field: JoinPublicSpaceResult joinPublicSpace = 99;
          */
         joinPublicSpace: JoinPublicSpaceResult;
+    } | {
+        oneofKind: "listConnectors";
+        /**
+         * @generated from protobuf field: ListConnectorsResult listConnectors = 101;
+         */
+        listConnectors: ListConnectorsResult;
+    } | {
+        oneofKind: "prepareConnectorOAuth";
+        /**
+         * @generated from protobuf field: PrepareConnectorOAuthResult prepareConnectorOAuth = 102;
+         */
+        prepareConnectorOAuth: PrepareConnectorOAuthResult;
+    } | {
+        oneofKind: "disconnectConnector";
+        /**
+         * @generated from protobuf field: DisconnectConnectorResult disconnectConnector = 103;
+         */
+        disconnectConnector: DisconnectConnectorResult;
     } | {
         oneofKind: undefined;
     };
@@ -6614,6 +6748,197 @@ export interface SearchMessagesResult {
     messages: Message[];
 }
 /**
+ * Provider-neutral autocomplete result. V1 inserts this as a TEXT_URL entity;
+ * this metadata is intentionally not persisted into the message yet.
+ *
+ * @generated from protobuf message ExternalResource
+ */
+export interface ExternalResource {
+    /**
+     * @generated from protobuf field: string id = 1;
+     */
+    id: string;
+    /**
+     * @generated from protobuf field: ExternalResourceProvider provider = 2;
+     */
+    provider: ExternalResourceProvider;
+    /**
+     * @generated from protobuf field: ExternalResourceKind kind = 3;
+     */
+    kind: ExternalResourceKind;
+    /**
+     * @generated from protobuf field: string title = 4;
+     */
+    title: string;
+    /**
+     * @generated from protobuf field: string url = 5;
+     */
+    url: string;
+    /**
+     * @generated from protobuf field: optional string subtitle = 6;
+     */
+    subtitle?: string;
+    /**
+     * @generated from protobuf field: optional string emoji = 7;
+     */
+    emoji?: string;
+}
+/**
+ * @generated from protobuf message SearchExternalResourcesInput
+ */
+export interface SearchExternalResourcesInput {
+    /**
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+    /**
+     * @generated from protobuf field: string query = 2;
+     */
+    query: string;
+    /**
+     * @generated from protobuf field: optional int32 limit = 3;
+     */
+    limit?: number;
+}
+/**
+ * @generated from protobuf message SearchExternalResourcesResult
+ */
+export interface SearchExternalResourcesResult {
+    /**
+     * @generated from protobuf field: repeated ExternalResource resources = 1;
+     */
+    resources: ExternalResource[];
+}
+/**
+ * @generated from protobuf message ConnectorScope
+ */
+export interface ConnectorScope {
+    /**
+     * @generated from protobuf field: Scope scope = 1;
+     */
+    scope?: Scope;
+    /**
+     * @generated from protobuf field: bool can_manage = 2;
+     */
+    canManage: boolean;
+    /**
+     * @generated from protobuf field: optional bool allows_connections = 3;
+     */
+    allowsConnections?: boolean;
+}
+/**
+ * @generated from protobuf message ConnectorProviderInfo
+ */
+export interface ConnectorProviderInfo {
+    /**
+     * @generated from protobuf field: ConnectorProvider provider = 1;
+     */
+    provider: ConnectorProvider;
+    /**
+     * @generated from protobuf field: bool available = 2;
+     */
+    available: boolean;
+    /**
+     * @generated from protobuf field: bool supports_user_scope = 3;
+     */
+    supportsUserScope: boolean;
+    /**
+     * @generated from protobuf field: bool supports_space_scope = 4;
+     */
+    supportsSpaceScope: boolean;
+}
+/**
+ * @generated from protobuf message ConnectorConnection
+ */
+export interface ConnectorConnection {
+    /**
+     * @generated from protobuf field: ConnectorProvider provider = 1;
+     */
+    provider: ConnectorProvider;
+    /**
+     * @generated from protobuf field: Scope scope = 2;
+     */
+    scope?: Scope;
+    /**
+     * @generated from protobuf field: int64 connected_at = 3;
+     */
+    connectedAt: bigint;
+    /**
+     * @generated from protobuf field: User connected_by = 4;
+     */
+    connectedBy?: User;
+    /**
+     * @generated from protobuf field: bool needs_configuration = 5;
+     */
+    needsConfiguration: boolean;
+}
+/**
+ * @generated from protobuf message ListConnectorsInput
+ */
+export interface ListConnectorsInput {
+}
+/**
+ * @generated from protobuf message ListConnectorsResult
+ */
+export interface ListConnectorsResult {
+    /**
+     * @generated from protobuf field: repeated ConnectorProviderInfo providers = 1;
+     */
+    providers: ConnectorProviderInfo[];
+    /**
+     * @generated from protobuf field: repeated ConnectorScope scopes = 2;
+     */
+    scopes: ConnectorScope[];
+    /**
+     * @generated from protobuf field: repeated ConnectorConnection connections = 3;
+     */
+    connections: ConnectorConnection[];
+}
+/**
+ * @generated from protobuf message PrepareConnectorOAuthInput
+ */
+export interface PrepareConnectorOAuthInput {
+    /**
+     * @generated from protobuf field: ConnectorProvider provider = 1;
+     */
+    provider: ConnectorProvider;
+    /**
+     * @generated from protobuf field: InputScope scope = 2;
+     */
+    scope?: InputScope;
+    /**
+     * @generated from protobuf field: string callback_scheme = 3;
+     */
+    callbackScheme: string;
+}
+/**
+ * @generated from protobuf message PrepareConnectorOAuthResult
+ */
+export interface PrepareConnectorOAuthResult {
+    /**
+     * @generated from protobuf field: string authorization_url = 1;
+     */
+    authorizationUrl: string;
+}
+/**
+ * @generated from protobuf message DisconnectConnectorInput
+ */
+export interface DisconnectConnectorInput {
+    /**
+     * @generated from protobuf field: ConnectorProvider provider = 1;
+     */
+    provider: ConnectorProvider;
+    /**
+     * @generated from protobuf field: InputScope scope = 2;
+     */
+    scope?: InputScope;
+}
+/**
+ * @generated from protobuf message DisconnectConnectorResult
+ */
+export interface DisconnectConnectorResult {
+}
+/**
  * @generated from protobuf message InputChatParticipant
  */
 export interface InputChatParticipant {
@@ -9353,9 +9678,25 @@ export enum Method {
      */
     GET_CHAT_TRANSCRIPT = 96,
     /**
+     * @generated from protobuf enum value: SEARCH_EXTERNAL_RESOURCES = 97;
+     */
+    SEARCH_EXTERNAL_RESOURCES = 97,
+    /**
      * @generated from protobuf enum value: JOIN_PUBLIC_SPACE = 98;
      */
-    JOIN_PUBLIC_SPACE = 98
+    JOIN_PUBLIC_SPACE = 98,
+    /**
+     * @generated from protobuf enum value: LIST_CONNECTORS = 100;
+     */
+    LIST_CONNECTORS = 100,
+    /**
+     * @generated from protobuf enum value: PREPARE_CONNECTOR_OAUTH = 101;
+     */
+    PREPARE_CONNECTOR_OAUTH = 101,
+    /**
+     * @generated from protobuf enum value: DISCONNECT_CONNECTOR = 102;
+     */
+    DISCONNECT_CONNECTOR = 102
 }
 /**
  * @generated from protobuf enum GridConnectionUnavailableReason
@@ -9528,6 +9869,81 @@ export enum SearchMessagesFilter {
      * @generated from protobuf enum value: FILTER_VOICE_MEMOS = 6;
      */
     FILTER_VOICE_MEMOS = 6
+}
+/**
+ * @generated from protobuf enum ExternalResourceProvider
+ */
+export enum ExternalResourceProvider {
+    /**
+     * @generated from protobuf enum value: EXTERNAL_RESOURCE_PROVIDER_UNSPECIFIED = 0;
+     */
+    EXTERNAL_RESOURCE_PROVIDER_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: NOTION = 1;
+     */
+    NOTION = 1,
+    /**
+     * @generated from protobuf enum value: LINEAR = 2;
+     */
+    LINEAR = 2,
+    /**
+     * @generated from protobuf enum value: GITHUB = 3;
+     */
+    GITHUB = 3
+}
+/**
+ * @generated from protobuf enum ExternalResourceKind
+ */
+export enum ExternalResourceKind {
+    /**
+     * @generated from protobuf enum value: EXTERNAL_RESOURCE_KIND_UNSPECIFIED = 0;
+     */
+    EXTERNAL_RESOURCE_KIND_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: PAGE = 1;
+     */
+    PAGE = 1,
+    /**
+     * @generated from protobuf enum value: DATABASE = 2;
+     */
+    DATABASE = 2,
+    /**
+     * @generated from protobuf enum value: ISSUE = 3;
+     */
+    ISSUE = 3,
+    /**
+     * @generated from protobuf enum value: PULL_REQUEST = 4;
+     */
+    PULL_REQUEST = 4,
+    /**
+     * @generated from protobuf enum value: REPOSITORY = 5;
+     */
+    REPOSITORY = 5,
+    /**
+     * @generated from protobuf enum value: OTHER = 6;
+     */
+    OTHER = 6
+}
+/**
+ * @generated from protobuf enum ConnectorProvider
+ */
+export enum ConnectorProvider {
+    /**
+     * @generated from protobuf enum value: CONNECTOR_PROVIDER_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: CONNECTOR_PROVIDER_NOTION = 1;
+     */
+    NOTION = 1,
+    /**
+     * @generated from protobuf enum value: CONNECTOR_PROVIDER_LINEAR = 2;
+     */
+    LINEAR = 2,
+    /**
+     * @generated from protobuf enum value: CONNECTOR_PROVIDER_GITHUB = 3;
+     */
+    GITHUB = 3
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class ClientMessage$Type extends MessageType<ClientMessage> {
@@ -10551,6 +10967,312 @@ class PeerUser$Type extends MessageType<PeerUser> {
  * @generated MessageType for protobuf message PeerUser
  */
 export const PeerUser = new PeerUser$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class InputScope$Type extends MessageType<InputScope> {
+    constructor() {
+        super("InputScope", [
+            { no: 1, name: "user", kind: "message", oneof: "type", T: () => InputScopeUser },
+            { no: 2, name: "space", kind: "message", oneof: "type", T: () => InputScopeSpace }
+        ]);
+    }
+    create(value?: PartialMessage<InputScope>): InputScope {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.type = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<InputScope>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: InputScope): InputScope {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputScopeUser user */ 1:
+                    message.type = {
+                        oneofKind: "user",
+                        user: InputScopeUser.internalBinaryRead(reader, reader.uint32(), options, (message.type as any).user)
+                    };
+                    break;
+                case /* InputScopeSpace space */ 2:
+                    message.type = {
+                        oneofKind: "space",
+                        space: InputScopeSpace.internalBinaryRead(reader, reader.uint32(), options, (message.type as any).space)
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: InputScope, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputScopeUser user = 1; */
+        if (message.type.oneofKind === "user")
+            InputScopeUser.internalBinaryWrite(message.type.user, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* InputScopeSpace space = 2; */
+        if (message.type.oneofKind === "space")
+            InputScopeSpace.internalBinaryWrite(message.type.space, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message InputScope
+ */
+export const InputScope = new InputScope$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class InputScopeUser$Type extends MessageType<InputScopeUser> {
+    constructor() {
+        super("InputScopeUser", [
+            { no: 1, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<InputScopeUser>): InputScopeUser {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.userId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<InputScopeUser>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: InputScopeUser): InputScopeUser {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 user_id */ 1:
+                    message.userId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: InputScopeUser, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 user_id = 1; */
+        if (message.userId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.userId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message InputScopeUser
+ */
+export const InputScopeUser = new InputScopeUser$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class InputScopeSpace$Type extends MessageType<InputScopeSpace> {
+    constructor() {
+        super("InputScopeSpace", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<InputScopeSpace>): InputScopeSpace {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<InputScopeSpace>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: InputScopeSpace): InputScopeSpace {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: InputScopeSpace, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message InputScopeSpace
+ */
+export const InputScopeSpace = new InputScopeSpace$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class Scope$Type extends MessageType<Scope> {
+    constructor() {
+        super("Scope", [
+            { no: 1, name: "user", kind: "message", oneof: "type", T: () => ScopeUser },
+            { no: 2, name: "space", kind: "message", oneof: "type", T: () => ScopeSpace }
+        ]);
+    }
+    create(value?: PartialMessage<Scope>): Scope {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.type = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<Scope>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: Scope): Scope {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* ScopeUser user */ 1:
+                    message.type = {
+                        oneofKind: "user",
+                        user: ScopeUser.internalBinaryRead(reader, reader.uint32(), options, (message.type as any).user)
+                    };
+                    break;
+                case /* ScopeSpace space */ 2:
+                    message.type = {
+                        oneofKind: "space",
+                        space: ScopeSpace.internalBinaryRead(reader, reader.uint32(), options, (message.type as any).space)
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: Scope, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* ScopeUser user = 1; */
+        if (message.type.oneofKind === "user")
+            ScopeUser.internalBinaryWrite(message.type.user, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* ScopeSpace space = 2; */
+        if (message.type.oneofKind === "space")
+            ScopeSpace.internalBinaryWrite(message.type.space, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message Scope
+ */
+export const Scope = new Scope$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ScopeUser$Type extends MessageType<ScopeUser> {
+    constructor() {
+        super("ScopeUser", [
+            { no: 1, name: "user", kind: "message", T: () => User }
+        ]);
+    }
+    create(value?: PartialMessage<ScopeUser>): ScopeUser {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<ScopeUser>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ScopeUser): ScopeUser {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* User user */ 1:
+                    message.user = User.internalBinaryRead(reader, reader.uint32(), options, message.user);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ScopeUser, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* User user = 1; */
+        if (message.user)
+            User.internalBinaryWrite(message.user, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ScopeUser
+ */
+export const ScopeUser = new ScopeUser$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ScopeSpace$Type extends MessageType<ScopeSpace> {
+    constructor() {
+        super("ScopeSpace", [
+            { no: 1, name: "space", kind: "message", T: () => Space }
+        ]);
+    }
+    create(value?: PartialMessage<ScopeSpace>): ScopeSpace {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<ScopeSpace>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ScopeSpace): ScopeSpace {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Space space */ 1:
+                    message.space = Space.internalBinaryRead(reader, reader.uint32(), options, message.space);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ScopeSpace, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Space space = 1; */
+        if (message.space)
+            Space.internalBinaryWrite(message.space, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ScopeSpace
+ */
+export const ScopeSpace = new ScopeSpace$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class BotAvatar$Type extends MessageType<BotAvatar> {
     constructor() {
@@ -14941,7 +15663,11 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 95, name: "setProfilePhoto", kind: "message", oneof: "input", T: () => SetProfilePhotoInput },
             { no: 96, name: "getExternalProfilePhoto", kind: "message", oneof: "input", T: () => GetExternalProfilePhotoInput },
             { no: 97, name: "getChatTranscript", kind: "message", oneof: "input", T: () => GetChatTranscriptInput },
-            { no: 99, name: "joinPublicSpace", kind: "message", oneof: "input", T: () => JoinPublicSpaceInput }
+            { no: 98, name: "searchExternalResources", kind: "message", oneof: "input", T: () => SearchExternalResourcesInput },
+            { no: 99, name: "joinPublicSpace", kind: "message", oneof: "input", T: () => JoinPublicSpaceInput },
+            { no: 101, name: "listConnectors", kind: "message", oneof: "input", T: () => ListConnectorsInput },
+            { no: 102, name: "prepareConnectorOAuth", kind: "message", oneof: "input", T: () => PrepareConnectorOAuthInput },
+            { no: 103, name: "disconnectConnector", kind: "message", oneof: "input", T: () => DisconnectConnectorInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -15530,10 +16256,34 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getChatTranscript: GetChatTranscriptInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getChatTranscript)
                     };
                     break;
+                case /* SearchExternalResourcesInput searchExternalResources */ 98:
+                    message.input = {
+                        oneofKind: "searchExternalResources",
+                        searchExternalResources: SearchExternalResourcesInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).searchExternalResources)
+                    };
+                    break;
                 case /* JoinPublicSpaceInput joinPublicSpace */ 99:
                     message.input = {
                         oneofKind: "joinPublicSpace",
                         joinPublicSpace: JoinPublicSpaceInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).joinPublicSpace)
+                    };
+                    break;
+                case /* ListConnectorsInput listConnectors */ 101:
+                    message.input = {
+                        oneofKind: "listConnectors",
+                        listConnectors: ListConnectorsInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).listConnectors)
+                    };
+                    break;
+                case /* PrepareConnectorOAuthInput prepareConnectorOAuth */ 102:
+                    message.input = {
+                        oneofKind: "prepareConnectorOAuth",
+                        prepareConnectorOAuth: PrepareConnectorOAuthInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).prepareConnectorOAuth)
+                    };
+                    break;
+                case /* DisconnectConnectorInput disconnectConnector */ 103:
+                    message.input = {
+                        oneofKind: "disconnectConnector",
+                        disconnectConnector: DisconnectConnectorInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).disconnectConnector)
                     };
                     break;
                 default:
@@ -15836,9 +16586,21 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetChatTranscriptInput getChatTranscript = 97; */
         if (message.input.oneofKind === "getChatTranscript")
             GetChatTranscriptInput.internalBinaryWrite(message.input.getChatTranscript, writer.tag(97, WireType.LengthDelimited).fork(), options).join();
+        /* SearchExternalResourcesInput searchExternalResources = 98; */
+        if (message.input.oneofKind === "searchExternalResources")
+            SearchExternalResourcesInput.internalBinaryWrite(message.input.searchExternalResources, writer.tag(98, WireType.LengthDelimited).fork(), options).join();
         /* JoinPublicSpaceInput joinPublicSpace = 99; */
         if (message.input.oneofKind === "joinPublicSpace")
             JoinPublicSpaceInput.internalBinaryWrite(message.input.joinPublicSpace, writer.tag(99, WireType.LengthDelimited).fork(), options).join();
+        /* ListConnectorsInput listConnectors = 101; */
+        if (message.input.oneofKind === "listConnectors")
+            ListConnectorsInput.internalBinaryWrite(message.input.listConnectors, writer.tag(101, WireType.LengthDelimited).fork(), options).join();
+        /* PrepareConnectorOAuthInput prepareConnectorOAuth = 102; */
+        if (message.input.oneofKind === "prepareConnectorOAuth")
+            PrepareConnectorOAuthInput.internalBinaryWrite(message.input.prepareConnectorOAuth, writer.tag(102, WireType.LengthDelimited).fork(), options).join();
+        /* DisconnectConnectorInput disconnectConnector = 103; */
+        if (message.input.oneofKind === "disconnectConnector")
+            DisconnectConnectorInput.internalBinaryWrite(message.input.disconnectConnector, writer.tag(103, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -15949,7 +16711,11 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 95, name: "setProfilePhoto", kind: "message", oneof: "result", T: () => SetProfilePhotoResult },
             { no: 96, name: "getExternalProfilePhoto", kind: "message", oneof: "result", T: () => GetExternalProfilePhotoResult },
             { no: 97, name: "getChatTranscript", kind: "message", oneof: "result", T: () => GetChatTranscriptResult },
-            { no: 99, name: "joinPublicSpace", kind: "message", oneof: "result", T: () => JoinPublicSpaceResult }
+            { no: 98, name: "searchExternalResources", kind: "message", oneof: "result", T: () => SearchExternalResourcesResult },
+            { no: 99, name: "joinPublicSpace", kind: "message", oneof: "result", T: () => JoinPublicSpaceResult },
+            { no: 101, name: "listConnectors", kind: "message", oneof: "result", T: () => ListConnectorsResult },
+            { no: 102, name: "prepareConnectorOAuth", kind: "message", oneof: "result", T: () => PrepareConnectorOAuthResult },
+            { no: 103, name: "disconnectConnector", kind: "message", oneof: "result", T: () => DisconnectConnectorResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -16538,10 +17304,34 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getChatTranscript: GetChatTranscriptResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getChatTranscript)
                     };
                     break;
+                case /* SearchExternalResourcesResult searchExternalResources */ 98:
+                    message.result = {
+                        oneofKind: "searchExternalResources",
+                        searchExternalResources: SearchExternalResourcesResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).searchExternalResources)
+                    };
+                    break;
                 case /* JoinPublicSpaceResult joinPublicSpace */ 99:
                     message.result = {
                         oneofKind: "joinPublicSpace",
                         joinPublicSpace: JoinPublicSpaceResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).joinPublicSpace)
+                    };
+                    break;
+                case /* ListConnectorsResult listConnectors */ 101:
+                    message.result = {
+                        oneofKind: "listConnectors",
+                        listConnectors: ListConnectorsResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).listConnectors)
+                    };
+                    break;
+                case /* PrepareConnectorOAuthResult prepareConnectorOAuth */ 102:
+                    message.result = {
+                        oneofKind: "prepareConnectorOAuth",
+                        prepareConnectorOAuth: PrepareConnectorOAuthResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).prepareConnectorOAuth)
+                    };
+                    break;
+                case /* DisconnectConnectorResult disconnectConnector */ 103:
+                    message.result = {
+                        oneofKind: "disconnectConnector",
+                        disconnectConnector: DisconnectConnectorResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).disconnectConnector)
                     };
                     break;
                 default:
@@ -16844,9 +17634,21 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetChatTranscriptResult getChatTranscript = 97; */
         if (message.result.oneofKind === "getChatTranscript")
             GetChatTranscriptResult.internalBinaryWrite(message.result.getChatTranscript, writer.tag(97, WireType.LengthDelimited).fork(), options).join();
+        /* SearchExternalResourcesResult searchExternalResources = 98; */
+        if (message.result.oneofKind === "searchExternalResources")
+            SearchExternalResourcesResult.internalBinaryWrite(message.result.searchExternalResources, writer.tag(98, WireType.LengthDelimited).fork(), options).join();
         /* JoinPublicSpaceResult joinPublicSpace = 99; */
         if (message.result.oneofKind === "joinPublicSpace")
             JoinPublicSpaceResult.internalBinaryWrite(message.result.joinPublicSpace, writer.tag(99, WireType.LengthDelimited).fork(), options).join();
+        /* ListConnectorsResult listConnectors = 101; */
+        if (message.result.oneofKind === "listConnectors")
+            ListConnectorsResult.internalBinaryWrite(message.result.listConnectors, writer.tag(101, WireType.LengthDelimited).fork(), options).join();
+        /* PrepareConnectorOAuthResult prepareConnectorOAuth = 102; */
+        if (message.result.oneofKind === "prepareConnectorOAuth")
+            PrepareConnectorOAuthResult.internalBinaryWrite(message.result.prepareConnectorOAuth, writer.tag(102, WireType.LengthDelimited).fork(), options).join();
+        /* DisconnectConnectorResult disconnectConnector = 103; */
+        if (message.result.oneofKind === "disconnectConnector")
+            DisconnectConnectorResult.internalBinaryWrite(message.result.disconnectConnector, writer.tag(103, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -26671,6 +27473,692 @@ class SearchMessagesResult$Type extends MessageType<SearchMessagesResult> {
  * @generated MessageType for protobuf message SearchMessagesResult
  */
 export const SearchMessagesResult = new SearchMessagesResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ExternalResource$Type extends MessageType<ExternalResource> {
+    constructor() {
+        super("ExternalResource", [
+            { no: 1, name: "id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "provider", kind: "enum", T: () => ["ExternalResourceProvider", ExternalResourceProvider] },
+            { no: 3, name: "kind", kind: "enum", T: () => ["ExternalResourceKind", ExternalResourceKind] },
+            { no: 4, name: "title", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "subtitle", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "emoji", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ExternalResource>): ExternalResource {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.id = "";
+        message.provider = 0;
+        message.kind = 0;
+        message.title = "";
+        message.url = "";
+        if (value !== undefined)
+            reflectionMergePartial<ExternalResource>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ExternalResource): ExternalResource {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string id */ 1:
+                    message.id = reader.string();
+                    break;
+                case /* ExternalResourceProvider provider */ 2:
+                    message.provider = reader.int32();
+                    break;
+                case /* ExternalResourceKind kind */ 3:
+                    message.kind = reader.int32();
+                    break;
+                case /* string title */ 4:
+                    message.title = reader.string();
+                    break;
+                case /* string url */ 5:
+                    message.url = reader.string();
+                    break;
+                case /* optional string subtitle */ 6:
+                    message.subtitle = reader.string();
+                    break;
+                case /* optional string emoji */ 7:
+                    message.emoji = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ExternalResource, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string id = 1; */
+        if (message.id !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.id);
+        /* ExternalResourceProvider provider = 2; */
+        if (message.provider !== 0)
+            writer.tag(2, WireType.Varint).int32(message.provider);
+        /* ExternalResourceKind kind = 3; */
+        if (message.kind !== 0)
+            writer.tag(3, WireType.Varint).int32(message.kind);
+        /* string title = 4; */
+        if (message.title !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.title);
+        /* string url = 5; */
+        if (message.url !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.url);
+        /* optional string subtitle = 6; */
+        if (message.subtitle !== undefined)
+            writer.tag(6, WireType.LengthDelimited).string(message.subtitle);
+        /* optional string emoji = 7; */
+        if (message.emoji !== undefined)
+            writer.tag(7, WireType.LengthDelimited).string(message.emoji);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ExternalResource
+ */
+export const ExternalResource = new ExternalResource$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SearchExternalResourcesInput$Type extends MessageType<SearchExternalResourcesInput> {
+    constructor() {
+        super("SearchExternalResourcesInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "query", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SearchExternalResourcesInput>): SearchExternalResourcesInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.query = "";
+        if (value !== undefined)
+            reflectionMergePartial<SearchExternalResourcesInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SearchExternalResourcesInput): SearchExternalResourcesInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* string query */ 2:
+                    message.query = reader.string();
+                    break;
+                case /* optional int32 limit */ 3:
+                    message.limit = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SearchExternalResourcesInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* string query = 2; */
+        if (message.query !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.query);
+        /* optional int32 limit = 3; */
+        if (message.limit !== undefined)
+            writer.tag(3, WireType.Varint).int32(message.limit);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SearchExternalResourcesInput
+ */
+export const SearchExternalResourcesInput = new SearchExternalResourcesInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SearchExternalResourcesResult$Type extends MessageType<SearchExternalResourcesResult> {
+    constructor() {
+        super("SearchExternalResourcesResult", [
+            { no: 1, name: "resources", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => ExternalResource }
+        ]);
+    }
+    create(value?: PartialMessage<SearchExternalResourcesResult>): SearchExternalResourcesResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.resources = [];
+        if (value !== undefined)
+            reflectionMergePartial<SearchExternalResourcesResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SearchExternalResourcesResult): SearchExternalResourcesResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated ExternalResource resources */ 1:
+                    message.resources.push(ExternalResource.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SearchExternalResourcesResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated ExternalResource resources = 1; */
+        for (let i = 0; i < message.resources.length; i++)
+            ExternalResource.internalBinaryWrite(message.resources[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SearchExternalResourcesResult
+ */
+export const SearchExternalResourcesResult = new SearchExternalResourcesResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ConnectorScope$Type extends MessageType<ConnectorScope> {
+    constructor() {
+        super("ConnectorScope", [
+            { no: 1, name: "scope", kind: "message", T: () => Scope },
+            { no: 2, name: "can_manage", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "allows_connections", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ConnectorScope>): ConnectorScope {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.canManage = false;
+        if (value !== undefined)
+            reflectionMergePartial<ConnectorScope>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ConnectorScope): ConnectorScope {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Scope scope */ 1:
+                    message.scope = Scope.internalBinaryRead(reader, reader.uint32(), options, message.scope);
+                    break;
+                case /* bool can_manage */ 2:
+                    message.canManage = reader.bool();
+                    break;
+                case /* optional bool allows_connections */ 3:
+                    message.allowsConnections = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ConnectorScope, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Scope scope = 1; */
+        if (message.scope)
+            Scope.internalBinaryWrite(message.scope, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* bool can_manage = 2; */
+        if (message.canManage !== false)
+            writer.tag(2, WireType.Varint).bool(message.canManage);
+        /* optional bool allows_connections = 3; */
+        if (message.allowsConnections !== undefined)
+            writer.tag(3, WireType.Varint).bool(message.allowsConnections);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ConnectorScope
+ */
+export const ConnectorScope = new ConnectorScope$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ConnectorProviderInfo$Type extends MessageType<ConnectorProviderInfo> {
+    constructor() {
+        super("ConnectorProviderInfo", [
+            { no: 1, name: "provider", kind: "enum", T: () => ["ConnectorProvider", ConnectorProvider, "CONNECTOR_PROVIDER_"] },
+            { no: 2, name: "available", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "supports_user_scope", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 4, name: "supports_space_scope", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ConnectorProviderInfo>): ConnectorProviderInfo {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.provider = 0;
+        message.available = false;
+        message.supportsUserScope = false;
+        message.supportsSpaceScope = false;
+        if (value !== undefined)
+            reflectionMergePartial<ConnectorProviderInfo>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ConnectorProviderInfo): ConnectorProviderInfo {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* ConnectorProvider provider */ 1:
+                    message.provider = reader.int32();
+                    break;
+                case /* bool available */ 2:
+                    message.available = reader.bool();
+                    break;
+                case /* bool supports_user_scope */ 3:
+                    message.supportsUserScope = reader.bool();
+                    break;
+                case /* bool supports_space_scope */ 4:
+                    message.supportsSpaceScope = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ConnectorProviderInfo, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* ConnectorProvider provider = 1; */
+        if (message.provider !== 0)
+            writer.tag(1, WireType.Varint).int32(message.provider);
+        /* bool available = 2; */
+        if (message.available !== false)
+            writer.tag(2, WireType.Varint).bool(message.available);
+        /* bool supports_user_scope = 3; */
+        if (message.supportsUserScope !== false)
+            writer.tag(3, WireType.Varint).bool(message.supportsUserScope);
+        /* bool supports_space_scope = 4; */
+        if (message.supportsSpaceScope !== false)
+            writer.tag(4, WireType.Varint).bool(message.supportsSpaceScope);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ConnectorProviderInfo
+ */
+export const ConnectorProviderInfo = new ConnectorProviderInfo$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ConnectorConnection$Type extends MessageType<ConnectorConnection> {
+    constructor() {
+        super("ConnectorConnection", [
+            { no: 1, name: "provider", kind: "enum", T: () => ["ConnectorProvider", ConnectorProvider, "CONNECTOR_PROVIDER_"] },
+            { no: 2, name: "scope", kind: "message", T: () => Scope },
+            { no: 3, name: "connected_at", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "connected_by", kind: "message", T: () => User },
+            { no: 5, name: "needs_configuration", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ConnectorConnection>): ConnectorConnection {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.provider = 0;
+        message.connectedAt = 0n;
+        message.needsConfiguration = false;
+        if (value !== undefined)
+            reflectionMergePartial<ConnectorConnection>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ConnectorConnection): ConnectorConnection {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* ConnectorProvider provider */ 1:
+                    message.provider = reader.int32();
+                    break;
+                case /* Scope scope */ 2:
+                    message.scope = Scope.internalBinaryRead(reader, reader.uint32(), options, message.scope);
+                    break;
+                case /* int64 connected_at */ 3:
+                    message.connectedAt = reader.int64().toBigInt();
+                    break;
+                case /* User connected_by */ 4:
+                    message.connectedBy = User.internalBinaryRead(reader, reader.uint32(), options, message.connectedBy);
+                    break;
+                case /* bool needs_configuration */ 5:
+                    message.needsConfiguration = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ConnectorConnection, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* ConnectorProvider provider = 1; */
+        if (message.provider !== 0)
+            writer.tag(1, WireType.Varint).int32(message.provider);
+        /* Scope scope = 2; */
+        if (message.scope)
+            Scope.internalBinaryWrite(message.scope, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* int64 connected_at = 3; */
+        if (message.connectedAt !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.connectedAt);
+        /* User connected_by = 4; */
+        if (message.connectedBy)
+            User.internalBinaryWrite(message.connectedBy, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* bool needs_configuration = 5; */
+        if (message.needsConfiguration !== false)
+            writer.tag(5, WireType.Varint).bool(message.needsConfiguration);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ConnectorConnection
+ */
+export const ConnectorConnection = new ConnectorConnection$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ListConnectorsInput$Type extends MessageType<ListConnectorsInput> {
+    constructor() {
+        super("ListConnectorsInput", []);
+    }
+    create(value?: PartialMessage<ListConnectorsInput>): ListConnectorsInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<ListConnectorsInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ListConnectorsInput): ListConnectorsInput {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: ListConnectorsInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ListConnectorsInput
+ */
+export const ListConnectorsInput = new ListConnectorsInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ListConnectorsResult$Type extends MessageType<ListConnectorsResult> {
+    constructor() {
+        super("ListConnectorsResult", [
+            { no: 1, name: "providers", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => ConnectorProviderInfo },
+            { no: 2, name: "scopes", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => ConnectorScope },
+            { no: 3, name: "connections", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => ConnectorConnection }
+        ]);
+    }
+    create(value?: PartialMessage<ListConnectorsResult>): ListConnectorsResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.providers = [];
+        message.scopes = [];
+        message.connections = [];
+        if (value !== undefined)
+            reflectionMergePartial<ListConnectorsResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ListConnectorsResult): ListConnectorsResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated ConnectorProviderInfo providers */ 1:
+                    message.providers.push(ConnectorProviderInfo.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated ConnectorScope scopes */ 2:
+                    message.scopes.push(ConnectorScope.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated ConnectorConnection connections */ 3:
+                    message.connections.push(ConnectorConnection.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ListConnectorsResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated ConnectorProviderInfo providers = 1; */
+        for (let i = 0; i < message.providers.length; i++)
+            ConnectorProviderInfo.internalBinaryWrite(message.providers[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated ConnectorScope scopes = 2; */
+        for (let i = 0; i < message.scopes.length; i++)
+            ConnectorScope.internalBinaryWrite(message.scopes[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* repeated ConnectorConnection connections = 3; */
+        for (let i = 0; i < message.connections.length; i++)
+            ConnectorConnection.internalBinaryWrite(message.connections[i], writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ListConnectorsResult
+ */
+export const ListConnectorsResult = new ListConnectorsResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class PrepareConnectorOAuthInput$Type extends MessageType<PrepareConnectorOAuthInput> {
+    constructor() {
+        super("PrepareConnectorOAuthInput", [
+            { no: 1, name: "provider", kind: "enum", T: () => ["ConnectorProvider", ConnectorProvider, "CONNECTOR_PROVIDER_"] },
+            { no: 2, name: "scope", kind: "message", T: () => InputScope },
+            { no: 3, name: "callback_scheme", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<PrepareConnectorOAuthInput>): PrepareConnectorOAuthInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.provider = 0;
+        message.callbackScheme = "";
+        if (value !== undefined)
+            reflectionMergePartial<PrepareConnectorOAuthInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: PrepareConnectorOAuthInput): PrepareConnectorOAuthInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* ConnectorProvider provider */ 1:
+                    message.provider = reader.int32();
+                    break;
+                case /* InputScope scope */ 2:
+                    message.scope = InputScope.internalBinaryRead(reader, reader.uint32(), options, message.scope);
+                    break;
+                case /* string callback_scheme */ 3:
+                    message.callbackScheme = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: PrepareConnectorOAuthInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* ConnectorProvider provider = 1; */
+        if (message.provider !== 0)
+            writer.tag(1, WireType.Varint).int32(message.provider);
+        /* InputScope scope = 2; */
+        if (message.scope)
+            InputScope.internalBinaryWrite(message.scope, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* string callback_scheme = 3; */
+        if (message.callbackScheme !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.callbackScheme);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message PrepareConnectorOAuthInput
+ */
+export const PrepareConnectorOAuthInput = new PrepareConnectorOAuthInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class PrepareConnectorOAuthResult$Type extends MessageType<PrepareConnectorOAuthResult> {
+    constructor() {
+        super("PrepareConnectorOAuthResult", [
+            { no: 1, name: "authorization_url", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<PrepareConnectorOAuthResult>): PrepareConnectorOAuthResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.authorizationUrl = "";
+        if (value !== undefined)
+            reflectionMergePartial<PrepareConnectorOAuthResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: PrepareConnectorOAuthResult): PrepareConnectorOAuthResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string authorization_url */ 1:
+                    message.authorizationUrl = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: PrepareConnectorOAuthResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string authorization_url = 1; */
+        if (message.authorizationUrl !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.authorizationUrl);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message PrepareConnectorOAuthResult
+ */
+export const PrepareConnectorOAuthResult = new PrepareConnectorOAuthResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class DisconnectConnectorInput$Type extends MessageType<DisconnectConnectorInput> {
+    constructor() {
+        super("DisconnectConnectorInput", [
+            { no: 1, name: "provider", kind: "enum", T: () => ["ConnectorProvider", ConnectorProvider, "CONNECTOR_PROVIDER_"] },
+            { no: 2, name: "scope", kind: "message", T: () => InputScope }
+        ]);
+    }
+    create(value?: PartialMessage<DisconnectConnectorInput>): DisconnectConnectorInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.provider = 0;
+        if (value !== undefined)
+            reflectionMergePartial<DisconnectConnectorInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: DisconnectConnectorInput): DisconnectConnectorInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* ConnectorProvider provider */ 1:
+                    message.provider = reader.int32();
+                    break;
+                case /* InputScope scope */ 2:
+                    message.scope = InputScope.internalBinaryRead(reader, reader.uint32(), options, message.scope);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: DisconnectConnectorInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* ConnectorProvider provider = 1; */
+        if (message.provider !== 0)
+            writer.tag(1, WireType.Varint).int32(message.provider);
+        /* InputScope scope = 2; */
+        if (message.scope)
+            InputScope.internalBinaryWrite(message.scope, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message DisconnectConnectorInput
+ */
+export const DisconnectConnectorInput = new DisconnectConnectorInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class DisconnectConnectorResult$Type extends MessageType<DisconnectConnectorResult> {
+    constructor() {
+        super("DisconnectConnectorResult", []);
+    }
+    create(value?: PartialMessage<DisconnectConnectorResult>): DisconnectConnectorResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<DisconnectConnectorResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: DisconnectConnectorResult): DisconnectConnectorResult {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: DisconnectConnectorResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message DisconnectConnectorResult
+ */
+export const DisconnectConnectorResult = new DisconnectConnectorResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class InputChatParticipant$Type extends MessageType<InputChatParticipant> {
     constructor() {
