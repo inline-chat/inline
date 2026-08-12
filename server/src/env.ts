@@ -97,6 +97,8 @@ export const DEMO_CODE2 = process.env["DEMO_CODE2"]
 
 export const LINEAR_CLIENT_ID = process.env["LINEAR_CLIENT_ID"]
 export const LINEAR_CLIENT_SECRET = process.env["LINEAR_CLIENT_SECRET"]
+export const LINEAR_CLIENT_ID_DEV = process.env["LINEAR_CLIENT_ID_DEV"]
+export const LINEAR_CLIENT_SECRET_DEV = process.env["LINEAR_CLIENT_SECRET_DEV"]
 export const HARDCODED_TRANSLATION_CONTEXT = process.env["HARDCODED_TRANSLATION_CONTEXT"]
 
 export const NOTION_CLIENT_ID = process.env["NOTION_CLIENT_ID"]

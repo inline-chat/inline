@@ -49,11 +49,14 @@ declare global {
       IPINFO_TOKEN?: string
       LINEAR_CLIENT_ID?: string
       LINEAR_CLIENT_SECRET?: string
+      LINEAR_CLIENT_ID_DEV?: string
+      LINEAR_CLIENT_SECRET_DEV?: string
       OPENAI_API_KEY?: string
       NOTION_CLIENT_ID?: string
       NOTION_CLIENT_SECRET?: string
       NOTION_CLIENT_ID_DEV?: string
       NOTION_CLIENT_SECRET_DEV?: string
+      CONNECTOR_OAUTH_CALLBACK_BASE_URL?: string
       HARDCODED_TRANSLATION_CONTEXT?: string
       // Allow for additional dynamic environment variables
       [key: string]: string | undefined
