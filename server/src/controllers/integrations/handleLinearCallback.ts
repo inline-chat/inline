@@ -1,9 +1,7 @@
-import * as arctic from "arctic"
-import { encryptLinearTokens } from "@in/server/libs/helpers"
-import { db } from "@in/server/db"
-import { integrations } from "@in/server/db/schema/integrations"
+import { decryptLinearTokens, encryptLinearTokens } from "@in/server/libs/helpers"
 import { Log } from "@in/server/utils/log"
-import { linearOauth } from "@in/server/libs/linear"
+import { exchangeLinearAuthorizationCode, revokeLinearToken } from "@in/server/libs/linear"
+import { storeConnectorToken } from "@in/server/modules/integrations/connectionStore"
 
 export const handleLinearCallback = async ({
   code,
@@ -12,10 +10,10 @@ export const handleLinearCallback = async ({
 }: {
   code: string
   userId: number
-  spaceId: string
+  spaceId: number | null
 }) => {
   try {
-    const tokens = await linearOauth?.validateAuthorizationCode(code)
+    const tokens = await exchangeLinearAuthorizationCode(code)
     if (!tokens) {
       return {
         ok: false,
@@ -24,40 +22,43 @@ export const handleLinearCallback = async ({
     }
     const encryptedToken = encryptLinearTokens(tokens)
 
-    const numericSpaceId = Number(spaceId)
-    if (isNaN(numericSpaceId)) {
-      return {
-        ok: false,
-        error: "Invalid spaceId",
-      }
-    }
-
     try {
-      await db
-        .insert(integrations)
-        .values({
-          userId,
-          spaceId: numericSpaceId,
-          provider: "linear",
-          accessTokenEncrypted: encryptedToken.encrypted,
-          accessTokenIv: encryptedToken.iv,
-          accessTokenTag: encryptedToken.authTag,
-        })
-        .onConflictDoUpdate({
-          target: [integrations.spaceId, integrations.provider],
-          set: {
-            userId,
-            accessTokenEncrypted: encryptedToken.encrypted,
-            accessTokenIv: encryptedToken.iv,
-            accessTokenTag: encryptedToken.authTag,
-            date: new Date(),
-          },
-        })
+      const replacedTokens = await storeConnectorToken({
+        userId,
+        spaceId,
+        provider: "linear",
+        token: encryptedToken,
+      })
+      await Promise.all(replacedTokens.map(async (token) => {
+        try {
+          const parsed = decryptLinearTokens(token)
+          const result = await revokeLinearToken({
+            accessToken: parsed?.data?.access_token,
+            refreshToken: parsed?.data?.refresh_token,
+          })
+          if (!result.ok) {
+            Log.shared.warn("Failed to revoke displaced Linear token", {
+              status: result.status,
+            })
+          }
+        } catch (error) {
+          Log.shared.warn("Failed to revoke displaced Linear token", { error })
+        }
+      }))
     } catch (e) {
       if (e instanceof Error) {
-        Log.shared.error("Failed to upsert Linear integration", e, { userId, spaceId: numericSpaceId })
+        Log.shared.error("Failed to upsert Linear integration", e, { userId, spaceId })
       } else {
-        Log.shared.error("Failed to upsert Linear integration", { userId, spaceId: numericSpaceId, error: e })
+        Log.shared.error("Failed to upsert Linear integration", { userId, spaceId, error: e })
+      }
+      const result = await revokeLinearToken({
+        accessToken: stringTokenField(tokens.data, "access_token"),
+        refreshToken: stringTokenField(tokens.data, "refresh_token"),
+      })
+      if (!result.ok) {
+        Log.shared.warn("Failed to revoke unsaved Linear token", {
+          status: result.status,
+        })
       }
       return {
         ok: false,
@@ -71,21 +72,17 @@ export const handleLinearCallback = async ({
   } catch (e) {
     Log.shared.error("Linear callback failed", e)
 
-    if (e instanceof arctic.OAuth2RequestError) {
-      return {
-        ok: false,
-        error: "Invalid authorization",
-      }
-    }
-    if (e instanceof arctic.ArcticFetchError) {
-      return {
-        ok: false,
-        error: "Network error",
-      }
-    }
     return {
       ok: false,
-      error: "Unknown error",
+      error: "Network error",
     }
   }
+}
+
+function stringTokenField(
+  data: Record<string, unknown>,
+  field: "access_token" | "refresh_token",
+): string | null {
+  const value = data[field]
+  return typeof value === "string" && value.length > 0 ? value : null
 }

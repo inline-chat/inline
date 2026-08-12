@@ -7,6 +7,8 @@ import {
 } from "../../modules/notion/notion"
 import { NOTION_SETUP_ERROR_MESSAGES } from "../../modules/notion/errors"
 import type { HandlerContext } from "@in/server/controllers/helpers"
+import { Authorize } from "@in/server/utils/authorize"
+import { rejectBotConnectorAccess } from "@in/server/modules/integrations/providerActionContext"
 
 export const Input = Type.Object({
   spaceId: Type.Number(),
@@ -24,6 +26,8 @@ export const handler = async (
   input: Static<typeof Input>,
   _context: HandlerContext,
 ): Promise<Static<typeof Response>> => {
+  await rejectBotConnectorAccess(_context.currentUserId)
+  await Authorize.spaceMember(input.spaceId, _context.currentUserId)
   const notion = await getNotionClient(input.spaceId)
   if (notion.databaseId) {
     try {

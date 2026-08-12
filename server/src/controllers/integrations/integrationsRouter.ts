@@ -7,6 +7,7 @@ import { getLinearAuthUrl } from "@in/server/libs/linear"
 import { handleLinearCallback } from "./handleLinearCallback"
 import { getNotionAuthUrl, handleNotionCallback } from "@in/server/libs/notion"
 import { Authorize } from "@in/server/utils/authorize"
+import { connectorCallbackUrl } from "@in/server/modules/integrations/connectorCallbackScheme"
 
 export const integrationsRouter = new Elysia({ prefix: "/integrations" })
   .get(
@@ -88,20 +89,20 @@ export const integrationsRouter = new Elysia({ prefix: "/integrations" })
       if (!cookieToken.value || !cookieState.value || !cookieSpaceId.value) {
         Log.shared.warn("Linear OAuth callback missing cookies")
         clearCookies()
-        return Response.redirect("in://integrations/linear?success=false&error=missing_cookie")
+        return Response.redirect(connectorCallbackUrl("linear", "success=false&error=missing_cookie"))
       }
 
       if (query.state !== cookieState.value) {
         Log.shared.warn("Linear OAuth callback state mismatch", { expected: cookieState.value, got: query.state })
         clearCookies()
-        return Response.redirect("in://integrations/linear?success=false&error=state_mismatch")
+        return Response.redirect(connectorCallbackUrl("linear", "success=false&error=state_mismatch"))
       }
 
       const spaceId = Number(cookieSpaceId.value)
       if (isNaN(spaceId)) {
         Log.shared.warn("Linear OAuth callback invalid spaceId cookie", { value: cookieSpaceId.value })
         clearCookies()
-        return Response.redirect("in://integrations/linear?success=false&error=invalid_space")
+        return Response.redirect(connectorCallbackUrl("linear", "success=false&error=invalid_space"))
       }
 
       let userId: number
@@ -111,13 +112,13 @@ export const integrationsRouter = new Elysia({ prefix: "/integrations" })
       } catch (error) {
         Log.shared.warn("Linear OAuth callback unauthorized", { spaceId, error })
         clearCookies()
-        return Response.redirect("in://integrations/linear?success=false&error=unauthorized")
+        return Response.redirect(connectorCallbackUrl("linear", "success=false&error=unauthorized"))
       }
 
       const result = await handleLinearCallback({
         code: query.code,
         userId,
-        spaceId: cookieSpaceId.value,
+        spaceId,
       })
 
       clearCookies()
@@ -125,11 +126,14 @@ export const integrationsRouter = new Elysia({ prefix: "/integrations" })
       if (!result.ok) {
         const errorValue = typeof result.error === "string" && result.error.length > 0 ? result.error : "callback_failed"
         Log.shared.error("Linear callback failed", { error: errorValue })
-        return Response.redirect(`in://integrations/linear?success=false&error=${encodeURIComponent(errorValue)}`)
+        return Response.redirect(connectorCallbackUrl(
+          "linear",
+          `success=false&error=${encodeURIComponent(errorValue)}`,
+        ))
       }
 
       Log.shared.info("Linear OAuth callback succeeded", { userId, spaceId })
-      return Response.redirect("in://integrations/linear?success=true")
+      return Response.redirect(connectorCallbackUrl("linear", "success=true"))
     },
     {
       cookie: t.Cookie({
@@ -226,20 +230,20 @@ export const integrationsRouter = new Elysia({ prefix: "/integrations" })
       if (!cookieToken.value || !cookieState.value || !cookieSpaceId.value) {
         Log.shared.warn("Notion OAuth callback missing cookies")
         clearCookies()
-        return Response.redirect("in://integrations/notion?success=false&error=missing_cookie")
+        return Response.redirect(connectorCallbackUrl("notion", "success=false&error=missing_cookie"))
       }
 
       if (query.state !== cookieState.value) {
         Log.shared.warn("Notion OAuth callback state mismatch", { expected: cookieState.value, got: query.state })
         clearCookies()
-        return Response.redirect("in://integrations/notion?success=false&error=state_mismatch")
+        return Response.redirect(connectorCallbackUrl("notion", "success=false&error=state_mismatch"))
       }
 
       const spaceId = Number(cookieSpaceId.value)
       if (isNaN(spaceId)) {
         Log.shared.warn("Notion OAuth callback invalid spaceId cookie", { value: cookieSpaceId.value })
         clearCookies()
-        return Response.redirect("in://integrations/notion?success=false&error=invalid_space")
+        return Response.redirect(connectorCallbackUrl("notion", "success=false&error=invalid_space"))
       }
 
       let userId: number
@@ -249,24 +253,24 @@ export const integrationsRouter = new Elysia({ prefix: "/integrations" })
       } catch (error) {
         Log.shared.warn("Notion OAuth callback unauthorized", { spaceId, error })
         clearCookies()
-        return Response.redirect("in://integrations/notion?success=false&error=unauthorized")
+        return Response.redirect(connectorCallbackUrl("notion", "success=false&error=unauthorized"))
       }
 
       const result = await handleNotionCallback({
         code: query.code,
         userId,
-        spaceId: cookieSpaceId.value,
+        spaceId,
       })
 
       clearCookies()
 
       if (!result.ok) {
         Log.shared.error("Notion callback failed", result.error)
-        return Response.redirect("in://integrations/notion?success=false&error=callback_failed")
+        return Response.redirect(connectorCallbackUrl("notion", "success=false&error=callback_failed"))
       }
 
       Log.shared.info("Notion OAuth callback succeeded", { userId, spaceId })
-      return Response.redirect("in://integrations/notion?success=true")
+      return Response.redirect(connectorCallbackUrl("notion", "success=true"))
     },
     {
       cookie: t.Cookie({

@@ -14,6 +14,9 @@ import { InlineError } from "../../types/errors"
 import { connectionManager } from "../../ws/connections"
 import type { TPeerInfo } from "../../api-types"
 import { deleteLinearIssue } from "@in/server/libs/linear"
+import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
+import { rejectBotConnectorAccess } from "@in/server/modules/integrations/providerActionContext"
+import { Authorize } from "@in/server/utils/authorize"
 
 export const Input = Type.Object({
   externalTaskId: Type.Number(),
@@ -30,7 +33,8 @@ export const handler = async (
   input: Static<typeof Input>,
   context: HandlerContext,
 ): Promise<Static<typeof Response>> => {
-  const { externalTaskId, pageId, messageId, chatId } = input
+  const { externalTaskId, messageId, chatId } = input
+  await rejectBotConnectorAccess(context.currentUserId)
 
   try {
     // Verify task ownership and get required data
@@ -40,14 +44,25 @@ export const handler = async (
       chatId,
       context.currentUserId,
     )
+    const connectorSpaceId = externalTask.connectorSpaceId ?? chat.spaceId
+    if (!connectorSpaceId) {
+      throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+    }
+    await Authorize.spaceMember(connectorSpaceId, context.currentUserId)
 
     if (externalTask.application === "linear") {
-      await deleteFromLinear(pageId, chat)
+      await deleteFromLinear(
+        externalTask.taskId,
+        connectorSpaceId,
+      )
     } else {
-      await deleteFromNotion(pageId, chat)
+      await deleteFromNotion(
+        externalTask.taskId,
+        connectorSpaceId,
+      )
     }
 
-    await deleteFromDatabase(externalTaskId, messageId)
+    await deleteFromDatabase(externalTaskId)
 
     await sendAttachmentDeletedUpdate(
       message,
@@ -61,7 +76,7 @@ export const handler = async (
 
     Log.shared.info("Successfully deleted attachment and external task", {
       externalTaskId,
-      pageId,
+      providerTaskId: externalTask.taskId,
       messageId,
       chatId,
     })
@@ -74,13 +89,41 @@ export const handler = async (
 }
 
 const verifyAndGetData = async (externalTaskId: number, messageId: number, chatId: number, currentUserId: number) => {
-  // Get the external task to verify ownership
-  const [externalTask] = await db.select().from(externalTasks).where(eq(externalTasks.id, externalTaskId))
+  const [bound] = await db
+    .select({
+      task: externalTasks,
+      boundMessage: messages,
+      boundChat: chats,
+      messageAttachmentId: messageAttachments.id,
+    })
+    .from(messageAttachments)
+    .innerJoin(
+      externalTasks,
+      eq(messageAttachments.externalTaskId, BigInt(externalTaskId)),
+    )
+    .innerJoin(messages, eq(messageAttachments.messageId, messages.globalId))
+    .innerJoin(chats, eq(messages.chatId, chats.id))
+    .where(and(
+      eq(externalTasks.id, externalTaskId),
+      eq(messages.messageId, messageId),
+      eq(chats.id, chatId),
+    ))
+    .limit(1)
 
-  if (!externalTask) {
-    Log.shared.error("External task not found", { externalTaskId })
+  if (!bound) {
+    Log.shared.error("External task attachment did not match message and chat", {
+      externalTaskId,
+      messageId,
+      chatId,
+    })
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
+  const {
+    task: externalTask,
+    boundMessage: message,
+    boundChat: chat,
+    messageAttachmentId,
+  } = bound
 
   // Verify the user has permission to delete this task
   if (externalTask.assignedUserId !== BigInt(currentUserId)) {
@@ -92,73 +135,34 @@ const verifyAndGetData = async (externalTaskId: number, messageId: number, chatI
     throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
   }
 
-  // Get the message
-  const [message] = await db
-    .select()
-    .from(messages)
-    .where(and(eq(messages.messageId, messageId), eq(messages.chatId, chatId)))
+  await AccessGuards.ensureChatAccess(chat, currentUserId)
 
-  if (!message) {
-    Log.shared.error("Message not found", { messageId, chatId })
-    throw new InlineError(InlineError.ApiError.MSG_ID_INVALID)
-  }
-
-  // Get chat info
-  const [chat] = await db.select().from(chats).where(eq(chats.id, chatId))
-
-  if (!chat) {
-    Log.shared.error("Chat not found", { chatId })
-    throw new InlineError(InlineError.ApiError.CHAT_ID_INVALID)
-  }
-
-  // Get message attachment id if it exists (may be missing for legacy/broken rows)
-  const [messageAttachment] = await db
-    .select({ id: messageAttachments.id })
-    .from(messageAttachments)
-    .where(and(eq(messageAttachments.externalTaskId, BigInt(externalTaskId)), eq(messageAttachments.messageId, message.globalId)))
-
-  return { externalTask, message, chat, messageAttachmentId: messageAttachment?.id }
+  return { externalTask, message, chat, messageAttachmentId }
 }
 
-const deleteFromLinear = async (issueId: string, chat: any) => {
-  try {
-    if (chat?.spaceId) {
-      await deleteLinearIssue({ spaceId: Number(chat.spaceId), issueId })
-    } else {
-      Log.shared.warn("No space ID found for chat, skipping Linear deletion", { chatId: chat.id })
-    }
-  } catch (linearError) {
-    Log.shared.error("Failed to delete Linear issue", {
-      issueId,
-      error: linearError instanceof Error ? linearError.message : String(linearError),
-    })
+const deleteFromLinear = async (issueId: string, connectorSpaceId: number | null) => {
+  if (!connectorSpaceId) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+  const result = await deleteLinearIssue({ spaceId: connectorSpaceId, issueId })
+  if (!result.success) {
+    throw new InlineError(InlineError.ApiError.INTERNAL)
   }
 }
 
-const deleteFromNotion = async (pageId: string, chat: any) => {
-  try {
-    if (chat?.spaceId) {
-      const { client, databaseId } = await getNotionClient(Number(chat.spaceId))
-
-      // Archive the page in Notion (Notion doesn't allow permanent deletion via API)
-      await client.pages.update({
-        page_id: pageId,
-        archived: true,
-      })
-
-      Log.shared.info("Successfully archived Notion page", { pageId })
-    } else {
-      Log.shared.warn("No space ID found for chat, skipping Notion deletion", { chatId: chat.id })
-    }
-  } catch (notionError) {
-    Log.shared.error("Failed to archive Notion page", {
-      pageId,
-      error: notionError instanceof Error ? notionError.message : String(notionError),
-    })
+const deleteFromNotion = async (pageId: string, connectorSpaceId: number | null) => {
+  if (!connectorSpaceId) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
+  const { client } = await getNotionClient(connectorSpaceId)
+  await client.pages.update({
+    page_id: pageId,
+    archived: true,
+  })
+  Log.shared.info("Successfully archived Notion page", { pageId })
 }
 
-const deleteFromDatabase = async (externalTaskId: number, messageId: number) => {
+const deleteFromDatabase = async (externalTaskId: number) => {
   await db.transaction(async (tx) => {
     // Delete message attachment
     await tx.delete(messageAttachments).where(eq(messageAttachments.externalTaskId, BigInt(externalTaskId)))

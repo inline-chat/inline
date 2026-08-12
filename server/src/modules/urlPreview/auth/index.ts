@@ -2,6 +2,8 @@ export {
   accessTokenFromPayload,
   defaultPreviewAuthPolicy,
   resolvePreviewAuth,
+  resolvePreviewAuthCandidates,
+  resolvePreviewAuthCandidatesWithDeps,
   resolvePreviewAuthWithDeps,
 } from "./resolver"
 export type {

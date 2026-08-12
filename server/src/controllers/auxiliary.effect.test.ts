@@ -78,6 +78,12 @@ interface Probe {
   authenticateCalls: number
   authorizeCalls: number
   callbackCalls: number
+  claimStateCalls: number
+  claimedIntegrationIdentity: {
+    userId: number
+    spaceId: number | null
+    callbackScheme: string
+  } | null
   mediaCalls: number
   mediaHeaders: MediaRequestHeaders | undefined
   thereCalls: number
@@ -134,6 +140,8 @@ const makeProbe = (): Probe => ({
   authenticateCalls: 0,
   authorizeCalls: 0,
   callbackCalls: 0,
+  claimStateCalls: 0,
+  claimedIntegrationIdentity: null,
   mediaCalls: 0,
   mediaHeaders: undefined,
   thereCalls: 0,
@@ -317,6 +325,10 @@ const makeHandler = (
               }),
             )
           : Effect.succeed(probe.callbackResult)
+      },
+      claimState: () => {
+        probe.claimStateCalls += 1
+        return Effect.succeed(probe.claimedIntegrationIdentity)
       },
     }),
     Layer.succeed(ErrorReporter, {
@@ -877,9 +889,13 @@ describe("AuxiliaryRouteGroup", () => {
             },
           ),
         )
-        expect(response.status).toBe(302)
-        expect(response.headers.get("location")).toBe(
-          "in://integrations/notion?success=false&error=unauthorized",
+        expect(response.status).toBe(200)
+        expect(response.headers.get("location")).toBeNull()
+        expect(response.headers.get("content-type")).toBe(
+          "text/html; charset=utf-8",
+        )
+        expect(await response.text()).toContain(
+          "in://integrations/notion?success=false&amp;error=unauthorized",
         )
         expect(
           response.headers.get("set-cookie"),
@@ -918,10 +934,11 @@ describe("AuxiliaryRouteGroup", () => {
           "http://inline.test/integrations/notion/callback?code=code&state=state-123",
         ),
       )
-      expect(missingCookies.status).toBe(302)
-      expect(missingCookies.headers.get("location")).toBe(
-        "in://integrations/notion?success=false&error=missing_cookie",
-      )
+      expect(missingCookies.status).toBe(400)
+      expect(missingCookies.headers.get("location")).toBeNull()
+      expect(await missingCookies.json()).toEqual({
+        error: "OAuth session expired or was already used",
+      })
       expect(
         missingCookies.headers.get("set-cookie"),
       ).toContain("state=; Max-Age=0")
@@ -939,10 +956,11 @@ describe("AuxiliaryRouteGroup", () => {
           },
         ),
       )
-      expect(stateMismatch.status).toBe(302)
-      expect(stateMismatch.headers.get("location")).toBe(
-        "in://integrations/linear?success=false&error=state_mismatch",
-      )
+      expect(stateMismatch.status).toBe(400)
+      expect(stateMismatch.headers.get("location")).toBeNull()
+      expect(await stateMismatch.json()).toEqual({
+        error: "OAuth state did not match this browser session",
+      })
       expect(probe.authenticateCalls).toBe(1)
 
       const callback = await handler(
@@ -956,8 +974,10 @@ describe("AuxiliaryRouteGroup", () => {
           },
         ),
       )
-      expect(callback.status).toBe(302)
-      expect(callback.headers.get("location")).toBe(
+      expect(callback.status).toBe(200)
+      expect(callback.headers.get("location")).toBeNull()
+      expect(callback.headers.get("cache-control")).toBe("no-store")
+      expect(await callback.text()).toContain(
         "in://integrations/linear?success=true",
       )
       expect(callback.headers.get("set-cookie")).toContain(
@@ -982,13 +1002,64 @@ describe("AuxiliaryRouteGroup", () => {
           },
         ),
       )
-      expect(failedCallback.status).toBe(302)
-      expect(
-        failedCallback.headers.get("location"),
-      ).toBe(
-        "in://integrations/linear?success=false&error=%20",
+      expect(failedCallback.status).toBe(200)
+      expect(failedCallback.headers.get("location")).toBeNull()
+      expect(await failedCallback.text()).toContain(
+        "in://integrations/linear?success=false&amp;error=%20",
       )
     })
+  })
+
+  it("accepts single-use connector state without session-token cookies", async () => {
+    const probe = makeProbe()
+    probe.claimedIntegrationIdentity = {
+      userId: 42,
+      spaceId: null,
+      callbackScheme: "inline-dev",
+    }
+
+    await withHandler(async ({ handler, probe }) => {
+      const response = await handler(
+        new Request(
+          "http://inline.test/integrations/notion/callback?code=code&state=rpc-state",
+        ),
+      )
+
+      expect(response.status).toBe(200)
+      expect(response.headers.get("location")).toBeNull()
+      expect(await response.text()).toContain(
+        "inline-dev://integrations/notion?success=true",
+      )
+      expect(probe.claimStateCalls).toBe(1)
+      expect(probe.authenticateCalls).toBe(0)
+      expect(probe.authorizeCalls).toBe(0)
+      expect(probe.callbackCalls).toBe(1)
+    }, probe)
+  })
+
+  it("returns provider cancellation to the initiating app without exchanging a code", async () => {
+    const probe = makeProbe()
+    probe.claimedIntegrationIdentity = {
+      userId: 42,
+      spaceId: null,
+      callbackScheme: "inline-debug-2",
+    }
+
+    await withHandler(async ({ handler, probe }) => {
+      const response = await handler(
+        new Request(
+          "http://inline.test/integrations/notion/callback?error=access_denied&state=rpc-state",
+        ),
+      )
+
+      expect(response.status).toBe(200)
+      expect(response.headers.get("location")).toBeNull()
+      expect(await response.text()).toContain(
+        "inline-debug-2://integrations/notion?success=false&amp;error=authorization_cancelled",
+      )
+      expect(probe.claimStateCalls).toBe(1)
+      expect(probe.callbackCalls).toBe(0)
+    }, probe)
   })
 
   it("preserves integration cookies on URL failure and rejects empty callback cookies", async () => {
@@ -1028,10 +1099,11 @@ describe("AuxiliaryRouteGroup", () => {
           },
         ),
       )
-      expect(emptyToken.status).toBe(302)
-      expect(emptyToken.headers.get("location")).toBe(
-        "in://integrations/notion?success=false&error=missing_cookie",
-      )
+      expect(emptyToken.status).toBe(400)
+      expect(emptyToken.headers.get("location")).toBeNull()
+      expect(await emptyToken.json()).toEqual({
+        error: "OAuth session expired or was already used",
+      })
       expect(
         emptyToken.headers.get("set-cookie"),
       ).toContain(

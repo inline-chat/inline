@@ -3,8 +3,8 @@ import { Log, LogLevel } from "../../utils/log"
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { createNotionPage } from "@in/server/modules/notion/agent"
 import { db } from "@in/server/db"
-import { externalTasks, messageAttachments, messages, users } from "@in/server/db/schema"
-import { and, eq } from "drizzle-orm"
+import { externalTasks, messageAttachments, users } from "@in/server/db/schema"
+import { eq } from "drizzle-orm"
 import { TInputPeerInfo, TPeerInfo } from "../../api-types"
 import { getUpdateGroup } from "../../modules/updates"
 import { connectionManager } from "../../ws/connections"
@@ -21,6 +21,8 @@ import { ProtocolConvertors } from "@in/server/types/protocolConvertors"
 import { isDev } from "@in/server/env"
 import { InlineError } from "@in/server/types/errors"
 import { toActionableNotionInlineError } from "@in/server/modules/notion/errors"
+import { resolveProviderActionContext } from "@in/server/modules/integrations/providerActionContext"
+import { getNotionClient } from "@in/server/modules/notion/notion"
 
 export const Input = Type.Object({
   spaceId: Type.Number(),
@@ -57,9 +59,18 @@ export const handler = async (
   input: Static<typeof Input>,
   context: HandlerContext,
 ): Promise<Static<typeof Response>> => {
-  const { spaceId, messageId, chatId, peerId } = input
+  const { messageId, chatId } = input
+  const authorized = await resolveProviderActionContext({
+    chatId,
+    messageId,
+    currentUserId: context.currentUserId,
+    claimedSpaceId: input.spaceId,
+  })
+  const { spaceId, message, peerId } = authorized
   const startTime = Date.now()
   let stage = "start"
+  let createdProviderPageId: string | null = null
+  let providerPagePersisted = false
   const telemetry = {
     spaceId,
     chatId,
@@ -72,31 +83,29 @@ export const handler = async (
   logDevTelemetry("Starting Notion task creation", devTelemetry)
 
   try {
-    // Create Notion page and check message existence in parallel
-    stage = "create_page_and_load_message"
-    const parallelStart = Date.now()
-    const [result, message] = await Promise.all([
-      createNotionPage({
-        spaceId,
-        messageId,
-        chatId,
-        currentUserId: context.currentUserId,
-      }),
-      db
-        .select()
-        .from(messages)
-        .where(and(eq(messages.messageId, messageId), eq(messages.chatId, chatId)))
-        .then((result) => result[0]),
+    // Resolve the delivery context before creating an external page. Failures
+    // after local persistence must not make a successful task look retryable.
+    stage = "load_delivery_context"
+    const [updateGroup, senderRows] = await Promise.all([
+      getUpdateGroup(peerId, { currentUserId: context.currentUserId }),
+      db.select().from(users).where(eq(users.id, context.currentUserId)).limit(1),
     ])
+    const senderUser = senderRows[0]
+
+    // Authorization and message binding are complete before provider work.
+    stage = "create_page"
+    const parallelStart = Date.now()
+    const result = await createNotionPage({
+      spaceId,
+      messageId,
+      chatId,
+      currentUserId: context.currentUserId,
+    })
+    createdProviderPageId = result.pageId
     logDevTelemetry("Notion task context loaded", {
       ...devTelemetry,
       durationMs: Date.now() - parallelStart,
     })
-
-    if (!message) {
-      Log.shared.error("Message does not exist, cannot create task attachment", devTelemetry)
-      throw new Error("Message does not exist")
-    }
 
     // Encrypt title if it exists (this is fast, no need to parallelize)
     stage = "encrypt_task_title"
@@ -111,27 +120,32 @@ export const handler = async (
       hasTitle: Boolean(result.taskTitle),
     })
 
-    // Insert external task and get update group info in parallel
-    stage = "write_task_and_update_group"
+    // Persist the provider task and attachment atomically before publishing updates.
+    stage = "write_task_and_attachment"
     const dbOperationsStart = Date.now()
-    const [externalTaskResult, updateGroup] = await Promise.all([
-      db
-        .insert(externalTasks)
-        .values({
-          application: "notion",
-          taskId: result.pageId,
-          status: "todo",
-          assignedUserId: BigInt(context.currentUserId),
-          title: encryptedTitle?.encrypted ?? null,
-          titleIv: encryptedTitle?.iv ?? null,
-          titleTag: encryptedTitle?.authTag ?? null,
-          url: result.url,
-          date: new Date(),
-        })
-        .returning()
-        .then(([task]) => task),
-      getUpdateGroup(peerId, { currentUserId: context.currentUserId }),
-    ])
+    const localWrite = await db.transaction(async (tx) => {
+      const [externalTaskResult] = await tx.insert(externalTasks).values({
+        application: "notion",
+        taskId: result.pageId,
+        status: "todo",
+        assignedUserId: BigInt(context.currentUserId),
+        connectorSpaceId: spaceId,
+        title: encryptedTitle?.encrypted ?? null,
+        titleIv: encryptedTitle?.iv ?? null,
+        titleTag: encryptedTitle?.authTag ?? null,
+        url: result.url,
+        date: new Date(),
+      }).returning()
+      if (!externalTaskResult?.id) throw new Error("Failed to create external task")
+      const [messageAttachmentRow] = await tx.insert(messageAttachments).values({
+        messageId: message.globalId,
+        externalTaskId: BigInt(externalTaskResult.id),
+      }).returning()
+      if (!messageAttachmentRow?.id) throw new Error("Failed to create message attachment")
+      return { externalTaskResult, messageAttachmentRow }
+    })
+    const { externalTaskResult, messageAttachmentRow } = localWrite
+    providerPagePersisted = true
     logDevTelemetry("Notion task database writes completed", {
       ...devTelemetry,
       durationMs: Date.now() - dbOperationsStart,
@@ -139,37 +153,10 @@ export const handler = async (
       updateGroupType: updateGroup.type,
     })
 
-    if (!externalTaskResult?.id) {
-      throw new Error("Failed to create external task")
-    }
-
-    // Create message attachment and get sender user info in parallel
-    stage = "write_message_attachment_and_load_sender"
-    const attachmentStart = Date.now()
-    const [messageAttachmentRow, senderUser] = await Promise.all([
-      db
-        .insert(messageAttachments)
-        .values({
-          messageId: message.globalId,
-          externalTaskId: BigInt(externalTaskResult.id),
-        })
-        .returning()
-        .then(([row]) => row),
-      db
-        .select()
-        .from(users)
-        .where(eq(users.id, context.currentUserId))
-        .then(([user]) => user),
-    ])
     logDevTelemetry("Notion attachment write completed", {
       ...devTelemetry,
-      durationMs: Date.now() - attachmentStart,
       hasAttachment: Boolean(messageAttachmentRow?.id),
     })
-
-    if (!messageAttachmentRow?.id) {
-      throw new Error("Failed to create message attachment")
-    }
 
     // Prepare all parallel operations for updates and notifications
     stage = "push_updates_and_notifications"
@@ -246,6 +233,9 @@ export const handler = async (
 
     return { url: result.url, taskTitle: result.taskTitle }
   } catch (error) {
+    if (createdProviderPageId && !providerPagePersisted) {
+      await compensateNotionPage(spaceId, createdProviderPageId)
+    }
     const totalDuration = Date.now() - startTime
     logProdTelemetry("Notion task creation failed", {
       ...telemetry,
@@ -265,6 +255,19 @@ export const handler = async (
     // The active legacy or Effect transport owns the single unexpected-error
     // report. Preserve the private cause without exposing provider/DB details.
     throw new InlineError(InlineError.ApiError.INTERNAL, { cause: error })
+  }
+}
+
+async function compensateNotionPage(spaceId: number, pageId: string): Promise<void> {
+  try {
+    const { client } = await getNotionClient(spaceId)
+    await client.pages.update({ page_id: pageId, archived: true })
+  } catch (error) {
+    Log.shared.warn("Failed to compensate untracked Notion page", {
+      spaceId,
+      pageId,
+      error,
+    })
   }
 }
 

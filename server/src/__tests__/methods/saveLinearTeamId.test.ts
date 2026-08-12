@@ -32,7 +32,11 @@ describe("saveLinearTeamId", () => {
       provider: "linear",
     })
 
-    await handler({ spaceId: String(space.id), teamId: "team-123" }, makeContext(user.id))
+    await handler(
+      { spaceId: String(space.id), teamId: "team-123" },
+      makeContext(user.id),
+      { async listTeams() { return [{ id: "team-123", name: "Product", key: "PROD" }] } },
+    )
 
     const [integration] = await db
       .select()
@@ -40,6 +44,29 @@ describe("saveLinearTeamId", () => {
       .where(and(eq(schema.integrations.spaceId, space.id), eq(schema.integrations.provider, "linear")))
 
     expect(integration?.linearTeamId).toBe("team-123")
+  })
+
+  test("rejects a team outside the connected Linear workspace", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Linear Space Validation", [
+      "linear-validation@example.com",
+    ])
+    const user = users[0]
+    if (!user) throw new Error("Failed to create user")
+    await db.update(schema.members).set({ role: "admin" }).where(and(
+      eq(schema.members.spaceId, space.id),
+      eq(schema.members.userId, user.id),
+    ))
+    await db.insert(schema.integrations).values({
+      userId: user.id,
+      spaceId: space.id,
+      provider: "linear",
+    })
+
+    await expect(handler(
+      { spaceId: String(space.id), teamId: "stale-team" },
+      makeContext(user.id),
+      { async listTeams() { return [{ id: "current-team", name: "Current", key: "CUR" }] } },
+    )).rejects.toThrow("Linear team is not available")
   })
 
   test("rejects updates from non-members", async () => {

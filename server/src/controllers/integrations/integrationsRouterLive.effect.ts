@@ -13,6 +13,7 @@ import {
   Authorize,
 } from "@in/server/utils/authorize"
 import { handleLinearCallback } from "./handleLinearCallback"
+import { claimConnectorOAuthState } from "@in/server/modules/integrations/connectorOAuthState"
 import {
   IntegrationOperations,
   makeIntegrationOperations,
@@ -48,5 +49,7 @@ export const IntegrationOperationsLive = Layer.succeed(
           : {}),
       }
     },
+    claimState: (provider, state) =>
+      claimConnectorOAuthState(state, provider),
   }),
 )

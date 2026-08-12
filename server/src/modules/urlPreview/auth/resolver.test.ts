@@ -1,12 +1,16 @@
 import { describe, expect, test } from "bun:test"
-import { accessTokenFromPayload, resolvePreviewAuthWithDeps } from "./resolver"
+import {
+  accessTokenFromPayload,
+  resolvePreviewAuthCandidatesWithDeps,
+  resolvePreviewAuthWithDeps,
+} from "./resolver"
 import type { PreviewAuthResolverDeps, PreviewIntegrationRow } from "./types"
 
 const spaceRow = row({ id: 1, spaceId: 10, userId: 7, token: "space-token" })
 const userRow = row({ id: 2, spaceId: null, userId: 7, token: "user-token" })
 
 describe("url preview auth resolver", () => {
-  test("prefers space integration for space chats", async () => {
+  test("prefers the requesting user's integration for space-chat previews", async () => {
     const auth = await resolvePreviewAuthWithDeps(
       { provider: "notion", currentUserId: 7, chatId: 100 },
       deps({ chatSpaceId: 10, spaceIntegration: spaceRow, userIntegration: userRow }),
@@ -14,31 +18,43 @@ describe("url preview auth resolver", () => {
 
     expect(auth).toMatchObject({
       provider: "notion",
-      accessToken: "space-token",
-      integrationId: 1,
-      owner: { type: "space", spaceId: 10 },
+      accessToken: "user-token",
+      integrationId: 2,
+      owner: { type: "user", userId: 7 },
     })
   })
 
-  test("does not fall back to user integration in space chats by default", async () => {
+  test("uses a personal integration in a space chat when no space connection exists", async () => {
     const auth = await resolvePreviewAuthWithDeps(
       { provider: "notion", currentUserId: 7, chatId: 100 },
       deps({ chatSpaceId: 10, spaceIntegration: null, userIntegration: userRow }),
-    )
-
-    expect(auth).toBeNull()
-  })
-
-  test("can fall back to user integration in space chats through policy", async () => {
-    const auth = await resolvePreviewAuthWithDeps(
-      { provider: "notion", currentUserId: 7, chatId: 100 },
-      deps({ chatSpaceId: 10, spaceIntegration: null, userIntegration: userRow }),
-      { allowUserTokenFallbackInSpaceChats: true },
     )
 
     expect(auth).toMatchObject({
       accessToken: "user-token",
       owner: { type: "user", userId: 7 },
+    })
+  })
+
+  test("returns personal and space credentials for provider fallback", async () => {
+    const auth = await resolvePreviewAuthCandidatesWithDeps(
+      { provider: "notion", currentUserId: 7, chatId: 100 },
+      deps({ chatSpaceId: 10, spaceIntegration: spaceRow, userIntegration: userRow }),
+    )
+
+    expect(auth.map((candidate) => candidate.integrationId)).toEqual([2, 1])
+  })
+
+  test("can explicitly use only the space integration", async () => {
+    const auth = await resolvePreviewAuthWithDeps(
+      { provider: "notion", currentUserId: 7, chatId: 100 },
+      deps({ chatSpaceId: 10, spaceIntegration: spaceRow, userIntegration: userRow }),
+      { scopeOrderInSpace: ["space"] },
+    )
+
+    expect(auth).toMatchObject({
+      accessToken: "space-token",
+      owner: { type: "space", spaceId: 10 },
     })
   })
 
@@ -100,6 +116,7 @@ function row(input: { id: number; spaceId: number | null; userId: number | null;
   return {
     id: input.id,
     provider: "notion",
+    date: new Date("2026-01-01T00:00:00Z"),
     userId: input.userId,
     spaceId: input.spaceId,
     accessTokenEncrypted: Buffer.from(input.token),

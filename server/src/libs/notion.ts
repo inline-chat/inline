@@ -1,26 +1,19 @@
 import * as arctic from "arctic"
 import { Log } from "@in/server/utils/log"
-import { encryptLinearTokens } from "@in/server/libs/helpers"
-import { db } from "@in/server/db"
-import { integrations } from "@in/server/db/schema/integrations"
+import { decryptLinearTokens, encryptLinearTokens } from "@in/server/libs/helpers"
+import { storeConnectorToken } from "@in/server/modules/integrations/connectionStore"
+import { connectorOAuthRedirectUri } from "@in/server/modules/integrations/connectorOAuthRedirectUri"
+import { connectorOAuthCredentials } from "@in/server/modules/integrations/connectorOAuthCredentials"
+import { exchangeConnectorAuthorizationCode } from "@in/server/modules/integrations/oauthTokenExchange"
 
 export let notionOauth: arctic.Notion | undefined
 
-const isProd = process.env.NODE_ENV === "production"
-
 const resolveNotionOauthConfig = () => {
-  if (isProd) {
-    return {
-      clientId: process.env.NOTION_CLIENT_ID,
-      clientSecret: process.env.NOTION_CLIENT_SECRET,
-      redirectUri: "https://api.inline.chat/integrations/notion/callback",
-    }
-  }
-
+  const credentials = connectorOAuthCredentials("notion")
   return {
-    clientId: process.env.NOTION_CLIENT_ID_DEV ?? process.env.NOTION_CLIENT_ID,
-    clientSecret: process.env.NOTION_CLIENT_SECRET_DEV ?? process.env.NOTION_CLIENT_SECRET,
-    redirectUri: "http://localhost:8000/integrations/notion/callback",
+    clientId: credentials?.clientId,
+    clientSecret: credentials?.clientSecret,
+    redirectUri: connectorOAuthRedirectUri("notion"),
   }
 }
 
@@ -34,7 +27,7 @@ if (notionOauthConfig.clientId && notionOauthConfig.clientSecret) {
 } else {
   Log.shared.warn("Notion OAuth is not configured", {
     nodeEnv: process.env.NODE_ENV ?? "unknown",
-    isProd,
+    isProd: process.env.NODE_ENV === "production",
     hasNotionClientId: Boolean(process.env.NOTION_CLIENT_ID),
     hasNotionClientSecret: Boolean(process.env.NOTION_CLIENT_SECRET),
     hasNotionClientIdDev: Boolean(process.env.NOTION_CLIENT_ID_DEV),
@@ -62,6 +55,50 @@ export const getNotionAuthUrl = (state: string) => {
   }
 }
 
+export const revokeNotionToken = async (
+  accessToken: string,
+): Promise<{ ok: boolean; status?: number }> => {
+  if (!notionOauthConfig.clientId || !notionOauthConfig.clientSecret) {
+    return { ok: false }
+  }
+  const authorization = Buffer.from(
+    `${notionOauthConfig.clientId}:${notionOauthConfig.clientSecret}`,
+    "utf8",
+  ).toString("base64")
+  try {
+    const response = await fetch("https://api.notion.com/v1/oauth/revoke", {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${authorization}`,
+        "Content-Type": "application/json",
+        "Notion-Version": "2026-03-11",
+      },
+      body: JSON.stringify({ token: accessToken }),
+      signal: AbortSignal.timeout(3_000),
+    })
+    return {
+      ok: response.ok,
+      status: response.status,
+    }
+  } catch (error) {
+    Log.shared.warn("Notion token revoke request failed", { error })
+    return { ok: false }
+  }
+}
+
+async function exchangeNotionAuthorizationCode(code: string) {
+  if (!notionOauthConfig.clientId || !notionOauthConfig.clientSecret) return null
+  return exchangeConnectorAuthorizationCode({
+    provider: "notion",
+    code,
+    redirectUri: notionOauthConfig.redirectUri,
+    credentials: {
+      clientId: notionOauthConfig.clientId,
+      clientSecret: notionOauthConfig.clientSecret,
+    },
+  })
+}
+
 export const handleNotionCallback = async ({
   code,
   userId,
@@ -69,7 +106,7 @@ export const handleNotionCallback = async ({
 }: {
   code: string
   userId: number
-  spaceId: string
+  spaceId: number | null
 }) => {
   if (!notionOauth) {
     return {
@@ -79,7 +116,7 @@ export const handleNotionCallback = async ({
   }
 
   try {
-    const tokens = await notionOauth.validateAuthorizationCode(code)
+    const tokens = await exchangeNotionAuthorizationCode(code)
 
     if (!tokens) {
       return {
@@ -90,40 +127,42 @@ export const handleNotionCallback = async ({
     const encryptedToken = encryptLinearTokens(tokens)
 
     try {
-      const integration = await db
-        .insert(integrations)
-        .values({
-          userId,
-          spaceId: Number(spaceId),
-          provider: "notion",
-          accessTokenEncrypted: encryptedToken.encrypted,
-          accessTokenIv: encryptedToken.iv,
-          accessTokenTag: encryptedToken.authTag,
-        })
-        .onConflictDoUpdate({
-          target: [integrations.spaceId, integrations.provider],
-          set: {
-            userId,
-            accessTokenEncrypted: encryptedToken.encrypted,
-            accessTokenIv: encryptedToken.iv,
-            accessTokenTag: encryptedToken.authTag,
-            date: new Date(),
-          },
-        })
-        .returning()
-
-      if (!integration) {
-        return {
-          ok: false,
-          error: "Failed to save integration",
+      const replacedTokens = await storeConnectorToken({
+        userId,
+        spaceId,
+        provider: "notion",
+        token: encryptedToken,
+      })
+      await Promise.all(replacedTokens.map(async (token) => {
+        try {
+          const parsed = decryptLinearTokens(token)
+          const accessToken = parsed?.data?.access_token
+          if (typeof accessToken === "string") {
+            const result = await revokeNotionToken(accessToken)
+            if (!result.ok) {
+              Log.shared.warn("Failed to revoke displaced Notion token", {
+                status: result.status,
+              })
+            }
+          }
+        } catch (error) {
+          Log.shared.warn("Failed to revoke displaced Notion token", { error })
         }
-      }
+      }))
       return {
         ok: true,
-        integration,
       }
     } catch (e) {
       Log.shared.error("Failed to create Notion integration", e)
+      const accessToken = tokens.data["access_token"]
+      if (typeof accessToken === "string") {
+        const result = await revokeNotionToken(accessToken)
+        if (!result.ok) {
+          Log.shared.warn("Failed to revoke unsaved Notion token", {
+            status: result.status,
+          })
+        }
+      }
       return {
         ok: false,
         error: "Failed to save integration",
@@ -132,21 +171,9 @@ export const handleNotionCallback = async ({
   } catch (e) {
     Log.shared.error("Notion callback failed", e)
 
-    if (e instanceof arctic.OAuth2RequestError) {
-      return {
-        ok: false,
-        error: "Invalid authorization",
-      }
-    }
-    if (e instanceof arctic.ArcticFetchError) {
-      return {
-        ok: false,
-        error: "Network error",
-      }
-    }
     return {
       ok: false,
-      error: "Unknown error",
+      error: "Network error",
     }
   }
 }

@@ -9,12 +9,13 @@ export type PreviewAuthInput = {
 }
 
 export type PreviewAuthPolicy = {
-  allowUserTokenFallbackInSpaceChats: boolean
+  scopeOrderInSpace: readonly ("user" | "space")[]
 }
 
 export type PreviewIntegrationRow = {
   id: number
   provider: string
+  date: Date
   userId: number | null
   spaceId: number | null
   accessTokenEncrypted: Buffer | null

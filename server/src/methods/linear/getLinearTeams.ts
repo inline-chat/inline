@@ -2,6 +2,7 @@ import { Type, type Static } from "@sinclair/typebox"
 import { listLinearTeams } from "@in/server/libs/linear"
 import { Authorize } from "@in/server/utils/authorize"
 import type { HandlerContext } from "@in/server/controllers/helpers"
+import { rejectBotConnectorAccess } from "@in/server/modules/integrations/providerActionContext"
 
 export const Input = Type.Object({
   spaceId: Type.Number(),
@@ -19,6 +20,7 @@ export const handler = async (
   input: Static<typeof Input>,
   context: HandlerContext,
 ): Promise<Static<typeof Response>> => {
+  await rejectBotConnectorAccess(context.currentUserId)
   await Authorize.spaceMember(input.spaceId, context.currentUserId)
 
   const teams = await listLinearTeams({ spaceId: input.spaceId })
@@ -29,4 +31,3 @@ export const handler = async (
     key: team.key,
   }))
 }
-

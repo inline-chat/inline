@@ -4,8 +4,7 @@ import { and, eq } from "drizzle-orm"
 import { db } from "@in/server/db"
 import { integrations } from "@in/server/db/schema"
 import { Authorize } from "@in/server/utils/authorize"
-import { decryptLinearTokens } from "@in/server/libs/helpers"
-import { revokeLinearToken } from "@in/server/libs/linear"
+import { revokeConnectorConnection } from "@in/server/functions/connectors"
 import { Log } from "@in/server/utils/log"
 
 export const Input = Type.Object({
@@ -24,41 +23,33 @@ export const handler = async (
   const spaceId = Number(input.spaceId)
   await Authorize.spaceAdmin(spaceId, context.currentUserId)
 
-  const integration = await db._query.integrations.findFirst({
-    where: and(eq(integrations.spaceId, spaceId), eq(integrations.provider, input.provider)),
-  })
-
-  if (input.provider === "linear" && integration) {
-    if (integration.accessTokenEncrypted && integration.accessTokenIv && integration.accessTokenTag) {
-      const parsed = decryptLinearTokens({
-        encrypted: integration.accessTokenEncrypted,
-        iv: integration.accessTokenIv,
-        authTag: integration.accessTokenTag,
-      })
-
-      const accessToken = parsed?.data?.access_token as string | undefined
-      const refreshToken = parsed?.data?.refresh_token as string | undefined
-
-      const revokeResult = await revokeLinearToken({
-        accessToken,
-        refreshToken,
-      })
-
-      if (!revokeResult.ok) {
-        Log.shared.warn("Failed to revoke Linear token during disconnect", {
-          spaceId,
-          status: revokeResult.status,
-        })
-        // Token revoke is best-effort. Even if it fails, proceed with disconnecting and delete the record.
-      }
-    } else {
-      Log.shared.warn("Linear integration missing token encryption data during disconnect", { spaceId })
-    }
-  }
+  const integrationRows = await db
+    .select()
+    .from(integrations)
+    .where(and(eq(integrations.spaceId, spaceId), eq(integrations.provider, input.provider)))
 
   await db
     .delete(integrations)
     .where(and(eq(integrations.spaceId, spaceId), eq(integrations.provider, input.provider)))
+
+  await Promise.all(integrationRows.map(async (integration) => {
+    const result = await revokeConnectorConnection(input.provider, integration)
+      .catch((error) => {
+        Log.shared.warn("Legacy connector token revocation failed", {
+          provider: input.provider,
+          spaceId,
+          error: error instanceof Error ? error.name : "UnknownError",
+        })
+        return { ok: false, status: undefined }
+      })
+    if (!result.ok) {
+      Log.shared.warn("Legacy connector token revocation failed", {
+        provider: input.provider,
+        spaceId,
+        status: result.status,
+      })
+    }
+  }))
 
   return { ok: true }
 }

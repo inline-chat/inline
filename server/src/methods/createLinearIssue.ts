@@ -1,10 +1,11 @@
 import { Optional, Type, type Static } from "@sinclair/typebox"
 import { eq, and, gte, lte } from "drizzle-orm"
-import { chats, chatParticipants, users, messages } from "../db/schema"
+import { chatParticipants, users, messages } from "../db/schema"
 import { db } from "../db"
 import { z } from "zod/v4"
 import {
   createIssue,
+  deleteLinearIssue,
   generateIssueLink,
   getLinearIssueLabels,
   getLinearOrg,
@@ -23,10 +24,10 @@ import { zodResponseFormat } from "openai/helpers/zod"
 import { RealtimeUpdates } from "../realtime/message"
 import { prompt } from "../libs/linear/prompt"
 import { Notifications } from "../modules/notifications/notifications"
-import { Authorize } from "@in/server/utils/authorize"
 import { encodeMessageAttachmentUpdate } from "../realtime/encoders/encodeMessageAttachment"
 import { ProtocolConvertors } from "@in/server/types/protocolConvertors"
 import { decrypt } from "../modules/encryption/encryption"
+import { resolveProviderActionContext } from "@in/server/modules/integrations/providerActionContext"
 
 type Context = {
   currentUserId: number
@@ -50,59 +51,41 @@ export const handler = async (
   { currentUserId }: Context,
 ): Promise<Static<typeof Response>> => {
   const startTime = Date.now()
-  let { text, messageId, peerId, chatId } = input
+  let { text, messageId, chatId } = input
   Log.shared.info("Starting Linear issue creation", {
     currentUserId,
     chatId,
     messageId,
-    peerType: "userId" in peerId ? "dm" : "thread",
+    peerType: "userId" in input.peerId ? "dm" : "thread",
     hasExplicitSpaceId: Boolean(input.spaceId),
     textLength: text.length,
   })
 
-  // Linear is space-scoped. Prefer the chat's spaceId; for DMs allow an explicit spaceId.
-  let spaceId: number | undefined
+  let authorized
   try {
-    const [chat] = await db.select({ spaceId: chats.spaceId }).from(chats).where(eq(chats.id, chatId))
-    spaceId = chat?.spaceId ?? undefined
-    if (spaceId) {
-      await Authorize.spaceMember(spaceId, currentUserId)
-      Log.shared.debug("Resolved Linear space from chat", { chatId, spaceId, currentUserId })
-    }
+    authorized = await resolveProviderActionContext({
+      chatId,
+      messageId,
+      currentUserId,
+      claimedSpaceId: input.spaceId,
+    })
   } catch (error) {
-    Log.shared.warn("Linear issue requested without valid space access", { chatId, currentUserId, error })
+    Log.shared.warn("Linear issue requested without valid chat and space access", {
+      chatId,
+      messageId,
+      currentUserId,
+      error,
+    })
     return { link: undefined }
   }
-
-  if (!spaceId && input.spaceId) {
-    spaceId = input.spaceId
-    try {
-      await Authorize.spaceMember(spaceId, currentUserId)
-      Log.shared.debug("Resolved Linear space from explicit spaceId", { chatId, spaceId, currentUserId })
-    } catch (error) {
-      Log.shared.warn("Linear issue requested without valid space access", {
-        chatId,
-        currentUserId,
-        spaceId,
-        error,
-      })
-      return { link: undefined }
-    }
-  }
-
-  if (!spaceId) {
-    Log.shared.warn("Linear issue requested outside a space", { peerId, chatId, currentUserId })
-    return { link: undefined }
-  }
+  const { message, peerId, spaceId } = authorized
+  let createdProviderTaskId: string | null = null
+  let providerTaskPersisted = false
 
   const contextStart = Math.max(1, messageId - 25)
   const contextEnd = messageId + 10
 
-  const [[message], labels, [actorUser], linearUsers, contextMessages, participantRows] = await Promise.all([
-    db
-      .select()
-      .from(messages)
-      .where(and(eq(messages.messageId, messageId), eq(messages.chatId, chatId))),
+  const [labels, [actorUser], linearUsers, contextMessages, participantRows] = await Promise.all([
     getLinearIssueLabels({ spaceId }),
     db.select().from(users).where(eq(users.id, currentUserId)),
     getLinearUsers({ spaceId }),
@@ -147,11 +130,6 @@ export const handler = async (
     labelCount: labels.labels?.length ?? 0,
     linearUsersCount: linearUsers.users?.length ?? 0,
   })
-
-  if (!message) {
-    Log.shared.error("Message does not exist, cannot create Linear issue attachment", { messageId, chatId })
-    return { link: undefined }
-  }
 
   const safeMessageText = (row: {
     text: string | null
@@ -310,6 +288,7 @@ export const handler = async (
       Log.shared.error("Failed to create Linear issue (no result)", { messageId, chatId, currentUserId })
       return { link: undefined }
     }
+    createdProviderTaskId = result.taskId
     Log.shared.info("Linear issue created", {
       currentUserId,
       chatId,
@@ -322,26 +301,29 @@ export const handler = async (
 
     const encryptedTitle = await encrypt(response.title)
 
-    const [externalTask] = await db
-      .insert(externalTasks)
-      .values({
+    const { externalTask, attachmentRow } = await db.transaction(async (tx) => {
+      const [externalTask] = await tx.insert(externalTasks).values({
         application: "linear",
         taskId: result.taskId,
         status: "todo",
         assignedUserId: BigInt(currentUserId),
+        connectorSpaceId: spaceId,
         number: result.identifier ?? "",
         url: result.link ?? "",
         title: encryptedTitle.encrypted,
         titleIv: encryptedTitle.iv,
         titleTag: encryptedTitle.authTag,
         date: new Date(),
-      })
-      .returning()
-
-    if (!externalTask?.id) {
-      Log.shared.error("Failed to create Linear external task record", { messageId, chatId, currentUserId })
-      return { link: undefined }
-    }
+      }).returning()
+      if (!externalTask?.id) throw new Error("Failed to create Linear external task record")
+      const [attachmentRow] = await tx.insert(messageAttachments).values({
+        messageId: message.globalId,
+        externalTaskId: BigInt(externalTask.id),
+      }).returning()
+      if (!attachmentRow?.id) throw new Error("Failed to create Linear message attachment")
+      return { externalTask, attachmentRow }
+    })
+    providerTaskPersisted = true
     Log.shared.debug("Created Linear external task record", {
       currentUserId,
       chatId,
@@ -350,19 +332,6 @@ export const handler = async (
       externalTaskId: externalTask.id,
     })
 
-    const [attachmentRow] = await db
-      .insert(messageAttachments)
-      .values({
-        // FK references messages.globalId (not messages.messageId)
-        messageId: message.globalId,
-        externalTaskId: BigInt(externalTask.id),
-      })
-      .returning()
-
-    if (!attachmentRow?.id) {
-      Log.shared.error("Failed to create message attachment", { messageId, chatId, currentUserId })
-      return { link: result.link }
-    }
     Log.shared.debug("Created message attachment row for Linear external task", {
       currentUserId,
       chatId,
@@ -411,6 +380,24 @@ export const handler = async (
     })
     return { link: result.link }
   } catch (error) {
+    if (createdProviderTaskId && !providerTaskPersisted) {
+      await deleteLinearIssue({ spaceId, issueId: createdProviderTaskId })
+        .then((result) => {
+          if (!result.success) {
+            Log.shared.warn("Failed to compensate untracked Linear issue", {
+              spaceId,
+              issueId: createdProviderTaskId,
+            })
+          }
+        })
+        .catch((compensationError) => {
+          Log.shared.warn("Failed to compensate untracked Linear issue", {
+            spaceId,
+            issueId: createdProviderTaskId,
+            error: compensationError,
+          })
+        })
+    }
     Log.shared.error("Failed to create Linear issue", { error, chatId, messageId, currentUserId })
     return { link: undefined }
   }

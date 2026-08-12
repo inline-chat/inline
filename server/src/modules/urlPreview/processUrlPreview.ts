@@ -42,7 +42,7 @@ import {
   touchPreviewCache,
   upsertPreviewCache,
 } from "@in/server/modules/urlPreview/cache"
-import { resolvePreviewAuth } from "@in/server/modules/urlPreview/auth"
+import { resolvePreviewAuthCandidates } from "@in/server/modules/urlPreview/auth"
 import { isSpaceUrlPreviewExcluded } from "@in/server/modules/urlPreview/exclusions"
 import {
   encodeMessageAttachment,
@@ -428,20 +428,24 @@ async function processAuthenticatedUrlPreview(
   input: ProcessUrlPreviewInput,
   previewRoute: PreviewRoute & { kind: "authenticated" },
 ): Promise<void> {
-  const auth = await resolvePreviewAuth({
+  const authCandidates = await resolvePreviewAuthCandidates({
     provider: previewRoute.parsedUrl.provider,
     currentUserId: input.currentUserId,
     chatId: input.chatId,
   })
-  if (!auth) {
+  if (authCandidates.length === 0) {
     return
   }
 
-  const metadata = await fetchAuthenticatedUrlPreview(previewRoute.parsedUrl, auth, {
-    maxDescriptionLength,
-    maxTitleLength,
-    maxSiteNameLength,
-  })
+  let metadata: Awaited<ReturnType<typeof fetchAuthenticatedUrlPreview>> = null
+  for (const auth of authCandidates) {
+    metadata = await fetchAuthenticatedUrlPreview(previewRoute.parsedUrl, auth, {
+      maxDescriptionLength,
+      maxTitleLength,
+      maxSiteNameLength,
+    })
+    if (metadata) break
+  }
   if (!metadata) {
     return
   }

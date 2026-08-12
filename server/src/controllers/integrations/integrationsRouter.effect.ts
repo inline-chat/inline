@@ -26,6 +26,12 @@ import {
   decodeLegacyStringObject,
   queryRecord,
 } from "../auxiliaryValidation.effect"
+import type { ConnectorOAuthIdentity } from "@in/server/modules/integrations/connectorOAuthState"
+import {
+  canonicalConnectorCallbackScheme,
+  connectorCallbackUrl,
+} from "@in/server/modules/integrations/connectorCallbackScheme"
+import { renderConnectorOAuthCompletionPage } from "@in/server/modules/integrations/connectorOAuthCompletionPage"
 
 export type IntegrationProvider = "linear" | "notion"
 
@@ -40,8 +46,9 @@ export type IntegrationStartQuery =
   typeof IntegrationStartQuery.Type
 
 export const IntegrationCallbackQuery = Schema.Struct({
-  code: Schema.String,
+  code: Schema.optionalKey(Schema.String),
   state: Schema.String,
+  error: Schema.optionalKey(Schema.String),
 }).annotate({
   identifier: "IntegrationCallbackQuery",
 })
@@ -70,6 +77,14 @@ const IntegrationStartInternalError = Schema.Union([
 })
 
 const IntegrationRedirect = HttpApiSchema.Empty(302)
+
+const IntegrationCallbackHtml = Schema.String.pipe(
+  HttpApiSchema.asText({
+    contentType: "text/html; charset=utf-8",
+  }),
+).annotate({
+  identifier: "IntegrationCallbackHtml",
+})
 
 const redirectDocs = OpenApi.annotations({
   transform: (operation) => {
@@ -118,13 +133,14 @@ export const IntegrationEndpoints = {
     "/integrations/linear/callback",
     {
       payload: IntegrationCallbackQuery.fields,
-      success: IntegrationRedirect,
+      success: IntegrationCallbackHtml,
       error: [
+        integrationErrorAt(400),
         LegacyValidationError,
         AuxiliaryInternalServerError,
       ],
     },
-  ).annotateMerge(redirectDocs),
+  ),
   notionIntegrate: HttpApiEndpoint.get(
     "notionIntegrate",
     "/integrations/notion/integrate",
@@ -139,13 +155,14 @@ export const IntegrationEndpoints = {
     "/integrations/notion/callback",
     {
       payload: IntegrationCallbackQuery.fields,
-      success: IntegrationRedirect,
+      success: IntegrationCallbackHtml,
       error: [
+        integrationErrorAt(400),
         LegacyValidationError,
         AuxiliaryInternalServerError,
       ],
     },
-  ).annotateMerge(redirectDocs),
+  ),
 } as const
 
 export class IntegrationAuthorizationRejected extends Data.TaggedError(
@@ -157,6 +174,7 @@ export class IntegrationAuthorizationRejected extends Data.TaggedError(
 export type IntegrationOperation =
   | "authenticate"
   | "authorize"
+  | "claimState"
   | "generateState"
   | "linearAuthUrl"
   | "linearCallback"
@@ -210,10 +228,17 @@ export interface IntegrationOperationsShape {
     input: {
       readonly code: string
       readonly userId: number
-      readonly spaceId: string
+      readonly spaceId: number | null
     },
   ) => Effect.Effect<
     IntegrationCallbackResult,
+    IntegrationOperationFailure
+  >
+  readonly claimState: (
+    provider: IntegrationProvider,
+    state: string,
+  ) => Effect.Effect<
+    ConnectorOAuthIdentity | null,
     IntegrationOperationFailure
   >
 }
@@ -242,13 +267,17 @@ export interface IntegrationOperationDependencies {
   readonly linearCallback: (input: {
     readonly code: string
     readonly userId: number
-    readonly spaceId: string
+    readonly spaceId: number | null
   }) => Promise<IntegrationCallbackResult>
   readonly notionCallback: (input: {
     readonly code: string
     readonly userId: number
-    readonly spaceId: string
+    readonly spaceId: number | null
   }) => Promise<IntegrationCallbackResult>
+  readonly claimState: (
+    provider: IntegrationProvider,
+    state: string,
+  ) => Promise<ConnectorOAuthIdentity | null>
 }
 
 export const makeIntegrationOperations = ({
@@ -260,6 +289,7 @@ export const makeIntegrationOperations = ({
   notionAuthUrl,
   linearCallback,
   notionCallback,
+  claimState,
 }: IntegrationOperationDependencies): IntegrationOperationsShape => ({
   secureCookies,
   authorizeAdmin: (spaceId, userId) =>
@@ -311,6 +341,15 @@ export const makeIntegrationOperations = ({
           cause,
         }),
     }),
+  claimState: (provider, state) =>
+    Effect.tryPromise({
+      try: () => claimState(provider, state),
+      catch: (cause) =>
+        new IntegrationOperationFailure({
+          operation: "claimState",
+          cause,
+        }),
+    }),
 })
 
 const startQueryFields = [
@@ -319,8 +358,9 @@ const startQueryFields = [
 ] as const
 
 const callbackQueryFields = [
-  { name: "code", required: true },
+  { name: "code", required: false },
   { name: "state", required: true },
+  { name: "error", required: false },
 ] as const
 
 const jsonError = (
@@ -455,13 +495,31 @@ const clearCookies = (
     Duration.zero,
   )
 
-const callbackRedirect = (
+const callbackCompletion = (
   provider: IntegrationProvider,
   suffix: string,
-) =>
-  HttpServerResponse.redirect(
-    `in://integrations/${provider}?${suffix}`,
+  scheme = canonicalConnectorCallbackScheme,
+) => {
+  const appUrl = connectorCallbackUrl(provider, suffix, scheme)
+  const document = renderConnectorOAuthCompletionPage({
+    provider,
+    appUrl,
+    succeeded: suffix === "success=true",
+  })
+  return HttpServerResponse.raw(
+    new TextEncoder().encode(document),
+    {
+      status: 200,
+      headers: {
+        "cache-control": "no-store",
+        "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+        "content-type": "text/html; charset=utf-8",
+        "referrer-policy": "no-referrer",
+        "x-content-type-options": "nosniff",
+      },
+    },
   )
+}
 
 export const executeIntegrationStart = (
   provider: IntegrationProvider,
@@ -560,60 +618,111 @@ export const executeIntegrationCallback = (
     const token = request.cookies["token"]
     const state = request.cookies["state"]
     const spaceIdCookie = request.cookies["spaceId"]
-
-    if (
-      !token ||
-      !state ||
-      !spaceIdCookie
-    ) {
-      return yield* clearCookies(
-        callbackRedirect(
-          provider,
-          "success=false&error=missing_cookie",
-        ),
-        operations.secureCookies,
-      )
-    }
-
-    if (query.state !== state) {
-      return yield* clearCookies(
-        callbackRedirect(
-          provider,
-          "success=false&error=state_mismatch",
-        ),
-        operations.secureCookies,
-      )
-    }
-
-    const spaceId = Number(spaceIdCookie)
-    if (Number.isNaN(spaceId)) {
-      return yield* clearCookies(
-        callbackRedirect(
-          provider,
-          "success=false&error=invalid_space",
-        ),
-        operations.secureCookies,
-      )
-    }
-
-    const authRejection = yield* clearCookies(
-      callbackRedirect(
-        provider,
-        "success=false&error=unauthorized",
-      ),
-      operations.secureCookies,
+    const claimed = yield* operations.claimState(
+      provider,
+      query.state,
     )
-    const userId = yield* authorizeAdmin(
-      token,
-      spaceId,
-      authRejection,
-    )
+    let callbackIdentity: ConnectorOAuthIdentity
+
+    if (claimed) {
+      callbackIdentity = claimed
+      if (claimed.spaceId !== null) {
+        const authRejection = yield* clearCookies(
+          callbackCompletion(
+            provider,
+            "success=false&error=unauthorized",
+            claimed.callbackScheme,
+          ),
+          operations.secureCookies,
+        )
+        yield* operations.authorizeAdmin(
+          claimed.spaceId,
+          claimed.userId,
+        ).pipe(
+          Effect.catchTags({
+            IntegrationAuthorizationRejected: () =>
+              reject(authRejection),
+            IntegrationOperationFailure: (failure) =>
+              Effect.fail(
+                new IntegrationOperationFailure({
+                  ...failure,
+                  publicResponse: authRejection,
+                }),
+              ),
+          }),
+        )
+      }
+    } else {
+      if (
+        !token ||
+        !state ||
+        !spaceIdCookie
+      ) {
+        return yield* clearCookies(
+          jsonError(400, "OAuth session expired or was already used"),
+          operations.secureCookies,
+        )
+      }
+
+      if (query.state !== state) {
+        return yield* clearCookies(
+          jsonError(400, "OAuth state did not match this browser session"),
+          operations.secureCookies,
+        )
+      }
+
+      const spaceId = Number(spaceIdCookie)
+      if (Number.isNaN(spaceId)) {
+        return yield* clearCookies(
+          callbackCompletion(
+            provider,
+            "success=false&error=invalid_space",
+          ),
+          operations.secureCookies,
+        )
+      }
+
+      const authRejection = yield* clearCookies(
+        callbackCompletion(
+          provider,
+          "success=false&error=unauthorized",
+        ),
+        operations.secureCookies,
+      )
+      const userId = yield* authorizeAdmin(
+        token,
+        spaceId,
+        authRejection,
+      )
+      callbackIdentity = {
+        userId,
+        spaceId,
+        callbackScheme: canonicalConnectorCallbackScheme,
+      }
+    }
+
+    if (query.error !== undefined || query.code === undefined) {
+      const error = query.error === "access_denied"
+        ? "authorization_cancelled"
+        : query.error !== undefined
+          ? "authorization_failed"
+          : "missing_code"
+      return yield* clearCookies(
+        callbackCompletion(
+          provider,
+          `success=false&error=${error}`,
+          callbackIdentity.callbackScheme,
+        ),
+        operations.secureCookies,
+      )
+    }
+
     const result = yield* operations.callback(
       provider,
       {
         code: query.code,
-        userId,
-        spaceId: spaceIdCookie,
+        userId: callbackIdentity.userId,
+        spaceId: callbackIdentity.spaceId,
       },
     )
 
@@ -626,16 +735,21 @@ export const executeIntegrationCallback = (
             : "callback_failed"
           : "callback_failed"
       return yield* clearCookies(
-        callbackRedirect(
+        callbackCompletion(
           provider,
           `success=false&error=${encodeURIComponent(error)}`,
+          callbackIdentity.callbackScheme,
         ),
         operations.secureCookies,
       )
     }
 
     return yield* clearCookies(
-      callbackRedirect(provider, "success=true"),
+      callbackCompletion(
+        provider,
+        "success=true",
+        callbackIdentity.callbackScheme,
+      ),
       operations.secureCookies,
     )
   })

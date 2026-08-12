@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm"
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm"
 import { db } from "@in/server/db"
 import { integrations, members, spaces } from "@in/server/db/schema"
 import { type Static, Type } from "@sinclair/typebox"
@@ -55,7 +55,12 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
   const linearByUser = await db
     .select({ id: integrations.id })
     .from(integrations)
-    .where(and(eq(integrations.userId, userId), eq(integrations.provider, "linear")))
+    .where(and(
+      eq(integrations.userId, userId),
+      isNull(integrations.spaceId),
+      eq(integrations.provider, "linear"),
+      usableCredentials,
+    ))
   hasLinearConnected = linearByUser.length > 0
 
   // Check Notion integrations (space-specific)
@@ -63,7 +68,17 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
     // Check if user is a member of the space
     await Authorize.spaceMember(spaceId, context.currentUserId)
 
-    const spaceIntegrations = await db.select().from(integrations).where(eq(integrations.spaceId, spaceId))
+    const spaceIntegrations = await db
+      .select({ integration: integrations })
+      .from(integrations)
+      .innerJoin(spaces, eq(integrations.spaceId, spaces.id))
+      .where(and(
+        eq(integrations.spaceId, spaceId),
+        eq(spaces.isPublic, false),
+        isNull(spaces.deleted),
+        usableCredentials,
+      ))
+      .then((rows) => rows.map((row) => row.integration))
     hasNotionConnected = spaceIntegrations.some((integration) => integration.provider === "notion")
     hasLinearConnected = spaceIntegrations.some((integration) => integration.provider === "linear")
     linearTeamId = spaceIntegrations.find((integration) => integration.provider === "linear")?.linearTeamId ?? undefined
@@ -91,7 +106,13 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
         })
         .from(integrations)
         .innerJoin(spaces, eq(integrations.spaceId, spaces.id))
-        .where(and(inArray(integrations.spaceId, spaceIds), eq(integrations.provider, "notion")))
+        .where(and(
+          inArray(integrations.spaceId, spaceIds),
+          eq(integrations.provider, "notion"),
+          eq(spaces.isPublic, false),
+          isNull(spaces.deleted),
+          usableCredentials,
+        ))
 
       hasNotionConnected = spacesWithNotion.length > 0
       if (hasNotionConnected) {
@@ -109,7 +130,13 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
         })
         .from(integrations)
         .innerJoin(spaces, eq(integrations.spaceId, spaces.id))
-        .where(and(inArray(integrations.spaceId, spaceIds), eq(integrations.provider, "linear")))
+        .where(and(
+          inArray(integrations.spaceId, spaceIds),
+          eq(integrations.provider, "linear"),
+          eq(spaces.isPublic, false),
+          isNull(spaces.deleted),
+          usableCredentials,
+        ))
 
       hasLinearConnected = spacesWithLinear.length > 0
       if (hasLinearConnected) {
@@ -119,8 +146,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
         }))
       }
 
-      // Check if user has access to any integrations using the utility function
-      hasIntegrationAccess = await Authorize.hasIntegrationAccess(context.currentUserId)
+      hasIntegrationAccess = hasNotionConnected || hasLinearConnected
     }
   }
 
@@ -134,6 +160,12 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
     linearSpaces,
   }
 }
+
+const usableCredentials = and(
+  isNotNull(integrations.accessTokenEncrypted),
+  isNotNull(integrations.accessTokenIv),
+  isNotNull(integrations.accessTokenTag),
+)
 
 const normalizeSpaceId = (value: Input["spaceId"]): number | undefined => {
   if (value === undefined) {

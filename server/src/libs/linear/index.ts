@@ -2,6 +2,9 @@ import { IntegrationsModel } from "@in/server/db/models/integrations"
 import * as arctic from "arctic"
 import type { Issue, Organization } from "@linear/sdk"
 import { Log } from "@in/server/utils/log"
+import { connectorOAuthRedirectUri } from "@in/server/modules/integrations/connectorOAuthRedirectUri"
+import { connectorOAuthCredentials } from "@in/server/modules/integrations/connectorOAuthCredentials"
+import { exchangeConnectorAuthorizationCode } from "@in/server/modules/integrations/oauthTokenExchange"
 
 // export const linearOauth = new arctic.Linear(
 //   process.env.LINEAR_CLIENT_ID,
@@ -11,14 +14,32 @@ import { Log } from "@in/server/utils/log"
 
 export let linearOauth: arctic.Linear | undefined
 
-if (process.env.LINEAR_CLIENT_ID && process.env.LINEAR_CLIENT_SECRET) {
+const linearOauthCredentials = connectorOAuthCredentials("linear")
+const linearRedirectUri = connectorOAuthRedirectUri("linear")
+if (linearOauthCredentials) {
   linearOauth = new arctic.Linear(
-    process.env.LINEAR_CLIENT_ID,
-    process.env.LINEAR_CLIENT_SECRET,
-    process.env.NODE_ENV === "production"
-      ? "https://api.inline.chat/integrations/linear/callback"
-      : "http://127.0.0.1:8000/integrations/linear/callback",
+    linearOauthCredentials.clientId,
+    linearOauthCredentials.clientSecret,
+    linearRedirectUri,
   )
+} else {
+  Log.shared.warn("Linear OAuth is not configured", {
+    nodeEnv: process.env.NODE_ENV ?? "unknown",
+    hasLinearClientId: Boolean(process.env.LINEAR_CLIENT_ID),
+    hasLinearClientSecret: Boolean(process.env.LINEAR_CLIENT_SECRET),
+    hasLinearClientIdDev: Boolean(process.env.LINEAR_CLIENT_ID_DEV),
+    hasLinearClientSecretDev: Boolean(process.env.LINEAR_CLIENT_SECRET_DEV),
+  })
+}
+
+export const exchangeLinearAuthorizationCode = async (code: string) => {
+  if (!linearOauthCredentials) return null
+  return exchangeConnectorAuthorizationCode({
+    provider: "linear",
+    code,
+    redirectUri: linearRedirectUri,
+    credentials: linearOauthCredentials,
+  })
 }
 
 export const getLinearAuthUrl = (state: string) => {
@@ -64,6 +85,7 @@ export const revokeLinearToken = async (input: {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body,
+      signal: AbortSignal.timeout(3_000),
     })
 
     if (result.ok) return result
@@ -80,6 +102,7 @@ export const revokeLinearToken = async (input: {
         Authorization: `Bearer ${input.accessToken}`,
       },
       body,
+      signal: AbortSignal.timeout(3_000),
     })
 
     if (result.ok) return result

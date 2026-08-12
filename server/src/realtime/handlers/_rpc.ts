@@ -14,6 +14,7 @@ import { getThreadReferences } from "@in/server/realtime/handlers/messages.getTh
 import { getThreadSubthreads } from "@in/server/realtime/handlers/messages.getThreadSubthreads"
 import { getChat } from "@in/server/realtime/handlers/messages.getChat"
 import { searchMessages } from "@in/server/realtime/handlers/messages.searchMessages"
+import { searchExternalResources } from "@in/server/realtime/handlers/externalResources.search"
 import { addReaction } from "./messages.addReactions"
 import { deleteReaction } from "./messages.deleteReaction"
 import { editMessage } from "./messages.editMessage"
@@ -104,6 +105,11 @@ import {
   getUserGroupsHandler,
   updateUserGroupHandler,
 } from "@in/server/realtime/handlers/space.userGroups"
+import {
+  disconnectConnector,
+  listConnectors,
+  prepareConnectorOAuth,
+} from "@in/server/functions/connectors"
 
 const log = new Log("rpc")
 
@@ -198,6 +204,20 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await searchMessages(call.input.searchMessages, handlerContext)
       return { oneofKind: "searchMessages", searchMessages: result }
+    }
+
+    case Method.SEARCH_EXTERNAL_RESOURCES: {
+      if (call.input.oneofKind !== "searchExternalResources") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await searchExternalResources(
+        call.input.searchExternalResources,
+        handlerContext,
+      )
+      return {
+        oneofKind: "searchExternalResources",
+        searchExternalResources: result,
+      }
     }
 
     case Method.ADD_REACTION: {
@@ -721,6 +741,30 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       const result = await updateDialogFollowMode(call.input.updateDialogFollowMode, handlerContext)
       return { oneofKind: "updateDialogFollowMode", updateDialogFollowMode: result }
+    }
+
+    case Method.LIST_CONNECTORS: {
+      if (call.input.oneofKind !== "listConnectors") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await listConnectors(handlerContext)
+      return { oneofKind: "listConnectors", listConnectors: result }
+    }
+
+    case Method.PREPARE_CONNECTOR_OAUTH: {
+      if (call.input.oneofKind !== "prepareConnectorOAuth") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await prepareConnectorOAuth(call.input.prepareConnectorOAuth, handlerContext)
+      return { oneofKind: "prepareConnectorOAuth", prepareConnectorOAuth: result }
+    }
+
+    case Method.DISCONNECT_CONNECTOR: {
+      if (call.input.oneofKind !== "disconnectConnector") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await disconnectConnector(call.input.disconnectConnector, handlerContext)
+      return { oneofKind: "disconnectConnector", disconnectConnector: result }
     }
 
     case Method.UPDATE_PUSH_NOTIFICATION_DETAILS: {
