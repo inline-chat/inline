@@ -143,7 +143,10 @@ interface CreateIssueParams {
   assigneeId?: string
 }
 
-const getLinearIssueLabels = async ({ spaceId }: { spaceId: number }) => {
+export type LinearIssueLabel = { id: string; name: string }
+export type LinearWorkspaceUser = { id: string; name: string; email: string }
+
+const getLinearIssueLabels = async ({ spaceId }: { spaceId: number }): Promise<{ labels: LinearIssueLabel[] }> => {
   const { accessToken } = await getLinearAccess(spaceId)
 
   const response = await queryLinear({
@@ -158,7 +161,7 @@ const getLinearIssueLabels = async ({ spaceId }: { spaceId: number }) => {
   }
 
   return {
-    labels: labels.data.issueLabels.nodes,
+    labels: labels.data.issueLabels.nodes as LinearIssueLabel[],
   }
 }
 
@@ -262,7 +265,7 @@ const getLinearUser = async ({ spaceId }: { spaceId: number }) => {
   }
 }
 
-const getLinearUsers = async ({ spaceId }: { spaceId: number }) => {
+const getLinearUsers = async ({ spaceId }: { spaceId: number }): Promise<{ users: LinearWorkspaceUser[] }> => {
   const { accessToken } = await getLinearAccess(spaceId)
 
   const response = await queryLinear({
@@ -277,7 +280,7 @@ const getLinearUsers = async ({ spaceId }: { spaceId: number }) => {
   }
 
   return {
-    users: usersData.data.users.nodes,
+    users: usersData.data.users.nodes as LinearWorkspaceUser[],
   }
 }
 
@@ -394,7 +397,12 @@ const deleteLinearIssue = async ({ spaceId, issueId }: { spaceId: number; issueI
   const success = result?.data?.issueDelete?.success === true
 
   if (!success) {
-    Log.shared.warn("Failed to delete Linear issue", { spaceId, issueId, result })
+    const errorCount = Array.isArray(result?.errors) ? result.errors.length : 0
+    Log.shared.warn("Failed to delete Linear issue", {
+      spaceId,
+      hasIssueId: Boolean(issueId),
+      errorCount,
+    })
   }
 
   return { success }

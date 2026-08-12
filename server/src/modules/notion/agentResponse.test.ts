@@ -66,4 +66,41 @@ describe("parseNotionAgentResponse", () => {
     })
     expect(result.markdown).toBeNull()
   })
+
+  test("preserves dynamic Notion property payloads without widening the response envelope", () => {
+    const result = parseNotionAgentResponse({
+      parsed: {
+        properties: {
+          Name: { title: [{ text: { content: "Ship connector settings" } }] },
+          Status: { status: { name: "In progress" } },
+          Due: { date: { start: "2026-08-14", end: null } },
+          Assignee: { people: [{ id: "notion-user-id" }] },
+        },
+        markdown: "  ## Goal\n\nShip connector settings safely.  ",
+        icon: { emoji: "🚀" },
+        unexpected: "ignored",
+      },
+    })
+
+    expect(result).toEqual({
+      properties: {
+        Name: { title: [{ text: { content: "Ship connector settings" } }] },
+        Status: { status: { name: "In progress" } },
+        Due: { date: { start: "2026-08-14", end: null } },
+        Assignee: { people: [{ id: "notion-user-id" }] },
+      },
+      markdown: "## Goal\n\nShip connector settings safely.",
+      icon: null,
+    })
+  })
+
+  test("rejects a non-object properties payload", () => {
+    expect(() => parseNotionAgentResponse({
+      parsed: {
+        properties: ["not", "a", "property map"],
+        markdown: null,
+        icon: null,
+      },
+    })).toThrow()
+  })
 })

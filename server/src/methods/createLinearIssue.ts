@@ -26,8 +26,12 @@ import { prompt } from "../libs/linear/prompt"
 import { Notifications } from "../modules/notifications/notifications"
 import { encodeMessageAttachmentUpdate } from "../realtime/encoders/encodeMessageAttachment"
 import { ProtocolConvertors } from "@in/server/types/protocolConvertors"
-import { decrypt } from "../modules/encryption/encryption"
 import { resolveProviderActionContext } from "@in/server/modules/integrations/providerActionContext"
+import { providerTaskModel, providerTaskReasoningEffort } from "@in/server/modules/integrations/providerTaskModel"
+import {
+  readStoredTaskMessageText,
+  resolveLinearTaskSourceText,
+} from "@in/server/libs/linear/taskContext"
 
 type Context = {
   currentUserId: number
@@ -51,14 +55,13 @@ export const handler = async (
   { currentUserId }: Context,
 ): Promise<Static<typeof Response>> => {
   const startTime = Date.now()
-  let { text, messageId, chatId } = input
+  const { messageId, chatId } = input
   Log.shared.info("Starting Linear issue creation", {
     currentUserId,
     chatId,
     messageId,
     peerType: "userId" in input.peerId ? "dm" : "thread",
     hasExplicitSpaceId: Boolean(input.spaceId),
-    textLength: text.length,
   })
 
   let authorized
@@ -85,7 +88,9 @@ export const handler = async (
   const contextStart = Math.max(1, messageId - 25)
   const contextEnd = messageId + 10
 
-  const [labels, [actorUser], linearUsers, contextMessages, participantRows] = await Promise.all([
+  const loadedContext = await Promise.all([
+    getLinearTeams({ spaceId, requireSavedTeam: true }),
+    getLinearOrg({ spaceId }),
     getLinearIssueLabels({ spaceId }),
     db.select().from(users).where(eq(users.id, currentUserId)),
     getLinearUsers({ spaceId }),
@@ -120,7 +125,17 @@ export const handler = async (
       .innerJoin(users, eq(chatParticipants.userId, users.id))
       .where(eq(chatParticipants.chatId, chatId))
       .limit(50),
-  ])
+  ]).catch((error) => {
+    Log.shared.error("Failed to load Linear issue context", { error, chatId, messageId, currentUserId, spaceId })
+    return null
+  })
+  if (!loadedContext) return { link: undefined }
+
+  const [teamData, orgData, labels, [actorUser], linearUsers, contextMessages, participantRows] = loadedContext
+  if (!teamData) {
+    Log.shared.warn("No Linear team selected for space; cannot create issue", { spaceId })
+    return { link: undefined }
+  }
   Log.shared.debug("Fetched Linear issue context", {
     currentUserId,
     chatId,
@@ -130,23 +145,6 @@ export const handler = async (
     labelCount: labels.labels?.length ?? 0,
     linearUsersCount: linearUsers.users?.length ?? 0,
   })
-
-  const safeMessageText = (row: {
-    text: string | null
-    textEncrypted: Buffer | null
-    textIv: Buffer | null
-    textTag: Buffer | null
-  }): string => {
-    if (row.text && row.text.trim().length > 0) return row.text
-    if (row.textEncrypted && row.textIv && row.textTag) {
-      try {
-        return decrypt({ encrypted: row.textEncrypted, iv: row.textIv, authTag: row.textTag })
-      } catch {
-        return ""
-      }
-    }
-    return ""
-  }
 
   const displayNameFor = (row: { firstName: string | null; lastName: string | null; username: string | null }) => {
     const first = row.firstName?.trim()
@@ -164,10 +162,25 @@ export const handler = async (
         fromId: m.fromId,
         author: displayNameFor(m),
         email: m.email,
-        text: safeMessageText(m).trim(),
+        text: readStoredTaskMessageText(m),
       }))
       .filter((m) => m.text.length > 0)
   })()
+
+  const sourceText = resolveLinearTaskSourceText({
+    messageId,
+    authorizedMessage: message,
+    contextMessages: contextWindow,
+  })
+  if (!sourceText) {
+    Log.shared.warn("Linear issue target message had no readable text", {
+      chatId,
+      messageId,
+      currentUserId,
+      spaceId,
+    })
+    return { link: undefined }
+  }
 
   const participants = (() => {
     const merged = [
@@ -190,10 +203,11 @@ export const handler = async (
     })
   })()
 
-  const assigneeByActorEmail = linearUsers.users.find((u: any) => u.email && u.email === actorUser?.email)?.id
+  const assigneeByActorEmail = linearUsers.users.find((user) => user.email && user.email === actorUser?.email)?.id
 
   if (!openaiClient) {
-    throw new Error("OpenAI client not initialized")
+    Log.shared.error("OpenAI client not initialized", { chatId, messageId, currentUserId, spaceId })
+    return { link: undefined }
   }
 
   const issueSchema = z.object({
@@ -211,33 +225,33 @@ export const handler = async (
     labelCount: labels.labels?.length ?? 0,
   })
   const completion = await openaiClient.chat.completions.parse({
-    model: "gpt-5.4",
+    model: providerTaskModel,
     verbosity: "low",
-    reasoning_effort: "low",
+    reasoning_effort: providerTaskReasoningEffort,
     messages: [
       {
         role: "user",
-        content: `${prompt({
+        content: prompt({
           primaryMessage: {
             author: contextWindow.find((m) => m.messageId === messageId)?.author ?? "Someone",
-            text,
+            text: sourceText,
           },
           surroundingMessages: contextWindow
             .filter((m) => m.messageId !== messageId)
             .map((m) => ({ author: m.author, text: m.text }))
             .slice(-20),
           participants,
-          linearWorkspaceUsers: (linearUsers.users ?? []).map((u: any) => ({
-            id: u.id,
-            name: u.name,
-            email: u.email,
-          })),
-          labels: (labels.labels ?? []).map((l: any) => ({ id: l.id, name: l.name })),
-        })}`,
+          linearWorkspaceUsers: linearUsers.users,
+          labels: labels.labels,
+        }),
       },
     ],
     response_format: zodResponseFormat(issueSchema, "linearIssue"),
+  }).catch((error) => {
+    Log.shared.error("Failed to generate Linear issue data", { error, chatId, messageId, currentUserId, spaceId })
+    return null
   })
+  if (!completion) return { link: undefined }
 
   try {
     const response = completion.choices[0]?.message.parsed
@@ -253,8 +267,10 @@ export const handler = async (
       labelIdsCount: response.labelIds.length,
     })
 
-    const allowedLabelIds = new Set<string>((labels.labels ?? []).map((l: any) => String(l.id)))
-    const filteredLabelIds = response.labelIds.filter((id) => allowedLabelIds.has(String(id)))
+    const allowedLabelIds = new Set(labels.labels.map((label) => label.id))
+    const filteredLabelIds = response.labelIds
+      .filter((id) => allowedLabelIds.has(String(id)))
+      .slice(0, 3)
     const droppedLabelIdsCount = response.labelIds.length - filteredLabelIds.length
     if (droppedLabelIdsCount > 0) {
       Log.shared.warn("Dropping invalid labelIds from OpenAI response", {
@@ -270,7 +286,7 @@ export const handler = async (
 
     const assigneeId =
       (response.assigneeLinearUserId
-        ? linearUsers.users.find((u: any) => u.id === response.assigneeLinearUserId)?.id
+        ? linearUsers.users.find((user) => user.id === response.assigneeLinearUserId)?.id
         : undefined) ?? assigneeByActorEmail
 
     const result = await createIssueFunc({
@@ -282,6 +298,8 @@ export const handler = async (
       labelIds: filteredLabelIds,
       currentUserId: currentUserId,
       spaceId,
+      team: teamData,
+      organizationUrlKey: orgData?.urlKey ?? "",
     })
 
     if (!result?.taskId) {
@@ -294,9 +312,9 @@ export const handler = async (
       chatId,
       messageId,
       spaceId,
-      linearTaskId: result.taskId,
-      identifier: result.identifier,
-      link: result.link,
+      hasTaskId: true,
+      hasIdentifier: Boolean(result.identifier),
+      hasLink: Boolean(result.link),
     })
 
     const encryptedTitle = await encrypt(response.title)
@@ -354,20 +372,29 @@ export const handler = async (
 
     const messageSenderId = message.fromId
     if (actorUser && messageSenderId && messageSenderId !== currentUserId) {
-      sendNotificationToUser({
+      void sendNotificationToUser({
         userId: messageSenderId,
         actorName: actorUser.firstName ?? "Someone",
         issueTitle: response.title,
-        messageText: text,
+        messageText: sourceText,
         currentUserId,
         chatId,
         isThread: peerId && "threadId" in peerId,
-      })
-      Log.shared.debug("Sent Linear issue push notification to message sender", {
-        currentUserId,
-        chatId,
-        messageId,
-        toUserId: messageSenderId,
+      }).then(() => {
+        Log.shared.debug("Sent Linear issue push notification to message sender", {
+          currentUserId,
+          chatId,
+          messageId,
+          toUserId: messageSenderId,
+        })
+      }).catch((error) => {
+        Log.shared.error("Failed to send Linear task creation notification", {
+          error,
+          chatId,
+          messageId,
+          currentUserId,
+          toUserId: messageSenderId,
+        })
       })
     }
 
@@ -386,14 +413,14 @@ export const handler = async (
           if (!result.success) {
             Log.shared.warn("Failed to compensate untracked Linear issue", {
               spaceId,
-              issueId: createdProviderTaskId,
+              hasIssueId: true,
             })
           }
         })
         .catch((compensationError) => {
           Log.shared.warn("Failed to compensate untracked Linear issue", {
             spaceId,
-            issueId: createdProviderTaskId,
+            hasIssueId: true,
             error: compensationError,
           })
         })
@@ -412,6 +439,8 @@ type CreateIssueProps = {
   peerId: TPeerInfo
   labelIds: string[]
   currentUserId: number
+  team: { id: string; key: string }
+  organizationUrlKey: string
 }
 
 type CreateIssueResult = {
@@ -421,87 +450,33 @@ type CreateIssueResult = {
 }
 const createIssueFunc = async (props: CreateIssueProps): Promise<CreateIssueResult | undefined> => {
   try {
-    const [teamData, orgData] = await Promise.all([
-      getLinearTeams({ spaceId: props.spaceId, requireSavedTeam: true }),
-      getLinearOrg({ spaceId: props.spaceId }),
-    ])
-
-    const teamId = teamData?.id
-    if (!teamId) {
-      Log.shared.warn("No Linear team selected for space; cannot create issue", { spaceId: props.spaceId })
-      return undefined
-    }
-
     const chatId = "threadId" in props.peerId ? props.peerId.threadId : undefined
     Log.shared.debug("Creating Linear issue via API", {
       spaceId: props.spaceId,
-      teamId,
-      teamKey: teamData?.key,
+      teamId: props.team.id,
+      teamKey: props.team.key,
       chatId: chatId ?? 0,
       labelIdsCount: props.labelIds.length,
       hasAssignee: Boolean(props.assigneeId),
     })
 
-    type LinearIssue = Awaited<ReturnType<typeof createIssue>>
-
-    const createIssueAttempt = async ({
-      assigneeId,
-      labelIds,
-    }: {
-      assigneeId: string | undefined
-      labelIds: string[]
-    }): Promise<LinearIssue> => {
-      return await createIssue({
-        spaceId: props.spaceId,
-        title: props.title,
-        description: props.description,
-        teamId,
-        messageId: props.messageId,
-        chatId: chatId ?? 0,
-        labelIds,
-        assigneeId,
-      })
-    }
-
-    let assigneeIdToUse = props.assigneeId || undefined
-    let labelIdsToUse = props.labelIds
-
-    let result: LinearIssue | undefined
-    let lastError: unknown
-    try {
-      result = await createIssueAttempt({ assigneeId: assigneeIdToUse, labelIds: labelIdsToUse })
-    } catch (error) {
-      lastError = error
-      if (assigneeIdToUse) {
-        Log.shared.warn("Linear issue create failed; retrying without assignee", {
-          spaceId: props.spaceId,
-          teamId,
-          chatId: chatId ?? 0,
-          error: lastError,
-        })
-        assigneeIdToUse = undefined
-        try {
-          result = await createIssueAttempt({ assigneeId: assigneeIdToUse, labelIds: labelIdsToUse })
-        } catch (retryError) {
-          lastError = retryError
-        }
-      }
-
-      if (!result && labelIdsToUse.length > 0) {
-        Log.shared.warn("Linear issue create failed; retrying without labels", {
-          spaceId: props.spaceId,
-          teamId,
-          chatId: chatId ?? 0,
-          error: lastError,
-        })
-        labelIdsToUse = []
-        result = await createIssueAttempt({ assigneeId: assigneeIdToUse, labelIds: labelIdsToUse })
-      }
-    }
+    // Provider mutation is intentionally single-attempt. Team, labels, and
+    // assignee were loaded and allowlisted before this call; retrying an
+    // ambiguous network failure could create a duplicate Linear issue.
+    const result = await createIssue({
+      spaceId: props.spaceId,
+      title: props.title,
+      description: props.description,
+      teamId: props.team.id,
+      messageId: props.messageId,
+      chatId: chatId ?? 0,
+      labelIds: props.labelIds,
+      assigneeId: props.assigneeId,
+    })
 
     return result
       ? {
-          link: generateIssueLink(result.identifier ?? "", orgData?.urlKey ?? ""),
+          link: generateIssueLink(result.identifier ?? "", props.organizationUrlKey),
           identifier: result.identifier ?? "",
           taskId: result.id ?? "",
         }
@@ -533,7 +508,7 @@ async function sendNotificationToUser({
   const title = `${actorName} created a Linear issue`
   const body = messageText || `"${issueTitle}"`
 
-  Notifications.sendToUser({
+  await Notifications.sendToUser({
     userId,
     payload: {
       kind: "alert",

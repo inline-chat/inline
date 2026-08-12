@@ -23,7 +23,7 @@ export type LinearIssuePromptContext = {
 }
 
 export const prompt = (ctx: LinearIssuePromptContext) => {
-  // Prompting approach is guided by GPT-5.2 best practices:
+  // Keep the prompt model-agnostic so upgrades only change the shared model configuration:
   // - provide concrete, structured context
   // - clamp output shape/fields (schema enforced via structured outputs)
   // - avoid "scratchpad" requests; keep instructions explicit and short

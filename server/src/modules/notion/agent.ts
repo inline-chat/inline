@@ -21,6 +21,11 @@ import { formatMessage } from "@in/server/modules/notifications/eval"
 import { systemPrompt14 } from "./prompts"
 import { parseNotionAgentResponse } from "./agentResponse"
 import { NOTION_SETUP_ERROR_MESSAGES } from "./errors"
+import {
+  estimateProviderTaskCostUsd,
+  providerTaskModel,
+  providerTaskReasoningEffort,
+} from "@in/server/modules/integrations/providerTaskModel"
 
 const log = new Log("NotionAgent", LogLevel.INFO)
 
@@ -97,20 +102,21 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
     // Run all data fetching operations in parallel - this is the biggest optimization
     stage = "load_notion_context"
     const dataFetchStart = Date.now()
+    const chatInfoPromise = getCachedChatInfo(input.chatId)
+    const participantNamesPromise = chatInfoPromise.then(async (resolvedChatInfo) => {
+      if (!resolvedChatInfo?.participantUserIds) return []
+      const names = await Promise.all(resolvedChatInfo.participantUserIds.map((userId) => getCachedUserName(userId)))
+      return names.filter(filterFalsy)
+    })
     const [notionUsers, dataSource, samplePages, targetMessage, messages, chatInfo, participantNames, currentUserName] =
       await Promise.all([
         getNotionUsers(input.spaceId, client).then(formatNotionUsers),
         getActiveDatabaseData(input.spaceId, selectedParent.dataSourceId, client),
-        getSampleDatabasePages(input.spaceId, selectedParent.dataSourceId, 3, client),
+        getSampleDatabasePages(input.spaceId, selectedParent.dataSourceId, 2, client),
         MessageModel.getMessage(input.messageId, input.chatId),
         MessageModel.getMessagesAroundTarget(input.chatId, input.messageId, 20, 10),
-        getCachedChatInfo(input.chatId),
-        // Fetch participant names in parallel instead of sequentially
-        getCachedChatInfo(input.chatId).then(async (chatInfo) => {
-          if (!chatInfo?.participantUserIds) return []
-          const names = await Promise.all(chatInfo.participantUserIds.map((userId) => getCachedUserName(userId)))
-          return names.filter(filterFalsy)
-        }),
+        chatInfoPromise,
+        participantNamesPromise,
         getCachedUserName(input.currentUserId),
       ])
     logDevTelemetry("Loaded Notion task context", {
@@ -163,9 +169,9 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
     stage = "openai_completion"
     const openaiStart = Date.now()
     const completion = await openaiClient.chat.completions.create({
-      model: "gpt-5.4",
+      model: providerTaskModel,
       verbosity: "medium",
-      reasoning_effort: "low", // was "hard"
+      reasoning_effort: providerTaskReasoningEffort,
 
       messages: [
         {
@@ -188,11 +194,7 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
 
     const inputTokens = completion.usage?.prompt_tokens ?? 0
     const outputTokens = completion.usage?.completion_tokens ?? 0
-    // input per milion tokens : $2
-    // output per milion tokens : $8
-    const inputPrice = (inputTokens * 0.002) / 1000
-    const outputPrice = (outputTokens * 0.008) / 1000
-    const totalPrice = inputPrice + outputPrice
+    const totalPrice = estimateProviderTaskCostUsd({ inputTokens, outputTokens })
     const completionDurationMs = Date.now() - openaiStart
     logProdTelemetry("Notion agent completion telemetry", {
       ...telemetry,
@@ -216,7 +218,6 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
     logDevTelemetry("Notion agent raw response", {
       ...devTelemetry,
       responseLength: responseMessage.content.length,
-      responseContent: responseMessage.content,
     })
 
     stage = "parse_agent_response"

@@ -3,10 +3,10 @@ import { Log, LogLevel } from "../../utils/log"
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { createNotionPage } from "@in/server/modules/notion/agent"
 import { db } from "@in/server/db"
-import { externalTasks, messageAttachments, users } from "@in/server/db/schema"
+import { externalTasks, messageAttachments, users, type DbExternalTask } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
 import { TInputPeerInfo, TPeerInfo } from "../../api-types"
-import { getUpdateGroup } from "../../modules/updates"
+import { getUpdateGroup, type UpdateGroup } from "../../modules/updates"
 import { connectionManager } from "../../ws/connections"
 import {
   MessageAttachmentExternalTask_Status,
@@ -15,7 +15,6 @@ import {
 import { RealtimeUpdates } from "../../realtime/message"
 import { Notifications } from "../../modules/notifications/notifications"
 import { encrypt, type EncryptedData } from "@in/server/modules/encryption/encryption"
-import { decryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { encodeMessageAttachmentUpdate } from "../../realtime/encoders/encodeMessageAttachment"
 import { ProtocolConvertors } from "@in/server/types/protocolConvertors"
 import { isDev } from "@in/server/env"
@@ -23,6 +22,7 @@ import { InlineError } from "@in/server/types/errors"
 import { toActionableNotionInlineError } from "@in/server/modules/notion/errors"
 import { resolveProviderActionContext } from "@in/server/modules/integrations/providerActionContext"
 import { getNotionClient } from "@in/server/modules/notion/notion"
+import { notionTaskNotificationText } from "./taskNotificationText"
 
 export const Input = Type.Object({
   spaceId: Type.Number(),
@@ -173,7 +173,7 @@ export const handler = async (
         externalTask: externalTaskResult,
         chatId,
         decryptedTitle: result.taskTitle,
-        updateGroup, // Pass the already fetched updateGroup
+        updateGroup,
       }),
     )
 
@@ -182,15 +182,7 @@ export const handler = async (
       const messageSenderId = message.fromId
 
       if (messageSenderId !== context.currentUserId) {
-        // Decrypt message text for notification description
-        let messageText = message.text || ""
-        if (message.textEncrypted && message.textIv && message.textTag) {
-          messageText = decryptMessage({
-            encrypted: message.textEncrypted,
-            iv: message.textIv,
-            authTag: message.textTag,
-          })
-        }
+        const messageText = notionTaskNotificationText(message)
 
         parallelOperations.push(
           Notifications.sendToUser({
@@ -201,7 +193,7 @@ export const handler = async (
               threadId: `chat_${chatId}`,
               title: `${senderUser.firstName ?? "Someone"} will do`,
               subtitle: result.taskTitle ?? undefined,
-              body: messageText || "A new task has been created from a message",
+              body: messageText,
               isThread: updateGroup.type === "threadUsers",
             },
           }).catch((error) => {
@@ -211,7 +203,6 @@ export const handler = async (
       }
     }
 
-    // Execute all parallel operations
     await Promise.allSettled(parallelOperations)
     logDevTelemetry("Notion updates and notifications completed", {
       ...devTelemetry,
@@ -265,7 +256,7 @@ async function compensateNotionPage(spaceId: number, pageId: string): Promise<vo
   } catch (error) {
     Log.shared.warn("Failed to compensate untracked Notion page", {
       spaceId,
-      pageId,
+      hasPageId: Boolean(pageId),
       error,
     })
   }
@@ -279,31 +270,27 @@ const messageAttachmentUpdate = async ({
   externalTask,
   chatId,
   decryptedTitle,
-  updateGroup, // Accept updateGroup as parameter to avoid refetching
+  updateGroup,
 }: {
   messageId: number
   peerId: TPeerInfo
   currentUserId: number
   messageAttachmentId: bigint
-  externalTask: any
+  externalTask: DbExternalTask
   chatId: number
   decryptedTitle: string | null
-  updateGroup?: any // Add this parameter
+  updateGroup: UpdateGroup
 }): Promise<void> => {
   try {
-    // Use passed updateGroup or fetch if not provided (for backward compatibility)
-    const finalUpdateGroup = updateGroup || (await getUpdateGroup(peerId, { currentUserId }))
     logDevTelemetry("Pushing messageAttachment update for Notion external task", {
       currentUserId,
       chatId,
       messageId,
-      updateGroupType: finalUpdateGroup.type,
+      updateGroupType: updateGroup.type,
       recipientCount:
-        finalUpdateGroup.type === "spaceUsers"
-          ? connectionManager.getSpaceUserIds(finalUpdateGroup.spaceId).length
-          : Array.isArray(finalUpdateGroup.userIds)
-          ? finalUpdateGroup.userIds.length
-          : undefined,
+        updateGroup.type === "spaceUsers"
+          ? connectionManager.getSpaceUserIds(updateGroup.spaceId).length
+          : updateGroup.userIds.length,
     })
 
     // Create the MessageAttachment object
@@ -329,9 +316,9 @@ const messageAttachmentUpdate = async ({
     const inputPeer = ProtocolConvertors.zodPeerToProtocolInputPeer(peerId)
 
     // Send updates to appropriate users
-    if (finalUpdateGroup.type === "dmUsers") {
+    if (updateGroup.type === "dmUsers") {
       const currentUserInputPeer = ProtocolConvertors.zodPeerToProtocolInputPeer({ userId: currentUserId })
-      finalUpdateGroup.userIds.forEach((userId: number) => {
+      updateGroup.userIds.forEach((userId: number) => {
         const encodingForInputPeer = userId === currentUserId ? inputPeer : currentUserInputPeer
         const update = encodeMessageAttachmentUpdate({
           messageId: BigInt(messageId),
@@ -342,8 +329,8 @@ const messageAttachmentUpdate = async ({
         })
         RealtimeUpdates.pushToUser(userId, [update])
       })
-    } else if (finalUpdateGroup.type === "threadUsers") {
-      finalUpdateGroup.userIds.forEach((userId: number) => {
+    } else if (updateGroup.type === "threadUsers") {
+      updateGroup.userIds.forEach((userId: number) => {
         const update = encodeMessageAttachmentUpdate({
           messageId: BigInt(messageId),
           chatId: BigInt(chatId),
@@ -353,8 +340,8 @@ const messageAttachmentUpdate = async ({
         })
         RealtimeUpdates.pushToUser(userId, [update])
       })
-    } else if (finalUpdateGroup.type === "spaceUsers") {
-      const userIds = connectionManager.getSpaceUserIds(finalUpdateGroup.spaceId)
+    } else if (updateGroup.type === "spaceUsers") {
+      const userIds = connectionManager.getSpaceUserIds(updateGroup.spaceId)
       userIds.forEach((userId) => {
         const update = encodeMessageAttachmentUpdate({
           messageId: BigInt(messageId),
