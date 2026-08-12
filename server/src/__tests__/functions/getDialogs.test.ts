@@ -1,9 +1,10 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { handler as getDialogsHandler } from "../../methods/getDialogs"
 import { testUtils, defaultTestContext, setupTestLifecycle } from "../setup"
 import { db } from "../../db"
 import * as schema from "../../db/schema"
 import { eq, and, or } from "drizzle-orm"
+import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 
 // Helper to create a HandlerContext
 const makeHandlerContext = (userId: number): any => ({
@@ -11,6 +12,58 @@ const makeHandlerContext = (userId: number): any => ({
   currentSessionId: defaultTestContext.sessionId,
   ip: "127.0.0.1",
 })
+
+const createPrivateReplyThreadFixture = async (input: {
+  spaceId: number
+  participants: Array<{ id: number }>
+  dialogUserId: number
+  chatListHidden?: boolean | null
+  latestMessage?: { messageId: number; fromId: number; text: string }
+}) => {
+  const owner = input.participants[0]
+  if (!owner) throw new Error("Reply-thread fixture requires a participant")
+
+  const parent = await testUtils.createChat(input.spaceId, "Private Parent", "thread", false, owner.id)
+  if (!parent) throw new Error("Parent chat was not created")
+  await db.insert(schema.chatParticipants).values(
+    input.participants.map((participant) => ({ chatId: parent.id, userId: participant.id })),
+  )
+  await db.insert(schema.messages).values({
+    chatId: parent.id,
+    messageId: 1,
+    fromId: owner.id,
+    text: "reply anchor",
+  })
+
+  const [replyThread] = await db
+    .insert(schema.chats)
+    .values({
+      spaceId: input.spaceId,
+      type: "thread",
+      title: "Private Reply Thread",
+      publicThread: false,
+      parentChatId: parent.id,
+      parentMessageId: 1,
+    })
+    .returning()
+  if (!replyThread) throw new Error("Reply thread was not created")
+
+  await db.insert(schema.dialogs).values({
+    chatId: replyThread.id,
+    userId: input.dialogUserId,
+    spaceId: input.spaceId,
+    chatListHidden: input.chatListHidden ?? null,
+  })
+  if (input.latestMessage) {
+    await db.insert(schema.messages).values({ chatId: replyThread.id, ...input.latestMessage })
+    await db
+      .update(schema.chats)
+      .set({ lastMsgId: input.latestMessage.messageId })
+      .where(eq(schema.chats.id, replyThread.id))
+  }
+
+  return replyThread
+}
 
 describe("getDialogs", () => {
   setupTestLifecycle()
@@ -247,6 +300,150 @@ describe("getDialogs", () => {
     expect(dialogThreadIds).not.toContain(chat.id)
     const chatIds = result.chats.map((c) => c.id)
     expect(chatIds).not.toContain(chat.id)
+  })
+
+  test("returns a visible private reply thread with its latest message and sender", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Private Reply Thread Space", [
+      "reply-participant-a@example.com",
+      "reply-participant-b@example.com",
+    ])
+    const [userA, userB] = users
+    const replyThread = await createPrivateReplyThreadFixture({
+      spaceId: space.id,
+      participants: [userA, userB],
+      dialogUserId: userA.id,
+      latestMessage: {
+        messageId: 2,
+        fromId: userB.id,
+        text: "newest reply preview",
+      },
+    })
+
+    const result = await getDialogsHandler({ spaceId: space.id }, makeHandlerContext(userA.id))
+
+    const returnedChats = result.chats.filter((chat) => chat.id === replyThread.id)
+    const returnedDialogs = result.dialogs.filter((dialog) => dialog.chatId === replyThread.id)
+    const returnedMessages = result.messages.filter((message) => message.chatId === replyThread.id)
+
+    expect(returnedChats).toHaveLength(1)
+    expect(returnedChats[0]?.lastMsgId).toBe(2)
+    expect(returnedDialogs).toHaveLength(1)
+    expect("threadId" in returnedDialogs[0]!.peerId && returnedDialogs[0]!.peerId.threadId).toBe(replyThread.id)
+    expect(returnedMessages).toHaveLength(1)
+    expect(returnedMessages[0]?.id).toBe(2)
+    expect(returnedMessages[0]?.fromId).toBe(userB.id)
+    expect(returnedMessages[0]?.text).toBe("newest reply preview")
+    expect(result.users.some((user) => user.id === userB.id)).toBe(true)
+  })
+
+  test("does not let top-level dialogs consume the linked reply-thread limit", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Busy Reply Thread Space", [
+      "busy-reply-participant@example.com",
+    ])
+    const [participant] = users
+
+    const topLevelChats = await db
+      .insert(schema.chats)
+      .values(
+        Array.from({ length: 201 }, (_, index) => ({
+          spaceId: space.id,
+          type: "thread" as const,
+          title: `Top Level ${index}`,
+          publicThread: true,
+        })),
+      )
+      .returning()
+    await db.insert(schema.dialogs).values(
+      topLevelChats.map((chat) => ({
+        chatId: chat.id,
+        userId: participant.id,
+        spaceId: space.id,
+        chatListHidden: null,
+      })),
+    )
+
+    const replyThread = await createPrivateReplyThreadFixture({
+      spaceId: space.id,
+      participants: [participant],
+      dialogUserId: participant.id,
+    })
+
+    const result = await getDialogsHandler({ spaceId: space.id }, makeHandlerContext(participant.id))
+
+    expect(result.chats.some((chat) => chat.id === replyThread.id)).toBe(true)
+    expect(result.dialogs.some((dialog) => dialog.chatId === replyThread.id)).toBe(true)
+  })
+
+  test("does not trust a stale private reply-thread dialog without participant access", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Stale Private Reply Dialog Space", [
+      "stale-reply-outsider@example.com",
+      "stale-reply-participant@example.com",
+    ])
+    const [outsider, participant] = users
+
+    const replyThread = await createPrivateReplyThreadFixture({
+      spaceId: space.id,
+      participants: [participant],
+      dialogUserId: outsider.id,
+      latestMessage: {
+        messageId: 1,
+        fromId: participant.id,
+        text: "private reply",
+      },
+    })
+
+    const result = await getDialogsHandler({ spaceId: space.id }, makeHandlerContext(outsider.id))
+
+    expect(result.chats.some((chat) => chat.id === replyThread.id)).toBe(false)
+    expect(result.dialogs.some((dialog) => dialog.chatId === replyThread.id)).toBe(false)
+    expect(result.messages.some((message) => message.chatId === replyThread.id)).toBe(false)
+  })
+
+  test("does not return a hidden private reply-thread dialog", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Hidden Private Reply Dialog Space", [
+      "hidden-reply-participant@example.com",
+    ])
+    const [participant] = users
+
+    const replyThread = await createPrivateReplyThreadFixture({
+      spaceId: space.id,
+      participants: [participant],
+      dialogUserId: participant.id,
+      chatListHidden: true,
+      latestMessage: {
+        messageId: 1,
+        fromId: participant.id,
+        text: "hidden reply",
+      },
+    })
+
+    const result = await getDialogsHandler({ spaceId: space.id }, makeHandlerContext(participant.id))
+
+    expect(result.chats.some((chat) => chat.id === replyThread.id)).toBe(false)
+    expect(result.dialogs.some((dialog) => dialog.chatId === replyThread.id)).toBe(false)
+    expect(result.messages.some((message) => message.chatId === replyThread.id)).toBe(false)
+  })
+
+  test("propagates operational errors while authorizing a private reply-thread dialog", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Reply Authorization Failure Space", [
+      "reply-auth-failure@example.com",
+    ])
+    const [participant] = users
+    await createPrivateReplyThreadFixture({
+      spaceId: space.id,
+      participants: [participant],
+      dialogUserId: participant.id,
+    })
+
+    const operationalError = new Error("authorization storage unavailable")
+    const accessSpy = spyOn(AccessGuards, "ensureChatAccess").mockRejectedValueOnce(operationalError)
+    try {
+      await expect(
+        getDialogsHandler({ spaceId: space.id }, makeHandlerContext(participant.id)),
+      ).rejects.toBe(operationalError)
+    } finally {
+      accessSpy.mockRestore()
+    }
   })
 
   test("creates private chats for space members without dialogs", async () => {

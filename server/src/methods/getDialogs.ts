@@ -1,5 +1,5 @@
 import { db } from "@in/server/db"
-import { and, eq, inArray, isNull, or } from "drizzle-orm"
+import { and, eq, inArray, isNotNull, isNull, or } from "drizzle-orm"
 import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
@@ -19,6 +19,8 @@ import type { HandlerContext } from "@in/server/controllers/helpers"
 import * as schema from "@in/server/db/schema"
 import { normalizeId, TInputId } from "@in/server/types/methods"
 import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
+import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 
 export const Input = Type.Object({
   spaceId: TInputId,
@@ -129,31 +131,47 @@ export const handler = async (
       eq(schema.dialogs.userId, currentUserId),
       eq(schema.dialogs.spaceId, spaceId),
       or(isNull(schema.dialogs.chatListHidden), eq(schema.dialogs.chatListHidden, false)),
+      inArray(
+        schema.dialogs.chatId,
+        db
+          .select({ id: schema.chats.id })
+          .from(schema.chats)
+          .where(or(eq(schema.chats.type, "private"), isNotNull(schema.chats.parentChatId))),
+      ),
     ),
     with: { chat: { with: { lastMsg: { with: { from: true, file: true } } } } },
     limit: MAX_LIMIT,
   })
-  existingThreadDialogs.forEach((d) => {
-    // 🎯 IMPORTANT IMPORTANT IMPORTANT
-    // We need to check if the chat is a private thread and if the user is a participant
-    // If so, we need to add the chat to the results
-    // Otherwise, we need to skip it
-    // 🎯 IMPORTANT IMPORTANT IMPORTANT
-    // TODO: This is a hack to filter out private threads that the user is not a participant of
-    // We need to find a better way to do this
+  for (const d of existingThreadDialogs) {
     if (d.chat?.type === "thread" && d.chat?.publicThread === false) {
-      return
+      // Top-level private threads are loaded by the participant-scoped query below. Linked
+      // reply threads only surface through an existing visible dialog, but the dialog alone is
+      // not an access grant: validate inherited/direct access before returning its chat payload.
+      if (d.chat.parentChatId == null) {
+        continue
+      }
+      try {
+        await AccessGuards.ensureChatAccess(d.chat, currentUserId)
+      } catch (error) {
+        const isExpectedAccessDenial =
+          RealtimeRpcError.is(error, RealtimeRpcError.Code.PEER_ID_INVALID) ||
+          RealtimeRpcError.is(error, RealtimeRpcError.Code.SPACE_ID_INVALID)
+        if (isExpectedAccessDenial) {
+          continue
+        }
+        throw error
+      }
     }
 
     // Skip public threads if user doesn't have permission
     if (d.chat?.type === "thread" && d.chat?.publicThread === true && !memberPermission?.canAccessPublicChats) {
-      return
+      continue
     }
 
     dialogs.push(d)
     if (d.chat) chats.push(d.chat)
     pushMessageAndUser(messages, users, d.chat?.lastMsg, currentUserId, peerIdFromChat(d.chat, { currentUserId }))
-  })
+  }
 
   // --- 2. Public Chats and Private Dialogs in Space ---
   if (spaceId) {
