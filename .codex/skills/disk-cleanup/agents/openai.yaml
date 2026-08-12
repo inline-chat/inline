@@ -1,4 +1,4 @@
 interface:
   display_name: "Disk Cleanup"
-  short_description: "Audit and reclaim disk space safely"
-  default_prompt: "Use $disk-cleanup to audit disk usage and propose or run the appropriate cleanup tier."
+  short_description: "Find cold disk usage before hot caches"
+  default_prompt: "Use $disk-cleanup for an audit-only disk inventory ordered by replacement cost. Report canonical absolute paths, prioritize cold generated outputs, and protect active builds, dependency state, mounted devices, and irreplaceable history."
