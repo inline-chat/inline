@@ -1,6 +1,7 @@
 import { bytea, creationDate } from "@in/server/db/schema/common"
 import { messages } from "@in/server/db/schema/messages"
 import { users } from "@in/server/db/schema/users"
+import { spaces } from "@in/server/db/schema/spaces"
 import { relations } from "drizzle-orm/_relations"
 import { pgTable, integer, text, bigint, index, timestamp, uniqueIndex, boolean } from "drizzle-orm/pg-core"
 import { documents, photos, videos } from "./media"
@@ -145,6 +146,8 @@ export const externalTasks = pgTable("external_tasks", {
   taskId: text("task_id").notNull(),
   status: text("status", { enum: ["backlog", "todo", "in_progress", "done", "cancelled"] }).notNull(),
   assignedUserId: bigint("assigned_user_id", { mode: "bigint" }).references(() => users.id),
+  /** Space connector used for provider actions, including tasks created from DMs. */
+  connectorSpaceId: integer("connector_space_id").references(() => spaces.id),
   number: text("number"),
   url: text("url"),
 

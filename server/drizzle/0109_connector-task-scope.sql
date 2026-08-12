@@ -1,0 +1,2 @@
+ALTER TABLE "external_tasks" ADD COLUMN "connector_space_id" integer;--> statement-breakpoint
+ALTER TABLE "external_tasks" ADD CONSTRAINT "external_tasks_connector_space_id_spaces_id_fk" FOREIGN KEY ("connector_space_id") REFERENCES "public"."spaces"("id") ON DELETE no action ON UPDATE no action;

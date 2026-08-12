@@ -74,6 +74,9 @@ export const dialogs = pgTable(
 
     /** Thread surfacing policy; null means relevance-only default, unfollowed blocks auto-follow. */
     followMode: text("follow_mode", { enum: ["following", "unfollowed"] }),
+
+    /** Personal history-collapse boundary; messages at or below this ID stay hidden. */
+    collapsedMaxId: integer("collapsed_max_id"),
   },
   (table) => ({
     chatIdUserIdUnique: unique("chat_id_user_id_unique").on(table.chatId, table.userId),

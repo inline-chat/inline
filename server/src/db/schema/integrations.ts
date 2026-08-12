@@ -1,4 +1,4 @@
-import { pgTable, integer, text, serial, uniqueIndex } from "drizzle-orm/pg-core"
+import { pgTable, integer, text, serial, uniqueIndex, varchar, timestamp, index } from "drizzle-orm/pg-core"
 import { users } from "./users"
 import { relations } from "drizzle-orm/_relations"
 import { bytea, creationDate } from "@in/server/db/schema/common"
@@ -26,7 +26,13 @@ export const integrations = pgTable(
     // Linear related data (space-level selection)
     linearTeamId: text("linear_team_id"),
 
-    date: creationDate,
+    date: timestamp("date", {
+      mode: "date",
+      precision: 3,
+      withTimezone: true,
+    })
+      .defaultNow()
+      .notNull(),
   },
   (table) => ({
     integrations_space_provider_unique: uniqueIndex("integrations_space_provider_unique").on(
@@ -49,3 +55,28 @@ export const integrationRelations = relations(integrations, ({ one }) => ({
 
 export type DbIntegration = typeof integrations.$inferSelect
 export type NewIntegration = typeof integrations.$inferInsert
+
+/**
+ * Single-use OAuth state. Only a SHA-256 digest is persisted; the raw state is
+ * returned to the provider and cannot be recovered from the database.
+ */
+export const integrationOAuthStates = pgTable(
+  "integration_oauth_states",
+  {
+    stateHash: varchar("state_hash", { length: 64 }).primaryKey(),
+    provider: varchar("provider", { length: 32 }).notNull(),
+    callbackScheme: varchar("callback_scheme", { length: 32 }).notNull(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    spaceId: integer("space_id").references(() => spaces.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { mode: "date", precision: 3 }).notNull(),
+    date: creationDate,
+  },
+  (table) => ({
+    integration_oauth_states_user: index("integration_oauth_states_user").on(table.userId),
+    integration_oauth_states_expires: index("integration_oauth_states_expires").on(table.expiresAt),
+  }),
+)
+
+export type DbIntegrationOAuthState = typeof integrationOAuthStates.$inferSelect
