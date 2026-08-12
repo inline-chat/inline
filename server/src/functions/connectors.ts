@@ -211,41 +211,111 @@ export async function disconnectConnector(
   rejectBots(context)
   const provider = decodeSupportedProvider(input.provider)
   const scope = await authorizeScope(input.scope, context, { allowPublicSpace: true })
+  await disconnectConnectorCredentials(provider, scope, dependencies)
+
+  return {}
+}
+
+export async function disconnectSpaceConnectorCredentials(
+  provider: ConnectorOAuthProvider,
+  input: { userId: number; spaceId: number },
+): Promise<void> {
+  await disconnectConnectorCredentials(provider, {
+    type: "space",
+    userId: input.userId,
+    spaceId: input.spaceId,
+  }, {
+    revokeConnection: revokeConnectorConnection,
+  })
+}
+
+async function disconnectConnectorCredentials(
+  provider: ConnectorOAuthProvider,
+  scope: ConnectorScopeIdentity,
+  dependencies: DisconnectConnectorDependencies,
+): Promise<void> {
   const scopeClause = scope.spaceId === null
     ? and(eq(integrations.userId, scope.userId), isNull(integrations.spaceId))
     : eq(integrations.spaceId, scope.spaceId)
 
-  const connections = await db
-    .select()
-    .from(integrations)
-    .where(and(scopeClause, eq(integrations.provider, provider)))
-    .orderBy(desc(integrations.date), desc(integrations.id))
+  const outcome = await db.transaction(async (tx) => {
+    if (scope.spaceId === null) {
+      await tx
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.id, scope.userId))
+        .for("update")
+        .limit(1)
+    } else {
+      await tx
+        .select({ id: spaces.id })
+        .from(spaces)
+        .where(eq(spaces.id, scope.spaceId))
+        .for("update")
+        .limit(1)
+    }
 
-  await db
-    .delete(integrations)
-    .where(and(scopeClause, eq(integrations.provider, provider)))
+    const connections = await tx
+      .select()
+      .from(integrations)
+      .where(and(scopeClause, eq(integrations.provider, provider)))
+      .orderBy(desc(integrations.date), desc(integrations.id))
 
-  await Promise.all(connections.map(async (connection) => {
-    await dependencies.revokeConnection(provider, connection)
-      .then((result) => {
-        if (!result.ok) {
-          log.warn("Provider token revocation failed during connector disconnect", {
-            provider,
-            scopeType: scope.type,
-            status: result.status,
-          })
+    const attempts = await Promise.all(connections.map(async (connection) => {
+      try {
+        const result = await dependencies.revokeConnection(provider, connection)
+        return {
+          connection,
+          ok: result.ok,
+          status: result.status ?? "UnknownError",
         }
-      })
-      .catch((error) => {
-        log.warn("Provider token revocation failed during connector disconnect", {
-          provider,
-          scopeType: scope.type,
+      } catch (error) {
+        return {
+          connection,
+          ok: false,
           status: error instanceof Error ? error.name : "UnknownError",
-        })
-      })
-  }))
+        }
+      }
+    }))
 
-  return {}
+    const revokedConnections = attempts
+      .filter((attempt) => attempt.ok)
+      .map((attempt) => attempt.connection)
+    const unchangedRevokedConnections = revokedConnections.map((connection) => and(
+      eq(integrations.id, connection.id),
+      connection.accessTokenEncrypted === null
+        ? isNull(integrations.accessTokenEncrypted)
+        : eq(integrations.accessTokenEncrypted, connection.accessTokenEncrypted),
+      connection.accessTokenIv === null
+        ? isNull(integrations.accessTokenIv)
+        : eq(integrations.accessTokenIv, connection.accessTokenIv),
+      connection.accessTokenTag === null
+        ? isNull(integrations.accessTokenTag)
+        : eq(integrations.accessTokenTag, connection.accessTokenTag),
+    ))
+    if (unchangedRevokedConnections.length > 0) {
+      await tx
+        .delete(integrations)
+        .where(or(...unchangedRevokedConnections))
+    }
+
+    return {
+      attemptedCount: attempts.length,
+      failedAttempts: attempts.filter((attempt) => !attempt.ok),
+    }
+  })
+
+  const { failedAttempts } = outcome
+  if (failedAttempts.length > 0) {
+    log.warn("Provider token revocation failed during connector disconnect", {
+      provider,
+      scopeType: scope.type,
+      failedCount: failedAttempts.length,
+      attemptedCount: outcome.attemptedCount,
+      statuses: failedAttempts.map((attempt) => attempt.status),
+    })
+    throw RealtimeRpcError.InternalError()
+  }
 }
 
 async function authorizeScope(

@@ -12,6 +12,7 @@ import {
   claimConnectorOAuthState,
   storeConnectorOAuthState,
 } from "@in/server/modules/integrations/connectorOAuthState"
+import { storeConnectorToken } from "@in/server/modules/integrations/connectionStore"
 import { resolveConnectorCallbackScheme } from "@in/server/modules/integrations/connectorCallbackScheme"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -278,6 +279,182 @@ describe("connectors", () => {
       ))
     expect(remaining).toHaveLength(0)
     expect(revokedIDs.sort()).toEqual(rows.map((row) => row.id).sort())
+  })
+
+  test("retains every credential whose provider revocation fails", async () => {
+    const rows = await db.insert(integrations).values([
+      {
+        userId: currentUserId,
+        provider: "linear",
+        accessTokenEncrypted: Buffer.from("revoked"),
+        accessTokenIv: Buffer.from("revoked-iv"),
+        accessTokenTag: Buffer.from("revoked-tag"),
+      },
+      {
+        userId: currentUserId,
+        provider: "linear",
+        accessTokenEncrypted: Buffer.from("failed"),
+        accessTokenIv: Buffer.from("failed-iv"),
+        accessTokenTag: Buffer.from("failed-tag"),
+      },
+      {
+        userId: currentUserId,
+        provider: "linear",
+        accessTokenEncrypted: Buffer.from("thrown"),
+        accessTokenIv: Buffer.from("thrown-iv"),
+        accessTokenTag: Buffer.from("thrown-tag"),
+      },
+    ]).returning({ id: integrations.id })
+    const [revokedRow, failedRow, thrownRow] = rows
+    if (!revokedRow || !failedRow || !thrownRow) throw new Error("integration rows not created")
+    const attemptedIDs: number[] = []
+
+    await expect(disconnectConnector({
+      provider: ConnectorProvider.LINEAR,
+      scope: {
+        type: {
+          oneofKind: "user",
+          user: { userId: BigInt(currentUserId) },
+        },
+      },
+    }, context, {
+      async revokeConnection(_provider, connection) {
+        attemptedIDs.push(connection.id)
+        if (connection.id === revokedRow.id) return { ok: true }
+        if (connection.id === failedRow.id) return { ok: false, status: 503 }
+        throw new Error("provider unavailable")
+      },
+    })).rejects.toMatchObject({
+      code: RealtimeRpcError.Code.INTERNAL_ERROR,
+    })
+
+    const remaining = await db
+      .select({ id: integrations.id })
+      .from(integrations)
+      .where(and(
+        eq(integrations.userId, currentUserId),
+        isNull(integrations.spaceId),
+        eq(integrations.provider, "linear"),
+      ))
+    expect(attemptedIDs.sort()).toEqual(rows.map((row) => row.id).sort())
+    expect(remaining.map((row) => row.id).sort()).toEqual(
+      [failedRow.id, thrownRow.id].sort(),
+    )
+  })
+
+  test("does not delete a credential replaced while revocation is in flight", async () => {
+    const [row] = await db.insert(integrations).values({
+      userId: currentUserId,
+      provider: "notion",
+      accessTokenEncrypted: Buffer.from("old-encrypted"),
+      accessTokenIv: Buffer.from("old-iv"),
+      accessTokenTag: Buffer.from("old-tag"),
+    }).returning({ id: integrations.id })
+    if (!row) throw new Error("integration row not created")
+
+    await disconnectConnector({
+      provider: ConnectorProvider.NOTION,
+      scope: {
+        type: {
+          oneofKind: "user",
+          user: { userId: BigInt(currentUserId) },
+        },
+      },
+    }, context, {
+      async revokeConnection() {
+        await db.update(integrations).set({
+          accessTokenEncrypted: Buffer.from("new-encrypted"),
+          accessTokenIv: Buffer.from("new-iv"),
+          accessTokenTag: Buffer.from("new-tag"),
+        }).where(eq(integrations.id, row.id))
+        return { ok: true }
+      },
+    })
+
+    const [remaining] = await db
+      .select({
+        id: integrations.id,
+        encrypted: integrations.accessTokenEncrypted,
+      })
+      .from(integrations)
+      .where(eq(integrations.id, row.id))
+    expect(remaining).toEqual({
+      id: row.id,
+      encrypted: Buffer.from("new-encrypted"),
+    })
+  })
+
+  test("serializes disconnect with a concurrent personal reconnect", async () => {
+    await db.insert(integrations).values({
+      userId: currentUserId,
+      provider: "notion",
+      accessTokenEncrypted: Buffer.from("old-encrypted"),
+      accessTokenIv: Buffer.from("old-iv"),
+      accessTokenTag: Buffer.from("old-tag"),
+    })
+
+    let releaseRevocation: (() => void) | undefined
+    const revocationCanFinish = new Promise<void>((resolve) => {
+      releaseRevocation = resolve
+    })
+    let markRevocationStarted: (() => void) | undefined
+    const revocationStarted = new Promise<void>((resolve) => {
+      markRevocationStarted = resolve
+    })
+    const disconnect = disconnectConnector({
+      provider: ConnectorProvider.NOTION,
+      scope: {
+        type: {
+          oneofKind: "user",
+          user: { userId: BigInt(currentUserId) },
+        },
+      },
+    }, context, {
+      async revokeConnection() {
+        markRevocationStarted?.()
+        await revocationCanFinish
+        return { ok: true }
+      },
+    })
+    await revocationStarted
+
+    let reconnectFinished = false
+    const reconnect = storeConnectorToken({
+      provider: "notion",
+      userId: currentUserId,
+      spaceId: null,
+      token: {
+        encrypted: Buffer.from("new-encrypted"),
+        iv: Buffer.from("new-iv"),
+        authTag: Buffer.from("new-tag"),
+      },
+    }).then(() => {
+      reconnectFinished = true
+    })
+    await Bun.sleep(50)
+    const finishedWhileDisconnectHeldLock = reconnectFinished
+
+    releaseRevocation?.()
+    await Promise.all([disconnect, reconnect])
+    expect(finishedWhileDisconnectHeldLock).toBe(false)
+
+    const remaining = await db
+      .select({
+        encrypted: integrations.accessTokenEncrypted,
+        iv: integrations.accessTokenIv,
+        authTag: integrations.accessTokenTag,
+      })
+      .from(integrations)
+      .where(and(
+        eq(integrations.userId, currentUserId),
+        isNull(integrations.spaceId),
+        eq(integrations.provider, "notion"),
+      ))
+    expect(remaining).toEqual([{
+      encrypted: Buffer.from("new-encrypted"),
+      iv: Buffer.from("new-iv"),
+      authTag: Buffer.from("new-tag"),
+    }])
   })
 
   test("requires an admin to disconnect a space connector", async () => {
