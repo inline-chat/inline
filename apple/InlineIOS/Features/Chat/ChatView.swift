@@ -14,6 +14,8 @@ struct ChatView: View {
   private let focusMessageID: Int64?
   private let autoCleanupUntitledEmptyThreadOnBack: Bool
 
+  @AppStorage(ChatToolbarBackgroundExperiment.key)
+  private var customToolbarBackgroundEnabled = ChatToolbarBackgroundExperiment.defaultValue
   @State var navBarHeight: CGFloat = 0
   @State var isChatHeaderPressed = false
   @State private var pageState: PageState = .initial
@@ -98,7 +100,14 @@ struct ChatView: View {
     ZStack(alignment: .top) {
       chatContent
       if !preview {
-        ChatViewHeader(navBarHeight: $navBarHeight)
+        if #available(iOS 27.0, *),
+           ChatToolbarBackgroundExperiment.implementation(
+             customBackgroundEnabled: customToolbarBackgroundEnabled
+           ) == .customToolbarBackground {
+          ChatToolbarBackgroundExperimentView(navBarHeight: $navBarHeight)
+        } else {
+          ChatViewHeader(navBarHeight: $navBarHeight)
+        }
       }
       renderOverlay
     }
