@@ -25,57 +25,7 @@ public struct ConnectorsSettingsView: View {
   }
 
   public var body: some View {
-    Form {
-      Section {
-        ConnectorScopePicker(
-          scopes: model.scopes,
-          selection: $model.selectedScopeID
-        )
-      } header: {
-        Text("Scope")
-      } footer: {
-        ConnectorScopeDescription(scope: model.selectedScope)
-      }
-
-      Section {
-        ForEach(model.providers) { availability in
-          let provider = availability.id
-          let scope = model.selectedScope
-          ConnectorRow(
-            availability: availability,
-            scope: scope,
-            connection: scope.flatMap {
-              model.connection(for: provider, scopeID: $0.id)
-            },
-            isActive: model.activeProviders.contains(provider),
-            configure: configure,
-            onConnect: {
-              Task {
-                if let url = await model.prepareOAuth(for: provider) {
-                  openAuthorizationURL(url)
-                }
-              }
-            },
-            onDisconnect: {
-              if let scope {
-                pendingDisconnect = PendingConnectorDisconnect(
-                  provider: provider,
-                  scope: scope
-                )
-              }
-            }
-          )
-        }
-      } header: {
-        Text("Apps & Tools")
-      } footer: {
-        Text("Use connectors for link previews, [[ references, and actions like creating tasks.")
-      }
-    }
-    .formStyle(.grouped)
-    #if os(macOS)
-    .scrollContentBackground(.hidden)
-    #endif
+    connectorSurface
     .overlay {
       if model.isLoading {
         ProgressView("Loading Connectors…")
@@ -152,6 +102,71 @@ public struct ConnectorsSettingsView: View {
     }
   }
 
+  @ViewBuilder
+  private var connectorSurface: some View {
+    #if os(iOS)
+    List {
+      connectorSections
+    }
+    .listStyle(.insetGrouped)
+    #else
+    Form {
+      connectorSections
+    }
+    .formStyle(.grouped)
+    .scrollContentBackground(.hidden)
+    #endif
+  }
+
+  @ViewBuilder
+  private var connectorSections: some View {
+    Section {
+      ConnectorScopePicker(
+        scopes: model.scopes,
+        selection: $model.selectedScopeID
+      )
+    } header: {
+      Text("Scope")
+    } footer: {
+      ConnectorScopeDescription(scope: model.selectedScope)
+    }
+
+    Section {
+      ForEach(model.providers) { availability in
+        let provider = availability.id
+        let scope = model.selectedScope
+        ConnectorRow(
+          availability: availability,
+          scope: scope,
+          connection: scope.flatMap {
+            model.connection(for: provider, scopeID: $0.id)
+          },
+          isActive: model.activeProviders.contains(provider),
+          configure: configure,
+          onConnect: {
+            Task {
+              if let url = await model.prepareOAuth(for: provider) {
+                openAuthorizationURL(url)
+              }
+            }
+          },
+          onDisconnect: {
+            if let scope {
+              pendingDisconnect = PendingConnectorDisconnect(
+                provider: provider,
+                scope: scope
+              )
+            }
+          }
+        )
+      }
+    } header: {
+      Text("Apps & Tools")
+    } footer: {
+      Text("Use connectors for link previews, [[ references, and actions like creating tasks.")
+    }
+  }
+
 }
 
 private struct PendingConnectorDisconnect {
@@ -194,6 +209,9 @@ private struct ConnectorRow: View {
     }
     #if os(macOS)
     .frame(minHeight: 38)
+    #else
+    .frame(minHeight: 52)
+    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 8))
     #endif
   }
 }
@@ -253,10 +271,13 @@ private struct ConnectorAction: View {
             Button(configurationTitle) {
               configure(provider, spaceID)
             }
-            .buttonStyle(.bordered)
             #if os(macOS)
+            .buttonStyle(.bordered)
             .controlSize(.small)
             #else
+            .buttonStyle(.plain)
+            .font(.subheadline)
+            .foregroundStyle(Color.accentColor)
             .frame(minHeight: 44)
             #endif
             .accessibilityLabel(configurationAccessibilityLabel)
@@ -269,33 +290,27 @@ private struct ConnectorAction: View {
           connectorOptionsMenu
         }
       } else if connection.needsConfiguration {
-        Text("Setup required")
-          .font(.caption)
-          .foregroundStyle(.secondary)
+        trailingStatus("Setup required")
       }
     } else if !isAvailable {
-      Text(provider == .github ? "Coming soon" : "Unavailable")
-        .font(.caption.weight(.medium))
-        .foregroundStyle(.secondary)
+      trailingStatus(provider == .github ? "Coming soon" : "Unavailable")
     } else if !isSupportedInScope {
-      Text(unsupportedScopeLabel)
-        .font(.caption)
-        .foregroundStyle(.secondary)
+      trailingStatus(unsupportedScopeLabel)
     } else if scope?.canManage == false {
-      Text("Admin required")
-        .font(.caption)
-        .foregroundStyle(.secondary)
+      trailingStatus("Admin required")
     } else {
       Button(action: onConnect) {
         Text("Connect")
           .frame(minWidth: 52)
-          #if !os(macOS)
-          .frame(minHeight: 44)
-          #endif
       }
-      .buttonStyle(.bordered)
       #if os(macOS)
+      .buttonStyle(.bordered)
       .controlSize(.small)
+      #else
+      .buttonStyle(.plain)
+      .font(.subheadline)
+      .foregroundStyle(Color.accentColor)
+      .frame(minWidth: 72, minHeight: 44, alignment: .trailing)
       #endif
       .disabled(isActive || scope == nil)
       .accessibilityLabel(connectAccessibilityLabel)
@@ -308,6 +323,18 @@ private struct ConnectorAction: View {
       }
       .opacity(isActive ? 0.65 : 1)
     }
+  }
+
+  private func trailingStatus(_ title: LocalizedStringResource) -> some View {
+    Text(title)
+      #if os(macOS)
+      .font(.caption)
+      #else
+      .font(.subheadline)
+      .frame(minHeight: 44, alignment: .trailing)
+      #endif
+      .foregroundStyle(.secondary)
+      .lineLimit(1)
   }
 
   private var connectorOptionsMenu: some View {
@@ -352,7 +379,11 @@ private struct ConnectorLabel: View {
 
       VStack(alignment: .leading, spacing: 2) {
         Text(provider.title)
+          #if os(macOS)
           .font(.body.weight(.medium))
+          #else
+          .font(.body)
+          #endif
 
         if let connection {
           ConnectorConnectionStatus(connection: connection)
@@ -386,16 +417,33 @@ private struct ConnectorConnectionStatus: View {
 private struct ConnectorIcon: View {
   let provider: ConnectorKind
 
+  private var iconSize: CGFloat {
+    #if os(macOS)
+    28
+    #else
+    32
+    #endif
+  }
+
+  private var iconCornerRadius: CGFloat {
+    #if os(macOS)
+    7
+    #else
+    8
+    #endif
+  }
+
   var body: some View {
     ZStack {
-      RoundedRectangle(cornerRadius: 7, style: .continuous)
+      RoundedRectangle(cornerRadius: iconCornerRadius, style: .continuous)
         .fill(Color.primary.opacity(0.045))
 
       providerMark
     }
-    .frame(width: 28, height: 28)
+    .frame(width: iconSize, height: iconSize)
+    .clipShape(RoundedRectangle(cornerRadius: iconCornerRadius, style: .continuous))
     .overlay {
-      RoundedRectangle(cornerRadius: 7, style: .continuous)
+      RoundedRectangle(cornerRadius: iconCornerRadius, style: .continuous)
         .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
     }
     .accessibilityHidden(true)
@@ -408,18 +456,30 @@ private struct ConnectorIcon: View {
       Image(provider.assetName)
         .resizable()
         .scaledToFit()
+        #if os(macOS)
         .frame(width: 19, height: 19)
+        #else
+        .frame(width: 23, height: 23)
+        #endif
     case .linear:
       Image(provider.assetName)
         .resizable()
         .scaledToFill()
-        .frame(width: 20, height: 20)
-        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+        #if os(macOS)
+        .frame(width: 30, height: 30)
+        #else
+        .frame(width: 38, height: 38)
+        #endif
+        .clipShape(RoundedRectangle(cornerRadius: iconCornerRadius, style: .continuous))
     case .github:
       Image(provider.assetName)
         .resizable()
         .scaledToFit()
+        #if os(macOS)
         .frame(width: 18, height: 18)
+        #else
+        .frame(width: 22, height: 22)
+        #endif
     }
   }
 }
@@ -441,29 +501,39 @@ private struct ConnectorScopePicker: View {
   }
 
   var body: some View {
+    #if os(iOS)
+    Picker("Connect for", selection: $selection) {
+      scopeOptions
+    }
+    .pickerStyle(.menu)
+    #else
     LabeledContent("Connect for") {
       Picker("Connect for", selection: $selection) {
-        if let personalScope {
-          Section("Private to you") {
-            Label(personalScope.name, systemImage: "person")
-              .tag(Optional(personalScope.id))
-          }
-        }
-
-        if !spaceScopes.isEmpty {
-          Section("Shared with space members") {
-            ForEach(spaceScopes) { scope in
-              Label(scope.name, systemImage: "person.2")
-                .tag(Optional(scope.id))
-            }
-          }
-        }
+        scopeOptions
       }
       .labelsHidden()
       .pickerStyle(.menu)
-      #if os(macOS)
       .frame(minWidth: 160)
-      #endif
+    }
+    #endif
+  }
+
+  @ViewBuilder
+  private var scopeOptions: some View {
+    if let personalScope {
+      Section("Private to you") {
+        Text(personalScope.name)
+          .tag(Optional(personalScope.id))
+      }
+    }
+
+    if !spaceScopes.isEmpty {
+      Section("Shared with space members") {
+        ForEach(spaceScopes) { scope in
+          Text(scope.name)
+            .tag(Optional(scope.id))
+        }
+      }
     }
   }
 }
