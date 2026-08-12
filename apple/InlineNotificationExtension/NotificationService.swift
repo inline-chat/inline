@@ -35,10 +35,10 @@ final class NotificationService: UNNotificationServiceExtension {
 
     // If we have an avatar URL, fetch it before finalising; otherwise finish immediately
     if let avatarURL = sender.profilePhotoUrl {
-      logger.info("fetching avatar from \(avatarURL.absoluteString, privacy: .public)")
+      logger.info("fetching notification avatar")
       avatarTask = URLSession.shared.dataTask(with: avatarURL) { [weak self] data, _, error in
-        if let error {
-          self?.logger.error("avatar download failed: \(error.localizedDescription, privacy: .public)")
+        if error != nil {
+          self?.logger.error("notification avatar download failed")
         }
         let imageData: Data? = if let data, UIImage(data: data) != nil {
           data
@@ -173,7 +173,7 @@ private extension NotificationService {
 
       logger.info("decrypted encrypted notification content")
     } catch {
-      logger.error("failed to decrypt encrypted notification content: \(error.localizedDescription, privacy: .public)")
+      logger.error("failed to decrypt encrypted notification content")
     }
   }
 
@@ -263,7 +263,7 @@ private extension NotificationService {
   func applyIntent(sender: SenderPayload, imageData: Data?) {
     guard let bestAttemptContent else { return }
 
-    logger.info("applying intent for sender \(sender.id, privacy: .public)")
+    logger.info("applying notification intent")
 
     let isThread = boolValue(bestAttemptContent.userInfo["isThread"])
     let isReplyThread = boolValue(bestAttemptContent.userInfo["isReplyThread"])
@@ -281,11 +281,7 @@ private extension NotificationService {
     }
 
     let groupName = isThread ? threadTitle : nil
-    let groupNameLog = groupName ?? "nil"
-    logger
-      .info(
-        "notification context: isThread=\(isThread, privacy: .public) title=\(bestAttemptContent.title, privacy: .public) subtitle=\(bestAttemptContent.subtitle, privacy: .public) groupName=\(groupNameLog, privacy: .public)"
-      )
+    logger.info("notification context: isThread=\(isThread, privacy: .public)")
 
     let senderName = senderNameComponents(sender.displayName)
     let senderAvatar = InlineMessageIntentDonation.Avatar.user(.init(
@@ -350,13 +346,13 @@ private extension NotificationService {
       let contentToDeliver: UNNotificationContent
       do {
         let intent = try await InlineMessageIntentDonation.donate(request)
-        logger.info("interaction donation succeeded (conversation=\(conversationIdentifier, privacy: .public))")
+        logger.info("notification interaction donation succeeded")
         let updated = try bestAttemptContent.updating(from: intent)
         contentToDeliver = updated
         self.bestAttemptContent = updated as? UNMutableNotificationContent
         logger.info("notification content updated from intent")
       } catch {
-        logger.error("interaction donation or content update failed: \(error.localizedDescription, privacy: .public)")
+        logger.error("notification interaction donation or content update failed")
         contentToDeliver = bestAttemptContent
       }
       finish(with: contentToDeliver)

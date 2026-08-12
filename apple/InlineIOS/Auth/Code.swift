@@ -130,6 +130,8 @@ extension Code {
           mainViewRouter.setRoute(route: .main)
         }
 
+      } catch is CancellationError {
+        formState.reset()
       } catch let error as APIError {
         errorMsg = NSLocalizedString("Please try again.", comment: "Error message for code verification")
         OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg)

@@ -146,6 +146,8 @@ struct OnboardingEnterCode: View {
         DispatchQueue.main.async {
           onboardingViewModel.navigateAfterLogin(pendingSetup: result.user.pendingSetup == true)
         }
+      } catch is CancellationError {
+        formState.reset()
       } catch {
         formState.failed(error: error.localizedDescription)
         Log.shared.error("Failed to send code", error: error)

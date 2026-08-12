@@ -553,7 +553,7 @@ final class QuickSearchViewModel {
         }
         openInSidebar(peer: .user(id: user.id))
       } catch {
-        Log.shared.error("Failed to open a private chat with \(user.anyName)", error: error)
+        Log.shared.error("Failed to open a private chat", error: error)
         dependencies.overlay.showError(message: "Failed to open a private chat with \(user.anyName)")
       }
     }
@@ -567,7 +567,7 @@ final class QuickSearchViewModel {
       }
       return dialog != nil
     } catch {
-      Log.shared.error("Failed to check dialog for user \(userId)", error: error)
+      Log.shared.error("Failed to inspect cached private-chat dialog", error: error)
       return false
     }
   }
@@ -577,7 +577,7 @@ final class QuickSearchViewModel {
       do {
         _ = try await realtimeV2.send(.updateDialogOpen(peerId: peer, open: true))
       } catch {
-        Log.shared.error("Failed to open chat in sidebar \(peer.toString())", error: error)
+        Log.shared.error("Failed to open chat in sidebar", error: error)
       }
     }
   }

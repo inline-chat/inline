@@ -1,9 +1,16 @@
+import CoreFoundation
 import Foundation
 import OSLog
 import Sentry
 import os.signpost
 
 public enum PerformanceTrace {
+  struct BreadcrumbProjection {
+    let message: String
+    let category: String
+    let data: [String: Any]
+  }
+
   public enum Category: String, Sendable {
     case sync = "SyncPerformance"
     case updates = "UpdateApply"
@@ -40,7 +47,7 @@ public enum PerformanceTrace {
         log: log,
         name: name,
         signpostID: id,
-        "%{public}s",
+        "%{private}s",
         message()
       )
     }
@@ -52,6 +59,74 @@ public enum PerformanceTrace {
   private static let messagesLog = OSLog(subsystem: subsystem, category: Category.messages.rawValue)
   private static let homeLog = OSLog(subsystem: subsystem, category: Category.home.rawValue)
   private static let realtimeLog = OSLog(subsystem: subsystem, category: Category.realtime.rawValue)
+  private static let breadcrumbCategories: Set<String> = [
+    "Grid.Access",
+    "Grid.Connection",
+    "Grid.Home",
+    "Grid.RTC",
+    "Grid.Snapshot",
+    "Grid.State",
+    "Navigation",
+    "PointsOfInterest",
+    "ios.home.commit",
+    "ios.home.diff",
+    "ios.home.navigation.back",
+    "ios.home.navigation.chat",
+    "ios.home.navigation.tab",
+    "ios.home.prepare",
+    "ios.home.query",
+    "messages.db",
+    "messages.ios",
+    "messages.layout",
+    "messages.mac",
+    "messages.publisher",
+    "messages.reload",
+    "realtime.protocol",
+    "realtime.transport",
+    "sync.catchup",
+    "sync.lifecycle",
+    "sync.realtime",
+    "updates.apply",
+  ]
+  private static let breadcrumbNumericKeys: Set<String> = [
+    "abandoned_operations",
+    "applied",
+    "attempt",
+    "attempts",
+    "attachment_count",
+    "buffered",
+    "changed",
+    "click_to_connected_ms",
+    "connect_ms",
+    "deleted",
+    "duration_ms",
+    "elapsed_ms",
+    "failed",
+    "fitted_height",
+    "fitting_width",
+    "inserted",
+    "large_url_preview_count",
+    "last_sync_age_sec",
+    "max_attempts",
+    "measured_height",
+    "previous_height",
+    "reconnect_count",
+    "response_bytes",
+    "retry_count",
+    "rtc_connect_ms",
+    "stabilized_height",
+    "threshold_ms",
+    "updates",
+    "visible_count",
+  ]
+  private static let breadcrumbBooleanKeys: Set<String> = [
+    "cold_start",
+    "interrupted",
+    "requested",
+    "success",
+  ]
+  private static let maxBreadcrumbMetricMagnitude = 1_000_000_000_000.0
+  private static let maxBreadcrumbMetricCount = 16
 
   @discardableResult
   public static func begin(
@@ -66,7 +141,7 @@ public enum PerformanceTrace {
       log: log,
       name: name,
       signpostID: id,
-      "%{public}s",
+      "%{private}s",
       message()
     )
     return Span(log: log, id: id, name: name)
@@ -81,7 +156,7 @@ public enum PerformanceTrace {
       .event,
       log: osLog(for: category),
       name: name,
-      "%{public}s",
+      "%{private}s",
       message()
     )
   }
@@ -94,10 +169,42 @@ public enum PerformanceTrace {
   ) {
     guard SentrySDK.isEnabled else { return }
 
-    let crumb = Breadcrumb(level: level.sentryLevel, category: category)
-    crumb.message = message
-    crumb.data = data
+    let projection = privacySafeBreadcrumbProjection(message: message, category: category, data: data)
+    let crumb = Breadcrumb(level: level.sentryLevel, category: projection.category)
+    crumb.message = projection.message
+    crumb.data = projection.data
     SentrySDK.addBreadcrumb(crumb)
+  }
+
+  static func privacySafeBreadcrumbProjection(
+    message _: String,
+    category: String,
+    data: [String: Any]
+  ) -> BreadcrumbProjection {
+    var projectedData: [String: Any] = [:]
+
+    for key in data.keys.sorted() {
+      guard projectedData.count < maxBreadcrumbMetricCount, let value = data[key] else { break }
+
+      if breadcrumbBooleanKeys.contains(key),
+         let number = value as? NSNumber,
+         CFGetTypeID(number) == CFBooleanGetTypeID() {
+        projectedData[key] = number.boolValue
+        continue
+      }
+
+      guard breadcrumbNumericKeys.contains(key), let number = value as? NSNumber else { continue }
+      guard CFGetTypeID(number) != CFBooleanGetTypeID() else { continue }
+      let numericValue = number.doubleValue
+      guard numericValue.isFinite else { continue }
+      projectedData[key] = min(max(numericValue, -maxBreadcrumbMetricMagnitude), maxBreadcrumbMetricMagnitude)
+    }
+
+    return BreadcrumbProjection(
+      message: "performance_event",
+      category: breadcrumbCategories.contains(category) ? category : "performance",
+      data: projectedData
+    )
   }
 
   public static func slowBreadcrumb(

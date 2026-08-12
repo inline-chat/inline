@@ -211,6 +211,12 @@ let package = Package(
     ),
 
     .testTarget(
+      name: "LoggerTests",
+      dependencies: ["Logger"],
+      swiftSettings: swiftSettings
+    ),
+
+    .testTarget(
       name: "InlineRTCTests",
       dependencies: ["InlineRTC"],
       // Superseded backend tests remain beside their source as investigation

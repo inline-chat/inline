@@ -13,7 +13,7 @@ public enum LogLevel: String, Codable, Sendable {
   var osLogType: OSLogType {
     switch self {
       case .error: .error
-      case .warning: .fault
+      case .warning: .default
       case .info: .info
       case .debug: .debug
       case .trace: .debug
@@ -87,10 +87,108 @@ public struct LogEntry: Codable, Identifiable, Sendable, Equatable {
 public struct LogEvent: @unchecked Sendable {
   public let entry: LogEntry
   public let error: Error?
+  public let http: HTTPLogMetadata?
 
-  public init(entry: LogEntry, error: Error?) {
+  public init(entry: LogEntry, error: Error?, http: HTTPLogMetadata? = nil) {
     self.entry = entry
     self.error = error
+    self.http = http
+  }
+}
+
+/// A deliberately narrow projection of an HTTP failure that is safe to persist.
+/// It accepts endpoint templates only; raw URLs, queries, headers, and bodies have
+/// no representation here.
+public struct HTTPLogMetadata: Sendable, Equatable {
+  public let method: String
+  public let endpointTemplate: String
+  public let statusCode: Int
+  public let requestID: String?
+  public let responseBytes: Int?
+  public let apiErrorCode: Int?
+
+  public init?(
+    method: String,
+    endpointTemplate: String,
+    statusCode: Int,
+    requestID: String? = nil,
+    responseBytes: Int? = nil,
+    apiErrorCode: Int? = nil
+  ) {
+    let normalizedMethod = method.uppercased()
+    guard Self.allowedMethods.contains(normalizedMethod),
+          Self.isSafeEndpointTemplate(endpointTemplate),
+          (100 ... 599).contains(statusCode)
+    else {
+      return nil
+    }
+
+    self.method = normalizedMethod
+    self.endpointTemplate = endpointTemplate
+    self.statusCode = statusCode
+    self.requestID = requestID.flatMap(Self.safeRequestID)
+    self.responseBytes = responseBytes.map { max(0, $0) }
+    self.apiErrorCode = apiErrorCode
+  }
+
+  var consoleMessage: String {
+    var fields = [
+      "event=http.request_failed",
+      "method=\(method)",
+      "endpoint=\(endpointTemplate)",
+      "status=\(statusCode)",
+    ]
+    if let requestID { fields.append("request_id=\(requestID)") }
+    if let responseBytes { fields.append("response_bytes=\(responseBytes)") }
+    if let apiErrorCode { fields.append("api_error_code=\(apiErrorCode)") }
+    return fields.joined(separator: " ")
+  }
+
+  private static let allowedMethods: Set<String> = ["DELETE", "GET", "HEAD", "PATCH", "POST", "PUT"]
+
+  private static func isSafeEndpointTemplate(_ value: String) -> Bool {
+    guard value.hasPrefix("/"), value.count <= 160 else { return false }
+    return value.unicodeScalars.allSatisfy { scalar in
+      CharacterSet.alphanumerics.contains(scalar) || "/-_.{}".unicodeScalars.contains(scalar)
+    }
+  }
+
+  private static func safeRequestID(_ value: String) -> String? {
+    guard !value.isEmpty, value.count <= 128 else { return nil }
+    let isSafe = value.utf8.allSatisfy { byte in
+      switch byte {
+      case 45, 46, 48 ... 57, 65 ... 90, 95, 97 ... 122:
+        true
+      default:
+        false
+      }
+    }
+    return isSafe ? value : nil
+  }
+
+}
+
+struct LogSourceLocation: Sendable {
+  let file: String
+  let function: String
+  let line: Int
+}
+
+enum SentryLogPolicy {
+  static func shouldReport(http: HTTPLogMetadata?) -> Bool {
+    http?.statusCode != 429
+  }
+
+  static func fingerprint(entry: LogEntry, http: HTTPLogMetadata?) -> [String] {
+    var components = ["app-error", entry.fileName, String(entry.line), entry.error ?? "none"]
+    if let http {
+      components.append(contentsOf: [
+        http.method,
+        http.endpointTemplate,
+        String(http.statusCode),
+      ])
+    }
+    return components
   }
 }
 
@@ -122,10 +220,12 @@ public final class ConsoleLogSink: LogSink, @unchecked Sendable {
 
   public func write(_ event: LogEvent) {
     let entry = event.entry
-    logger(for: entry.scope).log(
-      level: entry.level.osLogType,
-      "\(entry.consoleMessage, privacy: .public)"
-    )
+    let logger = logger(for: entry.scope)
+    if let http = event.http {
+      logger.log(level: entry.level.osLogType, "\(http.consoleMessage, privacy: .public)")
+    } else {
+      logger.log(level: entry.level.osLogType, "\(entry.consoleMessage, privacy: .private)")
+    }
   }
 
   private func logger(for scope: String) -> Logger {
@@ -150,23 +250,23 @@ public final class SentryLogSink: LogSink, @unchecked Sendable {
 
     let entry = event.entry
 
-    if entry.level == .info {
-      SentrySDK.logger.info(entry.message)
-    }
-
     guard entry.level == .error else { return }
 
+    let projection = Log.makeEntry(
+      level: entry.level,
+      scope: entry.scope,
+      message: entry.message,
+      error: event.error,
+      source: LogSourceLocation(file: entry.fileName, function: entry.function, line: entry.line),
+      includeSensitiveDetails: false
+    )
+
     Task {
-      if let error = event.error {
-        await SentryReporter.shared.reportError(
-          error,
-          entry: entry
-        )
-      } else {
-        await SentryReporter.shared.reportMessage(
-          entry
-        )
-      }
+      await SentryReporter.shared.report(
+        projection,
+        originalError: event.error,
+        http: event.http
+      )
     }
   }
 }
@@ -229,38 +329,108 @@ public final class Log: @unchecked Sendable {
     _ message: String,
     level: LogLevel,
     error: Error? = nil,
+    http: HTTPLogMetadata? = nil,
     file: String = #file,
     function: String = #function,
     line: Int = #line
   ) {
-    let fileName = (file as NSString).lastPathComponent
-    let errorDescription = error?.localizedDescription ?? ""
-
     // Respect the logger's configured minimum level
     guard level.priority >= self.level.priority else { return }
 
-    let logMessage: String
-    if scope == "shared" || level == .error {
-      logMessage = "[\(fileName):\(line) \(function)] \(message) \(errorDescription)"
-    } else {
-      logMessage = "\(message) \(errorDescription)"
-    }
-
-    let entry = LogEntry(
+    let entry = Self.makeEntry(
       level: level,
       scope: scope,
-      message: logMessage,
-      error: errorDescription.isEmpty ? nil : errorDescription,
-      file: file,
-      fileName: fileName,
-      function: function,
-      line: line
+      message: message,
+      error: error,
+      source: LogSourceLocation(file: file, function: function, line: line),
+      includeSensitiveDetails: _isDebugAssertConfiguration()
     )
 
-    let event = LogEvent(entry: entry, error: error)
+    let event = LogEvent(entry: entry, error: error, http: http)
     for sink in Self.registry.snapshot() {
       sink.write(event)
     }
+  }
+
+  public func httpError(
+    _ metadata: HTTPLogMetadata,
+    error: Error? = nil,
+    file: String = #file,
+    function: String = #function,
+    line: Int = #line
+  ) {
+    log(
+      "HTTP request failed",
+      level: .error,
+      error: error,
+      http: metadata,
+      file: file,
+      function: function,
+      line: line
+    )
+  }
+
+  static func makeEntry(
+    level: LogLevel,
+    scope: String,
+    message: String,
+    error: Error?,
+    source: LogSourceLocation,
+    includeSensitiveDetails: Bool
+  ) -> LogEntry {
+    let fileName = (source.file as NSString).lastPathComponent
+    let errorDescription = error?.localizedDescription ?? ""
+
+    if includeSensitiveDetails {
+      let detailedMessage = if scope == "shared" || level == .error {
+        "[\(fileName):\(source.line) \(source.function)] \(message) \(errorDescription)"
+      } else {
+        "\(message) \(errorDescription)"
+      }
+      return LogEntry(
+        level: level,
+        scope: scope,
+        message: detailedMessage,
+        error: errorDescription.isEmpty ? nil : errorDescription,
+        file: source.file,
+        fileName: fileName,
+        function: source.function,
+        line: source.line
+      )
+    }
+
+    return LogEntry(
+      level: level,
+      scope: safeScope(scope),
+      message: "\(level.rawValue) at \(fileName):\(source.line)",
+      error: errorCategory(error),
+      file: fileName,
+      fileName: fileName,
+      function: source.function,
+      line: source.line
+    )
+  }
+
+  private static func safeScope(_ scope: String) -> String {
+    guard !scope.isEmpty, scope.utf8.count <= 64 else { return "app" }
+    let isSafe = scope.utf8.allSatisfy { byte in
+      switch byte {
+      case 45, 46, 48 ... 57, 65 ... 90, 95, 97 ... 122:
+        true
+      default:
+        false
+      }
+    }
+    return isSafe ? scope : "app"
+  }
+
+  private static func errorCategory(_ error: Error?) -> String? {
+    guard let error else { return nil }
+    if error is CancellationError { return "cancelled" }
+    if let urlError = error as? URLError {
+      return "url:\(urlError.errorCode)"
+    }
+    return "other"
   }
 }
 
@@ -341,37 +511,37 @@ private actor SentryReporter {
     }
   }
 
-  func reportError(
-    _ error: Error,
-    entry: LogEntry
+  func report(
+    _ entry: LogEntry,
+    originalError: Error?,
+    http: HTTPLogMetadata?
   ) async {
     guard SentrySDK.isEnabled else { return }
-    guard shouldReport(error) else { return }
+    guard SentryLogPolicy.shouldReport(http: http) else { return }
+    if let originalError, !shouldReport(originalError) { return }
 
     await MainActor.run {
-      _ = SentrySDK.capture(error: error) { sentryScope in
+      _ = SentrySDK.capture(message: "app_error") { sentryScope in
+        sentryScope.setLevel(.error)
+        sentryScope.setFingerprint(SentryLogPolicy.fingerprint(entry: entry, http: http))
         sentryScope.setTag(value: entry.scope, key: "scope")
-        sentryScope.setExtra(value: entry.message, key: "message")
-        sentryScope.setExtra(value: entry.file, key: "file")
-        sentryScope.setExtra(value: entry.function, key: "function")
+        sentryScope.setTag(value: entry.fileName, key: "source_file")
+        sentryScope.setExtra(value: entry.error ?? "none", key: "error_category")
         sentryScope.setExtra(value: entry.line, key: "line")
-      }
-    }
-  }
-
-  func reportMessage(
-    _ entry: LogEntry
-  ) async {
-    guard SentrySDK.isEnabled else { return }
-
-    await MainActor.run {
-      _ = SentrySDK.capture(message: entry.message) { sentryScope in
-        sentryScope.setTag(value: entry.scope, key: "scope")
-        sentryScope.setExtra(value: entry.file, key: "file")
-        sentryScope.setExtra(value: entry.function, key: "function")
-        sentryScope.setExtra(value: entry.line, key: "line")
-        if let error = entry.error {
-          sentryScope.setExtra(value: error, key: "error")
+        if let http {
+          sentryScope.setTag(value: "http.request_failed", key: "event")
+          sentryScope.setTag(value: http.method, key: "http.method")
+          sentryScope.setTag(value: http.endpointTemplate, key: "http.endpoint_template")
+          sentryScope.setTag(value: String(http.statusCode), key: "http.status_code")
+          if let requestID = http.requestID {
+            sentryScope.setExtra(value: requestID, key: "http.request_id")
+          }
+          if let responseBytes = http.responseBytes {
+            sentryScope.setExtra(value: responseBytes, key: "http.response_bytes")
+          }
+          if let apiErrorCode = http.apiErrorCode {
+            sentryScope.setExtra(value: apiErrorCode, key: "http.api_error_code")
+          }
         }
       }
     }

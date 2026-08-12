@@ -90,7 +90,15 @@ public enum Path: String {
 
 public final class ApiClient: ObservableObject, @unchecked Sendable {
   public static let shared = ApiClient()
-  public init() {}
+  private let urlSession: URLSession
+
+  public convenience init() {
+    self.init(urlSession: .shared)
+  }
+
+  init(urlSession: URLSession) {
+    self.urlSession = urlSession
+  }
 
   private let log = Log.scoped("ApiClient", level: .trace)
 
@@ -165,7 +173,19 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   public var baseURL: String { Self.baseURL }
 
   private let decoder = JSONDecoder()
-  private let maxLoggedErrorBodyLength = 2_000
+
+  /// Cancellation is control flow for superseded searches, navigation, and auth work.
+  /// Keep it distinguishable from genuine transport failures so callers do not retry
+  /// or present a network alert for work they intentionally cancelled.
+  static func normalizeTransportError(_ error: Error) -> Error {
+    if error is CancellationError {
+      return error
+    }
+    if let urlError = error as? URLError, urlError.code == .cancelled {
+      return CancellationError()
+    }
+    return APIError.networkError
+  }
 
   private func parseAPIError(_ data: Data) -> APIError? {
     guard !data.isEmpty else {
@@ -181,37 +201,24 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     return nil
   }
 
-  private func formatErrorBody(_ data: Data) -> String {
-    guard !data.isEmpty else {
-      return "<empty>"
-    }
-
-    guard let body = String(data: data, encoding: .utf8)?
-      .trimmingCharacters(in: .whitespacesAndNewlines),
-      !body.isEmpty
-    else {
-      return "<non-utf8 body: \(data.count) bytes>"
-    }
-
-    if body.count <= maxLoggedErrorBodyLength {
-      return body
-    }
-
-    let endIdx = body.index(body.startIndex, offsetBy: maxLoggedErrorBodyLength)
-    return "\(body[..<endIdx])… (truncated, \(body.count) chars)"
-  }
-
   private func logHTTPError(
     method: String,
-    url: URL,
+    endpointTemplate: String,
     response: HTTPURLResponse,
-    data: Data
+    data: Data,
+    apiErrorCode: Int? = nil
   ) {
-    let requestId = response.value(forHTTPHeaderField: "x-request-id")
-      ?? response.value(forHTTPHeaderField: "X-Request-Id")
-      ?? "n/a"
-    let body = formatErrorBody(data)
-    log.error("HTTP \(response.statusCode) \(method) \(url.absoluteString) requestId=\(requestId) body=\(body)")
+    guard let metadata = HTTPLogMetadata(
+      method: method,
+      endpointTemplate: endpointTemplate,
+      statusCode: response.statusCode,
+      requestID: response.value(forHTTPHeaderField: "x-request-id"),
+      responseBytes: data.count,
+      apiErrorCode: apiErrorCode
+    ) else {
+      return
+    }
+    log.httpError(metadata)
   }
 
   private func request<T: Decodable & Sendable>(
@@ -237,7 +244,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     }
 
     do {
-      let (data, response) = try await URLSession.shared.data(for: request)
+      let (data, response) = try await urlSession.data(for: request)
 
       guard let httpResponse = response as? HTTPURLResponse else {
         throw APIError.invalidResponse
@@ -250,18 +257,28 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
             case let .success(data):
               return data
             case let .error(error, errorCode, description):
-              log.error("Error \(error): \(description ?? "")")
-              throw
-                APIError
-                .error(error: error, errorCode: errorCode, description: description)
+              logHTTPError(
+                method: request.httpMethod ?? "GET",
+                endpointTemplate: "/v1/\(path.rawValue)",
+                response: httpResponse,
+                data: data,
+                apiErrorCode: errorCode
+              )
+              throw APIError.error(error: error, errorCode: errorCode, description: description)
           }
         case 429:
+          logHTTPError(
+            method: request.httpMethod ?? "GET",
+            endpointTemplate: "/v1/\(path.rawValue)",
+            response: httpResponse,
+            data: data
+          )
           throw APIError.rateLimited
         default:
           if let apiError = parseAPIError(data) {
             logHTTPError(
               method: request.httpMethod ?? "GET",
-              url: url,
+              endpointTemplate: "/v1/\(path.rawValue)",
               response: httpResponse,
               data: data
             )
@@ -270,7 +287,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
           logHTTPError(
             method: request.httpMethod ?? "GET",
-            url: url,
+            endpointTemplate: "/v1/\(path.rawValue)",
             response: httpResponse,
             data: data
           )
@@ -281,7 +298,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     } catch let apiError as APIError {
       throw apiError
     } catch {
-      throw APIError.networkError
+      throw Self.normalizeTransportError(error)
     }
   }
 
@@ -290,22 +307,14 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     body: [String: Any],
     includeToken: Bool = true
   ) async throws -> T {
-    guard let url = URL(string: "\(baseURL)/\(path.rawValue)") else {
-      throw APIError.invalidURL
-    }
-
-    var request = URLRequest(url: url)
-    request.httpMethod = "POST"
-    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-    if let token = Auth.shared.getToken(), includeToken {
-      request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-    }
-
     do {
-      request.httpBody = try JSONSerialization.data(withJSONObject: body)
+      let request = try Self.makeJSONPostRequest(
+        path,
+        body: body,
+        authorizationToken: includeToken ? Auth.shared.getToken() : nil
+      )
 
-      let (data, response) = try await URLSession.shared.data(for: request)
+      let (data, response) = try await urlSession.data(for: request)
 
       guard let httpResponse = response as? HTTPURLResponse else {
         throw APIError.invalidResponse
@@ -318,16 +327,28 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
             case let .success(data):
               return data
             case let .error(error, errorCode, description):
-              log.error("Error \(error): \(description ?? "")")
+              logHTTPError(
+                method: request.httpMethod ?? "POST",
+                endpointTemplate: "/v1/\(path.rawValue)",
+                response: httpResponse,
+                data: data,
+                apiErrorCode: errorCode
+              )
               throw APIError.error(error: error, errorCode: errorCode, description: description)
           }
         case 429:
+          logHTTPError(
+            method: request.httpMethod ?? "POST",
+            endpointTemplate: "/v1/\(path.rawValue)",
+            response: httpResponse,
+            data: data
+          )
           throw APIError.rateLimited
         default:
           if let apiError = parseAPIError(data) {
             logHTTPError(
               method: request.httpMethod ?? "POST",
-              url: url,
+              endpointTemplate: "/v1/\(path.rawValue)",
               response: httpResponse,
               data: data
             )
@@ -336,7 +357,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
           logHTTPError(
             method: request.httpMethod ?? "POST",
-            url: url,
+            endpointTemplate: "/v1/\(path.rawValue)",
             response: httpResponse,
             data: data
           )
@@ -347,14 +368,37 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     } catch let apiError as APIError {
       throw apiError
     } catch {
-      throw APIError.networkError
+      throw Self.normalizeTransportError(error)
     }
+  }
+
+  static func makeJSONPostRequest(
+    _ path: Path,
+    body: [String: Any],
+    baseURL: String = ApiClient.baseURL,
+    authorizationToken: String? = nil
+  ) throws -> URLRequest {
+    guard let url = URL(string: "\(baseURL)/\(path.rawValue)") else {
+      throw APIError.invalidURL
+    }
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.httpBody = try JSONSerialization.data(withJSONObject: body)
+    if let authorizationToken {
+      request.setValue("Bearer \(authorizationToken)", forHTTPHeaderField: "Authorization")
+    }
+    return request
   }
 
   // MARK: AUTH
 
   public func sendCode(email: String) async throws -> SendCode {
-    try await request(.sendCode, queryItems: [URLQueryItem(name: "email", value: email)])
+    try await postRequest(
+      .sendCode,
+      body: ["email": email],
+      includeToken: false
+    )
   }
 
   public func sendSmsCode(phoneNumber: String) async throws -> SendSmsCode {
@@ -379,34 +423,47 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     challengeToken: String? = nil,
     inviteCode: String? = nil
   ) async throws -> VerifyCode {
-    var queryItems: [URLQueryItem] = [
-      URLQueryItem(name: "code", value: code), URLQueryItem(name: "email", value: email),
-    ]
-
-    if let challengeToken, !challengeToken.isEmpty {
-      queryItems.append(URLQueryItem(name: "challengeToken", value: challengeToken))
-    }
-
-    if let inviteCode, !inviteCode.isEmpty {
-      queryItems.append(URLQueryItem(name: "inviteCode", value: inviteCode))
-    }
-
-    if let sessionInfo = await SessionInfo.get() {
-      queryItems.append(URLQueryItem(name: "clientType", value: sessionInfo.clientType))
-      queryItems.append(URLQueryItem(name: "clientVersion", value: sessionInfo.clientVersion))
-      queryItems.append(URLQueryItem(name: "osVersion", value: sessionInfo.osVersion))
-      queryItems.append(URLQueryItem(name: "deviceName", value: sessionInfo.deviceName))
-      queryItems.append(URLQueryItem(name: "timezone", value: sessionInfo.timezone))
-    }
-
+    let sessionInfo = await SessionInfo.get()
     let deviceId = try await DeviceIdentifier.shared.getIdentifier()
-    queryItems.append(URLQueryItem(name: "deviceId", value: deviceId))
-
-    return try await request(
-      .verifyCode,
-      queryItems: queryItems,
-      includeToken: false
+    let body = Self.makeEmailCodeVerificationBody(
+      code: code,
+      email: email,
+      challengeToken: challengeToken.flatMap { $0.isEmpty ? nil : $0 },
+      inviteCode: inviteCode.flatMap { $0.isEmpty ? nil : $0 },
+      sessionInfo: sessionInfo,
+      deviceId: deviceId
     )
+
+    return try await postRequest(.verifyCode, body: body, includeToken: false)
+  }
+
+  static func makeEmailCodeVerificationBody(
+    code: String,
+    email: String,
+    challengeToken: String?,
+    inviteCode: String?,
+    sessionInfo: SessionInfo?,
+    deviceId: String
+  ) -> [String: Any] {
+    var body: [String: Any] = [
+      "code": code,
+      "email": email,
+      "deviceId": deviceId,
+    ]
+    for (key, optionalValue) in [
+      "challengeToken": challengeToken,
+      "inviteCode": inviteCode,
+      "clientType": sessionInfo?.clientType,
+      "clientVersion": sessionInfo?.clientVersion,
+      "osVersion": sessionInfo?.osVersion,
+      "deviceName": sessionInfo?.deviceName,
+      "timezone": sessionInfo?.timezone,
+    ] {
+      if let value = optionalValue {
+        body[key] = value
+      }
+    }
+    return body
   }
 
   public func verifySmsCode(code: String, phoneNumber: String, inviteCode: String? = nil) async throws -> VerifyCode {
@@ -962,10 +1019,22 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
         progress(UploadTransferProgress(bytesSent: body.totalBytes, totalBytes: body.totalBytes, fractionCompleted: 1))
         return data
       case let .error(error, errorCode, description):
-        log.error("Error \(error): \(description ?? "")")
+        logHTTPError(
+          method: request.httpMethod ?? "POST",
+          endpointTemplate: "/v1/uploadFile",
+          response: httpResponse,
+          data: data,
+          apiErrorCode: errorCode
+        )
         throw APIError.error(error: error, errorCode: errorCode, description: description)
       }
     case 429:
+      logHTTPError(
+        method: request.httpMethod ?? "POST",
+        endpointTemplate: "/v1/uploadFile",
+        response: httpResponse,
+        data: data
+      )
       if let apiResponse = try? decoder.decode(APIResponse<UploadFileResult>.self, from: data),
          case let .error(error, errorCode, description) = apiResponse
       {
@@ -973,6 +1042,12 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       }
       throw APIError.rateLimited
     default:
+      logHTTPError(
+        method: request.httpMethod ?? "POST",
+        endpointTemplate: "/v1/uploadFile",
+        response: httpResponse,
+        data: data
+      )
       if let apiResponse = try? decoder.decode(APIResponse<UploadFileResult>.self, from: data),
          case let .error(error, errorCode, description) = apiResponse
       {
@@ -1040,7 +1115,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       throw APIError.invalidURL
     }
 
-    log.debug("[uploadFile] Uploading a file with type \(type) and filename \(filename) with size \(data.count) bytes")
+    log.debug("[uploadFile] Uploading type \(type), \(data.count) bytes")
 
     var fields: [(name: String, filename: String?, mimeType: MIMEType?, data: Data)] = [
       (
@@ -1136,10 +1211,22 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
               progress(UploadTransferProgress(bytesSent: totalBodyBytes, totalBytes: totalBodyBytes, fractionCompleted: 1))
               return data
             case let .error(error, errorCode, description):
-              log.error("Error \(error): \(description ?? "")")
+              logHTTPError(
+                method: request.httpMethod ?? "POST",
+                endpointTemplate: "/v1/uploadFile",
+                response: httpResponse,
+                data: data,
+                apiErrorCode: errorCode
+              )
               throw APIError.error(error: error, errorCode: errorCode, description: description)
           }
         case 429:
+          logHTTPError(
+            method: request.httpMethod ?? "POST",
+            endpointTemplate: "/v1/uploadFile",
+            response: httpResponse,
+            data: data
+          )
           if let apiResponse = try? decoder.decode(APIResponse<UploadFileResult>.self, from: data),
              case let .error(error, errorCode, description) = apiResponse
           {
@@ -1147,6 +1234,12 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
           }
           throw APIError.rateLimited
         default:
+          logHTTPError(
+            method: request.httpMethod ?? "POST",
+            endpointTemplate: "/v1/uploadFile",
+            response: httpResponse,
+            data: data
+          )
           if let apiResponse = try? decoder.decode(APIResponse<UploadFileResult>.self, from: data),
              case let .error(error, errorCode, description) = apiResponse
           {
@@ -1159,7 +1252,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     } catch let apiError as APIError {
       throw apiError
     } catch {
-      throw APIError.networkError
+      throw Self.normalizeTransportError(error)
     }
   }
 
@@ -1189,8 +1282,8 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       throw APIError.decodingError(decodingError)
     } catch let apiError as APIError {
       throw apiError
-    } catch is URLError {
-      throw APIError.networkError
+    } catch let urlError as URLError {
+      throw Self.normalizeTransportError(urlError)
     }
   }
 
