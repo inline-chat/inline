@@ -1,16 +1,44 @@
 import Foundation
 
 public enum InlineDeepLink: Equatable, Sendable {
+  public static let configurationKey = "InlineURLScheme"
   public static let defaultScheme = "in"
   public static let productionSchemes: Set<String> = ["in", "inline"]
-  public static let debugSchemes: Set<String> = ["inline-dev", "inline-debug"]
+  public static let debugSchemes: Set<String> = ["inline-dev", "inline-debug", "inline-debug-2"]
   public static let supportedSchemes: Set<String> = {
-    #if DEBUG || DEBUG_BUILD
+    #if DEBUG || DEBUG_BUILD || DEVBUILD_REQUIRES_SCRIPT
       productionSchemes.union(debugSchemes)
     #else
       productionSchemes
     #endif
   }()
+
+  /// The build-configured scheme used when creating links and OAuth callbacks.
+  /// `in` remains the canonical fallback and all shipped aliases remain readable.
+  public static var configuredScheme: String {
+    guard let configured = Bundle.main.object(forInfoDictionaryKey: configurationKey) as? String else {
+      return defaultScheme
+    }
+    let normalized = configured.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    return supportedSchemes.contains(normalized) ? normalized : defaultScheme
+  }
+
+  /// Schemes this particular app identity may handle. Production keeps its
+  /// legacy alias; development variants only accept their unique build scheme.
+  public static var currentAppSchemes: Set<String> {
+    appSchemes(configuredScheme: configuredScheme)
+  }
+
+  public static func appSchemes(configuredScheme: String) -> Set<String> {
+    let normalized = configuredScheme.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    if productionSchemes.contains(normalized) {
+      return productionSchemes
+    }
+    if debugSchemes.contains(normalized) {
+      return [normalized]
+    }
+    return productionSchemes
+  }
 
   case user(id: Int64)
   case chat(id: Int64)
@@ -62,8 +90,8 @@ public enum InlineDeepLink: Equatable, Sendable {
     }
   }
 
-  public func url(scheme: String = Self.defaultScheme) -> URL? {
-    let normalizedScheme = scheme.lowercased()
+  public func url(scheme: String? = nil) -> URL? {
+    let normalizedScheme = (scheme ?? Self.configuredScheme).lowercased()
     guard Self.isSupportedScheme(normalizedScheme), isValid else {
       return nil
     }
@@ -95,6 +123,11 @@ public enum InlineDeepLink: Equatable, Sendable {
   public static func isSupportedScheme(_ scheme: String?) -> Bool {
     guard let scheme else { return false }
     return supportedSchemes.contains(scheme.lowercased())
+  }
+
+  public static func isCurrentAppScheme(_ scheme: String?) -> Bool {
+    guard let scheme else { return false }
+    return currentAppSchemes.contains(scheme.lowercased())
   }
 }
 

@@ -10,10 +10,12 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>$(INLINE_URL_SCHEME)</string>
-				<string>in</string>
+				<string>$(INLINE_URL_SCHEME_ALIAS)</string>
 			</array>
 		</dict>
 	</array>
+	<key>InlineURLScheme</key>
+	<string>$(INLINE_URL_SCHEME)</string>
 	<key>DEV_HOST</key>
 	<string>$(DEV_HOST)</string>
 	<key>INLINE_USER_PROFILE</key>

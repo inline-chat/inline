@@ -14,6 +14,16 @@ struct InlineDeepLinkTests {
     #expect(InlineDeepLink.chat(id: 34).url(scheme: "https") == nil)
   }
 
+  @Test("isolates routable schemes by app identity")
+  func isolatesRoutableSchemesByAppIdentity() {
+    #expect(InlineDeepLink.appSchemes(configuredScheme: "in") == ["in", "inline"])
+    #expect(InlineDeepLink.appSchemes(configuredScheme: "inline") == ["in", "inline"])
+    #expect(InlineDeepLink.appSchemes(configuredScheme: "inline-debug") == ["inline-debug"])
+    #expect(InlineDeepLink.appSchemes(configuredScheme: "INLINE-DEBUG-2") == ["inline-debug-2"])
+    #expect(InlineDeepLink.appSchemes(configuredScheme: "inline-dev") == ["inline-dev"])
+    #expect(InlineDeepLink.appSchemes(configuredScheme: "unknown") == ["in", "inline"])
+  }
+
   @Test("parses user and chat deep links")
   func parsesUserAndChatLinks() {
     #expect(InlineDeepLink(url: URL(string: "inline://user/12")!) == .user(id: 12))
@@ -32,13 +42,15 @@ struct InlineDeepLinkTests {
 
   @Test("accepts dev and debug schemes only in debug builds")
   func acceptsDevAndDebugSchemesOnlyInDebugBuilds() {
-    #if DEBUG || DEBUG_BUILD
+    #if DEBUG || DEBUG_BUILD || DEVBUILD_REQUIRES_SCRIPT
       #expect(InlineDeepLink(url: URL(string: "inline-dev://chat/34")!) == .chat(id: 34))
       #expect(InlineDeepLink(url: URL(string: "inline-debug://thread?thread_id=34")!) == .chat(id: 34))
+      #expect(InlineDeepLink(url: URL(string: "inline-debug-2://chat/34")!) == .chat(id: 34))
       #expect(InlineDeepLink.chat(id: 34).url(scheme: "inline-dev")?.absoluteString == "inline-dev://chat/34")
     #else
       #expect(InlineDeepLink(url: URL(string: "inline-dev://chat/34")!) == nil)
       #expect(InlineDeepLink(url: URL(string: "inline-debug://thread?thread_id=34")!) == nil)
+      #expect(InlineDeepLink(url: URL(string: "inline-debug-2://chat/34")!) == nil)
       #expect(InlineDeepLink.chat(id: 34).url(scheme: "inline-dev") == nil)
     #endif
   }

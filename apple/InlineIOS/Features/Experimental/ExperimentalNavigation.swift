@@ -261,6 +261,10 @@ struct ExperimentalSheetView: View {
       NavigationStack {
         SettingsView()
       }
+    case let .connectors(callbackURL):
+      NavigationStack {
+        ConnectorsView(initialOAuthCallbackURL: URL(string: callbackURL))
+      }
     case .createSpace:
       CreateSpace()
     case .alphaSheet:

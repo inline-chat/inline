@@ -1,4 +1,5 @@
 import Auth
+import Foundation
 import InlineKit
 import Sentry
 import SwiftUI
@@ -19,7 +20,12 @@ struct InlineApp: App {
         .environmentObject(appDelegate.nav)
         .environmentObject(INUserSettings.current.notification)
         .onOpenURL { url in
-          _ = appDelegate.handleDeepLink(url)
+          if InlineDeepLink.isCurrentAppScheme(url.scheme),
+             ConnectorOAuthCallback(url: url) != nil {
+            appDelegate.router.presentedSheet = .connectors(callbackURL: url.absoluteString)
+          } else {
+            _ = appDelegate.handleDeepLink(url)
+          }
         }
     }
   }

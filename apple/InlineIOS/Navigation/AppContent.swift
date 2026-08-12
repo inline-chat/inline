@@ -57,6 +57,7 @@ enum Sheet: SheetType, Codable {
   case alphaSheet
 
   case settings
+  case connectors(callbackURL: String)
 
   case addMember(spaceId: Int64)
   case members(spaceId: Int64)
@@ -71,6 +72,9 @@ enum Sheet: SheetType, Codable {
 
     case .settings:
       "settings"
+
+    case let .connectors(callbackURL):
+      "connectors_\(callbackURL)"
 
     case let .addMember(spaceId):
       "addMember_\(spaceId)"

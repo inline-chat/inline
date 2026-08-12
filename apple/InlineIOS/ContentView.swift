@@ -182,6 +182,11 @@ private struct AuthedAppRoot: View {
         SettingsView()
       }
 
+    case let .connectors(callbackURL):
+      NavigationStack {
+        ConnectorsView(initialOAuthCallbackURL: URL(string: callbackURL))
+      }
+
     case let .addMember(spaceId):
       InviteToSpaceView(spaceId: spaceId)
 

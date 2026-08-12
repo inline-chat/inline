@@ -1,70 +1,34 @@
-import Auth
-import AuthenticationServices
-import InlineConfig
 import InlineKit
+import InlineUI
 import SwiftUI
 
-struct IntegrationsView: View {
-  @State private var isConnectingLinear = false
-  @State private var isConnectedLinear = false
+struct ConnectorsView: View {
+  @State private var model = ConnectorSettingsModel()
+  @Environment(Router.self) private var router
+  let initialOAuthCallbackURL: URL?
 
-  var body: some View {
-    Form {
-      IntegrationCard(
-        image: "linear-icon",
-        title: "Linear",
-        description: "Connect your Linear to create issues from messages with AI",
-        isConnected: $isConnectedLinear,
-        isConnecting: $isConnectingLinear,
-        provider: "linear",
-        clipped: true,
-        completion: checkIntegrationConnection
-      )
-    }
-    .listStyle(.insetGrouped)
-    .onAppear {
-      checkIntegrationConnection()
-    }
-
-    .navigationBarTitleDisplayMode(.inline)
-    .toolbarRole(.editor)
-    .toolbar {
-      ToolbarItem(id: "integrations", placement: .principal) {
-        HStack {
-          Image(systemName: "app.connected.to.app.below.fill")
-            .foregroundColor(.secondary)
-            .font(.callout)
-            .padding(.trailing, 4)
-          VStack(alignment: .leading) {
-            Text("Integrations")
-              .font(.body)
-              .fontWeight(.semibold)
-              .foregroundColor(.primary)
-          }
-        }
-      }
-    }
+  init(initialOAuthCallbackURL: URL? = nil) {
+    self.initialOAuthCallbackURL = initialOAuthCallbackURL
   }
 
-  func checkIntegrationConnection() {
-    Task {
-      do {
-        let result = try await ApiClient.shared.getIntegrations(userId: Auth.shared.getCurrentUserId() ?? 0)
-        if result.hasLinearConnected {
-          isConnectedLinear = true
-        } else {
-          isConnectedLinear = false
-        }
-
-      } catch {
-        print("Failed to get integrations \(error)")
-      }
-    }
+  var body: some View {
+    ConnectorsSettingsView(
+      model: model,
+      openAuthorizationURL: { InAppBrowser.shared.open($0) },
+      didReceiveOAuthCallback: { InAppBrowser.shared.dismissIfPresented() },
+      configure: { provider, spaceID in
+        router.push(.integrationOptions(spaceId: spaceID, provider: provider.rawValue))
+      },
+      initialOAuthCallbackURL: initialOAuthCallbackURL
+    )
+    .navigationTitle("Connectors")
+    .navigationBarTitleDisplayMode(.inline)
+    .toolbarRole(.editor)
   }
 }
 
 #Preview {
   NavigationView {
-    IntegrationsView()
+    ConnectorsView()
   }
 }

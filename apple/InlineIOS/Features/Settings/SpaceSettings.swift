@@ -69,7 +69,7 @@ struct SpaceSettingsView: View {
               .frame(width: 25, height: 25)
               .background(Color.purple)
               .clipShape(RoundedRectangle(cornerRadius: 6))
-            Text("Integrations")
+            Text("Connectors")
                 
               .padding(.leading, 4)
             Spacer()

@@ -38,9 +38,9 @@ struct SettingsSidebarView: View {
     }
 
     categories.append(contentsOf: [.general, .appearance, .notifications, .dataStorage])
-#if SPARKLE
-    categories.append(.updates)
-#endif
+    if auth.isLoggedIn {
+      categories.append(.connectors)
+    }
     categories.append(.hotkeys)
 
     if auth.isLoggedIn {
@@ -48,6 +48,9 @@ struct SettingsSidebarView: View {
       categories.append(.activeSessions)
     }
 
+#if SPARKLE
+    categories.append(.updates)
+#endif
     categories.append(contentsOf: [.experimental, .debug])
     return categories
   }

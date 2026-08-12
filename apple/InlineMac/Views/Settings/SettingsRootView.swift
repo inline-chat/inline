@@ -148,6 +148,8 @@ private struct SettingsDetailView: View {
         GeneralSettingsDetailView()
       case .dataStorage:
         DataStorageSettingsDetailView()
+      case .connectors:
+        ConnectorsSettingsDetailView()
       case .hotkeys:
         HotkeysSettingsDetailView()
         #if SPARKLE

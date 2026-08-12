@@ -17,7 +17,7 @@ import UserNotifications
 #endif
 
 class AppDelegate: NSObject, NSApplicationDelegate {
-  private static let customURLSchemes: Set<String> = ["inline", "inline-dev", "inline-debug", "in"]
+  private static var customURLSchemes: Set<String> { InlineDeepLink.currentAppSchemes }
 
   private var didHandleInitialActivation = false
 
@@ -292,8 +292,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       case "chat", "thread":
         handleChatURL(url)
       case "integrations":
-        showAndFocusMainWindow()
-        NotificationCenter.default.post(name: .integrationCallback, object: url)
+        dependencies.appBridge.openSettings(
+          dependencies: dependencies,
+          selectedCategory: .connectors
+        )
+        DispatchQueue.main.async {
+          NotificationCenter.default.post(name: .connectorOAuthCallback, object: url)
+          NotificationCenter.default.post(name: .integrationCallback, object: url)
+        }
       default:
         log.warning("Unhandled URL host: \(url.host ?? "nil")")
       }

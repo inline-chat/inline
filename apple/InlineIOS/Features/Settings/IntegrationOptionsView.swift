@@ -7,10 +7,17 @@ struct IntegrationOptionsView: View {
   var provider: String
   @State private var selectedDatabase: String? = nil
   @State private var databases: [NotionSimplifiedDatabase] = []
+  @State private var selectedTeam: String? = nil
+  @State private var teams: [LinearTeam] = []
+  @State private var isLoading = false
+  @State private var errorMessage: String?
+  @State private var saveTask: Task<Void, Never>?
 
   // Cache keys
   private let databasesCacheKey: String
   private let selectedDatabaseCacheKey: String
+  private let teamsCacheKey: String
+  private let selectedTeamCacheKey: String
 
   init(spaceId: Int64, provider: String) {
     self.spaceId = spaceId
@@ -18,40 +25,54 @@ struct IntegrationOptionsView: View {
     // Create unique cache keys for this space
     databasesCacheKey = "notion_databases_\(spaceId)"
     selectedDatabaseCacheKey = "notion_selected_database_\(spaceId)"
+    teamsCacheKey = "linear_teams_\(spaceId)"
+    selectedTeamCacheKey = "linear_selected_team_\(spaceId)"
   }
 
   var body: some View {
     List {
-      Section(footer: Text("Select the Notion source where Inline should create tasks for this space.")) {
-        Picker("Notion Source", selection: $selectedDatabase) {
-          Text("Select a Notion source").tag(nil as String?)
-          ForEach(databases, id: \.id) { database in
-            Text("\(database.icon ?? "📄") \(database.title)")
-              .tag(database.id as String?)
-          }
-        }
-        .animation(.default, value: selectedDatabase)
-        .onChange(of: selectedDatabase ?? "") { _, newValue in
-          UserDefaults.standard.set(newValue, forKey: selectedDatabaseCacheKey)
-          Task {
-            do {
-              _ = try await ApiClient.shared.saveNotionDatabaseId(spaceId: spaceId, databaseId: newValue)
-            } catch {
-              print("Error saving notion database id: \(error)")
-              DispatchQueue.main.async {
-                selectedDatabase = UserDefaults.standard.string(forKey: selectedDatabaseCacheKey)
-              }
+      if provider == "linear" {
+        Section(footer: Text("Choose where Inline should create issues for this space.")) {
+          Picker("Default Team", selection: linearSelection) {
+            Text("Select a team").tag(nil as String?)
+            ForEach(teams, id: \.id) { team in
+              Text("\(team.name) (\(team.key))")
+                .tag(team.id as String?)
             }
           }
         }
+      } else {
+        Section(footer: Text("Choose where Inline should create tasks for this space.")) {
+          Picker("Notion Source", selection: notionSelection) {
+            Text("Select a Notion source").tag(nil as String?)
+            ForEach(databases, id: \.id) { database in
+              Text("\(database.icon ?? "📄") \(database.title)")
+                .tag(database.id as String?)
+            }
+          }
+        }
+      }
+
+      if isLoading {
+        ProgressView()
+          .frame(maxWidth: .infinity)
+      }
+
+      if let errorMessage {
+        Text(errorMessage)
+          .foregroundStyle(.red)
       }
     }
     .listStyle(.insetGrouped)
     .onAppear {
       loadCachedData()
 
-      Task(priority: .background) {
-        await fetchDatabases()
+      Task {
+        if provider == "linear" {
+          await fetchTeams()
+        } else {
+          await fetchDatabases()
+        }
         await fetchCurrentSelection()
       }
     }
@@ -59,26 +80,49 @@ struct IntegrationOptionsView: View {
     .toolbar {
       ToolbarItem(id: "integration-options", placement: .principal) {
         HStack {
-          if provider == "notion" {
-            Image("notion-logo")
+          if provider == "notion" || provider == "linear" {
+            Image(provider == "linear" ? "linear-icon" : "notion-logo")
               .resizable()
               .frame(width: 24, height: 24)
               .padding(.trailing, 4)
 
             VStack(alignment: .leading) {
-              Text("Notion")
+              Text(provider == "linear" ? "Linear" : "Notion")
                 .font(.body)
                 .fontWeight(.semibold)
                 .foregroundColor(.primary)
             }
           } else {
-            // TODO: support Linear
             Text("Integration Options")
               .foregroundColor(.primary)
           }
         }
       }
     }
+  }
+
+  private var notionSelection: Binding<String?> {
+    Binding(
+      get: { selectedDatabase },
+      set: { value in
+        selectedDatabase = value
+        guard let value, !value.isEmpty else { return }
+        UserDefaults.standard.set(value, forKey: selectedDatabaseCacheKey)
+        enqueueSave { await saveNotionDatabase(value) }
+      }
+    )
+  }
+
+  private var linearSelection: Binding<String?> {
+    Binding(
+      get: { selectedTeam },
+      set: { value in
+        selectedTeam = value
+        guard let value, !value.isEmpty else { return }
+        UserDefaults.standard.set(value, forKey: selectedTeamCacheKey)
+        enqueueSave { await saveLinearTeam(value) }
+      }
+    )
   }
 
   private func loadCachedData() {
@@ -88,10 +132,20 @@ struct IntegrationOptionsView: View {
       databases = decodedDatabases
     }
 
-    selectedDatabase = UserDefaults.standard.string(forKey: selectedDatabaseCacheKey)
+    // Lists may be cached, but the saved target always comes from the server.
+    selectedDatabase = nil
+
+    if let cachedData = UserDefaults.standard.data(forKey: teamsCacheKey),
+       let decodedTeams = try? JSONDecoder().decode([LinearTeam].self, from: cachedData)
+    {
+      teams = decodedTeams
+    }
+    selectedTeam = nil
   }
 
   private func fetchDatabases() async {
+    await MainActor.run { isLoading = true }
+    defer { Task { @MainActor in isLoading = false } }
     do {
       let fetchedDatabases = try await ApiClient.shared.getNotionDatabases(spaceId: spaceId)
 
@@ -100,12 +154,26 @@ struct IntegrationOptionsView: View {
           UserDefaults.standard.set(encodedData, forKey: databasesCacheKey)
         }
 
-        DispatchQueue.main.async {
+        await MainActor.run {
           databases = fetchedDatabases
         }
       }
     } catch {
-      print("Error fetching databases: \(error)")
+      await MainActor.run { errorMessage = "Couldn’t load Notion sources." }
+    }
+  }
+
+  private func fetchTeams() async {
+    await MainActor.run { isLoading = true }
+    defer { Task { @MainActor in isLoading = false } }
+    do {
+      let fetchedTeams = try await ApiClient.shared.getLinearTeams(spaceId: spaceId)
+      if let encodedData = try? JSONEncoder().encode(fetchedTeams) {
+        UserDefaults.standard.set(encodedData, forKey: teamsCacheKey)
+      }
+      await MainActor.run { teams = fetchedTeams }
+    } catch {
+      await MainActor.run { errorMessage = "Couldn’t load Linear teams." }
     }
   }
 
@@ -117,16 +185,71 @@ struct IntegrationOptionsView: View {
       )
 
       await MainActor.run {
-        if let sourceId = integrations.notionDatabaseId, !sourceId.isEmpty {
-          selectedDatabase = sourceId
-          UserDefaults.standard.set(sourceId, forKey: selectedDatabaseCacheKey)
+        if provider == "linear" {
+          if let teamID = integrations.linearTeamId, !teamID.isEmpty {
+            selectedTeam = teamID
+            UserDefaults.standard.set(teamID, forKey: selectedTeamCacheKey)
+          } else {
+            selectedTeam = nil
+            UserDefaults.standard.removeObject(forKey: selectedTeamCacheKey)
+          }
+        } else if let sourceID = integrations.notionDatabaseId, !sourceID.isEmpty {
+          selectedDatabase = sourceID
+          UserDefaults.standard.set(sourceID, forKey: selectedDatabaseCacheKey)
         } else {
           selectedDatabase = nil
           UserDefaults.standard.removeObject(forKey: selectedDatabaseCacheKey)
         }
       }
     } catch {
-      print("Error fetching current Notion source selection: \(error)")
+      await MainActor.run {
+        selectedDatabase = nil
+        selectedTeam = nil
+      }
+    }
+  }
+
+  private func saveNotionDatabase(_ databaseID: String) async {
+    do {
+      _ = try await ApiClient.shared.saveNotionDatabaseId(spaceId: spaceId, databaseId: databaseID)
+      await MainActor.run {
+        errorMessage = nil
+        NotificationCenter.default.post(name: .connectorConfigurationUpdated, object: nil)
+      }
+    } catch {
+      await MainActor.run {
+        if selectedDatabase == databaseID {
+          errorMessage = "Couldn’t save the Notion source."
+          selectedDatabase = nil
+          UserDefaults.standard.removeObject(forKey: selectedDatabaseCacheKey)
+        }
+      }
+    }
+  }
+
+  private func saveLinearTeam(_ teamID: String) async {
+    do {
+      _ = try await ApiClient.shared.saveLinearTeamId(spaceId: spaceId, teamId: teamID)
+      await MainActor.run {
+        errorMessage = nil
+        NotificationCenter.default.post(name: .connectorConfigurationUpdated, object: nil)
+      }
+    } catch {
+      await MainActor.run {
+        if selectedTeam == teamID {
+          errorMessage = "Couldn’t save the Linear team."
+          selectedTeam = nil
+          UserDefaults.standard.removeObject(forKey: selectedTeamCacheKey)
+        }
+      }
+    }
+  }
+
+  private func enqueueSave(_ operation: @escaping @MainActor () async -> Void) {
+    let previous = saveTask
+    saveTask = Task { @MainActor in
+      await previous?.value
+      await operation()
     }
   }
 

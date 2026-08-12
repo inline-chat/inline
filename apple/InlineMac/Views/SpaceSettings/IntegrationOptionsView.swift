@@ -18,6 +18,7 @@ struct IntegrationOptionsView: View {
   @State private var didLoadFromCache = false
   @State private var hadStaleCachedSelection = false
   @State private var hadStaleNotionSelection = false
+  @State private var saveTask: Task<Void, Never>?
 
   private let databasesCacheKey: String
   private let selectedDatabaseCacheKey: String
@@ -41,7 +42,7 @@ struct IntegrationOptionsView: View {
             .font(.footnote)
             .foregroundStyle(.secondary)
 
-          Picker("Notion Source", selection: $selectedDatabase) {
+          Picker("Notion Source", selection: notionSelection) {
             Text("Select a Notion source")
               .tag(nil as String?)
               .disabled(true)
@@ -51,11 +52,6 @@ struct IntegrationOptionsView: View {
             }
           }
           .pickerStyle(.menu)
-          .onChange(of: selectedDatabase ?? "") { _, newValue in
-            guard !newValue.isEmpty else { return }
-            cacheNotionSelection(newValue)
-            saveNotionSelection(newValue)
-          }
 
           Text(notionSelectionSummary)
             .font(.footnote)
@@ -69,7 +65,7 @@ struct IntegrationOptionsView: View {
             .font(.footnote)
             .foregroundStyle(.secondary)
 
-          Picker("Team", selection: $selectedTeamId) {
+          Picker("Team", selection: linearSelection) {
             Text("Select a team")
               .tag(nil as String?)
               .disabled(true)
@@ -79,11 +75,6 @@ struct IntegrationOptionsView: View {
             }
           }
           .pickerStyle(.menu)
-          .onChange(of: selectedTeamId ?? "") { _, newValue in
-            guard !newValue.isEmpty else { return }
-            cacheLinearSelection(newValue)
-            saveLinearSelection(newValue)
-          }
 
           Text(linearSelectionSummary)
             .font(.footnote)
@@ -125,6 +116,30 @@ struct IntegrationOptionsView: View {
       loadCachedData()
       await refresh()
     }
+  }
+
+  private var notionSelection: Binding<String?> {
+    Binding(
+      get: { selectedDatabase },
+      set: { value in
+        selectedDatabase = value
+        guard let value, !value.isEmpty else { return }
+        cacheNotionSelection(value)
+        saveNotionSelection(value)
+      }
+    )
+  }
+
+  private var linearSelection: Binding<String?> {
+    Binding(
+      get: { selectedTeamId },
+      set: { value in
+        selectedTeamId = value
+        guard let value, !value.isEmpty else { return }
+        cacheLinearSelection(value)
+        saveLinearSelection(value)
+      }
+    )
   }
 
   private var statusRow: some View {
@@ -194,13 +209,19 @@ struct IntegrationOptionsView: View {
   }
 
   private func saveNotionSelection(_ newValue: String) {
-    Task {
+    enqueueSave {
       do {
         _ = try await ApiClient.shared.saveNotionDatabaseId(spaceId: spaceId, databaseId: newValue)
+        await MainActor.run {
+          NotificationCenter.default.post(name: .connectorConfigurationUpdated, object: nil)
+        }
       } catch {
         await MainActor.run {
-          errorMessage = "Failed to save selection: \(error.localizedDescription)"
-          selectedDatabase = UserDefaults.standard.string(forKey: selectedDatabaseCacheKey)
+          if selectedDatabase == newValue {
+            errorMessage = "Failed to save selection: \(error.localizedDescription)"
+            selectedDatabase = nil
+            UserDefaults.standard.removeObject(forKey: selectedDatabaseCacheKey)
+          }
         }
       }
     }
@@ -211,15 +232,29 @@ struct IntegrationOptionsView: View {
   }
 
   private func saveLinearSelection(_ newValue: String) {
-    Task {
+    enqueueSave {
       do {
         _ = try await ApiClient.shared.saveLinearTeamId(spaceId: spaceId, teamId: newValue)
+        await MainActor.run {
+          NotificationCenter.default.post(name: .connectorConfigurationUpdated, object: nil)
+        }
       } catch {
         await MainActor.run {
-          errorMessage = "Failed to save selection: \(error.localizedDescription)"
-          selectedTeamId = UserDefaults.standard.string(forKey: selectedTeamCacheKey)
+          if selectedTeamId == newValue {
+            errorMessage = "Failed to save selection: \(error.localizedDescription)"
+            selectedTeamId = nil
+            UserDefaults.standard.removeObject(forKey: selectedTeamCacheKey)
+          }
         }
       }
+    }
+  }
+
+  private func enqueueSave(_ operation: @escaping @MainActor () async -> Void) {
+    let previous = saveTask
+    saveTask = Task { @MainActor in
+      await previous?.value
+      await operation()
     }
   }
 
@@ -233,7 +268,8 @@ struct IntegrationOptionsView: View {
       databases = decoded
       loadedDatabasesFromCache = true
     }
-    selectedDatabase = UserDefaults.standard.string(forKey: selectedDatabaseCacheKey)
+    // Lists may be cached, but the saved target always comes from the server.
+    selectedDatabase = nil
 
     if let cachedTeamsData = UserDefaults.standard.data(forKey: teamsCacheKey),
        let decodedTeams = try? JSONDecoder().decode([LinearTeam].self, from: cachedTeamsData)
@@ -241,12 +277,7 @@ struct IntegrationOptionsView: View {
       teams = decodedTeams
       loadedTeamsFromCache = true
     }
-    if provider == "linear" {
-      // Prefer server truth; cached selection can be stale and misleading.
-      selectedTeamId = nil
-    } else {
-      selectedTeamId = UserDefaults.standard.string(forKey: selectedTeamCacheKey)
-    }
+    selectedTeamId = nil
 
     switch provider {
     case "notion":
@@ -297,7 +328,7 @@ struct IntegrationOptionsView: View {
         }
       }
     } catch {
-      // best-effort; keep cached selection
+      await MainActor.run { selectedDatabase = nil }
     }
   }
 
@@ -340,7 +371,7 @@ struct IntegrationOptionsView: View {
         }
       }
     } catch {
-      // best-effort; keep cached selection
+      await MainActor.run { selectedTeamId = nil }
     }
   }
 

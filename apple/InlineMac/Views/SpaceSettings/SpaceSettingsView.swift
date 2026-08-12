@@ -104,7 +104,7 @@ struct SpaceSettingsView: View {
   }
 
   private var integrationsButtonTitle: String {
-    isAdminOrOwner ? "Manage Integrations..." : "View Integrations..."
+    isAdminOrOwner ? "Manage Connectors..." : "View Connectors..."
   }
 
   private var destructiveSectionTitle: String {
@@ -186,7 +186,7 @@ struct SpaceSettingsView: View {
         )
 
         SpaceSettingsActionRow(
-          title: "Integrations",
+          title: "Connectors",
           subtitle: "Connect tools such as Linear and Notion, then configure defaults for this space.",
           systemImage: "app.connected.to.app.below.fill",
           buttonTitle: integrationsButtonTitle,

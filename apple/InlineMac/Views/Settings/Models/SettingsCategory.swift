@@ -4,6 +4,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
   case account
   case activeSessions
   case bots
+  case connectors
   case dataStorage
   case general
   case hotkeys
@@ -23,6 +24,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
       return "General"
     case .dataStorage:
       return "Data & Storage"
+    case .connectors:
+      return "Connectors"
     case .hotkeys:
       return "Hotkeys"
     case .appearance:
@@ -52,6 +55,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
       return "gear"
     case .dataStorage:
       return "externaldrive"
+    case .connectors:
+      return "app.connected.to.app.below.fill"
     case .hotkeys:
       return "keyboard"
     case .appearance:

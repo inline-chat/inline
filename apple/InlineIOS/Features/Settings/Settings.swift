@@ -49,6 +49,12 @@ struct SettingsView: View {
           destination: DataStorageSettingsView()
         )
         SettingsNavigationRow(
+          title: "Connectors",
+          systemImage: "app.connected.to.app.below.fill",
+          color: .purple,
+          destination: ConnectorsView()
+        )
+        SettingsNavigationRow(
           title: "Active Sessions",
           systemImage: "laptopcomputer.and.iphone",
           color: .blue,
