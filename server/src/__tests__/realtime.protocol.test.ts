@@ -316,6 +316,8 @@ describe("realtime protocol safety", () => {
   })
 
   it("returns unauthorized connectionError when connectionInit token belongs to a deleted user", async () => {
+    const warnSpy = spyOn(Log.prototype, "warn")
+    const debugSpy = spyOn(Log.prototype, "debug")
     const ws = await openRealtimeSocket()
     const user = await testUtils.createUser("realtime-deleted-auth@test.com")
     const { token } = await testUtils.createSessionForUser(user.id, { clientType: "ios" })
@@ -338,6 +340,18 @@ describe("realtime protocol safety", () => {
     if (message.body.oneofKind === "connectionError") {
       expect(message.body.connectionError.reason).toBe(ConnectionError_Reason.UNAUTHORIZED)
     }
+    expect(
+      warnSpy.mock.calls.filter(
+        ([message]) => message === "realtime connectionInit rejected",
+      ),
+    ).toHaveLength(0)
+    expect(
+      debugSpy.mock.calls.filter(
+        ([message]) => message === "realtime connectionInit rejected",
+      ),
+    ).toHaveLength(1)
+    warnSpy.mockRestore()
+    debugSpy.mockRestore()
     await wsClosed(ws)
   })
 

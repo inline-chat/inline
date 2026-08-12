@@ -210,7 +210,9 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
           const authDetails = getAuthTokenErrorDetails(e)
           const metadata = connectionInitRejectionMetadata(message, rootContext, e, reason)
           if (authDetails) {
-            const decision = authRejectionLogDecision(authDetails)
+            const decision = authDetails.failure === "user_deactivated"
+              ? { warn: false, suppressedCount: 0 }
+              : authRejectionLogDecision(authDetails)
             const rejectionMetadata = decision.suppressedCount > 0
               ? { ...metadata, suppressedCount: decision.suppressedCount }
               : metadata
