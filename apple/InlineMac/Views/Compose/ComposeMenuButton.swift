@@ -20,15 +20,7 @@ class ComposeMenuButton: NSView {
 
   init(mode: ComposeControlMode = .legacy) {
     self.mode = mode
-    button = NSButton(frame: .zero)
-    button.bezelStyle = .regularSquare
-    button.isBordered = false
-    button.translatesAutoresizingMaskIntoConstraints = false
-
-    let image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)?
-      .withSymbolConfiguration(.init(pointSize: mode.sideIconPointSize, weight: .medium))
-    button.image = image
-    button.contentTintColor = .tertiaryLabelColor
+    button = Self.makeButton(mode: mode)
 
     super.init(frame: .zero)
     setupView()
@@ -42,23 +34,66 @@ class ComposeMenuButton: NSView {
   // MARK: - Setup
 
   private func setupView() {
-    wantsLayer = true
-    layer?.cornerRadius = size / 2
+    translatesAutoresizingMaskIntoConstraints = false
+
+    if mode.usesCustomHoverFill {
+      wantsLayer = true
+      layer?.cornerRadius = size / 2
+    }
 
     addSubview(button)
 
-    NSLayoutConstraint.activate([
-      widthAnchor.constraint(equalToConstant: size),
-      heightAnchor.constraint(equalToConstant: size),
-
-      button.centerXAnchor.constraint(equalTo: centerXAnchor),
-      button.centerYAnchor.constraint(equalTo: centerYAnchor),
-      button.widthAnchor.constraint(equalToConstant: size),
-      button.heightAnchor.constraint(equalToConstant: size),
-    ])
+    if mode.usesCustomHoverFill {
+      NSLayoutConstraint.activate([
+        widthAnchor.constraint(equalToConstant: size),
+        heightAnchor.constraint(equalToConstant: size),
+        button.centerXAnchor.constraint(equalTo: centerXAnchor),
+        button.centerYAnchor.constraint(equalTo: centerYAnchor),
+        button.widthAnchor.constraint(equalToConstant: size),
+        button.heightAnchor.constraint(equalToConstant: size),
+      ])
+    } else {
+      // GlassComposeAppKit owns glass-mode geometry so its existing width
+      // constraint can collapse this control without fighting a fixed self-size.
+      NSLayoutConstraint.activate([
+        button.leadingAnchor.constraint(equalTo: leadingAnchor),
+        button.trailingAnchor.constraint(equalTo: trailingAnchor),
+        button.topAnchor.constraint(equalTo: topAnchor),
+        button.bottomAnchor.constraint(equalTo: bottomAnchor),
+      ])
+    }
 
     button.target = self
     button.action = #selector(handleClick)
+  }
+
+  private static func makeButton(mode: ComposeControlMode) -> NSButton {
+    let button = NSButton(frame: .zero)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.imagePosition = .imageOnly
+    button.imageScaling = .scaleNone
+    button.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)?
+      .withSymbolConfiguration(.init(pointSize: mode.sideIconPointSize, weight: .medium))
+    button.toolTip = "Add attachment"
+    button.setAccessibilityLabel("Add attachment")
+
+    if mode.usesCustomHoverFill {
+      configureLegacyButton(button)
+    } else if #available(macOS 26.0, *) {
+      button.bezelStyle = .glass
+      button.borderShape = .circle
+      button.isBordered = true
+    } else {
+      configureLegacyButton(button)
+    }
+
+    return button
+  }
+
+  private static func configureLegacyButton(_ button: NSButton) {
+    button.bezelStyle = .regularSquare
+    button.isBordered = false
+    button.contentTintColor = .tertiaryLabelColor
   }
 
   private func makeMenu() -> NSMenu {
@@ -184,7 +219,10 @@ class ComposeMenuButton: NSView {
 
     if let existingTrackingArea = trackingArea {
       removeTrackingArea(existingTrackingArea)
+      trackingArea = nil
     }
+
+    guard mode.usesCustomHoverFill else { return }
 
     let options: NSTrackingArea.Options = [
       .mouseEnteredAndExited,

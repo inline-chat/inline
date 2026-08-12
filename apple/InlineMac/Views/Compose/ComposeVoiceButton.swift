@@ -3,19 +3,22 @@ import AppKit
 final class ComposeVoiceButton: NSView {
   private let mode: ComposeControlMode
   private var size: CGFloat { mode.voiceButtonSize }
-  private let iconView: NSImageView
+  private let contentView: NSView
+  private let glassButton: NSButton?
   private var trackingArea: NSTrackingArea?
   private var isHovering = false
 
   var onClick: (() -> Void)?
+  var isEnabled: Bool {
+    get { glassButton?.isEnabled ?? true }
+    set { glassButton?.isEnabled = newValue }
+  }
 
   override init(frame frameRect: NSRect) {
     mode = .legacy
-    let image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Record voice message")?
-      .withSymbolConfiguration(.init(pointSize: mode.voiceButtonIconPointSize, weight: .medium))
-    iconView = NSImageView(image: image ?? NSImage())
-    iconView.translatesAutoresizingMaskIntoConstraints = false
-    iconView.contentTintColor = .tertiaryLabelColor
+    let content = Self.makeContent(mode: mode)
+    contentView = content.view
+    glassButton = content.button
 
     super.init(frame: frameRect)
     setupView()
@@ -23,11 +26,9 @@ final class ComposeVoiceButton: NSView {
 
   init(mode: ComposeControlMode) {
     self.mode = mode
-    let image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Record voice message")?
-      .withSymbolConfiguration(.init(pointSize: mode.voiceButtonIconPointSize, weight: .medium))
-    iconView = NSImageView(image: image ?? NSImage())
-    iconView.translatesAutoresizingMaskIntoConstraints = false
-    iconView.contentTintColor = .tertiaryLabelColor
+    let content = Self.makeContent(mode: mode)
+    contentView = content.view
+    glassButton = content.button
 
     super.init(frame: .zero)
     setupView()
@@ -44,27 +45,68 @@ final class ComposeVoiceButton: NSView {
 
   private func setupView() {
     translatesAutoresizingMaskIntoConstraints = false
-    wantsLayer = true
-    layer?.cornerRadius = size / 2
-    layer?.masksToBounds = true
-    toolTip = "Record voice message"
 
-    addSubview(iconView)
+    addSubview(contentView)
 
-    NSLayoutConstraint.activate([
-      widthAnchor.constraint(equalToConstant: size),
-      heightAnchor.constraint(equalToConstant: size),
-      iconView.centerXAnchor.constraint(equalTo: centerXAnchor),
-      iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
-    ])
+    if let glassButton {
+      // GlassComposeAppKit owns glass-mode geometry so its existing width
+      // constraint can collapse this control without fighting a fixed self-size.
+      NSLayoutConstraint.activate([
+        contentView.leadingAnchor.constraint(equalTo: leadingAnchor),
+        contentView.trailingAnchor.constraint(equalTo: trailingAnchor),
+        contentView.topAnchor.constraint(equalTo: topAnchor),
+        contentView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      ])
+
+      glassButton.target = self
+      glassButton.action = #selector(handleClick)
+    } else {
+      wantsLayer = true
+      layer?.cornerRadius = size / 2
+      layer?.masksToBounds = true
+      toolTip = "Record voice message"
+
+      NSLayoutConstraint.activate([
+        widthAnchor.constraint(equalToConstant: size),
+        heightAnchor.constraint(equalToConstant: size),
+        contentView.centerXAnchor.constraint(equalTo: centerXAnchor),
+        contentView.centerYAnchor.constraint(equalTo: centerYAnchor),
+      ])
+    }
   }
 
-  override func layout() {
-    super.layout()
-    layer?.cornerRadius = bounds.height / 2
+  private static func makeContent(mode: ComposeControlMode) -> (view: NSView, button: NSButton?) {
+    let image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Record voice message")?
+      .withSymbolConfiguration(.init(pointSize: mode.voiceButtonIconPointSize, weight: .medium))
+
+    if case .glass = mode {
+      if #available(macOS 26.0, *) {
+        let button = NSButton(frame: .zero)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.imagePosition = .imageOnly
+        button.imageScaling = .scaleNone
+        button.image = image
+        button.toolTip = "Record voice message"
+        button.setAccessibilityLabel("Record voice message")
+        button.bezelStyle = .glass
+        button.borderShape = .circle
+        button.isBordered = true
+        return (button, button)
+      }
+    }
+
+    let iconView = NSImageView(image: image ?? NSImage())
+    iconView.translatesAutoresizingMaskIntoConstraints = false
+    iconView.contentTintColor = .tertiaryLabelColor
+    return (iconView, nil)
+  }
+
+  @objc private func handleClick() {
+    onClick?()
   }
 
   override func mouseDown(with event: NSEvent) {
+    guard glassButton == nil else { return }
     super.mouseDown(with: event)
     onClick?()
   }
@@ -74,7 +116,10 @@ final class ComposeVoiceButton: NSView {
 
     if let trackingArea {
       removeTrackingArea(trackingArea)
+      self.trackingArea = nil
     }
+
+    guard mode.usesCustomHoverFill else { return }
 
     let options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeAlways]
     trackingArea = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)

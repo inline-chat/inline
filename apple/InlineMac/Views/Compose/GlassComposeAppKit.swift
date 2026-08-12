@@ -425,21 +425,19 @@ class GlassComposeAppKit: NSView {
 
     addSubview(containerView)
 
-    let attachmentGlassView = makeGlassEffectView(cornerRadius: controlMode.sideButtonSize / 2)
+    let attachmentGlassControl = menuButton
     let composePillView = makeGlassEffectView(cornerRadius: radius)
-    let trailingGlassView = makeGlassEffectView(cornerRadius: controlMode.sideButtonSize / 2)
+    let trailingGlassControl = voiceButton
     let pillContentView = NSView()
     pillContentView.translatesAutoresizingMaskIntoConstraints = false
     let editorRowView = NSView()
     editorRowView.translatesAutoresizingMaskIntoConstraints = false
 
-    embed(menuButton, in: attachmentGlassView)
     embed(pillContentView, in: composePillView)
-    embed(voiceButton, in: trailingGlassView)
 
-    contentView.addSubview(attachmentGlassView)
+    contentView.addSubview(attachmentGlassControl)
     contentView.addSubview(composePillView)
-    contentView.addSubview(trailingGlassView)
+    contentView.addSubview(trailingGlassControl)
 
     pillContentView.addSubview(messageView)
     pillContentView.addSubview(attachments)
@@ -455,11 +453,11 @@ class GlassComposeAppKit: NSView {
 
     glassContainerView = containerView
     glassContentView = contentView
-    glassAttachmentView = attachmentGlassView
+    glassAttachmentView = attachmentGlassControl
     glassComposePillView = composePillView
     glassComposePillContentView = pillContentView
     glassEditorRowView = editorRowView
-    glassTrailingView = trailingGlassView
+    glassTrailingView = trailingGlassControl
   }
 
   @available(macOS 26.0, *)
@@ -795,6 +793,7 @@ class GlassComposeAppKit: NSView {
     // Glass divergence: the idle voice affordance is the trailing glass
     // button and remains visible even when text/attachments make it inert.
     voiceButton.isHidden = isVoiceActive
+    voiceButton.isEnabled = isVoiceRecordingAvailable(isVoiceActive: isVoiceActive)
     sendButton.isHidden = isVoiceActive || !canSend
 
     updateSilentModeUI(animated: false, forceLayout: false, isVoiceActive: isVoiceActive)
