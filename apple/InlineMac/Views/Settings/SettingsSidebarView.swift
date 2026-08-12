@@ -17,6 +17,7 @@ struct SettingsSidebarView: View {
     }
     .listStyle(.sidebar)
     .background(sidebarTint)
+    .animation(.easeInOut(duration: 0.18), value: settings.sidebarGlassAndTintEnabled)
     .scrollEdgeEffectStyleSoftIfAvailable()
     .navigationTitle("Settings")
     .safeAreaInset(edge: .bottom, spacing: 0) {

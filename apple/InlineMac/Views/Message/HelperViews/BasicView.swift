@@ -70,6 +70,101 @@ class BasicView: NSView {
   }
 }
 
+private final class MessageBubbleLightingLayer: CAGradientLayer {
+  private var lastStartY: CGFloat?
+  private var lastEndY: CGFloat?
+
+  override init() {
+    super.init()
+    type = .axial
+    locations = [0, 1]
+    isHidden = true
+  }
+
+  override init(layer: Any) {
+    super.init(layer: layer)
+  }
+
+  required init?(coder: NSCoder) {
+    super.init(coder: coder)
+  }
+
+  func configure(topAlpha: CGFloat, bottomAlpha: CGFloat) {
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    colors = [
+      NSColor.white.withAlphaComponent(topAlpha).cgColor,
+      NSColor.white.withAlphaComponent(bottomAlpha).cgColor,
+    ]
+    CATransaction.commit()
+  }
+
+  func updateWindowVector(startY: CGFloat, endY: CGFloat) {
+    guard startY.isFinite, endY.isFinite, endY > startY else {
+      clearWindowVector()
+      return
+    }
+    guard lastStartY != startY || lastEndY != endY || isHidden else { return }
+
+    lastStartY = startY
+    lastEndY = endY
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    // Window sampling uses a top-origin Y axis, while CAGradientLayer's local
+    // unit coordinates are bottom-origin on macOS.
+    startPoint = CGPoint(x: 0.5, y: 1 - startY)
+    endPoint = CGPoint(x: 0.5, y: 1 - endY)
+    isHidden = false
+    CATransaction.commit()
+  }
+
+  func clearWindowVector() {
+    guard !isHidden || lastStartY != nil || lastEndY != nil else { return }
+    lastStartY = nil
+    lastEndY = nil
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    isHidden = true
+    CATransaction.commit()
+  }
+}
+
+final class MessageBubbleBackgroundView: BasicView {
+  private let lightingLayer = MessageBubbleLightingLayer()
+
+  override init() {
+    super.init()
+    layer?.addSublayer(lightingLayer)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override func layout() {
+    super.layout()
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    lightingLayer.frame = bounds
+    lightingLayer.cornerRadius = cornerRadius
+    lightingLayer.masksToBounds = true
+    CATransaction.commit()
+  }
+
+  func configureContinuousGradient(topAlpha: CGFloat, bottomAlpha: CGFloat) {
+    lightingLayer.configure(topAlpha: topAlpha, bottomAlpha: bottomAlpha)
+  }
+
+  func updateContinuousGradient(startY: CGFloat, endY: CGFloat) {
+    lightingLayer.updateWindowVector(startY: startY, endY: endY)
+  }
+
+  func clearContinuousGradient() {
+    lightingLayer.clearWindowVector()
+  }
+}
+
 final class MessageBubbleTailView: NSView {
   enum Side {
     case none
@@ -106,6 +201,8 @@ final class MessageBubbleTailView: NSView {
   private(set) var side: Side = .none
 
   private var fillColor: NSColor = .clear
+  private let lightingLayer = MessageBubbleLightingLayer()
+  private let lightingMaskLayer = CAShapeLayer()
 
   override var isFlipped: Bool { true }
 
@@ -113,6 +210,8 @@ final class MessageBubbleTailView: NSView {
     super.init(frame: .zero)
     wantsLayer = true
     layer?.backgroundColor = NSColor.clear.cgColor
+    lightingLayer.mask = lightingMaskLayer
+    layer?.addSublayer(lightingLayer)
   }
 
   @available(*, unavailable)
@@ -122,6 +221,11 @@ final class MessageBubbleTailView: NSView {
 
   override func hitTest(_ point: NSPoint) -> NSView? {
     nil
+  }
+
+  override func layout() {
+    super.layout()
+    updateLightingLayerGeometry()
   }
 
   override func draw(_ dirtyRect: NSRect) {
@@ -149,9 +253,37 @@ final class MessageBubbleTailView: NSView {
     updateVisibility()
   }
 
+  func configureContinuousGradient(topAlpha: CGFloat, bottomAlpha: CGFloat) {
+    lightingLayer.configure(topAlpha: topAlpha, bottomAlpha: bottomAlpha)
+  }
+
+  func updateContinuousGradient(startY: CGFloat, endY: CGFloat) {
+    guard side != .none else {
+      lightingLayer.clearWindowVector()
+      return
+    }
+    lightingLayer.updateWindowVector(startY: startY, endY: endY)
+  }
+
+  func clearContinuousGradient() {
+    lightingLayer.clearWindowVector()
+  }
+
   private func updateVisibility() {
     isHidden = side == .none || resolvedFillColor.alphaComponent <= 0.01
+    updateLightingLayerGeometry()
     needsDisplay = true
+  }
+
+  private func updateLightingLayerGeometry() {
+    guard let layer else { return }
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    lightingLayer.frame = bounds
+    lightingMaskLayer.frame = bounds
+    lightingMaskLayer.path = side == .none ? nil : Self.path(for: side, in: bounds).cgPath
+    layer.masksToBounds = false
+    CATransaction.commit()
   }
 
   private var resolvedFillColor: NSColor {

@@ -59,52 +59,6 @@ public enum ThemeAppearanceVariant: String, CaseIterable, Codable, Identifiable,
   }
 }
 
-public enum SystemThemeAccent: String, CaseIterable, Codable, Identifiable, Sendable {
-  case native
-  case blue
-  case purple
-  case pink
-  case orange
-  case green
-
-  public var id: String { rawValue }
-
-  public var title: String {
-    switch self {
-    case .native:
-      "Native"
-    case .blue:
-      "Blue"
-    case .purple:
-      "Purple"
-    case .pink:
-      "Pink"
-    case .orange:
-      "Orange"
-    case .green:
-      "Green"
-    }
-  }
-
-  public func colorValue(appearance: NSAppearance) -> ThemeColorValue {
-    let color: NSColor = switch self {
-    case .native:
-      .controlAccentColor
-    case .blue:
-      .systemBlue
-    case .purple:
-      .systemPurple
-    case .pink:
-      .systemPink
-    case .orange:
-      .systemOrange
-    case .green:
-      .systemGreen
-    }
-    return ThemeColorValue(nsColor: color, appearance: appearance)
-  }
-}
-
 public enum ThemeColorRole: String, CaseIterable, Codable, Identifiable, Sendable {
   case accent
   case prominent
@@ -123,6 +77,23 @@ public enum ThemeColorRole: String, CaseIterable, Codable, Identifiable, Sendabl
       "Outgoing Bubble"
     case .background:
       "Background"
+    }
+  }
+}
+
+/// The only colors authored by a theme. Semantic roles remain internal aliases.
+public enum ThemeSeedRole: String, CaseIterable, Codable, Identifiable, Sendable {
+  case primary
+  case canvas
+
+  public var id: String { rawValue }
+
+  public var title: String {
+    switch self {
+    case .primary:
+      "Primary"
+    case .canvas:
+      "Window"
     }
   }
 }
@@ -188,21 +159,54 @@ public struct ThemeColorValue: Codable, Equatable, Sendable {
 }
 
 public struct ThemePalette: Codable, Equatable, Sendable {
-  public var accent: ThemeColorValue
-  public var prominent: ThemeColorValue
-  public var bubble: ThemeColorValue
-  public var background: ThemeColorValue
+  public var primary: ThemeColorValue
+  public var canvas: ThemeColorValue
 
   public init(
-    accent: ThemeColorValue,
-    prominent: ThemeColorValue,
-    bubble: ThemeColorValue,
-    background: ThemeColorValue
+    primary: ThemeColorValue,
+    canvas: ThemeColorValue
   ) {
-    self.accent = accent
-    self.prominent = prominent
-    self.bubble = bubble
-    self.background = background
+    self.primary = primary
+    self.canvas = canvas
+  }
+
+  public var accent: ThemeColorValue {
+    get { primary }
+    set { primary = newValue }
+  }
+
+  public var prominent: ThemeColorValue {
+    get { primary }
+    set { primary = newValue }
+  }
+
+  public var bubble: ThemeColorValue {
+    get { primary }
+    set { primary = newValue }
+  }
+
+  public var background: ThemeColorValue {
+    get { canvas }
+    set { canvas = newValue }
+  }
+
+  public subscript(seed role: ThemeSeedRole) -> ThemeColorValue {
+    get {
+      switch role {
+      case .primary:
+        primary
+      case .canvas:
+        canvas
+      }
+    }
+    set {
+      switch role {
+      case .primary:
+        primary = newValue
+      case .canvas:
+        canvas = newValue
+      }
+    }
   }
 
   public subscript(role: ThemeColorRole) -> ThemeColorValue {
@@ -235,7 +239,9 @@ public struct ThemePalette: Codable, Equatable, Sendable {
 
 public enum ThemePreference {
   public static let selectedPresetKey = "macAppThemePreset"
+  /// Obsolete but intentionally retained so older builds can still read their preference.
   public static let selectedSystemAccentKey = "macAppThemeSystemAccent"
+  public static let sidebarGlassAndTintEnabledKey = "macSidebarGlassAndTintEnabled"
 
   public static func selectedPreset(userDefaults: UserDefaults = .standard) -> AppThemePreset {
     guard let rawValue = userDefaults.string(forKey: selectedPresetKey),
@@ -244,19 +250,17 @@ public enum ThemePreference {
     return preset
   }
 
-  public static func selectedSystemAccent(
+  public static func sidebarGlassAndTintEnabled(
     userDefaults: UserDefaults = .standard
-  ) -> SystemThemeAccent {
-    guard let rawValue = userDefaults.string(forKey: selectedSystemAccentKey),
-          let accent = SystemThemeAccent(rawValue: rawValue)
-    else { return .native }
-    return accent
+  ) -> Bool {
+    userDefaults.object(forKey: sidebarGlassAndTintEnabledKey) as? Bool ?? true
   }
 }
 
 public enum ThemePaletteOverrides {
-  /// Kept stable so palettes adjusted with pre-import debug builds remain available.
-  public static let storageKey = "macAppThemeDebugOverrides.v1"
+  public static let storageKey = "macAppThemeOverrides.v2"
+  public static let legacyStorageKey = "macAppThemeDebugOverrides.v1"
+  public static let legacyMigrationKey = "macAppThemeOverridesMigratedToV2"
 
   public static func hasOverrides(
     preset: AppThemePreset,
@@ -270,11 +274,6 @@ public enum ThemePaletteOverrides {
   ) -> Set<AppThemePreset> {
     let keys = storage(userDefaults: userDefaults).colors.keys
     return Set(AppThemePreset.allCases.filter { preset in
-      if preset == .system {
-        return ThemeAppearanceVariant.allCases.contains { variant in
-          keys.contains(key(preset: preset, variant: variant, role: .bubble))
-        }
-      }
       return keys.contains { $0.hasPrefix("\(preset.rawValue).") }
     })
   }
@@ -287,9 +286,9 @@ public enum ThemePaletteOverrides {
   ) -> ThemePalette {
     let colors = storage(userDefaults: userDefaults).colors
     var palette = basePalette
-    for role in editableRoles(for: preset) {
+    for role in editableSeedRoles(for: preset) {
       if let color = colors[key(preset: preset, variant: variant, role: role)] {
-        palette[role] = color
+        palette[seed: role] = color
       }
     }
     return palette
@@ -299,10 +298,10 @@ public enum ThemePaletteOverrides {
     _ color: ThemeColorValue,
     preset: AppThemePreset,
     variant: ThemeAppearanceVariant,
-    role: ThemeColorRole,
+    role: ThemeSeedRole,
     userDefaults: UserDefaults = .standard
   ) {
-    guard editableRoles(for: preset).contains(role) else { return }
+    guard editableSeedRoles(for: preset).contains(role) else { return }
     var value = storage(userDefaults: userDefaults)
     value.colors[key(preset: preset, variant: variant, role: role)] = color
     save(value, userDefaults: userDefaults)
@@ -332,6 +331,7 @@ public enum ThemePaletteOverrides {
     userDefaults: UserDefaults = .standard
   ) throws -> Data {
     let export = ThemePaletteFile(
+      version: 2,
       preset: preset.rawValue,
       light: exportPalette(preset: preset, variant: .light, userDefaults: userDefaults),
       dark: exportPalette(preset: preset, variant: .dark, userDefaults: userDefaults)
@@ -347,6 +347,9 @@ public enum ThemePaletteOverrides {
     userDefaults: UserDefaults = .standard
   ) throws -> AppThemePreset {
     let file = try JSONDecoder().decode(ThemePaletteFile.self, from: data)
+    guard file.version == nil || file.version == 1 || file.version == 2 else {
+      throw ThemePaletteFileError.unsupportedVersion(file.version ?? 0)
+    }
     guard let preset = AppThemePreset(rawValue: file.preset) else {
       throw ThemePaletteFileError.unknownPreset(file.preset)
     }
@@ -361,8 +364,8 @@ public enum ThemePaletteOverrides {
     value.colors = value.colors.filter { !$0.key.hasPrefix(prefix) }
 
     for (variant, palette) in palettes {
-      for role in editableRoles(for: preset) {
-        value.colors[key(preset: preset, variant: variant, role: role)] = palette[role]
+      for role in editableSeedRoles(for: preset) {
+        value.colors[key(preset: preset, variant: variant, role: role)] = palette[seed: role]
       }
     }
 
@@ -381,30 +384,68 @@ public enum ThemePaletteOverrides {
       userDefaults: userDefaults
     )
     return .init(
-      accent: palette.accent.hexRGB,
-      prominent: palette.prominent.hexRGB,
-      bubble: palette.bubble.hexRGB,
-      background: palette.background.hexRGB
+      primary: palette.primary.hexRGB,
+      canvas: palette.canvas.hexRGB
     )
   }
 
   private static func key(
     preset: AppThemePreset,
     variant: ThemeAppearanceVariant,
-    role: ThemeColorRole
+    role: ThemeSeedRole
   ) -> String {
     "\(preset.rawValue).\(variant.rawValue).\(role.rawValue)"
   }
 
-  private static func editableRoles(for preset: AppThemePreset) -> [ThemeColorRole] {
-    preset == .system ? [.bubble] : ThemeColorRole.allCases
+  private static func editableSeedRoles(for preset: AppThemePreset) -> [ThemeSeedRole] {
+    preset == .system ? [.primary] : ThemeSeedRole.allCases
   }
 
   private static func storage(userDefaults: UserDefaults) -> Storage {
-    guard let data = userDefaults.data(forKey: storageKey),
-          let value = try? JSONDecoder().decode(Storage.self, from: data)
+    if let data = userDefaults.data(forKey: storageKey),
+       let value = try? JSONDecoder().decode(Storage.self, from: data) {
+      return value
+    }
+
+    guard userDefaults.bool(forKey: legacyMigrationKey) == false,
+          let data = userDefaults.data(forKey: legacyStorageKey),
+          let legacy = try? JSONDecoder().decode(Storage.self, from: data)
     else { return Storage() }
-    return value
+
+    let migrated = migrateLegacyStorage(legacy)
+    save(migrated, userDefaults: userDefaults)
+    userDefaults.set(true, forKey: legacyMigrationKey)
+    return migrated
+  }
+
+  private static func migrateLegacyStorage(_ legacy: Storage) -> Storage {
+    var migrated = Storage()
+    for preset in AppThemePreset.allCases {
+      for variant in ThemeAppearanceVariant.allCases {
+        for role in editableSeedRoles(for: preset) {
+          let color: ThemeColorValue? = switch role {
+          case .primary:
+            legacy.colors[legacyKey(preset: preset, variant: variant, role: .bubble)]
+              ?? legacy.colors[legacyKey(preset: preset, variant: variant, role: .prominent)]
+              ?? legacy.colors[legacyKey(preset: preset, variant: variant, role: .accent)]
+          case .canvas:
+            legacy.colors[legacyKey(preset: preset, variant: variant, role: .background)]
+          }
+          if let color {
+            migrated.colors[key(preset: preset, variant: variant, role: role)] = color
+          }
+        }
+      }
+    }
+    return migrated
+  }
+
+  private static func legacyKey(
+    preset: AppThemePreset,
+    variant: ThemeAppearanceVariant,
+    role: ThemeColorRole
+  ) -> String {
+    "\(preset.rawValue).\(variant.rawValue).\(role.rawValue)"
   }
 
   private static func save(_ value: Storage, userDefaults: UserDefaults) {
@@ -422,43 +463,63 @@ public enum ThemePaletteOverrides {
 
   private struct ThemePaletteFile: Codable {
     struct Palette: Codable {
-      let accent: String
-      let prominent: String
-      let bubble: String
-      let background: String
+      let primary: String?
+      let canvas: String?
+      let accent: String?
+      let prominent: String?
+      let bubble: String?
+      let background: String?
+
+      init(primary: String, canvas: String) {
+        self.primary = primary
+        self.canvas = canvas
+        accent = nil
+        prominent = nil
+        bubble = nil
+        background = nil
+      }
 
       func themePalette() throws -> ThemePalette {
-        try ThemePalette(
-          accent: color(accent, role: .accent),
-          prominent: color(prominent, role: .prominent),
-          bubble: color(bubble, role: .bubble),
-          background: color(background, role: .background)
+        let primaryValue = primary ?? bubble ?? prominent ?? accent
+        let canvasValue = canvas ?? background
+        guard let primaryValue else { throw ThemePaletteFileError.missingColor("primary") }
+        guard let canvasValue else { throw ThemePaletteFileError.missingColor("canvas") }
+        return try ThemePalette(
+          primary: color(primaryValue, field: "primary"),
+          canvas: color(canvasValue, field: "canvas")
         )
       }
 
-      private func color(_ value: String, role: ThemeColorRole) throws -> ThemeColorValue {
+      private func color(_ value: String, field: String) throws -> ThemeColorValue {
         guard let color = ThemeColorValue(hexRGB: value) else {
-          throw ThemePaletteFileError.invalidColor(role: role, value: value)
+          throw ThemePaletteFileError.invalidColor(field: field, value: value)
         }
         return color
       }
     }
 
+    let version: Int?
     let preset: String
     let light: Palette
     let dark: Palette
   }
 
   private enum ThemePaletteFileError: LocalizedError {
+    case unsupportedVersion(Int)
     case unknownPreset(String)
-    case invalidColor(role: ThemeColorRole, value: String)
+    case missingColor(String)
+    case invalidColor(field: String, value: String)
 
     var errorDescription: String? {
       switch self {
+      case let .unsupportedVersion(version):
+        "Unsupported theme file version: \(version)"
       case let .unknownPreset(preset):
         "Unknown theme preset: \(preset)"
-      case let .invalidColor(role, value):
-        "Invalid \(role.rawValue) color: \(value)"
+      case let .missingColor(field):
+        "Missing \(field) color"
+      case let .invalidColor(field, value):
+        "Invalid \(field) color: \(value)"
       }
     }
   }

@@ -346,17 +346,25 @@ class MessageViewAppKit: NSView {
 
   // MARK: Views
 
-  private lazy var bubbleView: BasicView = {
-    let view = BasicView()
+  private lazy var bubbleView: MessageBubbleBackgroundView = {
+    let view = MessageBubbleBackgroundView()
     view.translatesAutoresizingMaskIntoConstraints = false
     view.cornerRadius = Theme.messageBubbleCornerRadius
     view.backgroundColor = bubbleBackgroundColor
+    view.configureContinuousGradient(
+      topAlpha: Theme.messageBubbleGradientTopOverlayAlpha,
+      bottomAlpha: Theme.messageBubbleGradientBottomOverlayAlpha
+    )
     return view
   }()
 
   private lazy var bubbleTailView: MessageBubbleTailView = {
     let view = MessageBubbleTailView()
     view.translatesAutoresizingMaskIntoConstraints = false
+    view.configureContinuousGradient(
+      topAlpha: Theme.messageBubbleGradientTopOverlayAlpha,
+      bottomAlpha: Theme.messageBubbleGradientBottomOverlayAlpha
+    )
     return view
   }()
 
@@ -1016,6 +1024,12 @@ class MessageViewAppKit: NSView {
 
   override func layout() {
     super.layout()
+    syncContinuousBubbleGradient()
+  }
+
+  override func viewDidMoveToSuperview() {
+    super.viewDidMoveToSuperview()
+    setupBoundsChangeObserver()
   }
 
   override func hitTest(_ point: NSPoint) -> NSView? {
@@ -1038,6 +1052,9 @@ class MessageViewAppKit: NSView {
   deinit {
     NotificationCenter.default.removeObserver(self)
     if let observer = notificationObserver {
+      NotificationCenter.default.removeObserver(observer)
+    }
+    if let observer = boundsChangeObserver {
       NotificationCenter.default.removeObserver(observer)
     }
     translationStateCancellable?.cancel()
@@ -2995,14 +3012,63 @@ class MessageViewAppKit: NSView {
     )
   }
 
-  func reflectBoundsChange(fraction _: CGFloat) {}
+  func reflectBoundsChange(fraction _: CGFloat) {
+    syncContinuousBubbleGradient()
+  }
 
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
 
+    setupBoundsChangeObserver()
+    syncContinuousBubbleGradient()
+  }
+
+  private func syncContinuousBubbleGradient() {
+    guard props.layout.hasBubbleColor else {
+      bubbleView.clearContinuousGradient()
+      bubbleTailView.clearContinuousGradient()
+      return
+    }
+
+    if let vector = windowGradientVector(for: bubbleView) {
+      bubbleView.updateContinuousGradient(startY: vector.startY, endY: vector.endY)
+    } else {
+      bubbleView.clearContinuousGradient()
+    }
+
+    if bubbleTailSide != .none, let vector = windowGradientVector(for: bubbleTailView) {
+      bubbleTailView.updateContinuousGradient(startY: vector.startY, endY: vector.endY)
+    } else {
+      bubbleTailView.clearContinuousGradient()
+    }
+  }
+
+  private func windowGradientVector(for view: NSView) -> (startY: CGFloat, endY: CGFloat)? {
+    guard let contentView = window?.contentView else { return nil }
+    let windowBounds = contentView.bounds
+    let rect = view.convert(view.bounds, to: contentView).standardized
+    guard windowBounds.height > 1, rect.height > 1 else { return nil }
+
+    let distanceFromWindowTop = contentView.isFlipped
+      ? rect.minY - windowBounds.minY
+      : windowBounds.maxY - rect.maxY
+    return (
+      startY: -distanceFromWindowTop / rect.height,
+      endY: (windowBounds.height - distanceFromWindowTop) / rect.height
+    )
+  }
+
+  private var boundsChangeObserver: NSObjectProtocol?
+
+  private func setupBoundsChangeObserver() {
+    if let observer = boundsChangeObserver {
+      NotificationCenter.default.removeObserver(observer)
+      boundsChangeObserver = nil
+    }
+
     // Experimental in build 66
     // Adjust viewport instead of layouting
-    if window != nil {
+    if superview != nil, window != nil, let clipView = enclosingScrollView?.contentView {
       // Register for both frame and bounds changes
 //      NotificationCenter.default.addObserver(
 //        self,
@@ -3012,12 +3078,13 @@ class MessageViewAppKit: NSView {
 //      )
 
       ////      // Also observe bounds changes
-      NotificationCenter.default.addObserver(
-        self,
-        selector: #selector(handleBoundsChange),
-        name: NSView.boundsDidChangeNotification,
-        object: enclosingScrollView?.contentView
-      )
+      boundsChangeObserver = NotificationCenter.default.addObserver(
+        forName: NSView.boundsDidChangeNotification,
+        object: clipView,
+        queue: .main
+      ) { [weak self] notification in
+        self?.handleBoundsChange(notification)
+      }
 
 //      // Observe window resize notifications
 //      NotificationCenter.default.addObserver(
@@ -3856,6 +3923,7 @@ class MessageViewAppKit: NSView {
     // Update bubble background
     bubbleView.backgroundColor = bubbleBackgroundColor
     syncBubbleTail(animated: animate)
+    syncContinuousBubbleGradient()
 
     syncForwardHeaderView(for: props)
 
@@ -4240,6 +4308,7 @@ extension MessageViewAppKit: AppThemeRefreshable {
     swipeAnimationView = nil
     bubbleView.backgroundColor = bubbleBackgroundColor
     syncBubbleTail()
+    syncContinuousBubbleGradient()
     setupMessageText()
   }
 }

@@ -223,12 +223,12 @@ final class AppSettings: ObservableObject {
     }
   }
 
-  @Published var systemThemeAccent: SystemThemeAccent {
+  @Published var sidebarGlassAndTintEnabled: Bool {
     didSet {
-      guard systemThemeAccent != oldValue else { return }
+      guard sidebarGlassAndTintEnabled != oldValue else { return }
       UserDefaults.standard.set(
-        systemThemeAccent.rawValue,
-        forKey: ThemePreference.selectedSystemAccentKey
+        sidebarGlassAndTintEnabled,
+        forKey: ThemePreference.sidebarGlassAndTintEnabledKey
       )
       publishThemeChange()
     }
@@ -364,7 +364,7 @@ final class AppSettings: ObservableObject {
     }
 
     appTheme = ThemePreference.selectedPreset()
-    systemThemeAccent = ThemePreference.selectedSystemAccent()
+    sidebarGlassAndTintEnabled = ThemePreference.sidebarGlassAndTintEnabled()
 
     if let storedToolbarStyle = UserDefaults.standard.string(forKey: "macToolbarStyle"),
        let toolbarStyleValue = MacToolbarStyle(rawValue: storedToolbarStyle) {

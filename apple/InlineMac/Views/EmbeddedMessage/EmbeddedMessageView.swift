@@ -148,8 +148,11 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
     guard kind == .replyInMessage || kind == .pinnedInHeader else { return nil }
 
     if style == .colored {
-      let baseColor = shouldUseSenderColor ? senderColor : NSColor.controlAccentColor
-      return baseColor.withAlphaComponent(0.08)
+      guard kind == .replyInMessage else {
+        return NSColor.controlAccentColor.withAlphaComponent(0.08)
+      }
+      let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+      return (isDark ? NSColor.black : NSColor.white).withAlphaComponent(0.08)
     } else {
       return NSColor.white.withAlphaComponent(0.09)
     }
@@ -528,6 +531,11 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
     } else {
       PressScaleAnimator.prepare(self)
     }
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    applyResolvedStyle()
   }
 
   func gestureRecognizer(

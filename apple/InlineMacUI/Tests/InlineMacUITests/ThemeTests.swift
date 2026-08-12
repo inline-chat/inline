@@ -14,42 +14,138 @@ struct ThemeTests {
     #expect(Theme.messageBubblePrimaryBgColor != Theme.messageBubblePrimaryBgColor)
   }
 
-  @Test("System sidebar stays native while styled themes use translucent tint")
-  func systemSidebarStaysNative() {
-    let system = Theme.resolvedSidebarOverlayColor(
-      preset: .system,
-      variant: .light
-    )
-    let light = Theme.resolvedSidebarOverlayColor(
-      preset: .sunset,
-      variant: .light
-    )
-    let dark = Theme.resolvedSidebarOverlayColor(
-      preset: .sunset,
-      variant: .dark
-    )
+  @Test("sidebar tint follows its independent preference")
+  func sidebarTintFollowsPreference() {
+    withUserDefaults { defaults in
+      let system = Theme.resolvedSidebarOverlayColor(
+        preset: .system,
+        variant: .light,
+        userDefaults: defaults
+      )
+      let light = Theme.resolvedSidebarOverlayColor(
+        preset: .sunset,
+        variant: .light,
+        userDefaults: defaults
+      )
+      let dark = Theme.resolvedSidebarOverlayColor(
+        preset: .sunset,
+        variant: .dark,
+        userDefaults: defaults
+      )
 
-    #expect(system.alpha == 0)
-    #expect(abs(light.alpha - 0.07) < 0.001)
-    #expect(abs(dark.alpha - 0.1) < 0.001)
+      #expect(system.alpha == 0)
+      #expect(abs(light.alpha - 0.02625) < 0.001)
+      #expect(abs(dark.alpha - 0.042) < 0.001)
+
+      defaults.set(false, forKey: ThemePreference.sidebarGlassAndTintEnabledKey)
+      #expect(
+        Theme.resolvedSidebarOverlayColor(
+          preset: .sunset,
+          variant: .light,
+          userDefaults: defaults
+        ).alpha == 0
+      )
+    }
   }
 
-  @Test("all presets provide distinct light and dark palettes")
-  func allPresetsProvideBothVariants() {
-    for preset in AppThemePreset.allCases {
-      let light = palette(preset: preset, variant: .light)
-      let dark = palette(preset: preset, variant: .dark)
+  @Test("styled window surfaces remain close to native macOS backgrounds")
+  func styledWindowSurfacesAreRestrained() {
+    withUserDefaults { defaults in
+      for variant in ThemeAppearanceVariant.allCases {
+        let native = ThemeColorValue(
+          nsColor: NSColor.windowBackgroundColor,
+          appearance: variant.nsAppearance
+        )
+        #expect(
+          Theme.resolvedWindowSurfaceColor(
+            preset: .system,
+            variant: variant,
+            userDefaults: defaults
+          ) == native
+        )
 
-      #expect(light != dark)
-      for role in ThemeColorRole.allCases {
-        #expect(light[role].alpha == 1)
-        #expect(dark[role].alpha == 1)
+        for preset in AppThemePreset.allCases where preset != .system {
+          let canvas = Theme.resolvedPalette(
+            preset: preset,
+            variant: variant,
+            userDefaults: defaults
+          ).canvas
+          let surface = Theme.resolvedWindowSurfaceColor(
+            preset: preset,
+            variant: variant,
+            userDefaults: defaults
+          )
+          let amount: CGFloat = variant == .dark ? 0.189 : 0.126
+          let expectedColor = native.nsColor.blended(
+            withFraction: amount,
+            of: canvas.nsColor
+          ) ?? native.nsColor
+          let expected = ThemeColorValue(
+            nsColor: expectedColor,
+            appearance: variant.nsAppearance
+          )
+          let canvasDistance = rgbDistance(canvas, native)
+          #expect(rgbDistance(surface, expected) < 0.001)
+          #expect(rgbDistance(surface, native) <= canvasDistance)
+          if canvasDistance > 0.001 {
+            #expect(rgbDistance(surface, native) < canvasDistance)
+          }
+        }
       }
     }
   }
 
-  @Test("default emphasis colors support their foreground and surface contexts")
-  func defaultEmphasisColorsHaveUsableContrast() {
+  @Test("bubble lighting is continuous and retains a soft floor")
+  func bubbleLightingGradientIsContinuous() {
+    #expect(abs(Theme.messageBubbleGradientOverlayAlpha(atWindowFraction: -1) - 0.25) < 0.001)
+    #expect(abs(Theme.messageBubbleGradientOverlayAlpha(atWindowFraction: 0) - 0.25) < 0.001)
+    #expect(abs(Theme.messageBubbleGradientOverlayAlpha(atWindowFraction: 0.5) - 0.15) < 0.001)
+    #expect(abs(Theme.messageBubbleGradientOverlayAlpha(atWindowFraction: 1) - 0.05) < 0.001)
+    #expect(abs(Theme.messageBubbleGradientOverlayAlpha(atWindowFraction: 2) - 0.05) < 0.001)
+  }
+
+  @Test("all semantic emphasis roles resolve from one primary seed")
+  func semanticRolesSharePrimarySeed() {
+    withUserDefaults { defaults in
+      for preset in AppThemePreset.allCases {
+        for variant in ThemeAppearanceVariant.allCases {
+          let palette = Theme.resolvedPalette(
+            preset: preset,
+            variant: variant,
+            userDefaults: defaults
+          )
+          #expect(palette.accent == palette.primary)
+          #expect(palette.prominent == palette.primary)
+          #expect(palette.bubble == palette.primary)
+          #expect(palette.background == palette.canvas)
+          #expect(palette.primary.alpha == 1)
+          #expect(palette.canvas.alpha == 1)
+        }
+      }
+    }
+  }
+
+  @Test("all presets provide distinct light and dark palettes")
+  func allPresetsProvideBothVariants() {
+    withUserDefaults { defaults in
+      for preset in AppThemePreset.allCases {
+        let light = Theme.resolvedPalette(
+          preset: preset,
+          variant: .light,
+          userDefaults: defaults
+        )
+        let dark = Theme.resolvedPalette(
+          preset: preset,
+          variant: .dark,
+          userDefaults: defaults
+        )
+        #expect(light != dark)
+      }
+    }
+  }
+
+  @Test("default primary colors support white content and canvas separation")
+  func defaultPrimaryColorsHaveUsableContrast() {
     withUserDefaults { defaults in
       for preset in AppThemePreset.allCases where preset != .system {
         for variant in ThemeAppearanceVariant.allCases {
@@ -58,42 +154,57 @@ struct ThemeTests {
             variant: variant,
             userDefaults: defaults
           )
-
-          #expect(contrastRatio(palette.bubble, .init(rgb: 0xFFFFFF)) >= 4.5)
-          #expect(contrastRatio(palette.prominent, .init(rgb: 0xFFFFFF)) >= 4.5)
-          #expect(contrastRatio(palette.accent, .init(rgb: 0xFFFFFF)) >= 3)
-          #expect(contrastRatio(palette.accent, palette.background) >= 3)
+          #expect(contrastRatio(palette.primary, .init(rgb: 0xFFFFFF)) >= 4.5)
+          #expect(contrastRatio(palette.primary, palette.canvas) >= 1.8)
         }
       }
     }
   }
 
-  @Test("Flexoki uses its canonical paper, black, and standard accent colors")
-  func flexokiUsesCanonicalPalette() {
+  @Test("sourced palettes retain their published primary and canvas pairs")
+  func sourcedPalettesRetainPublishedPairs() {
     withUserDefaults { defaults in
+      #expect(
+        Theme.resolvedPalette(
+          preset: .sunset,
+          variant: .light,
+          userDefaults: defaults
+        ) == ThemePalette(primary: .init(rgb: 0xC94D24), canvas: .init(rgb: 0xFFF5F0))
+      )
+      #expect(
+        Theme.resolvedPalette(
+          preset: .midnight,
+          variant: .dark,
+          userDefaults: defaults
+        ) == ThemePalette(primary: .init(rgb: 0x0969DA), canvas: .init(rgb: 0x0D1117))
+      )
+      #expect(
+        Theme.resolvedPalette(
+          preset: .ash,
+          variant: .light,
+          userDefaults: defaults
+        ) == ThemePalette(primary: .init(rgb: 0x44494D), canvas: .init(rgb: 0xFFFFFF))
+      )
       #expect(
         Theme.resolvedPalette(
           preset: .flexoki,
           variant: .light,
           userDefaults: defaults
-        ) == ThemePalette(
-          accent: .init(rgb: 0x66800B),
-          prominent: .init(rgb: 0xBC5215),
-          bubble: .init(rgb: 0x205EA6),
-          background: .init(rgb: 0xFFFCF0)
-        )
+        ) == ThemePalette(primary: .init(rgb: 0x205EA6), canvas: .init(rgb: 0xFFFCF0))
       )
       #expect(
         Theme.resolvedPalette(
-          preset: .flexoki,
+          preset: .pastel,
           variant: .dark,
           userDefaults: defaults
-        ) == ThemePalette(
-          accent: .init(rgb: 0x879A39),
-          prominent: .init(rgb: 0xBC5215),
-          bubble: .init(rgb: 0x205EA6),
-          background: .init(rgb: 0x100F0F)
-        )
+        ) == ThemePalette(primary: .init(rgb: 0x7D57C1), canvas: .init(rgb: 0x292D3E))
+      )
+      #expect(
+        Theme.resolvedPalette(
+          preset: .neonNoir,
+          variant: .dark,
+          userDefaults: defaults
+        ) == ThemePalette(primary: .init(rgb: 0x623BE2), canvas: .init(rgb: 0x080808))
       )
     }
   }
@@ -106,111 +217,62 @@ struct ThemeTests {
     }
   }
 
-  @Test("System accent choices remain independent from its iMessage-like bubble")
-  func systemAccentChoicesRemainIndependentFromBubble() {
+  @Test("System uses one iMessage primary and native canvas")
+  func systemUsesOnePrimaryAndNativeCanvas() {
     withUserDefaults { defaults in
       for variant in ThemeAppearanceVariant.allCases {
-        let expectedAccent = ThemeColorValue(
-          nsColor: NSColor.controlAccentColor,
-          appearance: variant.nsAppearance
-        )
-        let expectedBubble = ThemeColorValue(rgb: variant == .light ? 0x3395FF : 0x0A84FF)
-        let expectedBackground = ThemeColorValue(
+        let expectedPrimary = ThemeColorValue(rgb: variant == .light ? 0x00A7F8 : 0x0A84FF)
+        let expectedCanvas = ThemeColorValue(
           nsColor: NSColor.windowBackgroundColor,
           appearance: variant.nsAppearance
         )
-
-        #expect(
-          Theme.resolvedColor(
-            role: .accent,
-            preset: .system,
-            variant: variant,
-            userDefaults: defaults
-          ) == expectedAccent
+        let palette = Theme.resolvedPalette(
+          preset: .system,
+          variant: variant,
+          userDefaults: defaults
         )
-        #expect(
-          Theme.resolvedColor(
-            role: .prominent,
-            preset: .system,
-            variant: variant,
-            userDefaults: defaults
-          ) == expectedAccent
-        )
-        #expect(
-          Theme.resolvedColor(
-            role: .bubble,
-            preset: .system,
-            variant: variant,
-            userDefaults: defaults
-          ) == expectedBubble
-        )
-        #expect(
-          Theme.resolvedColor(
-            role: .background,
-            preset: .system,
-            variant: variant,
-            userDefaults: defaults
-          ) == expectedBackground
-        )
+        #expect(palette.primary == expectedPrimary)
+        #expect(palette.canvas == expectedCanvas)
       }
 
+      defaults.set("purple", forKey: ThemePreference.selectedSystemAccentKey)
+      #expect(
+        Theme.resolvedPalette(
+          preset: .system,
+          variant: .light,
+          userDefaults: defaults
+        ).primary == ThemeColorValue(rgb: 0x00A7F8)
+      )
+
       ThemePaletteOverrides.setColor(
-        ThemeColorValue(rgb: 0xFF0000),
+        .init(rgb: 0xFF0000),
         preset: .system,
         variant: .light,
-        role: .background,
+        role: .canvas,
         userDefaults: defaults
       )
       #expect(!ThemePaletteOverrides.hasOverrides(preset: .system, userDefaults: defaults))
 
-      let originalBubble = Theme.resolvedColor(
-        role: .bubble,
-        preset: .system,
-        variant: .light,
-        userDefaults: defaults
-      )
-      defaults.set(SystemThemeAccent.purple.rawValue, forKey: ThemePreference.selectedSystemAccentKey)
-      let expectedPurple = SystemThemeAccent.purple.colorValue(
-        appearance: ThemeAppearanceVariant.light.nsAppearance
-      )
-      #expect(
-        Theme.resolvedColor(
-          role: .accent,
-          preset: .system,
-          variant: .light,
-          userDefaults: defaults
-        ) == expectedPurple
-      )
-      #expect(
-        Theme.resolvedColor(
-          role: .bubble,
-          preset: .system,
-          variant: .light,
-          userDefaults: defaults
-        ) == originalBubble
-      )
-
-      let customBubble = ThemeColorValue(rgb: 0x123456)
+      let customPrimary = ThemeColorValue(rgb: 0x123456)
       ThemePaletteOverrides.setColor(
-        customBubble,
+        customPrimary,
         preset: .system,
         variant: .dark,
-        role: .bubble,
+        role: .primary,
         userDefaults: defaults
       )
       #expect(ThemePaletteOverrides.hasOverrides(preset: .system, userDefaults: defaults))
       #expect(
-        Theme.resolvedColor(
-          role: .bubble,
+        Theme.resolvedPalette(
           preset: .system,
           variant: .dark,
           userDefaults: defaults
-        ) == customBubble
+        ).primary == customPrimary
       )
     }
   }
 
-  @Test("secondary bubbles stay clean and subordinate to outgoing color")
+  @Test("secondary bubbles stay clean and subordinate to primary")
   func secondaryBubblesStayCleanAndSubordinate() {
     withUserDefaults { defaults in
       #expect(
@@ -221,45 +283,56 @@ struct ThemeTests {
         ) == ThemeColorValue(rgb: 0xECECEC)
       )
 
-      let original = Theme.resolvedSecondaryBubbleColor(
-        preset: .sunset,
-        variant: .light,
-        userDefaults: defaults
-      )
-      let midnight = Theme.resolvedSecondaryBubbleColor(
-        preset: .midnight,
-        variant: .light,
-        userDefaults: defaults
-      )
-      #expect(rgbDistance(original, midnight) > 0.005)
-
       for preset in AppThemePreset.allCases where preset != .system {
-        let page = Theme.resolvedColor(
-          role: .background,
+        let page = Theme.resolvedPalette(
           preset: preset,
           variant: .light,
           userDefaults: defaults
-        )
+        ).canvas
         let incoming = Theme.resolvedSecondaryBubbleColor(
           preset: preset,
           variant: .light,
           userDefaults: defaults
         )
-        #expect(rgbDistance(incoming, page) > 0.075)
+        let lightAtWindowTop = ThemeColorValue(
+          nsColor: incoming.nsColor.blended(
+            withFraction: Theme.messageBubbleGradientTopOverlayAlpha,
+            of: .white
+          ) ?? incoming.nsColor,
+          appearance: ThemeAppearanceVariant.light.nsAppearance
+        )
+        #expect(
+          rgbDistance(incoming, page) > 0.075,
+          "Incoming bubble blends into \(preset.title)"
+        )
+        #expect(contrastRatio(lightAtWindowTop, .init(rgb: 0x000000)) >= 4.5)
+
+        let darkIncoming = Theme.resolvedSecondaryBubbleColor(
+          preset: preset,
+          variant: .dark,
+          userDefaults: defaults
+        )
+        let darkAtWindowTop = ThemeColorValue(
+          nsColor: darkIncoming.nsColor.blended(
+            withFraction: Theme.messageBubbleGradientTopOverlayAlpha,
+            of: .white
+          ) ?? darkIncoming.nsColor,
+          appearance: ThemeAppearanceVariant.dark.nsAppearance
+        )
+        #expect(darkIncoming == ThemeColorValue(rgb: 0x3A3A3A))
+        #expect(contrastRatio(darkAtWindowTop, .init(rgb: 0xFFFFFF)) >= 4.5)
       }
 
-      let originalBubble = Theme.resolvedColor(
-        role: .bubble,
+      let original = Theme.resolvedSecondaryBubbleColor(
         preset: .sunset,
         variant: .light,
         userDefaults: defaults
       )
-      let customBubble = ThemeColorValue(rgb: 0x123456)
       ThemePaletteOverrides.setColor(
-        customBubble,
+        .init(rgb: 0x123456),
         preset: .sunset,
         variant: .light,
-        role: .bubble,
+        role: .primary,
         userDefaults: defaults
       )
       let customized = Theme.resolvedSecondaryBubbleColor(
@@ -267,150 +340,191 @@ struct ThemeTests {
         variant: .light,
         userDefaults: defaults
       )
+      #expect(customized == original)
 
-      #expect(customized != original)
-      #expect(customized != customBubble)
+      let originalDark = Theme.resolvedSecondaryBubbleColor(
+        preset: .sunset,
+        variant: .dark,
+        userDefaults: defaults
+      )
+      ThemePaletteOverrides.setColor(
+        .init(rgb: 0x654321),
+        preset: .sunset,
+        variant: .dark,
+        role: .canvas,
+        userDefaults: defaults
+      )
       #expect(
-        rgbDistance(customized, original) <
-          rgbDistance(customBubble, originalBubble) * 0.1
+        Theme.resolvedSecondaryBubbleColor(
+          preset: .sunset,
+          variant: .dark,
+          userDefaults: defaults
+        ) == originalDark
       )
     }
   }
 
-  @Test("palette overrides are role-scoped, exportable, and resettable")
+  @Test("two-seed overrides are scoped, exportable, and resettable")
   func paletteOverridesRoundTrip() {
     withUserDefaults { defaults in
       let preset = AppThemePreset.sunset
       let variant = ThemeAppearanceVariant.dark
-      let originalAccent = Theme.resolvedColor(
-        role: .accent,
+      let originalPrimary = Theme.resolvedPalette(
         preset: preset,
         variant: variant,
         userDefaults: defaults
-      )
+      ).primary
       let override = ThemeColorValue(rgb: 0x123456)
 
       ThemePaletteOverrides.setColor(
         override,
         preset: preset,
         variant: variant,
-        role: .background,
+        role: .canvas,
         userDefaults: defaults
       )
 
-      #expect(ThemePaletteOverrides.hasOverrides(preset: preset, userDefaults: defaults))
       #expect(ThemePaletteOverrides.customizedPresets(userDefaults: defaults) == [preset])
-
-      #expect(
-        Theme.resolvedColor(
-          role: .background,
-          preset: preset,
-          variant: variant,
-          userDefaults: defaults
-        ) == override
+      let customized = Theme.resolvedPalette(
+        preset: preset,
+        variant: variant,
+        userDefaults: defaults
       )
-      #expect(
-        Theme.resolvedColor(
-          role: .accent,
-          preset: preset,
-          variant: variant,
-          userDefaults: defaults
-        ) == originalAccent
-      )
+      #expect(customized.canvas == override)
+      #expect(customized.primary == originalPrimary)
 
       let export = ThemePaletteOverrides.export(preset: preset, userDefaults: defaults)
-      #expect(export.contains("\"preset\" : \"sunset\""))
-      #expect(export.contains("\"background\" : \"#123456\""))
+      #expect(export.contains("\"version\" : 2"))
+      #expect(export.contains("\"canvas\" : \"#123456\""))
+      #expect(!export.contains("\"accent\""))
 
       ThemePaletteOverrides.reset(preset: preset, variant: variant, userDefaults: defaults)
       #expect(!ThemePaletteOverrides.hasOverrides(preset: preset, userDefaults: defaults))
-      #expect(
-        Theme.resolvedColor(
-          role: .background,
-          preset: preset,
-          variant: variant,
-          userDefaults: defaults
-        ) != override
-      )
     }
   }
 
-  @Test("exported palette files import both appearance variants")
+  @Test("v2 palette files import both appearance variants")
   func paletteFileRoundTrip() throws {
     try withUserDefaults { defaults in
       let preset = AppThemePreset.midnight
-      let lightAccent = ThemeColorValue(rgb: 0x123456)
-      let darkBackground = ThemeColorValue(rgb: 0x0A1020)
-
+      let lightPrimary = ThemeColorValue(rgb: 0x123456)
+      let darkCanvas = ThemeColorValue(rgb: 0x0A1020)
       ThemePaletteOverrides.setColor(
-        lightAccent,
+        lightPrimary,
         preset: preset,
         variant: .light,
-        role: .accent,
+        role: .primary,
         userDefaults: defaults
       )
       ThemePaletteOverrides.setColor(
-        darkBackground,
+        darkCanvas,
         preset: preset,
         variant: .dark,
-        role: .background,
+        role: .canvas,
         userDefaults: defaults
       )
 
       let data = try ThemePaletteOverrides.exportData(preset: preset, userDefaults: defaults)
       ThemePaletteOverrides.reset(preset: preset, userDefaults: defaults)
-
       let importedPreset = try ThemePaletteOverrides.importData(data, userDefaults: defaults)
       #expect(importedPreset == preset)
-      #expect(ThemePaletteOverrides.hasOverrides(preset: preset, userDefaults: defaults))
-      #expect(
-        Theme.resolvedColor(
-          role: .accent,
-          preset: preset,
-          variant: .light,
-          userDefaults: defaults
-        ) == lightAccent
+
+      let light = Theme.resolvedPalette(
+        preset: preset,
+        variant: .light,
+        userDefaults: defaults
       )
-      #expect(
-        Theme.resolvedColor(
-          role: .background,
-          preset: preset,
-          variant: .dark,
-          userDefaults: defaults
-        ) == darkBackground
+      let dark = Theme.resolvedPalette(
+        preset: preset,
+        variant: .dark,
+        userDefaults: defaults
       )
+      #expect(light.primary == lightPrimary)
+      #expect(dark.canvas == darkCanvas)
+    }
+  }
+
+  @Test("v1 palette files migrate bubble and background")
+  func v1PaletteFilesMigrate() throws {
+    try withUserDefaults { defaults in
+      let data = Data(
+        """
+        {
+          "preset": "pastel",
+          "light": {
+            "accent": "#111111",
+            "prominent": "#222222",
+            "bubble": "#334455",
+            "background": "#F0F1F2"
+          },
+          "dark": {
+            "accent": "#333333",
+            "prominent": "#444444",
+            "bubble": "#556677",
+            "background": "#101112"
+          }
+        }
+        """.utf8
+      )
+
+      let importedPreset = try ThemePaletteOverrides.importData(data, userDefaults: defaults)
+      #expect(importedPreset == .pastel)
+      let light = Theme.resolvedPalette(
+        preset: .pastel,
+        variant: .light,
+        userDefaults: defaults
+      )
+      #expect(light.primary == ThemeColorValue(rgb: 0x334455))
+      #expect(light.canvas == ThemeColorValue(rgb: 0xF0F1F2))
+    }
+  }
+
+  @Test("legacy local overrides migrate once without deleting old storage")
+  func legacyOverridesMigrateOnce() throws {
+    try withUserDefaults { defaults in
+      let bubble = ThemeColorValue(rgb: 0x123456)
+      let background = ThemeColorValue(rgb: 0xF1F2F3)
+      let legacy = LegacyStorage(colors: [
+        "sunset.light.accent": .init(rgb: 0x111111),
+        "sunset.light.prominent": .init(rgb: 0x222222),
+        "sunset.light.bubble": bubble,
+        "sunset.light.background": background,
+      ])
+      defaults.set(
+        try JSONEncoder().encode(legacy),
+        forKey: ThemePaletteOverrides.legacyStorageKey
+      )
+
+      let palette = Theme.resolvedPalette(
+        preset: .sunset,
+        variant: .light,
+        userDefaults: defaults
+      )
+      #expect(palette.primary == bubble)
+      #expect(palette.canvas == background)
+      #expect(defaults.bool(forKey: ThemePaletteOverrides.legacyMigrationKey))
+      #expect(defaults.data(forKey: ThemePaletteOverrides.legacyStorageKey) != nil)
     }
   }
 
   @Test("invalid imports preserve existing overrides")
   func invalidImportPreservesExistingOverrides() {
     withUserDefaults { defaults in
-      let preset = AppThemePreset.pastel
       let existing = ThemeColorValue(rgb: 0x123456)
       ThemePaletteOverrides.setColor(
         existing,
-        preset: preset,
+        preset: .pastel,
         variant: .dark,
-        role: .background,
+        role: .canvas,
         userDefaults: defaults
       )
-
       let invalidJSON = Data(
         """
         {
+          "version": 2,
           "preset": "pastel",
-          "light": {
-            "accent": "not-a-color",
-            "prominent": "#112233",
-            "bubble": "#223344",
-            "background": "#334455"
-          },
-          "dark": {
-            "accent": "#445566",
-            "prominent": "#556677",
-            "bubble": "#667788",
-            "background": "#778899"
-          }
+          "light": { "primary": "not-a-color", "canvas": "#334455" },
+          "dark": { "primary": "#667788", "canvas": "#778899" }
         }
         """.utf8
       )
@@ -419,26 +533,13 @@ struct ThemeTests {
         try ThemePaletteOverrides.importData(invalidJSON, userDefaults: defaults)
       }
       #expect(
-        Theme.resolvedColor(
-          role: .background,
-          preset: preset,
+        Theme.resolvedPalette(
+          preset: .pastel,
           variant: .dark,
           userDefaults: defaults
-        ) == existing
+        ).canvas == existing
       )
     }
-  }
-
-  private func palette(
-    preset: AppThemePreset,
-    variant: ThemeAppearanceVariant
-  ) -> ThemePalette {
-    ThemePalette(
-      accent: Theme.resolvedColor(role: .accent, preset: preset, variant: variant),
-      prominent: Theme.resolvedColor(role: .prominent, preset: preset, variant: variant),
-      bubble: Theme.resolvedColor(role: .bubble, preset: preset, variant: variant),
-      background: Theme.resolvedColor(role: .background, preset: preset, variant: variant)
-    )
   }
 
   private func rgbDistance(_ lhs: ThemeColorValue, _ rhs: ThemeColorValue) -> Double {
@@ -473,4 +574,8 @@ struct ThemeTests {
     defer { UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName) }
     try body(defaults)
   }
+}
+
+private struct LegacyStorage: Codable {
+  var colors: [String: ThemeColorValue]
 }

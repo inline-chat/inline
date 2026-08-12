@@ -27,7 +27,7 @@ struct ActiveThemeCustomizationView: View {
           .frame(width: 180)
         }
 
-        ThemePresetPreview(preset: preset, variant: variant)
+        ThemeCustomizationPreview(preset: preset, variant: variant)
           .frame(width: 280)
           .frame(maxWidth: .infinity)
           .padding(.vertical, 6)
@@ -61,7 +61,7 @@ struct ActiveThemeCustomizationView: View {
       }
     }
     .settingsFormStyle()
-    .frame(minWidth: 480, minHeight: preset == .system ? 380 : 470)
+    .frame(minWidth: 480, minHeight: 400)
   }
 }
 
@@ -95,24 +95,24 @@ private struct ThemeColorEditorSection: View {
     }
   }
 
-  private var editableRoles: [ThemeColorRole] {
-    preset == .system ? [.bubble] : ThemeColorRole.allCases
+  private var editableRoles: [ThemeSeedRole] {
+    preset == .system ? [.primary] : ThemeSeedRole.allCases
   }
 
   private var subtitle: LocalizedStringResource {
     if preset == .system {
-      "Choose the accent in the theme picker. Native surfaces remain unchanged."
+      "Primary drives bubbles and app emphasis. Native window surfaces remain unchanged."
     } else {
-      "Foreground content remains white."
+      "Primary drives bubbles and app emphasis. Window controls the app canvas."
     }
   }
 
-  private func resolvedColor(_ role: ThemeColorRole) -> ThemeColorValue {
+  private func resolvedColor(_ role: ThemeSeedRole) -> ThemeColorValue {
     _ = settings.themeRevision
-    return Theme.resolvedColor(role: role, preset: preset, variant: variant)
+    return Theme.resolvedPalette(preset: preset, variant: variant)[seed: role]
   }
 
-  private func binding(for role: ThemeColorRole) -> Binding<Color> {
+  private func binding(for role: ThemeSeedRole) -> Binding<Color> {
     Binding {
       Color(nsColor: resolvedColor(role).nsColor)
     } set: { color in
@@ -193,7 +193,7 @@ private struct ThemeWorkshopPreviewSection: View {
 
   var body: some View {
     Section {
-      ThemePresetPreview(preset: preset, variant: variant)
+      ThemeCustomizationPreview(preset: preset, variant: variant)
         .frame(width: 300)
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)

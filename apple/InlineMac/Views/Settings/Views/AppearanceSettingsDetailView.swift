@@ -25,6 +25,13 @@ struct AppearanceSettingsDetailView: View {
         } label: {
           SettingsRowLabel("Item Size")
         }
+
+        Toggle(isOn: $appSettings.sidebarGlassAndTintEnabled) {
+          SettingsRowLabel(
+            "Sidebar Tint",
+            description: "Add a subtle theme color over native sidebars."
+          )
+        }
       } header: {
         SettingsSectionHeader("Sidebar")
       }
@@ -104,7 +111,6 @@ private struct AppearanceAndThemeSettingsSection: View {
         .popover(isPresented: $showsThemePicker, arrowEdge: .trailing) {
           ThemePickerPopover(
             selection: $settings.appTheme,
-            systemAccent: $settings.systemThemeAccent,
             variant: previewVariant,
             customizedPresets: customizedPresets,
             clipboardStatus: clipboardStatus,
@@ -270,7 +276,7 @@ private struct ThemePickerSummary: View {
 
   var body: some View {
     HStack(spacing: 10) {
-      ThemePresetPreview(preset: preset, variant: variant)
+      ThemePresetSwatch(preset: preset, variant: variant)
         .frame(width: 112)
 
       VStack(alignment: .leading, spacing: 2) {
@@ -298,7 +304,6 @@ private struct ThemePickerSummary: View {
 
 private struct ThemePickerPopover: View {
   @Binding var selection: AppThemePreset
-  @Binding var systemAccent: SystemThemeAccent
   let variant: ThemeAppearanceVariant
   let customizedPresets: Set<AppThemePreset>
   let clipboardStatus: LocalizedStringResource?
@@ -316,7 +321,6 @@ private struct ThemePickerPopover: View {
 
       ThemePicker(
         selection: $selection,
-        systemAccent: $systemAccent,
         variant: variant,
         customizedPresets: customizedPresets
       )

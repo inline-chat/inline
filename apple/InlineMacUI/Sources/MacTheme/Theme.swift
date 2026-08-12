@@ -56,40 +56,52 @@ public enum Theme {
     variant: ThemeAppearanceVariant,
     userDefaults: UserDefaults = .standard
   ) -> ThemePalette {
-    var palette = ThemePaletteOverrides.applyingOverrides(
+    ThemePaletteOverrides.applyingOverrides(
       to: basePalette(preset: preset, variant: variant),
       preset: preset,
       variant: variant,
       userDefaults: userDefaults
     )
-
-    if preset == .system {
-      let systemAccent = ThemePreference.selectedSystemAccent(userDefaults: userDefaults)
-      let nativeAccent = systemAccent.colorValue(appearance: variant.nsAppearance)
-      palette.accent = nativeAccent
-      palette.prominent = nativeAccent
-    }
-    return palette
   }
 
   // MARK: - Window
 
   public static let windowMinimumSize: CGSize = .init(width: 320, height: 300)
   public static var windowBackgroundColor: NSColor {
-    semanticColor(role: .background)
+    windowContentBackgroundColor
   }
 
   public static var windowContentBackgroundColor: NSColor {
-    semanticColor(role: .background)
+    .init(name: nil) { appearance in
+      let preset = ThemePreference.selectedPreset()
+      let variant = ThemeAppearanceVariant(appearance: appearance)
+      return resolvedWindowSurfaceColor(preset: preset, variant: variant).nsColor
+    }
   }
 
   public static var settingsWindowBackgroundColor: NSColor {
-    .init(name: nil) { appearance in
-      let native = NSColor.windowBackgroundColor.resolvedColor(with: appearance)
-      guard ThemePreference.selectedPreset() != .system else { return native }
-      let theme = windowContentBackgroundColor.resolvedColor(with: appearance)
-      return native.blended(withFraction: 0.7, of: theme) ?? theme
+    windowContentBackgroundColor
+  }
+
+  public static func resolvedWindowSurfaceColor(
+    preset: AppThemePreset,
+    variant: ThemeAppearanceVariant,
+    userDefaults: UserDefaults = .standard
+  ) -> ThemeColorValue {
+    let appearance = variant.nsAppearance
+    let native = NSColor.windowBackgroundColor.resolvedColor(with: appearance)
+    guard preset != .system else {
+      return ThemeColorValue(nsColor: native, appearance: appearance)
     }
+
+    let canvas = resolvedPalette(
+      preset: preset,
+      variant: variant,
+      userDefaults: userDefaults
+    ).canvas.nsColor
+    let amount: CGFloat = variant == .dark ? 0.189 : 0.126
+    let surface = native.blended(withFraction: amount, of: canvas) ?? native
+    return ThemeColorValue(nsColor: surface, appearance: appearance)
   }
 
   public static var sidebarOverlayColor: NSColor {
@@ -105,7 +117,9 @@ public enum Theme {
     variant: ThemeAppearanceVariant,
     userDefaults: UserDefaults = .standard
   ) -> ThemeColorValue {
-    guard preset != .system else {
+    guard ThemePreference.sidebarGlassAndTintEnabled(userDefaults: userDefaults),
+          preset != .system
+    else {
       return ThemeColorValue(red: 0, green: 0, blue: 0, alpha: 0)
     }
 
@@ -114,7 +128,7 @@ public enum Theme {
       preset: preset,
       variant: variant,
       userDefaults: userDefaults
-    ).nsColor.withAlphaComponent(variant == .dark ? 0.1 : 0.07)
+    ).nsColor.withAlphaComponent(variant == .dark ? 0.042 : 0.02625)
     return ThemeColorValue(nsColor: accent, appearance: variant.nsAppearance)
   }
 
@@ -210,6 +224,17 @@ public enum Theme {
     semanticColor(role: .bubble)
   }
 
+  public static let messageBubbleGradientTopOverlayAlpha: CGFloat = 0.25
+  public static let messageBubbleGradientBottomOverlayAlpha: CGFloat = 0.05
+
+  public static func messageBubbleGradientOverlayAlpha(
+    atWindowFraction fraction: CGFloat
+  ) -> CGFloat {
+    let progress = min(max(fraction, 0), 1)
+    return messageBubbleGradientTopOverlayAlpha
+      + (messageBubbleGradientBottomOverlayAlpha - messageBubbleGradientTopOverlayAlpha) * progress
+  }
+
   public static var messageBubbleSecondaryBgColor: NSColor {
     .init(name: nil) { appearance in
       let preset = ThemePreference.selectedPreset()
@@ -223,17 +248,16 @@ public enum Theme {
     variant: ThemeAppearanceVariant,
     userDefaults: UserDefaults = .standard
   ) -> ThemeColorValue {
-    let palette = resolvedPalette(
-      preset: preset,
-      variant: variant,
-      userDefaults: userDefaults
-    )
-
     if preset == .system {
       if variant == .light {
         return .init(rgb: 0xECECEC)
       }
 
+      let palette = resolvedPalette(
+        preset: preset,
+        variant: variant,
+        userDefaults: userDefaults
+      )
       let color = solidBubbleColor(
         background: palette.background.nsColor,
         overlay: .white,
@@ -243,26 +267,13 @@ public enum Theme {
       return ThemeColorValue(nsColor: color, appearance: variant.nsAppearance)
     }
 
-    // A fixed cool-neutral base gives light incoming bubbles reliable separation
-    // without darkening warm page colors into muddy gray or brown. A trace of the
-    // outgoing hue coordinates the pair. Dark bubbles lift from their own page.
-    let neutral = if variant == .light {
-      ThemeColorValue(rgb: 0xEDF0F4).nsColor
-    } else {
-      solidBubbleColor(
-        background: palette.background.nsColor,
-        overlay: .white,
-        alpha: 0.12,
-        appearance: variant.nsAppearance
-      )
+    // Incoming bubbles are a neutral supporting surface, not a third authored
+    // theme color. Light themes share a clean gray; dark themes use OpenCode
+    // V2's neutral grey-800 instead of inheriting muddy canvas hues.
+    if variant == .light {
+      return .init(rgb: 0xEAEAEA)
     }
-    let color = solidBubbleColor(
-      background: neutral,
-      overlay: palette.bubble.nsColor,
-      alpha: variant == .dark ? 0.07 : 0.045,
-      appearance: variant.nsAppearance
-    )
-    return ThemeColorValue(nsColor: color, appearance: variant.nsAppearance)
+    return .init(rgb: 0x3A3A3A)
   }
 
   /// used for bubbles diff to edge
@@ -339,104 +350,82 @@ public enum Theme {
     variant: ThemeAppearanceVariant
   ) -> ThemePalette {
     switch (preset, variant) {
+    // User-supplied iMessage bottom capture for light; Apple system blue for dark.
     case (.system, .light):
       ThemePalette(
-        accent: .init(rgb: 0x0A84FF),
-        prominent: .init(rgb: 0x0A84FF),
-        bubble: .init(rgb: 0x3395FF),
-        background: .init(nsColor: .windowBackgroundColor, appearance: variant.nsAppearance)
+        primary: .init(rgb: 0x00A7F8),
+        canvas: .init(nsColor: .windowBackgroundColor, appearance: variant.nsAppearance)
       )
     case (.system, .dark):
       ThemePalette(
-        accent: .init(rgb: 0x0A84FF),
-        prominent: .init(rgb: 0x0A84FF),
-        bubble: .init(rgb: 0x0A84FF),
-        background: .init(nsColor: .windowBackgroundColor, appearance: variant.nsAppearance)
+        primary: .init(rgb: 0x0A84FF),
+        canvas: .init(nsColor: .windowBackgroundColor, appearance: variant.nsAppearance)
       )
+    // OpenCode Lucent Orng: https://github.com/anomalyco/opencode
     case (.sunset, .light):
       ThemePalette(
-        accent: .init(rgb: 0xC84165),
-        prominent: .init(rgb: 0xC44F3F),
-        bubble: .init(rgb: 0xC84643),
-        background: .init(rgb: 0xFFF8F5)
+        primary: .init(rgb: 0xC94D24),
+        canvas: .init(rgb: 0xFFF5F0)
       )
     case (.sunset, .dark):
       ThemePalette(
-        accent: .init(rgb: 0xC84A69),
-        prominent: .init(rgb: 0xC35434),
-        bubble: .init(rgb: 0xB8422D),
-        background: .init(rgb: 0x21191B)
+        primary: .init(rgb: 0xC94D24),
+        canvas: .init(rgb: 0x2A1A15)
       )
+    // GitHub Primer default light/dark canvases and action blue.
     case (.midnight, .light):
       ThemePalette(
-        accent: .init(rgb: 0x2F6FA8),
-        prominent: .init(rgb: 0x385EC7),
-        bubble: .init(rgb: 0x3A7BAA),
-        background: .init(rgb: 0xF5F8FF)
+        primary: .init(rgb: 0x0969DA),
+        canvas: .init(rgb: 0xFFFFFF)
       )
     case (.midnight, .dark):
       ThemePalette(
-        accent: .init(rgb: 0x4C86C6),
-        prominent: .init(rgb: 0x4777BC),
-        bubble: .init(rgb: 0x3D6A97),
-        background: .init(rgb: 0x111827)
+        primary: .init(rgb: 0x0969DA),
+        canvas: .init(rgb: 0x0D1117)
       )
+    // Linear Ash surface/text pair; its dark canvas comes from Linear Midnight.
     case (.ash, .light):
       ThemePalette(
-        accent: .init(rgb: 0x5F6875),
-        prominent: .init(rgb: 0x667080),
-        bubble: .init(rgb: 0x626B78),
-        background: .init(rgb: 0xF6F6F7)
+        primary: .init(rgb: 0x44494D),
+        canvas: .init(rgb: 0xFFFFFF)
       )
     case (.ash, .dark):
       ThemePalette(
-        accent: .init(rgb: 0x6F7886),
-        prominent: .init(rgb: 0x6A7483),
-        bubble: .init(rgb: 0x3D414D),
-        background: .init(rgb: 0x0E0F11)
+        primary: .init(rgb: 0x44494D),
+        canvas: .init(rgb: 0x151516)
       )
     // Flexoki palette by Steph Ango: https://github.com/kepano/flexoki (MIT).
     case (.flexoki, .light):
       ThemePalette(
-        accent: .init(rgb: 0x66800B),
-        prominent: .init(rgb: 0xBC5215),
-        bubble: .init(rgb: 0x205EA6),
-        background: .init(rgb: 0xFFFCF0)
+        primary: .init(rgb: 0x205EA6),
+        canvas: .init(rgb: 0xFFFCF0)
       )
     case (.flexoki, .dark):
       ThemePalette(
-        accent: .init(rgb: 0x879A39),
-        prominent: .init(rgb: 0xBC5215),
-        bubble: .init(rgb: 0x205EA6),
-        background: .init(rgb: 0x100F0F)
+        primary: .init(rgb: 0x205EA6),
+        canvas: .init(rgb: 0x100F0F)
       )
+    // Linear Pale primary with its Barbie Dreamhouse and Pale surfaces.
     case (.pastel, .light):
       ThemePalette(
-        accent: .init(rgb: 0x835FC7),
-        prominent: .init(rgb: 0xA95682),
-        bubble: .init(rgb: 0x7E5FE5),
-        background: .init(rgb: 0xFAF6FF)
+        primary: .init(rgb: 0x7D57C1),
+        canvas: .init(rgb: 0xE2DAF1)
       )
     case (.pastel, .dark):
       ThemePalette(
-        accent: .init(rgb: 0x8D68C4),
-        prominent: .init(rgb: 0xA35F88),
-        bubble: .init(rgb: 0x6547B8),
-        background: .init(rgb: 0x1E1E2E)
+        primary: .init(rgb: 0x7D57C1),
+        canvas: .init(rgb: 0x292D3E)
       )
+    // OpenCode V2 purple-700 with OC-2 neutral endpoints.
     case (.neonNoir, .light):
       ThemePalette(
-        accent: .init(rgb: 0x6C3BFF),
-        prominent: .init(rgb: 0x007E88),
-        bubble: .init(rgb: 0x7748FF),
-        background: .init(rgb: 0xF7F6FB)
+        primary: .init(rgb: 0x623BE2),
+        canvas: .init(rgb: 0xF7F7F7)
       )
     case (.neonNoir, .dark):
       ThemePalette(
-        accent: .init(rgb: 0x9D6CFF),
-        prominent: .init(rgb: 0x00857F),
-        bubble: .init(rgb: 0x5B2FD0),
-        background: .init(rgb: 0x0A0A0F)
+        primary: .init(rgb: 0x623BE2),
+        canvas: .init(rgb: 0x080808)
       )
     }
   }
