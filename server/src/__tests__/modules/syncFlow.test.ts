@@ -457,6 +457,41 @@ describe("Sync core flow", () => {
     expect(userUpdate.update.participantAdd.participant?.userId).toBe(BigInt(user.id))
   })
 
+  it("inflates personal history-collapse boundaries from the user bucket", async () => {
+    const user = await testUtils.createUser("collapse-history-sync@example.com")
+    const peerId: Peer = {
+      type: { oneofKind: "chat", chat: { chatId: 42n } },
+    }
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.User,
+      entityId: user.id,
+      seq: 1,
+      payload: {
+        oneofKind: "userDialogCollapsedMaxId",
+        userDialogCollapsedMaxId: {
+          peerId,
+          maxId: 17n,
+        },
+      },
+    })
+
+    const { updates: dbUpdates } = await Sync.getUpdates({
+      bucket: { type: UpdateBucket.User, userId: user.id },
+      seqStart: 0,
+      limit: 10,
+    })
+
+    const inflated = Sync.inflateUserUpdates(dbUpdates)
+    expect(inflated).toHaveLength(1)
+    const [update] = inflated
+    if (!update || update.update.oneofKind !== "dialogCollapsedMaxId") {
+      throw new Error("Expected dialogCollapsedMaxId from user bucket")
+    }
+    expect(update.update.dialogCollapsedMaxId.peerId).toEqual(peerId)
+    expect(update.update.dialogCollapsedMaxId.maxId).toBe(17n)
+  })
+
   it("inflates user bucket updates for current-user chat permissions", async () => {
     const user = await testUtils.createUser("chat-permissions-sync@example.com")
     if (!user) {

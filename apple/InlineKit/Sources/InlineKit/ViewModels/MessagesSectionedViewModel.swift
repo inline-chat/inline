@@ -39,11 +39,18 @@ public class MessagesSectionedViewModel {
   // MARK: - Public Properties
 
   public var sections: [MessageSection] = []
-  public var messages: [FullMessage] { progressiveViewModel.messages }
+  public var messages: [FullMessage] { visibleMessages }
   public var messagesByID: [Int64: FullMessage] { progressiveViewModel.messagesByID }
   public var oldestLoadedMessageId: Int64? { progressiveViewModel.oldestLoadedMessageId }
   public var canLoadOlderFromLocal: Bool { progressiveViewModel.canLoadOlderFromLocal }
   public var threadAnchor: FullMessage? { progressiveViewModel.threadAnchor }
+  public private(set) var collapsedMaxId: Int64?
+  public var highestPositiveMessageId: Int64? {
+    progressiveViewModel.messages.lazy
+      .map(\.message.messageId)
+      .filter { $0 > 0 }
+      .max()
+  }
 
   // MARK: - Private Properties
 
@@ -56,8 +63,10 @@ public class MessagesSectionedViewModel {
   public init(
     peer: Peer,
     reversed: Bool = false,
-    initialState: MessagesProgressiveViewModel.InitialState? = nil
+    initialState: MessagesProgressiveViewModel.InitialState? = nil,
+    collapsedMaxId: Int64? = nil
   ) {
+    self.collapsedMaxId = collapsedMaxId
     progressiveViewModel = MessagesProgressiveViewModel(
       peer: peer,
       reversed: reversed,
@@ -121,6 +130,13 @@ public class MessagesSectionedViewModel {
     progressiveViewModel.setAtBottom(atBottom)
   }
 
+  public func setCollapsedMaxId(_ collapsedMaxId: Int64?) {
+    guard self.collapsedMaxId != collapsedMaxId else { return }
+    self.collapsedMaxId = collapsedMaxId
+    rebuildSections()
+    callback?(.reload(animated: false))
+  }
+
   @discardableResult
   public func reloadThreadAnchorFromLocal() -> Bool {
     progressiveViewModel.reloadThreadAnchorFromLocal()
@@ -134,8 +150,15 @@ public class MessagesSectionedViewModel {
   // MARK: - Section Management
 
   private func rebuildSections() {
-    let messages = progressiveViewModel.messages
-    sections = groupMessagesByDay(messages)
+    sections = groupMessagesByDay(visibleMessages)
+  }
+
+  private var visibleMessages: [FullMessage] {
+    guard let collapsedMaxId else { return progressiveViewModel.messages }
+    return progressiveViewModel.messages.filter { message in
+      let messageId = message.message.messageId
+      return messageId <= 0 || messageId > collapsedMaxId
+    }
   }
 
   private func publishBatchSectionChange(previousSectionsSet: Set<Date>) {
@@ -233,6 +256,13 @@ public class MessagesSectionedViewModel {
     from update: MessagesProgressiveViewModel
       .MessagesChangeSet
   ) -> SectionedMessagesChangeSet {
+    // Keep the established incremental path unchanged. While collapsed, rebuilding the small
+    // visible projection is safer than translating raw-message indexes through the boundary.
+    if collapsedMaxId != nil {
+      rebuildSections()
+      return .reload(animated: false)
+    }
+
     switch update {
       case let .reload(animated):
         rebuildSections()

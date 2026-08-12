@@ -204,6 +204,7 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case getChatTranscript // = 96
   case searchExternalResources // = 97
   case joinPublicSpace // = 98
+  case collapseHistory // = 99
   case listConnectors // = 100
   case prepareConnectorOauth // = 101
   case disconnectConnector // = 102
@@ -313,6 +314,7 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 96: self = .getChatTranscript
     case 97: self = .searchExternalResources
     case 98: self = .joinPublicSpace
+    case 99: self = .collapseHistory
     case 100: self = .listConnectors
     case 101: self = .prepareConnectorOauth
     case 102: self = .disconnectConnector
@@ -420,6 +422,7 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .getChatTranscript: return 96
     case .searchExternalResources: return 97
     case .joinPublicSpace: return 98
+    case .collapseHistory: return 99
     case .listConnectors: return 100
     case .prepareConnectorOauth: return 101
     case .disconnectConnector: return 102
@@ -527,6 +530,7 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .getChatTranscript,
     .searchExternalResources,
     .joinPublicSpace,
+    .collapseHistory,
     .listConnectors,
     .prepareConnectorOauth,
     .disconnectConnector,
@@ -1125,75 +1129,69 @@ public nonisolated struct ConnectionInit: Sendable {
   fileprivate var _osVersion: String? = nil
 }
 
-public nonisolated struct ServerProtocolMessage: @unchecked Sendable {
+public nonisolated struct ServerProtocolMessage: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  public var id: UInt64 {
-    get {_storage._id}
-    set {_uniqueStorage()._id = newValue}
-  }
+  public var id: UInt64 = 0
 
-  public var body: OneOf_Body? {
-    get {return _storage._body}
-    set {_uniqueStorage()._body = newValue}
-  }
+  public var body: ServerProtocolMessage.OneOf_Body? = nil
 
   public var connectionOpen: ConnectionOpen {
     get {
-      if case .connectionOpen(let v)? = _storage._body {return v}
+      if case .connectionOpen(let v)? = body {return v}
       return ConnectionOpen()
     }
-    set {_uniqueStorage()._body = .connectionOpen(newValue)}
+    set {body = .connectionOpen(newValue)}
   }
 
   public var rpcResult: RpcResult {
     get {
-      if case .rpcResult(let v)? = _storage._body {return v}
+      if case .rpcResult(let v)? = body {return v}
       return RpcResult()
     }
-    set {_uniqueStorage()._body = .rpcResult(newValue)}
+    set {body = .rpcResult(newValue)}
   }
 
   public var rpcError: RpcError {
     get {
-      if case .rpcError(let v)? = _storage._body {return v}
+      if case .rpcError(let v)? = body {return v}
       return RpcError()
     }
-    set {_uniqueStorage()._body = .rpcError(newValue)}
+    set {body = .rpcError(newValue)}
   }
 
   public var message: ServerMessage {
     get {
-      if case .message(let v)? = _storage._body {return v}
+      if case .message(let v)? = body {return v}
       return ServerMessage()
     }
-    set {_uniqueStorage()._body = .message(newValue)}
+    set {body = .message(newValue)}
   }
 
   public var ack: Ack {
     get {
-      if case .ack(let v)? = _storage._body {return v}
+      if case .ack(let v)? = body {return v}
       return Ack()
     }
-    set {_uniqueStorage()._body = .ack(newValue)}
+    set {body = .ack(newValue)}
   }
 
   public var pong: Pong {
     get {
-      if case .pong(let v)? = _storage._body {return v}
+      if case .pong(let v)? = body {return v}
       return Pong()
     }
-    set {_uniqueStorage()._body = .pong(newValue)}
+    set {body = .pong(newValue)}
   }
 
   public var connectionError: ConnectionError {
     get {
-      if case .connectionError(let v)? = _storage._body {return v}
+      if case .connectionError(let v)? = body {return v}
       return ConnectionError()
     }
-    set {_uniqueStorage()._body = .connectionError(newValue)}
+    set {body = .connectionError(newValue)}
   }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -1210,8 +1208,6 @@ public nonisolated struct ServerProtocolMessage: @unchecked Sendable {
   }
 
   public init() {}
-
-  fileprivate var _storage = _StorageClass.defaultInstance
 }
 
 public nonisolated struct ServerMessage: Sendable {
@@ -2035,184 +2031,179 @@ public nonisolated struct UserProfilePhoto: Sendable {
   fileprivate var _fileUniqueID: String? = nil
 }
 
-public nonisolated struct Dialog: Sendable {
+public nonisolated struct Dialog: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var peer: Peer {
-    get {_peer ?? Peer()}
-    set {_peer = newValue}
+    get {_storage._peer ?? Peer()}
+    set {_uniqueStorage()._peer = newValue}
   }
   /// Returns true if `peer` has been explicitly set.
-  public var hasPeer: Bool {self._peer != nil}
+  public var hasPeer: Bool {_storage._peer != nil}
   /// Clears the value of `peer`. Subsequent reads from it will return its default value.
-  public mutating func clearPeer() {self._peer = nil}
+  public mutating func clearPeer() {_uniqueStorage()._peer = nil}
 
   public var spaceID: Int64 {
-    get {_spaceID ?? 0}
-    set {_spaceID = newValue}
+    get {_storage._spaceID ?? 0}
+    set {_uniqueStorage()._spaceID = newValue}
   }
   /// Returns true if `spaceID` has been explicitly set.
-  public var hasSpaceID: Bool {self._spaceID != nil}
+  public var hasSpaceID: Bool {_storage._spaceID != nil}
   /// Clears the value of `spaceID`. Subsequent reads from it will return its default value.
-  public mutating func clearSpaceID() {self._spaceID = nil}
+  public mutating func clearSpaceID() {_uniqueStorage()._spaceID = nil}
 
   public var archived: Bool {
-    get {_archived ?? false}
-    set {_archived = newValue}
+    get {_storage._archived ?? false}
+    set {_uniqueStorage()._archived = newValue}
   }
   /// Returns true if `archived` has been explicitly set.
-  public var hasArchived: Bool {self._archived != nil}
+  public var hasArchived: Bool {_storage._archived != nil}
   /// Clears the value of `archived`. Subsequent reads from it will return its default value.
-  public mutating func clearArchived() {self._archived = nil}
+  public mutating func clearArchived() {_uniqueStorage()._archived = nil}
 
   public var pinned: Bool {
-    get {_pinned ?? false}
-    set {_pinned = newValue}
+    get {_storage._pinned ?? false}
+    set {_uniqueStorage()._pinned = newValue}
   }
   /// Returns true if `pinned` has been explicitly set.
-  public var hasPinned: Bool {self._pinned != nil}
+  public var hasPinned: Bool {_storage._pinned != nil}
   /// Clears the value of `pinned`. Subsequent reads from it will return its default value.
-  public mutating func clearPinned() {self._pinned = nil}
+  public mutating func clearPinned() {_uniqueStorage()._pinned = nil}
 
   public var readMaxID: Int64 {
-    get {_readMaxID ?? 0}
-    set {_readMaxID = newValue}
+    get {_storage._readMaxID ?? 0}
+    set {_uniqueStorage()._readMaxID = newValue}
   }
   /// Returns true if `readMaxID` has been explicitly set.
-  public var hasReadMaxID: Bool {self._readMaxID != nil}
+  public var hasReadMaxID: Bool {_storage._readMaxID != nil}
   /// Clears the value of `readMaxID`. Subsequent reads from it will return its default value.
-  public mutating func clearReadMaxID() {self._readMaxID = nil}
+  public mutating func clearReadMaxID() {_uniqueStorage()._readMaxID = nil}
 
   public var unreadCount: Int32 {
-    get {_unreadCount ?? 0}
-    set {_unreadCount = newValue}
+    get {_storage._unreadCount ?? 0}
+    set {_uniqueStorage()._unreadCount = newValue}
   }
   /// Returns true if `unreadCount` has been explicitly set.
-  public var hasUnreadCount: Bool {self._unreadCount != nil}
+  public var hasUnreadCount: Bool {_storage._unreadCount != nil}
   /// Clears the value of `unreadCount`. Subsequent reads from it will return its default value.
-  public mutating func clearUnreadCount() {self._unreadCount = nil}
+  public mutating func clearUnreadCount() {_uniqueStorage()._unreadCount = nil}
 
   public var chatID: Int64 {
-    get {_chatID ?? 0}
-    set {_chatID = newValue}
+    get {_storage._chatID ?? 0}
+    set {_uniqueStorage()._chatID = newValue}
   }
   /// Returns true if `chatID` has been explicitly set.
-  public var hasChatID: Bool {self._chatID != nil}
+  public var hasChatID: Bool {_storage._chatID != nil}
   /// Clears the value of `chatID`. Subsequent reads from it will return its default value.
-  public mutating func clearChatID() {self._chatID = nil}
+  public mutating func clearChatID() {_uniqueStorage()._chatID = nil}
 
   public var unreadMark: Bool {
-    get {_unreadMark ?? false}
-    set {_unreadMark = newValue}
+    get {_storage._unreadMark ?? false}
+    set {_uniqueStorage()._unreadMark = newValue}
   }
   /// Returns true if `unreadMark` has been explicitly set.
-  public var hasUnreadMark: Bool {self._unreadMark != nil}
+  public var hasUnreadMark: Bool {_storage._unreadMark != nil}
   /// Clears the value of `unreadMark`. Subsequent reads from it will return its default value.
-  public mutating func clearUnreadMark() {self._unreadMark = nil}
+  public mutating func clearUnreadMark() {_uniqueStorage()._unreadMark = nil}
 
   public var notificationSettings: DialogNotificationSettings {
-    get {_notificationSettings ?? DialogNotificationSettings()}
-    set {_notificationSettings = newValue}
+    get {_storage._notificationSettings ?? DialogNotificationSettings()}
+    set {_uniqueStorage()._notificationSettings = newValue}
   }
   /// Returns true if `notificationSettings` has been explicitly set.
-  public var hasNotificationSettings: Bool {self._notificationSettings != nil}
+  public var hasNotificationSettings: Bool {_storage._notificationSettings != nil}
   /// Clears the value of `notificationSettings`. Subsequent reads from it will return its default value.
-  public mutating func clearNotificationSettings() {self._notificationSettings = nil}
+  public mutating func clearNotificationSettings() {_uniqueStorage()._notificationSettings = nil}
 
   /// Deprecated wire field kept so old sidebar_visible=true does not decode as hidden.
   ///
   /// NOTE: This field was marked as deprecated in the .proto file.
   public var sidebarVisible: Bool {
-    get {_sidebarVisible ?? false}
-    set {_sidebarVisible = newValue}
+    get {_storage._sidebarVisible ?? false}
+    set {_uniqueStorage()._sidebarVisible = newValue}
   }
   /// Returns true if `sidebarVisible` has been explicitly set.
-  public var hasSidebarVisible: Bool {self._sidebarVisible != nil}
+  public var hasSidebarVisible: Bool {_storage._sidebarVisible != nil}
   /// Clears the value of `sidebarVisible`. Subsequent reads from it will return its default value.
-  public mutating func clearSidebarVisible() {self._sidebarVisible = nil}
+  public mutating func clearSidebarVisible() {_uniqueStorage()._sidebarVisible = nil}
 
   /// Hide noisy reply threads from normal chat lists; this is independent of sidebar inbox open state.
   public var chatListHidden: Bool {
-    get {_chatListHidden ?? false}
-    set {_chatListHidden = newValue}
+    get {_storage._chatListHidden ?? false}
+    set {_uniqueStorage()._chatListHidden = newValue}
   }
   /// Returns true if `chatListHidden` has been explicitly set.
-  public var hasChatListHidden: Bool {self._chatListHidden != nil}
+  public var hasChatListHidden: Bool {_storage._chatListHidden != nil}
   /// Clears the value of `chatListHidden`. Subsequent reads from it will return its default value.
-  public mutating func clearChatListHidden() {self._chatListHidden = nil}
+  public mutating func clearChatListHidden() {_uniqueStorage()._chatListHidden = nil}
 
   /// Stable sidebar inbox membership.
   public var `open`: Bool {
-    get {_open ?? false}
-    set {_open = newValue}
+    get {_storage._open ?? false}
+    set {_uniqueStorage()._open = newValue}
   }
   /// Returns true if ``open`` has been explicitly set.
-  public var hasOpen: Bool {self._open != nil}
+  public var hasOpen: Bool {_storage._open != nil}
   /// Clears the value of ``open``. Subsequent reads from it will return its default value.
-  public mutating func clearOpen() {self._open = nil}
+  public mutating func clearOpen() {_uniqueStorage()._open = nil}
 
   /// Deprecated: sidebar ordering is now stored in order.
   public var openedDate: Int64 {
-    get {_openedDate ?? 0}
-    set {_openedDate = newValue}
+    get {_storage._openedDate ?? 0}
+    set {_uniqueStorage()._openedDate = newValue}
   }
   /// Returns true if `openedDate` has been explicitly set.
-  public var hasOpenedDate: Bool {self._openedDate != nil}
+  public var hasOpenedDate: Bool {_storage._openedDate != nil}
   /// Clears the value of `openedDate`. Subsequent reads from it will return its default value.
-  public mutating func clearOpenedDate() {self._openedDate = nil}
+  public mutating func clearOpenedDate() {_uniqueStorage()._openedDate = nil}
 
   /// Stable fractional order for normal sidebar inbox rows.
   public var order: String {
-    get {_order ?? String()}
-    set {_order = newValue}
+    get {_storage._order ?? String()}
+    set {_uniqueStorage()._order = newValue}
   }
   /// Returns true if `order` has been explicitly set.
-  public var hasOrder: Bool {self._order != nil}
+  public var hasOrder: Bool {_storage._order != nil}
   /// Clears the value of `order`. Subsequent reads from it will return its default value.
-  public mutating func clearOrder() {self._order = nil}
+  public mutating func clearOrder() {_uniqueStorage()._order = nil}
 
   /// Stable fractional order for pinned sidebar rows.
   public var pinnedOrder: String {
-    get {_pinnedOrder ?? String()}
-    set {_pinnedOrder = newValue}
+    get {_storage._pinnedOrder ?? String()}
+    set {_uniqueStorage()._pinnedOrder = newValue}
   }
   /// Returns true if `pinnedOrder` has been explicitly set.
-  public var hasPinnedOrder: Bool {self._pinnedOrder != nil}
+  public var hasPinnedOrder: Bool {_storage._pinnedOrder != nil}
   /// Clears the value of `pinnedOrder`. Subsequent reads from it will return its default value.
-  public mutating func clearPinnedOrder() {self._pinnedOrder = nil}
+  public mutating func clearPinnedOrder() {_uniqueStorage()._pinnedOrder = nil}
 
   /// Reply-thread automatic surfacing policy.
   public var followMode: DialogFollowMode {
-    get {_followMode ?? .unspecified}
-    set {_followMode = newValue}
+    get {_storage._followMode ?? .unspecified}
+    set {_uniqueStorage()._followMode = newValue}
   }
   /// Returns true if `followMode` has been explicitly set.
-  public var hasFollowMode: Bool {self._followMode != nil}
+  public var hasFollowMode: Bool {_storage._followMode != nil}
   /// Clears the value of `followMode`. Subsequent reads from it will return its default value.
-  public mutating func clearFollowMode() {self._followMode = nil}
+  public mutating func clearFollowMode() {_uniqueStorage()._followMode = nil}
+
+  /// Personal history-collapse boundary; messages at or below this ID stay hidden.
+  public var collapsedMaxID: Int64 {
+    get {_storage._collapsedMaxID ?? 0}
+    set {_uniqueStorage()._collapsedMaxID = newValue}
+  }
+  /// Returns true if `collapsedMaxID` has been explicitly set.
+  public var hasCollapsedMaxID: Bool {_storage._collapsedMaxID != nil}
+  /// Clears the value of `collapsedMaxID`. Subsequent reads from it will return its default value.
+  public mutating func clearCollapsedMaxID() {_uniqueStorage()._collapsedMaxID = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
-  fileprivate var _peer: Peer? = nil
-  fileprivate var _spaceID: Int64? = nil
-  fileprivate var _archived: Bool? = nil
-  fileprivate var _pinned: Bool? = nil
-  fileprivate var _readMaxID: Int64? = nil
-  fileprivate var _unreadCount: Int32? = nil
-  fileprivate var _chatID: Int64? = nil
-  fileprivate var _unreadMark: Bool? = nil
-  fileprivate var _notificationSettings: DialogNotificationSettings? = nil
-  fileprivate var _sidebarVisible: Bool? = nil
-  fileprivate var _chatListHidden: Bool? = nil
-  fileprivate var _open: Bool? = nil
-  fileprivate var _openedDate: Int64? = nil
-  fileprivate var _order: String? = nil
-  fileprivate var _pinnedOrder: String? = nil
-  fileprivate var _followMode: DialogFollowMode? = nil
+  fileprivate var _storage = _StorageClass.defaultInstance
 }
 
 /// Effective actions the current user may take on a chat.
@@ -5365,6 +5356,14 @@ public nonisolated struct RpcCall: Sendable {
     set {input = .joinPublicSpace(newValue)}
   }
 
+  public var collapseHistory: CollapseHistoryInput {
+    get {
+      if case .collapseHistory(let v)? = input {return v}
+      return CollapseHistoryInput()
+    }
+    set {input = .collapseHistory(newValue)}
+  }
+
   public var listConnectors: ListConnectorsInput {
     get {
       if case .listConnectors(let v)? = input {return v}
@@ -5489,6 +5488,7 @@ public nonisolated struct RpcCall: Sendable {
     case getChatTranscript(GetChatTranscriptInput)
     case searchExternalResources(SearchExternalResourcesInput)
     case joinPublicSpace(JoinPublicSpaceInput)
+    case collapseHistory(CollapseHistoryInput)
     case listConnectors(ListConnectorsInput)
     case prepareConnectorOauth(PrepareConnectorOAuthInput)
     case disconnectConnector(DisconnectConnectorInput)
@@ -5498,813 +5498,827 @@ public nonisolated struct RpcCall: Sendable {
   public init() {}
 }
 
-public nonisolated struct RpcResult: Sendable {
+public nonisolated struct RpcResult: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  public var reqMsgID: UInt64 = 0
+  public var reqMsgID: UInt64 {
+    get {_storage._reqMsgID}
+    set {_uniqueStorage()._reqMsgID = newValue}
+  }
 
-  public var result: RpcResult.OneOf_Result? = nil
+  public var result: OneOf_Result? {
+    get {return _storage._result}
+    set {_uniqueStorage()._result = newValue}
+  }
 
   public var getMe: GetMeResult {
     get {
-      if case .getMe(let v)? = result {return v}
+      if case .getMe(let v)? = _storage._result {return v}
       return GetMeResult()
     }
-    set {result = .getMe(newValue)}
+    set {_uniqueStorage()._result = .getMe(newValue)}
   }
 
   public var getPeerPhoto: GetPeerPhotoResult {
     get {
-      if case .getPeerPhoto(let v)? = result {return v}
+      if case .getPeerPhoto(let v)? = _storage._result {return v}
       return GetPeerPhotoResult()
     }
-    set {result = .getPeerPhoto(newValue)}
+    set {_uniqueStorage()._result = .getPeerPhoto(newValue)}
   }
 
   public var deleteMessages: DeleteMessagesResult {
     get {
-      if case .deleteMessages(let v)? = result {return v}
+      if case .deleteMessages(let v)? = _storage._result {return v}
       return DeleteMessagesResult()
     }
-    set {result = .deleteMessages(newValue)}
+    set {_uniqueStorage()._result = .deleteMessages(newValue)}
   }
 
   public var sendMessage: SendMessageResult {
     get {
-      if case .sendMessage(let v)? = result {return v}
+      if case .sendMessage(let v)? = _storage._result {return v}
       return SendMessageResult()
     }
-    set {result = .sendMessage(newValue)}
+    set {_uniqueStorage()._result = .sendMessage(newValue)}
   }
 
   public var getChatHistory: GetChatHistoryResult {
     get {
-      if case .getChatHistory(let v)? = result {return v}
+      if case .getChatHistory(let v)? = _storage._result {return v}
       return GetChatHistoryResult()
     }
-    set {result = .getChatHistory(newValue)}
+    set {_uniqueStorage()._result = .getChatHistory(newValue)}
   }
 
   public var addReaction: AddReactionResult {
     get {
-      if case .addReaction(let v)? = result {return v}
+      if case .addReaction(let v)? = _storage._result {return v}
       return AddReactionResult()
     }
-    set {result = .addReaction(newValue)}
+    set {_uniqueStorage()._result = .addReaction(newValue)}
   }
 
   public var deleteReaction: DeleteReactionResult {
     get {
-      if case .deleteReaction(let v)? = result {return v}
+      if case .deleteReaction(let v)? = _storage._result {return v}
       return DeleteReactionResult()
     }
-    set {result = .deleteReaction(newValue)}
+    set {_uniqueStorage()._result = .deleteReaction(newValue)}
   }
 
   public var editMessage: EditMessageResult {
     get {
-      if case .editMessage(let v)? = result {return v}
+      if case .editMessage(let v)? = _storage._result {return v}
       return EditMessageResult()
     }
-    set {result = .editMessage(newValue)}
+    set {_uniqueStorage()._result = .editMessage(newValue)}
   }
 
   public var createChat: CreateChatResult {
     get {
-      if case .createChat(let v)? = result {return v}
+      if case .createChat(let v)? = _storage._result {return v}
       return CreateChatResult()
     }
-    set {result = .createChat(newValue)}
+    set {_uniqueStorage()._result = .createChat(newValue)}
   }
 
   public var getSpaceMembers: GetSpaceMembersResult {
     get {
-      if case .getSpaceMembers(let v)? = result {return v}
+      if case .getSpaceMembers(let v)? = _storage._result {return v}
       return GetSpaceMembersResult()
     }
-    set {result = .getSpaceMembers(newValue)}
+    set {_uniqueStorage()._result = .getSpaceMembers(newValue)}
   }
 
   public var deleteChat: DeleteChatResult {
     get {
-      if case .deleteChat(let v)? = result {return v}
+      if case .deleteChat(let v)? = _storage._result {return v}
       return DeleteChatResult()
     }
-    set {result = .deleteChat(newValue)}
+    set {_uniqueStorage()._result = .deleteChat(newValue)}
   }
 
   public var inviteToSpace: InviteToSpaceResult {
     get {
-      if case .inviteToSpace(let v)? = result {return v}
+      if case .inviteToSpace(let v)? = _storage._result {return v}
       return InviteToSpaceResult()
     }
-    set {result = .inviteToSpace(newValue)}
+    set {_uniqueStorage()._result = .inviteToSpace(newValue)}
   }
 
   public var getChatParticipants: GetChatParticipantsResult {
     get {
-      if case .getChatParticipants(let v)? = result {return v}
+      if case .getChatParticipants(let v)? = _storage._result {return v}
       return GetChatParticipantsResult()
     }
-    set {result = .getChatParticipants(newValue)}
+    set {_uniqueStorage()._result = .getChatParticipants(newValue)}
   }
 
   public var addChatParticipant: AddChatParticipantResult {
     get {
-      if case .addChatParticipant(let v)? = result {return v}
+      if case .addChatParticipant(let v)? = _storage._result {return v}
       return AddChatParticipantResult()
     }
-    set {result = .addChatParticipant(newValue)}
+    set {_uniqueStorage()._result = .addChatParticipant(newValue)}
   }
 
   public var removeChatParticipant: RemoveChatParticipantResult {
     get {
-      if case .removeChatParticipant(let v)? = result {return v}
+      if case .removeChatParticipant(let v)? = _storage._result {return v}
       return RemoveChatParticipantResult()
     }
-    set {result = .removeChatParticipant(newValue)}
+    set {_uniqueStorage()._result = .removeChatParticipant(newValue)}
   }
 
   public var translateMessages: TranslateMessagesResult {
     get {
-      if case .translateMessages(let v)? = result {return v}
+      if case .translateMessages(let v)? = _storage._result {return v}
       return TranslateMessagesResult()
     }
-    set {result = .translateMessages(newValue)}
+    set {_uniqueStorage()._result = .translateMessages(newValue)}
   }
 
   public var getChats: GetChatsResult {
     get {
-      if case .getChats(let v)? = result {return v}
+      if case .getChats(let v)? = _storage._result {return v}
       return GetChatsResult()
     }
-    set {result = .getChats(newValue)}
+    set {_uniqueStorage()._result = .getChats(newValue)}
   }
 
   public var updateUserSettings: UpdateUserSettingsResult {
     get {
-      if case .updateUserSettings(let v)? = result {return v}
+      if case .updateUserSettings(let v)? = _storage._result {return v}
       return UpdateUserSettingsResult()
     }
-    set {result = .updateUserSettings(newValue)}
+    set {_uniqueStorage()._result = .updateUserSettings(newValue)}
   }
 
   public var getUserSettings: GetUserSettingsResult {
     get {
-      if case .getUserSettings(let v)? = result {return v}
+      if case .getUserSettings(let v)? = _storage._result {return v}
       return GetUserSettingsResult()
     }
-    set {result = .getUserSettings(newValue)}
+    set {_uniqueStorage()._result = .getUserSettings(newValue)}
   }
 
   public var sendComposeAction: SendComposeActionResult {
     get {
-      if case .sendComposeAction(let v)? = result {return v}
+      if case .sendComposeAction(let v)? = _storage._result {return v}
       return SendComposeActionResult()
     }
-    set {result = .sendComposeAction(newValue)}
+    set {_uniqueStorage()._result = .sendComposeAction(newValue)}
   }
 
   public var createBot: CreateBotResult {
     get {
-      if case .createBot(let v)? = result {return v}
+      if case .createBot(let v)? = _storage._result {return v}
       return CreateBotResult()
     }
-    set {result = .createBot(newValue)}
+    set {_uniqueStorage()._result = .createBot(newValue)}
   }
 
   public var deleteMember: DeleteMemberResult {
     get {
-      if case .deleteMember(let v)? = result {return v}
+      if case .deleteMember(let v)? = _storage._result {return v}
       return DeleteMemberResult()
     }
-    set {result = .deleteMember(newValue)}
+    set {_uniqueStorage()._result = .deleteMember(newValue)}
   }
 
   public var markAsUnread: MarkAsUnreadResult {
     get {
-      if case .markAsUnread(let v)? = result {return v}
+      if case .markAsUnread(let v)? = _storage._result {return v}
       return MarkAsUnreadResult()
     }
-    set {result = .markAsUnread(newValue)}
+    set {_uniqueStorage()._result = .markAsUnread(newValue)}
   }
 
   public var getUpdatesState: GetUpdatesStateResult {
     get {
-      if case .getUpdatesState(let v)? = result {return v}
+      if case .getUpdatesState(let v)? = _storage._result {return v}
       return GetUpdatesStateResult()
     }
-    set {result = .getUpdatesState(newValue)}
+    set {_uniqueStorage()._result = .getUpdatesState(newValue)}
   }
 
   public var getChat: GetChatResult {
     get {
-      if case .getChat(let v)? = result {return v}
+      if case .getChat(let v)? = _storage._result {return v}
       return GetChatResult()
     }
-    set {result = .getChat(newValue)}
+    set {_uniqueStorage()._result = .getChat(newValue)}
   }
 
   public var getUpdates: GetUpdatesResult {
     get {
-      if case .getUpdates(let v)? = result {return v}
+      if case .getUpdates(let v)? = _storage._result {return v}
       return GetUpdatesResult()
     }
-    set {result = .getUpdates(newValue)}
+    set {_uniqueStorage()._result = .getUpdates(newValue)}
   }
 
   public var updateMemberAccess: UpdateMemberAccessResult {
     get {
-      if case .updateMemberAccess(let v)? = result {return v}
+      if case .updateMemberAccess(let v)? = _storage._result {return v}
       return UpdateMemberAccessResult()
     }
-    set {result = .updateMemberAccess(newValue)}
+    set {_uniqueStorage()._result = .updateMemberAccess(newValue)}
   }
 
   public var searchMessages: SearchMessagesResult {
     get {
-      if case .searchMessages(let v)? = result {return v}
+      if case .searchMessages(let v)? = _storage._result {return v}
       return SearchMessagesResult()
     }
-    set {result = .searchMessages(newValue)}
+    set {_uniqueStorage()._result = .searchMessages(newValue)}
   }
 
   public var forwardMessages: ForwardMessagesResult {
     get {
-      if case .forwardMessages(let v)? = result {return v}
+      if case .forwardMessages(let v)? = _storage._result {return v}
       return ForwardMessagesResult()
     }
-    set {result = .forwardMessages(newValue)}
+    set {_uniqueStorage()._result = .forwardMessages(newValue)}
   }
 
   public var updateChatVisibility: UpdateChatVisibilityResult {
     get {
-      if case .updateChatVisibility(let v)? = result {return v}
+      if case .updateChatVisibility(let v)? = _storage._result {return v}
       return UpdateChatVisibilityResult()
     }
-    set {result = .updateChatVisibility(newValue)}
+    set {_uniqueStorage()._result = .updateChatVisibility(newValue)}
   }
 
   public var pinMessage: PinMessageResult {
     get {
-      if case .pinMessage(let v)? = result {return v}
+      if case .pinMessage(let v)? = _storage._result {return v}
       return PinMessageResult()
     }
-    set {result = .pinMessage(newValue)}
+    set {_uniqueStorage()._result = .pinMessage(newValue)}
   }
 
   public var updateChatInfo: UpdateChatInfoResult {
     get {
-      if case .updateChatInfo(let v)? = result {return v}
+      if case .updateChatInfo(let v)? = _storage._result {return v}
       return UpdateChatInfoResult()
     }
-    set {result = .updateChatInfo(newValue)}
+    set {_uniqueStorage()._result = .updateChatInfo(newValue)}
   }
 
   public var listBots: ListBotsResult {
     get {
-      if case .listBots(let v)? = result {return v}
+      if case .listBots(let v)? = _storage._result {return v}
       return ListBotsResult()
     }
-    set {result = .listBots(newValue)}
+    set {_uniqueStorage()._result = .listBots(newValue)}
   }
 
   public var revealBotToken: RevealBotTokenResult {
     get {
-      if case .revealBotToken(let v)? = result {return v}
+      if case .revealBotToken(let v)? = _storage._result {return v}
       return RevealBotTokenResult()
     }
-    set {result = .revealBotToken(newValue)}
+    set {_uniqueStorage()._result = .revealBotToken(newValue)}
   }
 
   public var moveThread: MoveThreadResult {
     get {
-      if case .moveThread(let v)? = result {return v}
+      if case .moveThread(let v)? = _storage._result {return v}
       return MoveThreadResult()
     }
-    set {result = .moveThread(newValue)}
+    set {_uniqueStorage()._result = .moveThread(newValue)}
   }
 
   public var rotateBotToken: RotateBotTokenResult {
     get {
-      if case .rotateBotToken(let v)? = result {return v}
+      if case .rotateBotToken(let v)? = _storage._result {return v}
       return RotateBotTokenResult()
     }
-    set {result = .rotateBotToken(newValue)}
+    set {_uniqueStorage()._result = .rotateBotToken(newValue)}
   }
 
   public var updateBotProfile: UpdateBotProfileResult {
     get {
-      if case .updateBotProfile(let v)? = result {return v}
+      if case .updateBotProfile(let v)? = _storage._result {return v}
       return UpdateBotProfileResult()
     }
-    set {result = .updateBotProfile(newValue)}
+    set {_uniqueStorage()._result = .updateBotProfile(newValue)}
   }
 
   public var getMessages: GetMessagesResult {
     get {
-      if case .getMessages(let v)? = result {return v}
+      if case .getMessages(let v)? = _storage._result {return v}
       return GetMessagesResult()
     }
-    set {result = .getMessages(newValue)}
+    set {_uniqueStorage()._result = .getMessages(newValue)}
   }
 
   public var updateDialogNotificationSettings: UpdateDialogNotificationSettingsResult {
     get {
-      if case .updateDialogNotificationSettings(let v)? = result {return v}
+      if case .updateDialogNotificationSettings(let v)? = _storage._result {return v}
       return UpdateDialogNotificationSettingsResult()
     }
-    set {result = .updateDialogNotificationSettings(newValue)}
+    set {_uniqueStorage()._result = .updateDialogNotificationSettings(newValue)}
   }
 
   public var readMessages: ReadMessagesResult {
     get {
-      if case .readMessages(let v)? = result {return v}
+      if case .readMessages(let v)? = _storage._result {return v}
       return ReadMessagesResult()
     }
-    set {result = .readMessages(newValue)}
+    set {_uniqueStorage()._result = .readMessages(newValue)}
   }
 
   public var updatePushNotificationDetails: UpdatePushNotificationDetailsResult {
     get {
-      if case .updatePushNotificationDetails(let v)? = result {return v}
+      if case .updatePushNotificationDetails(let v)? = _storage._result {return v}
       return UpdatePushNotificationDetailsResult()
     }
-    set {result = .updatePushNotificationDetails(newValue)}
+    set {_uniqueStorage()._result = .updatePushNotificationDetails(newValue)}
   }
 
   public var createSubthread: CreateSubthreadResult {
     get {
-      if case .createSubthread(let v)? = result {return v}
+      if case .createSubthread(let v)? = _storage._result {return v}
       return CreateSubthreadResult()
     }
-    set {result = .createSubthread(newValue)}
+    set {_uniqueStorage()._result = .createSubthread(newValue)}
   }
 
   public var getBotCommands: GetBotCommandsResult {
     get {
-      if case .getBotCommands(let v)? = result {return v}
+      if case .getBotCommands(let v)? = _storage._result {return v}
       return GetBotCommandsResult()
     }
-    set {result = .getBotCommands(newValue)}
+    set {_uniqueStorage()._result = .getBotCommands(newValue)}
   }
 
   public var setBotCommands: SetBotCommandsResult {
     get {
-      if case .setBotCommands(let v)? = result {return v}
+      if case .setBotCommands(let v)? = _storage._result {return v}
       return SetBotCommandsResult()
     }
-    set {result = .setBotCommands(newValue)}
+    set {_uniqueStorage()._result = .setBotCommands(newValue)}
   }
 
   public var getPeerBotCommands: GetPeerBotCommandsResult {
     get {
-      if case .getPeerBotCommands(let v)? = result {return v}
+      if case .getPeerBotCommands(let v)? = _storage._result {return v}
       return GetPeerBotCommandsResult()
     }
-    set {result = .getPeerBotCommands(newValue)}
+    set {_uniqueStorage()._result = .getPeerBotCommands(newValue)}
   }
 
   public var showInChatList: ShowInChatListResult {
     get {
-      if case .showInChatList(let v)? = result {return v}
+      if case .showInChatList(let v)? = _storage._result {return v}
       return ShowInChatListResult()
     }
-    set {result = .showInChatList(newValue)}
+    set {_uniqueStorage()._result = .showInChatList(newValue)}
   }
 
   public var reserveChatIds: ReserveChatIdsResult {
     get {
-      if case .reserveChatIds(let v)? = result {return v}
+      if case .reserveChatIds(let v)? = _storage._result {return v}
       return ReserveChatIdsResult()
     }
-    set {result = .reserveChatIds(newValue)}
+    set {_uniqueStorage()._result = .reserveChatIds(newValue)}
   }
 
   public var invokeMessageAction: InvokeMessageActionResult {
     get {
-      if case .invokeMessageAction(let v)? = result {return v}
+      if case .invokeMessageAction(let v)? = _storage._result {return v}
       return InvokeMessageActionResult()
     }
-    set {result = .invokeMessageAction(newValue)}
+    set {_uniqueStorage()._result = .invokeMessageAction(newValue)}
   }
 
   public var answerMessageAction: AnswerMessageActionResult {
     get {
-      if case .answerMessageAction(let v)? = result {return v}
+      if case .answerMessageAction(let v)? = _storage._result {return v}
       return AnswerMessageActionResult()
     }
-    set {result = .answerMessageAction(newValue)}
+    set {_uniqueStorage()._result = .answerMessageAction(newValue)}
   }
 
   public var revokeSession: RevokeSessionResult {
     get {
-      if case .revokeSession(let v)? = result {return v}
+      if case .revokeSession(let v)? = _storage._result {return v}
       return RevokeSessionResult()
     }
-    set {result = .revokeSession(newValue)}
+    set {_uniqueStorage()._result = .revokeSession(newValue)}
   }
 
   public var updateDialogOpen: UpdateDialogOpenResult {
     get {
-      if case .updateDialogOpen(let v)? = result {return v}
+      if case .updateDialogOpen(let v)? = _storage._result {return v}
       return UpdateDialogOpenResult()
     }
-    set {result = .updateDialogOpen(newValue)}
+    set {_uniqueStorage()._result = .updateDialogOpen(newValue)}
   }
 
   public var updateDialogOrder: UpdateDialogOrderResult {
     get {
-      if case .updateDialogOrder(let v)? = result {return v}
+      if case .updateDialogOrder(let v)? = _storage._result {return v}
       return UpdateDialogOrderResult()
     }
-    set {result = .updateDialogOrder(newValue)}
+    set {_uniqueStorage()._result = .updateDialogOrder(newValue)}
   }
 
   public var clearChatHistory_p: ClearChatHistoryResult {
     get {
-      if case .clearChatHistory_p(let v)? = result {return v}
+      if case .clearChatHistory_p(let v)? = _storage._result {return v}
       return ClearChatHistoryResult()
     }
-    set {result = .clearChatHistory_p(newValue)}
+    set {_uniqueStorage()._result = .clearChatHistory_p(newValue)}
   }
 
   public var deleteBot: DeleteBotResult {
     get {
-      if case .deleteBot(let v)? = result {return v}
+      if case .deleteBot(let v)? = _storage._result {return v}
       return DeleteBotResult()
     }
-    set {result = .deleteBot(newValue)}
+    set {_uniqueStorage()._result = .deleteBot(newValue)}
   }
 
   public var deleteMessageAttachment: DeleteMessageAttachmentResult {
     get {
-      if case .deleteMessageAttachment(let v)? = result {return v}
+      if case .deleteMessageAttachment(let v)? = _storage._result {return v}
       return DeleteMessageAttachmentResult()
     }
-    set {result = .deleteMessageAttachment(newValue)}
+    set {_uniqueStorage()._result = .deleteMessageAttachment(newValue)}
   }
 
   public var setBotAvatar: SetBotAvatarResult {
     get {
-      if case .setBotAvatar(let v)? = result {return v}
+      if case .setBotAvatar(let v)? = _storage._result {return v}
       return SetBotAvatarResult()
     }
-    set {result = .setBotAvatar(newValue)}
+    set {_uniqueStorage()._result = .setBotAvatar(newValue)}
   }
 
   public var clearBotAvatar_p: ClearBotAvatarResult {
     get {
-      if case .clearBotAvatar_p(let v)? = result {return v}
+      if case .clearBotAvatar_p(let v)? = _storage._result {return v}
       return ClearBotAvatarResult()
     }
-    set {result = .clearBotAvatar_p(newValue)}
+    set {_uniqueStorage()._result = .clearBotAvatar_p(newValue)}
   }
 
   public var getBotPresence: GetBotPresenceResult {
     get {
-      if case .getBotPresence(let v)? = result {return v}
+      if case .getBotPresence(let v)? = _storage._result {return v}
       return GetBotPresenceResult()
     }
-    set {result = .getBotPresence(newValue)}
+    set {_uniqueStorage()._result = .getBotPresence(newValue)}
   }
 
   public var setBotPresenceState: SetBotPresenceStateResult {
     get {
-      if case .setBotPresenceState(let v)? = result {return v}
+      if case .setBotPresenceState(let v)? = _storage._result {return v}
       return SetBotPresenceStateResult()
     }
-    set {result = .setBotPresenceState(newValue)}
+    set {_uniqueStorage()._result = .setBotPresenceState(newValue)}
   }
 
   public var updateDialogFollowMode: UpdateDialogFollowModeResult {
     get {
-      if case .updateDialogFollowMode(let v)? = result {return v}
+      if case .updateDialogFollowMode(let v)? = _storage._result {return v}
       return UpdateDialogFollowModeResult()
     }
-    set {result = .updateDialogFollowMode(newValue)}
+    set {_uniqueStorage()._result = .updateDialogFollowMode(newValue)}
   }
 
   public var getSessions: GetSessionsResult {
     get {
-      if case .getSessions(let v)? = result {return v}
+      if case .getSessions(let v)? = _storage._result {return v}
       return GetSessionsResult()
     }
-    set {result = .getSessions(newValue)}
+    set {_uniqueStorage()._result = .getSessions(newValue)}
   }
 
   public var checkUsername: CheckUsernameResult {
     get {
-      if case .checkUsername(let v)? = result {return v}
+      if case .checkUsername(let v)? = _storage._result {return v}
       return CheckUsernameResult()
     }
-    set {result = .checkUsername(newValue)}
+    set {_uniqueStorage()._result = .checkUsername(newValue)}
   }
 
   public var changeUsername: ChangeUsernameResult {
     get {
-      if case .changeUsername(let v)? = result {return v}
+      if case .changeUsername(let v)? = _storage._result {return v}
       return ChangeUsernameResult()
     }
-    set {result = .changeUsername(newValue)}
+    set {_uniqueStorage()._result = .changeUsername(newValue)}
   }
 
   public var updateProfile: UpdateProfileResult {
     get {
-      if case .updateProfile(let v)? = result {return v}
+      if case .updateProfile(let v)? = _storage._result {return v}
       return UpdateProfileResult()
     }
-    set {result = .updateProfile(newValue)}
+    set {_uniqueStorage()._result = .updateProfile(newValue)}
   }
 
   public var getSpaceURLPreviewExclusions: GetSpaceUrlPreviewExclusionsResult {
     get {
-      if case .getSpaceURLPreviewExclusions(let v)? = result {return v}
+      if case .getSpaceURLPreviewExclusions(let v)? = _storage._result {return v}
       return GetSpaceUrlPreviewExclusionsResult()
     }
-    set {result = .getSpaceURLPreviewExclusions(newValue)}
+    set {_uniqueStorage()._result = .getSpaceURLPreviewExclusions(newValue)}
   }
 
   public var addSpaceURLPreviewExclusion: AddSpaceUrlPreviewExclusionResult {
     get {
-      if case .addSpaceURLPreviewExclusion(let v)? = result {return v}
+      if case .addSpaceURLPreviewExclusion(let v)? = _storage._result {return v}
       return AddSpaceUrlPreviewExclusionResult()
     }
-    set {result = .addSpaceURLPreviewExclusion(newValue)}
+    set {_uniqueStorage()._result = .addSpaceURLPreviewExclusion(newValue)}
   }
 
   public var removeSpaceURLPreviewExclusion: RemoveSpaceUrlPreviewExclusionResult {
     get {
-      if case .removeSpaceURLPreviewExclusion(let v)? = result {return v}
+      if case .removeSpaceURLPreviewExclusion(let v)? = _storage._result {return v}
       return RemoveSpaceUrlPreviewExclusionResult()
     }
-    set {result = .removeSpaceURLPreviewExclusion(newValue)}
+    set {_uniqueStorage()._result = .removeSpaceURLPreviewExclusion(newValue)}
   }
 
   public var getUserGroups: GetUserGroupsResult {
     get {
-      if case .getUserGroups(let v)? = result {return v}
+      if case .getUserGroups(let v)? = _storage._result {return v}
       return GetUserGroupsResult()
     }
-    set {result = .getUserGroups(newValue)}
+    set {_uniqueStorage()._result = .getUserGroups(newValue)}
   }
 
   public var createUserGroup: CreateUserGroupResult {
     get {
-      if case .createUserGroup(let v)? = result {return v}
+      if case .createUserGroup(let v)? = _storage._result {return v}
       return CreateUserGroupResult()
     }
-    set {result = .createUserGroup(newValue)}
+    set {_uniqueStorage()._result = .createUserGroup(newValue)}
   }
 
   public var updateUserGroup: UpdateUserGroupResult {
     get {
-      if case .updateUserGroup(let v)? = result {return v}
+      if case .updateUserGroup(let v)? = _storage._result {return v}
       return UpdateUserGroupResult()
     }
-    set {result = .updateUserGroup(newValue)}
+    set {_uniqueStorage()._result = .updateUserGroup(newValue)}
   }
 
   public var deleteUserGroup: DeleteUserGroupResult {
     get {
-      if case .deleteUserGroup(let v)? = result {return v}
+      if case .deleteUserGroup(let v)? = _storage._result {return v}
       return DeleteUserGroupResult()
     }
-    set {result = .deleteUserGroup(newValue)}
+    set {_uniqueStorage()._result = .deleteUserGroup(newValue)}
   }
 
   public var getSpaceSettings: GetSpaceSettingsResult {
     get {
-      if case .getSpaceSettings(let v)? = result {return v}
+      if case .getSpaceSettings(let v)? = _storage._result {return v}
       return GetSpaceSettingsResult()
     }
-    set {result = .getSpaceSettings(newValue)}
+    set {_uniqueStorage()._result = .getSpaceSettings(newValue)}
   }
 
   public var toggleSpaceGrid: ToggleSpaceGridResult {
     get {
-      if case .toggleSpaceGrid(let v)? = result {return v}
+      if case .toggleSpaceGrid(let v)? = _storage._result {return v}
       return ToggleSpaceGridResult()
     }
-    set {result = .toggleSpaceGrid(newValue)}
+    set {_uniqueStorage()._result = .toggleSpaceGrid(newValue)}
   }
 
   public var getThreadReferences: GetThreadReferencesResult {
     get {
-      if case .getThreadReferences(let v)? = result {return v}
+      if case .getThreadReferences(let v)? = _storage._result {return v}
       return GetThreadReferencesResult()
     }
-    set {result = .getThreadReferences(newValue)}
+    set {_uniqueStorage()._result = .getThreadReferences(newValue)}
   }
 
   public var getThreadSubthreads: GetThreadSubthreadsResult {
     get {
-      if case .getThreadSubthreads(let v)? = result {return v}
+      if case .getThreadSubthreads(let v)? = _storage._result {return v}
       return GetThreadSubthreadsResult()
     }
-    set {result = .getThreadSubthreads(newValue)}
+    set {_uniqueStorage()._result = .getThreadSubthreads(newValue)}
   }
 
   public var getPeerBots: GetPeerBotsResult {
     get {
-      if case .getPeerBots(let v)? = result {return v}
+      if case .getPeerBots(let v)? = _storage._result {return v}
       return GetPeerBotsResult()
     }
-    set {result = .getPeerBots(newValue)}
+    set {_uniqueStorage()._result = .getPeerBots(newValue)}
   }
 
   public var getMyBotCapabilities: GetMyBotCapabilitiesResult {
     get {
-      if case .getMyBotCapabilities(let v)? = result {return v}
+      if case .getMyBotCapabilities(let v)? = _storage._result {return v}
       return GetMyBotCapabilitiesResult()
     }
-    set {result = .getMyBotCapabilities(newValue)}
+    set {_uniqueStorage()._result = .getMyBotCapabilities(newValue)}
   }
 
   public var setMyBotCapabilities: SetMyBotCapabilitiesResult {
     get {
-      if case .setMyBotCapabilities(let v)? = result {return v}
+      if case .setMyBotCapabilities(let v)? = _storage._result {return v}
       return SetMyBotCapabilitiesResult()
     }
-    set {result = .setMyBotCapabilities(newValue)}
+    set {_uniqueStorage()._result = .setMyBotCapabilities(newValue)}
   }
 
   public var requestBotChatSettings: RequestBotChatSettingsResult {
     get {
-      if case .requestBotChatSettings(let v)? = result {return v}
+      if case .requestBotChatSettings(let v)? = _storage._result {return v}
       return RequestBotChatSettingsResult()
     }
-    set {result = .requestBotChatSettings(newValue)}
+    set {_uniqueStorage()._result = .requestBotChatSettings(newValue)}
   }
 
   public var invokeBotChatSettingsItem: InvokeBotChatSettingsItemResult {
     get {
-      if case .invokeBotChatSettingsItem(let v)? = result {return v}
+      if case .invokeBotChatSettingsItem(let v)? = _storage._result {return v}
       return InvokeBotChatSettingsItemResult()
     }
-    set {result = .invokeBotChatSettingsItem(newValue)}
+    set {_uniqueStorage()._result = .invokeBotChatSettingsItem(newValue)}
   }
 
   public var answerBotChatSettings: AnswerBotChatSettingsResult {
     get {
-      if case .answerBotChatSettings(let v)? = result {return v}
+      if case .answerBotChatSettings(let v)? = _storage._result {return v}
       return AnswerBotChatSettingsResult()
     }
-    set {result = .answerBotChatSettings(newValue)}
+    set {_uniqueStorage()._result = .answerBotChatSettings(newValue)}
   }
 
   public var getGrid: GetGridResult {
     get {
-      if case .getGrid(let v)? = result {return v}
+      if case .getGrid(let v)? = _storage._result {return v}
       return GetGridResult()
     }
-    set {result = .getGrid(newValue)}
+    set {_uniqueStorage()._result = .getGrid(newValue)}
   }
 
   public var createGridRoom: CreateGridRoomResult {
     get {
-      if case .createGridRoom(let v)? = result {return v}
+      if case .createGridRoom(let v)? = _storage._result {return v}
       return CreateGridRoomResult()
     }
-    set {result = .createGridRoom(newValue)}
+    set {_uniqueStorage()._result = .createGridRoom(newValue)}
   }
 
   public var joinGridRoom: JoinGridRoomResult {
     get {
-      if case .joinGridRoom(let v)? = result {return v}
+      if case .joinGridRoom(let v)? = _storage._result {return v}
       return JoinGridRoomResult()
     }
-    set {result = .joinGridRoom(newValue)}
+    set {_uniqueStorage()._result = .joinGridRoom(newValue)}
   }
 
   public var leaveGridRoom: LeaveGridRoomResult {
     get {
-      if case .leaveGridRoom(let v)? = result {return v}
+      if case .leaveGridRoom(let v)? = _storage._result {return v}
       return LeaveGridRoomResult()
     }
-    set {result = .leaveGridRoom(newValue)}
+    set {_uniqueStorage()._result = .leaveGridRoom(newValue)}
   }
 
   public var setGridRoomTitle: SetGridRoomTitleResult {
     get {
-      if case .setGridRoomTitle(let v)? = result {return v}
+      if case .setGridRoomTitle(let v)? = _storage._result {return v}
       return SetGridRoomTitleResult()
     }
-    set {result = .setGridRoomTitle(newValue)}
+    set {_uniqueStorage()._result = .setGridRoomTitle(newValue)}
   }
 
   public var setGridRoomLocked: SetGridRoomLockedResult {
     get {
-      if case .setGridRoomLocked(let v)? = result {return v}
+      if case .setGridRoomLocked(let v)? = _storage._result {return v}
       return SetGridRoomLockedResult()
     }
-    set {result = .setGridRoomLocked(newValue)}
+    set {_uniqueStorage()._result = .setGridRoomLocked(newValue)}
   }
 
   public var deleteGridRoom: DeleteGridRoomResult {
     get {
-      if case .deleteGridRoom(let v)? = result {return v}
+      if case .deleteGridRoom(let v)? = _storage._result {return v}
       return DeleteGridRoomResult()
     }
-    set {result = .deleteGridRoom(newValue)}
+    set {_uniqueStorage()._result = .deleteGridRoom(newValue)}
   }
 
   public var prepareGridConnection: PrepareGridConnectionResult {
     get {
-      if case .prepareGridConnection(let v)? = result {return v}
+      if case .prepareGridConnection(let v)? = _storage._result {return v}
       return PrepareGridConnectionResult()
     }
-    set {result = .prepareGridConnection(newValue)}
+    set {_uniqueStorage()._result = .prepareGridConnection(newValue)}
   }
 
   public var setGridAvatarMicrophoneEnabled: SetGridAvatarMicrophoneEnabledResult {
     get {
-      if case .setGridAvatarMicrophoneEnabled(let v)? = result {return v}
+      if case .setGridAvatarMicrophoneEnabled(let v)? = _storage._result {return v}
       return SetGridAvatarMicrophoneEnabledResult()
     }
-    set {result = .setGridAvatarMicrophoneEnabled(newValue)}
+    set {_uniqueStorage()._result = .setGridAvatarMicrophoneEnabled(newValue)}
   }
 
   public var getGridHome: GetGridHomeResult {
     get {
-      if case .getGridHome(let v)? = result {return v}
+      if case .getGridHome(let v)? = _storage._result {return v}
       return GetGridHomeResult()
     }
-    set {result = .getGridHome(newValue)}
+    set {_uniqueStorage()._result = .getGridHome(newValue)}
   }
 
   public var createCliSession: CreateCliSessionResult {
     get {
-      if case .createCliSession(let v)? = result {return v}
+      if case .createCliSession(let v)? = _storage._result {return v}
       return CreateCliSessionResult()
     }
-    set {result = .createCliSession(newValue)}
+    set {_uniqueStorage()._result = .createCliSession(newValue)}
   }
 
   public var setProfilePhoto: SetProfilePhotoResult {
     get {
-      if case .setProfilePhoto(let v)? = result {return v}
+      if case .setProfilePhoto(let v)? = _storage._result {return v}
       return SetProfilePhotoResult()
     }
-    set {result = .setProfilePhoto(newValue)}
+    set {_uniqueStorage()._result = .setProfilePhoto(newValue)}
   }
 
   public var getExternalProfilePhoto: GetExternalProfilePhotoResult {
     get {
-      if case .getExternalProfilePhoto(let v)? = result {return v}
+      if case .getExternalProfilePhoto(let v)? = _storage._result {return v}
       return GetExternalProfilePhotoResult()
     }
-    set {result = .getExternalProfilePhoto(newValue)}
+    set {_uniqueStorage()._result = .getExternalProfilePhoto(newValue)}
   }
 
   public var getChatTranscript: GetChatTranscriptResult {
     get {
-      if case .getChatTranscript(let v)? = result {return v}
+      if case .getChatTranscript(let v)? = _storage._result {return v}
       return GetChatTranscriptResult()
     }
-    set {result = .getChatTranscript(newValue)}
+    set {_uniqueStorage()._result = .getChatTranscript(newValue)}
   }
 
   public var searchExternalResources: SearchExternalResourcesResult {
     get {
-      if case .searchExternalResources(let v)? = result {return v}
+      if case .searchExternalResources(let v)? = _storage._result {return v}
       return SearchExternalResourcesResult()
     }
-    set {result = .searchExternalResources(newValue)}
+    set {_uniqueStorage()._result = .searchExternalResources(newValue)}
   }
 
   public var joinPublicSpace: JoinPublicSpaceResult {
     get {
-      if case .joinPublicSpace(let v)? = result {return v}
+      if case .joinPublicSpace(let v)? = _storage._result {return v}
       return JoinPublicSpaceResult()
     }
-    set {result = .joinPublicSpace(newValue)}
+    set {_uniqueStorage()._result = .joinPublicSpace(newValue)}
+  }
+
+  public var collapseHistory: CollapseHistoryResult {
+    get {
+      if case .collapseHistory(let v)? = _storage._result {return v}
+      return CollapseHistoryResult()
+    }
+    set {_uniqueStorage()._result = .collapseHistory(newValue)}
   }
 
   public var listConnectors: ListConnectorsResult {
     get {
-      if case .listConnectors(let v)? = result {return v}
+      if case .listConnectors(let v)? = _storage._result {return v}
       return ListConnectorsResult()
     }
-    set {result = .listConnectors(newValue)}
+    set {_uniqueStorage()._result = .listConnectors(newValue)}
   }
 
   public var prepareConnectorOauth: PrepareConnectorOAuthResult {
     get {
-      if case .prepareConnectorOauth(let v)? = result {return v}
+      if case .prepareConnectorOauth(let v)? = _storage._result {return v}
       return PrepareConnectorOAuthResult()
     }
-    set {result = .prepareConnectorOauth(newValue)}
+    set {_uniqueStorage()._result = .prepareConnectorOauth(newValue)}
   }
 
   public var disconnectConnector: DisconnectConnectorResult {
     get {
-      if case .disconnectConnector(let v)? = result {return v}
+      if case .disconnectConnector(let v)? = _storage._result {return v}
       return DisconnectConnectorResult()
     }
-    set {result = .disconnectConnector(newValue)}
+    set {_uniqueStorage()._result = .disconnectConnector(newValue)}
   }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -6407,6 +6421,7 @@ public nonisolated struct RpcResult: Sendable {
     case getChatTranscript(GetChatTranscriptResult)
     case searchExternalResources(SearchExternalResourcesResult)
     case joinPublicSpace(JoinPublicSpaceResult)
+    case collapseHistory(CollapseHistoryResult)
     case listConnectors(ListConnectorsResult)
     case prepareConnectorOauth(PrepareConnectorOAuthResult)
     case disconnectConnector(DisconnectConnectorResult)
@@ -6414,6 +6429,8 @@ public nonisolated struct RpcResult: Sendable {
   }
 
   public init() {}
+
+  fileprivate var _storage = _StorageClass.defaultInstance
 }
 
 public nonisolated struct UpdateBucket: Sendable {
@@ -7758,34 +7775,35 @@ public nonisolated struct ShowInChatListInput: Sendable {
   fileprivate var _peerID: InputPeer? = nil
 }
 
-public nonisolated struct ShowInChatListResult: @unchecked Sendable {
+public nonisolated struct ShowInChatListResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var chat: Chat {
-    get {_storage._chat ?? Chat()}
-    set {_uniqueStorage()._chat = newValue}
+    get {_chat ?? Chat()}
+    set {_chat = newValue}
   }
   /// Returns true if `chat` has been explicitly set.
-  public var hasChat: Bool {_storage._chat != nil}
+  public var hasChat: Bool {self._chat != nil}
   /// Clears the value of `chat`. Subsequent reads from it will return its default value.
-  public mutating func clearChat() {_uniqueStorage()._chat = nil}
+  public mutating func clearChat() {self._chat = nil}
 
   public var dialog: Dialog {
-    get {_storage._dialog ?? Dialog()}
-    set {_uniqueStorage()._dialog = newValue}
+    get {_dialog ?? Dialog()}
+    set {_dialog = newValue}
   }
   /// Returns true if `dialog` has been explicitly set.
-  public var hasDialog: Bool {_storage._dialog != nil}
+  public var hasDialog: Bool {self._dialog != nil}
   /// Clears the value of `dialog`. Subsequent reads from it will return its default value.
-  public mutating func clearDialog() {_uniqueStorage()._dialog = nil}
+  public mutating func clearDialog() {self._dialog = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
-  fileprivate var _storage = _StorageClass.defaultInstance
+  fileprivate var _chat: Chat? = nil
+  fileprivate var _dialog: Dialog? = nil
 }
 
 public nonisolated struct UpdateDialogOpenInput: Sendable {
@@ -8001,6 +8019,50 @@ public nonisolated struct UpdateDialogFollowModeInput: Sendable {
 }
 
 public nonisolated struct UpdateDialogFollowModeResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var updates: [Update] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct CollapseHistoryInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var peerID: InputPeer {
+    get {_peerID ?? InputPeer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  /// Unset removes the personal collapse boundary.
+  public var maxID: Int64 {
+    get {_maxID ?? 0}
+    set {_maxID = newValue}
+  }
+  /// Returns true if `maxID` has been explicitly set.
+  public var hasMaxID: Bool {self._maxID != nil}
+  /// Clears the value of `maxID`. Subsequent reads from it will return its default value.
+  public mutating func clearMaxID() {self._maxID = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: InputPeer? = nil
+  fileprivate var _maxID: Int64? = nil
+}
+
+public nonisolated struct CollapseHistoryResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -11417,34 +11479,35 @@ public nonisolated struct CreateChatInput: Sendable {
   fileprivate var _reservedChatID: Int64? = nil
 }
 
-public nonisolated struct CreateChatResult: @unchecked Sendable {
+public nonisolated struct CreateChatResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var chat: Chat {
-    get {_storage._chat ?? Chat()}
-    set {_uniqueStorage()._chat = newValue}
+    get {_chat ?? Chat()}
+    set {_chat = newValue}
   }
   /// Returns true if `chat` has been explicitly set.
-  public var hasChat: Bool {_storage._chat != nil}
+  public var hasChat: Bool {self._chat != nil}
   /// Clears the value of `chat`. Subsequent reads from it will return its default value.
-  public mutating func clearChat() {_uniqueStorage()._chat = nil}
+  public mutating func clearChat() {self._chat = nil}
 
   public var dialog: Dialog {
-    get {_storage._dialog ?? Dialog()}
-    set {_uniqueStorage()._dialog = newValue}
+    get {_dialog ?? Dialog()}
+    set {_dialog = newValue}
   }
   /// Returns true if `dialog` has been explicitly set.
-  public var hasDialog: Bool {_storage._dialog != nil}
+  public var hasDialog: Bool {self._dialog != nil}
   /// Clears the value of `dialog`. Subsequent reads from it will return its default value.
-  public mutating func clearDialog() {_uniqueStorage()._dialog = nil}
+  public mutating func clearDialog() {self._dialog = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
-  fileprivate var _storage = _StorageClass.defaultInstance
+  fileprivate var _chat: Chat? = nil
+  fileprivate var _dialog: Dialog? = nil
 }
 
 public nonisolated struct CreateSubthreadInput: Sendable {
@@ -12089,6 +12152,14 @@ public nonisolated struct Update: @unchecked Sendable {
     set {_uniqueStorage()._update = .chatPermissions(newValue)}
   }
 
+  public var dialogCollapsedMaxID: UpdateDialogCollapsedMaxId {
+    get {
+      if case .dialogCollapsedMaxID(let v)? = _storage._update {return v}
+      return UpdateDialogCollapsedMaxId()
+    }
+    set {_uniqueStorage()._update = .dialogCollapsedMaxID(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Update: Equatable, Sendable {
@@ -12143,6 +12214,7 @@ public nonisolated struct Update: @unchecked Sendable {
     case participantGroupDelete(UpdateChatParticipantGroupDelete)
     case spaceSettings(UpdateSpaceSettings)
     case chatPermissions(UpdateChatPermissions)
+    case dialogCollapsedMaxID(UpdateDialogCollapsedMaxId)
 
   }
 
@@ -12744,6 +12816,38 @@ public nonisolated struct UpdateDialogFollowMode: Sendable {
 
   fileprivate var _peerID: Peer? = nil
   fileprivate var _followMode: DialogFollowMode? = nil
+}
+
+public nonisolated struct UpdateDialogCollapsedMaxId: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var peerID: Peer {
+    get {_peerID ?? Peer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  /// Unset removes the personal collapse boundary.
+  public var maxID: Int64 {
+    get {_maxID ?? 0}
+    set {_maxID = newValue}
+  }
+  /// Returns true if `maxID` has been explicitly set.
+  public var hasMaxID: Bool {self._maxID != nil}
+  /// Clears the value of `maxID`. Subsequent reads from it will return its default value.
+  public mutating func clearMaxID() {self._maxID = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: Peer? = nil
+  fileprivate var _maxID: Int64? = nil
 }
 
 /// Update when a new chat is created either in space or a private chat
@@ -14843,7 +14947,7 @@ nonisolated extension MessageSendMode: SwiftProtobuf._ProtoNameProviding {
 }
 
 nonisolated extension Method: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNSPECIFIED\0\u{1}GET_ME\0\u{1}SEND_MESSAGE\0\u{1}GET_PEER_PHOTO\0\u{1}DELETE_MESSAGES\0\u{1}GET_CHAT_HISTORY\0\u{1}ADD_REACTION\0\u{1}DELETE_REACTION\0\u{1}EDIT_MESSAGE\0\u{1}CREATE_CHAT\0\u{1}GET_SPACE_MEMBERS\0\u{1}DELETE_CHAT\0\u{1}INVITE_TO_SPACE\0\u{1}GET_CHAT_PARTICIPANTS\0\u{1}ADD_CHAT_PARTICIPANT\0\u{1}REMOVE_CHAT_PARTICIPANT\0\u{1}TRANSLATE_MESSAGES\0\u{1}GET_CHATS\0\u{1}UPDATE_USER_SETTINGS\0\u{1}GET_USER_SETTINGS\0\u{1}SEND_COMPOSE_ACTION\0\u{1}CREATE_BOT\0\u{1}DELETE_MEMBER\0\u{1}MARK_AS_UNREAD\0\u{1}GET_UPDATES_STATE\0\u{1}GET_CHAT\0\u{1}GET_UPDATES\0\u{1}UPDATE_MEMBER_ACCESS\0\u{1}SEARCH_MESSAGES\0\u{1}FORWARD_MESSAGES\0\u{1}UPDATE_CHAT_VISIBILITY\0\u{1}PIN_MESSAGE\0\u{1}UPDATE_CHAT_INFO\0\u{1}LIST_BOTS\0\u{1}REVEAL_BOT_TOKEN\0\u{1}MOVE_THREAD\0\u{1}ROTATE_BOT_TOKEN\0\u{1}UPDATE_BOT_PROFILE\0\u{1}GET_MESSAGES\0\u{1}UPDATE_DIALOG_NOTIFICATION_SETTINGS\0\u{1}READ_MESSAGES\0\u{1}UPDATE_PUSH_NOTIFICATION_DETAILS\0\u{1}CREATE_SUBTHREAD\0\u{1}GET_BOT_COMMANDS\0\u{1}SET_BOT_COMMANDS\0\u{1}GET_PEER_BOT_COMMANDS\0\u{1}SHOW_IN_CHAT_LIST\0\u{1}RESERVE_CHAT_IDS\0\u{1}INVOKE_MESSAGE_ACTION\0\u{1}ANSWER_MESSAGE_ACTION\0\u{1}REVOKE_SESSION\0\u{1}UPDATE_DIALOG_OPEN\0\u{1}UPDATE_DIALOG_ORDER\0\u{1}CLEAR_CHAT_HISTORY\0\u{1}DELETE_BOT\0\u{1}DELETE_MESSAGE_ATTACHMENT\0\u{1}SET_BOT_AVATAR\0\u{1}CLEAR_BOT_AVATAR\0\u{1}GET_BOT_PRESENCE\0\u{1}SET_BOT_PRESENCE_STATE\0\u{1}UPDATE_DIALOG_FOLLOW_MODE\0\u{1}GET_SESSIONS\0\u{1}CHECK_USERNAME\0\u{1}CHANGE_USERNAME\0\u{1}UPDATE_PROFILE\0\u{1}GET_SPACE_URL_PREVIEW_EXCLUSIONS\0\u{1}ADD_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}REMOVE_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}GET_USER_GROUPS\0\u{1}CREATE_USER_GROUP\0\u{1}UPDATE_USER_GROUP\0\u{1}DELETE_USER_GROUP\0\u{1}GET_SPACE_SETTINGS\0\u{1}TOGGLE_SPACE_GRID\0\u{1}GET_THREAD_REFERENCES\0\u{1}GET_THREAD_SUBTHREADS\0\u{1}GET_PEER_BOTS\0\u{1}GET_MY_BOT_CAPABILITIES\0\u{1}SET_MY_BOT_CAPABILITIES\0\u{1}REQUEST_BOT_CHAT_SETTINGS\0\u{1}INVOKE_BOT_CHAT_SETTINGS_ITEM\0\u{1}ANSWER_BOT_CHAT_SETTINGS\0\u{2}\u{2}GET_GRID\0\u{1}CREATE_GRID_ROOM\0\u{1}JOIN_GRID_ROOM\0\u{1}LEAVE_GRID_ROOM\0\u{1}SET_GRID_ROOM_TITLE\0\u{1}SET_GRID_ROOM_LOCKED\0\u{1}DELETE_GRID_ROOM\0\u{1}PREPARE_GRID_CONNECTION\0\u{1}SET_GRID_AVATAR_MICROPHONE_ENABLED\0\u{1}GET_GRID_HOME\0\u{1}CREATE_CLI_SESSION\0\u{1}SET_PROFILE_PHOTO\0\u{1}GET_EXTERNAL_PROFILE_PHOTO\0\u{1}GET_CHAT_TRANSCRIPT\0\u{1}SEARCH_EXTERNAL_RESOURCES\0\u{1}JOIN_PUBLIC_SPACE\0\u{2}\u{2}LIST_CONNECTORS\0\u{1}PREPARE_CONNECTOR_OAUTH\0\u{1}DISCONNECT_CONNECTOR\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNSPECIFIED\0\u{1}GET_ME\0\u{1}SEND_MESSAGE\0\u{1}GET_PEER_PHOTO\0\u{1}DELETE_MESSAGES\0\u{1}GET_CHAT_HISTORY\0\u{1}ADD_REACTION\0\u{1}DELETE_REACTION\0\u{1}EDIT_MESSAGE\0\u{1}CREATE_CHAT\0\u{1}GET_SPACE_MEMBERS\0\u{1}DELETE_CHAT\0\u{1}INVITE_TO_SPACE\0\u{1}GET_CHAT_PARTICIPANTS\0\u{1}ADD_CHAT_PARTICIPANT\0\u{1}REMOVE_CHAT_PARTICIPANT\0\u{1}TRANSLATE_MESSAGES\0\u{1}GET_CHATS\0\u{1}UPDATE_USER_SETTINGS\0\u{1}GET_USER_SETTINGS\0\u{1}SEND_COMPOSE_ACTION\0\u{1}CREATE_BOT\0\u{1}DELETE_MEMBER\0\u{1}MARK_AS_UNREAD\0\u{1}GET_UPDATES_STATE\0\u{1}GET_CHAT\0\u{1}GET_UPDATES\0\u{1}UPDATE_MEMBER_ACCESS\0\u{1}SEARCH_MESSAGES\0\u{1}FORWARD_MESSAGES\0\u{1}UPDATE_CHAT_VISIBILITY\0\u{1}PIN_MESSAGE\0\u{1}UPDATE_CHAT_INFO\0\u{1}LIST_BOTS\0\u{1}REVEAL_BOT_TOKEN\0\u{1}MOVE_THREAD\0\u{1}ROTATE_BOT_TOKEN\0\u{1}UPDATE_BOT_PROFILE\0\u{1}GET_MESSAGES\0\u{1}UPDATE_DIALOG_NOTIFICATION_SETTINGS\0\u{1}READ_MESSAGES\0\u{1}UPDATE_PUSH_NOTIFICATION_DETAILS\0\u{1}CREATE_SUBTHREAD\0\u{1}GET_BOT_COMMANDS\0\u{1}SET_BOT_COMMANDS\0\u{1}GET_PEER_BOT_COMMANDS\0\u{1}SHOW_IN_CHAT_LIST\0\u{1}RESERVE_CHAT_IDS\0\u{1}INVOKE_MESSAGE_ACTION\0\u{1}ANSWER_MESSAGE_ACTION\0\u{1}REVOKE_SESSION\0\u{1}UPDATE_DIALOG_OPEN\0\u{1}UPDATE_DIALOG_ORDER\0\u{1}CLEAR_CHAT_HISTORY\0\u{1}DELETE_BOT\0\u{1}DELETE_MESSAGE_ATTACHMENT\0\u{1}SET_BOT_AVATAR\0\u{1}CLEAR_BOT_AVATAR\0\u{1}GET_BOT_PRESENCE\0\u{1}SET_BOT_PRESENCE_STATE\0\u{1}UPDATE_DIALOG_FOLLOW_MODE\0\u{1}GET_SESSIONS\0\u{1}CHECK_USERNAME\0\u{1}CHANGE_USERNAME\0\u{1}UPDATE_PROFILE\0\u{1}GET_SPACE_URL_PREVIEW_EXCLUSIONS\0\u{1}ADD_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}REMOVE_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}GET_USER_GROUPS\0\u{1}CREATE_USER_GROUP\0\u{1}UPDATE_USER_GROUP\0\u{1}DELETE_USER_GROUP\0\u{1}GET_SPACE_SETTINGS\0\u{1}TOGGLE_SPACE_GRID\0\u{1}GET_THREAD_REFERENCES\0\u{1}GET_THREAD_SUBTHREADS\0\u{1}GET_PEER_BOTS\0\u{1}GET_MY_BOT_CAPABILITIES\0\u{1}SET_MY_BOT_CAPABILITIES\0\u{1}REQUEST_BOT_CHAT_SETTINGS\0\u{1}INVOKE_BOT_CHAT_SETTINGS_ITEM\0\u{1}ANSWER_BOT_CHAT_SETTINGS\0\u{2}\u{2}GET_GRID\0\u{1}CREATE_GRID_ROOM\0\u{1}JOIN_GRID_ROOM\0\u{1}LEAVE_GRID_ROOM\0\u{1}SET_GRID_ROOM_TITLE\0\u{1}SET_GRID_ROOM_LOCKED\0\u{1}DELETE_GRID_ROOM\0\u{1}PREPARE_GRID_CONNECTION\0\u{1}SET_GRID_AVATAR_MICROPHONE_ENABLED\0\u{1}GET_GRID_HOME\0\u{1}CREATE_CLI_SESSION\0\u{1}SET_PROFILE_PHOTO\0\u{1}GET_EXTERNAL_PROFILE_PHOTO\0\u{1}GET_CHAT_TRANSCRIPT\0\u{1}SEARCH_EXTERNAL_RESOURCES\0\u{1}JOIN_PUBLIC_SPACE\0\u{1}COLLAPSE_HISTORY\0\u{1}LIST_CONNECTORS\0\u{1}PREPARE_CONNECTOR_OAUTH\0\u{1}DISCONNECT_CONNECTOR\0")
 }
 
 nonisolated extension GridConnectionUnavailableReason: SwiftProtobuf._ProtoNameProviding {
@@ -15059,192 +15163,154 @@ nonisolated extension ServerProtocolMessage: SwiftProtobuf.Message, SwiftProtobu
   public static let protoMessageName: String = "ServerProtocolMessage"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{4}\u{3}connection_open\0\u{3}rpc_result\0\u{3}rpc_error\0\u{1}message\0\u{1}ack\0\u{1}pong\0\u{3}connection_error\0\u{c}\u{2}\u{1}\u{c}\u{3}\u{1}")
 
-  fileprivate class _StorageClass {
-    var _id: UInt64 = 0
-    var _body: ServerProtocolMessage.OneOf_Body?
-
-      // This property is used as the initial default value for new instances of the type.
-      // The type itself is protecting the reference to its storage via CoW semantics.
-      // This will force a copy to be made of this reference when the first mutation occurs;
-      // hence, it is safe to mark this as `nonisolated(unsafe)`.
-      static nonisolated(unsafe) let defaultInstance = _StorageClass()
-
-    private init() {}
-
-    init(copying source: _StorageClass) {
-      _id = source._id
-      _body = source._body
-    }
-  }
-
-  fileprivate mutating func _uniqueStorage() -> _StorageClass {
-    if !isKnownUniquelyReferenced(&_storage) {
-      _storage = _StorageClass(copying: _storage)
-    }
-    return _storage
-  }
-
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    _ = _uniqueStorage()
-    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
-      while let fieldNumber = try decoder.nextFieldNumber() {
-        // The use of inline closures is to circumvent an issue where the compiler
-        // allocates stack space for every case branch when no optimizations are
-        // enabled. https://github.com/apple/swift-protobuf/issues/1034
-        switch fieldNumber {
-        case 1: try { try decoder.decodeSingularUInt64Field(value: &_storage._id) }()
-        case 4: try {
-          var v: ConnectionOpen?
-          var hadOneofValue = false
-          if let current = _storage._body {
-            hadOneofValue = true
-            if case .connectionOpen(let m) = current {v = m}
-          }
-          try decoder.decodeSingularMessageField(value: &v)
-          if let v = v {
-            if hadOneofValue {try decoder.handleConflictingOneOf()}
-            _storage._body = .connectionOpen(v)
-          }
-        }()
-        case 5: try {
-          var v: RpcResult?
-          var hadOneofValue = false
-          if let current = _storage._body {
-            hadOneofValue = true
-            if case .rpcResult(let m) = current {v = m}
-          }
-          try decoder.decodeSingularMessageField(value: &v)
-          if let v = v {
-            if hadOneofValue {try decoder.handleConflictingOneOf()}
-            _storage._body = .rpcResult(v)
-          }
-        }()
-        case 6: try {
-          var v: RpcError?
-          var hadOneofValue = false
-          if let current = _storage._body {
-            hadOneofValue = true
-            if case .rpcError(let m) = current {v = m}
-          }
-          try decoder.decodeSingularMessageField(value: &v)
-          if let v = v {
-            if hadOneofValue {try decoder.handleConflictingOneOf()}
-            _storage._body = .rpcError(v)
-          }
-        }()
-        case 7: try {
-          var v: ServerMessage?
-          var hadOneofValue = false
-          if let current = _storage._body {
-            hadOneofValue = true
-            if case .message(let m) = current {v = m}
-          }
-          try decoder.decodeSingularMessageField(value: &v)
-          if let v = v {
-            if hadOneofValue {try decoder.handleConflictingOneOf()}
-            _storage._body = .message(v)
-          }
-        }()
-        case 8: try {
-          var v: Ack?
-          var hadOneofValue = false
-          if let current = _storage._body {
-            hadOneofValue = true
-            if case .ack(let m) = current {v = m}
-          }
-          try decoder.decodeSingularMessageField(value: &v)
-          if let v = v {
-            if hadOneofValue {try decoder.handleConflictingOneOf()}
-            _storage._body = .ack(v)
-          }
-        }()
-        case 9: try {
-          var v: Pong?
-          var hadOneofValue = false
-          if let current = _storage._body {
-            hadOneofValue = true
-            if case .pong(let m) = current {v = m}
-          }
-          try decoder.decodeSingularMessageField(value: &v)
-          if let v = v {
-            if hadOneofValue {try decoder.handleConflictingOneOf()}
-            _storage._body = .pong(v)
-          }
-        }()
-        case 10: try {
-          var v: ConnectionError?
-          var hadOneofValue = false
-          if let current = _storage._body {
-            hadOneofValue = true
-            if case .connectionError(let m) = current {v = m}
-          }
-          try decoder.decodeSingularMessageField(value: &v)
-          if let v = v {
-            if hadOneofValue {try decoder.handleConflictingOneOf()}
-            _storage._body = .connectionError(v)
-          }
-        }()
-        default: break
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.id) }()
+      case 4: try {
+        var v: ConnectionOpen?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .connectionOpen(let m) = current {v = m}
         }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .connectionOpen(v)
+        }
+      }()
+      case 5: try {
+        var v: RpcResult?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .rpcResult(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .rpcResult(v)
+        }
+      }()
+      case 6: try {
+        var v: RpcError?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .rpcError(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .rpcError(v)
+        }
+      }()
+      case 7: try {
+        var v: ServerMessage?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .message(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .message(v)
+        }
+      }()
+      case 8: try {
+        var v: Ack?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .ack(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .ack(v)
+        }
+      }()
+      case 9: try {
+        var v: Pong?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .pong(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .pong(v)
+        }
+      }()
+      case 10: try {
+        var v: ConnectionError?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .connectionError(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .connectionError(v)
+        }
+      }()
+      default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every if/case branch local when no optimizations
-      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-      // https://github.com/apple/swift-protobuf/issues/1182
-      if _storage._id != 0 {
-        try visitor.visitSingularUInt64Field(value: _storage._id, fieldNumber: 1)
-      }
-      switch _storage._body {
-      case .connectionOpen?: try {
-        guard case .connectionOpen(let v)? = _storage._body else { preconditionFailure() }
-        try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
-      }()
-      case .rpcResult?: try {
-        guard case .rpcResult(let v)? = _storage._body else { preconditionFailure() }
-        try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
-      }()
-      case .rpcError?: try {
-        guard case .rpcError(let v)? = _storage._body else { preconditionFailure() }
-        try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
-      }()
-      case .message?: try {
-        guard case .message(let v)? = _storage._body else { preconditionFailure() }
-        try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
-      }()
-      case .ack?: try {
-        guard case .ack(let v)? = _storage._body else { preconditionFailure() }
-        try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
-      }()
-      case .pong?: try {
-        guard case .pong(let v)? = _storage._body else { preconditionFailure() }
-        try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
-      }()
-      case .connectionError?: try {
-        guard case .connectionError(let v)? = _storage._body else { preconditionFailure() }
-        try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
-      }()
-      case nil: break
-      }
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.id != 0 {
+      try visitor.visitSingularUInt64Field(value: self.id, fieldNumber: 1)
+    }
+    switch self.body {
+    case .connectionOpen?: try {
+      guard case .connectionOpen(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    }()
+    case .rpcResult?: try {
+      guard case .rpcResult(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+    }()
+    case .rpcError?: try {
+      guard case .rpcError(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+    }()
+    case .message?: try {
+      guard case .message(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+    }()
+    case .ack?: try {
+      guard case .ack(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
+    }()
+    case .pong?: try {
+      guard case .pong(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+    }()
+    case .connectionError?: try {
+      guard case .connectionError(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
+    }()
+    case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: ServerProtocolMessage, rhs: ServerProtocolMessage) -> Bool {
-    if lhs._storage !== rhs._storage {
-      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
-        let _storage = _args.0
-        let rhs_storage = _args.1
-        if _storage._id != rhs_storage._id {return false}
-        if _storage._body != rhs_storage._body {return false}
-        return true
-      }
-      if !storagesAreEqual {return false}
-    }
+    if lhs.id != rhs.id {return false}
+    if lhs.body != rhs.body {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -16439,108 +16505,181 @@ nonisolated extension UserProfilePhoto: SwiftProtobuf.Message, SwiftProtobuf._Me
 
 nonisolated extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Dialog"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}peer\0\u{3}space_id\0\u{1}archived\0\u{1}pinned\0\u{3}read_max_id\0\u{3}unread_count\0\u{3}chat_id\0\u{3}unread_mark\0\u{3}notification_settings\0\u{3}sidebar_visible\0\u{1}open\0\u{3}opened_date\0\u{3}chat_list_hidden\0\u{1}order\0\u{3}pinned_order\0\u{3}follow_mode\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}peer\0\u{3}space_id\0\u{1}archived\0\u{1}pinned\0\u{3}read_max_id\0\u{3}unread_count\0\u{3}chat_id\0\u{3}unread_mark\0\u{3}notification_settings\0\u{3}sidebar_visible\0\u{1}open\0\u{3}opened_date\0\u{3}chat_list_hidden\0\u{1}order\0\u{3}pinned_order\0\u{3}follow_mode\0\u{3}collapsed_max_id\0")
+
+  fileprivate class _StorageClass {
+    var _peer: Peer? = nil
+    var _spaceID: Int64? = nil
+    var _archived: Bool? = nil
+    var _pinned: Bool? = nil
+    var _readMaxID: Int64? = nil
+    var _unreadCount: Int32? = nil
+    var _chatID: Int64? = nil
+    var _unreadMark: Bool? = nil
+    var _notificationSettings: DialogNotificationSettings? = nil
+    var _sidebarVisible: Bool? = nil
+    var _chatListHidden: Bool? = nil
+    var _open: Bool? = nil
+    var _openedDate: Int64? = nil
+    var _order: String? = nil
+    var _pinnedOrder: String? = nil
+    var _followMode: DialogFollowMode? = nil
+    var _collapsedMaxID: Int64? = nil
+
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _peer = source._peer
+      _spaceID = source._spaceID
+      _archived = source._archived
+      _pinned = source._pinned
+      _readMaxID = source._readMaxID
+      _unreadCount = source._unreadCount
+      _chatID = source._chatID
+      _unreadMark = source._unreadMark
+      _notificationSettings = source._notificationSettings
+      _sidebarVisible = source._sidebarVisible
+      _chatListHidden = source._chatListHidden
+      _open = source._open
+      _openedDate = source._openedDate
+      _order = source._order
+      _pinnedOrder = source._pinnedOrder
+      _followMode = source._followMode
+      _collapsedMaxID = source._collapsedMaxID
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularMessageField(value: &self._peer) }()
-      case 2: try { try decoder.decodeSingularInt64Field(value: &self._spaceID) }()
-      case 3: try { try decoder.decodeSingularBoolField(value: &self._archived) }()
-      case 4: try { try decoder.decodeSingularBoolField(value: &self._pinned) }()
-      case 5: try { try decoder.decodeSingularInt64Field(value: &self._readMaxID) }()
-      case 6: try { try decoder.decodeSingularInt32Field(value: &self._unreadCount) }()
-      case 7: try { try decoder.decodeSingularInt64Field(value: &self._chatID) }()
-      case 8: try { try decoder.decodeSingularBoolField(value: &self._unreadMark) }()
-      case 9: try { try decoder.decodeSingularMessageField(value: &self._notificationSettings) }()
-      case 10: try { try decoder.decodeSingularBoolField(value: &self._sidebarVisible) }()
-      case 11: try { try decoder.decodeSingularBoolField(value: &self._open) }()
-      case 12: try { try decoder.decodeSingularInt64Field(value: &self._openedDate) }()
-      case 13: try { try decoder.decodeSingularBoolField(value: &self._chatListHidden) }()
-      case 14: try { try decoder.decodeSingularStringField(value: &self._order) }()
-      case 15: try { try decoder.decodeSingularStringField(value: &self._pinnedOrder) }()
-      case 16: try { try decoder.decodeSingularEnumField(value: &self._followMode) }()
-      default: break
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularMessageField(value: &_storage._peer) }()
+        case 2: try { try decoder.decodeSingularInt64Field(value: &_storage._spaceID) }()
+        case 3: try { try decoder.decodeSingularBoolField(value: &_storage._archived) }()
+        case 4: try { try decoder.decodeSingularBoolField(value: &_storage._pinned) }()
+        case 5: try { try decoder.decodeSingularInt64Field(value: &_storage._readMaxID) }()
+        case 6: try { try decoder.decodeSingularInt32Field(value: &_storage._unreadCount) }()
+        case 7: try { try decoder.decodeSingularInt64Field(value: &_storage._chatID) }()
+        case 8: try { try decoder.decodeSingularBoolField(value: &_storage._unreadMark) }()
+        case 9: try { try decoder.decodeSingularMessageField(value: &_storage._notificationSettings) }()
+        case 10: try { try decoder.decodeSingularBoolField(value: &_storage._sidebarVisible) }()
+        case 11: try { try decoder.decodeSingularBoolField(value: &_storage._open) }()
+        case 12: try { try decoder.decodeSingularInt64Field(value: &_storage._openedDate) }()
+        case 13: try { try decoder.decodeSingularBoolField(value: &_storage._chatListHidden) }()
+        case 14: try { try decoder.decodeSingularStringField(value: &_storage._order) }()
+        case 15: try { try decoder.decodeSingularStringField(value: &_storage._pinnedOrder) }()
+        case 16: try { try decoder.decodeSingularEnumField(value: &_storage._followMode) }()
+        case 17: try { try decoder.decodeSingularInt64Field(value: &_storage._collapsedMaxID) }()
+        default: break
+        }
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    // The use of inline closures is to circumvent an issue where the compiler
-    // allocates stack space for every if/case branch local when no optimizations
-    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-    // https://github.com/apple/swift-protobuf/issues/1182
-    try { if let v = self._peer {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
-    } }()
-    try { if let v = self._spaceID {
-      try visitor.visitSingularInt64Field(value: v, fieldNumber: 2)
-    } }()
-    try { if let v = self._archived {
-      try visitor.visitSingularBoolField(value: v, fieldNumber: 3)
-    } }()
-    try { if let v = self._pinned {
-      try visitor.visitSingularBoolField(value: v, fieldNumber: 4)
-    } }()
-    try { if let v = self._readMaxID {
-      try visitor.visitSingularInt64Field(value: v, fieldNumber: 5)
-    } }()
-    try { if let v = self._unreadCount {
-      try visitor.visitSingularInt32Field(value: v, fieldNumber: 6)
-    } }()
-    try { if let v = self._chatID {
-      try visitor.visitSingularInt64Field(value: v, fieldNumber: 7)
-    } }()
-    try { if let v = self._unreadMark {
-      try visitor.visitSingularBoolField(value: v, fieldNumber: 8)
-    } }()
-    try { if let v = self._notificationSettings {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
-    } }()
-    try { if let v = self._sidebarVisible {
-      try visitor.visitSingularBoolField(value: v, fieldNumber: 10)
-    } }()
-    try { if let v = self._open {
-      try visitor.visitSingularBoolField(value: v, fieldNumber: 11)
-    } }()
-    try { if let v = self._openedDate {
-      try visitor.visitSingularInt64Field(value: v, fieldNumber: 12)
-    } }()
-    try { if let v = self._chatListHidden {
-      try visitor.visitSingularBoolField(value: v, fieldNumber: 13)
-    } }()
-    try { if let v = self._order {
-      try visitor.visitSingularStringField(value: v, fieldNumber: 14)
-    } }()
-    try { if let v = self._pinnedOrder {
-      try visitor.visitSingularStringField(value: v, fieldNumber: 15)
-    } }()
-    try { if let v = self._followMode {
-      try visitor.visitSingularEnumField(value: v, fieldNumber: 16)
-    } }()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      try { if let v = _storage._peer {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+      } }()
+      try { if let v = _storage._spaceID {
+        try visitor.visitSingularInt64Field(value: v, fieldNumber: 2)
+      } }()
+      try { if let v = _storage._archived {
+        try visitor.visitSingularBoolField(value: v, fieldNumber: 3)
+      } }()
+      try { if let v = _storage._pinned {
+        try visitor.visitSingularBoolField(value: v, fieldNumber: 4)
+      } }()
+      try { if let v = _storage._readMaxID {
+        try visitor.visitSingularInt64Field(value: v, fieldNumber: 5)
+      } }()
+      try { if let v = _storage._unreadCount {
+        try visitor.visitSingularInt32Field(value: v, fieldNumber: 6)
+      } }()
+      try { if let v = _storage._chatID {
+        try visitor.visitSingularInt64Field(value: v, fieldNumber: 7)
+      } }()
+      try { if let v = _storage._unreadMark {
+        try visitor.visitSingularBoolField(value: v, fieldNumber: 8)
+      } }()
+      try { if let v = _storage._notificationSettings {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+      } }()
+      try { if let v = _storage._sidebarVisible {
+        try visitor.visitSingularBoolField(value: v, fieldNumber: 10)
+      } }()
+      try { if let v = _storage._open {
+        try visitor.visitSingularBoolField(value: v, fieldNumber: 11)
+      } }()
+      try { if let v = _storage._openedDate {
+        try visitor.visitSingularInt64Field(value: v, fieldNumber: 12)
+      } }()
+      try { if let v = _storage._chatListHidden {
+        try visitor.visitSingularBoolField(value: v, fieldNumber: 13)
+      } }()
+      try { if let v = _storage._order {
+        try visitor.visitSingularStringField(value: v, fieldNumber: 14)
+      } }()
+      try { if let v = _storage._pinnedOrder {
+        try visitor.visitSingularStringField(value: v, fieldNumber: 15)
+      } }()
+      try { if let v = _storage._followMode {
+        try visitor.visitSingularEnumField(value: v, fieldNumber: 16)
+      } }()
+      try { if let v = _storage._collapsedMaxID {
+        try visitor.visitSingularInt64Field(value: v, fieldNumber: 17)
+      } }()
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Dialog, rhs: Dialog) -> Bool {
-    if lhs._peer != rhs._peer {return false}
-    if lhs._spaceID != rhs._spaceID {return false}
-    if lhs._archived != rhs._archived {return false}
-    if lhs._pinned != rhs._pinned {return false}
-    if lhs._readMaxID != rhs._readMaxID {return false}
-    if lhs._unreadCount != rhs._unreadCount {return false}
-    if lhs._chatID != rhs._chatID {return false}
-    if lhs._unreadMark != rhs._unreadMark {return false}
-    if lhs._notificationSettings != rhs._notificationSettings {return false}
-    if lhs._sidebarVisible != rhs._sidebarVisible {return false}
-    if lhs._chatListHidden != rhs._chatListHidden {return false}
-    if lhs._open != rhs._open {return false}
-    if lhs._openedDate != rhs._openedDate {return false}
-    if lhs._order != rhs._order {return false}
-    if lhs._pinnedOrder != rhs._pinnedOrder {return false}
-    if lhs._followMode != rhs._followMode {return false}
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._peer != rhs_storage._peer {return false}
+        if _storage._spaceID != rhs_storage._spaceID {return false}
+        if _storage._archived != rhs_storage._archived {return false}
+        if _storage._pinned != rhs_storage._pinned {return false}
+        if _storage._readMaxID != rhs_storage._readMaxID {return false}
+        if _storage._unreadCount != rhs_storage._unreadCount {return false}
+        if _storage._chatID != rhs_storage._chatID {return false}
+        if _storage._unreadMark != rhs_storage._unreadMark {return false}
+        if _storage._notificationSettings != rhs_storage._notificationSettings {return false}
+        if _storage._sidebarVisible != rhs_storage._sidebarVisible {return false}
+        if _storage._chatListHidden != rhs_storage._chatListHidden {return false}
+        if _storage._open != rhs_storage._open {return false}
+        if _storage._openedDate != rhs_storage._openedDate {return false}
+        if _storage._order != rhs_storage._order {return false}
+        if _storage._pinnedOrder != rhs_storage._pinnedOrder {return false}
+        if _storage._followMode != rhs_storage._followMode {return false}
+        if _storage._collapsedMaxID != rhs_storage._collapsedMaxID {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -19565,7 +19704,7 @@ nonisolated extension RpcError.Code: SwiftProtobuf._ProtoNameProviding {
 
 nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RpcCall"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}method\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}updatePushNotificationDetails\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{2}\u{2}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{c}S\u{1}\u{1}")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}method\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}updatePushNotificationDetails\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{c}S\u{1}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20835,6 +20974,19 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
           self.input = .joinPublicSpace(v)
         }
       }()
+      case 100: try {
+        var v: CollapseHistoryInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .collapseHistory(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .collapseHistory(v)
+        }
+      }()
       case 101: try {
         var v: ListConnectorsInput?
         var hadOneofValue = false
@@ -21276,6 +21428,10 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       guard case .joinPublicSpace(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 99)
     }()
+    case .collapseHistory?: try {
+      guard case .collapseHistory(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 100)
+    }()
     case .listConnectors?: try {
       guard case .listConnectors(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 101)
@@ -21303,1737 +21459,1792 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
 
 nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RpcResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}req_msg_id\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}updatePushNotificationDetails\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{2}\u{2}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{c}S\u{1}\u{1}")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}req_msg_id\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}updatePushNotificationDetails\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{c}S\u{1}\u{1}")
+
+  fileprivate class _StorageClass {
+    var _reqMsgID: UInt64 = 0
+    var _result: RpcResult.OneOf_Result?
+
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _reqMsgID = source._reqMsgID
+      _result = source._result
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularUInt64Field(value: &self.reqMsgID) }()
-      case 2: try {
-        var v: GetMeResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getMe(let m) = current {v = m}
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularUInt64Field(value: &_storage._reqMsgID) }()
+        case 2: try {
+          var v: GetMeResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getMe(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getMe(v)
+          }
+        }()
+        case 3: try {
+          var v: GetPeerPhotoResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getPeerPhoto(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getPeerPhoto(v)
+          }
+        }()
+        case 4: try {
+          var v: DeleteMessagesResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .deleteMessages(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .deleteMessages(v)
+          }
+        }()
+        case 5: try {
+          var v: SendMessageResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .sendMessage(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .sendMessage(v)
+          }
+        }()
+        case 6: try {
+          var v: GetChatHistoryResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getChatHistory(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getChatHistory(v)
+          }
+        }()
+        case 7: try {
+          var v: AddReactionResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .addReaction(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .addReaction(v)
+          }
+        }()
+        case 8: try {
+          var v: DeleteReactionResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .deleteReaction(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .deleteReaction(v)
+          }
+        }()
+        case 9: try {
+          var v: EditMessageResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .editMessage(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .editMessage(v)
+          }
+        }()
+        case 10: try {
+          var v: CreateChatResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .createChat(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .createChat(v)
+          }
+        }()
+        case 11: try {
+          var v: GetSpaceMembersResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getSpaceMembers(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getSpaceMembers(v)
+          }
+        }()
+        case 12: try {
+          var v: DeleteChatResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .deleteChat(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .deleteChat(v)
+          }
+        }()
+        case 13: try {
+          var v: InviteToSpaceResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .inviteToSpace(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .inviteToSpace(v)
+          }
+        }()
+        case 14: try {
+          var v: GetChatParticipantsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getChatParticipants(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getChatParticipants(v)
+          }
+        }()
+        case 15: try {
+          var v: AddChatParticipantResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .addChatParticipant(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .addChatParticipant(v)
+          }
+        }()
+        case 16: try {
+          var v: RemoveChatParticipantResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .removeChatParticipant(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .removeChatParticipant(v)
+          }
+        }()
+        case 17: try {
+          var v: TranslateMessagesResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .translateMessages(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .translateMessages(v)
+          }
+        }()
+        case 18: try {
+          var v: GetChatsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getChats(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getChats(v)
+          }
+        }()
+        case 19: try {
+          var v: UpdateUserSettingsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .updateUserSettings(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .updateUserSettings(v)
+          }
+        }()
+        case 20: try {
+          var v: GetUserSettingsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getUserSettings(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getUserSettings(v)
+          }
+        }()
+        case 21: try {
+          var v: SendComposeActionResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .sendComposeAction(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .sendComposeAction(v)
+          }
+        }()
+        case 22: try {
+          var v: CreateBotResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .createBot(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .createBot(v)
+          }
+        }()
+        case 23: try {
+          var v: DeleteMemberResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .deleteMember(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .deleteMember(v)
+          }
+        }()
+        case 24: try {
+          var v: MarkAsUnreadResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .markAsUnread(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .markAsUnread(v)
+          }
+        }()
+        case 25: try {
+          var v: GetUpdatesStateResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getUpdatesState(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getUpdatesState(v)
+          }
+        }()
+        case 26: try {
+          var v: GetChatResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getChat(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getChat(v)
+          }
+        }()
+        case 27: try {
+          var v: GetUpdatesResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getUpdates(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getUpdates(v)
+          }
+        }()
+        case 28: try {
+          var v: UpdateMemberAccessResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .updateMemberAccess(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .updateMemberAccess(v)
+          }
+        }()
+        case 29: try {
+          var v: SearchMessagesResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .searchMessages(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .searchMessages(v)
+          }
+        }()
+        case 30: try {
+          var v: ForwardMessagesResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .forwardMessages(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .forwardMessages(v)
+          }
+        }()
+        case 31: try {
+          var v: UpdateChatVisibilityResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .updateChatVisibility(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .updateChatVisibility(v)
+          }
+        }()
+        case 32: try {
+          var v: PinMessageResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .pinMessage(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .pinMessage(v)
+          }
+        }()
+        case 33: try {
+          var v: UpdateChatInfoResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .updateChatInfo(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .updateChatInfo(v)
+          }
+        }()
+        case 34: try {
+          var v: ListBotsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .listBots(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .listBots(v)
+          }
+        }()
+        case 35: try {
+          var v: RevealBotTokenResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .revealBotToken(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .revealBotToken(v)
+          }
+        }()
+        case 36: try {
+          var v: MoveThreadResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .moveThread(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .moveThread(v)
+          }
+        }()
+        case 37: try {
+          var v: RotateBotTokenResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .rotateBotToken(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .rotateBotToken(v)
+          }
+        }()
+        case 38: try {
+          var v: UpdateBotProfileResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .updateBotProfile(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .updateBotProfile(v)
+          }
+        }()
+        case 39: try {
+          var v: GetMessagesResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getMessages(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getMessages(v)
+          }
+        }()
+        case 40: try {
+          var v: UpdateDialogNotificationSettingsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .updateDialogNotificationSettings(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .updateDialogNotificationSettings(v)
+          }
+        }()
+        case 41: try {
+          var v: ReadMessagesResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .readMessages(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .readMessages(v)
+          }
+        }()
+        case 42: try {
+          var v: UpdatePushNotificationDetailsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .updatePushNotificationDetails(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .updatePushNotificationDetails(v)
+          }
+        }()
+        case 43: try {
+          var v: CreateSubthreadResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .createSubthread(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .createSubthread(v)
+          }
+        }()
+        case 44: try {
+          var v: GetBotCommandsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getBotCommands(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getBotCommands(v)
+          }
+        }()
+        case 45: try {
+          var v: SetBotCommandsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .setBotCommands(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .setBotCommands(v)
+          }
+        }()
+        case 46: try {
+          var v: GetPeerBotCommandsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getPeerBotCommands(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getPeerBotCommands(v)
+          }
+        }()
+        case 47: try {
+          var v: ShowInChatListResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .showInChatList(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .showInChatList(v)
+          }
+        }()
+        case 48: try {
+          var v: ReserveChatIdsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .reserveChatIds(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .reserveChatIds(v)
+          }
+        }()
+        case 49: try {
+          var v: InvokeMessageActionResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .invokeMessageAction(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .invokeMessageAction(v)
+          }
+        }()
+        case 50: try {
+          var v: AnswerMessageActionResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .answerMessageAction(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .answerMessageAction(v)
+          }
+        }()
+        case 51: try {
+          var v: RevokeSessionResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .revokeSession(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .revokeSession(v)
+          }
+        }()
+        case 52: try {
+          var v: UpdateDialogOpenResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .updateDialogOpen(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .updateDialogOpen(v)
+          }
+        }()
+        case 53: try {
+          var v: UpdateDialogOrderResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .updateDialogOrder(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .updateDialogOrder(v)
+          }
+        }()
+        case 54: try {
+          var v: ClearChatHistoryResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .clearChatHistory_p(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .clearChatHistory_p(v)
+          }
+        }()
+        case 55: try {
+          var v: DeleteBotResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .deleteBot(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .deleteBot(v)
+          }
+        }()
+        case 56: try {
+          var v: DeleteMessageAttachmentResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .deleteMessageAttachment(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .deleteMessageAttachment(v)
+          }
+        }()
+        case 57: try {
+          var v: SetBotAvatarResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .setBotAvatar(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .setBotAvatar(v)
+          }
+        }()
+        case 58: try {
+          var v: ClearBotAvatarResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .clearBotAvatar_p(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .clearBotAvatar_p(v)
+          }
+        }()
+        case 59: try {
+          var v: GetBotPresenceResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getBotPresence(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getBotPresence(v)
+          }
+        }()
+        case 60: try {
+          var v: SetBotPresenceStateResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .setBotPresenceState(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .setBotPresenceState(v)
+          }
+        }()
+        case 61: try {
+          var v: UpdateDialogFollowModeResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .updateDialogFollowMode(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .updateDialogFollowMode(v)
+          }
+        }()
+        case 62: try {
+          var v: GetSessionsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getSessions(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getSessions(v)
+          }
+        }()
+        case 63: try {
+          var v: CheckUsernameResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .checkUsername(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .checkUsername(v)
+          }
+        }()
+        case 64: try {
+          var v: ChangeUsernameResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .changeUsername(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .changeUsername(v)
+          }
+        }()
+        case 65: try {
+          var v: UpdateProfileResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .updateProfile(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .updateProfile(v)
+          }
+        }()
+        case 66: try {
+          var v: GetSpaceUrlPreviewExclusionsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getSpaceURLPreviewExclusions(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getSpaceURLPreviewExclusions(v)
+          }
+        }()
+        case 67: try {
+          var v: AddSpaceUrlPreviewExclusionResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .addSpaceURLPreviewExclusion(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .addSpaceURLPreviewExclusion(v)
+          }
+        }()
+        case 68: try {
+          var v: RemoveSpaceUrlPreviewExclusionResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .removeSpaceURLPreviewExclusion(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .removeSpaceURLPreviewExclusion(v)
+          }
+        }()
+        case 69: try {
+          var v: GetUserGroupsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getUserGroups(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getUserGroups(v)
+          }
+        }()
+        case 70: try {
+          var v: CreateUserGroupResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .createUserGroup(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .createUserGroup(v)
+          }
+        }()
+        case 71: try {
+          var v: UpdateUserGroupResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .updateUserGroup(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .updateUserGroup(v)
+          }
+        }()
+        case 72: try {
+          var v: DeleteUserGroupResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .deleteUserGroup(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .deleteUserGroup(v)
+          }
+        }()
+        case 73: try {
+          var v: GetSpaceSettingsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getSpaceSettings(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getSpaceSettings(v)
+          }
+        }()
+        case 74: try {
+          var v: ToggleSpaceGridResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .toggleSpaceGrid(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .toggleSpaceGrid(v)
+          }
+        }()
+        case 75: try {
+          var v: GetThreadReferencesResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getThreadReferences(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getThreadReferences(v)
+          }
+        }()
+        case 76: try {
+          var v: GetThreadSubthreadsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getThreadSubthreads(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getThreadSubthreads(v)
+          }
+        }()
+        case 77: try {
+          var v: GetPeerBotsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getPeerBots(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getPeerBots(v)
+          }
+        }()
+        case 78: try {
+          var v: GetMyBotCapabilitiesResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getMyBotCapabilities(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getMyBotCapabilities(v)
+          }
+        }()
+        case 79: try {
+          var v: SetMyBotCapabilitiesResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .setMyBotCapabilities(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .setMyBotCapabilities(v)
+          }
+        }()
+        case 80: try {
+          var v: RequestBotChatSettingsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .requestBotChatSettings(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .requestBotChatSettings(v)
+          }
+        }()
+        case 81: try {
+          var v: InvokeBotChatSettingsItemResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .invokeBotChatSettingsItem(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .invokeBotChatSettingsItem(v)
+          }
+        }()
+        case 82: try {
+          var v: AnswerBotChatSettingsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .answerBotChatSettings(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .answerBotChatSettings(v)
+          }
+        }()
+        case 84: try {
+          var v: GetGridResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getGrid(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getGrid(v)
+          }
+        }()
+        case 85: try {
+          var v: CreateGridRoomResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .createGridRoom(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .createGridRoom(v)
+          }
+        }()
+        case 86: try {
+          var v: JoinGridRoomResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .joinGridRoom(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .joinGridRoom(v)
+          }
+        }()
+        case 87: try {
+          var v: LeaveGridRoomResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .leaveGridRoom(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .leaveGridRoom(v)
+          }
+        }()
+        case 88: try {
+          var v: SetGridRoomTitleResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .setGridRoomTitle(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .setGridRoomTitle(v)
+          }
+        }()
+        case 89: try {
+          var v: SetGridRoomLockedResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .setGridRoomLocked(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .setGridRoomLocked(v)
+          }
+        }()
+        case 90: try {
+          var v: DeleteGridRoomResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .deleteGridRoom(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .deleteGridRoom(v)
+          }
+        }()
+        case 91: try {
+          var v: PrepareGridConnectionResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .prepareGridConnection(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .prepareGridConnection(v)
+          }
+        }()
+        case 92: try {
+          var v: SetGridAvatarMicrophoneEnabledResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .setGridAvatarMicrophoneEnabled(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .setGridAvatarMicrophoneEnabled(v)
+          }
+        }()
+        case 93: try {
+          var v: GetGridHomeResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getGridHome(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getGridHome(v)
+          }
+        }()
+        case 94: try {
+          var v: CreateCliSessionResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .createCliSession(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .createCliSession(v)
+          }
+        }()
+        case 95: try {
+          var v: SetProfilePhotoResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .setProfilePhoto(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .setProfilePhoto(v)
+          }
+        }()
+        case 96: try {
+          var v: GetExternalProfilePhotoResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getExternalProfilePhoto(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getExternalProfilePhoto(v)
+          }
+        }()
+        case 97: try {
+          var v: GetChatTranscriptResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getChatTranscript(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getChatTranscript(v)
+          }
+        }()
+        case 98: try {
+          var v: SearchExternalResourcesResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .searchExternalResources(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .searchExternalResources(v)
+          }
+        }()
+        case 99: try {
+          var v: JoinPublicSpaceResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .joinPublicSpace(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .joinPublicSpace(v)
+          }
+        }()
+        case 100: try {
+          var v: CollapseHistoryResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .collapseHistory(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .collapseHistory(v)
+          }
+        }()
+        case 101: try {
+          var v: ListConnectorsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .listConnectors(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .listConnectors(v)
+          }
+        }()
+        case 102: try {
+          var v: PrepareConnectorOAuthResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .prepareConnectorOauth(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .prepareConnectorOauth(v)
+          }
+        }()
+        case 103: try {
+          var v: DisconnectConnectorResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .disconnectConnector(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .disconnectConnector(v)
+          }
+        }()
+        default: break
         }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getMe(v)
-        }
-      }()
-      case 3: try {
-        var v: GetPeerPhotoResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getPeerPhoto(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getPeerPhoto(v)
-        }
-      }()
-      case 4: try {
-        var v: DeleteMessagesResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .deleteMessages(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .deleteMessages(v)
-        }
-      }()
-      case 5: try {
-        var v: SendMessageResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .sendMessage(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .sendMessage(v)
-        }
-      }()
-      case 6: try {
-        var v: GetChatHistoryResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getChatHistory(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getChatHistory(v)
-        }
-      }()
-      case 7: try {
-        var v: AddReactionResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .addReaction(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .addReaction(v)
-        }
-      }()
-      case 8: try {
-        var v: DeleteReactionResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .deleteReaction(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .deleteReaction(v)
-        }
-      }()
-      case 9: try {
-        var v: EditMessageResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .editMessage(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .editMessage(v)
-        }
-      }()
-      case 10: try {
-        var v: CreateChatResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .createChat(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .createChat(v)
-        }
-      }()
-      case 11: try {
-        var v: GetSpaceMembersResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getSpaceMembers(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getSpaceMembers(v)
-        }
-      }()
-      case 12: try {
-        var v: DeleteChatResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .deleteChat(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .deleteChat(v)
-        }
-      }()
-      case 13: try {
-        var v: InviteToSpaceResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .inviteToSpace(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .inviteToSpace(v)
-        }
-      }()
-      case 14: try {
-        var v: GetChatParticipantsResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getChatParticipants(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getChatParticipants(v)
-        }
-      }()
-      case 15: try {
-        var v: AddChatParticipantResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .addChatParticipant(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .addChatParticipant(v)
-        }
-      }()
-      case 16: try {
-        var v: RemoveChatParticipantResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .removeChatParticipant(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .removeChatParticipant(v)
-        }
-      }()
-      case 17: try {
-        var v: TranslateMessagesResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .translateMessages(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .translateMessages(v)
-        }
-      }()
-      case 18: try {
-        var v: GetChatsResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getChats(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getChats(v)
-        }
-      }()
-      case 19: try {
-        var v: UpdateUserSettingsResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .updateUserSettings(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .updateUserSettings(v)
-        }
-      }()
-      case 20: try {
-        var v: GetUserSettingsResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getUserSettings(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getUserSettings(v)
-        }
-      }()
-      case 21: try {
-        var v: SendComposeActionResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .sendComposeAction(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .sendComposeAction(v)
-        }
-      }()
-      case 22: try {
-        var v: CreateBotResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .createBot(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .createBot(v)
-        }
-      }()
-      case 23: try {
-        var v: DeleteMemberResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .deleteMember(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .deleteMember(v)
-        }
-      }()
-      case 24: try {
-        var v: MarkAsUnreadResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .markAsUnread(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .markAsUnread(v)
-        }
-      }()
-      case 25: try {
-        var v: GetUpdatesStateResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getUpdatesState(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getUpdatesState(v)
-        }
-      }()
-      case 26: try {
-        var v: GetChatResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getChat(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getChat(v)
-        }
-      }()
-      case 27: try {
-        var v: GetUpdatesResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getUpdates(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getUpdates(v)
-        }
-      }()
-      case 28: try {
-        var v: UpdateMemberAccessResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .updateMemberAccess(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .updateMemberAccess(v)
-        }
-      }()
-      case 29: try {
-        var v: SearchMessagesResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .searchMessages(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .searchMessages(v)
-        }
-      }()
-      case 30: try {
-        var v: ForwardMessagesResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .forwardMessages(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .forwardMessages(v)
-        }
-      }()
-      case 31: try {
-        var v: UpdateChatVisibilityResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .updateChatVisibility(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .updateChatVisibility(v)
-        }
-      }()
-      case 32: try {
-        var v: PinMessageResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .pinMessage(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .pinMessage(v)
-        }
-      }()
-      case 33: try {
-        var v: UpdateChatInfoResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .updateChatInfo(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .updateChatInfo(v)
-        }
-      }()
-      case 34: try {
-        var v: ListBotsResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .listBots(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .listBots(v)
-        }
-      }()
-      case 35: try {
-        var v: RevealBotTokenResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .revealBotToken(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .revealBotToken(v)
-        }
-      }()
-      case 36: try {
-        var v: MoveThreadResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .moveThread(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .moveThread(v)
-        }
-      }()
-      case 37: try {
-        var v: RotateBotTokenResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .rotateBotToken(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .rotateBotToken(v)
-        }
-      }()
-      case 38: try {
-        var v: UpdateBotProfileResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .updateBotProfile(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .updateBotProfile(v)
-        }
-      }()
-      case 39: try {
-        var v: GetMessagesResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getMessages(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getMessages(v)
-        }
-      }()
-      case 40: try {
-        var v: UpdateDialogNotificationSettingsResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .updateDialogNotificationSettings(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .updateDialogNotificationSettings(v)
-        }
-      }()
-      case 41: try {
-        var v: ReadMessagesResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .readMessages(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .readMessages(v)
-        }
-      }()
-      case 42: try {
-        var v: UpdatePushNotificationDetailsResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .updatePushNotificationDetails(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .updatePushNotificationDetails(v)
-        }
-      }()
-      case 43: try {
-        var v: CreateSubthreadResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .createSubthread(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .createSubthread(v)
-        }
-      }()
-      case 44: try {
-        var v: GetBotCommandsResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getBotCommands(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getBotCommands(v)
-        }
-      }()
-      case 45: try {
-        var v: SetBotCommandsResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .setBotCommands(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .setBotCommands(v)
-        }
-      }()
-      case 46: try {
-        var v: GetPeerBotCommandsResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getPeerBotCommands(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getPeerBotCommands(v)
-        }
-      }()
-      case 47: try {
-        var v: ShowInChatListResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .showInChatList(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .showInChatList(v)
-        }
-      }()
-      case 48: try {
-        var v: ReserveChatIdsResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .reserveChatIds(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .reserveChatIds(v)
-        }
-      }()
-      case 49: try {
-        var v: InvokeMessageActionResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .invokeMessageAction(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .invokeMessageAction(v)
-        }
-      }()
-      case 50: try {
-        var v: AnswerMessageActionResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .answerMessageAction(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .answerMessageAction(v)
-        }
-      }()
-      case 51: try {
-        var v: RevokeSessionResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .revokeSession(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .revokeSession(v)
-        }
-      }()
-      case 52: try {
-        var v: UpdateDialogOpenResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .updateDialogOpen(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .updateDialogOpen(v)
-        }
-      }()
-      case 53: try {
-        var v: UpdateDialogOrderResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .updateDialogOrder(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .updateDialogOrder(v)
-        }
-      }()
-      case 54: try {
-        var v: ClearChatHistoryResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .clearChatHistory_p(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .clearChatHistory_p(v)
-        }
-      }()
-      case 55: try {
-        var v: DeleteBotResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .deleteBot(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .deleteBot(v)
-        }
-      }()
-      case 56: try {
-        var v: DeleteMessageAttachmentResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .deleteMessageAttachment(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .deleteMessageAttachment(v)
-        }
-      }()
-      case 57: try {
-        var v: SetBotAvatarResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .setBotAvatar(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .setBotAvatar(v)
-        }
-      }()
-      case 58: try {
-        var v: ClearBotAvatarResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .clearBotAvatar_p(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .clearBotAvatar_p(v)
-        }
-      }()
-      case 59: try {
-        var v: GetBotPresenceResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getBotPresence(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getBotPresence(v)
-        }
-      }()
-      case 60: try {
-        var v: SetBotPresenceStateResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .setBotPresenceState(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .setBotPresenceState(v)
-        }
-      }()
-      case 61: try {
-        var v: UpdateDialogFollowModeResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .updateDialogFollowMode(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .updateDialogFollowMode(v)
-        }
-      }()
-      case 62: try {
-        var v: GetSessionsResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getSessions(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getSessions(v)
-        }
-      }()
-      case 63: try {
-        var v: CheckUsernameResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .checkUsername(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .checkUsername(v)
-        }
-      }()
-      case 64: try {
-        var v: ChangeUsernameResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .changeUsername(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .changeUsername(v)
-        }
-      }()
-      case 65: try {
-        var v: UpdateProfileResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .updateProfile(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .updateProfile(v)
-        }
-      }()
-      case 66: try {
-        var v: GetSpaceUrlPreviewExclusionsResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getSpaceURLPreviewExclusions(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getSpaceURLPreviewExclusions(v)
-        }
-      }()
-      case 67: try {
-        var v: AddSpaceUrlPreviewExclusionResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .addSpaceURLPreviewExclusion(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .addSpaceURLPreviewExclusion(v)
-        }
-      }()
-      case 68: try {
-        var v: RemoveSpaceUrlPreviewExclusionResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .removeSpaceURLPreviewExclusion(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .removeSpaceURLPreviewExclusion(v)
-        }
-      }()
-      case 69: try {
-        var v: GetUserGroupsResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getUserGroups(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getUserGroups(v)
-        }
-      }()
-      case 70: try {
-        var v: CreateUserGroupResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .createUserGroup(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .createUserGroup(v)
-        }
-      }()
-      case 71: try {
-        var v: UpdateUserGroupResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .updateUserGroup(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .updateUserGroup(v)
-        }
-      }()
-      case 72: try {
-        var v: DeleteUserGroupResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .deleteUserGroup(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .deleteUserGroup(v)
-        }
-      }()
-      case 73: try {
-        var v: GetSpaceSettingsResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getSpaceSettings(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getSpaceSettings(v)
-        }
-      }()
-      case 74: try {
-        var v: ToggleSpaceGridResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .toggleSpaceGrid(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .toggleSpaceGrid(v)
-        }
-      }()
-      case 75: try {
-        var v: GetThreadReferencesResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getThreadReferences(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getThreadReferences(v)
-        }
-      }()
-      case 76: try {
-        var v: GetThreadSubthreadsResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getThreadSubthreads(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getThreadSubthreads(v)
-        }
-      }()
-      case 77: try {
-        var v: GetPeerBotsResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getPeerBots(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getPeerBots(v)
-        }
-      }()
-      case 78: try {
-        var v: GetMyBotCapabilitiesResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getMyBotCapabilities(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getMyBotCapabilities(v)
-        }
-      }()
-      case 79: try {
-        var v: SetMyBotCapabilitiesResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .setMyBotCapabilities(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .setMyBotCapabilities(v)
-        }
-      }()
-      case 80: try {
-        var v: RequestBotChatSettingsResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .requestBotChatSettings(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .requestBotChatSettings(v)
-        }
-      }()
-      case 81: try {
-        var v: InvokeBotChatSettingsItemResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .invokeBotChatSettingsItem(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .invokeBotChatSettingsItem(v)
-        }
-      }()
-      case 82: try {
-        var v: AnswerBotChatSettingsResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .answerBotChatSettings(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .answerBotChatSettings(v)
-        }
-      }()
-      case 84: try {
-        var v: GetGridResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getGrid(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getGrid(v)
-        }
-      }()
-      case 85: try {
-        var v: CreateGridRoomResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .createGridRoom(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .createGridRoom(v)
-        }
-      }()
-      case 86: try {
-        var v: JoinGridRoomResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .joinGridRoom(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .joinGridRoom(v)
-        }
-      }()
-      case 87: try {
-        var v: LeaveGridRoomResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .leaveGridRoom(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .leaveGridRoom(v)
-        }
-      }()
-      case 88: try {
-        var v: SetGridRoomTitleResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .setGridRoomTitle(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .setGridRoomTitle(v)
-        }
-      }()
-      case 89: try {
-        var v: SetGridRoomLockedResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .setGridRoomLocked(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .setGridRoomLocked(v)
-        }
-      }()
-      case 90: try {
-        var v: DeleteGridRoomResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .deleteGridRoom(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .deleteGridRoom(v)
-        }
-      }()
-      case 91: try {
-        var v: PrepareGridConnectionResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .prepareGridConnection(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .prepareGridConnection(v)
-        }
-      }()
-      case 92: try {
-        var v: SetGridAvatarMicrophoneEnabledResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .setGridAvatarMicrophoneEnabled(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .setGridAvatarMicrophoneEnabled(v)
-        }
-      }()
-      case 93: try {
-        var v: GetGridHomeResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getGridHome(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getGridHome(v)
-        }
-      }()
-      case 94: try {
-        var v: CreateCliSessionResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .createCliSession(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .createCliSession(v)
-        }
-      }()
-      case 95: try {
-        var v: SetProfilePhotoResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .setProfilePhoto(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .setProfilePhoto(v)
-        }
-      }()
-      case 96: try {
-        var v: GetExternalProfilePhotoResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getExternalProfilePhoto(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getExternalProfilePhoto(v)
-        }
-      }()
-      case 97: try {
-        var v: GetChatTranscriptResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .getChatTranscript(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .getChatTranscript(v)
-        }
-      }()
-      case 98: try {
-        var v: SearchExternalResourcesResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .searchExternalResources(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .searchExternalResources(v)
-        }
-      }()
-      case 99: try {
-        var v: JoinPublicSpaceResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .joinPublicSpace(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .joinPublicSpace(v)
-        }
-      }()
-      case 101: try {
-        var v: ListConnectorsResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .listConnectors(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .listConnectors(v)
-        }
-      }()
-      case 102: try {
-        var v: PrepareConnectorOAuthResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .prepareConnectorOauth(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .prepareConnectorOauth(v)
-        }
-      }()
-      case 103: try {
-        var v: DisconnectConnectorResult?
-        var hadOneofValue = false
-        if let current = self.result {
-          hadOneofValue = true
-          if case .disconnectConnector(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.result = .disconnectConnector(v)
-        }
-      }()
-      default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    // The use of inline closures is to circumvent an issue where the compiler
-    // allocates stack space for every if/case branch local when no optimizations
-    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-    // https://github.com/apple/swift-protobuf/issues/1182
-    if self.reqMsgID != 0 {
-      try visitor.visitSingularUInt64Field(value: self.reqMsgID, fieldNumber: 1)
-    }
-    switch self.result {
-    case .getMe?: try {
-      guard case .getMe(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
-    }()
-    case .getPeerPhoto?: try {
-      guard case .getPeerPhoto(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
-    }()
-    case .deleteMessages?: try {
-      guard case .deleteMessages(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
-    }()
-    case .sendMessage?: try {
-      guard case .sendMessage(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
-    }()
-    case .getChatHistory?: try {
-      guard case .getChatHistory(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
-    }()
-    case .addReaction?: try {
-      guard case .addReaction(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
-    }()
-    case .deleteReaction?: try {
-      guard case .deleteReaction(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
-    }()
-    case .editMessage?: try {
-      guard case .editMessage(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
-    }()
-    case .createChat?: try {
-      guard case .createChat(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
-    }()
-    case .getSpaceMembers?: try {
-      guard case .getSpaceMembers(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 11)
-    }()
-    case .deleteChat?: try {
-      guard case .deleteChat(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 12)
-    }()
-    case .inviteToSpace?: try {
-      guard case .inviteToSpace(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 13)
-    }()
-    case .getChatParticipants?: try {
-      guard case .getChatParticipants(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 14)
-    }()
-    case .addChatParticipant?: try {
-      guard case .addChatParticipant(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 15)
-    }()
-    case .removeChatParticipant?: try {
-      guard case .removeChatParticipant(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 16)
-    }()
-    case .translateMessages?: try {
-      guard case .translateMessages(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 17)
-    }()
-    case .getChats?: try {
-      guard case .getChats(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 18)
-    }()
-    case .updateUserSettings?: try {
-      guard case .updateUserSettings(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 19)
-    }()
-    case .getUserSettings?: try {
-      guard case .getUserSettings(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 20)
-    }()
-    case .sendComposeAction?: try {
-      guard case .sendComposeAction(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 21)
-    }()
-    case .createBot?: try {
-      guard case .createBot(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 22)
-    }()
-    case .deleteMember?: try {
-      guard case .deleteMember(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 23)
-    }()
-    case .markAsUnread?: try {
-      guard case .markAsUnread(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 24)
-    }()
-    case .getUpdatesState?: try {
-      guard case .getUpdatesState(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 25)
-    }()
-    case .getChat?: try {
-      guard case .getChat(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 26)
-    }()
-    case .getUpdates?: try {
-      guard case .getUpdates(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 27)
-    }()
-    case .updateMemberAccess?: try {
-      guard case .updateMemberAccess(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 28)
-    }()
-    case .searchMessages?: try {
-      guard case .searchMessages(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 29)
-    }()
-    case .forwardMessages?: try {
-      guard case .forwardMessages(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 30)
-    }()
-    case .updateChatVisibility?: try {
-      guard case .updateChatVisibility(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 31)
-    }()
-    case .pinMessage?: try {
-      guard case .pinMessage(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 32)
-    }()
-    case .updateChatInfo?: try {
-      guard case .updateChatInfo(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 33)
-    }()
-    case .listBots?: try {
-      guard case .listBots(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 34)
-    }()
-    case .revealBotToken?: try {
-      guard case .revealBotToken(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 35)
-    }()
-    case .moveThread?: try {
-      guard case .moveThread(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 36)
-    }()
-    case .rotateBotToken?: try {
-      guard case .rotateBotToken(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 37)
-    }()
-    case .updateBotProfile?: try {
-      guard case .updateBotProfile(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 38)
-    }()
-    case .getMessages?: try {
-      guard case .getMessages(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 39)
-    }()
-    case .updateDialogNotificationSettings?: try {
-      guard case .updateDialogNotificationSettings(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 40)
-    }()
-    case .readMessages?: try {
-      guard case .readMessages(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 41)
-    }()
-    case .updatePushNotificationDetails?: try {
-      guard case .updatePushNotificationDetails(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 42)
-    }()
-    case .createSubthread?: try {
-      guard case .createSubthread(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 43)
-    }()
-    case .getBotCommands?: try {
-      guard case .getBotCommands(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 44)
-    }()
-    case .setBotCommands?: try {
-      guard case .setBotCommands(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 45)
-    }()
-    case .getPeerBotCommands?: try {
-      guard case .getPeerBotCommands(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 46)
-    }()
-    case .showInChatList?: try {
-      guard case .showInChatList(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 47)
-    }()
-    case .reserveChatIds?: try {
-      guard case .reserveChatIds(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 48)
-    }()
-    case .invokeMessageAction?: try {
-      guard case .invokeMessageAction(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 49)
-    }()
-    case .answerMessageAction?: try {
-      guard case .answerMessageAction(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 50)
-    }()
-    case .revokeSession?: try {
-      guard case .revokeSession(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 51)
-    }()
-    case .updateDialogOpen?: try {
-      guard case .updateDialogOpen(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 52)
-    }()
-    case .updateDialogOrder?: try {
-      guard case .updateDialogOrder(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 53)
-    }()
-    case .clearChatHistory_p?: try {
-      guard case .clearChatHistory_p(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 54)
-    }()
-    case .deleteBot?: try {
-      guard case .deleteBot(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 55)
-    }()
-    case .deleteMessageAttachment?: try {
-      guard case .deleteMessageAttachment(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 56)
-    }()
-    case .setBotAvatar?: try {
-      guard case .setBotAvatar(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 57)
-    }()
-    case .clearBotAvatar_p?: try {
-      guard case .clearBotAvatar_p(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 58)
-    }()
-    case .getBotPresence?: try {
-      guard case .getBotPresence(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 59)
-    }()
-    case .setBotPresenceState?: try {
-      guard case .setBotPresenceState(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 60)
-    }()
-    case .updateDialogFollowMode?: try {
-      guard case .updateDialogFollowMode(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 61)
-    }()
-    case .getSessions?: try {
-      guard case .getSessions(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 62)
-    }()
-    case .checkUsername?: try {
-      guard case .checkUsername(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 63)
-    }()
-    case .changeUsername?: try {
-      guard case .changeUsername(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 64)
-    }()
-    case .updateProfile?: try {
-      guard case .updateProfile(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 65)
-    }()
-    case .getSpaceURLPreviewExclusions?: try {
-      guard case .getSpaceURLPreviewExclusions(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 66)
-    }()
-    case .addSpaceURLPreviewExclusion?: try {
-      guard case .addSpaceURLPreviewExclusion(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 67)
-    }()
-    case .removeSpaceURLPreviewExclusion?: try {
-      guard case .removeSpaceURLPreviewExclusion(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 68)
-    }()
-    case .getUserGroups?: try {
-      guard case .getUserGroups(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 69)
-    }()
-    case .createUserGroup?: try {
-      guard case .createUserGroup(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 70)
-    }()
-    case .updateUserGroup?: try {
-      guard case .updateUserGroup(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 71)
-    }()
-    case .deleteUserGroup?: try {
-      guard case .deleteUserGroup(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 72)
-    }()
-    case .getSpaceSettings?: try {
-      guard case .getSpaceSettings(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 73)
-    }()
-    case .toggleSpaceGrid?: try {
-      guard case .toggleSpaceGrid(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 74)
-    }()
-    case .getThreadReferences?: try {
-      guard case .getThreadReferences(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 75)
-    }()
-    case .getThreadSubthreads?: try {
-      guard case .getThreadSubthreads(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 76)
-    }()
-    case .getPeerBots?: try {
-      guard case .getPeerBots(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 77)
-    }()
-    case .getMyBotCapabilities?: try {
-      guard case .getMyBotCapabilities(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 78)
-    }()
-    case .setMyBotCapabilities?: try {
-      guard case .setMyBotCapabilities(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 79)
-    }()
-    case .requestBotChatSettings?: try {
-      guard case .requestBotChatSettings(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 80)
-    }()
-    case .invokeBotChatSettingsItem?: try {
-      guard case .invokeBotChatSettingsItem(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 81)
-    }()
-    case .answerBotChatSettings?: try {
-      guard case .answerBotChatSettings(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 82)
-    }()
-    case .getGrid?: try {
-      guard case .getGrid(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 84)
-    }()
-    case .createGridRoom?: try {
-      guard case .createGridRoom(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 85)
-    }()
-    case .joinGridRoom?: try {
-      guard case .joinGridRoom(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 86)
-    }()
-    case .leaveGridRoom?: try {
-      guard case .leaveGridRoom(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 87)
-    }()
-    case .setGridRoomTitle?: try {
-      guard case .setGridRoomTitle(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 88)
-    }()
-    case .setGridRoomLocked?: try {
-      guard case .setGridRoomLocked(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 89)
-    }()
-    case .deleteGridRoom?: try {
-      guard case .deleteGridRoom(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 90)
-    }()
-    case .prepareGridConnection?: try {
-      guard case .prepareGridConnection(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 91)
-    }()
-    case .setGridAvatarMicrophoneEnabled?: try {
-      guard case .setGridAvatarMicrophoneEnabled(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 92)
-    }()
-    case .getGridHome?: try {
-      guard case .getGridHome(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 93)
-    }()
-    case .createCliSession?: try {
-      guard case .createCliSession(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 94)
-    }()
-    case .setProfilePhoto?: try {
-      guard case .setProfilePhoto(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 95)
-    }()
-    case .getExternalProfilePhoto?: try {
-      guard case .getExternalProfilePhoto(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 96)
-    }()
-    case .getChatTranscript?: try {
-      guard case .getChatTranscript(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 97)
-    }()
-    case .searchExternalResources?: try {
-      guard case .searchExternalResources(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 98)
-    }()
-    case .joinPublicSpace?: try {
-      guard case .joinPublicSpace(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 99)
-    }()
-    case .listConnectors?: try {
-      guard case .listConnectors(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 101)
-    }()
-    case .prepareConnectorOauth?: try {
-      guard case .prepareConnectorOauth(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 102)
-    }()
-    case .disconnectConnector?: try {
-      guard case .disconnectConnector(let v)? = self.result else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 103)
-    }()
-    case nil: break
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      if _storage._reqMsgID != 0 {
+        try visitor.visitSingularUInt64Field(value: _storage._reqMsgID, fieldNumber: 1)
+      }
+      switch _storage._result {
+      case .getMe?: try {
+        guard case .getMe(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+      }()
+      case .getPeerPhoto?: try {
+        guard case .getPeerPhoto(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+      }()
+      case .deleteMessages?: try {
+        guard case .deleteMessages(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+      }()
+      case .sendMessage?: try {
+        guard case .sendMessage(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+      }()
+      case .getChatHistory?: try {
+        guard case .getChatHistory(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+      }()
+      case .addReaction?: try {
+        guard case .addReaction(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+      }()
+      case .deleteReaction?: try {
+        guard case .deleteReaction(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
+      }()
+      case .editMessage?: try {
+        guard case .editMessage(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+      }()
+      case .createChat?: try {
+        guard case .createChat(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
+      }()
+      case .getSpaceMembers?: try {
+        guard case .getSpaceMembers(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 11)
+      }()
+      case .deleteChat?: try {
+        guard case .deleteChat(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 12)
+      }()
+      case .inviteToSpace?: try {
+        guard case .inviteToSpace(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 13)
+      }()
+      case .getChatParticipants?: try {
+        guard case .getChatParticipants(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 14)
+      }()
+      case .addChatParticipant?: try {
+        guard case .addChatParticipant(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 15)
+      }()
+      case .removeChatParticipant?: try {
+        guard case .removeChatParticipant(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 16)
+      }()
+      case .translateMessages?: try {
+        guard case .translateMessages(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 17)
+      }()
+      case .getChats?: try {
+        guard case .getChats(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 18)
+      }()
+      case .updateUserSettings?: try {
+        guard case .updateUserSettings(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 19)
+      }()
+      case .getUserSettings?: try {
+        guard case .getUserSettings(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 20)
+      }()
+      case .sendComposeAction?: try {
+        guard case .sendComposeAction(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 21)
+      }()
+      case .createBot?: try {
+        guard case .createBot(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 22)
+      }()
+      case .deleteMember?: try {
+        guard case .deleteMember(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 23)
+      }()
+      case .markAsUnread?: try {
+        guard case .markAsUnread(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 24)
+      }()
+      case .getUpdatesState?: try {
+        guard case .getUpdatesState(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 25)
+      }()
+      case .getChat?: try {
+        guard case .getChat(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 26)
+      }()
+      case .getUpdates?: try {
+        guard case .getUpdates(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 27)
+      }()
+      case .updateMemberAccess?: try {
+        guard case .updateMemberAccess(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 28)
+      }()
+      case .searchMessages?: try {
+        guard case .searchMessages(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 29)
+      }()
+      case .forwardMessages?: try {
+        guard case .forwardMessages(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 30)
+      }()
+      case .updateChatVisibility?: try {
+        guard case .updateChatVisibility(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 31)
+      }()
+      case .pinMessage?: try {
+        guard case .pinMessage(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 32)
+      }()
+      case .updateChatInfo?: try {
+        guard case .updateChatInfo(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 33)
+      }()
+      case .listBots?: try {
+        guard case .listBots(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 34)
+      }()
+      case .revealBotToken?: try {
+        guard case .revealBotToken(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 35)
+      }()
+      case .moveThread?: try {
+        guard case .moveThread(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 36)
+      }()
+      case .rotateBotToken?: try {
+        guard case .rotateBotToken(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 37)
+      }()
+      case .updateBotProfile?: try {
+        guard case .updateBotProfile(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 38)
+      }()
+      case .getMessages?: try {
+        guard case .getMessages(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 39)
+      }()
+      case .updateDialogNotificationSettings?: try {
+        guard case .updateDialogNotificationSettings(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 40)
+      }()
+      case .readMessages?: try {
+        guard case .readMessages(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 41)
+      }()
+      case .updatePushNotificationDetails?: try {
+        guard case .updatePushNotificationDetails(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 42)
+      }()
+      case .createSubthread?: try {
+        guard case .createSubthread(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 43)
+      }()
+      case .getBotCommands?: try {
+        guard case .getBotCommands(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 44)
+      }()
+      case .setBotCommands?: try {
+        guard case .setBotCommands(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 45)
+      }()
+      case .getPeerBotCommands?: try {
+        guard case .getPeerBotCommands(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 46)
+      }()
+      case .showInChatList?: try {
+        guard case .showInChatList(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 47)
+      }()
+      case .reserveChatIds?: try {
+        guard case .reserveChatIds(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 48)
+      }()
+      case .invokeMessageAction?: try {
+        guard case .invokeMessageAction(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 49)
+      }()
+      case .answerMessageAction?: try {
+        guard case .answerMessageAction(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 50)
+      }()
+      case .revokeSession?: try {
+        guard case .revokeSession(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 51)
+      }()
+      case .updateDialogOpen?: try {
+        guard case .updateDialogOpen(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 52)
+      }()
+      case .updateDialogOrder?: try {
+        guard case .updateDialogOrder(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 53)
+      }()
+      case .clearChatHistory_p?: try {
+        guard case .clearChatHistory_p(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 54)
+      }()
+      case .deleteBot?: try {
+        guard case .deleteBot(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 55)
+      }()
+      case .deleteMessageAttachment?: try {
+        guard case .deleteMessageAttachment(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 56)
+      }()
+      case .setBotAvatar?: try {
+        guard case .setBotAvatar(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 57)
+      }()
+      case .clearBotAvatar_p?: try {
+        guard case .clearBotAvatar_p(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 58)
+      }()
+      case .getBotPresence?: try {
+        guard case .getBotPresence(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 59)
+      }()
+      case .setBotPresenceState?: try {
+        guard case .setBotPresenceState(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 60)
+      }()
+      case .updateDialogFollowMode?: try {
+        guard case .updateDialogFollowMode(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 61)
+      }()
+      case .getSessions?: try {
+        guard case .getSessions(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 62)
+      }()
+      case .checkUsername?: try {
+        guard case .checkUsername(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 63)
+      }()
+      case .changeUsername?: try {
+        guard case .changeUsername(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 64)
+      }()
+      case .updateProfile?: try {
+        guard case .updateProfile(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 65)
+      }()
+      case .getSpaceURLPreviewExclusions?: try {
+        guard case .getSpaceURLPreviewExclusions(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 66)
+      }()
+      case .addSpaceURLPreviewExclusion?: try {
+        guard case .addSpaceURLPreviewExclusion(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 67)
+      }()
+      case .removeSpaceURLPreviewExclusion?: try {
+        guard case .removeSpaceURLPreviewExclusion(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 68)
+      }()
+      case .getUserGroups?: try {
+        guard case .getUserGroups(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 69)
+      }()
+      case .createUserGroup?: try {
+        guard case .createUserGroup(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 70)
+      }()
+      case .updateUserGroup?: try {
+        guard case .updateUserGroup(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 71)
+      }()
+      case .deleteUserGroup?: try {
+        guard case .deleteUserGroup(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 72)
+      }()
+      case .getSpaceSettings?: try {
+        guard case .getSpaceSettings(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 73)
+      }()
+      case .toggleSpaceGrid?: try {
+        guard case .toggleSpaceGrid(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 74)
+      }()
+      case .getThreadReferences?: try {
+        guard case .getThreadReferences(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 75)
+      }()
+      case .getThreadSubthreads?: try {
+        guard case .getThreadSubthreads(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 76)
+      }()
+      case .getPeerBots?: try {
+        guard case .getPeerBots(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 77)
+      }()
+      case .getMyBotCapabilities?: try {
+        guard case .getMyBotCapabilities(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 78)
+      }()
+      case .setMyBotCapabilities?: try {
+        guard case .setMyBotCapabilities(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 79)
+      }()
+      case .requestBotChatSettings?: try {
+        guard case .requestBotChatSettings(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 80)
+      }()
+      case .invokeBotChatSettingsItem?: try {
+        guard case .invokeBotChatSettingsItem(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 81)
+      }()
+      case .answerBotChatSettings?: try {
+        guard case .answerBotChatSettings(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 82)
+      }()
+      case .getGrid?: try {
+        guard case .getGrid(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 84)
+      }()
+      case .createGridRoom?: try {
+        guard case .createGridRoom(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 85)
+      }()
+      case .joinGridRoom?: try {
+        guard case .joinGridRoom(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 86)
+      }()
+      case .leaveGridRoom?: try {
+        guard case .leaveGridRoom(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 87)
+      }()
+      case .setGridRoomTitle?: try {
+        guard case .setGridRoomTitle(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 88)
+      }()
+      case .setGridRoomLocked?: try {
+        guard case .setGridRoomLocked(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 89)
+      }()
+      case .deleteGridRoom?: try {
+        guard case .deleteGridRoom(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 90)
+      }()
+      case .prepareGridConnection?: try {
+        guard case .prepareGridConnection(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 91)
+      }()
+      case .setGridAvatarMicrophoneEnabled?: try {
+        guard case .setGridAvatarMicrophoneEnabled(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 92)
+      }()
+      case .getGridHome?: try {
+        guard case .getGridHome(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 93)
+      }()
+      case .createCliSession?: try {
+        guard case .createCliSession(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 94)
+      }()
+      case .setProfilePhoto?: try {
+        guard case .setProfilePhoto(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 95)
+      }()
+      case .getExternalProfilePhoto?: try {
+        guard case .getExternalProfilePhoto(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 96)
+      }()
+      case .getChatTranscript?: try {
+        guard case .getChatTranscript(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 97)
+      }()
+      case .searchExternalResources?: try {
+        guard case .searchExternalResources(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 98)
+      }()
+      case .joinPublicSpace?: try {
+        guard case .joinPublicSpace(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 99)
+      }()
+      case .collapseHistory?: try {
+        guard case .collapseHistory(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 100)
+      }()
+      case .listConnectors?: try {
+        guard case .listConnectors(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 101)
+      }()
+      case .prepareConnectorOauth?: try {
+        guard case .prepareConnectorOauth(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 102)
+      }()
+      case .disconnectConnector?: try {
+        guard case .disconnectConnector(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 103)
+      }()
+      case nil: break
+      }
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: RpcResult, rhs: RpcResult) -> Bool {
-    if lhs.reqMsgID != rhs.reqMsgID {return false}
-    if lhs.result != rhs.result {return false}
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._reqMsgID != rhs_storage._reqMsgID {return false}
+        if _storage._result != rhs_storage._result {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -25464,74 +25675,36 @@ nonisolated extension ShowInChatListResult: SwiftProtobuf.Message, SwiftProtobuf
   public static let protoMessageName: String = "ShowInChatListResult"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}chat\0\u{1}dialog\0")
 
-  fileprivate class _StorageClass {
-    var _chat: Chat? = nil
-    var _dialog: Dialog? = nil
-
-      // This property is used as the initial default value for new instances of the type.
-      // The type itself is protecting the reference to its storage via CoW semantics.
-      // This will force a copy to be made of this reference when the first mutation occurs;
-      // hence, it is safe to mark this as `nonisolated(unsafe)`.
-      static nonisolated(unsafe) let defaultInstance = _StorageClass()
-
-    private init() {}
-
-    init(copying source: _StorageClass) {
-      _chat = source._chat
-      _dialog = source._dialog
-    }
-  }
-
-  fileprivate mutating func _uniqueStorage() -> _StorageClass {
-    if !isKnownUniquelyReferenced(&_storage) {
-      _storage = _StorageClass(copying: _storage)
-    }
-    return _storage
-  }
-
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    _ = _uniqueStorage()
-    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
-      while let fieldNumber = try decoder.nextFieldNumber() {
-        // The use of inline closures is to circumvent an issue where the compiler
-        // allocates stack space for every case branch when no optimizations are
-        // enabled. https://github.com/apple/swift-protobuf/issues/1034
-        switch fieldNumber {
-        case 1: try { try decoder.decodeSingularMessageField(value: &_storage._chat) }()
-        case 2: try { try decoder.decodeSingularMessageField(value: &_storage._dialog) }()
-        default: break
-        }
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._chat) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._dialog) }()
+      default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every if/case branch local when no optimizations
-      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-      // https://github.com/apple/swift-protobuf/issues/1182
-      try { if let v = _storage._chat {
-        try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
-      } }()
-      try { if let v = _storage._dialog {
-        try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
-      } }()
-    }
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._chat {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._dialog {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: ShowInChatListResult, rhs: ShowInChatListResult) -> Bool {
-    if lhs._storage !== rhs._storage {
-      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
-        let _storage = _args.0
-        let rhs_storage = _args.1
-        if _storage._chat != rhs_storage._chat {return false}
-        if _storage._dialog != rhs_storage._dialog {return false}
-        return true
-      }
-      if !storagesAreEqual {return false}
-    }
+    if lhs._chat != rhs._chat {return false}
+    if lhs._dialog != rhs._dialog {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -25868,6 +26041,75 @@ nonisolated extension UpdateDialogFollowModeResult: SwiftProtobuf.Message, Swift
   }
 
   public static func ==(lhs: UpdateDialogFollowModeResult, rhs: UpdateDialogFollowModeResult) -> Bool {
+    if lhs.updates != rhs.updates {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension CollapseHistoryInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "CollapseHistoryInput"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}max_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self._maxID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._maxID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: CollapseHistoryInput, rhs: CollapseHistoryInput) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs._maxID != rhs._maxID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension CollapseHistoryResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "CollapseHistoryResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}updates\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.updates) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.updates.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.updates, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: CollapseHistoryResult, rhs: CollapseHistoryResult) -> Bool {
     if lhs.updates != rhs.updates {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -30788,74 +31030,36 @@ nonisolated extension CreateChatResult: SwiftProtobuf.Message, SwiftProtobuf._Me
   public static let protoMessageName: String = "CreateChatResult"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}chat\0\u{1}dialog\0")
 
-  fileprivate class _StorageClass {
-    var _chat: Chat? = nil
-    var _dialog: Dialog? = nil
-
-      // This property is used as the initial default value for new instances of the type.
-      // The type itself is protecting the reference to its storage via CoW semantics.
-      // This will force a copy to be made of this reference when the first mutation occurs;
-      // hence, it is safe to mark this as `nonisolated(unsafe)`.
-      static nonisolated(unsafe) let defaultInstance = _StorageClass()
-
-    private init() {}
-
-    init(copying source: _StorageClass) {
-      _chat = source._chat
-      _dialog = source._dialog
-    }
-  }
-
-  fileprivate mutating func _uniqueStorage() -> _StorageClass {
-    if !isKnownUniquelyReferenced(&_storage) {
-      _storage = _StorageClass(copying: _storage)
-    }
-    return _storage
-  }
-
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    _ = _uniqueStorage()
-    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
-      while let fieldNumber = try decoder.nextFieldNumber() {
-        // The use of inline closures is to circumvent an issue where the compiler
-        // allocates stack space for every case branch when no optimizations are
-        // enabled. https://github.com/apple/swift-protobuf/issues/1034
-        switch fieldNumber {
-        case 1: try { try decoder.decodeSingularMessageField(value: &_storage._chat) }()
-        case 2: try { try decoder.decodeSingularMessageField(value: &_storage._dialog) }()
-        default: break
-        }
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._chat) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._dialog) }()
+      default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every if/case branch local when no optimizations
-      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-      // https://github.com/apple/swift-protobuf/issues/1182
-      try { if let v = _storage._chat {
-        try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
-      } }()
-      try { if let v = _storage._dialog {
-        try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
-      } }()
-    }
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._chat {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._dialog {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: CreateChatResult, rhs: CreateChatResult) -> Bool {
-    if lhs._storage !== rhs._storage {
-      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
-        let _storage = _args.0
-        let rhs_storage = _args.1
-        if _storage._chat != rhs_storage._chat {return false}
-        if _storage._dialog != rhs_storage._dialog {return false}
-        return true
-      }
-      if !storagesAreEqual {return false}
-    }
+    if lhs._chat != rhs._chat {return false}
+    if lhs._dialog != rhs._dialog {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -31361,7 +31565,7 @@ nonisolated extension DeleteUserGroupResult: SwiftProtobuf.Message, SwiftProtobu
 
 nonisolated extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Update"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}seq\0\u{1}date\0\u{4}\u{2}new_message\0\u{3}edit_message\0\u{3}update_message_id\0\u{3}delete_messages\0\u{3}update_compose_action\0\u{3}update_user_status\0\u{3}message_attachment\0\u{3}update_reaction\0\u{3}delete_reaction\0\u{3}participant_add\0\u{3}participant_delete\0\u{3}new_chat\0\u{3}delete_chat\0\u{3}space_member_add\0\u{3}space_member_delete\0\u{3}join_space\0\u{3}update_read_max_id\0\u{3}update_user_settings\0\u{3}new_message_notification\0\u{3}mark_as_unread\0\u{3}chat_skip_pts\0\u{3}chat_has_new_updates\0\u{3}space_has_new_updates\0\u{3}space_member_update\0\u{3}chat_visibility\0\u{3}dialog_archived\0\u{3}chat_info\0\u{3}pinned_messages\0\u{3}chat_moved\0\u{3}dialog_notification_settings\0\u{3}chat_open\0\u{3}message_action_invoked\0\u{3}message_action_answered\0\u{3}clear_chat_history\0\u{3}bot_presence\0\u{3}dialog_follow_mode\0\u{3}updated_user\0\u{3}participant_group_add\0\u{3}participant_group_delete\0\u{3}space_settings\0\u{3}chat_permissions\0\u{c}\u{3}\u{1}")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}seq\0\u{1}date\0\u{4}\u{2}new_message\0\u{3}edit_message\0\u{3}update_message_id\0\u{3}delete_messages\0\u{3}update_compose_action\0\u{3}update_user_status\0\u{3}message_attachment\0\u{3}update_reaction\0\u{3}delete_reaction\0\u{3}participant_add\0\u{3}participant_delete\0\u{3}new_chat\0\u{3}delete_chat\0\u{3}space_member_add\0\u{3}space_member_delete\0\u{3}join_space\0\u{3}update_read_max_id\0\u{3}update_user_settings\0\u{3}new_message_notification\0\u{3}mark_as_unread\0\u{3}chat_skip_pts\0\u{3}chat_has_new_updates\0\u{3}space_has_new_updates\0\u{3}space_member_update\0\u{3}chat_visibility\0\u{3}dialog_archived\0\u{3}chat_info\0\u{3}pinned_messages\0\u{3}chat_moved\0\u{3}dialog_notification_settings\0\u{3}chat_open\0\u{3}message_action_invoked\0\u{3}message_action_answered\0\u{3}clear_chat_history\0\u{3}bot_presence\0\u{3}dialog_follow_mode\0\u{3}updated_user\0\u{3}participant_group_add\0\u{3}participant_group_delete\0\u{3}space_settings\0\u{3}chat_permissions\0\u{3}dialog_collapsed_max_id\0\u{c}\u{3}\u{1}")
 
   fileprivate class _StorageClass {
     var _seq: Int32? = nil
@@ -31933,6 +32137,19 @@ nonisolated extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
             _storage._update = .chatPermissions(v)
           }
         }()
+        case 45: try {
+          var v: UpdateDialogCollapsedMaxId?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .dialogCollapsedMaxID(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .dialogCollapsedMaxID(v)
+          }
+        }()
         default: break
         }
       }
@@ -32115,6 +32332,10 @@ nonisolated extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
       case .chatPermissions?: try {
         guard case .chatPermissions(let v)? = _storage._update else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 44)
+      }()
+      case .dialogCollapsedMaxID?: try {
+        guard case .dialogCollapsedMaxID(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 45)
       }()
       case nil: break
       }
@@ -32986,6 +33207,45 @@ nonisolated extension UpdateDialogFollowMode: SwiftProtobuf.Message, SwiftProtob
   public static func ==(lhs: UpdateDialogFollowMode, rhs: UpdateDialogFollowMode) -> Bool {
     if lhs._peerID != rhs._peerID {return false}
     if lhs._followMode != rhs._followMode {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension UpdateDialogCollapsedMaxId: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateDialogCollapsedMaxId"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}max_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self._maxID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._maxID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateDialogCollapsedMaxId, rhs: UpdateDialogCollapsedMaxId) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs._maxID != rhs._maxID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

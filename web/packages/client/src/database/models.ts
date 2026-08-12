@@ -89,6 +89,7 @@ export interface Dialog extends DbModelBase<DbObjectKind.Dialog> {
   pinnedOrder?: string
   chatListHidden?: boolean
   followMode?: number
+  collapsedMaxId?: MessageID
 }
 
 export type MessageDraftKey =

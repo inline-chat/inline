@@ -127,6 +127,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   var onHeightChange: ((CGFloat, ComposeHeightChangeAnimation) -> Void)?
+  var executeInlineCommand: ((InlineCommandAction) async throws -> Bool)?
   var peerId: InlineKit.Peer? {
     didSet {
       updateEmbedState(animated: false)
@@ -1044,6 +1045,22 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     let attachmentItemsSnapshot = attachmentItems
     let hasAttachmentItems = !attachmentItemsSnapshot.isEmpty
     let hasForward = forwardContext != nil
+
+    let hasBotCommandEntity = extractedEntities.entities.contains { entity in
+      if case .botCommand = entity.entity { return true }
+      return false
+    }
+    if !isEditing,
+       !hasForward,
+       !hasAttachmentItems,
+       !hasPendingVideos,
+       !hasActiveUploads,
+       !hasBotCommandEntity,
+       let action = InlineCommandRegistry.action(forStandaloneText: rawText) {
+      performInlineCommand(action)
+      return
+    }
+
     guard ComposeSendEligibility.canSend(
       hasText: hasText,
       hasAttachments: hasAttachmentItems,
@@ -1269,6 +1286,73 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
         didPrepareSendAnimationPreview: didPrepareSendAnimationPreview
       )
     }
+  }
+
+  func performInlineCommand(_ action: InlineCommandAction) {
+    guard let executeInlineCommand, let peerId else { return }
+    let invocationPeerId = peerId
+    let invocationText = textView.text ?? ""
+    let invocationAttributedText = NSAttributedString(
+      attributedString: textView.attributedText ?? NSAttributedString()
+    )
+    let normalizedInvocation = invocationText.trimmingCharacters(in: .whitespacesAndNewlines)
+    let state = ChatState.shared.getState(peer: invocationPeerId)
+    guard normalizedInvocation.hasPrefix("/"),
+          !normalizedInvocation.dropFirst().contains(where: { $0.isWhitespace }),
+          state.editingMessageId == nil,
+          state.forwardContext == nil,
+          attachmentItems.isEmpty,
+          pendingVideoAttachments.isEmpty,
+          !hasActiveAttachmentUploads,
+          !isVoiceActive
+    else { return }
+
+    autocompleteManager?.dismissCompletion()
+    Task { @MainActor [weak self] in
+      do {
+        guard try await executeInlineCommand(action) else { return }
+        guard let self,
+              window != nil,
+              self.peerId == invocationPeerId
+        else { return }
+
+        let currentState = ChatState.shared.getState(peer: invocationPeerId)
+        guard (textView.text ?? "") == invocationText,
+              (textView.attributedText ?? NSAttributedString()).isEqual(to: invocationAttributedText),
+              currentState.editingMessageId == nil,
+              currentState.forwardContext == nil,
+              attachmentItems.isEmpty,
+              pendingVideoAttachments.isEmpty,
+              !hasActiveAttachmentUploads,
+              !isVoiceActive
+        else { return }
+
+        clearInlineCommandText()
+      } catch {
+        guard let self,
+              window != nil,
+              self.peerId == invocationPeerId
+        else { return }
+        log.error("Inline command failed", error: error)
+        ToastManager.shared.showToast(
+          error.localizedDescription,
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
+        )
+      }
+    }
+  }
+
+  private func clearInlineCommandText() {
+    clearDraft()
+    stopDraftSaveTimer()
+    textView.text = ""
+    resetTextViewState()
+    textView.font = .systemFont(ofSize: 17)
+    textView.typingAttributes[.font] = UIFont.systemFont(ofSize: 17)
+    textView.showPlaceholder(true)
+    updateSendButtonVisibility(syncVoiceAvailability: false)
+    updateHeight(animated: false)
   }
 
   private func attributedStringForSend() -> NSAttributedString {

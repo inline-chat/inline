@@ -29,6 +29,7 @@ class MessageListAppKit: NSViewController {
   private let additionalTopContentInset: CGFloat
   var viewModel: MessagesProgressiveViewModel { chatRows.progressiveViewModel }
   private var messages: [FullMessage] { chatRows.messages }
+  var highestPositiveMessageId: Int64? { chatRows.highestPositiveMessageId }
   private var state: ChatState
   private let messageRenderStyle: MessageRenderStyle
   private let usesAvatarOverlay: Bool
@@ -120,6 +121,7 @@ class MessageListAppKit: NSViewController {
     chat: Chat,
     showUnreadAfter: Int64? = nil,
     initialState: MessagesProgressiveViewModel.InitialState? = nil,
+    collapsedMaxId: Int64? = nil,
     initialPinnedMessage: PreparedPinnedMessage? = nil,
     surfaceStyle: ChatViewAppearance.SurfaceStyle = .content,
     additionalTopContentInset: CGFloat = 0
@@ -131,7 +133,11 @@ class MessageListAppKit: NSViewController {
     self.initialPinnedMessage = initialPinnedMessage
     self.surfaceStyle = surfaceStyle
     self.additionalTopContentInset = additionalTopContentInset
-    chatRows = ChatRowListViewModel(peer: peerId, initialState: initialState)
+    chatRows = ChatRowListViewModel(
+      peer: peerId,
+      initialState: initialState,
+      collapsedMaxId: collapsedMaxId
+    )
     let renderStyle = AppSettings.shared.messageRenderStyle
     messageRenderStyle = renderStyle
     usesAvatarOverlay = AppConfig.macMessageAvatarOverlayEnabled
@@ -257,6 +263,54 @@ class MessageListAppKit: NSViewController {
 
   private func rowItem(at row: Int) -> ChatRowListViewModel.Row? {
     chatRows.row(at: row)
+  }
+
+  func collapseHistory(maxID: Int64?) async throws {
+    let effectiveMaxID = try await Api.realtime.collapseHistory(peer: peerId.toInputPeer(), maxID: maxID)
+    setCollapsedMaxId(effectiveMaxID)
+  }
+
+  func setCollapsedMaxId(_ collapsedMaxId: Int64?) {
+    let wasAtBottom = isViewLoaded && isAtAbsoluteBottom
+    let anchor = isViewLoaded ? captureVisibleMessageAnchor() : nil
+    guard chatRows.setCollapsedMaxId(collapsedMaxId) != .none, isViewLoaded else { return }
+
+    clearHoveredMessage()
+    tableView.reloadData()
+    tableView.layoutSubtreeIfNeeded()
+    if wasAtBottom {
+      scrollToBottom(animated: false)
+    } else if let anchor {
+      restoreVisibleMessageAnchor(anchor)
+    }
+    syncAvatarOverlayAfterTableLayout()
+    scheduleMediaWarmupForVisibleAndNearby(reason: "collapse_boundary")
+  }
+
+  private struct VisibleMessageAnchor {
+    let stableId: Int64
+    let offset: CGFloat
+  }
+
+  private func captureVisibleMessageAnchor() -> VisibleMessageAnchor? {
+    let visibleRect = tableView.visibleRect
+    let range = tableView.rows(in: visibleRect)
+    guard range.location != NSNotFound, range.length > 0 else { return nil }
+
+    for row in range.location ..< NSMaxRange(range) {
+      guard let stableId = messageStableId(forRow: row) else { continue }
+      return VisibleMessageAnchor(
+        stableId: stableId,
+        offset: tableView.rect(ofRow: row).minY - visibleRect.minY
+      )
+    }
+    return nil
+  }
+
+  private func restoreVisibleMessageAnchor(_ anchor: VisibleMessageAnchor) {
+    guard let row = chatRows.rowIndex(forMessageStableId: anchor.stableId) else { return }
+    let target = tableView.rect(ofRow: row).minY - anchor.offset
+    scrollView.contentView.updateBounds(NSPoint(x: 0, y: clampScrollOffset(target)), cancel: true)
   }
 
   private func messageStableId(forRow row: Int) -> Int64? {
@@ -3145,6 +3199,66 @@ final class DateSeparatorTableCell: NSView {
   }
 }
 
+final class CollapsedHistoryTableCell: NSView {
+  static let height: CGFloat = 34
+
+  private let label = NSTextField(labelWithString: NSLocalizedString("Cleared", comment: "Collapsed history row"))
+  private var onClick: (() -> Void)?
+  private var trackingArea: NSTrackingArea?
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+
+    label.translatesAutoresizingMaskIntoConstraints = false
+    label.font = .systemFont(ofSize: 12, weight: .regular)
+    label.textColor = .secondaryLabelColor
+    label.alignment = .center
+    label.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(didClickLabel)))
+    addSubview(label)
+
+    NSLayoutConstraint.activate([
+      label.centerXAnchor.constraint(equalTo: centerXAnchor),
+      label.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -4),
+    ])
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  func configure(onClick: @escaping () -> Void) {
+    self.onClick = onClick
+  }
+
+  override func updateTrackingAreas() {
+    if let trackingArea {
+      label.removeTrackingArea(trackingArea)
+    }
+    let area = NSTrackingArea(
+      rect: label.bounds,
+      options: [.mouseEnteredAndExited, .activeInActiveApp],
+      owner: self,
+      userInfo: nil
+    )
+    label.addTrackingArea(area)
+    trackingArea = area
+    super.updateTrackingAreas()
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    label.textColor = .labelColor
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    label.textColor = .secondaryLabelColor
+  }
+
+  @objc private func didClickLabel() {
+    onClick?()
+  }
+}
+
 extension MessageListAppKit: NSTableViewDataSource {
   func numberOfRows(in tableView: NSTableView) -> Int {
     chatRows.rowCount
@@ -3346,6 +3460,24 @@ extension MessageListAppKit: NSTableViewDelegate {
         cell.configure(text: NSLocalizedString("Replies", comment: "Reply thread separator label"))
         return cell
 
+      case .collapsedHistory:
+        let identifier = NSUserInterfaceItemIdentifier("CollapsedHistoryCell")
+        let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? CollapsedHistoryTableCell
+          ?? CollapsedHistoryTableCell()
+        cell.identifier = identifier
+        cell.configure { [weak self] in
+          Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+              try await collapseHistory(maxID: nil)
+            } catch {
+              log.error("Failed to show collapsed history", error: error)
+              ToastCenter.shared.showError(error.localizedDescription)
+            }
+          }
+        }
+        return cell
+
       case .parentMessage:
         guard let id = messageStableId(forRow: row) else { return nil }
         return makeMessageCell(tableView: tableView, stableId: id, row: row)
@@ -3391,6 +3523,9 @@ extension MessageListAppKit: NSTableViewDelegate {
 
       case .repliesSeparator:
         return UnreadSeparatorTableCell.height
+
+      case .collapsedHistory:
+        return CollapsedHistoryTableCell.height
 
       case let .message(id), let .parentMessage(id):
         guard let message = messageAndIndex(forStableId: id)?.message else { return defaultRowHeight }

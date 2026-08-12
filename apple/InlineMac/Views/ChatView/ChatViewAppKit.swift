@@ -314,8 +314,9 @@ class ChatViewAppKit: NSViewController {
   }
 
   private func updateDialog(from item: SpaceChatItem?) {
-    guard let onDialogChange else { return }
     let dialog = item?.dialog
+    messageListVC?.setCollapsedMaxId(dialog?.collapsedMaxId)
+    guard let onDialogChange else { return }
     Task { @MainActor [weak self] in
       guard let self, !isDisposed else { return }
       onDialogChange(dialog)
@@ -367,6 +368,7 @@ class ChatViewAppKit: NSViewController {
         chat: chat,
         showUnreadAfter: unreadBoundaryAtOpen(),
         initialState: preparedPayload?.messagesInitialState,
+        collapsedMaxId: dialog?.collapsedMaxId,
         initialPinnedMessage: preparedPayload?.pinnedMessage,
         surfaceStyle: appearance.surfaceStyle,
         additionalTopContentInset: appearance.additionalTopContentInset

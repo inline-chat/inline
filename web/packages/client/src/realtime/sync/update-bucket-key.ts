@@ -131,6 +131,7 @@ const inferredUpdateBucketKey = (
     case "updateReadMaxId":
     case "chatOpen":
     case "dialogFollowMode":
+    case "dialogCollapsedMaxId":
     case "messageActionAnswered":
       return { kind: "user" }
     case "messageActionInvoked":

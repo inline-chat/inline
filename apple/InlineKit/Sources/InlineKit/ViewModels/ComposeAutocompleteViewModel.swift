@@ -31,6 +31,7 @@ public struct ComposeAutocompleteItem: Identifiable, Hashable, Sendable {
   public enum Payload: Hashable, Sendable {
     case mention(MentionCompletionItem)
     case command(PeerBotCommandSuggestion)
+    case inlineCommand(InlineCommandDefinition)
     case thread(chatId: Int64, spaceId: Int64?, title: String)
     case externalResource(ExternalResourceReference)
     case emoji(value: String, shortcode: String)
@@ -43,6 +44,7 @@ public struct ComposeAutocompleteItem: Identifiable, Hashable, Sendable {
   public let symbol: String?
   public let emoji: String?
   public let avatarUserInfo: UserInfo?
+  public let showsAppIcon: Bool
   public let payload: Payload
 
   public init(
@@ -53,6 +55,7 @@ public struct ComposeAutocompleteItem: Identifiable, Hashable, Sendable {
     symbol: String? = nil,
     emoji: String? = nil,
     avatarUserInfo: UserInfo? = nil,
+    showsAppIcon: Bool = false,
     payload: Payload
   ) {
     self.id = id
@@ -62,6 +65,7 @@ public struct ComposeAutocompleteItem: Identifiable, Hashable, Sendable {
     self.symbol = symbol
     self.emoji = emoji
     self.avatarUserInfo = avatarUserInfo
+    self.showsAppIcon = showsAppIcon
     self.payload = payload
   }
 }

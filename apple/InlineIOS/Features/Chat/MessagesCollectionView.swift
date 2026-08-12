@@ -29,6 +29,7 @@ final class MessagesCollectionView: UICollectionView {
     peerId: Peer,
     chatId: Int64,
     spaceId: Int64?,
+    collapsedMaxId: Int64? = nil,
     isPreview: Bool = false,
     sendAnimationCoordinator: SendMessageAnimationCoordinator? = nil
   ) {
@@ -40,6 +41,7 @@ final class MessagesCollectionView: UICollectionView {
       peerId: peerId,
       chatId: chatId,
       spaceId: spaceId,
+      collapsedMaxId: collapsedMaxId,
       isPreview: isPreview,
       sendAnimationCoordinator: sendAnimationCoordinator
     )
@@ -51,6 +53,19 @@ final class MessagesCollectionView: UICollectionView {
     super.init(frame: .zero, collectionViewLayout: layout)
 
     setupCollectionView()
+  }
+
+  var highestPositiveMessageId: Int64? {
+    coordinator.highestPositiveMessageId
+  }
+
+  func setCollapsedMaxId(_ collapsedMaxId: Int64?) {
+    coordinator.setCollapsedMaxId(collapsedMaxId)
+  }
+
+  func collapseHistory(maxID: Int64?) async throws {
+    let effectiveMaxID = try await Api.realtime.collapseHistory(peer: peerId.toInputPeer(), maxID: maxID)
+    coordinator.setCollapsedMaxId(effectiveMaxID)
   }
 
   @available(*, unavailable)
@@ -1047,6 +1062,10 @@ private extension MessagesCollectionView {
       viewModel.sections.flatMap(\.messages)
     }
 
+    var highestPositiveMessageId: Int64? {
+      viewModel.highestPositiveMessageId
+    }
+
     var items: [MessageListItem] {
       listSections.flatMap(\.items)
     }
@@ -1103,6 +1122,14 @@ private extension MessagesCollectionView {
         )
       }
 
+      if viewModel.collapsedMaxId != nil {
+        sections.append(MessageListSection(
+          id: .collapsedHistory,
+          dayString: nil,
+          items: [.collapsedHistory]
+        ))
+      }
+
       if let anchor = viewModel.threadAnchor {
         // The collection view is inverted, so the last section is the visual top.
         sections.append(MessageListSection(
@@ -1150,7 +1177,7 @@ private extension MessagesCollectionView {
           } else {
             nil
           }
-        case .unreadSeparator:
+        case .unreadSeparator, .collapsedHistory:
           nil
       }
     }
@@ -1165,7 +1192,13 @@ private extension MessagesCollectionView {
           return MessageListItemModel(content: .message(message, displayMode: .threadAnchor))
         case .unreadSeparator:
           return MessageListItemModel(content: .unreadSeparator(title: "Unread messages"))
+        case .collapsedHistory:
+          return MessageListItemModel(content: .collapsedHistory(title: "Cleared"))
       }
+    }
+
+    func setCollapsedMaxId(_ collapsedMaxId: Int64?) {
+      viewModel.setCollapsedMaxId(collapsedMaxId)
     }
 
     private static func cell(
@@ -1797,6 +1830,7 @@ private extension MessagesCollectionView {
       peerId: Peer,
       chatId: Int64,
       spaceId: Int64?,
+      collapsedMaxId: Int64? = nil,
       isPreview: Bool = false,
       sendAnimationCoordinator: SendMessageAnimationCoordinator? = nil
     ) {
@@ -1805,7 +1839,11 @@ private extension MessagesCollectionView {
       self.spaceId = spaceId
       self.isPreview = isPreview
       self.sendAnimationCoordinator = sendAnimationCoordinator
-      viewModel = MessagesSectionedViewModel(peer: peerId, reversed: true)
+      viewModel = MessagesSectionedViewModel(
+        peer: peerId,
+        reversed: true,
+        collapsedMaxId: collapsedMaxId
+      )
       translationViewModel = TranslationViewModel(peerId: peerId)
 
       super.init()
@@ -2090,14 +2128,25 @@ private extension MessagesCollectionView {
         MessageListSeparatorCell,
         MessageListItem
       > { [weak self] cell, _, item in
-        guard let self,
-              let model = model(for: item),
-              case let .unreadSeparator(title) = model.content
-        else {
-          return
-        }
+        guard let self, let model = model(for: item) else { return }
 
-        cell.configure(title: title)
+        switch model.content {
+          case let .unreadSeparator(title):
+            cell.configure(title: title)
+          case let .collapsedHistory(title):
+            cell.configure(title: title, showsLines: false) { [weak self] in
+              guard let collectionView = self?.currentCollectionView as? MessagesCollectionView else { return }
+              Task { @MainActor in
+                do {
+                  try await collectionView.collapseHistory(maxID: nil)
+                } catch {
+                  Log.shared.error("Failed to show collapsed history", error: error)
+                }
+              }
+            }
+          case .message:
+            break
+        }
       }
 
       dataSource = UICollectionViewDiffableDataSource<MessageListSectionID, MessageListItem>(
@@ -2110,7 +2159,7 @@ private extension MessagesCollectionView {
               for: indexPath,
               item: item
             )
-          case .unreadSeparator:
+          case .unreadSeparator, .collapsedHistory:
             collectionView.dequeueConfiguredReusableCell(
               using: separatorRegistration,
               for: indexPath,
@@ -3165,6 +3214,9 @@ private extension MessagesCollectionView {
       guard let item = item(at: indexPath) else { return .zero }
 
       if case .unreadSeparator = item {
+        return CGSize(width: collectionView.bounds.width, height: 34)
+      }
+      if case .collapsedHistory = item {
         return CGSize(width: collectionView.bounds.width, height: 34)
       }
 

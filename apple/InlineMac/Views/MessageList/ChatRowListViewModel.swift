@@ -9,6 +9,7 @@ final class ChatRowListViewModel {
     case daySeparator(dayStart: Date)
     case unreadSeparator
     case repliesSeparator
+    case collapsedHistory
     case parentMessage(id: Int64)
     case message(id: Int64)
   }
@@ -40,7 +41,14 @@ final class ChatRowListViewModel {
   private var rowIdxsByMsgId: [Int64: IndexSet] = [:]
 
   private(set) var showUnreadAfter: Int64?
+  private(set) var collapsedMaxId: Int64?
   var threadAnchor: FullMessage? { progressiveViewModel.threadAnchor }
+  var highestPositiveMessageId: Int64? {
+    progressiveViewModel.messages.lazy
+      .map(\.message.messageId)
+      .filter { $0 > 0 }
+      .max()
+  }
 
   var rowCount: Int { rows.count }
   var canLoadOlderFromLocal: Bool { progressiveViewModel.canLoadOlderFromLocal }
@@ -49,9 +57,14 @@ final class ChatRowListViewModel {
 
   // MARK: - Init
 
-  init(peer: Peer, initialState: MessagesProgressiveViewModel.InitialState?) {
+  init(
+    peer: Peer,
+    initialState: MessagesProgressiveViewModel.InitialState?,
+    collapsedMaxId: Int64? = nil
+  ) {
+    self.collapsedMaxId = collapsedMaxId
     progressiveViewModel = MessagesProgressiveViewModel(peer: peer, initialState: initialState)
-    messages = progressiveViewModel.messages
+    messages = visibleMessages
     rebuildRows()
   }
 
@@ -62,6 +75,14 @@ final class ChatRowListViewModel {
   }
 
   func apply(_ update: MessagesProgressiveViewModel.MessagesChangeSet) -> UpdateKind {
+    // Raw progressive indexes do not map through a collapse boundary. Keep the established
+    // incremental path unchanged for normal chats and rebuild only the collapsed projection.
+    if collapsedMaxId != nil {
+      messages = visibleMessages
+      rebuildRows()
+      return .reloadAll
+    }
+
     switch update {
       case let .added(added, _):
         return applyAdded(added)
@@ -79,13 +100,13 @@ final class ChatRowListViewModel {
 
   func syncFromViewModelAfterManualMutation() -> UpdateKind {
     let oldMessages = messages
-    messages = progressiveViewModel.messages
+    messages = visibleMessages
     return applyMutationTransition(from: oldMessages, to: messages)
   }
 
   @discardableResult
   func rebuildFromViewModel() -> UpdateKind {
-    messages = progressiveViewModel.messages
+    messages = visibleMessages
     rebuildRows()
     return .reloadAll
   }
@@ -116,6 +137,14 @@ final class ChatRowListViewModel {
     progressiveViewModel.setAtBottom(atBottom)
   }
 
+  func setCollapsedMaxId(_ collapsedMaxId: Int64?) -> UpdateKind {
+    guard self.collapsedMaxId != collapsedMaxId else { return .none }
+    self.collapsedMaxId = collapsedMaxId
+    messages = visibleMessages
+    rebuildRows()
+    return .reloadAll
+  }
+
   func loadLocalWindowAroundMessage(messageId: Int64, publish: Bool = true) -> Bool {
     progressiveViewModel.loadLocalWindowAroundMessage(messageId: messageId, publish: publish)
   }
@@ -139,7 +168,7 @@ final class ChatRowListViewModel {
     switch row {
       case let .message(id), let .parentMessage(id):
         return id
-      case .daySeparator, .unreadSeparator, .repliesSeparator:
+      case .daySeparator, .unreadSeparator, .repliesSeparator, .collapsedHistory:
         return nil
     }
   }
@@ -156,14 +185,14 @@ final class ChatRowListViewModel {
 
   private func applyAdded(_ added: [FullMessage]) -> UpdateKind {
     let oldMessages = messages
-    messages = progressiveViewModel.messages
+    messages = visibleMessages
 
     guard !added.isEmpty else { return .none }
     return applyMutationTransition(from: oldMessages, to: messages)
   }
 
   private func applyDeleted(_ deletedIds: [Int64]) -> UpdateKind {
-    messages = progressiveViewModel.messages
+    messages = visibleMessages
 
     guard !deletedIds.isEmpty else {
       reindex()
@@ -187,7 +216,7 @@ final class ChatRowListViewModel {
 
     let prevMessages = messages
     let prevMsgIdxById = msgIdxById
-    messages = progressiveViewModel.messages
+    messages = visibleMessages
     let anchorId = threadAnchor?.id
 
     for msg in updated {
@@ -295,7 +324,7 @@ final class ChatRowListViewModel {
   }
 
   private func reloadFromProgressive() -> UpdateKind {
-    messages = progressiveViewModel.messages
+    messages = visibleMessages
     rebuildRows()
     return .reloadAll
   }
@@ -334,7 +363,7 @@ final class ChatRowListViewModel {
         case let .parentMessage(id):
           allIdxsByMsgId[id, default: []].insert(rowIdx)
 
-        case .daySeparator, .unreadSeparator, .repliesSeparator:
+        case .daySeparator, .unreadSeparator, .repliesSeparator, .collapsedHistory:
           break
       }
     }
@@ -410,6 +439,7 @@ final class ChatRowListViewModel {
     Self.makeRows(
       messages: messages,
       showUnreadAfter: showUnreadAfter,
+      showsCollapsedHistory: collapsedMaxId != nil,
       parentMessageStableId: threadAnchor?.id
     )
   }
@@ -417,6 +447,7 @@ final class ChatRowListViewModel {
   private static func makeRows(
     messages: [FullMessage],
     showUnreadAfter: Int64?,
+    showsCollapsedHistory: Bool,
     parentMessageStableId: Int64?
   ) -> [Row] {
     var out: [Row] = []
@@ -425,6 +456,10 @@ final class ChatRowListViewModel {
     if let parentMessageStableId {
       out.append(.parentMessage(id: parentMessageStableId))
       out.append(.repliesSeparator)
+    }
+
+    if showsCollapsedHistory {
+      out.append(.collapsedHistory)
     }
 
     var prevDayStart: Date?
@@ -453,5 +488,13 @@ final class ChatRowListViewModel {
 
   private static func dayStart(for date: Date) -> Date {
     Calendar.autoupdatingCurrent.startOfDay(for: date)
+  }
+
+  private var visibleMessages: [FullMessage] {
+    guard let collapsedMaxId else { return progressiveViewModel.messages }
+    return progressiveViewModel.messages.filter { message in
+      let messageId = message.message.messageId
+      return messageId <= 0 || messageId > collapsedMaxId
+    }
   }
 }

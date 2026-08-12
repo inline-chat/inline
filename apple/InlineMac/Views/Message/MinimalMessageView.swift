@@ -3104,6 +3104,21 @@ class MinimalMessageViewAppKit: NSView {
   }
 
   @objc private func deleteMessage() {
+    if message.status == .failed {
+      let messageId = message.messageId
+      let chatId = message.chatId
+      let peerId = message.peerId
+      Task {
+        _ = try? await AppDatabase.shared.dbWriter.write { db in
+          try Message.deleteMessages(db, messageIds: [messageId], chatId: chatId)
+        }
+        await MainActor.run {
+          MessagesPublisher.shared.messagesDeleted(messageIds: [messageId], peer: peerId)
+        }
+      }
+      return
+    }
+
     // Delete message
     Task(priority: .userInitiated) { @MainActor in
       try await Api.realtime.send(.deleteMessages(

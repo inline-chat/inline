@@ -6,6 +6,7 @@ final class MessageListSeparatorCell: UICollectionViewCell {
   private let label = UILabel()
   private let leadingLine = UIView()
   private let trailingLine = UIView()
+  private var onTap: (() -> Void)?
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -17,13 +18,21 @@ final class MessageListSeparatorCell: UICollectionViewCell {
     fatalError("init(coder:) has not been implemented")
   }
 
-  func configure(title: String) {
+  func configure(title: String, showsLines: Bool = true, onTap: (() -> Void)? = nil) {
     label.text = title
+    leadingLine.isHidden = !showsLines
+    trailingLine.isHidden = !showsLines
+    self.onTap = onTap
+    label.isUserInteractionEnabled = onTap != nil
   }
 
   override func prepareForReuse() {
     super.prepareForReuse()
     label.text = nil
+    leadingLine.isHidden = false
+    trailingLine.isHidden = false
+    label.isUserInteractionEnabled = false
+    onTap = nil
   }
 
   private func setup() {
@@ -41,6 +50,7 @@ final class MessageListSeparatorCell: UICollectionViewCell {
       contentView.addSubview(line)
     }
     contentView.addSubview(label)
+    label.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(didTapLabel)))
 
     NSLayoutConstraint.activate([
       contentView.heightAnchor.constraint(greaterThanOrEqualToConstant: 34),
@@ -58,5 +68,9 @@ final class MessageListSeparatorCell: UICollectionViewCell {
       trailingLine.centerYAnchor.constraint(equalTo: label.centerYAnchor),
       trailingLine.heightAnchor.constraint(equalToConstant: 1 / UIScreen.main.scale),
     ])
+  }
+
+  @objc private func didTapLabel() {
+    onTap?()
   }
 }

@@ -20,6 +20,7 @@ public struct ApiDialog: Codable, Hashable, Sendable {
   public var pinnedOrder: String?
   public var sidebarVisible: Bool?
   public var chatListHidden: Bool?
+  public var collapsedMaxId: Int64?
 }
 
 public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
@@ -49,6 +50,8 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
   public var chatListHidden: Bool? = nil
   /// Reply-thread automatic surfacing policy; nil means relevance-only default.
   public var followMode: DialogFollowMode? = nil
+  /// Personal history-collapse boundary; messages at or below this ID stay hidden.
+  public var collapsedMaxId: Int64? = nil
 
   private enum CodingKeys: String, CodingKey {
     case id
@@ -70,6 +73,7 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
     case pinnedOrder
     case chatListHidden
     case followMode
+    case collapsedMaxId
   }
 
   public enum Columns {
@@ -92,6 +96,7 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
     public static let pinnedOrder = Column(CodingKeys.pinnedOrder)
     public static let chatListHidden = Column(CodingKeys.chatListHidden)
     public static let followMode = Column(CodingKeys.followMode)
+    public static let collapsedMaxId = Column(CodingKeys.collapsedMaxId)
   }
 
   public static let space = belongsTo(Space.self)
@@ -155,6 +160,7 @@ public extension Dialog {
     pinnedOrder = from.pinnedOrder
     chatListHidden = Self.chatListHidden(from: from.chatListHidden, sidebarVisible: from.sidebarVisible)
     followMode = nil
+    collapsedMaxId = from.collapsedMaxId
   }
 
   // Called when user clicks a user for the first time
@@ -181,6 +187,7 @@ public extension Dialog {
     pinnedOrder = nil
     chatListHidden = nil
     followMode = nil
+    collapsedMaxId = nil
   }
 
   init(optimisticForChat chat: Chat) {
@@ -209,6 +216,7 @@ public extension Dialog {
     pinnedOrder = nil
     chatListHidden = nil
     followMode = nil
+    collapsedMaxId = nil
   }
 
   init(from: InlineProtocol.Dialog) {
@@ -247,6 +255,7 @@ public extension Dialog {
       chatListHidden = nil
     }
     followMode = from.hasFollowMode ? from.followMode : nil
+    collapsedMaxId = from.hasCollapsedMaxID ? from.collapsedMaxID : nil
   }
 
   static func getDialogId(peerUserId: Int64) -> Int64 {

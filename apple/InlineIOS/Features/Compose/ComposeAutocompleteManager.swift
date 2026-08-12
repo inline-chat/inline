@@ -72,7 +72,11 @@ final class ComposeAutocompleteManager: NSObject {
         return mentionViewModel.items.prefix(limit).map(Self.autocompleteItem(for:))
       },
       commandItems: { query, limit in
-        commandViewModel.suggestions(matching: query).prefix(limit).map(Self.autocompleteItem(for:))
+        let botCommands = commandViewModel.suggestions(matching: query)
+          .map { ComposeCommandSuggestion.bot($0) }
+        let inlineCommands = InlineCommandRegistry.suggestions(matching: query)
+          .map { ComposeCommandSuggestion.inline($0) }
+        return (botCommands + inlineCommands).prefix(limit).map(Self.autocompleteItem(for:))
       },
       emojiItems: { query, limit in
         ComposeEmojiAutocompleteProvider.items(matching: query, limit: limit)
@@ -511,6 +515,13 @@ final class ComposeAutocompleteManager: NSObject {
     let replacedRange = match.range
     let currentAttributedText = textView.attributedText ?? NSAttributedString()
 
+    if case .inlineCommand = item.payload, activation == .completionOnly {
+      // App-owned commands must never be materialized as compose text on Tab: a later Send could
+      // misroute that text to a bot or the chat instead of executing the local action.
+      dismissCompletion()
+      return
+    }
+
     switch item.payload {
     case let .mention(mention):
       let mentionText = mentionViewModel.mentionText(for: mention)
@@ -531,6 +542,9 @@ final class ComposeAutocompleteManager: NSObject {
         targetBotUserId: suggestion.botId
       )
       apply(result.newAttributedText, cursorPosition: result.newCursorPosition, to: textView)
+
+    case .inlineCommand:
+      break
 
     case let .thread(chatId, _, title):
       let result = threadLinkDetector.replaceThreadLink(
@@ -721,19 +735,31 @@ final class ComposeAutocompleteManager: NSObject {
     )
   }
 
-  private static func autocompleteItem(for command: PeerBotCommandSuggestion) -> ComposeAutocompleteItem {
-    let botLabel = command.isAmbiguous ? (command.botLabel ?? command.botDisplayName) : nil
-    let subtitle = [botLabel, command.description]
-      .compactMap { value in value?.isEmpty == false ? value : nil }
-      .joined(separator: " · ")
-    return ComposeAutocompleteItem(
-      id: "command-\(command.id)",
-      kind: .command,
-      title: "/\(command.command)",
-      subtitle: subtitle,
-      avatarUserInfo: command.botUserInfo,
-      payload: .command(command)
-    )
+  private static func autocompleteItem(for suggestion: ComposeCommandSuggestion) -> ComposeAutocompleteItem {
+    switch suggestion {
+      case let .bot(command):
+        let botLabel = command.isAmbiguous ? (command.botLabel ?? command.botDisplayName) : nil
+        let subtitle = [botLabel, command.description]
+          .compactMap { value in value?.isEmpty == false ? value : nil }
+          .joined(separator: " · ")
+        return ComposeAutocompleteItem(
+          id: "command-\(suggestion.id)",
+          kind: .command,
+          title: "/\(command.command)",
+          subtitle: subtitle,
+          avatarUserInfo: command.botUserInfo,
+          payload: .command(command)
+        )
+      case let .inline(command):
+        return ComposeAutocompleteItem(
+          id: "command-\(suggestion.id)",
+          kind: .command,
+          title: "/\(command.command)",
+          subtitle: command.description,
+          showsAppIcon: true,
+          payload: .inlineCommand(command)
+        )
+    }
   }
 }
 
@@ -787,7 +813,9 @@ extension ComposeView: ComposeAutocompleteManagerDelegate {
     switch item.payload {
     case .command where activation == .primary:
       sendMessage()
-    case .command, .mention, .thread, .externalResource, .emoji:
+    case let .inlineCommand(command) where activation == .primary:
+      performInlineCommand(command.action)
+    case .command, .inlineCommand, .mention, .thread, .externalResource, .emoji:
       updateHeight()
       draftManager.invalidateLoadedEntities()
     }

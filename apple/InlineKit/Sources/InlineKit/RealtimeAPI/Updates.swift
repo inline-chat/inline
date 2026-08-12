@@ -163,6 +163,9 @@ public actor UpdatesEngine: Sendable {
         case let .dialogFollowMode(dialogFollowMode):
           try dialogFollowMode.apply(db)
 
+        case let .dialogCollapsedMaxID(dialogCollapsedMaxID):
+          try dialogCollapsedMaxID.apply(db)
+
         case let .chatOpen(chatOpen):
           try chatOpen.apply(db)
 
@@ -1424,6 +1427,19 @@ extension InlineProtocol.UpdateDialogFollowMode {
       Log.shared.debug("Updated dialog follow mode")
     } else {
       Log.shared.warning("Could not find dialog for peer \(peerID.toPeer()) to update follow mode")
+    }
+  }
+}
+
+extension InlineProtocol.UpdateDialogCollapsedMaxId {
+  func apply(_ db: Database) throws {
+    Log.shared.debug("update dialog collapsed max id for peer \(peerID.toPeer())")
+
+    if var dialog = try Dialog.get(peerId: peerID.toPeer()).fetchOne(db) {
+      dialog.collapsedMaxId = hasMaxID ? maxID : nil
+      try dialog.update(db)
+    } else {
+      Log.shared.warning("Could not find dialog for peer \(peerID.toPeer()) to update collapsed max id")
     }
   }
 }

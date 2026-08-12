@@ -574,6 +574,7 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
       case "userMessageActionInvoked":
       case "userMessageActionAnswered":
       case "userDialogFollowMode":
+      case "userDialogCollapsedMaxId":
       case "updatedUser":
       case "userChatParticipantGroupAdd":
       case "userChatParticipantGroupDelete":
@@ -836,6 +837,10 @@ async function buildUserSidecarsForUpdates(input: UserSidecarsForUpdatesInput): 
 
       case "dialogFollowMode":
         collectPeerSidecarRefs(update.update.dialogFollowMode.peerId, { chatIds, userIds, spaceIds })
+        break
+
+      case "dialogCollapsedMaxId":
+        collectPeerSidecarRefs(update.update.dialogCollapsedMaxId.peerId, { chatIds, userIds, spaceIds })
         break
 
       case "chatOpen":
@@ -1281,6 +1286,7 @@ function convertSpaceUpdate(update: DecryptedUpdate, options?: { sanitizeUsers?:
     case "clearChatHistory":
     case "messageAttachment":
     case "userDialogFollowMode":
+    case "userDialogCollapsedMaxId":
     case "updatedUser":
     case "participantGroupAdd":
     case "participantGroupDelete":
@@ -1470,6 +1476,19 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
           dialogFollowMode: {
             peerId: payload.userDialogFollowMode.peerId,
             followMode: payload.userDialogFollowMode.followMode,
+          },
+        },
+      }
+
+    case "userDialogCollapsedMaxId":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "dialogCollapsedMaxId",
+          dialogCollapsedMaxId: {
+            peerId: payload.userDialogCollapsedMaxId.peerId,
+            maxId: payload.userDialogCollapsedMaxId.maxId,
           },
         },
       }

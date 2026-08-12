@@ -460,7 +460,7 @@ struct ChatInfoView: View {
             Button(role: .destructive) {
               showClearHistorySheet = true
             } label: {
-              Label("Clear History...", systemImage: "trash")
+              Label("Delete History...", systemImage: "trash")
             }
           } label: {
             Image(systemName: "ellipsis.circle")
@@ -562,7 +562,7 @@ private struct IOSClearChatHistorySheet: View {
           }
         }
       }
-      .navigationTitle("Clear History")
+      .navigationTitle("Delete History")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
@@ -573,7 +573,7 @@ private struct IOSClearChatHistorySheet: View {
         }
 
         ToolbarItem(placement: .confirmationAction) {
-          Button("Clear", role: .destructive) {
+          Button("Delete", role: .destructive) {
             showClearConfirmation = true
           }
           .disabled(isSubmitting)
@@ -581,9 +581,9 @@ private struct IOSClearChatHistorySheet: View {
       }
     }
     .presentationDetents([.medium])
-    .alert("Clear history for everyone?", isPresented: $showClearConfirmation) {
+    .alert("Delete history for everyone?", isPresented: $showClearConfirmation) {
       Button("Cancel", role: .cancel) {}
-      Button("Clear History", role: .destructive) {
+      Button("Delete History", role: .destructive) {
         clearHistory()
       }
     } message: {
@@ -605,7 +605,7 @@ private struct IOSClearChatHistorySheet: View {
   private var clearConfirmationMessage: String {
     let target = clearSpace && spaceId != nil ? "all chats in this space" : "this chat"
     let rangeText = keepLastDays == 0 ? "all history" : "history older than \(keepLastDays) days"
-    return "This will clear \(rangeText) from \(target) for everyone. You will have 5 seconds to undo before it starts."
+    return "This will delete \(rangeText) from \(target) for everyone. You will have 5 seconds to undo before it starts."
   }
 
   @MainActor
@@ -620,7 +620,7 @@ private struct IOSClearChatHistorySheet: View {
     let token = DelayedDestructiveActionScheduler.shared.schedule(
       onPerforming: {
         ToastManager.shared.hideToast()
-        ToastManager.shared.showToast("Clearing history...", type: .loading, systemImage: "trash")
+        ToastManager.shared.showToast("Deleting history...", type: .loading, systemImage: "trash")
       },
       action: {
         if let selectedSpaceId {
@@ -639,19 +639,19 @@ private struct IOSClearChatHistorySheet: View {
       },
       onSuccess: {
         ToastManager.shared.hideToast()
-        ToastManager.shared.showToast("History cleared", type: .success, systemImage: "checkmark.circle.fill")
+        ToastManager.shared.showToast("History deleted", type: .success, systemImage: "checkmark.circle.fill")
       },
       onFailure: { _ in
         ToastManager.shared.hideToast()
-        ToastManager.shared.showToast("Failed to clear history", type: .error, systemImage: "exclamationmark.triangle.fill")
+        ToastManager.shared.showToast("Failed to delete history", type: .error, systemImage: "exclamationmark.triangle.fill")
       }
     )
 
-    ToastManager.shared.showUndoCountdown("Clearing history") {
+    ToastManager.shared.showUndoCountdown("Deleting history") {
       Task { @MainActor in
         if DelayedDestructiveActionScheduler.shared.cancel(token) {
           ToastManager.shared.hideToast()
-          ToastManager.shared.showToast("Clear history canceled", type: .info, systemImage: "arrow.uturn.backward")
+          ToastManager.shared.showToast("Delete history canceled", type: .info, systemImage: "arrow.uturn.backward")
         }
       }
     }

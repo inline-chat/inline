@@ -462,6 +462,22 @@ final class ComposeAutocompleteCompletionView: UIView {
     container.layer.cornerRadius = 15
     container.backgroundColor = ThemeManager.shared.selected.accent.withAlphaComponent(0.12)
 
+    if item.showsAppIcon {
+      let imageView = UIImageView(image: UIImage(named: "AppIconSmall"))
+      imageView.contentMode = .scaleAspectFit
+      imageView.layer.cornerRadius = 7
+      imageView.clipsToBounds = true
+      imageView.translatesAutoresizingMaskIntoConstraints = false
+      container.addSubview(imageView)
+      NSLayoutConstraint.activate([
+        imageView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+        imageView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+        imageView.topAnchor.constraint(equalTo: container.topAnchor),
+        imageView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+      ])
+      return container
+    }
+
     if let emoji = item.emoji, !emoji.isEmpty {
       let label = UILabel()
       label.text = emoji

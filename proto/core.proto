@@ -240,6 +240,8 @@ message Dialog {
   optional string pinned_order = 15;
   // Reply-thread automatic surfacing policy.
   optional DialogFollowMode follow_mode = 16;
+  // Personal history-collapse boundary; messages at or below this ID stay hidden.
+  optional int64 collapsed_max_id = 17;
 }
 
 enum DialogFollowMode {
@@ -1081,6 +1083,7 @@ enum Method {
   GET_CHAT_TRANSCRIPT = 96;
   SEARCH_EXTERNAL_RESOURCES = 97;
   JOIN_PUBLIC_SPACE = 98;
+  COLLAPSE_HISTORY = 99;
   LIST_CONNECTORS = 100;
   PREPARE_CONNECTOR_OAUTH = 101;
   DISCONNECT_CONNECTOR = 102;
@@ -1187,6 +1190,7 @@ message RpcCall {
     GetChatTranscriptInput getChatTranscript = 97;
     SearchExternalResourcesInput searchExternalResources = 98;
     JoinPublicSpaceInput joinPublicSpace = 99;
+    CollapseHistoryInput collapseHistory = 100;
     ListConnectorsInput listConnectors = 101;
     PrepareConnectorOAuthInput prepareConnectorOAuth = 102;
     DisconnectConnectorInput disconnectConnector = 103;
@@ -1295,6 +1299,7 @@ message RpcResult {
     GetChatTranscriptResult getChatTranscript = 97;
     SearchExternalResourcesResult searchExternalResources = 98;
     JoinPublicSpaceResult joinPublicSpace = 99;
+    CollapseHistoryResult collapseHistory = 100;
     ListConnectorsResult listConnectors = 101;
     PrepareConnectorOAuthResult prepareConnectorOAuth = 102;
     DisconnectConnectorResult disconnectConnector = 103;
@@ -1732,6 +1737,14 @@ message UpdateDialogFollowModeInput {
 }
 
 message UpdateDialogFollowModeResult { repeated Update updates = 1; }
+
+message CollapseHistoryInput {
+  InputPeer peer_id = 1;
+  // Unset removes the personal collapse boundary.
+  optional int64 max_id = 2;
+}
+
+message CollapseHistoryResult { repeated Update updates = 1; }
 
 // Mark dialog as unread
 message MarkAsUnreadInput {
@@ -2757,6 +2770,7 @@ message Update {
     UpdateChatParticipantGroupDelete participant_group_delete = 42;
     UpdateSpaceSettings space_settings = 43;
     UpdateChatPermissions chat_permissions = 44;
+    UpdateDialogCollapsedMaxId dialog_collapsed_max_id = 45;
   }
 }
 
@@ -2926,6 +2940,12 @@ message UpdateDialogFollowMode {
 
   // If unset, the reply thread uses default relevance mode.
   optional DialogFollowMode follow_mode = 2;
+}
+
+message UpdateDialogCollapsedMaxId {
+  Peer peer_id = 1;
+  // Unset removes the personal collapse boundary.
+  optional int64 max_id = 2;
 }
 
 // Update when a new chat is created either in space or a private chat

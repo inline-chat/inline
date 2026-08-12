@@ -624,6 +624,40 @@ const applyUpdate = (
       return "applied"
     }
 
+    case "dialogCollapsedMaxId": {
+      const peer = update.update.dialogCollapsedMaxId.peerId
+      if (!peer || peer.type.oneofKind === undefined) {
+        deferUpdate(db, update)
+        return "deferred"
+      }
+      const peerThreadId = getPeerChatId(peer)
+      const peerUserId = getPeerUserId(peer)
+      const dialogId =
+        peerThreadId != null
+          ? getDialogId({ peerThreadId })
+          : peerUserId != null
+            ? getDialogId({ peerUserId })
+            : undefined
+      if (dialogId == null) {
+        deferUpdate(db, update)
+        return "deferred"
+      }
+      const ref = db.ref(DbObjectKind.Dialog, dialogId)
+      const existing = db.get(ref)
+      if (!existing) {
+        deferUpdate(db, update)
+        return "deferred"
+      }
+      db.replace({
+        ...existing,
+        collapsedMaxId:
+          update.update.dialogCollapsedMaxId.maxId === undefined
+            ? undefined
+            : makeMessageId(update.update.dialogCollapsedMaxId.maxId),
+      })
+      return "applied"
+    }
+
     case "clearChatHistory": {
       if (
         update.update.clearChatHistory.target.oneofKind !==

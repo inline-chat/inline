@@ -52,6 +52,7 @@ message ServerUpdate {
     ServerUserUpdateChatParticipantGroupAdd user_chat_participant_group_add = 36;
     ServerUserUpdateChatParticipantGroupDelete user_chat_participant_group_delete = 37;
     ServerUserUpdateChatPermissions user_chat_permissions = 39;
+    ServerUserUpdateDialogCollapsedMaxId user_dialog_collapsed_max_id = 40;
   }
 }
 
@@ -274,6 +275,12 @@ message ServerUserUpdateDialogNotificationSettings {
 message ServerUserUpdateDialogFollowMode {
   Peer peer_id = 1;
   optional DialogFollowMode follow_mode = 2;
+}
+
+// Update for a user's personal history-collapse boundary.
+message ServerUserUpdateDialogCollapsedMaxId {
+  Peer peer_id = 1;
+  optional int64 max_id = 2;
 }
 
 // Update for a user when their profile/account fields change.

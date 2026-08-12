@@ -14,6 +14,31 @@ struct DialogChatListVisibilityTests {
     return queue
   }
 
+  @Test("dialog snapshot and update persist and clear collapse boundary")
+  func collapseBoundaryPersistence() throws {
+    let dbQueue = try makeInMemoryDB()
+
+    try dbQueue.write { db in
+      try seedDialog(db, chatId: 9, chatListHidden: nil)
+
+      var snapshot = InlineProtocol.Dialog()
+      snapshot.peer = makeChatPeer(chatId: 9)
+      snapshot.chatID = 9
+      snapshot.collapsedMaxID = 42
+      _ = try snapshot.saveFull(db)
+
+      var saved = try #require(try Dialog.get(peerId: .thread(id: 9)).fetchOne(db))
+      #expect(saved.collapsedMaxId == 42)
+
+      var clear = InlineProtocol.UpdateDialogCollapsedMaxId()
+      clear.peerID = makeChatPeer(chatId: 9)
+      try clear.apply(db)
+
+      saved = try #require(try Dialog.get(peerId: .thread(id: 9)).fetchOne(db))
+      #expect(saved.collapsedMaxId == nil)
+    }
+  }
+
   @Test("home chat query excludes hidden dialogs and keeps visible dialogs")
   func homeChatQueryFiltersHiddenDialogs() throws {
     let dbQueue = try makeInMemoryDB()

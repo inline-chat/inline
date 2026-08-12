@@ -686,6 +686,34 @@ public actor RealtimeV2 {
     return profilePhotoResult
   }
 
+  public func collapseHistory(
+    peer: InlineProtocol.InputPeer,
+    maxID: Int64?
+  ) async throws -> Int64? {
+    let result = try await callRpcDirect(
+      method: .collapseHistory,
+      input: .collapseHistory(.with {
+        $0.peerID = peer
+        if let maxID {
+          $0.maxID = maxID
+        }
+      })
+    )
+
+    guard case let .collapseHistory(collapseResult)? = result else {
+      throw RealtimeDirectRpcError.rpcError(message: "Unexpected collapseHistory response", code: 500)
+    }
+    guard let boundaryUpdate = collapseResult.updates.first(where: {
+      if case .dialogCollapsedMaxID = $0.update { return true }
+      return false
+    }), case let .dialogCollapsedMaxID(boundary) = boundaryUpdate.update else {
+      throw RealtimeDirectRpcError.rpcError(message: "Missing collapseHistory boundary update", code: 500)
+    }
+
+    await sync.process(updates: collapseResult.updates)
+    return boundary.hasMaxID ? boundary.maxID : nil
+  }
+
   public func cancelTransaction(where predicate: @escaping @Sendable (TransactionWrapper) -> Bool) {
     Task { [predicate] in
       await transactions.cancel(where: predicate)

@@ -1133,7 +1133,11 @@ class GlassComposeAppKit: NSView {
     hideAutocomplete()
 
     guard let peerBotCommandsViewModel, let commandCompletionMenu else { return }
-    let suggestions = peerBotCommandsViewModel.suggestions(matching: query)
+    let botSuggestions = peerBotCommandsViewModel.suggestions(matching: query)
+      .map { ComposeCommandSuggestion.bot($0) }
+    let inlineSuggestions = InlineCommandRegistry.suggestions(matching: query)
+      .map { ComposeCommandSuggestion.inline($0) }
+    let suggestions = botSuggestions + inlineSuggestions
     commandCompletionMenu.updateSuggestions(suggestions)
 
     if suggestions.isEmpty {
@@ -1704,6 +1708,20 @@ class GlassComposeAppKit: NSView {
     let hasText = !rawText.isEmpty
     let hasAttachments = !attachmentItemsSnapshot.isEmpty
 
+    let hasBotCommandEntity = entities.entities.contains { entity in
+      if case .botCommand = entity.entity { return true }
+      return false
+    }
+    if editingMessageId == nil,
+       forwardContext == nil,
+       !hasAttachments,
+       !hasBotCommandEntity,
+       let action = InlineCommandRegistry.action(forStandaloneText: rawText) {
+      ignoreNextHeightChange = false
+      performInlineCommand(action)
+      return
+    }
+
     // make it nil if empty
     let text = if rawText.isEmpty, hasAttachments {
       nil as String?
@@ -1856,6 +1874,65 @@ class GlassComposeAppKit: NSView {
 
     ignoreNextHeightChange = false
     // }
+  }
+
+  private func performInlineCommand(_ action: InlineCommandAction) {
+    let invocationPeerId = peerId
+    let invocationText = textEditor.plainText
+    let invocationAttributedText = NSAttributedString(attributedString: textEditor.attributedString)
+    let normalizedInvocation = invocationText.trimmingCharacters(in: .whitespacesAndNewlines)
+    let replyingToMsgId = state.replyingToMsgId
+    guard normalizedInvocation.hasPrefix("/"),
+          !normalizedInvocation.dropFirst().contains(where: { $0.isWhitespace }),
+          state.editingMsgId == nil,
+          state.forwardContext == nil,
+          attachmentItems.isEmpty,
+          !drafts2.hasPendingAttachments(peer: invocationPeerId),
+          !voiceViewModel.isActive,
+          let messageList,
+          let maxID = messageList.highestPositiveMessageId
+    else { return }
+
+    hideCommandCompletion()
+    Task { @MainActor [weak self] in
+      do {
+        switch action {
+        case .collapseHistory:
+          try await messageList.collapseHistory(maxID: maxID)
+        }
+
+        guard let self,
+              window != nil,
+              peerId == invocationPeerId
+        else { return }
+        guard textEditor.plainText == invocationText,
+              textEditor.attributedString.isEqual(to: invocationAttributedText),
+              state.replyingToMsgId == replyingToMsgId,
+              state.editingMsgId == nil,
+              state.forwardContext == nil,
+              attachmentItems.isEmpty,
+              !drafts2.hasPendingAttachments(peer: invocationPeerId),
+              !voiceViewModel.isActive
+        else { return }
+
+        clearInlineCommandText()
+      } catch {
+        guard let self,
+              window != nil,
+              peerId == invocationPeerId
+        else { return }
+        log.error("Inline command failed", error: error)
+        ToastCenter.shared.showError(error.localizedDescription)
+      }
+    }
+  }
+
+  private func clearInlineCommandText() {
+    textViewContentHeight = textEditor.getTypingLineHeight()
+    textEditor.clear()
+    clearDraft()
+    updateSendButtonIfNeeded()
+    updateHeight()
   }
 
   private func trimmedAttributedString(_ attributedString: NSAttributedString) -> NSAttributedString {
@@ -2583,18 +2660,32 @@ extension GlassComposeAppKit: MentionCompletionMenuDelegate {
 extension GlassComposeAppKit: CommandCompletionMenuDelegate {
   func commandMenu(
     _ menu: CommandCompletionMenu,
-    didSelectSuggestion suggestion: PeerBotCommandSuggestion,
+    didSelectSuggestion suggestion: ComposeCommandSuggestion,
     sendAfterInsertion: Bool
   ) {
     guard let currentSlashCommandRange else { return }
 
+    if case let .inline(command) = suggestion {
+      hideCommandCompletion()
+      if sendAfterInsertion {
+        performInlineCommand(command.action)
+      } else {
+        // App commands are not inserted on Tab: leaving executable system text in compose could
+        // later send it to a bot or the chat instead of running the local action.
+        updateHeightIfNeeded(for: textEditor.textView)
+      }
+      return
+    }
+
+    guard case let .bot(botSuggestion) = suggestion else { return }
+
     let currentAttributedText = textEditor.attributedString
-    let commandText = suggestion.insertionText.trimmingCharacters(in: .whitespacesAndNewlines)
+    let commandText = botSuggestion.insertionText.trimmingCharacters(in: .whitespacesAndNewlines)
     let result = slashCommandDetector.replaceSlashCommand(
       in: currentAttributedText,
       range: currentSlashCommandRange.range,
       with: commandText,
-      targetBotUserId: suggestion.botId
+      targetBotUserId: botSuggestion.botId
     )
 
     ignoreNextHeightChange = true
@@ -2679,7 +2770,7 @@ extension GlassComposeAppKit: ComposeAutocompleteMenuDelegate {
         hideAutocomplete()
         updateHeightIfNeeded(for: textEditor.textView)
 
-      case .mention, .command:
+      case .mention, .command, .inlineCommand:
         assertionFailure("iOS-only autocomplete payload reached the glass macOS composer")
     }
   }

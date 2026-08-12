@@ -497,6 +497,7 @@ struct ChatView: View {
         spaceId: chat.spaceId,
         draftMessage: fullChatViewModel.chatItem?.dialog.draftMessage,
         focusMessageID: focusMessageID,
+        collapsedMaxId: fullChatViewModel.chatItem?.dialog.collapsedMaxId,
         isPreview: preview
       )
       .edgesIgnoringSafeArea(.all)

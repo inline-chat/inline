@@ -7,6 +7,7 @@ public class ChatContainerView: UIView {
   let peerId: InlineKit.Peer
   let chatId: Int64?
   let spaceId: Int64?
+  private var collapsedMaxId: Int64?
   private let isPreview: Bool
   private var peerUser: InlineKit.User?
   private var lastAppliedDraftSignature: DraftSignature?
@@ -44,6 +45,7 @@ public class ChatContainerView: UIView {
       peerId: peerId,
       chatId: chatId ?? 0,
       spaceId: spaceId,
+      collapsedMaxId: collapsedMaxId,
       isPreview: isPreview,
       sendAnimationCoordinator: sendAnimationCoordinator
     )
@@ -72,6 +74,15 @@ public class ChatContainerView: UIView {
     view.spaceId = spaceId
     view.sendAnimationCoordinator = sendAnimationCoordinator
     view.setPeerUser(peerUser)
+    view.executeInlineCommand = { [weak self] action in
+      guard let self else { return false }
+      switch action {
+      case .collapseHistory:
+        guard let maxID = messagesCollectionView.highestPositiveMessageId else { return false }
+        try await messagesCollectionView.collapseHistory(maxID: maxID)
+        return true
+      }
+    }
     return view
   }()
 
@@ -131,12 +142,14 @@ public class ChatContainerView: UIView {
     chatId: Int64?,
     spaceId: Int64?,
     peerUser: InlineKit.User?,
+    collapsedMaxId: Int64? = nil,
     isPreview: Bool = false
   ) {
     self.peerId = peerId
     self.chatId = chatId
     self.spaceId = spaceId
     self.peerUser = peerUser
+    self.collapsedMaxId = collapsedMaxId
     self.isPreview = isPreview
 
     super.init(frame: .zero)
@@ -190,6 +203,12 @@ public class ChatContainerView: UIView {
     guard let messageID, lastRequestedFocusMessageID != messageID else { return }
     lastRequestedFocusMessageID = messageID
     messagesCollectionView.scrollToMessageWhenAvailable(messageID)
+  }
+
+  func setCollapsedMaxId(_ collapsedMaxId: Int64?) {
+    guard self.collapsedMaxId != collapsedMaxId else { return }
+    self.collapsedMaxId = collapsedMaxId
+    messagesCollectionView.setCollapsedMaxId(collapsedMaxId)
   }
 
   private var mentionCompletionHeightConstraint: NSLayoutConstraint!
@@ -840,6 +859,7 @@ struct ChatViewUIKit: UIViewRepresentable {
   let spaceId: Int64?
   let draftMessage: DraftMessage?
   let focusMessageID: Int64?
+  let collapsedMaxId: Int64?
   let isPreview: Bool
   @EnvironmentObject var data: DataManager
   @EnvironmentObject var fullChatViewModel: FullChatViewModel
@@ -850,6 +870,7 @@ struct ChatViewUIKit: UIViewRepresentable {
       chatId: chatId,
       spaceId: spaceId,
       peerUser: fullChatViewModel.peerUser,
+      collapsedMaxId: collapsedMaxId,
       isPreview: isPreview
     )
     if !isPreview {
@@ -865,6 +886,7 @@ struct ChatViewUIKit: UIViewRepresentable {
 
   func updateUIView(_ view: ChatContainerView, context _: Context) {
     view.setPeerUser(fullChatViewModel.peerUser)
+    view.setCollapsedMaxId(collapsedMaxId)
     if !isPreview {
       view.loadDraftIfNeeded(draftMessage)
       view.focusMessage(focusMessageID)

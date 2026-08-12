@@ -172,6 +172,10 @@ export const upsertDialog = (db: Db, dialog: Dialog) => {
     pinnedOrder: dialog.pinnedOrder ?? existing?.pinnedOrder,
     chatListHidden,
     followMode: dialog.followMode ?? existing?.followMode,
+    collapsedMaxId:
+      dialog.collapsedMaxId === undefined
+        ? undefined
+        : toId(dialog.collapsedMaxId, messageId),
   }
   if (existing) {
     db.replace(model)

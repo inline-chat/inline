@@ -728,6 +728,12 @@ export interface Dialog {
      * @generated from protobuf field: optional DialogFollowMode follow_mode = 16;
      */
     followMode?: DialogFollowMode;
+    /**
+     * Personal history-collapse boundary; messages at or below this ID stay hidden.
+     *
+     * @generated from protobuf field: optional int64 collapsed_max_id = 17;
+     */
+    collapsedMaxId?: bigint;
 }
 /**
  * Effective actions the current user may take on a chat.
@@ -3094,6 +3100,12 @@ export interface RpcCall {
          */
         joinPublicSpace: JoinPublicSpaceInput;
     } | {
+        oneofKind: "collapseHistory";
+        /**
+         * @generated from protobuf field: CollapseHistoryInput collapseHistory = 100;
+         */
+        collapseHistory: CollapseHistoryInput;
+    } | {
         oneofKind: "listConnectors";
         /**
          * @generated from protobuf field: ListConnectorsInput listConnectors = 101;
@@ -3708,6 +3720,12 @@ export interface RpcResult {
          * @generated from protobuf field: JoinPublicSpaceResult joinPublicSpace = 99;
          */
         joinPublicSpace: JoinPublicSpaceResult;
+    } | {
+        oneofKind: "collapseHistory";
+        /**
+         * @generated from protobuf field: CollapseHistoryResult collapseHistory = 100;
+         */
+        collapseHistory: CollapseHistoryResult;
     } | {
         oneofKind: "listConnectors";
         /**
@@ -4846,6 +4864,30 @@ export interface UpdateDialogFollowModeInput {
  * @generated from protobuf message UpdateDialogFollowModeResult
  */
 export interface UpdateDialogFollowModeResult {
+    /**
+     * @generated from protobuf field: repeated Update updates = 1;
+     */
+    updates: Update[];
+}
+/**
+ * @generated from protobuf message CollapseHistoryInput
+ */
+export interface CollapseHistoryInput {
+    /**
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+    /**
+     * Unset removes the personal collapse boundary.
+     *
+     * @generated from protobuf field: optional int64 max_id = 2;
+     */
+    maxId?: bigint;
+}
+/**
+ * @generated from protobuf message CollapseHistoryResult
+ */
+export interface CollapseHistoryResult {
     /**
      * @generated from protobuf field: repeated Update updates = 1;
      */
@@ -7491,6 +7533,12 @@ export interface Update {
          */
         chatPermissions: UpdateChatPermissions;
     } | {
+        oneofKind: "dialogCollapsedMaxId";
+        /**
+         * @generated from protobuf field: UpdateDialogCollapsedMaxId dialog_collapsed_max_id = 45;
+         */
+        dialogCollapsedMaxId: UpdateDialogCollapsedMaxId;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -7876,6 +7924,21 @@ export interface UpdateDialogFollowMode {
      * @generated from protobuf field: optional DialogFollowMode follow_mode = 2;
      */
     followMode?: DialogFollowMode;
+}
+/**
+ * @generated from protobuf message UpdateDialogCollapsedMaxId
+ */
+export interface UpdateDialogCollapsedMaxId {
+    /**
+     * @generated from protobuf field: Peer peer_id = 1;
+     */
+    peerId?: Peer;
+    /**
+     * Unset removes the personal collapse boundary.
+     *
+     * @generated from protobuf field: optional int64 max_id = 2;
+     */
+    maxId?: bigint;
 }
 /**
  * Update when a new chat is created either in space or a private chat
@@ -9685,6 +9748,10 @@ export enum Method {
      * @generated from protobuf enum value: JOIN_PUBLIC_SPACE = 98;
      */
     JOIN_PUBLIC_SPACE = 98,
+    /**
+     * @generated from protobuf enum value: COLLAPSE_HISTORY = 99;
+     */
+    COLLAPSE_HISTORY = 99,
     /**
      * @generated from protobuf enum value: LIST_CONNECTORS = 100;
      */
@@ -11627,7 +11694,8 @@ class Dialog$Type extends MessageType<Dialog> {
             { no: 12, name: "opened_date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 14, name: "order", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 15, name: "pinned_order", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 16, name: "follow_mode", kind: "enum", opt: true, T: () => ["DialogFollowMode", DialogFollowMode] }
+            { no: 16, name: "follow_mode", kind: "enum", opt: true, T: () => ["DialogFollowMode", DialogFollowMode] },
+            { no: 17, name: "collapsed_max_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<Dialog>): Dialog {
@@ -11689,6 +11757,9 @@ class Dialog$Type extends MessageType<Dialog> {
                 case /* optional DialogFollowMode follow_mode */ 16:
                     message.followMode = reader.int32();
                     break;
+                case /* optional int64 collapsed_max_id */ 17:
+                    message.collapsedMaxId = reader.int64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -11749,6 +11820,9 @@ class Dialog$Type extends MessageType<Dialog> {
         /* optional DialogFollowMode follow_mode = 16; */
         if (message.followMode !== undefined)
             writer.tag(16, WireType.Varint).int32(message.followMode);
+        /* optional int64 collapsed_max_id = 17; */
+        if (message.collapsedMaxId !== undefined)
+            writer.tag(17, WireType.Varint).int64(message.collapsedMaxId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -15665,6 +15739,7 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 97, name: "getChatTranscript", kind: "message", oneof: "input", T: () => GetChatTranscriptInput },
             { no: 98, name: "searchExternalResources", kind: "message", oneof: "input", T: () => SearchExternalResourcesInput },
             { no: 99, name: "joinPublicSpace", kind: "message", oneof: "input", T: () => JoinPublicSpaceInput },
+            { no: 100, name: "collapseHistory", kind: "message", oneof: "input", T: () => CollapseHistoryInput },
             { no: 101, name: "listConnectors", kind: "message", oneof: "input", T: () => ListConnectorsInput },
             { no: 102, name: "prepareConnectorOAuth", kind: "message", oneof: "input", T: () => PrepareConnectorOAuthInput },
             { no: 103, name: "disconnectConnector", kind: "message", oneof: "input", T: () => DisconnectConnectorInput }
@@ -16268,6 +16343,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         joinPublicSpace: JoinPublicSpaceInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).joinPublicSpace)
                     };
                     break;
+                case /* CollapseHistoryInput collapseHistory */ 100:
+                    message.input = {
+                        oneofKind: "collapseHistory",
+                        collapseHistory: CollapseHistoryInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).collapseHistory)
+                    };
+                    break;
                 case /* ListConnectorsInput listConnectors */ 101:
                     message.input = {
                         oneofKind: "listConnectors",
@@ -16592,6 +16673,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* JoinPublicSpaceInput joinPublicSpace = 99; */
         if (message.input.oneofKind === "joinPublicSpace")
             JoinPublicSpaceInput.internalBinaryWrite(message.input.joinPublicSpace, writer.tag(99, WireType.LengthDelimited).fork(), options).join();
+        /* CollapseHistoryInput collapseHistory = 100; */
+        if (message.input.oneofKind === "collapseHistory")
+            CollapseHistoryInput.internalBinaryWrite(message.input.collapseHistory, writer.tag(100, WireType.LengthDelimited).fork(), options).join();
         /* ListConnectorsInput listConnectors = 101; */
         if (message.input.oneofKind === "listConnectors")
             ListConnectorsInput.internalBinaryWrite(message.input.listConnectors, writer.tag(101, WireType.LengthDelimited).fork(), options).join();
@@ -16713,6 +16797,7 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 97, name: "getChatTranscript", kind: "message", oneof: "result", T: () => GetChatTranscriptResult },
             { no: 98, name: "searchExternalResources", kind: "message", oneof: "result", T: () => SearchExternalResourcesResult },
             { no: 99, name: "joinPublicSpace", kind: "message", oneof: "result", T: () => JoinPublicSpaceResult },
+            { no: 100, name: "collapseHistory", kind: "message", oneof: "result", T: () => CollapseHistoryResult },
             { no: 101, name: "listConnectors", kind: "message", oneof: "result", T: () => ListConnectorsResult },
             { no: 102, name: "prepareConnectorOAuth", kind: "message", oneof: "result", T: () => PrepareConnectorOAuthResult },
             { no: 103, name: "disconnectConnector", kind: "message", oneof: "result", T: () => DisconnectConnectorResult }
@@ -17316,6 +17401,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         joinPublicSpace: JoinPublicSpaceResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).joinPublicSpace)
                     };
                     break;
+                case /* CollapseHistoryResult collapseHistory */ 100:
+                    message.result = {
+                        oneofKind: "collapseHistory",
+                        collapseHistory: CollapseHistoryResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).collapseHistory)
+                    };
+                    break;
                 case /* ListConnectorsResult listConnectors */ 101:
                     message.result = {
                         oneofKind: "listConnectors",
@@ -17640,6 +17731,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* JoinPublicSpaceResult joinPublicSpace = 99; */
         if (message.result.oneofKind === "joinPublicSpace")
             JoinPublicSpaceResult.internalBinaryWrite(message.result.joinPublicSpace, writer.tag(99, WireType.LengthDelimited).fork(), options).join();
+        /* CollapseHistoryResult collapseHistory = 100; */
+        if (message.result.oneofKind === "collapseHistory")
+            CollapseHistoryResult.internalBinaryWrite(message.result.collapseHistory, writer.tag(100, WireType.LengthDelimited).fork(), options).join();
         /* ListConnectorsResult listConnectors = 101; */
         if (message.result.oneofKind === "listConnectors")
             ListConnectorsResult.internalBinaryWrite(message.result.listConnectors, writer.tag(101, WireType.LengthDelimited).fork(), options).join();
@@ -21461,6 +21555,106 @@ class UpdateDialogFollowModeResult$Type extends MessageType<UpdateDialogFollowMo
  * @generated MessageType for protobuf message UpdateDialogFollowModeResult
  */
 export const UpdateDialogFollowModeResult = new UpdateDialogFollowModeResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CollapseHistoryInput$Type extends MessageType<CollapseHistoryInput> {
+    constructor() {
+        super("CollapseHistoryInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "max_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<CollapseHistoryInput>): CollapseHistoryInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<CollapseHistoryInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CollapseHistoryInput): CollapseHistoryInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* optional int64 max_id */ 2:
+                    message.maxId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CollapseHistoryInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 max_id = 2; */
+        if (message.maxId !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.maxId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message CollapseHistoryInput
+ */
+export const CollapseHistoryInput = new CollapseHistoryInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CollapseHistoryResult$Type extends MessageType<CollapseHistoryResult> {
+    constructor() {
+        super("CollapseHistoryResult", [
+            { no: 1, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<CollapseHistoryResult>): CollapseHistoryResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<CollapseHistoryResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CollapseHistoryResult): CollapseHistoryResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Update updates */ 1:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CollapseHistoryResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Update updates = 1; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message CollapseHistoryResult
+ */
+export const CollapseHistoryResult = new CollapseHistoryResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class MarkAsUnreadInput$Type extends MessageType<MarkAsUnreadInput> {
     constructor() {
@@ -29233,7 +29427,8 @@ class Update$Type extends MessageType<Update> {
             { no: 41, name: "participant_group_add", kind: "message", oneof: "update", T: () => UpdateChatParticipantGroupAdd },
             { no: 42, name: "participant_group_delete", kind: "message", oneof: "update", T: () => UpdateChatParticipantGroupDelete },
             { no: 43, name: "space_settings", kind: "message", oneof: "update", T: () => UpdateSpaceSettings },
-            { no: 44, name: "chat_permissions", kind: "message", oneof: "update", T: () => UpdateChatPermissions }
+            { no: 44, name: "chat_permissions", kind: "message", oneof: "update", T: () => UpdateChatPermissions },
+            { no: 45, name: "dialog_collapsed_max_id", kind: "message", oneof: "update", T: () => UpdateDialogCollapsedMaxId }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -29500,6 +29695,12 @@ class Update$Type extends MessageType<Update> {
                         chatPermissions: UpdateChatPermissions.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).chatPermissions)
                     };
                     break;
+                case /* UpdateDialogCollapsedMaxId dialog_collapsed_max_id */ 45:
+                    message.update = {
+                        oneofKind: "dialogCollapsedMaxId",
+                        dialogCollapsedMaxId: UpdateDialogCollapsedMaxId.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).dialogCollapsedMaxId)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -29641,6 +29842,9 @@ class Update$Type extends MessageType<Update> {
         /* UpdateChatPermissions chat_permissions = 44; */
         if (message.update.oneofKind === "chatPermissions")
             UpdateChatPermissions.internalBinaryWrite(message.update.chatPermissions, writer.tag(44, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateDialogCollapsedMaxId dialog_collapsed_max_id = 45; */
+        if (message.update.oneofKind === "dialogCollapsedMaxId")
+            UpdateDialogCollapsedMaxId.internalBinaryWrite(message.update.dialogCollapsedMaxId, writer.tag(45, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -30797,6 +31001,59 @@ class UpdateDialogFollowMode$Type extends MessageType<UpdateDialogFollowMode> {
  * @generated MessageType for protobuf message UpdateDialogFollowMode
  */
 export const UpdateDialogFollowMode = new UpdateDialogFollowMode$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateDialogCollapsedMaxId$Type extends MessageType<UpdateDialogCollapsedMaxId> {
+    constructor() {
+        super("UpdateDialogCollapsedMaxId", [
+            { no: 1, name: "peer_id", kind: "message", T: () => Peer },
+            { no: 2, name: "max_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateDialogCollapsedMaxId>): UpdateDialogCollapsedMaxId {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<UpdateDialogCollapsedMaxId>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateDialogCollapsedMaxId): UpdateDialogCollapsedMaxId {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Peer peer_id */ 1:
+                    message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* optional int64 max_id */ 2:
+                    message.maxId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateDialogCollapsedMaxId, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Peer peer_id = 1; */
+        if (message.peerId)
+            Peer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 max_id = 2; */
+        if (message.maxId !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.maxId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateDialogCollapsedMaxId
+ */
+export const UpdateDialogCollapsedMaxId = new UpdateDialogCollapsedMaxId$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UpdateNewChat$Type extends MessageType<UpdateNewChat> {
     constructor() {
