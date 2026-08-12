@@ -104,7 +104,10 @@ final class CommandCompletionMenu: NSView {
       return
     }
 
-    guard !isVisible else { return }
+    guard !isVisible else {
+      isHidden = false
+      return
+    }
     isVisible = true
     isHidden = false
 
@@ -129,7 +132,8 @@ final class CommandCompletionMenu: NSView {
         context.timingFunction = CAMediaTimingFunction(name: .easeIn)
         animator().alphaValue = 0.0
       } completionHandler: { [weak self] in
-        self?.isHidden = true
+        guard let self, !isVisible else { return }
+        isHidden = true
       }
     } else {
       alphaValue = 0.0

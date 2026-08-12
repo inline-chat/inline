@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import InlineMacUI
 import SwiftUI
 
 protocol ComposeAutocompleteMenuDelegate: AnyObject {
@@ -24,6 +25,8 @@ final class ComposeAutocompleteMenu: NSView {
   private var availableWidth: CGFloat?
   private var style: Style = .list
   private(set) var isVisible = false
+  private(set) var canSelectItems = true
+  private(set) var presentationSession: ComposeAutocompletePresentationSession?
   private var heightConstraint: NSLayoutConstraint!
   private var widthConstraint: NSLayoutConstraint!
 
@@ -77,11 +80,18 @@ final class ComposeAutocompleteMenu: NSView {
     updateBackdropAppearance()
   }
 
-  func update(items: [ComposeAutocompleteItem], selectedIndex: Int, availableWidth: CGFloat? = nil) {
+  func update(
+    items: [ComposeAutocompleteItem],
+    selectedIndex: Int,
+    match: ComposeAutocompleteMatch,
+    availableWidth: CGFloat? = nil
+  ) {
     let nextStyle: Style = items.allSatisfy { $0.kind == .emoji } ? .emojiPalette : .list
     let needsReload = self.items != items || style != nextStyle
     let needsResize = self.availableWidth != availableWidth
 
+    presentationSession = ComposeAutocompletePresentationSession(match: match)
+    setContentInteractionEnabled(true)
     self.items = items
     self.selectedIndex = items.indices.contains(selectedIndex) ? selectedIndex : 0
     self.availableWidth = availableWidth
@@ -98,9 +108,20 @@ final class ComposeAutocompleteMenu: NSView {
   }
 
   func setSelectedIndex(_ selectedIndex: Int) {
-    guard items.indices.contains(selectedIndex) else { return }
+    guard canSelectItems, items.indices.contains(selectedIndex) else { return }
     self.selectedIndex = selectedIndex
     updateSelection()
+  }
+
+  @discardableResult
+  func retainVisibleContentWhileLoading() -> Bool {
+    guard isVisible, !items.isEmpty
+    else {
+      return false
+    }
+
+    setContentInteractionEnabled(false)
+    return true
   }
 
   func show(animated: Bool = true) {
@@ -109,7 +130,10 @@ final class ComposeAutocompleteMenu: NSView {
       return
     }
 
-    guard !isVisible else { return }
+    guard !isVisible else {
+      isHidden = false
+      return
+    }
     isVisible = true
     isHidden = false
 
@@ -125,6 +149,8 @@ final class ComposeAutocompleteMenu: NSView {
   }
 
   func hide(animated: Bool = true) {
+    presentationSession = nil
+    setContentInteractionEnabled(true)
     guard isVisible || !isHidden else { return }
     isVisible = false
 
@@ -134,7 +160,8 @@ final class ComposeAutocompleteMenu: NSView {
         context.timingFunction = CAMediaTimingFunction(name: .easeIn)
         animator().alphaValue = 0.0
       } completionHandler: { [weak self] in
-        self?.isHidden = true
+        guard let self, !isVisible else { return }
+        isHidden = true
       }
     } else {
       alphaValue = 0.0
@@ -144,9 +171,15 @@ final class ComposeAutocompleteMenu: NSView {
 
   @discardableResult
   func selectCurrentItem() -> Bool {
-    guard items.indices.contains(selectedIndex) else { return false }
+    guard canSelectItems, items.indices.contains(selectedIndex) else { return false }
     delegate?.autocompleteMenu(self, didSelect: items[selectedIndex])
     return true
+  }
+
+  private func setContentInteractionEnabled(_ isEnabled: Bool) {
+    guard canSelectItems != isEnabled else { return }
+    canSelectItems = isEnabled
+    collectionView.isSelectable = isEnabled
   }
 
   private func setupView() {
@@ -453,7 +486,7 @@ final class ComposeAutocompleteMenu: NSView {
 
   @objc private func tableViewClicked() {
     let clickedRow = tableView.clickedRow
-    guard items.indices.contains(clickedRow) else { return }
+    guard canSelectItems, items.indices.contains(clickedRow) else { return }
     selectedIndex = clickedRow
     DispatchQueue.main.async { [weak self] in
       _ = self?.selectCurrentItem()
@@ -524,13 +557,14 @@ extension ComposeAutocompleteMenu: NSTableViewDelegate {
   }
 
   func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+    guard canSelectItems else { return false }
     selectedIndex = row
     updateSelection()
     return true
   }
 
   func tableViewSelectionDidChange(_ notification: Notification) {
-    if tableView.selectedRow >= 0 {
+    if canSelectItems, tableView.selectedRow >= 0 {
       selectedIndex = tableView.selectedRow
       updateSelection()
     }
@@ -563,7 +597,12 @@ extension ComposeAutocompleteMenu: NSCollectionViewDataSource {
 
 extension ComposeAutocompleteMenu: NSCollectionViewDelegate {
   func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
-    guard let indexPath = indexPaths.first, items.indices.contains(indexPath.item) else { return }
+    guard canSelectItems,
+          let indexPath = indexPaths.first,
+          items.indices.contains(indexPath.item)
+    else {
+      return
+    }
     selectedIndex = indexPath.item
     DispatchQueue.main.async { [weak self] in
       _ = self?.selectCurrentItem()

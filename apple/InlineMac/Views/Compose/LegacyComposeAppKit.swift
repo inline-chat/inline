@@ -595,13 +595,30 @@ class LegacyComposeAppKit: NSView {
       }
       .store(in: &cancellables)
 
-    Publishers.CombineLatest3(
+    Publishers.CombineLatest4(
       autocompleteViewModel.$items,
       autocompleteViewModel.$selectedIndex,
-      autocompleteViewModel.$match
+      autocompleteViewModel.$match,
+      autocompleteViewModel.$loadState
     )
-    .sink { [weak self] items, selectedIndex, match in
-      self?.renderAutocompleteMenu(items: items, selectedIndex: selectedIndex, match: match)
+    .sink { [weak self] items, selectedIndex, match, loadState in
+      Task { @MainActor [weak self] in
+        guard let self,
+              items == autocompleteViewModel.items,
+              selectedIndex == autocompleteViewModel.selectedIndex,
+              match == autocompleteViewModel.match,
+              loadState == autocompleteViewModel.loadState
+        else {
+          return
+        }
+
+        renderAutocompleteMenu(
+          items: items,
+          selectedIndex: selectedIndex,
+          match: match,
+          loadState: loadState
+        )
+      }
     }
     .store(in: &cancellables)
   }
@@ -919,20 +936,42 @@ class LegacyComposeAppKit: NSView {
   private func renderAutocompleteMenu(
     items: [ComposeAutocompleteItem],
     selectedIndex: Int,
-    match: ComposeAutocompleteMatch?
+    match: ComposeAutocompleteMatch?,
+    loadState: ComposeAutocompleteLoadState
   ) {
-    guard let match, !items.isEmpty else {
+    let hasCurrentItems = if let match {
+      !items.isEmpty && items.allSatisfy { $0.kind == match.kind }
+    } else {
+      false
+    }
+    let action = composeAutocompletePresentationAction(
+      currentSession: autocompleteMenu?.presentationSession,
+      nextMatch: match,
+      hasItems: hasCurrentItems,
+      loadState: loadState,
+      isVisible: autocompleteMenu?.isVisible == true
+    )
+
+    switch action {
+    case .hide:
       autocompleteMenu?.hide()
       autocompleteKeyMonitorEscUnsubscribe?()
       autocompleteKeyMonitorEscUnsubscribe = nil
       return
+    case .retainVisibleContent:
+      _ = autocompleteMenu?.retainVisibleContentWhileLoading()
+      return
+    case .present:
+      break
     }
 
+    guard let match else { return }
     ensureAutocompleteMenu()
     addAutocompleteMenuToSuperview()
     autocompleteMenu?.update(
       items: items,
       selectedIndex: selectedIndex,
+      match: match,
       availableWidth: autocompleteMenuWidth(for: match)
     )
     if let autocompleteMenu {
@@ -2050,9 +2089,7 @@ extension LegacyComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textViewDidPressReturn(_ textView: NSTextView) -> Bool {
-    if let autocompleteMenu, autocompleteMenu.isVisible, autocompleteMenu.selectCurrentItem() {
-      return true
-    }
+    if handleAutocompleteCommitKey() { return true }
 
     if let commandCompletionMenu,
        commandCompletionMenu.isVisible,
@@ -2312,7 +2349,12 @@ extension LegacyComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   private func handleAutocompleteArrow(_ direction: ComposeAutocompleteArrowDirection) -> Bool {
-    guard let autocompleteMenu, autocompleteMenu.isVisible else { return false }
+    guard let autocompleteMenu,
+          autocompleteMenu.isVisible
+    else {
+      return false
+    }
+    guard autocompleteMenu.canSelectItems else { return true }
 
     if autocompleteMenu.isShowingEmojiPalette, isAtEmojiPaletteEdge(direction) {
       hideAutocomplete()
@@ -2342,9 +2384,7 @@ extension LegacyComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textViewDidPressTab(_ textView: NSTextView) -> Bool {
-    if let autocompleteMenu, autocompleteMenu.isVisible, autocompleteMenu.selectCurrentItem() {
-      return true
-    }
+    if handleAutocompleteCommitKey() { return true }
 
     if commandCompletionMenu?.isVisible == true {
       commandCompletionMenu?.selectCurrentItem(sendAfterInsertion: false)
@@ -2361,7 +2401,7 @@ extension LegacyComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textViewDidPressEscape(_ textView: NSTextView) -> Bool {
-    if autocompleteMenu?.isVisible == true {
+    if autocompleteCommitKeyAction != .ignore {
       hideAutocomplete(suppressCurrentMatch: true)
       return true
     }
@@ -2378,6 +2418,27 @@ extension LegacyComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     }
 
     return false // not handled
+  }
+
+  private var autocompleteCommitKeyAction: ComposeAutocompleteCommitKeyAction {
+    composeAutocompleteCommitKeyAction(
+      match: autocompleteViewModel.match,
+      loadState: autocompleteViewModel.loadState,
+      isVisible: autocompleteMenu?.isVisible == true,
+      canSelectItems: autocompleteMenu?.canSelectItems == true
+    )
+  }
+
+  private func handleAutocompleteCommitKey() -> Bool {
+    switch autocompleteCommitKeyAction {
+    case .ignore:
+      return false
+    case .consume:
+      return true
+    case .select:
+      _ = autocompleteMenu?.selectCurrentItem()
+      return true
+    }
   }
 
   func textViewDidChangeFormatting(_ textView: NSTextView) {

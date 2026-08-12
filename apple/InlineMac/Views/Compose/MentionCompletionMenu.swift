@@ -206,6 +206,7 @@ class MentionCompletionMenu: NSView {
 
     guard !isVisible else {
       log.trace("MentionMenu show: already visible")
+      isHidden = false
       return
     }
 
@@ -236,7 +237,8 @@ class MentionCompletionMenu: NSView {
         context.timingFunction = CAMediaTimingFunction(name: .easeIn)
         animator().alphaValue = 0.0
       } completionHandler: { [weak self] in
-        self?.isHidden = true
+        guard let self, !isVisible else { return }
+        isHidden = true
       }
     } else {
       alphaValue = 0.0
