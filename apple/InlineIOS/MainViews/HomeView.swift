@@ -2,6 +2,7 @@ import InlineKit
 import InlineSearch
 import InlineUI
 import Logger
+import RealtimeV2
 import SwiftUI
 import UIKit
 
@@ -10,7 +11,9 @@ struct HomeView: View {
 
   @EnvironmentObject private var dataManager: DataManager
   @EnvironmentObject private var notificationHandler: NotificationHandler
+  @EnvironmentObject private var notificationSettings: NotificationSettingsManager
   @EnvironmentObject private var home: HomeViewModel
+  @EnvironmentObject private var realtimeState: RealtimeState
 
   @Environment(\.realtimeV2) private var realtimeV2
   @Environment(\.appDatabase) private var database
@@ -34,7 +37,11 @@ struct HomeView: View {
         searchHome(query: newValue)
       }
       .toolbar {
-        HomeToolbarContent()
+        HomeToolbarContent(
+          router: router,
+          realtimeState: realtimeState,
+          notificationSettings: notificationSettings
+        )
       }
       .navigationBarTitleDisplayMode(.inline)
       .navigationBarBackButtonHidden()

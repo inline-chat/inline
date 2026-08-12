@@ -2,14 +2,19 @@ import InlineKit
 import SwiftUI
 
 /// A button that opens the notification settings sheet for iOS.
-struct NotificationSettingsButton: View {
-  @EnvironmentObject private var notificationSettings: NotificationSettingsManager
+struct NotificationSettingsButton: View, RehostSafeToolbarContent {
+  @ObservedObject private var notificationSettings: NotificationSettingsManager
 
   private let iconColor: Color
   private let iconFont: Font?
   @State private var presented = false
 
-  init(iconColor: Color = .primary, iconFont: Font? = nil) {
+  init(
+    notificationSettings: NotificationSettingsManager,
+    iconColor: Color = .primary,
+    iconFont: Font? = nil
+  ) {
+    _notificationSettings = ObservedObject(wrappedValue: notificationSettings)
     self.iconColor = iconColor
     self.iconFont = iconFont
   }
@@ -17,7 +22,10 @@ struct NotificationSettingsButton: View {
   var body: some View {
     button
       .sheet(isPresented: $presented) {
-        NotificationSettingsPopoverContent(onSelection: close)
+        NotificationSettingsPopoverContent(
+          notificationSettings: notificationSettings,
+          onSelection: close
+        )
           .presentationDragIndicator(.visible)
           .presentationDetents([.medium, .large])
           .presentationContentInteraction(.scrolls)
@@ -82,22 +90,34 @@ extension NotificationMode {
   }
 }
 
-struct NotificationSettingsPopoverContent: View {
+struct NotificationSettingsPopoverContent: View, RehostSafeToolbarContent {
+  let notificationSettings: NotificationSettingsManager
   let onSelection: () -> Void
 
   var body: some View {
     NavigationStack {
-      NotificationSettingsList(onSelection: onSelection)
+      NotificationSettingsList(
+        notificationSettings: notificationSettings,
+        onSelection: onSelection
+      )
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.inline)
     }
   }
 }
 
-private struct NotificationSettingsList: View {
-  @EnvironmentObject private var notificationSettings: NotificationSettingsManager
+private struct NotificationSettingsList: View, RehostSafeToolbarContent {
+  @ObservedObject private var notificationSettings: NotificationSettingsManager
 
   let onSelection: () -> Void
+
+  init(
+    notificationSettings: NotificationSettingsManager,
+    onSelection: @escaping () -> Void
+  ) {
+    _notificationSettings = ObservedObject(wrappedValue: notificationSettings)
+    self.onSelection = onSelection
+  }
 
   var body: some View {
     List {

@@ -30,6 +30,7 @@ struct ChatView: View {
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
 
   @EnvironmentObject var data: DataManager
+  @EnvironmentObject private var realtimeState: RealtimeState
 
   @Environment(Router.self) var router
   @Environment(\.scenePhase) var scenePhase
@@ -141,6 +142,9 @@ struct ChatView: View {
             ChatToolbarLeadingView(
               peerId: peerId,
               contextSpaceId: contextSpaceId,
+              router: router,
+              fullChatViewModel: fullChatViewModel,
+              realtimeState: realtimeState,
               isChatHeaderPressed: $isChatHeaderPressed,
               onOpenChatInfo: { presentedChatInfo = $0 }
             )
@@ -152,6 +156,9 @@ struct ChatView: View {
             ChatToolbarLeadingView(
               peerId: peerId,
               contextSpaceId: contextSpaceId,
+              router: router,
+              fullChatViewModel: fullChatViewModel,
+              realtimeState: realtimeState,
               isChatHeaderPressed: $isChatHeaderPressed,
               onOpenChatInfo: { presentedChatInfo = $0 }
             )

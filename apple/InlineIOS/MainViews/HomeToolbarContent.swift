@@ -4,9 +4,20 @@ import RealtimeV2
 
 import SwiftUI
 
-struct HomeToolbarContent: ToolbarContent {
-  @Environment(Router.self) private var router
-  @EnvironmentObject var realtimeState: RealtimeState
+struct HomeToolbarContent: ToolbarContent, RehostSafeToolbarContent {
+  private let router: Router
+  @ObservedObject private var realtimeState: RealtimeState
+  @ObservedObject private var notificationSettings: NotificationSettingsManager
+
+  init(
+    router: Router,
+    realtimeState: RealtimeState,
+    notificationSettings: NotificationSettingsManager
+  ) {
+    self.router = router
+    _realtimeState = ObservedObject(wrappedValue: realtimeState)
+    _notificationSettings = ObservedObject(wrappedValue: notificationSettings)
+  }
 
   var body: some ToolbarContent {
     ToolbarItem(placement: .topBarLeading) {
@@ -79,7 +90,7 @@ struct HomeToolbarContent: ToolbarContent {
 
   @ViewBuilder
   private var notificationsButton: some View {
-    NotificationSettingsButton()
+    NotificationSettingsButton(notificationSettings: notificationSettings)
   }
 
   @ViewBuilder

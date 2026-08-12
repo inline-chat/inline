@@ -2,25 +2,42 @@ import InlineKit
 import RealtimeV2
 import SwiftUI
 
-struct SpacePickerMenu: View {
+struct SpacePickerMenu: View, RehostSafeToolbarContent {
   private enum PresentedSheet: String, Identifiable {
     case picker
 
     var id: String { rawValue }
   }
 
-  @EnvironmentObject private var compactSpaceList: CompactSpaceList
-  @EnvironmentObject private var realtimeState: RealtimeState
-  @Environment(Router.self) private var router
+  @ObservedObject private var compactSpaceList: CompactSpaceList
+  @ObservedObject private var realtimeState: RealtimeState
 
   var selectedSpaceId: Binding<Int64?>?
   var onSelectHome: (() -> Void)?
   var onSelectSpace: ((Space) -> Void)?
-  var onCreateSpace: (() -> Void)?
+  let onCreateSpace: () -> Void
   var showsConnectionStateInTitle = true
 
   @State private var localSelectedSpaceId: Int64?
   @State private var presentedSheet: PresentedSheet?
+
+  init(
+    compactSpaceList: CompactSpaceList,
+    realtimeState: RealtimeState,
+    selectedSpaceId: Binding<Int64?>? = nil,
+    onSelectHome: (() -> Void)? = nil,
+    onSelectSpace: ((Space) -> Void)? = nil,
+    onCreateSpace: @escaping () -> Void,
+    showsConnectionStateInTitle: Bool = true
+  ) {
+    _compactSpaceList = ObservedObject(wrappedValue: compactSpaceList)
+    _realtimeState = ObservedObject(wrappedValue: realtimeState)
+    self.selectedSpaceId = selectedSpaceId
+    self.onSelectHome = onSelectHome
+    self.onSelectSpace = onSelectSpace
+    self.onCreateSpace = onCreateSpace
+    self.showsConnectionStateInTitle = showsConnectionStateInTitle
+  }
 
   var body: some View {
     let selectedSpaceId = selectedSpaceId ?? $localSelectedSpaceId
@@ -31,7 +48,6 @@ struct SpacePickerMenu: View {
     let title = visibleConnectionState?.title
       ?? activeSpace?.displayName
       ?? (onSelectHome != nil ? "Home" : "Spaces")
-    let createSpace = onCreateSpace ?? { router.push(.createSpace) }
     let selection = Binding<Int64?>(
       get: { selectedSpaceId.wrappedValue },
       set: { newSpaceId in
@@ -62,7 +78,7 @@ struct SpacePickerMenu: View {
       Divider()
 
       Button {
-        createSpace()
+        onCreateSpace()
       } label: {
         Text("Create Space")
       }

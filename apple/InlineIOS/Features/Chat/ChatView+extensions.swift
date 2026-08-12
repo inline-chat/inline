@@ -3,30 +3,35 @@ import InlineUI
 import RealtimeV2
 import SwiftUI
 
-struct ChatToolbarLeadingView: View {
+struct ChatToolbarLeadingView: View, RehostSafeToolbarContent {
   let peerId: Peer
   let contextSpaceId: Int64?
+  private let router: Router
   let onOpenChatInfo: (SpaceChatItem) -> Void
   @Binding private var isChatHeaderPressed: Bool
 
-  @EnvironmentObject private var fullChatViewModel: FullChatViewModel
-  @EnvironmentObject private var realtimeState: RealtimeState
-  @Environment(Router.self) private var router
-
+  @ObservedObject private var fullChatViewModel: FullChatViewModel
+  @ObservedObject private var realtimeState: RealtimeState
   @ObservedObject private var composeActions: ComposeActions
   @State private var toolbarContext: ReplyThreadToolbarContext?
 
   init(
     peerId: Peer,
     contextSpaceId: Int64? = nil,
+    router: Router,
+    fullChatViewModel: FullChatViewModel,
+    realtimeState: RealtimeState,
     isChatHeaderPressed: Binding<Bool>,
     onOpenChatInfo: @escaping (SpaceChatItem) -> Void,
     composeActions: ComposeActions = .shared
   ) {
     self.peerId = peerId
     self.contextSpaceId = contextSpaceId
+    self.router = router
     self.onOpenChatInfo = onOpenChatInfo
     _isChatHeaderPressed = isChatHeaderPressed
+    _fullChatViewModel = ObservedObject(wrappedValue: fullChatViewModel)
+    _realtimeState = ObservedObject(wrappedValue: realtimeState)
     _composeActions = ObservedObject(initialValue: composeActions)
   }
 

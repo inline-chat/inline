@@ -338,6 +338,8 @@ private struct ExperimentalAuthedRootView: View {
     selectedSpaceId: Binding<Int64?>
   ) -> some View {
     let picker = SpacePickerMenu(
+      compactSpaceList: compactSpaceList,
+      realtimeState: realtimeState,
       selectedSpaceId: selectedSpaceId,
       onSelectHome: {
         selectedSpaceId.wrappedValue = nil
@@ -523,9 +525,10 @@ private struct ExperimentalAuthedRootView: View {
     .frame(width: 28, height: 28)
     .accessibilityLabel("More")
     .popover(isPresented: $isNotificationSettingsPresented) {
-      NotificationSettingsPopoverContent {
-        isNotificationSettingsPresented = false
-      }
+      NotificationSettingsPopoverContent(
+        notificationSettings: notificationSettings,
+        onSelection: { isNotificationSettingsPresented = false }
+      )
       .frame(idealWidth: 360, idealHeight: 480)
       .presentationCompactAdaptation(.popover)
     }
