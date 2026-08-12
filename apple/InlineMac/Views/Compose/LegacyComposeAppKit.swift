@@ -125,6 +125,14 @@ class LegacyComposeAppKit: NSView {
     },
     emojiItems: { query, limit in
       ComposeEmojiAutocompleteProvider.items(matching: query, limit: limit)
+    },
+    externalResourceItems: { [weak self] query, limit in
+      guard let peer = self?.peerId else { return [] }
+      return try await ExternalResourceSearchClient.search(
+        peer: peer,
+        query: query,
+        limit: limit
+      )
     }
   )
   private var autocompleteMenu: ComposeAutocompleteMenu?
@@ -2490,6 +2498,26 @@ extension LegacyComposeAppKit: ComposeAutocompleteMenuDelegate {
 
         hideAutocomplete()
         updateHeightIfNeeded(for: textEditor.textView)
+        saveDraft()
+
+      case let .externalResource(resource):
+        let result = ExternalResourceLinkEditing.replaceReference(
+          in: textEditor.attributedString,
+          range: match.range,
+          with: resource,
+          linkAttributes: composeThreadLinkAttributes,
+          trailingAttributes: composeBaseTextAttributes
+        )
+
+        ignoreNextHeightChange = true
+        textEditor.setAttributedString(result.newAttributedText)
+        textEditor.textView.setSelectedRange(NSRange(location: result.newCursorPosition, length: 0))
+        textEditor.textView.resetTypingAttributesToDefault()
+        ignoreNextHeightChange = false
+
+        hideAutocomplete()
+        updateHeightIfNeeded(for: textEditor.textView)
+        updateSendButtonIfNeeded()
         saveDraft()
 
       case let .emoji(value, _):

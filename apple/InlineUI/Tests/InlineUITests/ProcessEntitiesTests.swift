@@ -973,6 +973,34 @@ struct ProcessEntitiesTests {
     #expect(entity.textURL.url == "https://example.com")
   }
 
+  @Test("External resource reference round-trips as text_url")
+  func testExternalResourceReferenceRoundTripsAsTextURL() {
+    let resource = ExternalResourceReference(
+      id: "notion-roadmap",
+      provider: .notion,
+      kind: .page,
+      title: "Roadmap",
+      url: URL(string: "https://www.notion.so/notion-roadmap")!,
+      subtitle: "Notion page",
+      emoji: "🧭"
+    )
+    let replacement = ExternalResourceLinkEditing.replaceReference(
+      in: NSAttributedString(string: "[[road"),
+      range: NSRange(location: 0, length: 6),
+      with: resource
+    )
+
+    let result = ProcessEntities.fromAttributedString(replacement.newAttributedText)
+
+    #expect(result.text == "[[🧭 Roadmap]] ")
+    #expect(result.entities.entities.count == 1)
+    let entity = result.entities.entities[0]
+    #expect(entity.type == .textURL)
+    #expect(entity.offset == 0)
+    #expect(entity.length == Int64(("[[🧭 Roadmap]]" as NSString).length))
+    #expect(entity.textURL.url == "https://www.notion.so/notion-roadmap")
+  }
+
   @Test("Extract app deep link text_url from attributed string link attribute")
   func testExtractAppDeepLinkTextURLFromAttributedString() {
     let text = "OmniFocus"

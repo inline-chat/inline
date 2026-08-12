@@ -1,6 +1,5 @@
 import Combine
 import Foundation
-import GRDB
 import Logger
 
 public enum ComposeAutocompleteKind: String, Hashable, Sendable {
@@ -33,6 +32,7 @@ public struct ComposeAutocompleteItem: Identifiable, Hashable, Sendable {
     case mention(MentionCompletionItem)
     case command(PeerBotCommandSuggestion)
     case thread(chatId: Int64, spaceId: Int64?, title: String)
+    case externalResource(ExternalResourceReference)
     case emoji(value: String, shortcode: String)
   }
 
@@ -85,25 +85,72 @@ public typealias ComposeThreadRecentChatIdsProvider = @MainActor (
   _ limit: Int
 ) -> [Int64]
 
+public typealias ComposeExternalResourceItemsProvider = @MainActor (
+  _ query: String,
+  _ limit: Int
+) async throws -> [ExternalResourceReference]
+
 @MainActor
 public final class ComposeAutocompleteViewModel: ObservableObject {
+  private enum ReferenceSource: String, Sendable {
+    case all
+    case inline
+    case notion
+    case linear
+
+    var includesInline: Bool {
+      self == .all || self == .inline
+    }
+
+    var includesNotion: Bool {
+      self == .all || self == .notion
+    }
+  }
+
+  private struct ReferenceQuery: Sendable {
+    let source: ReferenceSource
+    let query: String
+
+    var searchesNotion: Bool {
+      source.includesNotion && (source == .notion || !query.isEmpty)
+    }
+  }
+
+  private struct CachedExternalResources {
+    let resources: [ExternalResourceReference]
+    let expiresAt: Date
+  }
+
+  private struct ThreadCandidate {
+    let chatId: Int64
+    let chat: Chat
+    let snapshot: HomeChatListItemSnapshot
+  }
+
   @Published public private(set) var match: ComposeAutocompleteMatch?
   @Published public private(set) var items: [ComposeAutocompleteItem] = []
   @Published public private(set) var selectedIndex = 0
   @Published public private(set) var loadState: ComposeAutocompleteLoadState = .idle
 
-  private let log = Log.scoped("ComposeAutocompleteViewModel")
+  private let log = Log.scoped("ComposeAutocompleteViewModel", enableTracing: true)
   private let db: AppDatabase
   private let limit: Int
   private let recentThreadChatIds: ComposeThreadRecentChatIdsProvider
   private let mentionItems: ComposeMentionAutocompleteItemsProvider
   private let commandItems: ComposeCommandAutocompleteItemsProvider
   private let emojiItems: ComposeEmojiAutocompleteItemsProvider
+  private let externalResourceItems: ComposeExternalResourceItemsProvider
   private var spaceId: Int64?
   private var loadTask: Task<Void, Never>?
   private var loadToken = UUID()
   private var suppressedMatch: ComposeAutocompleteMatch?
-  private let recentThreadLimit = 5
+  private let recentThreadLimit = 6
+  private let searchedThreadLimit = 5
+  private let externalResourceLimit = 6
+  private let externalResourceCacheLimit = 20
+  private let externalResourceCacheTTL: TimeInterval = 30
+  private var externalResourceCache: [String: CachedExternalResources] = [:]
+  private var externalResourceCacheOrder: [String] = []
 
   public init(
     db: AppDatabase = .shared,
@@ -112,7 +159,8 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
     recentThreadChatIds: @escaping ComposeThreadRecentChatIdsProvider = { _ in [] },
     mentionItems: @escaping ComposeMentionAutocompleteItemsProvider = { _, _ in [] },
     commandItems: @escaping ComposeCommandAutocompleteItemsProvider = { _, _ in [] },
-    emojiItems: @escaping ComposeEmojiAutocompleteItemsProvider = { _, _ in [] }
+    emojiItems: @escaping ComposeEmojiAutocompleteItemsProvider = { _, _ in [] },
+    externalResourceItems: @escaping ComposeExternalResourceItemsProvider = { _, _ in [] }
   ) {
     self.db = db
     self.spaceId = spaceId
@@ -121,6 +169,7 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
     self.mentionItems = mentionItems
     self.commandItems = commandItems
     self.emojiItems = emojiItems
+    self.externalResourceItems = externalResourceItems
   }
 
   deinit {
@@ -139,6 +188,8 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
   public func configure(spaceId: Int64?) {
     guard self.spaceId != spaceId else { return }
     self.spaceId = spaceId
+    externalResourceCache.removeAll(keepingCapacity: true)
+    externalResourceCacheOrder.removeAll(keepingCapacity: true)
     reloadItems()
   }
 
@@ -231,144 +282,146 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
   }
 
   private func loadThreadItems(query: String) {
-    guard !query.isEmpty else {
+    let referenceQuery = Self.referenceQuery(from: query)
+    log.debug(
+      "event=reference_scope source=\(referenceQuery.source.rawValue) " +
+        "query_length=\(referenceQuery.query.utf16.count) " +
+        "includes_inline=\(referenceQuery.source.includesInline) " +
+        "searches_notion=\(referenceQuery.searchesNotion) " +
+        "recent=\(referenceQuery.query.isEmpty)"
+    )
+
+    if referenceQuery.source == .linear {
+      log.debug("event=reference_scope_unavailable source=linear adapter_available=false")
+      loadSynchronousItems([])
+      return
+    }
+
+    if referenceQuery.query.isEmpty, referenceQuery.source != .notion {
       loadRecentThreadItems()
       return
     }
 
-    let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmedQuery.isEmpty else {
-      loadRecentThreadItems()
-      return
+    let normalizedQuery = Self.normalizedExternalResourceQuery(referenceQuery.query)
+    let cachedResources: [ExternalResourceReference]?
+    if referenceQuery.searchesNotion {
+      cachedResources = cachedExternalResources(for: normalizedQuery)
+    } else {
+      cachedResources = []
     }
-
-    let compactQuery = Self.compactWhitespace(trimmedQuery)
-    let titlePattern = Self.likePattern(containing: trimmedQuery)
-    let compactTitlePattern = Self.likePattern(containing: compactQuery)
+    if referenceQuery.searchesNotion, let cachedResources {
+      log.trace(
+        "event=external_resource_cache_hit provider=notion " +
+          "query_length=\(referenceQuery.query.utf16.count) " +
+          "result_count=\(cachedResources.count)"
+      )
+    }
+    let preferredChatIds = referenceQuery.source.includesInline
+      ? recentThreadChatIds(recentThreadLimit)
+      : []
     let token = UUID()
     loadToken = token
     loadState = .loading
+    let logger = log
 
-    loadTask = Task { [db, limit] in
+    loadTask = Task { [db, limit, searchedThreadLimit, externalResourceLimit, externalResourceItems, logger] in
       do {
         // Avoid issuing a local database search for every intermediate keystroke.
         // The presentation layer keeps the current menu stable during this short debounce.
         try await Task.sleep(for: .milliseconds(80))
         try Task.checkCancellation()
-        let items = try await db.reader.read { db in
-          let compactTitleSQL = """
-          replace(replace(replace(replace(title, ' ', ''), char(9), ''), char(10), ''), char(13), '')
-          """
-          let request = Chat
-            .filter(Chat.Columns.type == ChatType.thread.rawValue)
-            .filter(Chat.Columns.parentMessageId == nil)
-            .filter(
-              sql: "(title COLLATE NOCASE LIKE ? ESCAPE '\\' OR \(compactTitleSQL) COLLATE NOCASE LIKE ? ESCAPE '\\')",
-              arguments: StatementArguments([titlePattern, compactTitlePattern])
-            )
-
-          let chats = try request
-            .order(Chat.Columns.date.desc)
-            .limit(limit)
-            .fetchAll(db)
-
-          var spaceNames: [Int64: String] = [:]
-          for spaceId in Set(chats.compactMap(\.spaceId)) {
-            if let space = try Space.fetchOne(db, id: spaceId) {
-              spaceNames[spaceId] = space.displayName
-            }
-          }
-
-          return chats.compactMap { chat -> ComposeAutocompleteItem? in
-            guard let title = chat.title?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !title.isEmpty
-            else {
-              return nil
-            }
-
-            let subtitle = chat.spaceId.flatMap { spaceNames[$0] } ?? "Thread"
-            return ComposeAutocompleteItem(
-              id: "thread-\(chat.id)",
-              kind: .thread,
-              title: title,
-              subtitle: subtitle,
-              emoji: chat.emoji,
-              payload: .thread(chatId: chat.id, spaceId: chat.spaceId, title: title)
-            )
-          }
+        let threadItems: [ComposeAutocompleteItem]
+        if referenceQuery.source.includesInline {
+          let snapshots = try await db.fetchCommandBarChatCatalogSnapshots()
+          threadItems = Self.threadItems(
+            from: snapshots,
+            preferredChatIds: preferredChatIds,
+            query: referenceQuery.query,
+            limit: min(searchedThreadLimit, limit)
+          )
+        } else {
+          threadItems = []
         }
 
         await MainActor.run { [weak self] in
           guard let self, self.loadToken == token else { return }
-          self.items = items
-          self.selectedIndex = items.isEmpty ? 0 : min(self.selectedIndex, items.count - 1)
-          self.loadState = .idle
+          self.items = Self.referenceItems(
+            threads: threadItems,
+            externalResources: Self.externalResources(
+              cachedResources ?? [],
+              for: referenceQuery.source
+            ),
+            limit: limit
+          )
+          self.selectedIndex = self.items.isEmpty ? 0 : min(self.selectedIndex, self.items.count - 1)
+          self.loadState = cachedResources == nil && self.items.isEmpty ? .loading : .idle
+          logger.trace(
+            "event=reference_local_phase source=\(referenceQuery.source.rawValue) " +
+              "thread_count=\(threadItems.count) " +
+              "visible_count=\(self.items.count)"
+          )
         }
+
+        guard cachedResources == nil else { return }
+
+        // Give local results priority and avoid a provider request for every
+        // intermediate keystroke while the user is still typing.
+        try await Task.sleep(for: .milliseconds(140))
+        try Task.checkCancellation()
+        logger.debug(
+          "event=external_resource_request provider=notion " +
+            "query_length=\(referenceQuery.query.utf16.count) " +
+            "recent=\(referenceQuery.query.isEmpty) limit=\(externalResourceLimit)"
+        )
+        let resources = try await externalResourceItems(referenceQuery.query, externalResourceLimit)
+        let scopedResources = Self.externalResources(resources, for: referenceQuery.source)
+
+        await MainActor.run { [weak self] in
+          guard let self, self.loadToken == token else { return }
+          self.cacheExternalResources(resources, for: normalizedQuery)
+          self.items = Self.referenceItems(
+            threads: threadItems,
+            externalResources: scopedResources,
+            limit: limit
+          )
+          self.selectedIndex = self.items.isEmpty ? 0 : min(self.selectedIndex, self.items.count - 1)
+          self.loadState = .idle
+          logger.debug(
+            "event=external_resource_published provider=notion " +
+              "resource_count=\(resources.count) scoped_count=\(scopedResources.count) " +
+              "thread_count=\(threadItems.count) " +
+              "visible_count=\(self.items.count)"
+          )
+        }
+      } catch is CancellationError {
+        logger.trace("event=external_resource_cancelled source=\(referenceQuery.source.rawValue)")
+        return
       } catch {
         await MainActor.run { [weak self] in
           guard let self, self.loadToken == token else { return }
-          self.items = []
-          self.selectedIndex = 0
-          self.loadState = .failed
-          self.log.error("Failed to load thread autocomplete items", error: error)
+          self.loadState = self.items.isEmpty ? .failed : .idle
+          self.log.error("Failed to load reference autocomplete items", error: error)
         }
       }
     }
   }
 
   private func loadRecentThreadItems() {
-    let chatIds = recentThreadChatIds(recentThreadLimit)
-    guard !chatIds.isEmpty else {
-      items = []
-      selectedIndex = 0
-      loadState = .idle
-      return
-    }
+    let preferredChatIds = recentThreadChatIds(recentThreadLimit)
 
     let token = UUID()
     loadToken = token
     loadState = .loading
 
-    loadTask = Task { [db] in
+    loadTask = Task { [db, limit, recentThreadLimit] in
       do {
-        let items = try await db.reader.read { db in
-          var items: [ComposeAutocompleteItem] = []
-          var spaceNames: [Int64: String] = [:]
-
-          for chatId in chatIds {
-            guard let chat = try Chat.fetchOne(db, id: chatId),
-                  chat.type == .thread,
-                  chat.parentMessageId == nil,
-                  let title = chat.title?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !title.isEmpty
-            else {
-              continue
-            }
-
-            let subtitle: String
-            if let spaceId = chat.spaceId {
-              if spaceNames[spaceId] == nil, let space = try Space.fetchOne(db, id: spaceId) {
-                spaceNames[spaceId] = space.displayName
-              }
-              subtitle = spaceNames[spaceId] ?? "Thread"
-            } else {
-              subtitle = "Thread"
-            }
-
-            items.append(
-              ComposeAutocompleteItem(
-                id: "thread-\(chat.id)",
-                kind: .thread,
-                title: title,
-                subtitle: subtitle,
-                emoji: chat.emoji,
-                payload: .thread(chatId: chat.id, spaceId: chat.spaceId, title: title)
-              )
-            )
-          }
-
-          return items
-        }
+        let snapshots = try await db.fetchCommandBarChatCatalogSnapshots()
+        let items = Self.threadItems(
+          from: snapshots,
+          preferredChatIds: preferredChatIds,
+          query: nil,
+          limit: min(recentThreadLimit, limit)
+        )
 
         await MainActor.run { [weak self] in
           guard let self, self.loadToken == token else { return }
@@ -388,20 +441,169 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
     }
   }
 
+  private static func threadItems(
+    from snapshots: [HomeChatListItemSnapshot],
+    preferredChatIds: [Int64],
+    query: String?,
+    limit: Int
+  ) -> [ComposeAutocompleteItem] {
+    guard limit > 0 else { return [] }
+
+    let normalizedQuery = query.map(HomeChatListItemSnapshot.normalizedSearchText) ?? ""
+    let compactQuery = compactWhitespace(normalizedQuery)
+    var candidates = snapshots.compactMap { snapshot -> ThreadCandidate? in
+      guard !snapshot.archived,
+            let chatId = snapshot.peerId.asThreadId(),
+            let chat = snapshot.item.chat,
+            chat.type == .thread,
+            !snapshot.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      else {
+        return nil
+      }
+
+      if !normalizedQuery.isEmpty {
+        let searchText = snapshot.searchText
+        guard searchText.contains(normalizedQuery)
+          || compactWhitespace(searchText).contains(compactQuery)
+        else {
+          return nil
+        }
+      }
+
+      return ThreadCandidate(chatId: chatId, chat: chat, snapshot: snapshot)
+    }
+
+    var preferredRank: [Int64: Int] = [:]
+    for (index, chatId) in preferredChatIds.enumerated() where preferredRank[chatId] == nil {
+      preferredRank[chatId] = index
+    }
+
+    candidates.sort { lhs, rhs in
+      switch (preferredRank[lhs.chatId], preferredRank[rhs.chatId]) {
+      case let (lhsRank?, rhsRank?) where lhsRank != rhsRank:
+        return lhsRank < rhsRank
+      case (_?, nil):
+        return true
+      case (nil, _?):
+        return false
+      default:
+        break
+      }
+
+      let lhsDate = lhs.snapshot.item.dialog.openedDate ?? lhs.snapshot.sortDate
+      let rhsDate = rhs.snapshot.item.dialog.openedDate ?? rhs.snapshot.sortDate
+      if lhsDate != rhsDate { return lhsDate > rhsDate }
+      if lhs.snapshot.sortDate != rhs.snapshot.sortDate {
+        return lhs.snapshot.sortDate > rhs.snapshot.sortDate
+      }
+      return lhs.chatId > rhs.chatId
+    }
+
+    return candidates.prefix(limit).map { candidate in
+      let snapshot = candidate.snapshot
+      let chat = candidate.chat
+      let title = snapshot.title
+      let spaceId = snapshot.item.dialog.spaceId ?? chat.spaceId
+      return ComposeAutocompleteItem(
+        id: "thread-\(candidate.chatId)",
+        kind: .thread,
+        title: title,
+        subtitle: snapshot.parentTitle ?? snapshot.spaceTitle ?? "Thread",
+        emoji: chat.emoji,
+        payload: .thread(chatId: candidate.chatId, spaceId: spaceId, title: title)
+      )
+    }
+  }
+
   private static func compactWhitespace(_ value: String) -> String {
     let scalars = value.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) }
     return String(String.UnicodeScalarView(scalars))
   }
 
-  private static func likePattern(containing value: String) -> String {
-    var pattern = "%"
-    for character in value {
-      if character == "\\" || character == "%" || character == "_" {
-        pattern.append("\\")
-      }
-      pattern.append(character)
+  private func cacheExternalResources(_ resources: [ExternalResourceReference], for key: String) {
+    externalResourceCache[key] = CachedExternalResources(
+      resources: resources,
+      expiresAt: Date().addingTimeInterval(externalResourceCacheTTL)
+    )
+    externalResourceCacheOrder.removeAll { $0 == key }
+    externalResourceCacheOrder.append(key)
+
+    while externalResourceCacheOrder.count > externalResourceCacheLimit {
+      let oldestKey = externalResourceCacheOrder.removeFirst()
+      externalResourceCache.removeValue(forKey: oldestKey)
     }
-    pattern.append("%")
-    return pattern
   }
+
+  private func cachedExternalResources(for key: String) -> [ExternalResourceReference]? {
+    guard let entry = externalResourceCache[key] else { return nil }
+    guard entry.expiresAt > Date() else {
+      externalResourceCache.removeValue(forKey: key)
+      externalResourceCacheOrder.removeAll { $0 == key }
+      return nil
+    }
+    externalResourceCacheOrder.removeAll { $0 == key }
+    externalResourceCacheOrder.append(key)
+    return entry.resources
+  }
+
+  private static func referenceItems(
+    threads: [ComposeAutocompleteItem],
+    externalResources: [ExternalResourceReference],
+    limit: Int
+  ) -> [ComposeAutocompleteItem] {
+    let resources = externalResources.map { resource in
+      ComposeAutocompleteItem(
+        id: "external-\(resource.provider.rawValue)-\(resource.id)",
+        kind: .thread,
+        title: resource.title,
+        subtitle: resource.subtitle,
+        symbol: "doc.text",
+        emoji: resource.emoji,
+        payload: .externalResource(resource)
+      )
+    }
+    return Array((threads + resources).prefix(limit))
+  }
+
+  private static func externalResources(
+    _ resources: [ExternalResourceReference],
+    for source: ReferenceSource
+  ) -> [ExternalResourceReference] {
+    source == .notion
+      ? resources.filter { $0.provider == .notion }
+      : resources
+  }
+
+  private static func normalizedExternalResourceQuery(_ value: String) -> String {
+    value
+      .split(whereSeparator: \.isWhitespace)
+      .joined(separator: " ")
+      .lowercased()
+  }
+
+  private static func referenceQuery(from value: String) -> ReferenceQuery {
+    let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let slashIndex = trimmedValue.firstIndex(of: "/") else {
+      return ReferenceQuery(source: .all, query: trimmedValue)
+    }
+
+    let prefix = trimmedValue[..<slashIndex]
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+    let queryStart = trimmedValue.index(after: slashIndex)
+    let scopedQuery = trimmedValue[queryStart...]
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+
+    switch prefix {
+    case "inline":
+      return ReferenceQuery(source: .inline, query: scopedQuery)
+    case "notion":
+      return ReferenceQuery(source: .notion, query: scopedQuery)
+    case "linear":
+      return ReferenceQuery(source: .linear, query: scopedQuery)
+    default:
+      return ReferenceQuery(source: .all, query: trimmedValue)
+    }
+  }
+
 }

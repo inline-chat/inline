@@ -46,23 +46,35 @@ final class ComposeAutocompleteMenuItem: NSTableCellView {
     subtitleLabel.stringValue = item.subtitle ?? ""
     subtitleLabel.isHidden = item.subtitle?.isEmpty != false
 
-    if item.kind == .thread {
+    switch item.payload {
+    case .thread:
       showThreadIcon(emoji: item.emoji)
-    } else if item.kind == .emoji, let emoji = item.emoji, !emoji.isEmpty {
-      hideThreadIcon()
-      iconLabel.stringValue = emoji
-      iconLabel.font = .systemFont(ofSize: 16)
-      iconLabel.isHidden = false
-      iconImageView.isHidden = true
-    } else {
-      hideThreadIcon()
-      let symbol = item.symbol ?? "bubble.left"
-      iconImageView.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        ?? NSImage(systemSymbolName: "bubble.left", accessibilityDescription: nil)
-      iconImageView.isHidden = iconImageView.image == nil
-      iconLabel.stringValue = ""
-      iconLabel.isHidden = true
+    case .externalResource, .emoji:
+      if let emoji = item.emoji, !emoji.isEmpty {
+        showEmojiIcon(emoji)
+      } else {
+        showSymbolIcon(item.symbol ?? "bubble.left")
+      }
+    case .mention, .command:
+      showSymbolIcon(item.symbol ?? "bubble.left")
     }
+  }
+
+  private func showEmojiIcon(_ emoji: String) {
+    hideThreadIcon()
+    iconLabel.stringValue = emoji
+    iconLabel.font = .systemFont(ofSize: 16)
+    iconLabel.isHidden = false
+    iconImageView.isHidden = true
+  }
+
+  private func showSymbolIcon(_ symbol: String) {
+    hideThreadIcon()
+    iconImageView.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+      ?? NSImage(systemSymbolName: "bubble.left", accessibilityDescription: nil)
+    iconImageView.isHidden = iconImageView.image == nil
+    iconLabel.stringValue = ""
+    iconLabel.isHidden = true
   }
 
   private func setupView() {

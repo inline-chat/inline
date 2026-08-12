@@ -76,6 +76,13 @@ final class ComposeAutocompleteManager: NSObject {
       },
       emojiItems: { query, limit in
         ComposeEmojiAutocompleteProvider.items(matching: query, limit: limit)
+      },
+      externalResourceItems: { query, limit in
+        try await ExternalResourceSearchClient.search(
+          peer: peerId,
+          query: query,
+          limit: limit
+        )
       }
     )
     super.init()
@@ -323,7 +330,8 @@ final class ComposeAutocompleteManager: NSObject {
       found = attributes[.mentionUserId] != nil ||
         attributes[.mentionGroupId] != nil ||
         attributes[.botCommand] != nil ||
-        attributes[.threadLink] != nil
+        attributes[.threadLink] != nil ||
+        attributes[.link] != nil
       stop.pointee = ObjCBool(found)
     }
     return found
@@ -534,6 +542,16 @@ final class ComposeAutocompleteManager: NSObject {
         trailingAttributes: baseTextAttributes(for: textView)
       )
 
+      apply(result.newAttributedText, cursorPosition: result.newCursorPosition, to: textView)
+
+    case let .externalResource(resource):
+      let result = ExternalResourceLinkEditing.replaceReference(
+        in: currentAttributedText,
+        range: match.range,
+        with: resource,
+        linkAttributes: threadLinkAttributes(for: textView),
+        trailingAttributes: baseTextAttributes(for: textView)
+      )
       apply(result.newAttributedText, cursorPosition: result.newCursorPosition, to: textView)
 
     case let .emoji(value, _):
@@ -769,7 +787,7 @@ extension ComposeView: ComposeAutocompleteManagerDelegate {
     switch item.payload {
     case .command where activation == .primary:
       sendMessage()
-    case .command, .mention, .thread, .emoji:
+    case .command, .mention, .thread, .externalResource, .emoji:
       updateHeight()
       draftManager.invalidateLoadedEntities()
     }
