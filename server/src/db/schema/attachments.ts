@@ -140,24 +140,40 @@ export const urlPreview = pgTable("url_preview", {
   date: creationDate,
 })
 
-export const externalTasks = pgTable("external_tasks", {
-  id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
-  application: text("application").notNull(),
-  taskId: text("task_id").notNull(),
-  status: text("status", { enum: ["backlog", "todo", "in_progress", "done", "cancelled"] }).notNull(),
-  assignedUserId: bigint("assigned_user_id", { mode: "bigint" }).references(() => users.id),
-  /** Space connector used for provider actions, including tasks created from DMs. */
-  connectorSpaceId: integer("connector_space_id").references(() => spaces.id),
-  number: text("number"),
-  url: text("url"),
+export const externalTasks = pgTable(
+  "external_tasks",
+  {
+    id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
+    application: text("application").notNull(),
+    taskId: text("task_id").notNull(),
+    status: text("status", { enum: ["backlog", "todo", "in_progress", "done", "cancelled"] }).notNull(),
+    assignedUserId: bigint("assigned_user_id", { mode: "bigint" }).references(() => users.id),
+    /** Space connector used for provider actions, including tasks created from DMs. */
+    connectorSpaceId: integer("connector_space_id").references(() => spaces.id),
+    /** Authorized source message for durable provider-task idempotency. */
+    sourceMessageId: bigint("source_message_id", { mode: "bigint" }).references(
+      () => messages.globalId,
+      { onDelete: "set null" },
+    ),
+    number: text("number"),
+    url: text("url"),
 
-  /** title of the task (encrypted) */
-  title: bytea("title"),
-  titleIv: bytea("title_iv"),
-  titleTag: bytea("title_tag"),
+    /** title of the task (encrypted) */
+    title: bytea("title"),
+    titleIv: bytea("title_iv"),
+    titleTag: bytea("title_tag"),
 
-  date: creationDate,
-})
+    date: creationDate,
+  },
+  (table) => ({
+    providerUserSourceSpaceUnique: uniqueIndex("external_tasks_provider_user_source_space_unique").on(
+      table.sourceMessageId,
+      table.assignedUserId,
+      table.application,
+      table.connectorSpaceId,
+    ),
+  }),
+)
 
 export const messageAttachments = pgTable(
   "message_attachments",

@@ -32,6 +32,12 @@ import {
   readStoredTaskMessageText,
   resolveLinearTaskSourceText,
 } from "@in/server/libs/linear/taskContext"
+import {
+  findExistingProviderTask,
+  isProviderTaskIdempotencyConflict,
+  linearTaskReplayResponse,
+  type ProviderTaskIdentity,
+} from "@in/server/modules/integrations/providerTaskIdempotency"
 
 type Context = {
   currentUserId: number
@@ -82,6 +88,24 @@ export const handler = async (
     return { link: undefined }
   }
   const { message, peerId, spaceId } = authorized
+  const taskIdentity: ProviderTaskIdentity = {
+    application: "linear",
+    assignedUserId: BigInt(currentUserId),
+    sourceMessageId: message.globalId,
+    connectorSpaceId: spaceId,
+  }
+  const replay = linearTaskReplayResponse(
+    await findExistingProviderTask(taskIdentity),
+  )
+  if (replay) {
+    Log.shared.info("Replayed existing Linear issue creation", {
+      currentUserId,
+      chatId,
+      messageId,
+      spaceId,
+    })
+    return replay
+  }
   let createdProviderTaskId: string | null = null
   let providerTaskPersisted = false
 
@@ -326,6 +350,7 @@ export const handler = async (
         status: "todo",
         assignedUserId: BigInt(currentUserId),
         connectorSpaceId: spaceId,
+        sourceMessageId: message.globalId,
         number: result.identifier ?? "",
         url: result.link ?? "",
         title: encryptedTitle.encrypted,
@@ -407,6 +432,7 @@ export const handler = async (
     })
     return { link: result.link }
   } catch (error) {
+    const idempotencyConflict = isProviderTaskIdempotencyConflict(error)
     if (createdProviderTaskId && !providerTaskPersisted) {
       await deleteLinearIssue({ spaceId, issueId: createdProviderTaskId })
         .then((result) => {
@@ -424,6 +450,20 @@ export const handler = async (
             error: compensationError,
           })
         })
+    }
+    if (idempotencyConflict) {
+      const replay = linearTaskReplayResponse(
+        await findExistingProviderTask(taskIdentity),
+      )
+      if (replay) {
+        Log.shared.info("Converged concurrent Linear issue creation", {
+          currentUserId,
+          chatId,
+          messageId,
+          spaceId,
+        })
+        return replay
+      }
     }
     Log.shared.error("Failed to create Linear issue", { error, chatId, messageId, currentUserId })
     return { link: undefined }

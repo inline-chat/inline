@@ -23,6 +23,12 @@ import { toActionableNotionInlineError } from "@in/server/modules/notion/errors"
 import { resolveProviderActionContext } from "@in/server/modules/integrations/providerActionContext"
 import { getNotionClient } from "@in/server/modules/notion/notion"
 import { notionTaskNotificationText } from "./taskNotificationText"
+import {
+  findExistingProviderTask,
+  isProviderTaskIdempotencyConflict,
+  notionTaskReplayResponse,
+  type ProviderTaskIdentity,
+} from "@in/server/modules/integrations/providerTaskIdempotency"
 
 export const Input = Type.Object({
   spaceId: Type.Number(),
@@ -67,6 +73,24 @@ export const handler = async (
     claimedSpaceId: input.spaceId,
   })
   const { spaceId, message, peerId } = authorized
+  const taskIdentity: ProviderTaskIdentity = {
+    application: "notion",
+    assignedUserId: BigInt(context.currentUserId),
+    sourceMessageId: message.globalId,
+    connectorSpaceId: spaceId,
+  }
+  const replay = notionTaskReplayResponse(
+    await findExistingProviderTask(taskIdentity),
+  )
+  if (replay) {
+    Log.shared.info("Replayed existing Notion task creation", {
+      currentUserId: context.currentUserId,
+      chatId,
+      messageId,
+      spaceId,
+    })
+    return replay
+  }
   const startTime = Date.now()
   let stage = "start"
   let createdProviderPageId: string | null = null
@@ -130,6 +154,7 @@ export const handler = async (
         status: "todo",
         assignedUserId: BigInt(context.currentUserId),
         connectorSpaceId: spaceId,
+        sourceMessageId: message.globalId,
         title: encryptedTitle?.encrypted ?? null,
         titleIv: encryptedTitle?.iv ?? null,
         titleTag: encryptedTitle?.authTag ?? null,
@@ -224,8 +249,23 @@ export const handler = async (
 
     return { url: result.url, taskTitle: result.taskTitle }
   } catch (error) {
+    const idempotencyConflict = isProviderTaskIdempotencyConflict(error)
     if (createdProviderPageId && !providerPagePersisted) {
       await compensateNotionPage(spaceId, createdProviderPageId)
+    }
+    if (idempotencyConflict) {
+      const replay = notionTaskReplayResponse(
+        await findExistingProviderTask(taskIdentity),
+      )
+      if (replay) {
+        Log.shared.info("Converged concurrent Notion task creation", {
+          currentUserId: context.currentUserId,
+          chatId,
+          messageId,
+          spaceId,
+        })
+        return replay
+      }
     }
     const totalDuration = Date.now() - startTime
     logProdTelemetry("Notion task creation failed", {
