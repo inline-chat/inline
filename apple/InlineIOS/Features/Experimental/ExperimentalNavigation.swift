@@ -761,58 +761,58 @@ private struct ExperimentalChatListView: View {
 
   private func closeButton(for item: ChatListItemSnapshot) -> some View {
     Button(role: .destructive) {
-      Task {
-        do {
-          _ = try await homeActions.perform(peer: item.peer) {
-            _ = try await realtimeV2.send(
-              .updateDialogOpen(peerId: item.peer, open: false)
-            )
-          }
-        } catch {
-          Log.shared.error("Failed to update Inbox state", error: error)
-          ToastManager.shared.showToast(
-            "Could not close chat",
-            type: .error,
-            systemImage: "exclamationmark.triangle.fill"
-          )
-        }
-      }
+      performClose(peer: item.peer)
     } label: {
       Label("Close", systemImage: "xmark.circle.fill")
     }
     .tint(.gray)
   }
 
+  private func performClose(peer: Peer) {
+    Task {
+      do {
+        _ = try await InboxMembershipService.shared.close(peer: peer)
+      } catch {
+        Log.shared.error("Failed to update Inbox state", error: error)
+        ToastManager.shared.showToast(
+          "Could not close chat",
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
+        )
+      }
+    }
+  }
+
   @ViewBuilder
   private func openButton(for item: ChatListItemSnapshot) -> some View {
     if !item.isOpen {
       Button {
-        Task {
-          do {
-            let didPerform = try await homeActions.perform(peer: item.peer) {
-              _ = try await realtimeV2.send(
-                .updateDialogOpen(peerId: item.peer, open: true)
-              )
-            }
-            guard didPerform else { return }
-            ToastManager.shared.showToast(
-              "Opened in Inbox",
-              type: .success,
-              systemImage: "tray.full.fill"
-            )
-          } catch {
-            Log.shared.error("Failed to update Inbox state", error: error)
-            ToastManager.shared.showToast(
-              "Could not open chat",
-              type: .error,
-              systemImage: "exclamationmark.triangle.fill"
-            )
-          }
-        }
+        performOpen(item)
       } label: {
         Label("Open", systemImage: "tray.and.arrow.down.fill")
       }
       .tint(.green)
+    }
+  }
+
+  private func performOpen(_ item: ChatListItemSnapshot) {
+    Task {
+      do {
+        let didPerform = try await InboxMembershipService.shared.open(peer: item.peer)
+        guard didPerform else { return }
+        ToastManager.shared.showToast(
+          "Opened in Inbox",
+          type: .success,
+          systemImage: "tray.full.fill"
+        )
+      } catch {
+        Log.shared.error("Failed to update Inbox state", error: error)
+        ToastManager.shared.showToast(
+          "Could not open chat",
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
+        )
+      }
     }
   }
 
