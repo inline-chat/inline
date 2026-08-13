@@ -5,13 +5,13 @@ import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 
 export const getMe = async (_: GetMeInput, handlerContext: HandlerContext): Promise<GetMeResult> => {
-  let user = await UsersModel.getUserById(handlerContext.userId)
+  const user = await UsersModel.getUserWithProfile(handlerContext.userId)
 
   if (!user) {
     throw RealtimeRpcError.InternalError()
   }
 
   return {
-    user: Encoders.user({ user, min: false }),
+    user: Encoders.user({ user, photoFile: user.photoFile ?? undefined, min: false }),
   }
 }

@@ -24,6 +24,7 @@ import { afterAll, beforeAll, describe, expect, it, mock, spyOn } from "bun:test
 import Elysia from "elysia"
 import { Log } from "@in/server/utils/log"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
+import { Encoders } from "@in/server/realtime/encoders/encoders"
 
 const handleConnectionOpen = mock().mockResolvedValue(undefined)
 const handleConnectionClose = mock().mockResolvedValue(undefined)
@@ -480,6 +481,55 @@ describe("realtime protocol safety", () => {
     ).toBe(true)
     errorSpy.mockRestore()
     debugSpy.mockRestore()
+    await wsClosed(ws)
+  })
+
+  it("passes the current user's profile file to the getMe encoder", async () => {
+    const { ws, userId } = await authenticateSocket()
+    const userEncoderSpy = spyOn(Encoders, "user")
+    const fileUniqueId = `get-me-profile-photo-${userId}`
+    const [photo] = await db
+      .insert(files)
+      .values({
+        fileUniqueId,
+        userId,
+        fileType: "photo",
+        mimeType: "image/jpeg",
+        fileSize: 123,
+      })
+      .returning()
+    if (!photo) throw new Error("Expected profile photo file")
+    await db.update(users).set({ photoFileId: photo.id }).where(eq(users.id, userId))
+
+    wsSendClientProtocolMessage(ws, {
+      id: 98n,
+      seq: 2,
+      body: {
+        oneofKind: "rpcCall",
+        rpcCall: {
+          method: Method.GET_ME,
+          input: {
+            oneofKind: "getMe",
+            getMe: {},
+          },
+        },
+      },
+    })
+
+    const response = await wsServerProtocolMessage(ws)
+    expect(response.body.oneofKind).toBe("rpcResult")
+    if (response.body.oneofKind !== "rpcResult") throw new Error("Expected rpcResult")
+    expect(response.body.rpcResult.result.oneofKind).toBe("getMe")
+    if (response.body.rpcResult.result.oneofKind !== "getMe") {
+      throw new Error("Expected getMe result")
+    }
+    expect(
+      userEncoderSpy.mock.calls.some(
+        ([input]) => input.user.id === userId && input.photoFile?.fileUniqueId === fileUniqueId,
+      ),
+    ).toBe(true)
+    userEncoderSpy.mockRestore()
+
     await wsClosed(ws)
   })
 
