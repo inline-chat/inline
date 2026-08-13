@@ -10,6 +10,7 @@ import {
   ErrorReporter,
   type ErrorReporterShape,
 } from "./errorReporter"
+import { effectCauseDiagnostic } from "./effectCauseDiagnostics"
 import {
   HttpRequestContext,
   type HttpRequestContextShape,
@@ -50,8 +51,10 @@ const requestMetadata = (
 const inlineReporter: ErrorReporterShape = {
   report: ({ cause, context }) =>
     Effect.sync(() => {
-      safeLogError("Unexpected Effect failure", cause, {
+      const diagnostic = effectCauseDiagnostic(cause)
+      safeLogError("Unexpected Effect failure", diagnostic.error, {
         ...context,
+        effectCause: diagnostic.metadata,
       })
     }),
 }

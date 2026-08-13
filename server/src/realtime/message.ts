@@ -12,6 +12,7 @@ import type { HandlerContext, RootContext, Ws } from "./types"
 import { handleConnectionInit } from "@in/server/realtime/handlers/_connectionInit"
 import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { toRealtimeRpcError } from "@in/server/realtime/rpcErrorBoundary"
 import { InlineError } from "@in/server/types/errors"
 import {
   getAuthTokenErrorDetails,
@@ -236,12 +237,7 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
       errorMeta["errorCodeNumber"] = e.code
     }
 
-    const rpcError =
-      e instanceof RealtimeRpcError
-        ? e
-        : e instanceof InlineError
-          ? RealtimeRpcError.fromInlineError(e)
-          : RealtimeRpcError.InternalError()
+    const rpcError = toRealtimeRpcError(e)
 
     if (message.body.oneofKind === "rpcCall" && rpcError.codeNumber < 500) {
       log.debug("realtime RPC rejected", {

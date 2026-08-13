@@ -14,6 +14,9 @@ type SentryLogAttributes = Record<string, unknown>
 const BOT_TOKEN_SEGMENT_RE = /\bbot[^/\s]*(?::|%3A|%3a)[^/\s]+\b/g // matches "bot<userId>:IN...." (raw or url-encoded ':')
 const BEARER_RE = /\bBearer\s+[^\s]+/gi
 const AUTH_TOKEN_SEGMENT_RE = /(^|\/)\d+(?::|%3A|%3a)[^/\s]+/g
+const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi
+const ENCODED_EMAIL_RE = /\b[A-Z0-9._%+-]+%40[A-Z0-9.-]+\.[A-Z]{2,}\b/gi
+const INTERNATIONAL_PHONE_RE = /\+[1-9](?:[\s().-]*\d){7,14}\b/g
 const SENTRY_PROD_DROP_LEVELS = new Set<SentryLogLevel>(["trace", "debug"])
 const SENTRY_USER_DETAIL_ATTRIBUTES = ["user.email", "user.name"]
 
@@ -23,6 +26,9 @@ export const redactString = (value: string): string => {
     .replace(BEARER_RE, `Bearer ${REDACTED}`)
     .replace(BOT_TOKEN_SEGMENT_RE, `bot${REDACTED}`)
     .replace(AUTH_TOKEN_SEGMENT_RE, `$1${REDACTED}`)
+    .replace(EMAIL_RE, REDACTED)
+    .replace(ENCODED_EMAIL_RE, REDACTED)
+    .replace(INTERNATIONAL_PHONE_RE, REDACTED)
 }
 
 const shouldRedactKey = (key: string): boolean => {
@@ -55,7 +61,7 @@ export const redactValue = (value: unknown, depth = 0): unknown => {
       name: {
         configurable: true,
         writable: true,
-        value: value.name,
+        value: redactString(value.name),
       },
       message: {
         configurable: true,

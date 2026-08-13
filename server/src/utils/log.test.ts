@@ -16,6 +16,16 @@ describe("log redaction", () => {
     expect(output).not.toContain(encodedToken)
   })
 
+  it("redacts contact details embedded in error strings", () => {
+    const output = redactString(
+      "Provider rejected person@example.com, encoded person%40example.com, and +1 (555) 555-0123",
+    )
+
+    expect(output).toBe(
+      "Provider rejected <redacted>, encoded <redacted>, and <redacted>",
+    )
+  })
+
   it("redacts error message, stack, and nested cause", () => {
     const token = "123:INabcdefghijklmnopqrstuvwxyz"
     const encoded = "123%3AINabcdefghijklmnopqrstuvwxyz"
@@ -24,6 +34,7 @@ describe("log redaction", () => {
     ;(cause as any).stack = `Error: cause /bot${token}/deleteMessage\n    at cause (x.ts:1:1)`
 
     const error = new Error(`top /bot${encoded}/sendMessage Authorization: Bearer ${token}`)
+    error.name = "person@example.com"
     ;(error as any).stack = `Error: top /bot${token}/sendMessage Authorization: Bearer ${token}\n    at top (y.ts:1:1)`
     ;(error as any).cause = cause
 
@@ -32,6 +43,7 @@ describe("log redaction", () => {
 
     expect(redacted).toBeInstanceOf(Error)
     expect(redacted).not.toBe(error)
+    expect(redacted.name).toBe("<redacted>")
     expect(redacted.message).toContain("bot<redacted>")
     expect(redacted.message).toContain("Bearer <redacted>")
     expect(redacted.message).not.toContain(token)
