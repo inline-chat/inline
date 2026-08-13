@@ -8,7 +8,7 @@ enum ReplyThreadPaneMetrics {
   static let idealContentWidth: CGFloat = 380
   static let minimumPrimaryContentWidth = Theme.chatViewMinWidth
   static let separatorWidth: CGFloat = 0.5
-  static let floatingToolbarHeight: CGFloat = 34
+  static let floatingToolbarHeight: CGFloat = 40
   static let floatingToolbarTopSpacing: CGFloat = 8
   static let floatingToolbarBottomSpacing: CGFloat = 8
   static let floatingToolbarContentInset = floatingToolbarTopSpacing
@@ -78,10 +78,8 @@ struct ReplyThreadPaneView: View {
     .overlay {
       GeometryReader { geometry in
         ReplyThreadPaneControls(
-          peer: peer,
-          dependencies: dependencies,
           title: titleModel.title,
-          iconPeer: titleModel.iconPeer,
+          status: titleModel.status,
           botChatSettingsCoordinator: botChatSettingsCoordinator,
           toolbarState: toolbarState,
           onExpand: onExpand,
@@ -113,10 +111,8 @@ struct ReplyThreadPaneView: View {
 }
 
 private struct ReplyThreadPaneControls: View {
-  let peer: Peer
-  let dependencies: AppDependencies
   let title: String
-  let iconPeer: ChatIcon.PeerType?
+  let status: ChatRouteToolbarTitleModel.Status
   let botChatSettingsCoordinator: BotChatSettingsCoordinator
   let toolbarState: ChatToolbarState
   let onExpand: () -> Void
@@ -124,39 +120,46 @@ private struct ReplyThreadPaneControls: View {
 
   var body: some View {
     let shape = Capsule()
-    let content = HStack(spacing: 4) {
-      HStack(spacing: 7) {
-        if let iconPeer {
-          SidebarChatIcon(peer: iconPeer, size: 20)
-        } else {
-          ThreadIconView(
-            ThreadIconDescriptor(emoji: nil, isReplyThread: true),
-            size: .compact(20)
-          )
-        }
+    let content = HStack(spacing: 2) {
+      ReplyThreadPaneControlButton(
+        systemImage: "arrow.up.left.and.arrow.down.right",
+        help: "Open as Chat",
+        accessibilityLabel: "Open Thread as Chat",
+        action: onExpand
+      )
 
+      VStack(alignment: .leading, spacing: 0) {
         Text(title)
           .font(.system(size: 12, weight: .medium))
           .lineLimit(1)
           .truncationMode(.tail)
+
+        if status.isTyping, let typingText = status.text {
+          HStack(spacing: 3) {
+            TypingActivityIndicator(
+              dotSize: 2,
+              spacing: 1,
+              color: .accentColor,
+              lift: 1
+            )
+
+            Text(typingText)
+              .font(.system(size: 9))
+              .foregroundStyle(Color.accentColor)
+              .lineLimit(1)
+              .truncationMode(.tail)
+          }
+        }
       }
       .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
       .accessibilityElement(children: .combine)
-
-      Divider()
-        .frame(height: 18)
 
       if botChatSettingsCoordinator.isToolbarVisible {
         BotChatSettingsToolbarButton(
           coordinator: botChatSettingsCoordinator,
           toolbarState: toolbarState
         )
-        .buttonStyle(.plain)
-        .controlSize(.small)
-        .frame(width: 26, height: 26)
-
-        Divider()
-          .frame(height: 18)
+        .buttonStyle(ReplyThreadPaneControlButtonStyle())
       }
 
       ReplyThreadPaneControlButton(
@@ -165,24 +168,6 @@ private struct ReplyThreadPaneControls: View {
         accessibilityLabel: "Close Thread",
         action: onClose
       )
-
-      Divider()
-        .frame(height: 18)
-
-      ReplyThreadPaneControlButton(
-        systemImage: "arrow.up.left.and.arrow.down.right",
-        help: "Open as Chat",
-        accessibilityLabel: "Open Thread as Chat",
-        action: onExpand
-      )
-
-      Divider()
-        .frame(height: 18)
-
-      ChatToolbarMenuButton(peer: peer, dependencies: dependencies)
-        .buttonStyle(.plain)
-        .controlSize(.small)
-        .frame(width: 26, height: 26)
     }
     .padding(4)
     .frame(height: ReplyThreadPaneMetrics.floatingToolbarHeight)
@@ -207,24 +192,33 @@ private struct ReplyThreadPaneControlButton: View {
   let accessibilityLabel: String
   let action: () -> Void
 
-  @State private var isHovered = false
-
   var body: some View {
     Button(action: action) {
       Image(systemName: systemImage)
-        .font(.system(size: 12, weight: .medium))
-        .frame(width: 26, height: 26)
-        .background {
-          RoundedRectangle(cornerRadius: 6, style: .continuous)
-            .fill(Color.primary.opacity(isHovered ? 0.08 : 0))
-        }
-        .contentShape(.interaction, RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
-    .buttonStyle(.plain)
+    .buttonStyle(ReplyThreadPaneControlButtonStyle())
     .focusable(false)
     .help(help)
     .accessibilityLabel(accessibilityLabel)
-    .onHover { isHovered = $0 }
+  }
+}
+
+private struct ReplyThreadPaneControlButtonStyle: ButtonStyle {
+  @State private var isHovered = false
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .labelStyle(.iconOnly)
+      .font(.system(size: 11, weight: .medium))
+      .symbolRenderingMode(.monochrome)
+      .foregroundStyle(Color.secondary)
+      .frame(width: 26, height: 26)
+      .background {
+        RoundedRectangle(cornerRadius: 6, style: .continuous)
+          .fill(Color.primary.opacity(configuration.isPressed ? 0.1 : (isHovered ? 0.08 : 0)))
+      }
+      .contentShape(.interaction, RoundedRectangle(cornerRadius: 6, style: .continuous))
+      .onHover { isHovered = $0 }
   }
 }
 

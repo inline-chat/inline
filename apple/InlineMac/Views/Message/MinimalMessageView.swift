@@ -3170,7 +3170,10 @@ class MinimalMessageViewAppKit: NSView {
   }
 
   @objc private func replyInThread() {
-    openReplyThreadFlow(source: .menu)
+    openReplyThreadFlow(
+      source: .menu,
+      action: AppSettings.shared.openReplyThreadsInSidePane ? .sidePane : .current
+    )
   }
 
   private func makeReplyThreadSummaryMenu() -> NSMenu {
@@ -3178,7 +3181,7 @@ class MinimalMessageViewAppKit: NSView {
     menu.addItem(replyThreadMenuItem(
       title: "Open in Side Pane",
       systemSymbolName: "arrow.turn.down.right",
-      action: #selector(openReplyThreadFromSummaryMenu)
+      action: #selector(openReplyThreadInSidePaneFromSummaryMenu)
     ))
     menu.addItem(replyThreadMenuItem(
       title: "Open as Chat",
@@ -3210,8 +3213,8 @@ class MinimalMessageViewAppKit: NSView {
     return item
   }
 
-  @objc private func openReplyThreadFromSummaryMenu() {
-    openReplyThreadFlow(source: .menu)
+  @objc private func openReplyThreadInSidePaneFromSummaryMenu() {
+    openReplyThreadFlow(source: .menu, action: .sidePane)
   }
 
   @objc private func openReplyThreadAsChatFromSummaryMenu() {
@@ -3305,7 +3308,7 @@ class MinimalMessageViewAppKit: NSView {
 
   private func openReplyThreadFlow(
     source: ReplyThreadOpenSource,
-    action: ReplyThreadOpenAction = .sidePane
+    action: ReplyThreadOpenAction
   ) {
     guard !isAnchorMessage else { return }
     if action.usesCurrentWindowPresentation {
@@ -3379,29 +3382,8 @@ class MinimalMessageViewAppKit: NSView {
       dependencies.openReplyThreadInPane(parentPeer: message.peerId, threadPeer: peer)
     case .current:
       dependencies.openChatRoute(peer: peer)
-    case .sidebarBackground:
-      openReplyThreadInSidebar(peer: peer, dependencies: dependencies)
     case .newTab:
       MainWindowOpenCoordinator.shared.openTab(.chat(peer: peer))
-    }
-  }
-
-  private func openReplyThreadInSidebar(peer: Peer, dependencies: AppDependencies) {
-    let realtimeV2 = dependencies.realtimeV2
-    let log = log
-
-    Task(priority: .userInitiated) {
-      do {
-        if peer.isThread {
-          _ = try await realtimeV2.send(.showInChatList(peerId: peer))
-        }
-        _ = try await realtimeV2.send(.updateDialogOpen(peerId: peer, open: true))
-      } catch {
-        await MainActor.run {
-          ToastCenter.shared.showError("Failed to open thread in sidebar")
-        }
-        log.error("Failed to open reply thread in sidebar", error: error)
-      }
     }
   }
 

@@ -3,16 +3,19 @@ import AppKit
 enum ReplyThreadOpenAction: Equatable {
   case sidePane
   case current
-  case sidebarBackground
   case newTab
+
+  init(opensInSidePane: Bool) {
+    self = opensInSidePane ? .sidePane : .current
+  }
 
   init(modifierFlags: NSEvent.ModifierFlags, opensInSidePane: Bool) {
     if modifierFlags.contains(.option) {
-      self = .sidebarBackground
+      self = .sidePane
     } else if modifierFlags.contains(.command) {
       self = .newTab
     } else {
-      self = opensInSidePane ? .sidePane : .current
+      self.init(opensInSidePane: opensInSidePane)
     }
   }
 
