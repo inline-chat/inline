@@ -55,7 +55,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
       let fileName = "image-\(UUID().uuidString).jpg"
       let (_, tempURL) = try image.save(to: tempDirectory, withName: fileName, format: .jpeg)
       defer { try? FileManager.default.removeItem(at: tempURL) }
-      return .document(try FileCache.saveDocument(url: tempURL))
+      return .document(try FileCache.saveDocumentWithImmediateThumbnail(url: tempURL))
     }
 
     return .photo(try FileCache.savePhoto(image: image, optimize: optimizePhoto))

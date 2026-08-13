@@ -1997,11 +1997,18 @@ class ShareState: ObservableObject {
               progress: progressHandler
             )
           case .document:
+            let thumbnail = await DocumentThumbnailIntegration.generate(at: preparedFile.url)
             uploadResult = try await apiClient.uploadFile(
               type: .document,
               fileURL: preparedFile.url,
               filename: preparedFile.fileName,
               mimeType: preparedFile.mimeType,
+              thumbnailMetadata: thumbnail.map {
+                ApiClient.ThumbnailUploadMetadata(
+                  data: $0.jpegData,
+                  mimeType: MIMEType(text: "image/jpeg")
+                )
+              },
               progress: progressHandler
             )
           case .video:

@@ -2540,8 +2540,13 @@ private final class ComposeAttachmentPreviewItemView: UIView {
       }
 
     case let .document(documentInfo):
-      if let thumbnail = documentInfo.thumbnail {
-        applyPhotoPreview(thumbnail)
+      if documentInfo.thumbnail?.hasDisplayablePreview == true {
+        applyPhotoPreview(
+          documentInfo.thumbnail,
+          contentMode: .aspectFit,
+          usesInternalTinyThumbnail: true,
+          showsLoadingPlaceholder: true
+        )
       } else {
         applyFallback(
           iconName: DocumentIconResolver.symbolName(
@@ -2573,15 +2578,27 @@ private final class ComposeAttachmentPreviewItemView: UIView {
     _ = progress
   }
 
-  private func applyPhotoPreview(_ photoInfo: PhotoInfo?) {
+  private func applyPhotoPreview(
+    _ photoInfo: PhotoInfo?,
+    contentMode: PlatformPhotoContentMode = .aspectFill,
+    usesInternalTinyThumbnail: Bool = false,
+    showsLoadingPlaceholder: Bool = false
+  ) {
     localThumbnailImageView.image = nil
     localThumbnailImageView.isHidden = true
-    tinyThumbnailBackgroundView.setPhoto(photoInfo)
+    thumbnailView.photoContentMode = contentMode
+    thumbnailView.showsTinyThumbnailBackground = usesInternalTinyThumbnail
+    thumbnailView.showsLoadingPlaceholder = showsLoadingPlaceholder
+    tinyThumbnailBackgroundView.isHidden = usesInternalTinyThumbnail
+    tinyThumbnailBackgroundView.setPhoto(usesInternalTinyThumbnail ? nil : photoInfo)
     thumbnailView.setPhoto(photoInfo)
     centerIconView.isHidden = true
   }
 
   private func applyPendingThumbnail(_ image: UIImage) {
+    thumbnailView.photoContentMode = .aspectFill
+    thumbnailView.showsTinyThumbnailBackground = false
+    thumbnailView.showsLoadingPlaceholder = false
     thumbnailView.setPhoto(nil)
     thumbnailView.isHidden = true
     tinyThumbnailBackgroundView.setPhoto(nil)
@@ -2592,6 +2609,9 @@ private final class ComposeAttachmentPreviewItemView: UIView {
   }
 
   private func applyFallback(iconName: String, badgeText: String?) {
+    thumbnailView.photoContentMode = .aspectFill
+    thumbnailView.showsTinyThumbnailBackground = false
+    thumbnailView.showsLoadingPlaceholder = false
     thumbnailView.setPhoto(nil)
     thumbnailView.isHidden = true
     tinyThumbnailBackgroundView.setPhoto(nil)

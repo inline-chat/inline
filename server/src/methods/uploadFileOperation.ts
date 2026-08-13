@@ -46,15 +46,9 @@ export const uploadFileOperation = async (
     waveform,
   } = validateUploadFileMetadata(input)
 
-  if (input.thumbnail?.size === 0) {
-    throw uploadBadRequest("Uploaded thumbnail is empty")
-  }
-  if (input.thumbnail && input.thumbnail.size > MAX_FILE_SIZE) {
-    throw new InlineError(ApiError.FILE_TOO_LARGE)
-  }
-  if (input.thumbnail != null && !input.thumbnail.type?.trim()) {
-    throw uploadBadRequest("Uploaded thumbnail is missing MIME type")
-  }
+  const thumbnail = input.type === "document"
+    ? usableOptionalDocumentThumbnail(input.thumbnail, context.currentUserId)
+    : requireValidThumbnail(input.thumbnail)
 
   let result: UploadFileResult
   let uploadedThumbnailId: number | undefined
@@ -64,8 +58,8 @@ export const uploadFileOperation = async (
       result = await uploadPhoto(file, { userId: context.currentUserId })
       break
     case "video":
-      if (input.thumbnail) {
-        const thumbResult = await uploadPhoto(input.thumbnail, { userId: context.currentUserId })
+      if (thumbnail) {
+        const thumbResult = await uploadPhoto(thumbnail, { userId: context.currentUserId })
         uploadedThumbnailId = thumbResult.photoId
       }
       result = await uploadVideo(
@@ -82,15 +76,12 @@ export const uploadFileOperation = async (
       )
       break
     case "document":
-      if (input.thumbnail) {
-        const thumbResult = await uploadPhoto(input.thumbnail, { userId: context.currentUserId })
-        uploadedThumbnailId = thumbResult.photoId
-      }
-      result = await uploadDocument(
+      result = await uploadDocumentWithOptionalThumbnail(
         file,
-        uploadedThumbnailId ? BigInt(uploadedThumbnailId) : undefined,
-        { userId: context.currentUserId },
+        thumbnail,
+        context.currentUserId,
       )
+      uploadedThumbnailId = result.photoId
       break
     case "voice":
       result = await uploadVoice(
@@ -116,6 +107,89 @@ export const uploadFileOperation = async (
     documentId: result.documentId,
     voiceId: result.voiceId,
   }
+}
+
+export const uploadOptionalDocumentThumbnail = async (
+  thumbnail: File,
+  userId: number,
+  upload: typeof uploadPhoto = uploadPhoto,
+): Promise<number | undefined> => {
+  try {
+    return (await upload(thumbnail, { userId })).photoId
+  } catch (error) {
+    log.warn("Optional document thumbnail upload failed; continuing without preview", {
+      userId,
+      thumbnailSize: thumbnail.size,
+      thumbnailMimeType: thumbnail.type,
+      error,
+    })
+    return undefined
+  }
+}
+
+export const uploadDocumentWithOptionalThumbnail = async (
+  file: File,
+  thumbnail: File | undefined,
+  userId: number,
+  uploadThumbnail: typeof uploadPhoto = uploadPhoto,
+  upload: typeof uploadDocument = uploadDocument,
+): Promise<UploadFileResult> => {
+  const thumbnailId = thumbnail
+    ? await uploadOptionalDocumentThumbnail(thumbnail, userId, uploadThumbnail)
+    : undefined
+  const result = await upload(
+    file,
+    thumbnailId ? BigInt(thumbnailId) : undefined,
+    { userId },
+  )
+  return { ...result, photoId: result.photoId ?? thumbnailId }
+}
+
+export const usableOptionalDocumentThumbnail = (
+  thumbnail: File | null | undefined,
+  userId: number,
+): File | undefined => {
+  if (!thumbnail) {
+    return undefined
+  }
+
+  const invalidReason = thumbnailValidationFailure(thumbnail)
+  if (invalidReason) {
+    log.warn("Ignoring invalid optional document thumbnail", {
+      userId,
+      thumbnailSize: thumbnail.size,
+      thumbnailMimeType: thumbnail.type,
+      reason: invalidReason.message,
+    })
+    return undefined
+  }
+
+  return thumbnail
+}
+
+function requireValidThumbnail(thumbnail: File | null | undefined): File | undefined {
+  if (!thumbnail) {
+    return undefined
+  }
+
+  const failure = thumbnailValidationFailure(thumbnail)
+  if (failure) {
+    throw failure
+  }
+  return thumbnail
+}
+
+function thumbnailValidationFailure(thumbnail: File): InlineError | undefined {
+  if (thumbnail.size === 0) {
+    return uploadBadRequest("Uploaded thumbnail is empty")
+  }
+  if (thumbnail.size > MAX_FILE_SIZE) {
+    return new InlineError(ApiError.FILE_TOO_LARGE)
+  }
+  if (!thumbnail.type?.trim()) {
+    return uploadBadRequest("Uploaded thumbnail is missing MIME type")
+  }
+  return undefined
 }
 
 function requireUploadFile(file: File | null | undefined): File {

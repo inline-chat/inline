@@ -1524,7 +1524,9 @@ class LegacyComposeAppKit: NSView {
 
   @discardableResult
   func addFile(_ url: URL) -> Bool {
-    drafts2.addFile(peer: peerId, url: url)
+    let pendingId = drafts2.addFile(peer: peerId, url: url)
+    attachments.addPendingDocument(url: url, id: pendingId)
+    updateHeight(animate: true)
     return true
   }
 

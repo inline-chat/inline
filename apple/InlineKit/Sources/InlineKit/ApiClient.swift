@@ -899,6 +899,16 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     }
   }
 
+  public struct ThumbnailUploadMetadata: @unchecked Sendable {
+    public let data: Data
+    public let mimeType: MIMEType
+
+    public init(data: Data, mimeType: MIMEType) {
+      self.data = data
+      self.mimeType = mimeType
+    }
+  }
+
   private func escapedMultipartQuotedString(_ value: String) -> String {
     value
       .replacingOccurrences(of: "\\", with: "\\\\")
@@ -912,10 +922,12 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   }
 
   private func writeMultipartFile(from sourceURL: URL, to handle: FileHandle) throws {
+    try Task.checkCancellation()
     let input = try FileHandle(forReadingFrom: sourceURL)
     defer { try? input.close() }
 
     while true {
+      try Task.checkCancellation()
       let chunk = try input.read(upToCount: 512 * 1024)
       guard let chunk, !chunk.isEmpty else { break }
       try handle.write(contentsOf: chunk)
@@ -946,6 +958,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     }
 
     for part in parts {
+      try Task.checkCancellation()
       try writeMultipartString("--\(boundary)\r\n", to: handle)
 
       switch part {
@@ -1000,7 +1013,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     let delegate = UploadTaskDelegate(progressHandler: progress)
     let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
     defer {
-      session.finishTasksAndInvalidate()
+      session.invalidateAndCancel()
       try? FileManager.default.removeItem(at: body.url)
     }
 
@@ -1061,6 +1074,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     type: MessageFileType,
     filePart: MultipartUploadPart,
     videoMetadata: VideoUploadMetadata?,
+    thumbnailMetadata: ThumbnailUploadMetadata?,
     voiceMetadata: VoiceUploadMetadata?
   ) -> [MultipartUploadPart] {
     var parts: [MultipartUploadPart] = [
@@ -1079,17 +1093,19 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       if let hasAudio = videoMetadata.hasAudio {
         parts.append(.data(name: "hasAudio", filename: nil, mimeType: nil, data: Data("\(hasAudio)".utf8)))
       }
+    }
 
-      if let thumb = videoMetadata.thumbnail, let thumbMime = videoMetadata.thumbnailMimeType {
-        let thumbFilename: String = {
-          let mime = thumbMime.text.lowercased()
-          if mime.contains("png") { return "thumbnail.png" }
-          if mime.contains("gif") { return "thumbnail.gif" }
-          return "thumbnail.jpg"
-        }()
-
-        parts.append(.data(name: "thumbnail", filename: thumbFilename, mimeType: thumbMime, data: thumb))
-      }
+    let resolvedThumbnail = thumbnailMetadata ?? videoMetadata.flatMap { metadata in
+      guard let data = metadata.thumbnail, let mimeType = metadata.thumbnailMimeType else { return nil }
+      return ThumbnailUploadMetadata(data: data, mimeType: mimeType)
+    }
+    if let resolvedThumbnail {
+      parts.append(.data(
+        name: "thumbnail",
+        filename: thumbnailFilename(for: resolvedThumbnail.mimeType),
+        mimeType: resolvedThumbnail.mimeType,
+        data: resolvedThumbnail.data
+      ))
     }
 
     if let voiceMetadata {
@@ -1108,6 +1124,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     filename: String,
     mimeType: MIMEType,
     videoMetadata: VideoUploadMetadata? = nil,
+    thumbnailMetadata: ThumbnailUploadMetadata? = nil,
     voiceMetadata: VoiceUploadMetadata? = nil,
     progress: @escaping @Sendable (UploadTransferProgress) -> Void
   ) async throws -> UploadFileResult {
@@ -1148,22 +1165,19 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
           data: "\(hasAudio)".data(using: .utf8)!
         ))
       }
+    }
 
-      if let thumb = videoMetadata.thumbnail, let thumbMime = videoMetadata.thumbnailMimeType {
-        let thumbFilename: String = {
-          let mime = thumbMime.text.lowercased()
-          if mime.contains("png") { return "thumbnail.png" }
-          if mime.contains("gif") { return "thumbnail.gif" }
-          return "thumbnail.jpg"
-        }()
-
-        fields.append((
-          name: "thumbnail",
-          filename: thumbFilename,
-          mimeType: thumbMime,
-          data: thumb
-        ))
-      }
+    let resolvedThumbnail = thumbnailMetadata ?? videoMetadata.flatMap { metadata in
+      guard let data = metadata.thumbnail, let mimeType = metadata.thumbnailMimeType else { return nil }
+      return ThumbnailUploadMetadata(data: data, mimeType: mimeType)
+    }
+    if let resolvedThumbnail {
+      fields.append((
+        name: "thumbnail",
+        filename: thumbnailFilename(for: resolvedThumbnail.mimeType),
+        mimeType: resolvedThumbnail.mimeType,
+        data: resolvedThumbnail.data
+      ))
     }
 
     if let voiceMetadata {
@@ -1191,13 +1205,15 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
       let tempUploadFileURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("inline-upload-\(UUID().uuidString).tmp")
+      defer {
+        session.invalidateAndCancel()
+        try? FileManager.default.removeItem(at: tempUploadFileURL)
+      }
       try multipartFormData.body.write(to: tempUploadFileURL, options: .atomic)
-      defer { try? FileManager.default.removeItem(at: tempUploadFileURL) }
 
       let totalBodyBytes = Int64(multipartFormData.body.count)
       progress(UploadTransferProgress(bytesSent: 0, totalBytes: totalBodyBytes, fractionCompleted: 0))
       let (data, response) = try await session.upload(for: request, fromFile: tempUploadFileURL)
-      session.finishTasksAndInvalidate()
 
       guard let httpResponse = response as? HTTPURLResponse else {
         throw APIError.invalidResponse
@@ -1262,6 +1278,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     filename: String,
     mimeType: MIMEType,
     videoMetadata: VideoUploadMetadata? = nil,
+    thumbnailMetadata: ThumbnailUploadMetadata? = nil,
     voiceMetadata: VoiceUploadMetadata? = nil,
     progress: @escaping @Sendable (UploadTransferProgress) -> Void
   ) async throws -> UploadFileResult {
@@ -1270,13 +1287,17 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     }
 
     do {
+      try Task.checkCancellation()
       let parts = uploadFileParts(
         type: type,
         filePart: .file(name: "file", filename: filename, mimeType: mimeType, url: fileURL),
         videoMetadata: videoMetadata,
+        thumbnailMetadata: thumbnailMetadata,
         voiceMetadata: voiceMetadata
       )
       let body = try makeMultipartUploadBody(parts: parts)
+      defer { try? FileManager.default.removeItem(at: body.url) }
+      try Task.checkCancellation()
       return try await uploadMultipartBody(body, to: url, progress: progress)
     } catch let decodingError as DecodingError {
       throw APIError.decodingError(decodingError)
@@ -1285,6 +1306,13 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     } catch let urlError as URLError {
       throw Self.normalizeTransportError(urlError)
     }
+  }
+
+  private func thumbnailFilename(for mimeType: MIMEType) -> String {
+    let mime = mimeType.text.lowercased()
+    if mime.contains("png") { return "thumbnail.png" }
+    if mime.contains("gif") { return "thumbnail.gif" }
+    return "thumbnail.jpg"
   }
 
   public func updateProfilePhoto(fileUniqueId: String) async throws

@@ -411,7 +411,7 @@ public final class Drafts2: @unchecked Sendable {
     onComplete: Drafts2AttachmentCompletion? = nil
   ) -> String {
     startMaterialization(peer: peer, prefix: "pending_document") {
-      .document(try FileCache.saveDocument(url: url))
+      .document(try await FileCache.saveDocumentWithThumbnail(url: url))
     } onComplete: { result in
       onComplete?(result)
     }
@@ -529,6 +529,7 @@ public final class Drafts2: @unchecked Sendable {
     peer: Peer,
     prefix: String,
     makeMedia: @escaping @Sendable () async throws -> FileMediaItem,
+    discardMedia: @escaping @Sendable (FileMediaItem) async -> Void = discardMaterializedMedia,
     onComplete: Drafts2AttachmentCompletion?
   ) -> String {
     let peerKey = peer.toString()
@@ -548,12 +549,14 @@ public final class Drafts2: @unchecked Sendable {
       do {
         let media = try await makeMedia()
         guard !Task.isCancelled else {
+          await discardMedia(media)
           let result = Drafts2AttachmentResult.cancelled(pendingId: pendingId)
           emitAttachmentResult(peerKey: peerKey, result: result)
           await MainActor.run { onComplete?(result) }
           return
         }
         guard let attachment = finishMaterialization(peer: peer, pendingId: pendingId, media: media) else {
+          await discardMedia(media)
           let result = Drafts2AttachmentResult.cancelled(pendingId: pendingId)
           emitAttachmentResult(peerKey: peerKey, result: result)
           await MainActor.run { onComplete?(result) }
@@ -584,6 +587,11 @@ public final class Drafts2: @unchecked Sendable {
       pendingAttachmentTasks[taskKey] = task
     }
     return pendingId
+  }
+
+  static func discardMaterializedMedia(_ media: FileMediaItem) async {
+    guard case let .document(documentInfo) = media else { return }
+    await FileCache.discardLocalDocument(documentInfo)
   }
 
   private func finishMaterialization(peer: Peer, pendingId: String, media: FileMediaItem) -> Drafts2Attachment? {

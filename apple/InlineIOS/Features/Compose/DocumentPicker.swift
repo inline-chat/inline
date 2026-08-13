@@ -26,29 +26,18 @@ extension ComposeView: UIDocumentPickerDelegate {
       return
     }
 
-    // Ensure we can access the file
-    guard url.startAccessingSecurityScopedResource() else {
-      Log.shared.error("Failed to access security-scoped resource for file: \(url)")
-      return
-    }
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      do {
+        let documentInfo = try await FileCache.saveDocumentWithThumbnail(url: url)
+        let mediaItem = FileMediaItem.document(documentInfo)
+        sendMediaItemImmediately(mediaItem)
 
-    defer {
-      url.stopAccessingSecurityScopedResource()
-    }
-
-    do {
-      let documentInfo = try FileCache.saveDocument(url: url)
-      let mediaItem = FileMediaItem.document(documentInfo)
-      sendMediaItemImmediately(mediaItem)
-
-      Log.shared.debug("Sent file immediately from document picker")
-      dismissAttachmentPickerIfPresented(animated: true)
-    } catch {
-      Log.shared.error("Failed to save document", error: error)
-
-      // Show error to user
-      DispatchQueue.main.async { [weak self] in
-        self?.showFileError(error)
+        Log.shared.debug("Sent file immediately from document picker")
+        dismissAttachmentPickerIfPresented(animated: true)
+      } catch {
+        Log.shared.error("Failed to save document", error: error)
+        showFileError(error)
       }
     }
   }

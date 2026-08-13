@@ -188,19 +188,28 @@ struct Drafts2Tests {
   }
 
   @MainActor
-  @Test("pending attachment cancellation clears readiness and completes")
+  @Test("pending attachment cancellation clears readiness and discards completed media")
   func pendingAttachmentCancellationCompletes() async {
     let drafts = Drafts2(database: AppDatabase.empty())
     let peer: InlineKit.Peer = .user(id: 9)
     let media = FileMediaItem.document(documentInfo(id: -90))
+    let discardProbe = DraftMaterializationDiscardProbe()
 
     let result = await withCheckedContinuation { (continuation: CheckedContinuation<Drafts2AttachmentResult, Never>) in
-      let pendingID = drafts.startMaterialization(peer: peer, prefix: "pending_test") {
-        try await Task.sleep(for: .seconds(30))
-        return media
-      } onComplete: { result in
-        continuation.resume(returning: result)
-      }
+      let pendingID = drafts.startMaterialization(
+        peer: peer,
+        prefix: "pending_test",
+        makeMedia: {
+          try? await Task.sleep(for: .seconds(30))
+          return media
+        },
+        discardMedia: { _ in
+          await discardProbe.recordDiscard()
+        },
+        onComplete: { result in
+          continuation.resume(returning: result)
+        }
+      )
 
       #expect(drafts.hasPendingAttachments(peer: peer))
       drafts.removeAttachment(peer: peer, id: pendingID)
@@ -211,6 +220,7 @@ struct Drafts2Tests {
       Issue.record("Expected cancelled materialization")
       return
     }
+    #expect(await discardProbe.didDiscard)
   }
 
   @MainActor
@@ -248,6 +258,63 @@ struct Drafts2Tests {
     }
     results.continuation.finish()
     #expect(cancelledCount == 2)
+  }
+
+  @Test("discarding a cancelled local document removes its rows and cache files")
+  func discardsCancelledDocumentArtifacts() async throws {
+    let database = AppDatabase.empty()
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("inline-cancelled-document-\(UUID().uuidString)", isDirectory: true)
+    let documentDirectory = root.appendingPathComponent("documents", isDirectory: true)
+    let photoDirectory = root.appendingPathComponent("photos", isDirectory: true)
+    try FileManager.default.createDirectory(at: documentDirectory, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: photoDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let documentPath = "cancelled.pdf"
+    let thumbnailPath = "cancelled.jpg"
+    let documentURL = documentDirectory.appendingPathComponent(documentPath)
+    let thumbnailURL = photoDirectory.appendingPathComponent(thumbnailPath)
+    try Data("document".utf8).write(to: documentURL)
+    try Data("thumbnail".utf8).write(to: thumbnailURL)
+
+    let documentInfo = try await database.dbWriter.write { db in
+      let thumbnail = try Photo.createLocalPhoto(
+        db,
+        localPath: thumbnailPath,
+        fileSize: 9,
+        width: 70,
+        height: 70
+      )
+      return try Document.createLocalDocument(
+        db,
+        fileName: "cancelled.pdf",
+        mimeType: "application/pdf",
+        size: 8,
+        localPath: documentPath,
+        thumbnail: thumbnail
+      )
+    }
+
+    await FileCache.discardLocalDocument(
+      documentInfo,
+      database: database,
+      documentDirectory: documentDirectory,
+      photoDirectory: photoDirectory
+    )
+
+    #expect(!FileManager.default.fileExists(atPath: documentURL.path))
+    #expect(!FileManager.default.fileExists(atPath: thumbnailURL.path))
+    let counts = try await database.reader.read { db in
+      (
+        documents: try Document.fetchCount(db),
+        photos: try Photo.fetchCount(db),
+        photoSizes: try PhotoSize.fetchCount(db)
+      )
+    }
+    #expect(counts.documents == 0)
+    #expect(counts.photos == 0)
+    #expect(counts.photoSizes == 0)
   }
 
   private func mentionEntities() -> MessageEntities {
@@ -291,5 +358,13 @@ struct Drafts2Tests {
       try? await Task.sleep(nanoseconds: 10_000_000)
     }
     return nil
+  }
+}
+
+private actor DraftMaterializationDiscardProbe {
+  private(set) var didDiscard = false
+
+  func recordDiscard() {
+    didDiscard = true
   }
 }
