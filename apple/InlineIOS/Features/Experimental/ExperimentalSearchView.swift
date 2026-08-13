@@ -47,8 +47,33 @@ struct ExperimentalSearchView: View {
   }
 
   var body: some View {
-    VStack(spacing: 0) {
-      ExperimentalSearchInput(
+    ZStack {
+      if let searchModel {
+        InlineSearchResultsList(
+          model: searchModel,
+          openChat: openSearchChat,
+          openMessage: openSearchMessage,
+          openGlobalUser: openSearchGlobalUser
+        )
+        .safeAreaInset(edge: .top, spacing: 0) {
+          if let errorText = searchModel.errorText, searchModel.hasResults {
+            searchErrorBanner(errorText)
+          }
+        }
+      } else {
+        ProgressView()
+      }
+
+      ExperimentalSearchStatusOverlay(
+        state: overlayState,
+        onRetry: retrySearch,
+        onDismissKeyboard: dismissSearchFocus
+      )
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .scrollDismissesKeyboard(.interactively)
+    .modifier(ExperimentalSearchTopBar(
+      input: ExperimentalSearchInput(
         text: $query,
         isFocused: $isSearchFocused,
         isActivePresentation: isActivePresentation,
@@ -56,34 +81,7 @@ struct ExperimentalSearchView: View {
         onFocusIntent: activateSearch,
         onClose: closeActiveSearch
       )
-
-      ZStack {
-        if let searchModel {
-          InlineSearchResultsList(
-            model: searchModel,
-            openChat: openSearchChat,
-            openMessage: openSearchMessage,
-            openGlobalUser: openSearchGlobalUser
-          )
-          .safeAreaInset(edge: .top, spacing: 0) {
-            if let errorText = searchModel.errorText, searchModel.hasResults {
-              searchErrorBanner(errorText)
-            }
-          }
-        } else {
-          ProgressView()
-        }
-
-        overlayContent
-          .contentShape(.rect)
-          .onTapGesture {
-            focusRequested = false
-          }
-      }
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .scrollDismissesKeyboard(.interactively)
-    }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    ))
     .background(Color(.systemBackground))
     .navigationBarTitleDisplayMode(.inline)
     .navigationTitle("")
@@ -121,7 +119,6 @@ struct ExperimentalSearchView: View {
       isSearchFocused = false
       focusRequested = false
       onFocusChanged(false)
-      searchModel?.clear()
     }
   }
 
@@ -133,31 +130,19 @@ struct ExperimentalSearchView: View {
     searchModel?.isSearching ?? false
   }
 
-  @ViewBuilder
-  private var overlayContent: some View {
+  private var overlayState: ExperimentalSearchOverlayState {
     let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
 
     if trimmedQuery.isEmpty {
-      ContentUnavailableView(
-        "Search for chats and people",
-        systemImage: "magnifyingglass",
-        description: Text("Type to find existing chats or search for people to start new conversations")
-      )
+      return .empty
     } else if isSearching && !hasResults {
-      ProgressView()
-        .controlSize(.large)
+      return .searching
     } else if let errorText = searchModel?.errorText, !hasResults {
-      ContentUnavailableView {
-        Label("Search unavailable", systemImage: "exclamationmark.magnifyingglass")
-      } description: {
-        Text(errorText)
-      } actions: {
-        Button("Try Again", action: retrySearch)
-          .buttonStyle(.borderedProminent)
-      }
+      return .error(errorText)
     } else if !hasResults {
-      ContentUnavailableView.search(text: trimmedQuery)
+      return .noResults(trimmedQuery)
     }
+    return .hidden
   }
 
   private func searchErrorBanner(_ errorText: String) -> some View {
@@ -184,6 +169,11 @@ struct ExperimentalSearchView: View {
     searchModel?.search(query, scope: searchScope)
   }
 
+  private func dismissSearchFocus() {
+    isSearchFocused = false
+    focusRequested = false
+  }
+
   private func updateSearch(for query: String) {
     let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -192,7 +182,12 @@ struct ExperimentalSearchView: View {
       return
     }
 
-    ensureSearchModel().search(trimmedQuery, scope: searchScope)
+    let model = ensureSearchModel()
+    if model.query == trimmedQuery {
+      model.updateScope(searchScope)
+    } else {
+      model.search(trimmedQuery, scope: searchScope)
+    }
   }
 
   @discardableResult
@@ -227,12 +222,12 @@ struct ExperimentalSearchView: View {
 
   private func openSearchChat(_ result: InlineSearchChatResult) {
     globalUserOpenGeneration &+= 1
-    openInInbox(result.peer)
+    openSearchDestination(result.peer)
   }
 
   private func openSearchMessage(_ result: LocalMessageSearchResult) {
     globalUserOpenGeneration &+= 1
-    openInInbox(
+    openSearchDestination(
       result.peer,
       destination: .chatMessage(peer: result.peer, messageID: result.messageId)
     )
@@ -243,41 +238,33 @@ struct ExperimentalSearchView: View {
     globalUserOpenGeneration &+= 1
     let generation = globalUserOpenGeneration
     let selectionRevision = onBeginDeferredResult()
-    focusRequested = false
+    dismissSearchFocus()
     Task {
       do {
         try await dataManager.createPrivateChatWithOptimistic(user: user)
         guard generation == globalUserOpenGeneration,
               selectionRevision == interactionRevision
         else { return }
-        openInInbox(.user(id: user.id))
+        openSearchDestination(.user(id: user.id))
       } catch {
         guard generation == globalUserOpenGeneration,
               selectionRevision == interactionRevision
         else { return }
         Log.shared.error("Failed to open private chat from experimental search", error: error)
-        showOpenError()
+        showGlobalUserOpenError()
       }
     }
   }
 
-  private func openInInbox(_ peer: Peer, destination: Destination? = nil) {
+  private func openSearchDestination(_ peer: Peer, destination: Destination? = nil) {
+    dismissSearchFocus()
     onOpenResult(peer, destination ?? .chat(peer: peer))
-
-    Task {
-      do {
-        _ = try await InboxMembershipService.shared.open(peer: peer)
-      } catch {
-        Log.shared.error("Failed to open search result in Inbox", error: error)
-        showOpenError()
-      }
-    }
   }
 
-  private func showOpenError() {
+  private func showGlobalUserOpenError() {
     ToastManager.shared.showToast(
-      "Could not update Inbox",
-      description: "The chat opened, but Inbox could not be updated. Try again.",
+      "Couldn’t Start Conversation",
+      description: "Try again.",
       type: .error,
       systemImage: "exclamationmark.triangle.fill"
     )
@@ -296,6 +283,82 @@ struct ExperimentalSearchView: View {
   }
 }
 
+private enum ExperimentalSearchOverlayState: Equatable {
+  case empty
+  case searching
+  case error(String)
+  case noResults(String)
+  case hidden
+}
+
+private struct ExperimentalSearchStatusOverlay: View {
+  let state: ExperimentalSearchOverlayState
+  let onRetry: () -> Void
+  let onDismissKeyboard: () -> Void
+
+  var body: some View {
+    ZStack {
+      switch state {
+      case .empty:
+        ExperimentalSearchEmptyPlaceholder()
+
+      case .searching:
+        ProgressView()
+          .controlSize(.large)
+
+      case let .error(errorText):
+        ContentUnavailableView {
+          Label("Search unavailable", systemImage: "exclamationmark.magnifyingglass")
+        } description: {
+          Text(errorText)
+        } actions: {
+          Button("Try Again", action: onRetry)
+            .buttonStyle(.borderedProminent)
+        }
+
+      case let .noResults(query):
+        ContentUnavailableView.search(text: query)
+
+      case .hidden:
+        EmptyView()
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .contentShape(.rect)
+    .simultaneousGesture(TapGesture().onEnded(onDismissKeyboard))
+    .allowsHitTesting(state != .hidden)
+  }
+}
+
+private struct ExperimentalSearchEmptyPlaceholder: View {
+  var body: some View {
+    Text("Search messages and chats, or find Inline users by @username to start a conversation.")
+      .font(.subheadline)
+      .foregroundStyle(.secondary)
+      .multilineTextAlignment(.center)
+      .frame(maxWidth: 340)
+      .padding(.horizontal, Theme.Layout.screenEdgeOpticalInset)
+  }
+}
+
+private struct ExperimentalSearchTopBar<Input: View>: ViewModifier {
+  let input: Input
+
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    if #available(iOS 26.0, *) {
+      content.safeAreaBar(edge: .top, spacing: 0) {
+        input
+      }
+    } else {
+      content.safeAreaInset(edge: .top, spacing: 0) {
+        input
+          .background(.bar)
+      }
+    }
+  }
+}
+
 private struct ExperimentalSearchInput: View {
   @Binding var text: String
   @FocusState.Binding var isFocused: Bool
@@ -304,10 +367,12 @@ private struct ExperimentalSearchInput: View {
   let onFocusIntent: () -> Void
   let onClose: () -> Void
 
+  @Namespace private var glassNamespace
+
   @ViewBuilder
   var body: some View {
     if #available(iOS 26.0, *) {
-      GlassEffectContainer(spacing: 12) {
+      GlassEffectContainer(spacing: 0) {
         controls
       }
     } else {
@@ -318,15 +383,18 @@ private struct ExperimentalSearchInput: View {
   private var controls: some View {
     HStack(spacing: 8) {
       searchField
-        .modifier(ExperimentalSearchFieldSurface(isActive: isActivePresentation))
+        .modifier(ExperimentalSearchFieldSurface(
+          isActive: isActivePresentation,
+          namespace: glassNamespace
+        ))
 
       if isActivePresentation {
         closeButton
-          .modifier(ExperimentalSearchCloseSurface())
-          .transition(closeTransition)
+          .modifier(ExperimentalSearchCloseSurface(namespace: glassNamespace))
+          .transition(closeControlTransition)
       }
     }
-    .padding(.horizontal, 16)
+    .padding(.horizontal, horizontalInset)
     .padding(.top, 6)
     .padding(.bottom, 8)
     .animation(searchControlAnimation, value: isActivePresentation)
@@ -387,21 +455,26 @@ private struct ExperimentalSearchInput: View {
     reduceMotion ? nil : .smooth(duration: 0.2)
   }
 
-  private var closeTransition: AnyTransition {
-    guard !reduceMotion else { return .opacity }
-    return .opacity.combined(with: .scale(scale: 0.9))
+  private var closeControlTransition: AnyTransition {
+    reduceMotion ? .opacity : .scale(scale: 0.92).combined(with: .opacity)
+  }
+
+  private var horizontalInset: CGFloat {
+    max(0, Theme.Layout.screenEdgeOpticalInset - 8)
   }
 }
 
 private struct ExperimentalSearchFieldSurface: ViewModifier {
   let isActive: Bool
+  let namespace: Namespace.ID
 
   @ViewBuilder
   func body(content: Content) -> some View {
     if #available(iOS 26.0, *) {
       content
-        .background(Color(.secondarySystemFill), in: Capsule())
+        .background(Color(.secondarySystemFill).opacity(isActive ? 0 : 1), in: Capsule())
         .glassEffect(isActive ? .regular.interactive() : .identity, in: .capsule)
+        .glassEffectID("search-field", in: namespace)
     } else {
       content
         .background {
@@ -420,14 +493,21 @@ private struct ExperimentalSearchFieldSurface: ViewModifier {
 }
 
 private struct ExperimentalSearchCloseSurface: ViewModifier {
+  let namespace: Namespace.ID
+
   @ViewBuilder
   func body(content: Content) -> some View {
     if #available(iOS 26.0, *) {
       content
         .glassEffect(.regular.interactive(), in: .circle)
+        .glassEffectID("search-close", in: namespace)
+        .glassEffectTransition(.materialize)
     } else {
       content
-        .background(.thinMaterial, in: Circle())
+        .background {
+          Circle()
+            .fill(.thinMaterial)
+        }
     }
   }
 }

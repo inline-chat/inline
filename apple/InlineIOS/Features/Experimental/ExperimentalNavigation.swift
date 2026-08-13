@@ -342,9 +342,9 @@ struct ExperimentalHomeView: View {
         )
       case .archived:
         ExperimentalChatListView(
-          items: homeListStore.state.presentation.archived,
+          items: [],
           inboxPinnedItems: [],
-          daySections: [],
+          daySections: homeListStore.state.presentation.archivedSections,
           mode: .archived,
           emptyStyle: .text,
           emptyTitle: "No archived chats",
@@ -360,7 +360,7 @@ struct ExperimentalHomeView: View {
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(Color(.systemBackground))
     .navigationBarTitleDisplayMode(.inline)
-    .navigationTitle("")
+    .navigationTitle(initialTab == .archived ? Text("Archived Chats") : Text(""))
   }
 
   private var chatItemRenderMode: ExperimentalHomeChatItemRenderMode {
@@ -431,10 +431,13 @@ private struct ExperimentalChatListView: View {
         emptyContent
       } else {
         List {
-          if mode == .allChats {
+          if mode == .allChats || mode == .archived {
             ForEach(daySections) { section in
               Section {
-                ExperimentalChatDaySectionHeader(day: section.id)
+                ExperimentalChatDaySectionHeader(
+                  day: section.id,
+                  chatItemRenderMode: chatItemRenderMode
+                )
                   .listRowInsets(sectionHeaderInsets)
                   .listRowSeparator(.hidden)
                   .listRowBackground(Color.clear)
@@ -445,7 +448,10 @@ private struct ExperimentalChatListView: View {
           } else if mode == .inbox {
             ForEach(inboxSections) { section in
               Section {
-                ExperimentalChatSectionHeader(title: section.title)
+                ExperimentalChatSectionHeader(
+                  title: section.title,
+                  chatItemRenderMode: chatItemRenderMode
+                )
                   .listRowInsets(sectionHeaderInsets)
                   .listRowSeparator(.hidden)
                   .listRowBackground(Color.clear)
@@ -500,7 +506,12 @@ private struct ExperimentalChatListView: View {
   }
 
   private var sectionHeaderInsets: EdgeInsets {
-    EdgeInsets(top: 1, leading: 20, bottom: 1, trailing: 20)
+    EdgeInsets(
+      top: 1,
+      leading: Theme.Layout.screenEdgeOpticalInset,
+      bottom: chatItemRenderMode.sectionHeaderBottomInset,
+      trailing: Theme.Layout.screenEdgeOpticalInset
+    )
   }
 
   private var listTopContentMargin: CGFloat {
@@ -508,18 +519,7 @@ private struct ExperimentalChatListView: View {
   }
 
   private var listSectionSpacing: CGFloat {
-    switch (mode, chatItemRenderMode) {
-    case (.inbox, .noLastMessage):
-      4
-    case (.inbox, _):
-      8
-    case (.allChats, .noLastMessage):
-      5
-    case (.allChats, _):
-      10
-    case (.archived, _):
-      8
-    }
+    chatItemRenderMode.listSectionSpacing
   }
 
   private var defaultMinimumListRowHeight: CGFloat {
@@ -552,7 +552,8 @@ private struct ExperimentalChatListView: View {
         layoutMode: chatItemRenderMode.chatListLayoutMode,
         showsPinnedIndicator: false,
         showsActivityTime: true,
-        unreadBadgeStyle: unreadBadgeStyle
+        unreadBadgeStyle: unreadBadgeStyle,
+        leadingInset: rowLeadingInset
       )
       .equatable()
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -620,10 +621,21 @@ private struct ExperimentalChatListView: View {
   private var rowContentInsets: EdgeInsets {
     EdgeInsets(
       top: chatItemRenderMode.listVerticalInset,
-      leading: 16,
+      leading: rowLeadingInset,
       bottom: chatItemRenderMode.listVerticalInset,
-      trailing: 20
+      trailing: Theme.Layout.screenEdgeOpticalInset
     )
+  }
+
+  private var rowLeadingInset: CGFloat {
+    switch chatItemRenderMode {
+    case .noLastMessage:
+      // Compact keeps its outer identity close to the shared optical line while
+      // preserving a small leading gutter for the unread dot.
+      max(0, Theme.Layout.screenEdgeOpticalInset - 4)
+    case .oneLineLastMessage, .twoLineLastMessage, .large:
+      Theme.Layout.screenEdgeOpticalInset
+    }
   }
 
   @ViewBuilder
@@ -705,7 +717,7 @@ private struct ExperimentalChatListView: View {
   }
 
   private func contextMenuArchiveButton(for item: ChatListItemSnapshot) -> some View {
-    Button(role: .destructive) {
+    Button {
       performArchive(item)
     } label: {
       Label("Archive", systemImage: "archivebox")
@@ -773,6 +785,7 @@ private struct ExperimentalChatListView: View {
       closeButton(for: item)
       pinButton(for: item)
     } else if mode == .allChats {
+      archiveButton(for: item)
       openButton(for: item)
     } else if mode == .archived {
       unarchiveButton(for: item)
@@ -866,6 +879,15 @@ private struct ExperimentalChatListView: View {
         )
       }
     }
+  }
+
+  private func archiveButton(for item: ChatListItemSnapshot) -> some View {
+    Button {
+      performArchive(item)
+    } label: {
+      Label("Archive", systemImage: "archivebox.fill")
+    }
+    .tint(.orange)
   }
 
   private func pinButton(for item: ChatListItemSnapshot) -> some View {
@@ -1017,19 +1039,21 @@ private struct ExperimentalHomeFailureStateView: View {
 
 private struct ExperimentalChatSectionHeader: View {
   let title: LocalizedStringResource
+  let chatItemRenderMode: ExperimentalHomeChatItemRenderMode
 
   var body: some View {
     Text(title)
-      .modifier(ExperimentalChatSectionHeaderStyle())
+      .modifier(ExperimentalChatSectionHeaderStyle(chatItemRenderMode: chatItemRenderMode))
   }
 }
 
 private struct ExperimentalChatDaySectionHeader: View {
   let day: Date
+  let chatItemRenderMode: ExperimentalHomeChatItemRenderMode
 
   var body: some View {
     title
-      .modifier(ExperimentalChatSectionHeaderStyle())
+      .modifier(ExperimentalChatSectionHeaderStyle(chatItemRenderMode: chatItemRenderMode))
   }
 
   private var title: Text {
@@ -1042,7 +1066,9 @@ private struct ExperimentalChatDaySectionHeader: View {
 }
 
 private struct ExperimentalChatSectionHeaderStyle: ViewModifier {
-  @ScaledMetric(relativeTo: .headline) private var fontSize: CGFloat = 16
+  let chatItemRenderMode: ExperimentalHomeChatItemRenderMode
+  @ScaledMetric(relativeTo: .subheadline) private var compactFontSize: CGFloat = 15
+  @ScaledMetric(relativeTo: .headline) private var regularFontSize: CGFloat = 16
 
   func body(content: Content) -> some View {
     content
@@ -1051,6 +1077,15 @@ private struct ExperimentalChatSectionHeaderStyle: ViewModifier {
       .textCase(nil)
       .frame(maxWidth: .infinity, alignment: .leading)
       .accessibilityAddTraits(.isHeader)
+  }
+
+  private var fontSize: CGFloat {
+    switch chatItemRenderMode {
+    case .noLastMessage:
+      compactFontSize
+    case .oneLineLastMessage, .twoLineLastMessage, .large:
+      regularFontSize
+    }
   }
 }
 
@@ -1074,6 +1109,26 @@ private extension ExperimentalHomeChatItemRenderMode {
       5
     case .large:
       2
+    }
+  }
+
+  var sectionHeaderBottomInset: CGFloat {
+    switch self {
+    case .noLastMessage:
+      3
+    case .oneLineLastMessage, .twoLineLastMessage, .large:
+      4
+    }
+  }
+
+  var listSectionSpacing: CGFloat {
+    switch self {
+    case .noLastMessage:
+      7
+    case .oneLineLastMessage, .twoLineLastMessage:
+      10
+    case .large:
+      12
     }
   }
 }

@@ -133,6 +133,7 @@ private struct ExperimentalAuthedRootView: View {
   private var sortModeRaw = ExperimentalHomeSortMode.recentActivity.rawValue
 
   @Environment(Router.self) private var router
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.auth) private var auth
   @Environment(\.colorScheme) private var colorScheme
   @Environment(\.realtimeV2) private var realtimeV2
@@ -211,6 +212,7 @@ private struct ExperimentalAuthedRootView: View {
         .experimentalRootTitleDisplayMode()
         .navigationTitle("")
         .toolbarVisibility(isSearchActivePresentation ? .hidden : .visible, for: .navigationBar)
+        .animation(searchChromeAnimation, value: isSearchActivePresentation)
         .toolbar {
           experimentalToolbarContent()
         }
@@ -306,11 +308,15 @@ private struct ExperimentalAuthedRootView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
       guard isSearchRootSelected else { return }
-      isSearchKeyboardVisible = true
+      withAnimation(searchChromeAnimation) {
+        isSearchKeyboardVisible = true
+      }
     }
     .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
-      isSearchKeyboardVisible = false
-      completePendingSearchExit()
+      withAnimation(searchChromeAnimation) {
+        isSearchKeyboardVisible = false
+        completePendingSearchExit()
+      }
     }
     .onChange(of: nav.activeSpaceId) { _, _ in
       sceneActiveSpaceIDRaw = nav.activeSpaceId.map(String.init) ?? ""
@@ -434,6 +440,10 @@ private struct ExperimentalAuthedRootView: View {
       && (searchFocusRequested || isSearchFieldFocused || isSearchKeyboardVisible)
   }
 
+  private var searchChromeAnimation: Animation? {
+    reduceMotion ? nil : .smooth(duration: 0.24)
+  }
+
   private func selectRootTab(_ newRootTab: RootTab, previousRootTab: RootTab) {
     guard newRootTab != .newChat else { return }
 
@@ -495,7 +505,8 @@ private struct ExperimentalAuthedRootView: View {
   private func openSearchResult(_ peer: Peer, _ destination: Destination) {
     guard isSearchRootSelected else { return }
     ExperimentalHomeNavigationPerformance.beginChatOpen(peer: peer, source: "search")
-    requestSearchExit(to: .inbox, destination: destination)
+    searchFocusRequested = false
+    router.push(destination, for: .search)
   }
 
   private func completePendingSearchExit() {
@@ -791,14 +802,6 @@ private struct ExperimentalAuthedRootView: View {
       }
       .sharedBackgroundVisibility(.hidden)
 
-      if showsAllChatsFilter {
-        ToolbarItem(placement: .topBarTrailing) {
-          allChatsFilterMenu()
-        }
-
-        ToolbarSpacer(.fixed, placement: .topBarTrailing)
-      }
-
       if let connectionState = realtimeState.displayedConnectionState {
         ToolbarItem(placement: .topBarTrailing) {
           connectionProgressIndicator(connectionState)
@@ -813,6 +816,14 @@ private struct ExperimentalAuthedRootView: View {
 
       ToolbarSpacer(.fixed, placement: .topBarTrailing)
 
+      if showsAllChatsFilter {
+        ToolbarItem(placement: .topBarTrailing) {
+          allChatsFilterMenu()
+        }
+
+        ToolbarSpacer(.fixed, placement: .topBarTrailing)
+      }
+
       ToolbarItem(placement: .topBarTrailing) {
         accountButton()
       }
@@ -824,13 +835,13 @@ private struct ExperimentalAuthedRootView: View {
 
       ToolbarItemGroup(placement: .topBarTrailing) {
         newChatButton(activeSpaceId: nav.activeSpaceId)
-        if showsAllChatsFilter {
-          allChatsFilterMenu()
-        }
         if let connectionState = realtimeState.displayedConnectionState {
           connectionProgressIndicator(connectionState)
         }
         overflowMenu()
+        if showsAllChatsFilter {
+          allChatsFilterMenu()
+        }
       }
 
       ToolbarItem(placement: .topBarTrailing) {

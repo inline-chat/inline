@@ -252,11 +252,16 @@ struct HomeChatListPresentationTests {
       item(1, open: true, archived: true, activity: date(day: 3)),
       item(2, open: true, hidden: true, activity: date(day: 2)),
       item(3, open: true, activity: date(day: 1)),
+      item(4, open: false, archived: true, activity: date(day: 1)),
     ], inboxSort: .lastUpdated, calendar: calendar)
 
     #expect(presentation.inbox.map(\.peer) == [.thread(id: 3)])
     #expect(presentation.allChats.map(\.peer) == [.thread(id: 3)])
-    #expect(presentation.archived.map(\.peer) == [.thread(id: 1)])
+    #expect(presentation.archived.map(\.peer) == [.thread(id: 1), .thread(id: 4)])
+    #expect(presentation.archivedSections.map(\.id) == [date(day: 3), date(day: 1)])
+    #expect(presentation.archivedSections.flatMap(\.items).map(\.peer) == [
+      .thread(id: 1), .thread(id: 4),
+    ])
   }
 
   @Test("Opened-time sorting applies to Inbox while All Chats stays activity ordered")

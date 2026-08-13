@@ -60,6 +60,7 @@ public enum ThreadIconShape: Equatable, Hashable, Sendable {
 
 public enum ThreadIconSymbolColor: Equatable, Hashable, Sendable {
   case primary
+  case mutedPrimary
   case secondary
   case white
 }
@@ -172,7 +173,7 @@ public struct ThreadIconView: View, Equatable {
       Image(systemName: ThreadIconDefaults.fallbackSymbolName(isReplyThread: descriptor.isReplyThread))
         .font(.system(
           size: resolvedSize * contentScale.symbolRatio * contentScaleMultiplier,
-          weight: .semibold
+          weight: descriptor.isReplyThread ? .bold : .semibold
         ))
         .foregroundStyle(resolvedSymbolColor)
         .accessibilityHidden(true)
@@ -357,6 +358,8 @@ private extension ThreadIconSymbolColor {
     switch self {
     case .primary:
       .primary
+    case .mutedPrimary:
+      Color.primary.opacity(0.82)
     case .secondary:
       .secondary
     case .white:

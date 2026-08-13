@@ -12,8 +12,9 @@ public struct ChatListDaySection: Identifiable, Equatable, Sendable {
 
 /// Every render-ready Home surface prepared from one database snapshot.
 ///
-/// Keeping Inbox and All Chats in one immutable value means switching tabs never
-/// performs filtering, sorting, grouping, or a database read on the main actor.
+/// Keeping Inbox, All Chats, and Archived Chats in one immutable value means
+/// switching surfaces never performs filtering, sorting, grouping, or a database
+/// read on the main actor.
 public struct ChatListPresentation: Equatable, Sendable {
   public static let empty = Self(
     inbox: [],
@@ -27,19 +28,22 @@ public struct ChatListPresentation: Equatable, Sendable {
   public let inboxUnpinned: [ChatListItemSnapshot]
   public let allChatSections: [ChatListDaySection]
   public let archived: [ChatListItemSnapshot]
+  public let archivedSections: [ChatListDaySection]
   public let inboxUnreadCount: Int
 
   public init(
     inbox: [ChatListItemSnapshot],
     allChatSections: [ChatListDaySection],
     archived: [ChatListItemSnapshot],
-    inboxUnreadCount: Int
+    inboxUnreadCount: Int,
+    calendar: Calendar = .autoupdatingCurrent
   ) {
     self.inbox = inbox
     self.inboxPinned = inbox.filter(\.isPinned)
     self.inboxUnpinned = inbox.filter { !$0.isPinned }
     self.allChatSections = allChatSections
     self.archived = archived
+    self.archivedSections = Self.daySections(from: archived, calendar: calendar)
     self.inboxUnreadCount = inboxUnreadCount
   }
 
@@ -64,7 +68,8 @@ public struct ChatListPresentation: Equatable, Sendable {
       inbox: inbox,
       allChatSections: daySections(from: timeline, calendar: calendar),
       archived: archived,
-      inboxUnreadCount: inbox.lazy.filter(\.isUnread).count
+      inboxUnreadCount: inbox.lazy.filter(\.isUnread).count,
+      calendar: calendar
     )
   }
 
@@ -161,7 +166,7 @@ public struct ChatListPresentation: Equatable, Sendable {
     case inboxPinned
     case inbox
     case allChats(Date)
-    case archived
+    case archived(Date)
   }
 
   private struct OrderedPosition: Equatable {
@@ -209,12 +214,14 @@ public struct ChatListPresentation: Equatable, Sendable {
     }
 
     predecessor = nil
-    for item in archived {
-      locations[item.peer, default: Locations()].archived = OrderedPosition(
-        predecessor: predecessor,
-        sectionID: .archived
-      )
-      predecessor = item.peer
+    for section in archivedSections {
+      for item in section.items {
+        locations[item.peer, default: Locations()].archived = OrderedPosition(
+          predecessor: predecessor,
+          sectionID: .archived(section.id)
+        )
+        predecessor = item.peer
+      }
     }
     return locations
   }

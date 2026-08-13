@@ -5,6 +5,13 @@ class Theme {
 
   init() {}
 
+  enum Layout {
+    /// The shared optical line measured from a screen edge. Toolbars, sections,
+    /// rows, and controls derive their own padding, gutters, and symbol geometry
+    /// from this reference so separate surfaces still read as one aligned UI.
+    static let screenEdgeOpticalInset: CGFloat = 24
+  }
+
   let chatPreviewSize: CGSize = .init(
     width: UIScreen.main.bounds.width * 0.95,
     height: UIScreen.main.bounds.height * 0.6

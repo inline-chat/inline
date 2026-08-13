@@ -12,49 +12,68 @@ struct InlineSearchResultsList: View {
   var body: some View {
     List {
       if model.chats.isEmpty == false {
-        Section("Chats") {
-          ForEach(model.chats) { result in
-            InlineSearchChatRow(result: result) {
-              openChat(result)
-            }
+        InlineSearchSectionHeader(title: "Chats")
+
+        ForEach(model.chats) { result in
+          InlineSearchChatRow(result: result) {
+            openChat(result)
           }
         }
       }
 
       if model.messages.isEmpty == false {
-        Section("Messages") {
-          ForEach(model.messages) { result in
-            InlineSearchMessageRow(result: result) {
-              openMessage(result)
-            }
-            .onAppear {
-              if result.id == model.messages.last?.id {
-                model.loadMoreMessages()
-              }
+        InlineSearchSectionHeader(title: "Messages")
+
+        ForEach(model.messages) { result in
+          InlineSearchMessageRow(result: result) {
+            openMessage(result)
+          }
+          .onAppear {
+            if result.id == model.messages.last?.id {
+              model.loadMoreMessages()
             }
           }
+        }
 
-          if model.isLoadingMoreMessages {
-            HStack {
-              Spacer()
-              ProgressView()
-              Spacer()
-            }
+        if model.isLoadingMoreMessages {
+          HStack {
+            Spacer()
+            ProgressView()
+            Spacer()
           }
         }
       }
 
       if model.globalUsers.isEmpty == false {
-        Section("People") {
-          ForEach(model.globalUsers) { result in
-            InlineSearchGlobalUserRow(result: result) {
-              openGlobalUser(result)
-            }
+        InlineSearchSectionHeader(title: "People")
+
+        ForEach(model.globalUsers) { result in
+          InlineSearchGlobalUserRow(result: result) {
+            openGlobalUser(result)
           }
         }
       }
     }
     .listStyle(.plain)
+  }
+}
+
+private struct InlineSearchSectionHeader: View {
+  let title: LocalizedStringKey
+
+  var body: some View {
+    Text(title)
+      .font(.subheadline.weight(.semibold))
+      .foregroundStyle(.secondary)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .accessibilityAddTraits(.isHeader)
+      .listRowInsets(.init(
+        top: 12,
+        leading: Theme.Layout.screenEdgeOpticalInset,
+        bottom: 4,
+        trailing: Theme.Layout.screenEdgeOpticalInset
+      ))
+      .listRowSeparator(.hidden)
   }
 }
 
@@ -73,7 +92,12 @@ private struct InlineSearchChatRow: View {
       )
     }
     .buttonStyle(.plain)
-    .listRowInsets(.init(top: 4, leading: 12, bottom: 4, trailing: 12))
+    .listRowInsets(.init(
+      top: 4,
+      leading: Theme.Layout.screenEdgeOpticalInset,
+      bottom: 4,
+      trailing: Theme.Layout.screenEdgeOpticalInset
+    ))
   }
 
   @ViewBuilder
@@ -116,7 +140,12 @@ private struct InlineSearchMessageRow: View {
       )
     }
     .buttonStyle(.plain)
-    .listRowInsets(.init(top: 4, leading: 12, bottom: 4, trailing: 12))
+    .listRowInsets(.init(
+      top: 4,
+      leading: Theme.Layout.screenEdgeOpticalInset,
+      bottom: 4,
+      trailing: Theme.Layout.screenEdgeOpticalInset
+    ))
   }
 
   @ViewBuilder
@@ -167,7 +196,12 @@ private struct InlineSearchGlobalUserRow: View {
       )
     }
     .buttonStyle(.plain)
-    .listRowInsets(.init(top: 4, leading: 12, bottom: 4, trailing: 12))
+    .listRowInsets(.init(
+      top: 4,
+      leading: Theme.Layout.screenEdgeOpticalInset,
+      bottom: 4,
+      trailing: Theme.Layout.screenEdgeOpticalInset
+    ))
   }
 }
 

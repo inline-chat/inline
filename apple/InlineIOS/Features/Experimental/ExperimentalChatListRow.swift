@@ -9,6 +9,13 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
   let showsPinnedIndicator: Bool
   let showsActivityTime: Bool
   let unreadBadgeStyle: ExperimentalHomeUnreadBadgeStyle
+  let leadingInset: CGFloat
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.layoutDirection) private var layoutDirection
+  @ScaledMetric(relativeTo: .footnote) private var timestampWidth: CGFloat = 54
+  @ScaledMetric(relativeTo: .footnote) private var timestampBaselineLift: CGFloat = 2
+  @ScaledMetric(relativeTo: .caption) private var unreadBadgeWidth: CGFloat = 24
+  @ScaledMetric(relativeTo: .caption) private var unreadBadgeHeight: CGFloat = 19
   @State private var showsTranslatedPreview: Bool
 
   init(
@@ -16,13 +23,15 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
     layoutMode: ChatListLayoutMode,
     showsPinnedIndicator: Bool = true,
     showsActivityTime: Bool = false,
-    unreadBadgeStyle: ExperimentalHomeUnreadBadgeStyle = .defaultValue
+    unreadBadgeStyle: ExperimentalHomeUnreadBadgeStyle = .defaultValue,
+    leadingInset: CGFloat
   ) {
     self.item = item
     self.layoutMode = layoutMode
     self.showsPinnedIndicator = showsPinnedIndicator
     self.showsActivityTime = showsActivityTime
     self.unreadBadgeStyle = unreadBadgeStyle
+    self.leadingInset = leadingInset
     _showsTranslatedPreview = State(
       initialValue: TranslationState.shared.isTranslationEnabled(for: item.peer)
     )
@@ -34,13 +43,12 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
       && lhs.showsPinnedIndicator == rhs.showsPinnedIndicator
       && lhs.showsActivityTime == rhs.showsActivityTime
       && lhs.unreadBadgeStyle == rhs.unreadBadgeStyle
+      && lhs.leadingInset == rhs.leadingInset
   }
 
   var body: some View {
     ZStack(alignment: .leading) {
-      if unreadBadgeStyle == .dot, item.isUnread {
-        dotUnreadIndicator
-      }
+      dotUnreadIndicator
 
       HStack(alignment: .center, spacing: metrics.horizontalSpacing) {
         identity
@@ -52,8 +60,9 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
             previewLine
           }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
       }
-      .padding(.leading, unreadGutter)
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
     .frame(minHeight: metrics.minimumHeight)
     .contentShape(Rectangle())
@@ -85,20 +94,26 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
           .accessibilityHidden(true)
       }
 
-      if let timestampText = displayedTimestampText {
+      if layoutMode == .compact {
+        ComposeActionCompactAccessory(peer: item.peer)
+
+        if showsNumberedUnread {
+          unreadBadge
+            .transition(unreadTransition)
+        }
+      } else if let timestampText = displayedTimestampText {
         Text(timestampText)
           .font(.footnote)
           .foregroundStyle(.tertiary)
           .lineLimit(1)
-          .fixedSize(horizontal: true, vertical: false)
-      }
-
-      if layoutMode == .compact {
-        ComposeActionCompactAccessory(peer: item.peer)
-
-        numberedUnreadIndicator
+          .minimumScaleFactor(0.8)
+          .frame(width: timestampWidth, alignment: .trailing)
+          .alignmentGuide(.firstTextBaseline) { dimensions in
+            dimensions[.firstTextBaseline] + timestampBaselineLift
+          }
       }
     }
+    .animation(unreadAnimation, value: showsNumberedUnread)
   }
 
   private var previewLine: some View {
@@ -106,8 +121,12 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
       previewContent
         .frame(maxWidth: .infinity, alignment: .leading)
 
-      numberedUnreadIndicator
+      if showsNumberedUnread {
+        unreadBadge
+          .transition(unreadTransition)
+      }
     }
+    .animation(unreadAnimation, value: showsNumberedUnread)
   }
 
   @ViewBuilder
@@ -137,6 +156,7 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
         size: metrics.avatarSize
       )
         .equatable()
+        .frame(width: metrics.identityContainerSize, height: metrics.identityContainerSize)
     case let .thread(descriptor):
       ThreadIconView(
         ThreadIconDescriptor(
@@ -145,60 +165,88 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
           isReplyThread: descriptor.isReplyThread,
           accessibilityLabel: descriptor.title
         ),
-        size: .large(metrics.avatarSize),
-        shape: .circle,
-        symbolColor: .primary,
+        size: metrics.threadIconSize,
+        shape: metrics.threadIconShape,
+        symbolColor: metrics.threadSymbolColor,
         contentScaleMultiplier: metrics.iconContentScale
       )
       .equatable()
       .opacity(metrics.iconOpacity)
+      .frame(width: metrics.identityContainerSize, height: metrics.identityContainerSize)
     case nil:
       ThreadIconView(
         ThreadIconDescriptor(emoji: nil, title: item.title),
-        size: .large(metrics.avatarSize),
-        shape: .circle,
-        symbolColor: .primary,
+        size: metrics.threadIconSize,
+        shape: metrics.threadIconShape,
+        symbolColor: metrics.threadSymbolColor,
         contentScaleMultiplier: metrics.iconContentScale
       )
       .equatable()
       .opacity(metrics.iconOpacity)
+      .frame(width: metrics.identityContainerSize, height: metrics.identityContainerSize)
     }
   }
 
   @ViewBuilder
   private var dotUnreadIndicator: some View {
-    Group {
-      if unreadBadgeStyle == .dot, item.isUnread {
+    ZStack {
+      if showsDotUnread {
         Circle()
           .fill(item.isProminent ? Color.accentColor : Color.secondary)
           .frame(width: 8, height: 8)
+          .offset(x: dotUnreadOffset)
+          .transition(unreadTransition)
           .accessibilityHidden(true)
       }
     }
+    .animation(unreadAnimation, value: showsDotUnread)
   }
 
-  @ViewBuilder
-  private var numberedUnreadIndicator: some View {
-    if unreadBadgeStyle == .numbered, item.isUnread {
-      let displayedCount = max(item.unreadCount, 1)
-      Text(displayedCount > 99 ? "99+" : "\(displayedCount)")
-        .font(.caption.weight(.semibold).monospacedDigit())
-        .foregroundStyle(item.isProminent ? Color.white : Color(.systemBackground))
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .frame(minWidth: 22, minHeight: 22)
-        .background(
-          item.isProminent ? Color.accentColor : Color(.systemGray2),
-          in: Capsule()
-        )
-        .accessibilityLabel(
-          item.unreadCount > 0 ? "\(item.unreadCount) unread messages" : "Marked unread"
-        )
-    }
+  private var unreadBadge: some View {
+    Text(displayedUnreadText)
+      .font(.caption.weight(.semibold).monospacedDigit())
+      .foregroundStyle(item.isProminent ? Color.white : Color(.systemBackground))
+      .lineLimit(1)
+      .minimumScaleFactor(0.76)
+      .frame(width: unreadBadgeWidth, height: unreadBadgeHeight)
+      .background(
+        item.isProminent ? Color.accentColor : Color(.systemGray2),
+        in: Capsule()
+      )
+      .contentTransition(.numericText(value: Double(min(displayedUnreadCount, 99))))
+      .animation(unreadAnimation, value: displayedUnreadCount)
+      .accessibilityLabel(
+        item.unreadCount > 0 ? "\(item.unreadCount) unread messages" : "Marked unread"
+      )
   }
 
-  private var unreadGutter: CGFloat {
-    11
+  private var showsDotUnread: Bool {
+    unreadBadgeStyle == .dot && item.isUnread
+  }
+
+  private var showsNumberedUnread: Bool {
+    unreadBadgeStyle == .numbered && item.isUnread
+  }
+
+  private var displayedUnreadCount: Int {
+    max(item.unreadCount, 1)
+  }
+
+  private var displayedUnreadText: String {
+    displayedUnreadCount > 99 ? "99+" : "\(displayedUnreadCount)"
+  }
+
+  private var dotUnreadOffset: CGFloat {
+    let magnitude = min(10, leadingInset / 2)
+    return layoutDirection == .leftToRight ? -magnitude : magnitude
+  }
+
+  private var unreadAnimation: Animation? {
+    reduceMotion ? nil : .smooth(duration: 0.18)
+  }
+
+  private var unreadTransition: AnyTransition {
+    reduceMotion ? .opacity : .scale(scale: 0.88).combined(with: .opacity)
   }
 
   private var resolvedPreviewText: String? {
@@ -250,9 +298,13 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
     switch layoutMode {
     case .compact:
       Metrics(
-        avatarSize: 32,
-        iconContentScale: 0.88,
-        iconOpacity: 0.84,
+        avatarSize: 30,
+        identityContainerSize: 32,
+        threadIconSize: .regular(32),
+        threadIconShape: .none,
+        threadSymbolColor: .mutedPrimary,
+        iconContentScale: 1.15,
+        iconOpacity: 1,
         minimumHeight: 44,
         horizontalSpacing: 12,
         textSpacing: 0,
@@ -261,8 +313,12 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
     case .standard:
       Metrics(
         avatarSize: 44,
-        iconContentScale: 0.88,
-        iconOpacity: 0.84,
+        identityContainerSize: 44,
+        threadIconSize: .large(44),
+        threadIconShape: .circle,
+        threadSymbolColor: .mutedPrimary,
+        iconContentScale: 0.96,
+        iconOpacity: 1,
         minimumHeight: 52,
         horizontalSpacing: 10,
         textSpacing: 0,
@@ -271,6 +327,10 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
     case .large:
       Metrics(
         avatarSize: 56,
+        identityContainerSize: 56,
+        threadIconSize: .large(56),
+        threadIconShape: .circle,
+        threadSymbolColor: .primary,
         iconContentScale: 0.88,
         iconOpacity: 0.84,
         minimumHeight: 72,
@@ -412,6 +472,10 @@ private struct ChatListPreviewText: View {
 
 private struct Metrics {
   let avatarSize: CGFloat
+  let identityContainerSize: CGFloat
+  let threadIconSize: ThreadIconSize
+  let threadIconShape: ThreadIconShape
+  let threadSymbolColor: ThreadIconSymbolColor
   let iconContentScale: CGFloat
   let iconOpacity: Double
   let minimumHeight: CGFloat

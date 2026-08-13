@@ -48,7 +48,7 @@ struct AccountSessionsSettingsView: View {
       } header: {
         Text("Signed-In Devices")
       } footer: {
-        Text("Revoke any device or client you do not recognize. Use Logout below to sign out this device.")
+        Text("Sign out any device or client you do not recognize. Use Logout below to sign out this device.")
       }
 
       LogoutSection()
@@ -68,14 +68,14 @@ struct AccountSessionsSettingsView: View {
       }
     }
     .confirmationDialog(
-      "Revoke Session?",
+      "Sign Out Session?",
       isPresented: Binding(
         get: { sessionToRevoke != nil },
         set: { if !$0 { sessionToRevoke = nil } }
       ),
       titleVisibility: .visible
     ) {
-      Button("Revoke", role: .destructive) {
+      Button("Sign Out", role: .destructive) {
         guard let session = sessionToRevoke else { return }
         sessionToRevoke = nil
         revoke(session)
@@ -130,7 +130,7 @@ struct AccountSessionsSettingsView: View {
         Log.scoped("IOSSettings.Sessions").error("Failed to revoke session", error: error)
         loadError = error.localizedDescription
         ToastManager.shared.showToast(
-          "Could not revoke session",
+          "Could not sign out session",
           type: .error,
           systemImage: "exclamationmark.triangle.fill"
         )
@@ -180,7 +180,7 @@ private struct AccountSessionRow: View {
         ProgressView()
           .controlSize(.small)
       } else if !session.current {
-        Button("Revoke", role: .destructive, action: requestRevoke)
+        Button("Sign Out", role: .destructive, action: requestRevoke)
           .buttonStyle(.borderless)
       }
     }
