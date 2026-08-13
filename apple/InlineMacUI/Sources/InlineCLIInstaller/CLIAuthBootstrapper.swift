@@ -97,18 +97,23 @@ public struct CLIAuthBootstrapper: Sendable {
     process.standardOutput = standardOutput
     process.standardError = standardError
 
-    let cancellationState = CancellationState(process: process)
+    let cancellationState = AuthProcessCancellationState()
     return try await withTaskCancellationHandler {
       try Task.checkCancellation()
-      guard !cancellationState.isCancelled else { throw CancellationError() }
+      let launched: Bool
       do {
-        try process.run()
-        try? standardOutput.fileHandleForWriting.close()
-        try? standardError.fileHandleForWriting.close()
+        launched = try cancellationState.launch {
+          try process.run()
+        }
       } catch {
         throw CLIAuthBootstrapError.couldNotLaunch
       }
-      if cancellationState.isCancelled {
+      guard launched else { throw CancellationError() }
+      do {
+        try? standardOutput.fileHandleForWriting.close()
+        try? standardError.fileHandleForWriting.close()
+      }
+      if cancellationState.isCancellationRequested {
         Self.stop(process)
         throw CancellationError()
       }
@@ -122,9 +127,7 @@ public struct CLIAuthBootstrapper: Sendable {
       )
     } onCancel: {
       cancellationState.cancel()
-      DispatchQueue.global(qos: .utility).async {
-        Self.stop(process)
-      }
+      Self.stop(process)
     }
   }
 
@@ -174,11 +177,15 @@ public struct CLIAuthBootstrapper: Sendable {
       )
     } catch {
       Self.stop(process)
-      throw timeoutState.didTimeOut ? CLIAuthBootstrapError.timedOut : CLIAuthBootstrapError.invalidHandshake
+      try Self.rethrowUnlessCancelled(
+        timeoutState.didTimeOut ? CLIAuthBootstrapError.timedOut : CLIAuthBootstrapError.invalidHandshake
+      )
     }
+    try Task.checkCancellation()
 
     if let existing = try? Self.parseResult(initialData) {
       process.waitUntilExit()
+      try Task.checkCancellation()
       guard !timeoutState.didTimeOut else { throw CLIAuthBootstrapError.timedOut }
       guard process.terminationStatus == 0 else {
         throw CLIAuthBootstrapError.commandFailed(nil)
@@ -194,12 +201,14 @@ public struct CLIAuthBootstrapper: Sendable {
       throw timeoutState.didTimeOut ? CLIAuthBootstrapError.timedOut : CLIAuthBootstrapError.invalidHandshake
     }
 
+    try Task.checkCancellation()
     do {
       try await authorize(request)
     } catch {
       Self.stop(process)
-      throw error
+      try Self.rethrowUnlessCancelled(error)
     }
+    try Task.checkCancellation()
 
     let resultData: Data
     do {
@@ -209,13 +218,14 @@ public struct CLIAuthBootstrapper: Sendable {
       )
     } catch {
       Self.stop(process)
-      if timeoutState.didTimeOut {
-        throw CLIAuthBootstrapError.timedOut
-      }
-      throw CLIAuthBootstrapError.commandFailed(nil)
+      try Self.rethrowUnlessCancelled(
+        timeoutState.didTimeOut ? CLIAuthBootstrapError.timedOut : CLIAuthBootstrapError.commandFailed(nil)
+      )
     }
+    try Task.checkCancellation()
 
     process.waitUntilExit()
+    try Task.checkCancellation()
     guard !timeoutState.didTimeOut else {
       throw CLIAuthBootstrapError.timedOut
     }
@@ -303,6 +313,11 @@ public struct CLIAuthBootstrapper: Sendable {
     return sanitized
   }
 
+  static func rethrowUnlessCancelled(_ error: any Error) throws -> Never {
+    try Task.checkCancellation()
+    throw error
+  }
+
   private static func readLine(from handle: FileHandle, maximumBytes: Int) throws -> Data {
     var data = Data()
     while data.count < maximumBytes {
@@ -351,24 +366,24 @@ public struct CLIAuthBootstrapper: Sendable {
   }
 }
 
-private final class CancellationState: @unchecked Sendable {
+final class AuthProcessCancellationState: @unchecked Sendable {
   private let lock = NSLock()
-  private let process: Process
   private var cancelled = false
 
-  init(process: Process) {
-    self.process = process
+  var isCancellationRequested: Bool {
+    lock.withLock { cancelled }
   }
 
-  var isCancelled: Bool {
-    lock.withLock { cancelled }
+  func launch(_ start: () throws -> Void) throws -> Bool {
+    try lock.withLock {
+      guard !cancelled else { return false }
+      try start()
+      return true
+    }
   }
 
   func cancel() {
     lock.withLock { cancelled = true }
-    if process.isRunning {
-      process.terminate()
-    }
   }
 }
 

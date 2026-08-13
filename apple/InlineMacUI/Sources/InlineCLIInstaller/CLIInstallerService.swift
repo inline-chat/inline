@@ -3,6 +3,8 @@ import Darwin
 import Foundation
 
 public actor CLIInstallerService: CLIInstalling {
+  static let minimumAgentSetupVersion = "0.7.3"
+
   private struct ReleaseManifest: Decodable {
     let version: String
     let targets: [String: ReleaseTarget]
@@ -44,7 +46,36 @@ public actor CLIInstallerService: CLIInstalling {
   }
 
   public func install(progress: @escaping CLIInstallerProgress) async throws -> CLIServiceInstallOutcome {
+    try await install(progress: progress, allowSideBySide: false)
+  }
+
+  public func installForAgentSetup(
+    progress: @escaping CLIInstallerProgress
+  ) async throws -> CLIServiceInstallOutcome {
+    try await install(progress: progress, allowSideBySide: true)
+  }
+
+  public func compatibleLocalInstallationForAgentSetup() -> CLIInstallation? {
+    Self.compatibleInstallationForAgentSetup(
+      in: strictlyVerifiedLocalInstallations(),
+      minimumVersion: Self.minimumAgentSetupVersion
+    )
+  }
+
+  private func install(
+    progress: @escaping CLIInstallerProgress,
+    allowSideBySide: Bool
+  ) async throws -> CLIServiceInstallOutcome {
     let plan = try await check(progress: progress)
+    try Task.checkCancellation()
+    if allowSideBySide, !Self.supportsAgentSetup(releaseVersion: plan.release.version) {
+      throw failure(
+        .invalidManifest,
+        title: "Inline CLI Update Required",
+        message: "Agent setup requires Inline CLI \(Self.minimumAgentSetupVersion) or newer, but the available release is \(plan.release.version)."
+      )
+    }
+    let destinationURL: URL?
 
     switch plan.disposition {
     case .current:
@@ -55,28 +86,49 @@ public actor CLIInstallerService: CLIInstalling {
           message: "Inline CLI was reported as installed, but its executable could not be found."
         )
       }
-      return CLIServiceInstallOutcome(installation: localInstallation, didInstall: false)
+      let requiredVersion = Self.requiredAgentSetupVersion(for: plan.release.version)
+      if !allowSideBySide
+        || (isStrictlyVerified(localInstallation)
+          && !Self.isOlder(localInstallation.version, than: requiredVersion)) {
+        return CLIServiceInstallOutcome(installation: localInstallation, didInstall: false)
+      }
+      if let alternate = compatibleAlternate(for: plan) {
+        return CLIServiceInstallOutcome(installation: alternate, didInstall: false)
+      }
+      destinationURL = chooseNewDestination(excluding: localInstallation.executableURL)
 
     case .packageManaged:
-      throw failure(
-        .packageManaged,
-        title: "Inline CLI Is Managed by Homebrew",
-        message: "Update this Inline CLI installation with Homebrew, or use the manual installation instructions."
-      )
+      guard allowSideBySide else {
+        throw failure(
+          .packageManaged,
+          title: "Inline CLI Is Managed by Homebrew",
+          message: "Update this Inline CLI installation with Homebrew, or use the manual installation instructions."
+        )
+      }
+      if let alternate = compatibleAlternate(for: plan) {
+        return CLIServiceInstallOutcome(installation: alternate, didInstall: false)
+      }
+      destinationURL = chooseNewDestination(excluding: plan.localInstallation?.executableURL)
 
     case .conflictingInstallation:
-      let path = plan.localInstallation?.executableURL.path ?? "a directory on your PATH"
-      throw failure(
-        .conflictingInstallation,
-        title: "Another Inline Command Was Found",
-        message: "The existing executable at \(path) is not an Inline-signed CLI. It was left unchanged."
-      )
+      guard allowSideBySide else {
+        let path = plan.localInstallation?.executableURL.path ?? "a directory on your PATH"
+        throw failure(
+          .conflictingInstallation,
+          title: "Another Inline Command Was Found",
+          message: "The existing executable at \(path) is not an Inline-signed CLI. It was left unchanged."
+        )
+      }
+      if let alternate = compatibleAlternate(for: plan) {
+        return CLIServiceInstallOutcome(installation: alternate, didInstall: false)
+      }
+      destinationURL = chooseNewDestination(excluding: plan.localInstallation?.executableURL)
 
     case .install, .update:
-      break
+      destinationURL = plan.destinationURL
     }
 
-    guard let destinationURL = plan.destinationURL else {
+    guard let destinationURL else {
       throw failure(
         .permissionDenied,
         title: "No Writable Installation Location",
@@ -84,7 +136,9 @@ public actor CLIInstallerService: CLIInstalling {
       )
     }
 
+    try Task.checkCancellation()
     await progress(.downloading(version: plan.release.version, expectedBytes: plan.release.size))
+    try Task.checkCancellation()
     let workDirectory = fileManager.temporaryDirectory
       .appending(path: "inline-cli-installer-\(UUID().uuidString)", directoryHint: .isDirectory)
 
@@ -101,11 +155,16 @@ public actor CLIInstallerService: CLIInstalling {
 
     let archiveURL = workDirectory.appending(path: "inline.tar.gz")
     try await download(plan.release, to: archiveURL)
+    try Task.checkCancellation()
 
     await progress(.verifying(version: plan.release.version))
+    try Task.checkCancellation()
     try verifyChecksum(of: archiveURL, expected: plan.release.sha256)
+    try Task.checkCancellation()
     let executableURL = try extractExecutable(from: archiveURL, in: workDirectory)
+    try Task.checkCancellation()
     try verifySignature(of: executableURL)
+    try Task.checkCancellation()
 
     let downloadedVersion = try readVersion(at: executableURL)
     guard downloadedVersion == plan.release.version else {
@@ -117,7 +176,9 @@ public actor CLIInstallerService: CLIInstalling {
     }
 
     await progress(.installing(destinationURL: destinationURL))
-    try installExecutable(executableURL, at: destinationURL)
+    try Self.performInstallUnlessCancelled {
+      try installExecutable(executableURL, at: destinationURL)
+    }
     try verifySignature(of: destinationURL)
 
     let installedVersion = try readVersion(at: destinationURL)
@@ -144,6 +205,7 @@ public actor CLIInstallerService: CLIInstalling {
     do {
       (data, response) = try await session.data(from: configuration.manifestURL)
     } catch {
+      try Task.checkCancellation()
       throw failure(
         .network,
         title: "Couldn’t Check for Inline CLI",
@@ -196,34 +258,59 @@ public actor CLIInstallerService: CLIInstalling {
 
   private func inspectLocalInstallation() -> CLIInstallation? {
     for candidate in localCandidateURLs() {
-      guard fileManager.fileExists(atPath: candidate.path) else { continue }
-
-      let resolvedURL = candidate.resolvingSymlinksInPath()
-      let attributes = try? fileManager.attributesOfItem(atPath: candidate.path)
-      let isSymbolicLink = attributes?[.type] as? FileAttributeType == .typeSymbolicLink
-      let hasExpectedSignature = (try? verifySignature(of: candidate, allowLegacyAdHoc: true)) != nil
-      let source: CLIInstallationSource
-      if !hasExpectedSignature {
-        source = .external
-      } else if isSymbolicLink,
-                !Self.isHomebrewPath(candidate.path),
-                !Self.isHomebrewPath(resolvedURL.path) {
-        source = .external
-      } else if Self.isHomebrewPath(candidate.path) || Self.isHomebrewPath(resolvedURL.path) {
-        source = .homebrew
-      } else {
-        source = .inline
-      }
-
-      let version = source == .external ? nil : try? readVersion(at: candidate)
-      return CLIInstallation(
-        executableURL: candidate,
-        version: version,
-        source: source,
-        isOnPath: pathContains(candidate.deletingLastPathComponent())
-      )
+      if let installation = inspectLocalInstallation(at: candidate) { return installation }
     }
     return nil
+  }
+
+  private func strictlyVerifiedLocalInstallations() -> [CLIInstallation] {
+    localCandidateURLs().compactMap { candidate in
+      guard let installation = inspectLocalInstallation(at: candidate),
+            installation.source != .external,
+            isStrictlyVerified(installation) else { return nil }
+      return installation
+    }
+  }
+
+  private func inspectLocalInstallation(at candidate: URL) -> CLIInstallation? {
+    guard fileManager.fileExists(atPath: candidate.path) else { return nil }
+
+    let resolvedURL = candidate.resolvingSymlinksInPath()
+    let attributes = try? fileManager.attributesOfItem(atPath: candidate.path)
+    let isSymbolicLink = attributes?[.type] as? FileAttributeType == .typeSymbolicLink
+    let hasExpectedSignature = (try? verifySignature(of: candidate, allowLegacyAdHoc: true)) != nil
+    let source: CLIInstallationSource
+    if !hasExpectedSignature {
+      source = .external
+    } else if isSymbolicLink,
+              !Self.isHomebrewPath(candidate.path),
+              !Self.isHomebrewPath(resolvedURL.path) {
+      source = .external
+    } else if Self.isHomebrewPath(candidate.path) || Self.isHomebrewPath(resolvedURL.path) {
+      source = .homebrew
+    } else {
+      source = .inline
+    }
+
+    let version = source == .external ? nil : try? readVersion(at: candidate)
+    return CLIInstallation(
+      executableURL: candidate,
+      version: version,
+      source: source,
+      isOnPath: pathContains(candidate.deletingLastPathComponent())
+    )
+  }
+
+  private func isStrictlyVerified(_ installation: CLIInstallation) -> Bool {
+    (try? verifySignature(of: installation.executableURL)) != nil
+  }
+
+  private func compatibleAlternate(for plan: CLIInstallPlan) -> CLIInstallation? {
+    Self.compatibleInstallationForAgentSetup(
+      in: strictlyVerifiedLocalInstallations(),
+      minimumVersion: Self.requiredAgentSetupVersion(for: plan.release.version),
+      excluding: plan.localInstallation?.executableURL
+    )
   }
 
   private func makePlan(localInstallation: CLIInstallation?, release: CLIRelease) throws -> CLIInstallPlan {
@@ -266,8 +353,19 @@ public actor CLIInstallerService: CLIInstalling {
     }
   }
 
-  private func chooseNewDestination() -> URL? {
+  private func chooseNewDestination(excluding existingURL: URL? = nil) -> URL? {
+    let excludedPath = existingURL?.resolvingSymlinksInPath().standardizedFileURL.path
     for candidate in configuration.installLocations where !Self.isHomebrewPath(candidate.path) {
+      guard candidate.resolvingSymlinksInPath().standardizedFileURL.path != excludedPath else {
+        continue
+      }
+      if fileManager.fileExists(atPath: candidate.path) {
+        let attributes = try? fileManager.attributesOfItem(atPath: candidate.path)
+        guard attributes?[.type] as? FileAttributeType != .typeSymbolicLink,
+              (try? verifySignature(of: candidate, allowLegacyAdHoc: true)) != nil else {
+          continue
+        }
+      }
       let directory = candidate.deletingLastPathComponent()
       if fileManager.fileExists(atPath: directory.path) {
         if fileManager.isWritableFile(atPath: directory.path) {
@@ -297,6 +395,7 @@ public actor CLIInstallerService: CLIInstalling {
     do {
       (temporaryURL, response) = try await session.download(from: release.archiveURL)
     } catch {
+      try Task.checkCancellation()
       throw failure(
         .network,
         title: "Couldn’t Download Inline CLI",
@@ -476,6 +575,24 @@ public actor CLIInstallerService: CLIInstalling {
     process.terminationHandler = { _ in completion.signal() }
 
     try process.run()
+    try? standardOutput.fileHandleForWriting.close()
+    try? standardError.fileHandleForWriting.close()
+    let outputGroup = DispatchGroup()
+    let outputCapture = InstallerOutputCapture()
+    let errorCapture = InstallerOutputCapture()
+    let overflowState = InstallerOutputLimitState()
+    let drain: @Sendable (FileHandle, InstallerOutputCapture) -> Void = { handle, capture in
+      capture.store(Self.boundedProcessOutput(handle, overflowState: overflowState))
+      outputGroup.leave()
+    }
+    outputGroup.enter()
+    DispatchQueue.global(qos: .utility).async {
+      drain(standardOutput.fileHandleForReading, outputCapture)
+    }
+    outputGroup.enter()
+    DispatchQueue.global(qos: .utility).async {
+      drain(standardError.fileHandleForReading, errorCapture)
+    }
     if completion.wait(timeout: .now() + 10) == .timedOut {
       process.terminate()
       if completion.wait(timeout: .now() + 1) == .timedOut {
@@ -488,13 +605,39 @@ public actor CLIInstallerService: CLIInstalling {
         message: "\(executableURL.lastPathComponent) did not finish in time."
       )
     }
-    let outputData = standardOutput.fileHandleForReading.readDataToEndOfFile()
-    let errorData = standardError.fileHandleForReading.readDataToEndOfFile()
+    outputGroup.wait()
+    if overflowState.didExceed {
+      throw failure(
+        .installationFailed,
+        title: "Inline CLI Check Produced Too Much Output",
+        message: "\(executableURL.lastPathComponent) produced more output than Inline could safely inspect."
+      )
+    }
     return ProcessOutput(
       status: process.terminationStatus,
-      standardOutput: String(data: outputData, encoding: .utf8) ?? "",
-      standardError: String(data: errorData, encoding: .utf8) ?? ""
+      standardOutput: String(data: outputCapture.value, encoding: .utf8) ?? "",
+      standardError: String(data: errorCapture.value, encoding: .utf8) ?? ""
     )
+  }
+
+  private static func boundedProcessOutput(
+    _ handle: FileHandle,
+    overflowState: InstallerOutputLimitState
+  ) -> Data {
+    let maximumBytes = 1_024 * 1_024
+    var retained = Data()
+    do {
+      while let chunk = try handle.read(upToCount: 64 * 1_024), !chunk.isEmpty {
+        let remaining = maximumBytes - retained.count
+        if remaining > 0 {
+          retained.append(contentsOf: chunk.prefix(remaining))
+        }
+        if chunk.count > remaining {
+          overflowState.markExceeded()
+        }
+      }
+    } catch {}
+    return retained
   }
 
   private func pathContains(_ directoryURL: URL) -> Bool {
@@ -611,5 +754,55 @@ public actor CLIInstallerService: CLIInstalling {
     installed += repeatElement(0, count: count - installed.count)
     release += repeatElement(0, count: count - release.count)
     return installed.lexicographicallyPrecedes(release)
+  }
+
+  static func supportsAgentSetup(releaseVersion: String) -> Bool {
+    !isOlder(releaseVersion, than: minimumAgentSetupVersion)
+  }
+
+  static func requiredAgentSetupVersion(for releaseVersion: String) -> String {
+    supportsAgentSetup(releaseVersion: releaseVersion)
+      ? releaseVersion
+      : minimumAgentSetupVersion
+  }
+
+  static func performInstallUnlessCancelled(_ install: () throws -> Void) throws {
+    try Task.checkCancellation()
+    try install()
+  }
+
+  static func compatibleInstallationForAgentSetup(
+    in installations: [CLIInstallation],
+    minimumVersion: String,
+    excluding excludedURL: URL? = nil
+  ) -> CLIInstallation? {
+    let excludedPath = excludedURL?.resolvingSymlinksInPath().standardizedFileURL.path
+    return installations.first { installation in
+      installation.source != .external
+        && !isOlder(installation.version, than: minimumVersion)
+        && installation.executableURL.resolvingSymlinksInPath().standardizedFileURL.path != excludedPath
+    }
+  }
+}
+
+private final class InstallerOutputCapture: @unchecked Sendable {
+  private let lock = NSLock()
+  private var data = Data()
+
+  var value: Data { lock.withLock { data } }
+
+  func store(_ value: Data) {
+    lock.withLock { data = value }
+  }
+}
+
+private final class InstallerOutputLimitState: @unchecked Sendable {
+  private let lock = NSLock()
+  private var exceeded = false
+
+  var didExceed: Bool { lock.withLock { exceeded } }
+
+  func markExceeded() {
+    lock.withLock { exceeded = true }
   }
 }

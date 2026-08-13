@@ -34,6 +34,18 @@ public final class CLIInstallerController {
   }
 
   public func install() async -> CLIInstallResult {
+    await install(forAgentSetup: false)
+  }
+
+  public func installForAgentSetup() async -> CLIInstallResult {
+    await install(forAgentSetup: true)
+  }
+
+  public func compatibleLocalInstallationForAgentSetup() async -> CLIInstallation? {
+    await service.compatibleLocalInstallationForAgentSetup()
+  }
+
+  private func install(forAgentSetup: Bool) async -> CLIInstallResult {
     guard !phase.isBusy else {
       return .failed(
         CLIInstallerFailure(
@@ -46,7 +58,12 @@ public final class CLIInstallerController {
     }
 
     do {
-      let outcome = try await service.install(progress: apply)
+      let outcome: CLIServiceInstallOutcome
+      if forAgentSetup {
+        outcome = try await service.installForAgentSetup(progress: apply)
+      } else {
+        outcome = try await service.install(progress: apply)
+      }
       phase = .installed(outcome.installation)
       return outcome.didInstall
         ? .installed(outcome.installation)

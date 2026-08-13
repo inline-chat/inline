@@ -81,4 +81,100 @@ struct CLIAuthBootstrapperTests {
         "The installed CLI did not finish signing in within two minutes."
     )
   }
+
+  @Test("cancellation latched before auth launch prevents the child from starting")
+  func cancellationBeforeAuthLaunchPreventsStart() throws {
+    let state = AuthProcessCancellationState()
+    let probe = AuthLaunchProbe()
+
+    state.cancel()
+    let launched = try state.launch {
+      probe.markStarted()
+    }
+
+    #expect(!launched)
+    #expect(!probe.didStart)
+  }
+
+  @Test("auth cancellation cannot return during the launch transition")
+  func authCancellationWaitsForLaunchTransition() {
+    let state = AuthProcessCancellationState()
+    let launchEntered = DispatchSemaphore(value: 0)
+    let permitLaunch = DispatchSemaphore(value: 0)
+    let cancellationReturned = DispatchSemaphore(value: 0)
+
+    DispatchQueue.global(qos: .userInitiated).async {
+      _ = try? state.launch {
+        launchEntered.signal()
+        permitLaunch.wait()
+      }
+    }
+    #expect(launchEntered.wait(timeout: .now() + 2) == .success)
+
+    DispatchQueue.global(qos: .userInitiated).async {
+      state.cancel()
+      cancellationReturned.signal()
+    }
+    #expect(cancellationReturned.wait(timeout: .now() + 0.1) == .timedOut)
+
+    permitLaunch.signal()
+    #expect(cancellationReturned.wait(timeout: .now() + 2) == .success)
+    #expect(state.isCancellationRequested)
+  }
+
+  @Test("auth cancellation takes priority over pipe and process errors")
+  func cancellationWinsOverAuthErrors() async {
+    let gate = AuthCancellationGate()
+    let task = Task {
+      await gate.waitBeforeFailureMapping()
+      try CLIAuthBootstrapper.rethrowUnlessCancelled(CLIAuthBootstrapError.invalidHandshake)
+    }
+
+    await gate.waitUntilReached()
+    task.cancel()
+    await gate.release()
+
+    await #expect(throws: CancellationError.self) {
+      try await task.value
+    }
+  }
+}
+
+private actor AuthCancellationGate {
+  private var reached = false
+  private var reachedWaiters: [CheckedContinuation<Void, Never>] = []
+  private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+  func waitBeforeFailureMapping() async {
+    reached = true
+    let waiters = reachedWaiters
+    reachedWaiters.removeAll()
+    for waiter in waiters { waiter.resume() }
+    await withCheckedContinuation { continuation in
+      releaseContinuation = continuation
+    }
+  }
+
+  func waitUntilReached() async {
+    guard !reached else { return }
+    await withCheckedContinuation { continuation in
+      reachedWaiters.append(continuation)
+    }
+  }
+
+  func release() {
+    releaseContinuation?.resume()
+    releaseContinuation = nil
+  }
+}
+
+private final class AuthLaunchProbe: @unchecked Sendable {
+  private let lock = NSLock()
+  private var started = false
+
+  var didStart: Bool { lock.withLock { started } }
+
+  func markStarted() {
+    lock.withLock { started = true }
+  }
 }

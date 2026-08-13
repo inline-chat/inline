@@ -229,4 +229,20 @@ public typealias CLIInstallerProgress = @MainActor @Sendable (CLIInstallerPhase)
 public protocol CLIInstalling: Sendable {
   func check(progress: @escaping CLIInstallerProgress) async throws -> CLIInstallPlan
   func install(progress: @escaping CLIInstallerProgress) async throws -> CLIServiceInstallOutcome
+  func installForAgentSetup(
+    progress: @escaping CLIInstallerProgress
+  ) async throws -> CLIServiceInstallOutcome
+  func compatibleLocalInstallationForAgentSetup() async -> CLIInstallation?
+}
+
+public extension CLIInstalling {
+  func installForAgentSetup(
+    progress: @escaping CLIInstallerProgress
+  ) async throws -> CLIServiceInstallOutcome {
+    try await install(progress: progress)
+  }
+
+  func compatibleLocalInstallationForAgentSetup() async -> CLIInstallation? {
+    nil
+  }
 }

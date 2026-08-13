@@ -37,11 +37,32 @@ struct CLIInstallerControllerTests {
     #expect(result == .failed(expected))
     #expect(controller.phase == .failed(expected))
   }
+
+  @Test("uses the side-by-side installation policy for agent setup")
+  func usesAgentSetupInstallationPolicy() async {
+    let service = MockCLIInstaller()
+    let controller = CLIInstallerController(service: service)
+
+    _ = await controller.installForAgentSetup()
+
+    #expect(await service.agentSetupInstallCalls() == 1)
+  }
+
+  @Test("exposes a compatible local CLI for offline agent setup")
+  func exposesCompatibleOfflineCLI() async {
+    let service = MockCLIInstaller()
+    let controller = CLIInstallerController(service: service)
+
+    let installation = await controller.compatibleLocalInstallationForAgentSetup()
+
+    #expect(installation?.version == "1.2.3")
+  }
 }
 
 private actor MockCLIInstaller: CLIInstalling {
   private let installFailure: CLIInstallerFailure?
   private var phases: [CLIInstallerPhase] = []
+  private var agentSetupCalls = 0
 
   init(installFailure: CLIInstallerFailure? = nil) {
     self.installFailure = installFailure
@@ -65,6 +86,20 @@ private actor MockCLIInstaller: CLIInstalling {
     await publish(.installed(installation), progress: progress)
     return CLIServiceInstallOutcome(installation: installation, didInstall: true)
   }
+  func installForAgentSetup(
+    progress: @escaping CLIInstallerProgress
+  ) async throws -> CLIServiceInstallOutcome {
+    agentSetupCalls += 1
+    return try await install(progress: progress)
+  }
+
+  func agentSetupInstallCalls() -> Int {
+    agentSetupCalls
+  }
+
+  func compatibleLocalInstallationForAgentSetup() -> CLIInstallation? {
+    Self.installation
+  }
 
   func observedPhases() -> [CLIInstallerPhase] {
     phases
@@ -85,5 +120,12 @@ private actor MockCLIInstaller: CLIInstalling {
     ),
     destinationURL: URL(fileURLWithPath: "/usr/local/bin/inline"),
     disposition: .install
+  )
+
+  private static let installation = CLIInstallation(
+    executableURL: URL(fileURLWithPath: "/usr/local/bin/inline"),
+    version: "1.2.3",
+    source: .inline,
+    isOnPath: true
   )
 }
