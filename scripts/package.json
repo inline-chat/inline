@@ -26,7 +26,7 @@
     "cleanup:builds:deep": "bun run cleanup-build-artifacts.ts --deep",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "oxlint --ignore-path ../.oxlintignore .",
-    "test": "echo \"No tests yet for inline-scripts\""
+    "test": "bun test macos"
   },
   "dependencies": {},
   "devDependencies": {

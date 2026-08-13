@@ -71,10 +71,11 @@ def main() -> int:
         return 1
 
     root = tree.getroot()
-    channel = root.find("channel")
-    if channel is None:
-        print("Appcast missing <channel>", file=sys.stderr)
+    channels = root.findall("channel")
+    if root.tag != "rss" or len(channels) != 1:
+        print("Appcast must have exactly one <rss><channel> feed", file=sys.stderr)
         return 1
+    channel = channels[0]
 
     items = channel.findall("item")
     if not items:

@@ -28,9 +28,12 @@ MACOS_PROVISIONING_PROFILE_PATH=${MACOS_PROVISIONING_PROFILE_PATH:-""}
 OVERWRITE_DMG=${OVERWRITE_DMG:-0}
 SIGN_RETRY_COUNT=${SIGN_RETRY_COUNT:-3}
 SIGN_RETRY_DELAY_SECONDS=${SIGN_RETRY_DELAY_SECONDS:-2}
-PAUSE_BEFORE_NOTARIZE=${PAUSE_BEFORE_NOTARIZE:-0}
 DEBUG_BUILD=${DEBUG_BUILD:-0}
 CREATE_DMG_NODE_BIN_DIR=${CREATE_DMG_NODE_BIN_DIR:-""}
+EXPECTED_SOURCE_COMMIT=${EXPECTED_SOURCE_COMMIT:-""}
+EXPECTED_SOURCE_BUILD=${EXPECTED_SOURCE_BUILD:-""}
+REQUIRE_CLEAN_SOURCE=${REQUIRE_CLEAN_SOURCE:-0}
+ARTIFACT_PROVENANCE_PATH=${ARTIFACT_PROVENANCE_PATH:-"${OUTPUT_DIR}/release-provenance.json"}
 
 case "${CHANNEL}" in
   stable|beta|tip) ;;
@@ -39,6 +42,30 @@ case "${CHANNEL}" in
     exit 1
     ;;
 esac
+
+verify_frozen_source() {
+  local current_commit current_build
+  current_commit=$(git -C "${ROOT_DIR}" rev-parse HEAD)
+  current_build=$(git -C "${ROOT_DIR}" rev-list --count HEAD)
+  if [[ -n "${EXPECTED_SOURCE_COMMIT}" && "${current_commit}" != "${EXPECTED_SOURCE_COMMIT}" ]]; then
+    echo "Source commit changed during release: expected ${EXPECTED_SOURCE_COMMIT}, found ${current_commit}" >&2
+    exit 1
+  fi
+  if [[ -n "${EXPECTED_SOURCE_BUILD}" && "${current_build}" != "${EXPECTED_SOURCE_BUILD}" ]]; then
+    echo "Source build changed during release: expected ${EXPECTED_SOURCE_BUILD}, found ${current_build}" >&2
+    exit 1
+  fi
+  if [[ "${REQUIRE_CLEAN_SOURCE}" == "1" && -n "$(git -C "${ROOT_DIR}" status --porcelain)" ]]; then
+    echo "Source became dirty during a public release; refusing to label or publish the artifact." >&2
+    exit 1
+  fi
+}
+
+SOURCE_WAS_CLEAN=1
+if [[ -n "$(git -C "${ROOT_DIR}" status --porcelain)" ]]; then
+  SOURCE_WAS_CLEAN=0
+fi
+verify_frozen_source
 
 if [[ -z "${CREATE_DMG_NODE_BIN_DIR}" ]]; then
   for candidate in /opt/homebrew/opt/node@20/bin /usr/local/opt/node@20/bin; do
@@ -182,8 +209,13 @@ fi
 
 APP_PATH="${DERIVED_DATA}/Build/Products/${configuration}/${app_name}"
 PLIST_PATH="${APP_PATH}/Contents/Info.plist"
-BUILD_NUMBER=$(git -C "${ROOT_DIR}" rev-list --count HEAD)
-INLINE_COMMIT=$(git -C "${ROOT_DIR}" rev-parse --short HEAD)
+verify_frozen_source
+BUILD_NUMBER=${EXPECTED_SOURCE_BUILD:-$(git -C "${ROOT_DIR}" rev-list --count HEAD)}
+if [[ -n "${EXPECTED_SOURCE_COMMIT}" ]]; then
+  INLINE_COMMIT=$(git -C "${ROOT_DIR}" rev-parse --short "${EXPECTED_SOURCE_COMMIT}")
+else
+  INLINE_COMMIT=$(git -C "${ROOT_DIR}" rev-parse --short HEAD)
+fi
 
 if [[ ! -d "${APP_PATH}" ]]; then
   echo "Built app not found at ${APP_PATH}" >&2
@@ -292,17 +324,9 @@ else
   mv -f "${DMG_SOURCE}" "${DMG_PATH}"
 fi
 
-if [[ -z "${SKIP_NOTARIZE:-}" && "${PAUSE_BEFORE_NOTARIZE}" == "1" ]]; then
-  if [[ ! -t 0 ]]; then
-    echo "PAUSE_BEFORE_NOTARIZE=1 requires an interactive terminal." >&2
-    exit 1
-  fi
-  echo "Build/sign step complete. App is ready for local checks:"
-  echo "  App: ${APP_PATH}"
-  echo "  DMG: ${DMG_PATH}"
-  echo "Press Enter to continue with notarization, or Ctrl+C to stop here."
-  read -r
-fi
+echo "Build/sign step complete. App is ready for local checks:"
+echo "  App: ${APP_PATH}"
+echo "  DMG: ${DMG_PATH}"
 
 if [[ -z "${SKIP_NOTARIZE:-}" ]]; then
   echo "Starting notarization for DMG: ${DMG_PATH}"
@@ -402,6 +426,31 @@ print((status + " " + _id).strip())
   xcrun stapler staple "${DMG_PATH}"
   xcrun stapler staple "${APP_PATH}"
 fi
+
+verify_frozen_source
+APP_EXECUTABLE_SHA256=$(shasum -a 256 "${APP_PATH}/Contents/MacOS/Inline" | awk '{print $1}')
+DMG_SHA256=$(shasum -a 256 "${DMG_PATH}" | awk '{print $1}')
+DMG_SIZE=$(stat -f %z "${DMG_PATH}")
+mkdir -p "$(dirname "${ARTIFACT_PROVENANCE_PATH}")"
+python3 - "${ARTIFACT_PROVENANCE_PATH}" "${EXPECTED_SOURCE_COMMIT:-$(git -C "${ROOT_DIR}" rev-parse HEAD)}" "${BUILD_NUMBER}" "${SOURCE_WAS_CLEAN}" "${APP_EXECUTABLE_SHA256}" "${DMG_SIZE}" "${DMG_SHA256}" <<'PY'
+import json
+import sys
+
+path, source_commit, source_build, source_clean, app_sha256, dmg_size, dmg_sha256 = sys.argv[1:]
+payload = {
+    "schemaVersion": 1,
+    "sourceCommit": source_commit,
+    "sourceBuild": source_build,
+    "sourceClean": source_clean == "1",
+    "appExecutableSha256": app_sha256,
+    "dmgSize": int(dmg_size),
+    "dmgSha256": dmg_sha256,
+}
+with open(path, "w", encoding="utf-8") as file:
+    json.dump(payload, file, indent=2)
+    file.write("\n")
+PY
+echo "Artifact provenance: ${ARTIFACT_PROVENANCE_PATH}"
 
 echo "Built app: ${APP_PATH}"
 echo "DMG: ${DMG_PATH}"

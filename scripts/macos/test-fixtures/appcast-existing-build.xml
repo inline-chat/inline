@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Inline macOS (tip)</title>
+    <item>
+      <title>Inline 1.2.3</title>
+      <sparkle:version> 4766 </sparkle:version>
+      <sparkle:shortVersionString>1.2.3</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.2</sparkle:minimumSystemVersion>
+      <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+      <enclosure url="https://updates.invalid/4766/original.dmg" sparkle:edSignature="fixture" length="123" />
+    </item>
+  </channel>
+</rss>

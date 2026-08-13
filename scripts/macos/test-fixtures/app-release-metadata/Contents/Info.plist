@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleVersion</key>
+  <string>4766</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.2.3</string>
+  <key>InlineCommit</key>
+  <string>abc1234</string>
+  <key>SUFeedURL</key>
+  <string>https://updates.invalid/mac/tip/appcast.xml</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>15.2</string>
+</dict>
+</plist>

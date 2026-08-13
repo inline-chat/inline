@@ -1,7 +1,9 @@
 import { spawnSync } from "bun";
-import { appendFileSync, mkdirSync, rmSync, writeFileSync, existsSync } from "fs";
-import { basename, resolve } from "path";
+import { createHash, randomUUID } from "node:crypto";
+import { appendFileSync, existsSync, mkdirSync, realpathSync, readFileSync, rmdirSync, rmSync, unlinkSync, writeFileSync } from "fs";
+import { basename, dirname, resolve } from "path";
 import { createInterface } from "node:readline";
+import { readBuiltAppMetadata, readDmgAppMetadata, metadataMismatches, type BuiltAppMetadata } from "./app-release-metadata";
 
 const sparkleVersion = "2.9.3";
 const macosReleaseArch = "arm64";
@@ -31,11 +33,13 @@ type ReleaseOptions = {
   skip: Set<string>;
   fromTask: string;
   dryRun: boolean;
-  pauseBeforeNotarize: boolean;
   rollback: boolean;
   rollbackToBuild: string;
   rollbackStepsBack: number;
   dropBuild: string;
+  createNewAppcast: boolean;
+  sourceCommit: string;
+  sourceBuild: string;
 };
 
 type ParsedArgs = Omit<ReleaseOptions, "channel" | "releaseTag"> & {
@@ -57,20 +61,13 @@ type PruneMetadata = {
   remainingBuilds: string[];
 };
 
-type BuiltAppMetadata = {
-  infoPlist: string;
-  buildNumber: string;
-  version: string;
-  commit: string;
-  feedUrl: string;
-};
-
 type ReleaseContext = ReleaseOptions & {
   rootDir: string;
   tempDir: string;
   signingKeyPath: string;
   signUpdatePath: string;
   appcastPath: string;
+  appcastHeadersPath: string;
   appcastOutputPath: string;
   rollbackMetaPath: string;
   pruneMetaPath: string;
@@ -82,6 +79,7 @@ type ReleaseContext = ReleaseOptions & {
   baseUrl: string;
   dmgUrl: string;
   appcastUrl: string;
+  minimumSystemVersion: string;
   rollbackSelectedBuild: string;
   rollbackSelectedUrl: string;
   rollbackRemovedBuilds: string[];
@@ -89,7 +87,33 @@ type ReleaseContext = ReleaseOptions & {
   pruneDroppedUrl: string;
   pruneLatestBuild: string;
   pruneLatestUrl: string;
+  sourceCommitShort: string;
+  dmgSize: number;
+  dmgSha256: string;
+  provenancePath: string;
+  appcastExpectedEtag: string;
+  appcastExpectAbsent: boolean;
+  channelLockToken: string;
 };
+
+type HeldLock = {
+  path: string;
+  token: string;
+};
+
+type AppcastFetchDecision = "use-existing" | "create-new";
+
+type ArtifactProvenance = {
+  schemaVersion: 1;
+  sourceCommit: string;
+  sourceBuild: string;
+  sourceClean: boolean;
+  appExecutableSha256: string;
+  dmgSize: number;
+  dmgSha256: string;
+};
+
+let activeSubprocess: ReturnType<typeof Bun.spawn> | undefined;
 
 function usage(): string {
   return [
@@ -97,13 +121,13 @@ function usage(): string {
     "",
     "Options:",
     "  --channel stable|beta|tip        Update channel (default: beta; prompts if omitted in an interactive terminal)",
-    "  --derived-data <path>            Xcode derived data (default: unique <root>/build/InlineMacDirect/release-*)",
+    "  --derived-data <path>            Xcode DerivedData (default: target of <root>/build/InlineMacDirect/reusable)",
     "  --app-path <path>                App path (default: <derived-data>/Build/Products/Release/Inline.app)",
-    "  --dmg-path <path>                DMG path (default: <root>/build/macos-direct/Inline.dmg)",
+    "  --dmg-path <path>                DMG path (default: unique <root>/build/macos-direct/release-*/Inline.dmg)",
     `  --sparkle-dir <path>             Sparkle tools dir (default: <root>/.action/sparkle/${sparkleVersion})`,
     "  --release-tag <tag>              Attach DMG to GitHub release/tag (default: selected channel name)",
     "  --skip-github-release            Skip GitHub release/tag steps",
-    "  --allow-dirty                    Allow a stable build from a dirty worktree",
+    "  --allow-dirty                    Allow only a local non-publishing build from dirty source",
     "  --from <id>                      Resume from a task id without rerunning earlier steps (preflight still runs)",
     "  --skip <ids>                     Skip steps (comma-separated or repeatable)",
     "                                  Known ids: build, upload-sentry-dsyms, post-check, upload-dmg, verify-dmg, gen-appcast, validate-appcast, upload-appcast, github",
@@ -112,7 +136,9 @@ function usage(): string {
     "  --rollback-to-build <build>      Target build to restore (default: previous appcast item)",
     "  --rollback-steps-back <n>        Pick the Nth previous appcast item (default: 1)",
     "  --drop-build <build>             Remove one non-latest build from the live appcast and republish it",
-    "  --pause-before-notarize          Pause after app/DMG build so you can test locally, then continue notarization",
+    "  --create-new-appcast              Allow an absent feed only for an explicit first publication",
+    "  --source-commit <sha>              Frozen source commit (printed automatically in resume commands)",
+    "  --source-build <build>             Frozen source build number (printed automatically in resume commands)",
     "  --upload-sentry-dsyms            Upload dSYMs to Sentry (disabled by default while the upload flow is broken)",
     "  --dry-run                         Print what would run, without executing the pipeline",
     "  --skip-build                      Alias for --skip build",
@@ -120,8 +146,9 @@ function usage(): string {
     "",
     "Notes:",
     "  - This script intentionally does not auto-load scripts/.env. Export env vars in your shell.",
-    "  - Skipped steps stay visible in the TUI as disabled, so you can see the full pipeline at a glance.",
+    "  - Skipped steps stay visible in the append-only summary.",
     "  - --rollback only republishes appcast.xml; it does not rebuild or downgrade already-installed builds.",
+    "  - Existing appcast fetch/parse failures stop the release unless --create-new-appcast sees an actual 404.",
   ].join("\n");
 }
 
@@ -132,9 +159,9 @@ function die(message: string): never {
 
 function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   let channel: ReleaseChannel | undefined;
-  let derivedData = resolve(rootDir, "build/InlineMacDirect", `release-${nowIsoCompact()}-${Math.random().toString(16).slice(2, 8)}`);
+  let derivedData = defaultDerivedDataPath(rootDir);
   let appPath = "";
-  let dmgPath = resolve(rootDir, "build/macos-direct/Inline.dmg");
+  let dmgPath = resolve(rootDir, "build/macos-direct", `release-${nowIsoCompact()}-${Math.random().toString(16).slice(2, 8)}`, "Inline.dmg");
   let sparkleDir = resolve(rootDir, ".action/sparkle", sparkleVersion);
   let releaseTag: string | undefined;
   let skipGithubRelease = false;
@@ -142,12 +169,14 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   const skip = new Set<string>();
   let fromTask = "";
   let dryRun = false;
-  let pauseBeforeNotarize = false;
   let rollback = false;
   let rollbackToBuild = "";
   let rollbackStepsBack = 1;
   let dropBuild = "";
   let uploadSentryDsyms = false;
+  let createNewAppcast = false;
+  let sourceCommit = "";
+  let sourceBuild = "";
 
   const resolveFromRoot = (p: string): string => {
     if (!p) return p;
@@ -229,12 +258,24 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
       i++;
       continue;
     }
-    if (arg === "--dry-run") {
-      dryRun = true;
+    if (arg === "--create-new-appcast") {
+      createNewAppcast = true;
       continue;
     }
-    if (arg === "--pause-before-notarize") {
-      pauseBeforeNotarize = true;
+    if (arg === "--source-commit") {
+      sourceCommit = eat(i).trim();
+      if (!sourceCommit) die(`Missing value for ${arg}`);
+      i++;
+      continue;
+    }
+    if (arg === "--source-build") {
+      sourceBuild = eat(i).trim();
+      if (!/^\d+$/.test(sourceBuild)) die(`Invalid --source-build: ${sourceBuild}`);
+      i++;
+      continue;
+    }
+    if (arg === "--dry-run") {
+      dryRun = true;
       continue;
     }
     if (arg === "--upload-sentry-dsyms") {
@@ -264,6 +305,12 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   if (!appPath) {
     appPath = resolve(derivedData, "Build/Products/Release/Inline.app");
   }
+  if (derivedData === resolve("/")) {
+    die("Refusing to use the filesystem root as --derived-data. Re-run without the malformed path argument.");
+  }
+  if (appPath === resolve("/Build/Products/Release/Inline.app")) {
+    die("Refusing malformed --app-path /Build/Products/Release/Inline.app. Re-run without the malformed path argument.");
+  }
   if (rollback && uploadSentryDsyms) {
     die("--upload-sentry-dsyms is not supported with --rollback.");
   }
@@ -291,9 +338,6 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   if (rollback && skip.size > 0) {
     die("--skip is not supported with --rollback.");
   }
-  if (rollback && pauseBeforeNotarize) {
-    die("--pause-before-notarize is not supported with --rollback.");
-  }
   if (rollback && releaseTag) {
     die("--release-tag is not supported with --rollback.");
   }
@@ -306,9 +350,6 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   if (dropBuild && skip.size > 0) {
     die("--skip is not supported with --drop-build.");
   }
-  if (dropBuild && pauseBeforeNotarize) {
-    die("--pause-before-notarize is not supported with --drop-build.");
-  }
   if (dropBuild && releaseTag) {
     die("--release-tag is not supported with --drop-build.");
   }
@@ -318,7 +359,12 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   if (dropBuild && allowDirty) {
     die("--allow-dirty is only useful for builds and is not supported with --drop-build.");
   }
-
+  if ((rollback || dropBuild) && createNewAppcast) {
+    die("--create-new-appcast is only supported for a normal release.");
+  }
+  if ((rollback || dropBuild) && (sourceCommit || sourceBuild)) {
+    die("--source-commit and --source-build are only supported for a normal release.");
+  }
   return {
     channel,
     derivedData,
@@ -331,11 +377,13 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
     skip,
     fromTask,
     dryRun,
-    pauseBeforeNotarize,
     rollback,
     rollbackToBuild,
     rollbackStepsBack,
     dropBuild,
+    createNewAppcast,
+    sourceCommit,
+    sourceBuild,
   };
 }
 
@@ -350,6 +398,17 @@ function commandExists(cmd: string): boolean {
   return res.exitCode === 0;
 }
 
+function activeXcodebuildForDerivedData(derivedData: string): string {
+  if (!commandExists("pgrep")) return "";
+  const result = spawnSync({ cmd: ["pgrep", "-afil", "xcodebuild"], stdout: "pipe", stderr: "pipe" });
+  if (result.exitCode !== 0) return "";
+  return new TextDecoder()
+    .decode(result.stdout)
+    .split("\n")
+    .find((line) => line.includes(`-derivedDataPath ${derivedData}`))
+    ?.trim() ?? "";
+}
+
 function trimTrailingSlash(s: string): string {
   return s.replace(/\/+$/g, "");
 }
@@ -360,15 +419,141 @@ function nowIsoCompact(): string {
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 
-function readPlistString(plistPath: string, key: string): string {
-  const res = spawnSync({
-    cmd: ["/usr/libexec/PlistBuddy", "-c", `Print :${key}`, plistPath],
+function defaultDerivedDataPath(rootDir: string): string {
+  const reusablePath = resolve(rootDir, "build/InlineMacDirect/reusable");
+  return existsSync(reusablePath) ? realpathSync(reusablePath) : reusablePath;
+}
+
+function sha256File(path: string): string {
+  const result = spawnSync({ cmd: ["shasum", "-a", "256", path], stdout: "pipe", stderr: "pipe" });
+  if (result.exitCode !== 0) {
+    throw new Error(`Unable to hash ${path}: ${new TextDecoder().decode(result.stderr).trim()}`);
+  }
+  const digest = new TextDecoder().decode(result.stdout).trim().split(/\s+/, 1)[0] ?? "";
+  if (!/^[0-9a-f]{64}$/.test(digest)) throw new Error(`Invalid SHA-256 output for ${path}`);
+  return digest;
+}
+
+function pathLockName(prefix: string, path: string): string {
+  const canonicalPath = existsSync(path) ? realpathSync(path) : resolve(path);
+  return `${prefix}-${createHash("sha256").update(canonicalPath).digest("hex").slice(0, 16)}.lockdir`;
+}
+
+function acquireLock(lockRoot: string, name: string, details: Record<string, unknown>): HeldLock {
+  mkdirSync(lockRoot, { recursive: true });
+  const path = resolve(lockRoot, name);
+  const token = randomUUID();
+  try {
+    mkdirSync(path, { mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    const ownerPath = resolve(path, "owner.json");
+    let owner = "";
+    if (existsSync(ownerPath)) {
+      try {
+        const details = JSON.parse(readFileSync(ownerPath, "utf8")) as Record<string, unknown>;
+        delete details.token;
+        owner = JSON.stringify(details);
+      } catch {
+        owner = "unreadable owner record";
+      }
+    }
+    const suffix = owner ? `\nCurrent owner: ${owner}` : "";
+    throw new Error(`Release lock is already held: ${path}${suffix}\nIf no listed process is alive, inspect and remove this exact stale lock before retrying.`);
+  }
+  try {
+    writeFileSync(resolve(path, "owner.json"), `${JSON.stringify({ token, pid: process.pid, startedAt: new Date().toISOString(), ...details })}\n`, { mode: 0o600 });
+  } catch (error) {
+    try {
+      rmdirSync(path);
+    } catch {
+      // Preserve the original owner-record failure.
+    }
+    throw error;
+  }
+  return { path, token };
+}
+
+function releaseLock(lock: HeldLock): void {
+  try {
+    const ownerPath = resolve(lock.path, "owner.json");
+    const owner = JSON.parse(readFileSync(ownerPath, "utf8")) as { token?: string };
+    if (owner.token === lock.token) {
+      unlinkSync(ownerPath);
+      rmdirSync(lock.path);
+    }
+  } catch {
+    // A missing or foreign lock is never removed.
+  }
+}
+
+export function decideAppcastFetch(
+  exitCode: number,
+  httpStatus: number,
+  createNewAppcast: boolean,
+): AppcastFetchDecision {
+  if (exitCode !== 0) {
+    throw new Error(`Unable to fetch the existing appcast (curl exit ${exitCode}, HTTP ${httpStatus || "unknown"}). Refusing to replace feed history.`);
+  }
+  if (exitCode === 0 && httpStatus === 200) {
+    if (createNewAppcast) {
+      throw new Error("--create-new-appcast was passed, but the channel appcast already exists.");
+    }
+    return "use-existing";
+  }
+  if (httpStatus === 404 && createNewAppcast) return "create-new";
+  if (httpStatus === 404) {
+    throw new Error("Channel appcast does not exist. Pass --create-new-appcast only for an intentional first publication.");
+  }
+  throw new Error(`Unable to fetch the existing appcast (curl exit ${exitCode}, HTTP ${httpStatus || "unknown"}). Refusing to replace feed history.`);
+}
+
+export function safeResumeTask(taskId: string, operation: "release" | "rollback" | "drop-build"): string {
+  if (operation !== "release") return taskId === "preflight" ? "preflight" : "fetch-appcast";
+  if (["upload-dmg", "verify-dmg", "gen-appcast", "validate-appcast", "upload-appcast", "github"].includes(taskId)) {
+    return "post-check";
+  }
+  return taskId;
+}
+
+function lastHttpHeader(path: string, name: string): string {
+  if (!existsSync(path)) return "";
+  const prefix = `${name.toLowerCase()}:`;
+  let value = "";
+  for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
+    if (line.toLowerCase().startsWith(prefix)) value = line.slice(prefix.length).trim();
+  }
+  return value;
+}
+
+function fetchExistingAppcast(ctx: ReleaseContext, ui: Ui): AppcastFetchDecision {
+  const result = spawnSync({
+    cmd: ["curl", "-sS", "-L", "-D", ctx.appcastHeadersPath, "-o", ctx.appcastPath, "-w", "%{http_code}", ctx.appcastUrl],
     stdout: "pipe",
     stderr: "pipe",
   });
-  if (res.exitCode !== 0) return "";
-  return new TextDecoder().decode(res.stdout).trim();
+  const status = Number.parseInt(new TextDecoder().decode(result.stdout).trim(), 10) || 0;
+  const decision = decideAppcastFetch(result.exitCode, status, ctx.createNewAppcast);
+  if (decision === "create-new") {
+    ctx.appcastExpectedEtag = "";
+    ctx.appcastExpectAbsent = true;
+    try {
+      rmSync(ctx.appcastPath, { force: true });
+    } catch {
+      // A 404 normally leaves no output file.
+    }
+    ui.info(`Confirmed ${ctx.appcastUrl} is absent (HTTP 404); creating the first feed because --create-new-appcast was passed.`);
+  } else {
+    ctx.appcastExpectedEtag = lastHttpHeader(ctx.appcastHeadersPath, "etag");
+    ctx.appcastExpectAbsent = false;
+    if (!ctx.appcastExpectedEtag) {
+      throw new Error(`Existing appcast response did not include an ETag. Refusing an unconditional update of ${ctx.appcastUrl}.`);
+    }
+    ui.detail("Existing appcast", ctx.appcastUrl);
+  }
+  return decision;
 }
+
 
 function git(rootDir: string, args: string[]): string {
   const res = spawnSync({ cmd: ["git", "-C", rootDir, ...args], stdout: "pipe", stderr: "pipe" });
@@ -389,31 +574,10 @@ function defaultAppcastUrl(ctx: ReleaseContext): string {
   return `${baseUrl}/mac/${ctx.channel}/appcast.xml`;
 }
 
-function readBuiltAppMetadata(ctx: ReleaseContext): BuiltAppMetadata {
-  if (!existsSync(ctx.appPath)) throw new Error(`App not found at ${ctx.appPath}`);
-  const infoPlist = resolve(ctx.appPath, "Contents/Info.plist");
-  const buildNumber = readPlistString(infoPlist, "CFBundleVersion");
-  const version = readPlistString(infoPlist, "CFBundleShortVersionString");
-  const commit = readPlistString(infoPlist, "InlineCommit");
-  const feedUrl = readPlistString(infoPlist, "SUFeedURL");
-
-  const missing = [
-    ["CFBundleVersion", buildNumber],
-    ["CFBundleShortVersionString", version],
-    ["InlineCommit", commit],
-    ["SUFeedURL", feedUrl],
-  ].flatMap(([key, value]) => (value ? [] : [key]));
-  if (missing.length) {
-    throw new Error(`Built app metadata missing in ${infoPlist}: ${missing.join(", ")}`);
-  }
-
-  return { infoPlist, buildNumber, version, commit, feedUrl };
-}
-
 function verifyBuiltAppMetadata(ctx: ReleaseContext, ui: Ui): BuiltAppMetadata {
-  const metadata = readBuiltAppMetadata(ctx);
-  const expectedBuild = git(ctx.rootDir, ["rev-list", "--count", "HEAD"]);
-  const expectedCommit = git(ctx.rootDir, ["rev-parse", "--short", "HEAD"]);
+  const metadata = readBuiltAppMetadata(ctx.appPath);
+  const expectedBuild = ctx.sourceBuild;
+  const expectedCommit = ctx.sourceCommitShort;
   const expectedFeedUrl = defaultAppcastUrl(ctx);
   const mismatches: string[] = [];
 
@@ -438,14 +602,52 @@ function verifyBuiltAppMetadata(ctx: ReleaseContext, ui: Ui): BuiltAppMetadata {
   ctx.buildNumber = metadata.buildNumber;
   ctx.version = metadata.version;
   ctx.commit = metadata.commit;
-  ctx.commitLong = git(ctx.rootDir, ["rev-parse", "HEAD"]);
+  ctx.commitLong = ctx.sourceCommit;
   ctx.appcastUrl = expectedFeedUrl;
-  ui.info(`Verified app metadata: build ${ctx.buildNumber}, commit ${ctx.commit}, feed ${ctx.appcastUrl}`);
+  ctx.minimumSystemVersion = metadata.minimumSystemVersion;
+  ui.info(`Verified app metadata: build ${ctx.buildNumber}, minimum macOS ${ctx.minimumSystemVersion}, commit ${ctx.commit}, feed ${ctx.appcastUrl}`);
   return metadata;
 }
 
-function stableReleaseNeedsCleanWorktree(opts: ReleaseOptions): boolean {
-  return !opts.rollback && !opts.dropBuild && opts.channel === "stable";
+function verifyArtifactIdentity(ctx: ReleaseContext, ui: Ui): BuiltAppMetadata {
+  const appMetadata = verifyBuiltAppMetadata(ctx, ui);
+  const dmgMetadata = readDmgAppMetadata(ctx.dmgPath);
+  const mismatches = metadataMismatches(appMetadata, dmgMetadata);
+  if (mismatches.length) {
+    throw new Error(`DMG app does not match ${ctx.appPath}:\n- ${mismatches.join("\n- ")}`);
+  }
+  const stat = Bun.file(ctx.dmgPath);
+  ctx.dmgSize = stat.size;
+  ctx.dmgSha256 = sha256File(ctx.dmgPath);
+  if (publicMutationEnabled(ctx)) {
+    if (!existsSync(ctx.provenancePath)) {
+      throw new Error(`Clean-source artifact provenance not found at ${ctx.provenancePath}. Resume from build; public steps cannot publish an unbound artifact.`);
+    }
+    const provenance = JSON.parse(readFileSync(ctx.provenancePath, "utf8")) as ArtifactProvenance;
+    const executableSha256 = sha256File(resolve(ctx.appPath, "Contents/MacOS/Inline"));
+    const provenanceMismatches = [
+      provenance.schemaVersion === 1 ? "" : `schemaVersion ${provenance.schemaVersion}`,
+      provenance.sourceClean ? "" : "source was dirty",
+      provenance.sourceCommit === ctx.sourceCommit ? "" : `sourceCommit ${provenance.sourceCommit}`,
+      provenance.sourceBuild === ctx.sourceBuild ? "" : `sourceBuild ${provenance.sourceBuild}`,
+      provenance.appExecutableSha256 === executableSha256 ? "" : `app executable sha256 ${provenance.appExecutableSha256}`,
+      provenance.dmgSize === ctx.dmgSize ? "" : `DMG size ${provenance.dmgSize}`,
+      provenance.dmgSha256 === ctx.dmgSha256 ? "" : `DMG sha256 ${provenance.dmgSha256}`,
+    ].filter(Boolean);
+    if (provenanceMismatches.length) {
+      throw new Error(`Artifact provenance mismatch in ${ctx.provenancePath}:\n- ${provenanceMismatches.join("\n- ")}`);
+    }
+  }
+  ui.detail("Artifact identity", `build ${appMetadata.buildNumber}, ${ctx.dmgSize} bytes, sha256 ${ctx.dmgSha256}`);
+  return appMetadata;
+}
+
+function assertFrozenSource(ctx: ReleaseContext): void {
+  const currentCommit = git(ctx.rootDir, ["rev-parse", "HEAD"]);
+  const currentBuild = git(ctx.rootDir, ["rev-list", "--count", "HEAD"]);
+  if (currentCommit !== ctx.sourceCommit || currentBuild !== ctx.sourceBuild) {
+    throw new Error(`Source changed during release. Frozen ${ctx.sourceCommit} (build ${ctx.sourceBuild}); current ${currentCommit || "unknown"} (build ${currentBuild || "unknown"}).`);
+  }
 }
 
 function writeReleaseHistory(ctx: ReleaseContext, action: "release" | "rollback" | "drop-build", ui: Ui) {
@@ -462,10 +664,15 @@ function writeReleaseHistory(ctx: ReleaseContext, action: "release" | "rollback"
     commitLong: ctx.commitLong || undefined,
     dmgUrl: ctx.dmgUrl || undefined,
     appcastUrl: ctx.appcastUrl || undefined,
+    minimumSystemVersion: ctx.minimumSystemVersion || undefined,
     releaseTag: ctx.releaseTag || undefined,
     appPath: ctx.appPath,
     dmgPath: ctx.dmgPath,
+    provenancePath: ctx.provenancePath,
     derivedData: ctx.derivedData,
+    sourceState: ctx.allowDirty && !publicMutationEnabled(ctx) ? "local-dirty-allowed" : "clean",
+    dmgSize: ctx.dmgSize || undefined,
+    dmgSha256: ctx.dmgSha256 || undefined,
     rollback: ctx.rollback
       ? {
           selectedBuild: ctx.rollbackSelectedBuild,
@@ -512,12 +719,12 @@ async function promptPickChannel(): Promise<ReleaseChannel> {
 }
 
 function ansiStrip(s: string): string {
-  return s.replace(/\x1b\[[0-9;]*m/g, "");
+  const escape = String.fromCharCode(27);
+  return s.replace(new RegExp(`${escape}\\[[0-9;]*m`, "g"), "");
 }
 
 const color = {
   reset: "\x1b[0m",
-  dim: "\x1b[2m",
   bold: "\x1b[1m",
   red: "\x1b[31m",
   green: "\x1b[32m",
@@ -527,18 +734,11 @@ const color = {
 };
 
 class Ui {
-  private frame = 0;
-  private lastRenderAt = 0;
   private currentTaskId = "";
-  private currentLog: string[] = [];
-  private lastError = "";
   private tasks: Array<{ id: string; title: string; status: TaskStatus; note?: string }> = [];
-  private ticker: Timer | null = null;
-  private hintLine = "";
+  private taskStartedAt = new Map<string, number>();
   private logPath = "";
   private logWriteFailed = false;
-
-  constructor(private readonly interactive: boolean) {}
 
   setLogPath(logPath: string) {
     this.logPath = logPath;
@@ -547,7 +747,6 @@ class Ui {
       this.logPath,
       [`Inline macOS Release`, `Started: ${new Date().toISOString()}`, ``, ``].join("\n"),
     );
-    this.render(true);
   }
 
   getLogPath(): string {
@@ -555,8 +754,18 @@ class Ui {
   }
 
   setHintLine(hint: string) {
-    this.hintLine = hint;
-    this.render(true);
+    console.log(`${color.bold}Inline macOS Release${color.reset}`);
+    console.log(`${color.gray}${hint}${color.reset}`);
+    this.appendLogLine(hint);
+  }
+
+  showLogFiles(files: Array<{ label: string; path: string }>) {
+    console.log(`${color.gray}Detailed logs:${color.reset}`);
+    for (const file of files) {
+      console.log(`${color.gray}  ${file.label}: ${file.path}${color.reset}`);
+      this.appendLogLine(`Log (${file.label}): ${file.path}`);
+    }
+    console.log("");
   }
 
   init(tasks: Task[]) {
@@ -566,64 +775,65 @@ class Ui {
       status: t.enabled ? "pending" : "skipped",
       note: !t.enabled ? t.skipReason : undefined,
     }));
-    this.render(true);
+    this.appendLogLine(`Pipeline: ${this.tasks.map((task) => `${task.id}=${task.status}`).join(", ")}`);
   }
 
   setRunning(taskId: string) {
     this.currentTaskId = taskId;
-    this.currentLog = [];
-    this.lastError = "";
+    this.taskStartedAt.set(taskId, Date.now());
     this.appendLogLine(`==> ${this.taskLabel(taskId)}`);
     this.setStatus(taskId, "running");
-    this.startTicker();
+    console.log(`${color.blue}→${color.reset} ${this.taskLabel(taskId)}`);
   }
 
   setSkipped(taskId: string, reason?: string) {
     this.appendLogLine(`-- skipped ${this.taskLabel(taskId)}${reason ? ` (${reason})` : ""}`);
     this.setStatus(taskId, "skipped", reason);
-    this.stopTicker();
+    console.log(`${color.gray}– ${this.taskLabel(taskId)}${reason ? ` (${reason})` : ""}${color.reset}`);
+    if (this.currentTaskId === taskId) this.currentTaskId = "";
   }
 
   setSuccess(taskId: string, note?: string) {
     this.appendLogLine(`-- ok ${this.taskLabel(taskId)}${note ? ` (${note})` : ""}`);
     this.setStatus(taskId, "success", note);
-    this.stopTicker();
+    const suffix = [this.elapsedSuffix(taskId), note].filter(Boolean).join(", ");
+    console.log(`${color.green}✓${color.reset} ${this.taskLabel(taskId)}${suffix ? ` ${color.gray}(${suffix})${color.reset}` : ""}`);
+    if (this.currentTaskId === taskId) this.currentTaskId = "";
   }
 
   setFailed(taskId: string, message: string) {
-    this.lastError = message;
     this.appendLogLine(`-- failed ${this.taskLabel(taskId)}: ${message}`);
     this.setStatus(taskId, "failed");
-    this.stopTicker();
+    const elapsed = this.elapsedSuffix(taskId);
+    console.error(`${color.red}✗ ${this.taskLabel(taskId)}${elapsed ? ` (${elapsed})` : ""}${color.reset}`);
+    console.error(`${color.red}  ${message}${color.reset}`);
+    if (this.currentTaskId === taskId) this.currentTaskId = "";
   }
 
   log(line: string) {
     const cleaned = ansiStrip(line).replace(/\r/g, "").trimEnd();
     if (!cleaned) return;
     this.appendLogLine(cleaned);
-    this.currentLog.push(cleaned);
-    if (this.currentLog.length > 200) this.currentLog.splice(0, this.currentLog.length - 200);
-    this.render(false);
   }
 
   info(line: string) {
     const cleaned = ansiStrip(line).replace(/\r/g, "").trimEnd();
     if (!cleaned) return;
-    if (this.interactive) this.log(cleaned);
-    else {
-      this.appendLogLine(cleaned);
-      console.log(cleaned);
-    }
+    this.appendLogLine(cleaned);
+    console.log(`  ${cleaned}`);
   }
 
   error(line: string) {
     const cleaned = ansiStrip(line).replace(/\r/g, "").trimEnd();
     if (!cleaned) return;
-    if (this.interactive) this.log(cleaned);
-    else {
-      this.appendLogLine(cleaned);
-      console.error(cleaned);
-    }
+    this.appendLogLine(cleaned);
+    console.error(`${color.red}  ${cleaned}${color.reset}`);
+  }
+
+  detail(label: string, value: string) {
+    const line = `${label}: ${value}`;
+    this.appendLogLine(`-- ${line}`);
+    console.log(`  ${color.gray}${label}:${color.reset} ${value}`);
   }
 
   private appendLogLine(line: string) {
@@ -633,7 +843,7 @@ class Ui {
     } catch (err) {
       this.logWriteFailed = true;
       const msg = err instanceof Error ? err.message : String(err);
-      if (!this.interactive) console.error(`Could not write release log ${this.logPath}: ${msg}`);
+      console.error(`Could not write release log ${this.logPath}: ${msg}`);
     }
   }
 
@@ -648,95 +858,72 @@ class Ui {
       t.status = status;
       if (note) t.note = note;
     }
-    this.render(true);
   }
 
-  private statusBadge(status: TaskStatus): string {
-    switch (status) {
-      case "pending":
-        return `${color.gray}[TODO]${color.reset}`;
-      case "running": {
-        const sp = ["|", "/", "-", "\\"][this.frame % 4];
-        return `${color.blue}[ ${sp} ]${color.reset}`;
-      }
-      case "success":
-        return `${color.green}[ OK ]${color.reset}`;
-      case "failed":
-        return `${color.red}[FAIL]${color.reset}`;
-      case "skipped":
-        return `${color.gray}[SKIP]${color.reset}`;
-    }
-  }
-
-  private render(force: boolean) {
-    if (!this.interactive) return;
-    const now = Date.now();
-    if (!force && now - this.lastRenderAt < 60) return;
-    this.lastRenderAt = now;
-    this.frame++;
-
-    const lines: string[] = [];
-    lines.push(`${color.bold}Inline macOS Release${color.reset}`);
-    if (this.hintLine) lines.push(`${color.gray}${this.hintLine}${color.reset}`);
-    if (this.logPath) lines.push(`${color.gray}Log: ${this.logPath}${color.reset}`);
-    lines.push(`${color.gray}Press Ctrl+C to cancel.${color.reset}`);
-    lines.push("");
-
-    for (const t of this.tasks) {
-      const badge = this.statusBadge(t.status);
-      const isCurrent = t.id === this.currentTaskId && t.status === "running";
-      const title = isCurrent ? `${color.bold}${t.title}${color.reset}` : t.title;
-      const note = t.note ? ` ${color.gray}(${t.note})${color.reset}` : "";
-      lines.push(`${badge} ${title}${note}`);
-    }
-
-    const tail = this.currentLog.slice(-10);
-    lines.push("");
-    lines.push(`${color.bold}Logs${color.reset} ${color.gray}(latest)${color.reset}`);
-    if (tail.length === 0) {
-      lines.push(`${color.gray}${color.dim}(no output yet)${color.reset}`);
-    } else {
-      for (const l of tail) lines.push(`${color.gray}${l}${color.reset}`);
-    }
-
-    if (this.lastError) {
-      lines.push("");
-      lines.push(`${color.red}${color.bold}Error${color.reset}`);
-      lines.push(`${color.red}${this.lastError}${color.reset}`);
-    }
-
-    // Clear screen + move cursor to top-left.
-    process.stdout.write("\x1b[2J\x1b[H" + lines.join("\n") + "\n");
+  private elapsedSuffix(taskId: string): string {
+    const startedAt = this.taskStartedAt.get(taskId);
+    return startedAt ? formatElapsed(Date.now() - startedAt) : "";
   }
 
   getCurrentTaskId(): string {
     return this.currentTaskId;
   }
+}
 
-  private startTicker() {
-    if (!this.interactive) return;
-    if (this.ticker) return;
-    this.ticker = setInterval(() => this.render(false), 120);
-  }
+function formatElapsed(durationMs: number): string {
+  const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}
 
-  private stopTicker() {
-    if (!this.ticker) return;
-    clearInterval(this.ticker);
-    this.ticker = null;
+function readConfiguredMarketingVersion(rootDir: string, ui: Ui): string {
+  if (!commandExists("xcodebuild")) return "";
+  const result = spawnSync({
+    cmd: [
+      "xcodebuild",
+      "-project",
+      resolve(rootDir, "apple/Inline.xcodeproj"),
+      "-scheme",
+      "Inline (macOS)",
+      "-configuration",
+      "Release",
+      "-showBuildSettings",
+    ],
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const stdout = new TextDecoder().decode(result.stdout);
+  const stderr = new TextDecoder().decode(result.stderr);
+  for (const line of `${stdout}\n${stderr}`.split("\n")) {
+    if (line.trim()) ui.log(`[version] ${line}`);
   }
+  if (result.exitCode !== 0) return "";
+  return stdout.match(/^\s*MARKETING_VERSION = (.+)$/m)?.[1]?.trim() ?? "";
 }
 
 async function runStreaming(
   ui: Ui,
   cmd: string[],
-  opts: { cwd: string; env?: Record<string, string> },
+  opts: { cwd: string; env?: Record<string, string>; onLine?: (line: string) => void },
 ): Promise<void> {
+  const recentLines: string[] = [];
+  let lastErrorLine = "";
   const proc = Bun.spawn(cmd, {
     cwd: opts.cwd,
-    env: { ...process.env, ...(opts.env ?? {}) },
+    env: { ...process.env, ...opts.env },
+    stdin: "inherit",
     stdout: "pipe",
     stderr: "pipe",
   });
+  activeSubprocess = proc;
+
+  const recordLine = (line: string) => {
+    const cleaned = ansiStrip(line).trim();
+    recentLines.push(cleaned);
+    if (/\berror:/i.test(cleaned)) lastErrorLine = cleaned;
+    if (recentLines.length > 200) recentLines.splice(0, recentLines.length - 200);
+  };
 
   const forward = async (stream: ReadableStream<Uint8Array> | null, prefix: string) => {
     if (!stream) return;
@@ -751,16 +938,32 @@ async function runStreaming(
       while ((idx = buf.indexOf("\n")) !== -1) {
         const line = buf.slice(0, idx);
         buf = buf.slice(idx + 1);
+        recordLine(prefix + line);
         ui.log(prefix + line);
+        opts.onLine?.(prefix + line);
       }
     }
-    if (buf.trim().length) ui.log(prefix + buf);
+    if (buf.trim().length) {
+      recordLine(prefix + buf);
+      ui.log(prefix + buf);
+      opts.onLine?.(prefix + buf);
+    }
   };
 
-  await Promise.all([forward(proc.stdout, ""), forward(proc.stderr, "")]);
-  const exitCode = await proc.exited;
+  let exitCode: number;
+  try {
+    await Promise.all([forward(proc.stdout, ""), forward(proc.stderr, "")]);
+    exitCode = await proc.exited;
+  } finally {
+    if (activeSubprocess === proc) activeSubprocess = undefined;
+  }
   if (exitCode !== 0) {
-    throw new Error(`Command failed (${exitCode}): ${cmd.map((c) => (c.includes(" ") ? JSON.stringify(c) : c)).join(" ")}`);
+    const usefulLine = lastErrorLine || [...recentLines]
+      .reverse()
+      .find((line) => !line.endsWith(":") && line !== "** BUILD FAILED **" && /(error|failed|requires|not found|does not|invalid|timed out|denied|read.only|can.?t save)/i.test(line));
+    throw new Error(
+      `Command failed (${exitCode}): ${cmd.map((c) => (c.includes(" ") ? JSON.stringify(c) : c)).join(" ")}${usefulLine ? `\nLast output: ${usefulLine}` : ""}`,
+    );
   }
 }
 
@@ -777,6 +980,37 @@ function computeSkipOptions<T extends { skip: Set<string> }>(opts: T): T {
 
 function taskEnabled(opts: ReleaseOptions, id: string): boolean {
   return !opts.skip.has(id);
+}
+
+function publicMutationEnabled(opts: ReleaseOptions): boolean {
+  return taskEnabled(opts, "upload-dmg") || taskEnabled(opts, "upload-appcast")
+    || Boolean(opts.releaseTag && !opts.skipGithubRelease && taskEnabled(opts, "github"));
+}
+
+export function releaseIntegrityGateErrors(
+  opts: Pick<ReleaseOptions, "skip" | "releaseTag" | "skipGithubRelease">,
+): string[] {
+  const uploadDmg = !opts.skip.has("upload-dmg");
+  const uploadAppcast = !opts.skip.has("upload-appcast");
+  const github = Boolean(opts.releaseTag && !opts.skipGithubRelease && !opts.skip.has("github"));
+  const errors: string[] = [];
+  if ((uploadDmg || uploadAppcast || github) && opts.skip.has("post-check")) {
+    errors.push("post-check cannot be skipped while publishing a DMG or appcast");
+  }
+  if ((uploadDmg || uploadAppcast) && opts.skip.has("verify-dmg")) {
+    errors.push("verify-dmg cannot be skipped while publishing to R2");
+  }
+  if (uploadAppcast && opts.skip.has("gen-appcast")) {
+    errors.push("gen-appcast cannot be skipped while uploading appcast.xml");
+  }
+  if (uploadAppcast && opts.skip.has("validate-appcast")) {
+    errors.push("validate-appcast cannot be skipped while uploading appcast.xml");
+  }
+  return errors;
+}
+
+function buildWillRun(opts: ReleaseOptions): boolean {
+  return taskEnabled(opts, "build") && (!opts.fromTask || opts.fromTask === "preflight" || opts.fromTask === "build");
 }
 
 const KNOWN_SKIP_IDS = new Set([
@@ -802,9 +1036,19 @@ function validateSkipIds(skip: Set<string>) {
 }
 
 function formatCmd(args: string[]): string {
-  return args
-    .map((arg) => (/^[A-Za-z0-9_./:=+-]+$/.test(arg) ? arg : JSON.stringify(arg)))
-    .join(" ");
+  const quote = (arg: string) => (/^[A-Za-z0-9_./:=+-]+$/.test(arg) ? arg : JSON.stringify(arg));
+  const lines = [args.slice(0, 3).map(quote).join(" ")];
+  for (let index = 3; index < args.length; index++) {
+    const arg = args[index];
+    const next = args[index + 1];
+    if (arg.startsWith("--") && next && !next.startsWith("--")) {
+      lines.push(`${quote(arg)} ${quote(next)}`);
+      index++;
+    } else {
+      lines.push(quote(arg));
+    }
+  }
+  return lines.join(" \\\n  ");
 }
 
 function defaultReleaseTag(channel: ReleaseChannel): string {
@@ -826,10 +1070,9 @@ function validateReleaseTag(channel: ReleaseChannel, releaseTag: string): void {
 }
 
 function buildResumeCommand(ctx: ReleaseContext, fromTask: string): string {
-  const args = ["bun", "run", "scripts/macos/release-app.ts", "--channel", ctx.channel, "--from", fromTask];
-  const defaultDerivedData = resolve(ctx.rootDir, "build/InlineMacDirect");
-  const defaultAppPath = resolve(defaultDerivedData, "Build/Products/Release/Inline.app");
-  const defaultDmgPath = resolve(ctx.rootDir, "build/macos-direct/Inline.dmg");
+  const operation = ctx.rollback ? "rollback" : ctx.dropBuild ? "drop-build" : "release";
+  const safeFromTask = safeResumeTask(fromTask, operation);
+  const args = ["bun", "run", resolve(ctx.rootDir, "scripts/macos/release-app.ts"), "--channel", ctx.channel, "--from", safeFromTask];
   const defaultSparkleDir = resolve(ctx.rootDir, ".action/sparkle", sparkleVersion);
   const defaultTag = ctx.rollback || ctx.dropBuild ? "" : defaultReleaseTag(ctx.channel);
   const concreteSkipIds = [...ctx.skip]
@@ -838,7 +1081,8 @@ function buildResumeCommand(ctx: ReleaseContext, fromTask: string): string {
 
   if (ctx.rollback) {
     args.push("--rollback");
-    if (ctx.rollbackToBuild) args.push("--rollback-to-build", ctx.rollbackToBuild);
+    if (ctx.rollbackSelectedBuild) args.push("--rollback-to-build", ctx.rollbackSelectedBuild);
+    else if (ctx.rollbackToBuild) args.push("--rollback-to-build", ctx.rollbackToBuild);
     else if (ctx.rollbackStepsBack !== 1) args.push("--rollback-steps-back", String(ctx.rollbackStepsBack));
   } else if (ctx.dropBuild) {
     args.push("--drop-build", ctx.dropBuild);
@@ -848,12 +1092,13 @@ function buildResumeCommand(ctx: ReleaseContext, fromTask: string): string {
 
   if (ctx.skipGithubRelease) args.push("--skip-github-release");
   if (concreteSkipIds.length) args.push("--skip", concreteSkipIds.join(","));
-  if (ctx.pauseBeforeNotarize) args.push("--pause-before-notarize");
   if (ctx.allowDirty) args.push("--allow-dirty");
   if (!ctx.rollback && !ctx.dropBuild && !ctx.skip.has("upload-sentry-dsyms")) args.push("--upload-sentry-dsyms");
-  if (ctx.derivedData !== defaultDerivedData) args.push("--derived-data", ctx.derivedData);
-  if (ctx.appPath !== defaultAppPath) args.push("--app-path", ctx.appPath);
-  if (ctx.dmgPath !== defaultDmgPath) args.push("--dmg-path", ctx.dmgPath);
+  if (!ctx.rollback && !ctx.dropBuild) {
+    args.push("--source-commit", ctx.sourceCommit, "--source-build", ctx.sourceBuild);
+    args.push("--derived-data", ctx.derivedData, "--app-path", ctx.appPath, "--dmg-path", ctx.dmgPath);
+    if (ctx.createNewAppcast) args.push("--create-new-appcast");
+  }
   if (ctx.sparkleDir !== defaultSparkleDir) args.push("--sparkle-dir", ctx.sparkleDir);
 
   return formatCmd(args);
@@ -861,8 +1106,8 @@ function buildResumeCommand(ctx: ReleaseContext, fromTask: string): string {
 
 async function main() {
   const rootDir = resolve(import.meta.dir, "../..");
-  const interactive = Boolean(process.stdout.isTTY && process.stderr.isTTY && !process.env.CI);
-  const ui = new Ui(interactive);
+  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY && process.stderr.isTTY && !process.env.CI);
+  const ui = new Ui();
 
   let keepTempDir = false;
   const parsedRaw = parseArgs(process.argv.slice(2), rootDir);
@@ -882,6 +1127,11 @@ async function main() {
   }
   const releaseTag = parsed0.rollback || parsed0.dropBuild ? "" : parsed0.releaseTag || defaultReleaseTag(channel);
   if (releaseTag) validateReleaseTag(channel, releaseTag);
+  const operation = parsed0.rollback ? "rollback" : parsed0.dropBuild ? "drop-build" : "release";
+  const fromTask = parsed0.fromTask ? safeResumeTask(parsed0.fromTask, operation) : "";
+  if (fromTask && fromTask !== parsed0.fromTask) {
+    console.log(`Resume requires durable prerequisite ${fromTask}; requested ${parsed0.fromTask}.`);
+  }
   const opts: ReleaseOptions = {
     channel,
     derivedData: parsed0.derivedData,
@@ -892,14 +1142,25 @@ async function main() {
     skipGithubRelease: parsed0.skipGithubRelease || parsed0.skip.has("github"),
     allowDirty: parsed0.allowDirty,
     skip: parsed0.skip,
-    fromTask: parsed0.fromTask,
+    fromTask,
     dryRun: parsed0.dryRun,
-    pauseBeforeNotarize: parsed0.pauseBeforeNotarize,
     rollback: parsed0.rollback,
     rollbackToBuild: parsed0.rollbackToBuild,
     rollbackStepsBack: parsed0.rollbackStepsBack,
     dropBuild: parsed0.dropBuild,
+    createNewAppcast: parsed0.createNewAppcast,
+    sourceCommit: parsed0.sourceCommit || git(rootDir, ["rev-parse", "HEAD"]),
+    sourceBuild: parsed0.sourceBuild || git(rootDir, ["rev-list", "--count", "HEAD"]),
   };
+  if (!opts.rollback && !opts.dropBuild && (!/^[0-9a-f]{40}$/.test(opts.sourceCommit) || !/^\d+$/.test(opts.sourceBuild))) {
+    die("Unable to freeze release source commit/build.");
+  }
+  if (!opts.rollback && !opts.dropBuild) {
+    const integrityErrors = releaseIntegrityGateErrors(opts);
+    if (integrityErrors.length) {
+      die(`Unsafe release skip combination:\n- ${integrityErrors.join("\n- ")}`);
+    }
+  }
 
   // Temp dir is created up-front so we can point to it on failures.
   const tempRoot = resolve(rootDir, "build/macos-release-tmp");
@@ -914,6 +1175,7 @@ async function main() {
     signingKeyPath: resolve(tempDir, "signing.key"),
     signUpdatePath: resolve(tempDir, "sign_update.txt"),
     appcastPath: resolve(tempDir, "appcast.xml"),
+    appcastHeadersPath: resolve(tempDir, "appcast.headers"),
     appcastOutputPath: resolve(tempDir, "appcast_new.xml"),
     rollbackMetaPath: resolve(tempDir, "rollback_meta.json"),
     pruneMetaPath: resolve(tempDir, "prune_meta.json"),
@@ -925,6 +1187,7 @@ async function main() {
     baseUrl: "",
     dmgUrl: "",
     appcastUrl: "",
+    minimumSystemVersion: "",
     rollbackSelectedBuild: "",
     rollbackSelectedUrl: "",
     rollbackRemovedBuilds: [],
@@ -932,6 +1195,13 @@ async function main() {
     pruneDroppedUrl: "",
     pruneLatestBuild: "",
     pruneLatestUrl: "",
+    sourceCommitShort: git(rootDir, ["rev-parse", "--short", opts.sourceCommit]),
+    dmgSize: 0,
+    dmgSha256: "",
+    provenancePath: resolve(dirname(opts.dmgPath), "release-provenance.json"),
+    appcastExpectedEtag: "",
+    appcastExpectAbsent: false,
+    channelLockToken: "",
     ...opts,
   };
 
@@ -945,20 +1215,38 @@ async function main() {
       ? `Rollback  Channel: ${opts.channel}${opts.rollbackToBuild ? `  Build: ${opts.rollbackToBuild}` : `  Steps back: ${opts.rollbackStepsBack}`}${opts.fromTask ? `  From: ${opts.fromTask}` : ""}${opts.dryRun ? "  Dry run" : ""}`
       : opts.dropBuild
         ? `Drop build  Channel: ${opts.channel}  Build: ${opts.dropBuild}${opts.dryRun ? "  Dry run" : ""}`
-        : `Release  Channel: ${opts.channel}${opts.releaseTag ? `  Tag: ${opts.releaseTag}` : ""}${opts.fromTask ? `  From: ${opts.fromTask}` : ""}${opts.pauseBeforeNotarize ? "  Pause before notarize" : ""}${opts.allowDirty ? "  Allow dirty" : ""}${opts.dryRun ? "  Dry run" : ""}`,
+        : `Release  Channel: ${opts.channel}${opts.releaseTag ? `  Tag: ${opts.releaseTag}` : ""}${opts.fromTask ? `  From: ${opts.fromTask}` : ""}${opts.allowDirty ? "  Allow dirty" : ""}${opts.dryRun ? "  Dry run" : ""}`,
   );
-  ui.info(`Release log: ${releaseLogPath}`);
+  const logFiles = [{ label: "release", path: releaseLogPath }];
+  if (!opts.rollback && !opts.dropBuild) {
+    logFiles.push(
+      { label: "build", path: resolve(dirname(ctx.dmgPath), "build-direct.log") },
+      { label: "Xcode", path: resolve(dirname(ctx.dmgPath), "xcodebuild.log") },
+    );
+  }
+  ui.showLogFiles(logFiles);
 
   const tasks: Task[] = [];
 
   const runPreflight: Task["run"] = async (ctx, ui) => {
+    if (!ctx.rollback && !ctx.dropBuild) {
+      const configuredVersion = readConfiguredMarketingVersion(ctx.rootDir, ui);
+      const plannedBuild = ctx.sourceBuild;
+      const plannedCommit = ctx.sourceCommitShort;
+      if (configuredVersion) ctx.version = configuredVersion;
+      ui.detail("Version", `${configuredVersion || "unknown"}${plannedBuild ? ` (build ${plannedBuild})` : ""}`);
+      ui.detail("Tag", ctx.releaseTag || "none");
+      ui.detail("Channel", ctx.channel);
+      if (plannedCommit) ui.detail("Commit", plannedCommit);
+      ui.detail("DerivedData", `${existsSync(ctx.derivedData) ? "reusing" : "creating"} ${ctx.derivedData}`);
+    }
     const missing: string[] = [];
-    for (const c of ["bun", "python3", "curl", "git"]) {
+    for (const c of ["bun", "python3", "curl", "git", "shasum"]) {
       if (!commandExists(c)) missing.push(c);
     }
     if (ctx.rollback || ctx.dropBuild) {
       // Appcast-only operations need feed editing + upload tooling.
-    } else if (taskEnabled(opts, "build")) {
+    } else if (buildWillRun(opts)) {
       for (const c of ["xcodebuild", "xcrun", "codesign", "security", "create-dmg", "rsync", "unzip", "perl", "lipo"]) {
         if (!commandExists(c)) missing.push(c);
       }
@@ -979,20 +1267,24 @@ async function main() {
     if (!ctx.rollback && !ctx.dropBuild && !opts.skipGithubRelease && opts.releaseTag) {
       if (!commandExists("gh")) missing.push("gh");
     }
-    if (ctx.pauseBeforeNotarize && taskEnabled(opts, "build") && !interactive) {
-      if (ctx.dryRun) ui.info("Warning: --pause-before-notarize requires an interactive terminal when executing the build.");
-      else throw new Error("--pause-before-notarize requires an interactive terminal.");
-    }
-    if (stableReleaseNeedsCleanWorktree(ctx)) {
-      const dirty = gitLines(ctx.rootDir, ["status", "--porcelain"]);
-      if (dirty.length && !ctx.allowDirty) {
-        const sample = dirty.slice(0, 12).join("\n");
-        const extra = dirty.length > 12 ? `\n... and ${dirty.length - 12} more` : "";
-        const message = `Stable releases require a clean worktree. Commit or discard changes before publishing, or pass --allow-dirty for an intentional local/dev build.\n${sample}${extra}`;
-        if (ctx.dryRun) ui.info(`Warning: ${message}`);
-        else throw new Error(message);
-      } else if (dirty.length && ctx.allowDirty) {
-        ui.info("Warning: building a stable release from a dirty worktree because --allow-dirty was passed.");
+    if (!ctx.rollback && !ctx.dropBuild) {
+      if (buildWillRun(ctx)) {
+        assertFrozenSource(ctx);
+        const dirty = gitLines(ctx.rootDir, ["status", "--porcelain"]);
+        const willPublish = publicMutationEnabled(ctx);
+        if (dirty.length && willPublish) {
+          const sample = dirty.slice(0, 12).join("\n");
+          const extra = dirty.length > 12 ? `\n... and ${dirty.length - 12} more` : "";
+          const message = `Public macOS releases require a clean frozen source on every channel. Dirty source cannot upload a DMG/appcast or move a GitHub tag.\n${sample}${extra}`;
+          if (ctx.dryRun) ui.info(`Warning: ${message}`);
+          else throw new Error(message);
+        } else if (dirty.length && !ctx.allowDirty) {
+          const message = "Dirty source is allowed only for an explicitly local, non-publishing run with --allow-dirty and all public mutation steps skipped.";
+          if (ctx.dryRun) ui.info(`Warning: ${message}`);
+          else throw new Error(message);
+        } else if (dirty.length) {
+          ui.info("Warning: local non-publishing build from dirty source because --allow-dirty was passed.");
+        }
       }
     }
     if (missing.length) {
@@ -1002,7 +1294,22 @@ async function main() {
       }
       throw new Error(`Missing required command(s): ${missing.join(", ")}`);
     }
-    if (!ctx.rollback && !ctx.dropBuild && taskEnabled(opts, "build")) {
+    if (!ctx.rollback && !ctx.dropBuild) {
+      if (buildWillRun(opts)) {
+        const expectedAppPath = resolve(ctx.derivedData, "Build/Products/Release/Inline.app");
+        if (ctx.appPath !== expectedAppPath) {
+          throw new Error(`The build step requires --app-path ${expectedAppPath}; custom app paths are only valid when resuming after build.`);
+        }
+      }
+      const activeOwner = activeXcodebuildForDerivedData(ctx.derivedData);
+      if (activeOwner) {
+        const message = `DerivedData is already in use by another Xcode build: ${ctx.derivedData}\n${activeOwner}`;
+        if (ctx.dryRun) ui.info(`Warning: ${message}`);
+        else throw new Error(message);
+      }
+    }
+    ui.detail("Tools", "available");
+    if (!ctx.rollback && !ctx.dropBuild && buildWillRun(opts)) {
       const command = ["bun", "run", resolve(ctx.rootDir, "scripts/macos/check-grid-livekit-pin.ts")];
       if (ctx.dryRun) {
         try {
@@ -1012,22 +1319,24 @@ async function main() {
         }
       } else {
         await runStreaming(ui, command, { cwd: ctx.rootDir });
+        ui.detail("LiveKit pin", "verified");
       }
     }
-    if (!ctx.rollback && !ctx.dropBuild && taskEnabled(opts, "build")) {
+    if (!ctx.rollback && !ctx.dropBuild && buildWillRun(opts)) {
       if (ctx.dryRun) {
         ui.info("Would validate notarization credentials with xcrun notarytool history.");
       } else {
         await runStreaming(ui, ["bash", resolve(ctx.rootDir, "scripts/macos/check-notary-credentials.sh")], {
           cwd: ctx.rootDir,
         });
+        ui.detail("Notarization credentials", "verified");
       }
     }
   };
 
   tasks.push({
     id: "preflight",
-    title: "Preflight checks",
+    title: "Release details and preflight checks",
     enabled: true,
     dryRun: async (ctx, ui) => {
       ui.info("Checking tool availability only.");
@@ -1050,7 +1359,7 @@ async function main() {
       run: async (ctx, ui) => {
         ctx.baseUrl = trimTrailingSlash(requireEnv("PUBLIC_RELEASES_R2_PUBLIC_BASE_URL"));
         ctx.appcastUrl = `${ctx.baseUrl}/mac/${ctx.channel}/appcast.xml`;
-        await runStreaming(ui, ["curl", "-fsSL", ctx.appcastUrl, "-o", ctx.appcastPath], { cwd: ctx.rootDir });
+        fetchExistingAppcast(ctx, ui);
       },
     });
 
@@ -1112,9 +1421,12 @@ async function main() {
           throw new Error("Rollback DMG URL missing. prepare-rollback must run first.");
         }
         for (let attempt = 1; attempt <= 3; attempt++) {
-          ui.info(`curl -I ${ctx.dmgUrl} (attempt ${attempt}/3)`);
+          ui.log(`curl -I ${ctx.dmgUrl} (attempt ${attempt}/3)`);
           const res = spawnSync({ cmd: ["curl", "-fsI", ctx.dmgUrl], stdout: "pipe", stderr: "pipe" });
-          if (res.exitCode === 0) return;
+          if (res.exitCode === 0) {
+            ui.detail("Verified DMG", ctx.dmgUrl);
+            return;
+          }
           if (attempt === 3) {
             const err = new TextDecoder().decode(res.stderr).trim();
             throw new Error(`Rollback DMG not reachable at ${ctx.dmgUrl}${err ? `\n${err}` : ""}`);
@@ -1179,8 +1491,12 @@ async function main() {
             CHANNEL: ctx.channel,
             APPCAST_PATH: ctx.appcastOutputPath,
             BUILD_NUMBER: ctx.buildNumber,
+            APPCAST_EXPECTED_ETAG: ctx.appcastExpectedEtag,
+            APPCAST_EXPECT_ABSENT: ctx.appcastExpectAbsent ? "1" : "0",
+            RELEASE_CHANNEL_LOCK_TOKEN: ctx.channelLockToken,
           },
         });
+        ui.detail("Uploaded appcast", ctx.appcastUrl);
       },
     });
   } else if (opts.dropBuild) {
@@ -1197,7 +1513,7 @@ async function main() {
       run: async (ctx, ui) => {
         ctx.baseUrl = trimTrailingSlash(requireEnv("PUBLIC_RELEASES_R2_PUBLIC_BASE_URL"));
         ctx.appcastUrl = `${ctx.baseUrl}/mac/${ctx.channel}/appcast.xml`;
-        await runStreaming(ui, ["curl", "-fsSL", ctx.appcastUrl, "-o", ctx.appcastPath], { cwd: ctx.rootDir });
+        fetchExistingAppcast(ctx, ui);
       },
     });
 
@@ -1298,14 +1614,18 @@ async function main() {
             CHANNEL: ctx.channel,
             APPCAST_PATH: ctx.appcastOutputPath,
             BUILD_NUMBER: ctx.buildNumber,
+            APPCAST_EXPECTED_ETAG: ctx.appcastExpectedEtag,
+            APPCAST_EXPECT_ABSENT: ctx.appcastExpectAbsent ? "1" : "0",
+            RELEASE_CHANNEL_LOCK_TOKEN: ctx.channelLockToken,
           },
         });
+        ui.detail("Uploaded appcast", ctx.appcastUrl);
       },
     });
   } else {
     tasks.push({
       id: "build",
-      title: "Build, sign, DMG, notarize (build-direct.sh)",
+      title: "Build, sign, and notarize app",
       enabled: taskEnabled(opts, "build"),
       skipReason: taskEnabled(opts, "build") ? undefined : "operator requested",
       dryRun: (ctx, ui) => {
@@ -1319,24 +1639,51 @@ async function main() {
         ui.info(`  MACOS_RELEASE_ARCH=${macosReleaseArch}`);
         ui.info("  ENABLE_CODE_COVERAGE=NO");
         ui.info("  DEAD_CODE_STRIPPING=YES");
-        ui.info(`  PAUSE_BEFORE_NOTARIZE=${ctx.pauseBeforeNotarize ? "1" : "0"}`);
         ui.info("build-direct.sh strips the release executable before signing.");
         ui.info("build-direct.sh enforces signing/notarization env vars.");
       },
       run: async (ctx, ui) => {
         // Let build-direct.sh enforce its own env requirements. We only pass paths/options through.
-        ui.info(`Running build script; output in ${ctx.tempDir}`);
+        assertFrozenSource(ctx);
+        let artifactsShown = false;
+        let notarizationStartedAt = 0;
+        const showArtifacts = () => {
+          if (artifactsShown) return;
+          artifactsShown = true;
+          ui.detail("Built app", ctx.appPath);
+          ui.detail("DMG", ctx.dmgPath);
+        };
         await runStreaming(ui, ["bash", resolve(ctx.rootDir, "scripts/macos/build-direct.sh")], {
           cwd: ctx.rootDir,
           env: {
             CHANNEL: ctx.channel,
             DERIVED_DATA: ctx.derivedData,
+            OUTPUT_DIR: dirname(ctx.dmgPath),
             DMG_PATH: ctx.dmgPath,
             SPARKLE_DIR: ctx.sparkleDir,
             MACOS_RELEASE_ARCH: macosReleaseArch,
-            PAUSE_BEFORE_NOTARIZE: ctx.pauseBeforeNotarize ? "1" : "0",
+            EXPECTED_SOURCE_COMMIT: ctx.sourceCommit,
+            EXPECTED_SOURCE_BUILD: ctx.sourceBuild,
+            REQUIRE_CLEAN_SOURCE: publicMutationEnabled(ctx) ? "1" : "0",
+            ARTIFACT_PROVENANCE_PATH: ctx.provenancePath,
+          },
+          onLine: (line) => {
+            if (line.includes("** BUILD SUCCEEDED **")) {
+              ui.detail("Xcode build", "completed");
+            } else if (line.startsWith("Build/sign step complete.")) {
+              showArtifacts();
+            } else if (line.startsWith("Starting notarization for DMG:")) {
+              notarizationStartedAt = Date.now();
+              ui.detail("Notarization", `started ${new Date(notarizationStartedAt).toLocaleTimeString()}`);
+            } else if (line.startsWith("Built app:")) {
+              showArtifacts();
+              if (notarizationStartedAt) {
+                ui.detail("Notarization", `completed in ${formatElapsed(Date.now() - notarizationStartedAt)}`);
+              }
+            }
           },
         });
+        assertFrozenSource(ctx);
       },
     });
 
@@ -1386,6 +1733,7 @@ async function main() {
           cwd: ctx.rootDir,
           env: {
             DMG_PATH: ctx.dmgPath,
+            APP_PATH: "",
           },
         });
       },
@@ -1415,7 +1763,7 @@ async function main() {
       requireEnv("PUBLIC_RELEASES_R2_ENDPOINT");
       ctx.baseUrl = trimTrailingSlash(requireEnv("PUBLIC_RELEASES_R2_PUBLIC_BASE_URL"));
       ctx.appcastUrl = `${ctx.baseUrl}/mac/${ctx.channel}/appcast.xml`;
-      verifyBuiltAppMetadata(ctx, ui);
+      verifyArtifactIdentity(ctx, ui);
       ctx.dmgUrl = `${ctx.baseUrl}/mac/${ctx.channel}/${ctx.buildNumber}/Inline.dmg`;
 
       await runStreaming(ui, ["bun", "run", resolve(ctx.rootDir, "scripts/macos/release-direct.ts")], {
@@ -1425,19 +1773,24 @@ async function main() {
           CHANNEL: ctx.channel,
           DMG_PATH: ctx.dmgPath,
           BUILD_NUMBER: ctx.buildNumber,
+          RELEASE_CHANNEL_LOCK_TOKEN: ctx.channelLockToken,
+          DMG_EXPECTED_SIZE: String(ctx.dmgSize),
+          DMG_EXPECTED_SHA256: ctx.dmgSha256,
         },
       });
+      ui.detail("Uploaded DMG", ctx.dmgUrl);
     },
     });
 
     tasks.push({
       id: "verify-dmg",
-    title: "Verify DMG availability (HEAD request)",
+    title: "Verify remote DMG bytes",
     enabled: taskEnabled(opts, "verify-dmg"),
     skipReason: taskEnabled(opts, "verify-dmg") ? undefined : "operator requested",
     dryRun: (ctx, ui) => {
       ui.info("Would run:");
-      ui.info(`  curl -fsI <PUBLIC_RELEASES_R2_PUBLIC_BASE_URL>/mac/${ctx.channel}/<build>/Inline.dmg (retry up to 5x)`);
+      ui.info(`  curl -fSL <PUBLIC_RELEASES_R2_PUBLIC_BASE_URL>/mac/${ctx.channel}/<build>/Inline.dmg -o <temp>/remote-Inline.dmg`);
+      ui.info("  Compare the remote file size and SHA-256 with the verified local DMG.");
       ui.info("Requires env:");
       ui.info("  PUBLIC_RELEASES_R2_PUBLIC_BASE_URL");
     },
@@ -1450,16 +1803,18 @@ async function main() {
         ctx.dmgUrl = `${ctx.baseUrl}/mac/${ctx.channel}/${ctx.buildNumber}/Inline.dmg`;
       }
 
-      for (let attempt = 1; attempt <= 5; attempt++) {
-        ui.info(`curl -I ${ctx.dmgUrl} (attempt ${attempt}/5)`);
-        const res = spawnSync({ cmd: ["curl", "-fsI", ctx.dmgUrl], stdout: "pipe", stderr: "pipe" });
-        if (res.exitCode === 0) return;
-        if (attempt === 5) {
-          const err = new TextDecoder().decode(res.stderr).trim();
-          throw new Error(`DMG not reachable at ${ctx.dmgUrl}${err ? `\n${err}` : ""}`);
-        }
-        await sleep(2000);
+      verifyArtifactIdentity(ctx, ui);
+      const remoteDmgPath = resolve(ctx.tempDir, "remote-Inline.dmg");
+      await runStreaming(ui, ["curl", "-fSL", "--retry", "4", "--retry-all-errors", ctx.dmgUrl, "-o", remoteDmgPath], {
+        cwd: ctx.rootDir,
+      });
+      const remoteSize = Bun.file(remoteDmgPath).size;
+      const remoteSha256 = sha256File(remoteDmgPath);
+      if (remoteSize !== ctx.dmgSize || remoteSha256 !== ctx.dmgSha256) {
+        throw new Error(`Remote DMG does not match local artifact: remote ${remoteSize} bytes sha256 ${remoteSha256}; local ${ctx.dmgSize} bytes sha256 ${ctx.dmgSha256}.`);
       }
+      rmSync(remoteDmgPath, { force: true });
+      ui.detail("Verified remote DMG", `${ctx.dmgUrl} (${remoteSize} bytes, sha256 ${remoteSha256})`);
     },
     });
 
@@ -1495,10 +1850,10 @@ async function main() {
       if (!ctx.dmgUrl || !ctx.appcastUrl) {
         ctx.baseUrl = ctx.baseUrl || trimTrailingSlash(requireEnv("PUBLIC_RELEASES_R2_PUBLIC_BASE_URL"));
         ctx.appcastUrl = `${ctx.baseUrl}/mac/${ctx.channel}/appcast.xml`;
-        verifyBuiltAppMetadata(ctx, ui);
+        verifyArtifactIdentity(ctx, ui);
         ctx.dmgUrl = `${ctx.baseUrl}/mac/${ctx.channel}/${ctx.buildNumber}/Inline.dmg`;
       } else {
-        verifyBuiltAppMetadata(ctx, ui);
+        verifyArtifactIdentity(ctx, ui);
       }
 
       writeFileSync(ctx.signingKeyPath, sparklePrivateKey);
@@ -1525,21 +1880,7 @@ async function main() {
       }
       ui.info(`Wrote ${basename(ctx.signUpdatePath)} to ${ctx.signUpdatePath}`);
 
-      // Fetch existing appcast (optional).
-      const curlRes = spawnSync({
-        cmd: ["curl", "-fsSL", ctx.appcastUrl, "-o", ctx.appcastPath],
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      if (curlRes.exitCode !== 0) {
-        ui.info(`No existing appcast found at ${ctx.appcastUrl}; creating a new one.`);
-        // Ensure file doesn't exist (update_appcast.py treats missing as "new").
-        try {
-          rmSync(ctx.appcastPath, { force: true });
-        } catch {
-          // ignore
-        }
-      }
+      fetchExistingAppcast(ctx, ui);
 
       await runStreaming(ui, ["python3", resolve(ctx.rootDir, "scripts/macos/update_appcast.py")], {
         cwd: ctx.rootDir,
@@ -1548,13 +1889,14 @@ async function main() {
           INLINE_VERSION: ctx.version,
           INLINE_CHANNEL: ctx.channel,
           INLINE_DMG_URL: ctx.dmgUrl,
-          INLINE_MIN_MACOS: "15.0",
+          INLINE_MIN_MACOS: ctx.minimumSystemVersion,
           INLINE_HARDWARE_REQUIREMENTS: macosReleaseArch,
           INLINE_COMMIT: ctx.commit,
           INLINE_COMMIT_LONG: ctx.commitLong,
           SIGN_UPDATE_PATH: ctx.signUpdatePath,
           APPCAST_PATH: ctx.appcastPath,
           APPCAST_OUTPUT: ctx.appcastOutputPath,
+          ALLOW_NEW_APPCAST: ctx.createNewAppcast ? "1" : "0",
         },
       });
     },
@@ -1567,7 +1909,7 @@ async function main() {
     skipReason: taskEnabled(opts, "validate-appcast") ? undefined : "operator requested",
     dryRun: (ctx, ui) => {
       ui.info("Would run:");
-      ui.info("  python3 scripts/macos/validate_appcast.py --appcast <temp>/appcast_new.xml --require-build <build> --require-url <dmg-url> --require-hardware arm64");
+      ui.info("  python3 scripts/macos/validate_appcast.py --appcast <temp>/appcast_new.xml --require-build <build> --require-short-version <version> --require-url <dmg-url> --require-length <bytes> --require-hardware arm64 --require-minimum-system-version <app floor>");
     },
     run: async (ctx, ui) => {
       if (!ctx.buildNumber || !ctx.dmgUrl) {
@@ -1577,7 +1919,7 @@ async function main() {
         ctx.dmgUrl = `${ctx.baseUrl}/mac/${ctx.channel}/${ctx.buildNumber}/Inline.dmg`;
       }
 
-      await runStreaming(ui, ["python3", resolve(ctx.rootDir, "scripts/macos/validate_appcast.py"), "--appcast", ctx.appcastOutputPath, "--require-build", ctx.buildNumber, "--require-url", ctx.dmgUrl, "--require-hardware", macosReleaseArch], {
+      await runStreaming(ui, ["python3", resolve(ctx.rootDir, "scripts/macos/validate_appcast.py"), "--appcast", ctx.appcastOutputPath, "--require-build", ctx.buildNumber, "--require-short-version", ctx.version, "--require-url", ctx.dmgUrl, "--require-length", String(ctx.dmgSize), "--require-hardware", macosReleaseArch, "--require-minimum-system-version", ctx.minimumSystemVersion], {
         cwd: ctx.rootDir,
       });
     },
@@ -1601,7 +1943,7 @@ async function main() {
       requireEnv("PUBLIC_RELEASES_R2_ENDPOINT");
       ctx.baseUrl = ctx.baseUrl || trimTrailingSlash(requireEnv("PUBLIC_RELEASES_R2_PUBLIC_BASE_URL"));
       ctx.appcastUrl = `${ctx.baseUrl}/mac/${ctx.channel}/appcast.xml`;
-      verifyBuiltAppMetadata(ctx, ui);
+      verifyArtifactIdentity(ctx, ui);
       await runStreaming(ui, ["bun", "run", resolve(ctx.rootDir, "scripts/macos/release-direct.ts")], {
         cwd: ctx.rootDir,
         env: {
@@ -1609,8 +1951,12 @@ async function main() {
           CHANNEL: ctx.channel,
           APPCAST_PATH: ctx.appcastOutputPath,
           BUILD_NUMBER: ctx.buildNumber,
+          APPCAST_EXPECTED_ETAG: ctx.appcastExpectedEtag,
+          APPCAST_EXPECT_ABSENT: ctx.appcastExpectAbsent ? "1" : "0",
+          RELEASE_CHANNEL_LOCK_TOKEN: ctx.channelLockToken,
         },
       });
+      ui.detail("Uploaded appcast", ctx.appcastUrl);
     },
     });
 
@@ -1628,7 +1974,7 @@ async function main() {
         : "no --release-tag",
     dryRun: (ctx, ui) => {
       ui.info("Would run:");
-      ui.info(`  git tag -fa ${ctx.releaseTag} -m "Latest Sparkle release" HEAD`);
+      ui.info(`  git tag -fa ${ctx.releaseTag} -m "Latest Sparkle release" ${ctx.sourceCommit}`);
       ui.info(`  git push --force origin ${ctx.releaseTag}`);
       ui.info(`  gh release view ${ctx.releaseTag} || gh release create ${ctx.releaseTag} ...`);
       ui.info(`  gh release upload ${ctx.releaseTag} ${ctx.dmgPath} --clobber`);
@@ -1636,9 +1982,10 @@ async function main() {
     run: async (ctx, ui) => {
       if (!ctx.releaseTag) throw new Error("Internal error: github task enabled without releaseTag");
       if (!existsSync(ctx.dmgPath)) throw new Error(`DMG not found at ${ctx.dmgPath}`);
+      verifyArtifactIdentity(ctx, ui);
 
       // Force-update tag and attach DMG.
-      await runStreaming(ui, ["git", "-C", ctx.rootDir, "-c", "user.name=github-actions[bot]", "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com", "tag", "-fa", ctx.releaseTag, "-m", "Latest Sparkle release", "HEAD"], {
+      await runStreaming(ui, ["git", "-C", ctx.rootDir, "-c", "user.name=github-actions[bot]", "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com", "tag", "-fa", ctx.releaseTag, "-m", "Latest Sparkle release", ctx.sourceCommit], {
         cwd: ctx.rootDir,
       });
       await runStreaming(ui, ["git", "-C", ctx.rootDir, "push", "--force", "origin", ctx.releaseTag], { cwd: ctx.rootDir });
@@ -1653,6 +2000,7 @@ async function main() {
       }
 
       await runStreaming(ui, ["gh", "release", "upload", ctx.releaseTag, ctx.dmgPath, "--clobber"], { cwd: ctx.rootDir });
+      ui.detail("GitHub release tag", ctx.releaseTag);
     },
     });
   }
@@ -1669,7 +2017,12 @@ async function main() {
   }
   ui.init(tasks);
 
+  const heldLocks: HeldLock[] = [];
+  let preserveLocks = false;
   const cleanup = () => {
+    if (!preserveLocks) {
+      while (heldLocks.length) releaseLock(heldLocks.pop()!);
+    }
     if (keepTempDir) return;
     try {
       rmSync(ctx.tempDir, { recursive: true, force: true });
@@ -1678,17 +2031,55 @@ async function main() {
     }
   };
   process.on("exit", cleanup);
+  let handlingInterrupt = false;
   process.on("SIGINT", () => {
-    cleanup();
-    process.exit(130);
+    if (handlingInterrupt) {
+      preserveLocks = true;
+      process.exit(130);
+    }
+    handlingInterrupt = true;
+    try {
+      rmSync(ctx.signingKeyPath, { force: true });
+    } catch {
+      // ignore
+    }
+    keepTempDir = true;
+    const interruptedProcess = activeSubprocess;
+    interruptedProcess?.kill("SIGINT");
+    if (interruptedProcess) {
+      const killTimer = setTimeout(() => {
+        if (activeSubprocess === interruptedProcess) interruptedProcess.kill("SIGKILL");
+      }, 10_000);
+      killTimer.unref();
+    }
   });
 
   try {
+    if (!opts.dryRun) {
+      const lockRoot = resolve(ctx.rootDir, "build/macos-release-locks");
+      const channelLock = acquireLock(lockRoot, `channel-${ctx.channel}.lockdir`, {
+        kind: "channel",
+        channel: ctx.channel,
+        tempDir: ctx.tempDir,
+      });
+      heldLocks.push(channelLock);
+      ctx.channelLockToken = channelLock.token;
+      ui.detail("Channel lock", heldLocks.at(-1)!.path);
+      if (!ctx.rollback && !ctx.dropBuild) {
+        heldLocks.push(acquireLock(lockRoot, pathLockName("derived-data", ctx.derivedData), {
+          kind: "derived-data",
+          derivedData: ctx.derivedData,
+          tempDir: ctx.tempDir,
+        }));
+        ui.detail("DerivedData lock", heldLocks.at(-1)!.path);
+      }
+    }
     if (opts.dryRun) {
       ui.info("Dry run: not executing. Showing what would run.");
     }
     let reachedFrom = !opts.fromTask;
     for (const task of tasks) {
+      if (handlingInterrupt) throw new Error("Interrupted by Ctrl+C.");
       if (!task.enabled) {
         ui.setSkipped(task.id, task.skipReason);
         continue;
@@ -1708,6 +2099,7 @@ async function main() {
         } else {
           await task.run(ctx, ui);
         }
+        if (handlingInterrupt) throw new Error("Interrupted by Ctrl+C.");
       } catch (err) {
         if (!task.softFail) throw err;
         const msg = err instanceof Error ? err.message : String(err);
@@ -1730,18 +2122,21 @@ async function main() {
     const current = ui.getCurrentTaskId();
     if (current) {
       ui.setFailed(current, msg);
-      if (!interactive) ui.error(msg);
     } else ui.error(msg);
     if (current) {
-      ui.error(`Retry this step: ${buildResumeCommand(ctx, current)}`);
-      const currentIndex = tasks.findIndex((task) => task.id === current);
-      const nextTask = currentIndex === -1 ? undefined : tasks.slice(currentIndex + 1).find((task) => task.enabled);
-      if (nextTask) {
-        ui.error(`Continue past it: ${buildResumeCommand(ctx, nextTask.id)}`);
-      }
+      ui.error(`Retry this step:\n  ${buildResumeCommand(ctx, current)}`);
     }
     if (ui.getLogPath()) ui.error(`Release log: ${ui.getLogPath()}`);
     ui.error(`Temp dir: ${ctx.tempDir}`);
+    if (handlingInterrupt) {
+      const activeOwner = !ctx.rollback && !ctx.dropBuild ? activeXcodebuildForDerivedData(ctx.derivedData) : "";
+      if (activeOwner) {
+        preserveLocks = true;
+        ui.error(`An Xcode build still owns DerivedData, so release locks were intentionally preserved for manual inspection:\n${activeOwner}`);
+      }
+      process.exitCode = 130;
+      return;
+    }
     process.exit(1);
   }
 
@@ -1751,4 +2146,4 @@ async function main() {
   ui.info(opts.rollback ? "Rollback appcast publish complete." : opts.dropBuild ? "Appcast prune publish complete." : "Release pipeline complete.");
 }
 
-await main();
+if (import.meta.main) await main();
