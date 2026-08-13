@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import InlineMacUI
 
 /// Immutable row lookup used by both diffable data source updates and custom
 /// layout transitions. Collection items are always configured by semantic ID,
@@ -40,7 +41,8 @@ struct SidebarBodyLayoutDrag: Equatable {
   let sourceIDs: Set<SidebarCollectionRow.ID>
   let destinationIndex: Int
   let slotHeight: CGFloat
-  let targetLane: SidebarOrderLane
+  let showsEmptyPinnedTarget: Bool
+  let hidesPinnedHeader: Bool
 }
 
 /// Owns only physical collection geometry: rows, the one drag reservation,
@@ -95,74 +97,66 @@ final class SidebarCollectionBodyLayout: NSCollectionViewLayout {
     let collectionWidth = collectionView.bounds.width
     let insetWidth = max(collectionWidth - horizontalInset * 2, 1)
     var attributes: [IndexPath: NSCollectionViewLayoutAttributes] = [:]
-    var y: CGFloat = 0
-    var reducedIndex = 0
-    var insertedSlot = false
     let rows = presentation?.rows ?? []
-
-    func insertSlotIfNeeded() {
-      guard insertedSlot == false,
-            let drag,
-            reducedIndex == drag.destinationIndex
-      else { return }
-
-      slotFrame = CGRect(x: 0, y: y, width: collectionWidth, height: drag.slotHeight)
-      y += drag.slotHeight
-      insertedSlot = true
+    let plannedRows = rows.map { row in
+      let role: SidebarCollectionDragLayoutRowRole
+      switch row.id {
+      case .sectionHeader(.pinned):
+        role = .pinnedHeader
+      case .pinDropGuide:
+        role = .emptyPinnedGuide
+      default:
+        role = .ordinary
+      }
+      return SidebarCollectionDragLayoutRow(
+        id: row.id,
+        height: Double(row.height),
+        role: role
+      )
     }
+    let plannedDrag = drag.map { drag in
+      SidebarCollectionDragLayoutState(
+        sourceIDs: drag.sourceIDs,
+        destinationIndex: drag.destinationIndex,
+        slotHeight: Double(drag.slotHeight),
+        showsEmptyPinnedTarget: drag.showsEmptyPinnedTarget,
+        hidesPinnedHeader: drag.hidesPinnedHeader,
+        emptyPinnedHeaderHeight: Double(SidebarCollectionRow.sectionHeaderHeight)
+      )
+    }
+    let plan = SidebarCollectionDragLayoutPlanner.plan(
+      rows: plannedRows,
+      drag: plannedDrag
+    )
 
-    slotFrame = nil
+    slotFrame = plan.slotFrame.map {
+      CGRect(
+        x: 0,
+        y: CGFloat($0.minY),
+        width: collectionWidth,
+        height: CGFloat($0.height)
+      )
+    }
     laneBoundaryFrame = nil
     for (index, row) in rows.enumerated() {
       let indexPath = IndexPath(item: index, section: 0)
       let itemAttributes = NSCollectionViewLayoutAttributes(forItemWith: indexPath)
-
-      if drag?.sourceIDs.contains(row.id) == true {
-        itemAttributes.frame = itemFrame(
-          for: row,
-          y: y,
-          collectionWidth: collectionWidth,
-          horizontalInset: horizontalInset,
-          insetWidth: insetWidth
-        )
-        itemAttributes.alpha = 0
-        attributes[indexPath] = itemAttributes
-        continue
-      }
-
-      // The empty-lane guide teaches pinning until the pointer enters that
-      // lane. The exact drag reservation then replaces it, so the layout never
-      // presents two destination gaps.
-      if row.id == .pinDropGuide, drag?.targetLane == .pinned {
-        insertSlotIfNeeded()
-        itemAttributes.frame = CGRect(x: 0, y: y, width: collectionWidth, height: 0)
-        itemAttributes.alpha = 0
-        attributes[indexPath] = itemAttributes
-        reducedIndex += 1
-        continue
-      }
-
-      insertSlotIfNeeded()
+      let verticalFrame = plan.rowFrames[row.id]
+        ?? SidebarCollectionVerticalFrame(minY: 0, height: 0)
       itemAttributes.frame = itemFrame(
         for: row,
-        y: y,
+        y: CGFloat(verticalFrame.minY),
+        height: CGFloat(verticalFrame.height),
         collectionWidth: collectionWidth,
         horizontalInset: horizontalInset,
         insetWidth: insetWidth
       )
-      itemAttributes.alpha = settlingSourceIDs.contains(row.id) ? 0 : 1
+      itemAttributes.alpha = plan.visibleRowIDs.contains(row.id)
+        && settlingSourceIDs.contains(row.id) == false ? 1 : 0
       attributes[indexPath] = itemAttributes
       if case .sectionHeader(.content, _) = row.kind {
         laneBoundaryFrame = itemAttributes.frame
       }
-      y += row.height
-      reducedIndex += 1
-    }
-
-    insertSlotIfNeeded()
-    if let drag, insertedSlot == false {
-      slotFrame = CGRect(x: 0, y: y, width: collectionWidth, height: drag.slotHeight)
-      y += drag.slotHeight
     }
 
     itemAttributes = attributes
@@ -175,7 +169,7 @@ final class SidebarCollectionBodyLayout: NSCollectionViewLayout {
     let trailingScrollPadding = rows.last.map { min($0.height, 44) } ?? 0
     contentSize = CGSize(
       width: collectionView.bounds.width,
-      height: max(y + trailingScrollPadding, viewportHeight)
+      height: max(CGFloat(plan.contentHeight) + trailingScrollPadding, viewportHeight)
     )
   }
 
@@ -251,13 +245,14 @@ final class SidebarCollectionBodyLayout: NSCollectionViewLayout {
   private func itemFrame(
     for row: SidebarCollectionRow,
     y: CGFloat,
+    height: CGFloat,
     collectionWidth: CGFloat,
     horizontalInset: CGFloat,
     insetWidth: CGFloat
   ) -> CGRect {
     if row.projectedItem != nil || row.isSectionHeader || row.id == .pinDropGuide {
-      return CGRect(x: 0, y: y, width: collectionWidth, height: row.height)
+      return CGRect(x: 0, y: y, width: collectionWidth, height: height)
     }
-    return CGRect(x: horizontalInset, y: y, width: insetWidth, height: row.height)
+    return CGRect(x: horizontalInset, y: y, width: insetWidth, height: height)
   }
 }

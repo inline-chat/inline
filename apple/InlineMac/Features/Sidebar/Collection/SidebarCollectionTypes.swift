@@ -19,8 +19,7 @@ struct SidebarCollectionRow: Equatable, Identifiable {
     }
   }
 
-  static let sectionHeaderHeight: CGFloat = 36
-  static let pinDropGuideHeight: CGFloat = 76
+  static let sectionHeaderHeight: CGFloat = 28
 
   enum ID: Hashable {
     case allChats
@@ -63,19 +62,23 @@ struct SidebarCollectionRow: Equatable, Identifiable {
     return (section, isExpanded)
   }
 
-  static func sectionHeader(_ section: SectionHeader, isExpanded: Bool) -> Self {
+  static func sectionHeader(
+    _ section: SectionHeader,
+    isExpanded: Bool,
+    height: CGFloat = sectionHeaderHeight
+  ) -> Self {
     Self(
       id: .sectionHeader(section),
       kind: .sectionHeader(section, isExpanded: isExpanded),
-      height: sectionHeaderHeight
+      height: height
     )
   }
 
-  static func pinDropGuide() -> Self {
+  static func pinDropGuide(height: CGFloat = 0) -> Self {
     Self(
       id: .pinDropGuide,
       kind: .pinDropGuide,
-      height: pinDropGuideHeight
+      height: height
     )
   }
 }

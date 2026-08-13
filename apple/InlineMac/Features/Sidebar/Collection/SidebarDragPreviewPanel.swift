@@ -97,7 +97,7 @@ final class SidebarDragPreviewPanel {
       return
     }
     NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0.14
+      context.duration = 0.16
       context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
       panel.animator().setFrame(panelFrame, display: true)
     } completionHandler: {

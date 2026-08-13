@@ -36,10 +36,12 @@ struct SidebarCollectionSectionHeaderView: View {
     }
     .contentShape(Rectangle())
     .onHover { isHovered = $0 }
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-    .padding(.leading, Theme.sidebarItemInnerSpacing)
-    .padding(.trailing, Theme.sidebarItemOuterSpacing)
-    .padding(.top, 8)
+    // Chat rows use an eight-point full-width hover inset before their own
+    // content padding. Match that visible leading edge instead of leaving
+    // section titles stuck to the collection boundary.
+    .padding(.leading, Theme.sidebarItemInnerSpacing + 8)
+    .padding(.trailing, Theme.sidebarContentSideSpacing)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
   }
 }
 
