@@ -47,7 +47,10 @@ import {
   sendResendBroadcast,
   syncResendCampaignRecipients,
 } from "@in/server/modules/emailCampaigns/delivery"
-import { renderCampaign } from "@in/server/modules/emailCampaigns/render"
+import {
+  renderCampaign,
+  validateCampaignBodyImages,
+} from "@in/server/modules/emailCampaigns/render"
 import { getEmailProviderStatus } from "@in/server/modules/emailCampaigns/providerStatus"
 import { syncProviderSuppressions } from "@in/server/modules/emailCampaigns/providerSuppressions"
 import type { EmailCampaignAudience } from "@in/server/modules/emailCampaigns/types"
@@ -270,6 +273,10 @@ const validateAudience = (audience: EmailCampaignAudience): string | null => {
     return "invalid_activity_window"
   }
   if (audience.sampleSeed.trim().length === 0 || audience.sampleSeed.length > 160) return "invalid_sample_seed"
+  if (
+    audience.selectionOrder !== undefined &&
+    !["newest", "oldest", "random"].includes(audience.selectionOrder)
+  ) return "invalid_selection_order"
   if (audience.excludeCampaignIds.some((id) => !Number.isSafeInteger(id) || id <= 0)) return "invalid_campaign_exclusion"
   return null
 }
@@ -333,6 +340,8 @@ const previewEmailCampaignOperation: AdminOperationsShape["previewEmailCampaign"
     Effect.gen(function* () {
       const validationError = validateAudience(input.audience as EmailCampaignAudience)
       if (validationError) return yield* reject(400, validationError)
+      const bodyValidationError = validateCampaignBodyImages(input.bodyText)
+      if (bodyValidationError) return yield* reject(400, bodyValidationError)
       yield* attempt("admin.email-campaigns.preview.suppressions", () =>
         syncProviderSuppressions(input.provider),
       )
@@ -357,7 +366,12 @@ const previewEmailCampaignOperation: AdminOperationsShape["previewEmailCampaign"
       return jsonResult({
         ok: true as const,
         count: preview.recipients.length,
-        sample: preview.recipients.slice(0, 20).map(({ email, name, sources }) => ({ email, name, sources })),
+        sample: preview.recipients.slice(0, 20).map(({ email, name, sources, joinedAt }) => ({
+          email,
+          name,
+          sources,
+          joinedAt: joinedAt?.toISOString() ?? null,
+        })),
         excluded: preview.excluded,
         rendered: {
           subject: rendered.subject,
@@ -380,6 +394,8 @@ const createEmailCampaignOperation: AdminOperationsShape["createEmailCampaign"] 
       if (!subject || subject.length > 240) return yield* reject(400, "invalid_subject")
       if (previewText && previewText.length > 240) return yield* reject(400, "invalid_preview_text")
       if (!bodyText || bodyText.length > 20_000) return yield* reject(400, "invalid_body")
+      const bodyValidationError = validateCampaignBodyImages(bodyText)
+      if (bodyValidationError) return yield* reject(400, bodyValidationError)
       const unsubscribeOverrideReason = input.unsubscribeOverrideReason?.trim() || null
       if (!input.visibleUnsubscribe && (!unsubscribeOverrideReason || unsubscribeOverrideReason.length < 20)) {
         return yield* reject(400, "unsubscribe_override_reason_required")
@@ -499,6 +515,14 @@ const sendEmailCampaignOperation: AdminOperationsShape["sendEmailCampaign"] =
       if (!campaign.testSentAt) return yield* reject(400, "test_send_required")
       if (!["frozen", "sending", "paused"].includes(campaign.status)) return yield* reject(400, "campaign_not_sendable")
       if (input.confirmation !== `SEND ${campaign.name}`) return yield* reject(400, "confirmation_mismatch")
+      if (campaign.status === "paused") {
+        yield* attempt("admin.email-campaigns.send.resume", () =>
+          db.update(emailCampaigns).set({ status: "sending" }).where(and(
+            eq(emailCampaigns.id, campaignId),
+            eq(emailCampaigns.status, "paused"),
+          )),
+        )
+      }
       yield* attempt("admin.email-campaigns.send.suppressions", () =>
         syncProviderSuppressions(selectedCampaignProvider(campaign.provider), { force: true }),
       )

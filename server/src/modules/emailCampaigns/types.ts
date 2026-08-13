@@ -12,6 +12,7 @@ export const EMAIL_CAMPAIGN_PLATFORMS = [
 
 export type EmailCampaignSource = (typeof EMAIL_CAMPAIGN_SOURCES)[number]
 export type EmailCampaignPlatform = (typeof EMAIL_CAMPAIGN_PLATFORMS)[number]
+export type EmailCampaignSelectionOrder = "newest" | "oldest" | "random"
 
 export interface EmailCampaignAudience {
   readonly sources: readonly EmailCampaignSource[]
@@ -22,8 +23,10 @@ export interface EmailCampaignAudience {
   readonly joinedBefore?: string | undefined
   readonly manualEmails: readonly string[]
   readonly excludeCampaignIds: readonly number[]
+  readonly excludeInlineUsers?: boolean | undefined
   readonly limit?: number | undefined
   readonly sampleSeed: string
+  readonly selectionOrder?: EmailCampaignSelectionOrder | undefined
 }
 
 export interface ResolvedCampaignRecipient {
@@ -31,6 +34,7 @@ export interface ResolvedCampaignRecipient {
   readonly name: string | null
   readonly emailKey: string
   readonly sources: readonly (EmailCampaignSource | "manual")[]
+  readonly joinedAt: Date | null
 }
 
 export interface CampaignAudiencePreview {
@@ -43,6 +47,7 @@ export interface CampaignAudiencePreview {
     readonly platform: number
     readonly suppressed: number
     readonly priorCampaign: number
+    readonly converted: number
     readonly duplicate: number
     readonly limited: number
   }

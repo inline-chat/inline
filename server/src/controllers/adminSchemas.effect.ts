@@ -403,8 +403,10 @@ export const AdminEmailCampaignAudience = Schema.Struct({
   joinedBefore: OptionalString,
   manualEmails: Schema.Array(Schema.String),
   excludeCampaignIds: Schema.Array(Schema.Number),
+  excludeInlineUsers: Schema.optionalKey(Schema.Boolean),
   limit: Schema.optionalKey(Schema.Number),
   sampleSeed: Schema.String,
+  selectionOrder: Schema.optionalKey(Schema.Literals(["newest", "oldest", "random"])),
 }).annotate({
   identifier: "AdminEmailCampaignAudience",
 })
@@ -417,6 +419,7 @@ const AdminEmailCampaignExclusions = Schema.Struct({
   platform: WireNonNegativeInteger,
   suppressed: WireNonNegativeInteger,
   priorCampaign: WireNonNegativeInteger,
+  converted: WireNonNegativeInteger,
   duplicate: WireNonNegativeInteger,
   limited: WireNonNegativeInteger,
 })
@@ -454,6 +457,7 @@ export const AdminEmailCampaignPreviewResult = Schema.Struct({
       email: Schema.String,
       name: NullableString,
       sources: Schema.Array(Schema.String),
+      joinedAt: NullableString,
     }),
   ),
   excluded: AdminEmailCampaignExclusions,

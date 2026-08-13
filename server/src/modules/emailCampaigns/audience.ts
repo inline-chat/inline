@@ -8,7 +8,6 @@ import {
   or,
   sql,
 } from "drizzle-orm"
-import { createHash } from "node:crypto"
 import { db } from "@in/server/db"
 import {
   emailCampaignRecipients,
@@ -21,6 +20,7 @@ import {
   emailContactKey,
 } from "./contactCrypto"
 import { campaignEmailQuality } from "./emailQuality"
+import { orderCampaignRecipients } from "./selection"
 import type {
   CampaignAudiencePreview,
   EmailCampaignAudience,
@@ -113,17 +113,23 @@ const loadWaitlistCandidates = async (): Promise<readonly Candidate[]> => {
   }))
 }
 
-const deterministicRank = (emailKey: string, seed: string): string =>
-  createHash("sha256").update(`${seed}:${emailKey}`).digest("hex")
-
 export const resolveCampaignAudience = async (
   audience: EmailCampaignAudience,
 ): Promise<CampaignAudiencePreview> => {
-  const sourceRows = await Promise.all([
-    audience.sources.includes("inline") ? loadInlineCandidates() : [],
+  const [inlineRows, waitlistRows] = await Promise.all([
+    audience.sources.includes("inline") || (
+      audience.excludeInlineUsers === true && audience.sources.includes("waitlist")
+    ) ? loadInlineCandidates() : [],
     audience.sources.includes("waitlist") ? loadWaitlistCandidates() : [],
   ])
-  const candidates: Candidate[] = sourceRows.flat()
+  const candidates: Candidate[] = [
+    ...(audience.sources.includes("inline") ? inlineRows : []),
+    ...waitlistRows,
+  ]
+  const inlineEmailKeys = new Set(inlineRows.flatMap((candidate) => {
+    const quality = campaignEmailQuality(candidate.email)
+    return quality.valid ? [emailContactKey(quality.email)] : []
+  }))
   candidates.push(
     ...audience.manualEmails.map((email) => ({
       email,
@@ -144,6 +150,7 @@ export const resolveCampaignAudience = async (
     platform: 0,
     suppressed: 0,
     priorCampaign: 0,
+    converted: 0,
     duplicate: 0,
     limited: 0,
   }
@@ -199,6 +206,14 @@ export const resolveCampaignAudience = async (
     }
 
     const emailKey = emailContactKey(email)
+    if (
+      candidate.source === "waitlist" &&
+      audience.excludeInlineUsers === true &&
+      inlineEmailKeys.has(emailKey)
+    ) {
+      excluded.converted += 1
+      continue
+    }
     const existing = byKey.get(emailKey)
     if (existing) {
       excluded.duplicate += 1
@@ -215,6 +230,7 @@ export const resolveCampaignAudience = async (
       name: candidate.name,
       emailKey,
       sources: [candidate.source],
+      joinedAt: candidate.joinedAt,
     })
   }
 
@@ -250,10 +266,10 @@ export const resolveCampaignAudience = async (
     }
   }
 
-  const ranked = [...byKey.values()].sort((left, right) =>
-    deterministicRank(left.emailKey, audience.sampleSeed).localeCompare(
-      deterministicRank(right.emailKey, audience.sampleSeed),
-    ),
+  const ranked = orderCampaignRecipients(
+    [...byKey.values()],
+    audience.selectionOrder ?? "random",
+    audience.sampleSeed,
   )
   const limit = audience.limit ?? ranked.length
   excluded.limited = Math.max(0, ranked.length - limit)

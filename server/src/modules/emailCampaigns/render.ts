@@ -25,6 +25,38 @@ export interface RenderedCampaign {
   readonly unsubscribeUrl?: string | undefined
 }
 
+export type CampaignBodyValidationError =
+  | "campaign_image_alt_required"
+  | "campaign_image_requires_https"
+  | "campaign_image_syntax_unsupported"
+  | "too_many_campaign_images"
+
+const BASIC_MARKDOWN_IMAGE = /!\[([^\]\n]*)\]\(([^)\s]+)\)/g
+
+export const validateCampaignBodyImages = (
+  bodyText: string,
+): CampaignBodyValidationError | null => {
+  const imageStarts = bodyText.match(/!\[/g)?.length ?? 0
+  if (imageStarts === 0) return null
+
+  const images = [...bodyText.matchAll(BASIC_MARKDOWN_IMAGE)]
+  if (images.length !== imageStarts) return "campaign_image_syntax_unsupported"
+  if (images.length > 10) return "too_many_campaign_images"
+
+  for (const image of images) {
+    if (!image[1]?.trim()) return "campaign_image_alt_required"
+    try {
+      const url = new URL(image[2] ?? "")
+      if (url.protocol !== "https:" || url.username || url.password) {
+        return "campaign_image_requires_https"
+      }
+    } catch {
+      return "campaign_image_requires_https"
+    }
+  }
+  return null
+}
+
 const variableValue = (key: string, variables: CampaignTemplateVariables): string => {
   if (key === "name" || key === "first_name") return variables.name?.trim() || "there"
   if (key === "email") return variables.email?.trim() || "preview@inline.chat"
@@ -48,6 +80,8 @@ export const campaignUnsubscribeUrl = (token: string): string =>
   `${API_BASE_URL}/email/unsubscribe/${encodeURIComponent(token)}`
 
 export const renderCampaign = async (input: RenderCampaignInput): Promise<RenderedCampaign> => {
+  const bodyValidationError = validateCampaignBodyImages(input.bodyText)
+  if (bodyValidationError) throw new Error(bodyValidationError)
   const subject = interpolateCampaignVariables(input.subject, input.variables)
   const markdown = escapeMarkdownHtml(
     interpolateCampaignVariables(input.bodyText.trim(), input.variables),
@@ -64,9 +98,18 @@ export const renderCampaign = async (input: RenderCampaignInput): Promise<Render
     unsubscribeUrl,
     visibleUnsubscribe: input.visibleUnsubscribe,
   })
+  const textElement = React.createElement(CampaignEmail, {
+    markdown: markdown.replace(
+      BASIC_MARKDOWN_IMAGE,
+      (_match, alt: string, url: string) => `${alt}: ${url}`,
+    ),
+    previewText,
+    unsubscribeUrl,
+    visibleUnsubscribe: input.visibleUnsubscribe,
+  })
   const [html, text] = await Promise.all([
     render(element),
-    render(element, { plainText: true }),
+    render(textElement, { plainText: true }),
   ])
   return { subject, html, text, unsubscribeUrl }
 }

@@ -58,6 +58,12 @@ const page = (content: string): HttpServerResponse.HttpServerResponse =>
     { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } },
   )
 
+const oneClickAccepted = (): HttpServerResponse.HttpServerResponse =>
+  HttpServerResponse.empty({
+    status: 200,
+    headers: { "cache-control": "no-store" },
+  })
+
 const tokenFromRequest = (request: HttpServerRequest.HttpServerRequest): string => {
   const pathname = new URL(request.url, "https://api.inline.chat").pathname
   return decodeURIComponent(pathname.split("/").at(-1) ?? "")
@@ -85,10 +91,18 @@ export const executeEmailUnsubscribeSubmit = (
   request: HttpServerRequest.HttpServerRequest,
 ) =>
   Effect.gen(function* () {
+    const oneClick = yield* request.urlParamsBody.pipe(
+      Effect.map((params) =>
+        params.params.some(([key, value]) =>
+          key === "List-Unsubscribe" && value === "One-Click")),
+      Effect.catch(() => Effect.succeed(false)),
+    )
     const contact = yield* lookup(request)
     if (contact) {
       const operations = yield* EmailUnsubscribeOperations
       yield* operations.suppress(contact)
     }
-    return page("<p>You are unsubscribed from Inline campaign emails.</p>")
+    return oneClick
+      ? oneClickAccepted()
+      : page("<p>You are unsubscribed from Inline campaign emails.</p>")
   })

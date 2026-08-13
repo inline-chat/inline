@@ -569,6 +569,18 @@ describe("AuxiliaryRouteGroup", () => {
       expect(submitted.status).toBe(200)
       expect(await submitted.text()).toContain("You are unsubscribed")
       expect(probe.unsubscribeSuppressed).toBe(true)
+
+      probe.unsubscribeSuppressed = false
+      const oneClick = await handler(
+        new Request(`http://inline.test/email/unsubscribe/${token}`, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: "List-Unsubscribe=One-Click",
+        }),
+      )
+      expect(oneClick.status).toBe(200)
+      expect(await oneClick.text()).toBe("")
+      expect(probe.unsubscribeSuppressed).toBe(true)
     }, probe)
   })
 

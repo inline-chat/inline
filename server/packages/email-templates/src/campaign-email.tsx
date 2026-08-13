@@ -43,6 +43,13 @@ export function CampaignEmail({
               link: { color: "#2563eb", textDecoration: "underline" },
               li: { margin: "0 0 6px" },
               codeInline: { backgroundColor: "#f2f3f5", borderRadius: "4px", padding: "2px 4px" },
+              image: {
+                display: "block",
+                width: "100%",
+                maxWidth: "100%",
+                height: "auto",
+                margin: "20px 0",
+              },
             }}
           >
             {markdown}
