@@ -1,9 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// Native owner for the described view-options menu. SwiftUI's `Menu` does
-/// not expose the macOS 27 image-visibility preference, so selected symbols
-/// could be silently hidden even though the label contained a checkmark.
+/// Native owner for the described view-options menu. AppKit provides native
+/// state columns for aligned choice checkmarks and explicit macOS 27 image
+/// visibility for the parent submenu icons.
 struct SidebarViewOptionsMenuButton: NSViewRepresentable {
   @Binding var itemSize: SidebarItemSize
   @Binding var sortMode: SidebarSortMode
@@ -177,14 +177,7 @@ struct SidebarViewOptionsMenuButton: NSViewRepresentable {
       item.target = self
       item.tag = tag
       item.subtitle = subtitle
-      if isSelected {
-        if #available(macOS 27.0, *) {
-          item.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)
-          item.preferredImageVisibility = .visible
-        } else {
-          item.state = .on
-        }
-      }
+      item.state = isSelected ? .on : .off
       return item
     }
 
