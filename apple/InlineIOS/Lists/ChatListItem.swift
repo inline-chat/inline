@@ -261,7 +261,7 @@ struct ChatListItem: View {
             ThreadIconDescriptor(chat: chat),
             size: threadIconSize,
             shape: rowStyle == .prototypeCompact ? .none : .circle,
-            symbolColor: rowStyle == .prototypeCompact ? .primary : .secondary
+            symbolColor: rowStyle == .prototypeCompact ? .mutedPrimary : .secondary
           )
           .frame(width: avatarSize, height: avatarSize)
 

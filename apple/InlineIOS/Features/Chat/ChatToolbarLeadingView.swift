@@ -116,10 +116,9 @@ struct ChatToolbarLeadingView: View {
         fullChatViewModel.chat.map(ThreadIconDescriptor.init(chat:)) ?? ThreadIconDescriptor(emoji: nil),
         size: .large(toolbarAvatarSize),
         shape: .circle,
-        symbolColor: .primary,
+        symbolColor: .mutedPrimary,
         contentScaleMultiplier: 0.88
       )
-      .opacity(0.84)
     } else if let user = fullChatViewModel.peerUserInfo {
       UserAvatar(userInfo: user, size: toolbarAvatarSize)
         .frame(width: toolbarAvatarSize, height: toolbarAvatarSize)

@@ -60,6 +60,8 @@ public enum ThreadIconShape: Equatable, Hashable, Sendable {
 
 public enum ThreadIconSymbolColor: Equatable, Hashable, Sendable {
   case primary
+  /// A restrained primary foreground for in-app thread symbols. Notification
+  /// avatars use their separate bitmap renderer and do not consume this role.
   case mutedPrimary
   case secondary
   case white
@@ -359,7 +361,7 @@ private extension ThreadIconSymbolColor {
     case .primary:
       .primary
     case .mutedPrimary:
-      Color.primary.opacity(0.82)
+      Color.primary.opacity(0.76)
     case .secondary:
       .secondary
     case .white:

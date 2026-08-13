@@ -171,7 +171,6 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
         contentScaleMultiplier: metrics.iconContentScale
       )
       .equatable()
-      .opacity(metrics.iconOpacity)
       .frame(width: metrics.identityContainerSize, height: metrics.identityContainerSize)
     case nil:
       ThreadIconView(
@@ -182,7 +181,6 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
         contentScaleMultiplier: metrics.iconContentScale
       )
       .equatable()
-      .opacity(metrics.iconOpacity)
       .frame(width: metrics.identityContainerSize, height: metrics.identityContainerSize)
     }
   }
@@ -304,7 +302,6 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
         threadIconShape: .none,
         threadSymbolColor: .mutedPrimary,
         iconContentScale: 1.15,
-        iconOpacity: 1,
         minimumHeight: 44,
         horizontalSpacing: 12,
         textSpacing: 0,
@@ -318,7 +315,6 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
         threadIconShape: .circle,
         threadSymbolColor: .mutedPrimary,
         iconContentScale: 0.96,
-        iconOpacity: 1,
         minimumHeight: 52,
         horizontalSpacing: 10,
         textSpacing: 0,
@@ -330,9 +326,8 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
         identityContainerSize: 56,
         threadIconSize: .large(56),
         threadIconShape: .circle,
-        threadSymbolColor: .primary,
+        threadSymbolColor: .mutedPrimary,
         iconContentScale: 0.88,
-        iconOpacity: 0.84,
         minimumHeight: 72,
         horizontalSpacing: 12,
         textSpacing: 0,
@@ -477,7 +472,6 @@ private struct Metrics {
   let threadIconShape: ThreadIconShape
   let threadSymbolColor: ThreadIconSymbolColor
   let iconContentScale: CGFloat
-  let iconOpacity: Double
   let minimumHeight: CGFloat
   let horizontalSpacing: CGFloat
   let textSpacing: CGFloat
