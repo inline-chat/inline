@@ -17,7 +17,6 @@ struct ChatView: View {
   @AppStorage(ChatToolbarBackgroundExperiment.key)
   private var customToolbarBackgroundEnabled = ChatToolbarBackgroundExperiment.defaultValue
   @State var navBarHeight: CGFloat = 0
-  @State var isChatHeaderPressed = false
   @State private var pageState: PageState = .initial
   @State private var attemptedUntitledCleanupOnExit = false
   @State private var activeChatToken: MessagesPublisher.ActiveChatToken?
@@ -154,7 +153,6 @@ struct ChatView: View {
               router: router,
               fullChatViewModel: fullChatViewModel,
               realtimeState: realtimeState,
-              isChatHeaderPressed: $isChatHeaderPressed,
               onOpenChatInfo: { presentedChatInfo = $0 }
             )
             .matchedTransitionSource(id: TransitionID.chatInfo, in: chatInfoTransition)
@@ -168,7 +166,6 @@ struct ChatView: View {
               router: router,
               fullChatViewModel: fullChatViewModel,
               realtimeState: realtimeState,
-              isChatHeaderPressed: $isChatHeaderPressed,
               onOpenChatInfo: { presentedChatInfo = $0 }
             )
             .matchedTransitionSource(id: TransitionID.chatInfo, in: chatInfoTransition)

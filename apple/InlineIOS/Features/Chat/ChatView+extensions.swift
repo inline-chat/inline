@@ -8,11 +8,10 @@ struct ChatToolbarLeadingView: View, RehostSafeToolbarContent {
   let contextSpaceId: Int64?
   private let router: Router
   let onOpenChatInfo: (SpaceChatItem) -> Void
-  @Binding private var isChatHeaderPressed: Bool
 
   @ObservedObject private var fullChatViewModel: FullChatViewModel
-  @ObservedObject private var realtimeState: RealtimeState
-  @ObservedObject private var composeActions: ComposeActions
+  private let realtimeState: RealtimeState
+
   @State private var toolbarContext: ReplyThreadToolbarContext?
 
   init(
@@ -21,18 +20,14 @@ struct ChatToolbarLeadingView: View, RehostSafeToolbarContent {
     router: Router,
     fullChatViewModel: FullChatViewModel,
     realtimeState: RealtimeState,
-    isChatHeaderPressed: Binding<Bool>,
-    onOpenChatInfo: @escaping (SpaceChatItem) -> Void,
-    composeActions: ComposeActions = .shared
+    onOpenChatInfo: @escaping (SpaceChatItem) -> Void
   ) {
     self.peerId = peerId
     self.contextSpaceId = contextSpaceId
     self.router = router
+    self.realtimeState = realtimeState
     self.onOpenChatInfo = onOpenChatInfo
-    _isChatHeaderPressed = isChatHeaderPressed
     _fullChatViewModel = ObservedObject(wrappedValue: fullChatViewModel)
-    _realtimeState = ObservedObject(wrappedValue: realtimeState)
-    _composeActions = ObservedObject(initialValue: composeActions)
   }
 
   private var toolbarAvatarSize: CGFloat {
@@ -94,153 +89,73 @@ struct ChatToolbarLeadingView: View, RehostSafeToolbarContent {
     ].joined(separator: ":")
   }
 
-  private func currentComposeAction() -> ApiComposeAction? {
-    composeActions.getComposeAction(for: peerId)?.action
-  }
-
-  private func getCurrentSubtitle() -> ChatSubtitle {
-    if let displayedConnectionState = realtimeState.displayedConnectionState {
-      return .connectionState(displayedConnectionState)
-    } else if isPrivateChat {
-      if let composeAction = currentComposeAction() {
-        if composeAction == .typing {
-          if let typingText = composeActions.getTypingDisplayText(for: peerId, length: .min), !typingText.isEmpty {
-            return .typing(typingText)
-          } else {
-            return .empty
-          }
-        } else {
-          return .composeAction(composeAction)
-        }
-      } else if let user = fullChatViewModel.peerUserInfo?.user,
-                let timeZone = user.timeZone,
-                timeZone != TimeZone.current.identifier {
-        return .timezone(timeZone)
-      }
-    } else {
-      if let composeAction = currentComposeAction() {
-        if composeAction == .typing {
-          if let typingText = composeActions.getTypingDisplayText(for: peerId, length: .min), !typingText.isEmpty {
-            return .typing(typingText)
-          } else {
-            return .empty
-          }
-        } else {
-          return .composeAction(composeAction)
-        }
-      }
+  private var subtitleFallback: ChatSubtitle {
+    if isPrivateChat,
+       let user = fullChatViewModel.peerUserInfo?.user,
+       let timeZone = user.timeZone,
+       timeZone != TimeZone.current.identifier,
+       let text = TimeZoneFormatter.shared.formatTimeZoneInfo(userTimeZoneId: timeZone),
+       !text.isEmpty {
+      return .timezone(text)
     }
+
+    if let toolbarContext, toolbarContext.hasBreadcrumb {
+      return .breadcrumb(toolbarContext)
+    }
+
     return .empty
   }
 
   @ViewBuilder
-  private var subtitleView: some View {
-    let subtitle = getCurrentSubtitle()
-    if !subtitle.text.isEmpty {
-      subtitleContent(subtitle)
-    } else if let toolbarContext, toolbarContext.hasBreadcrumb {
-      breadcrumbView(toolbarContext)
+  private var avatar: some View {
+    if isThreadChat {
+      ThreadIconView(
+        fullChatViewModel.chat.map(ThreadIconDescriptor.init(chat:)) ?? ThreadIconDescriptor(emoji: nil),
+        size: .large(toolbarAvatarSize),
+        shape: .circle,
+        symbolColor: .primary,
+        contentScaleMultiplier: 0.88
+      )
+      .opacity(0.84)
+    } else if let user = fullChatViewModel.peerUserInfo {
+      UserAvatar(userInfo: user, size: toolbarAvatarSize)
+        .frame(width: toolbarAvatarSize, height: toolbarAvatarSize)
+    } else {
+      Circle()
+        .fill(.quinary)
+        .frame(width: toolbarAvatarSize, height: toolbarAvatarSize)
     }
-  }
-
-  private func subtitleContent(_ subtitle: ChatSubtitle) -> some View {
-    HStack(alignment: .center, spacing: 4) {
-      subtitle.animatedIndicator
-
-      Text(subtitle.shouldKeepOriginalCase ? subtitle.text : subtitle.text.lowercased())
-        .font(.caption)
-        .foregroundStyle(subtitle.foregroundColor)
-        .lineLimit(1)
-        .truncationMode(.tail)
-        .allowsTightening(true)
-    }
-    .padding(.top, -2)
-  }
-
-  private func breadcrumbView(_ context: ReplyThreadToolbarContext) -> some View {
-    HStack(alignment: .center, spacing: 4) {
-      if let space = context.space {
-        breadcrumbButton(title: space.title, accessibilityLabel: "Open space \(space.title)") {
-          openSpace(space)
-        }
-
-        if context.parent != nil {
-          Text("/")
-            .font(.caption)
-            .foregroundStyle(.tertiary)
-        }
-      }
-
-      if let parent = context.parent {
-        breadcrumbButton(title: parent.title, accessibilityLabel: "Open parent chat \(parent.title)") {
-          openParentThread(parent)
-        }
-        .layoutPriority(1)
-      }
-    }
-    .lineLimit(1)
-    .padding(.top, -2)
-  }
-
-  private func breadcrumbButton(
-    title: String,
-    accessibilityLabel: String,
-    action: @escaping () -> Void
-  ) -> some View {
-    Button(action: action) {
-      Text(title)
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-        .truncationMode(.tail)
-        .allowsTightening(true)
-    }
-    .buttonStyle(.plain)
-    .accessibilityLabel(accessibilityLabel)
   }
 
   var body: some View {
     HStack(spacing: 8) {
-      if isThreadChat {
-        ThreadIconView(
-          fullChatViewModel.chat.map(ThreadIconDescriptor.init(chat:)) ?? ThreadIconDescriptor(emoji: nil),
-          size: .regular(toolbarAvatarSize),
-          shape: .circle
-        )
-        .onTapGesture(perform: openChatInfo)
-      } else {
-        if let user = fullChatViewModel.peerUserInfo {
-          UserAvatar(userInfo: user, size: toolbarAvatarSize)
-            .frame(width: toolbarAvatarSize, height: toolbarAvatarSize)
-            .onTapGesture(perform: openChatInfo)
-        } else {
-          Circle()
-            .fill(.quinary)
-            .frame(width: toolbarAvatarSize, height: toolbarAvatarSize)
-            .onTapGesture(perform: openChatInfo)
-        }
+      Button(action: openChatInfo) {
+        avatar
       }
+      .buttonStyle(ChatToolbarHeaderButtonStyle())
+      .accessibilityLabel("Open chat info")
 
-      VStack(alignment: .leading, spacing: 0) {
-        Text(title)
-          .font(.body)
-          .fontWeight(.medium)
-          .lineLimit(1)
-          .truncationMode(.tail)
-          .allowsTightening(true)
-          .onTapGesture(perform: openChatInfo)
-        subtitleView
-      }
+      ChatToolbarTitleStack(
+        title: title,
+        minimumHeight: toolbarAvatarSize,
+        peerId: peerId,
+        fallback: subtitleFallback,
+        realtimeState: realtimeState,
+        onOpenChatInfo: openChatInfo,
+        onOpenSpace: openSpace,
+        onOpenParentThread: openParentThread
+      )
+      .id(peerId)
+      .layoutPriority(1)
+
+      Color.clear
+        .frame(minWidth: 0, maxWidth: .infinity)
+        .accessibilityHidden(true)
     }
+    .frame(maxWidth: .infinity, alignment: .leading)
     // Important: do not use `fixedSize()` here. In a navigation bar toolbar item (principal/leading),
     // `fixedSize()` makes this view resist width constraints, so long titles can overlap the system
     // navigation buttons instead of truncating within the available space.
-    .opacity(isChatHeaderPressed ? 0.7 : 1.0)
-    .onLongPressGesture(minimumDuration: 0, maximumDistance: .infinity, pressing: { pressing in
-      withAnimation(.easeInOut(duration: 0.1)) {
-        isChatHeaderPressed = pressing
-      }
-    }, perform: {})
     .task(id: toolbarContextKey) {
       await loadToolbarContext()
     }
@@ -283,111 +198,301 @@ struct ChatToolbarLeadingView: View, RehostSafeToolbarContent {
   }
 }
 
-enum ChatSubtitle {
-  case connectionState(RealtimeConnectionState)
-  case typing(String)
-  case composeAction(ApiComposeAction)
+private struct ChatToolbarHeaderButtonStyle: ButtonStyle {
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .opacity(configuration.isPressed ? 0.72 : 1)
+      .scaleEffect(reduceMotion ? 1 : (configuration.isPressed ? 0.98 : 1))
+      .animation(reduceMotion ? nil : .smooth(duration: 0.12), value: configuration.isPressed)
+  }
+}
+
+enum ChatSubtitle: Equatable {
+  case connectionState(String)
+  case composeAction(ComposeActionPresentation)
   case timezone(String)
-  case parentThread(String)
+  case breadcrumb(ReplyThreadToolbarContext)
   case empty
 
-  var text: String {
+  var transitionID: String {
     switch self {
-    case let .connectionState(state):
-      state.title.lowercased()
-    case let .typing(text):
-      text
-    case let .composeAction(action):
-      action.toHumanReadableForIOS()
-    case let .timezone(timezone):
-      TimeZoneFormatter.shared.formatTimeZoneInfo(userTimeZoneId: timezone) ?? ""
-    case let .parentThread(title):
-      title
+    case let .connectionState(text):
+      "connection:\(text)"
+    case let .composeAction(presentation):
+      "compose:\(presentation.action.rawValue):\(presentation.text)"
+    case let .timezone(text):
+      "timezone:\(text)"
+    case let .breadcrumb(context):
+      [
+        "breadcrumb",
+        "\(context.space?.id ?? 0)",
+        context.space?.title ?? "",
+        context.parent?.peer.toString() ?? "none",
+        context.parent?.title ?? "",
+      ].joined(separator: ":")
     case .empty:
-      ""
+      "empty"
     }
+  }
+}
+
+private struct ChatToolbarTitleStack: View, RehostSafeToolbarContent {
+  let title: String
+  let minimumHeight: CGFloat
+  let peerId: Peer
+  let fallback: ChatSubtitle
+  let onOpenChatInfo: () -> Void
+  let onOpenSpace: (ReplyThreadToolbarContext.SpaceLink) -> Void
+  let onOpenParentThread: (ReplyThreadToolbarContext.ParentLink) -> Void
+
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @ObservedObject private var realtimeState: RealtimeState
+  @State private var activityState: ComposeActionActivityState
+
+  init(
+    title: String,
+    minimumHeight: CGFloat,
+    peerId: Peer,
+    fallback: ChatSubtitle,
+    realtimeState: RealtimeState,
+    onOpenChatInfo: @escaping () -> Void,
+    onOpenSpace: @escaping (ReplyThreadToolbarContext.SpaceLink) -> Void,
+    onOpenParentThread: @escaping (ReplyThreadToolbarContext.ParentLink) -> Void
+  ) {
+    self.title = title
+    self.minimumHeight = minimumHeight
+    self.peerId = peerId
+    self.fallback = fallback
+    self.onOpenChatInfo = onOpenChatInfo
+    self.onOpenSpace = onOpenSpace
+    self.onOpenParentThread = onOpenParentThread
+    _realtimeState = ObservedObject(wrappedValue: realtimeState)
+    _activityState = State(initialValue: ComposeActions.shared.activityState(for: peerId))
   }
 
-  var shouldKeepOriginalCase: Bool {
-    switch self {
-    case .typing:
-      true
-    case .parentThread:
-      true
-    default:
-      false
+  private var subtitle: ChatSubtitle {
+    if let connectionState = realtimeState.displayedConnectionState {
+      return .connectionState(connectionState.title.lowercased())
     }
+
+    if let presentation = activityState.presentation {
+      if presentation.action == .typing,
+         let typingText = ComposeActions.shared.getTypingDisplayText(for: peerId, length: .min),
+         !typingText.isEmpty {
+        return .composeAction(ComposeActionPresentation(action: .typing, text: typingText))
+      }
+
+      return .composeAction(presentation)
+    }
+
+    return fallback
   }
 
-  var isParentThread: Bool {
-    if case .parentThread = self {
-      return true
-    }
-    return false
+  private var subtitleTransition: AnyTransition {
+    guard !reduceMotion else { return .opacity }
+    return .opacity
+      .combined(with: .scale(scale: 0.97, anchor: .leading))
+      .combined(with: .offset(y: 3))
   }
 
-  var foregroundColor: Color {
-    switch self {
-    case .typing:
-      .accentColor
-    case let .composeAction(action) where action == .recordingVoice:
-      .accentColor
-    default:
-      .secondary
-    }
+  private var subtitleAnimation: Animation? {
+    reduceMotion ? nil : .smooth(duration: 0.2)
   }
+
+  var body: some View {
+    let subtitle = subtitle
+
+    VStack(alignment: .leading, spacing: 0) {
+      Button(action: onOpenChatInfo) {
+        Text(title)
+          .font(.body)
+          .fontWeight(.medium)
+          .lineLimit(1)
+          .truncationMode(.tail)
+          .allowsTightening(true)
+      }
+      .buttonStyle(ChatToolbarHeaderButtonStyle())
+      .accessibilityLabel("Open chat info for \(title)")
+
+      if subtitle != .empty {
+        ChatToolbarSubtitleContent(
+          subtitle: subtitle,
+          onOpenSpace: onOpenSpace,
+          onOpenParentThread: onOpenParentThread
+        )
+        .id(subtitle.transitionID)
+        .offset(y: -2)
+        .transition(subtitleTransition)
+      }
+    }
+    .frame(minHeight: minimumHeight, alignment: .leading)
+    .animation(subtitleAnimation, value: subtitle)
+  }
+}
+
+private struct ChatToolbarSubtitleContent: View, RehostSafeToolbarContent {
+  let subtitle: ChatSubtitle
+  let onOpenSpace: (ReplyThreadToolbarContext.SpaceLink) -> Void
+  let onOpenParentThread: (ReplyThreadToolbarContext.ParentLink) -> Void
 
   @ViewBuilder
-  var animatedIndicator: some View {
-    switch self {
-    case .typing:
-      TypingActivityIndicator(color: .accentColor)
-    case let .composeAction(action):
-      switch action {
-      case .uploadingPhoto:
-        AnimatedPhotoUpload()
-      case .uploadingDocument:
-        AnimatedDocumentUpload()
-      case .uploadingVideo:
-        AnimatedVideoUpload()
-      case .recordingVoice:
-        VoiceRecordingActivityIndicator(
-          barWidth: 2,
-          spacing: 2,
-          minBarHeight: 3,
-          maxBarHeight: 9,
-          color: .accentColor
-        )
-      default:
-        EmptyView()
-      }
-    case .parentThread:
-      Image(systemName: "arrowshape.turn.up.left")
-        .font(.caption2)
-        .foregroundStyle(.secondary)
-    default:
+  var body: some View {
+    switch subtitle {
+    case let .connectionState(text):
+      ChatToolbarConnectionSubtitle(text: text)
+    case let .composeAction(presentation):
+      ChatToolbarComposeActionSubtitle(presentation: presentation)
+    case let .timezone(text):
+      ChatToolbarTimezoneSubtitle(text: text)
+    case let .breadcrumb(context):
+      ChatToolbarBreadcrumbSubtitle(
+        context: context,
+        onOpenSpace: onOpenSpace,
+        onOpenParentThread: onOpenParentThread
+      )
+    case .empty:
       EmptyView()
     }
   }
 }
 
+private struct ChatToolbarConnectionSubtitle: View, RehostSafeToolbarContent {
+  let text: String
+
+  var body: some View {
+    ChatToolbarSubtitleText(text: text, color: .secondary)
+  }
+}
+
+private struct ChatToolbarTimezoneSubtitle: View, RehostSafeToolbarContent {
+  let text: String
+
+  var body: some View {
+    ChatToolbarSubtitleText(text: text, color: .secondary)
+  }
+}
+
+private struct ChatToolbarSubtitleText: View, RehostSafeToolbarContent {
+  let text: String
+  let color: Color
+
+  var body: some View {
+    Text(text)
+      .font(.caption)
+      .foregroundStyle(color)
+      .lineLimit(1)
+      .truncationMode(.tail)
+      .allowsTightening(true)
+  }
+}
+
+private struct ChatToolbarComposeActionSubtitle: View, RehostSafeToolbarContent {
+  let presentation: ComposeActionPresentation
+
+  private var usesAccentColor: Bool {
+    presentation.action == .typing || presentation.action == .recordingVoice
+  }
+
+  var body: some View {
+    HStack(alignment: .center, spacing: 4) {
+      ChatToolbarComposeActionIndicator(action: presentation.action)
+      ChatToolbarSubtitleText(
+        text: presentation.text,
+        color: usesAccentColor ? .accentColor : .secondary
+      )
+    }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(presentation.text)
+  }
+}
+
+private struct ChatToolbarComposeActionIndicator: View, RehostSafeToolbarContent {
+  let action: ApiComposeAction
+
+  @ViewBuilder
+  var body: some View {
+    switch action {
+    case .typing:
+      TypingActivityIndicator(color: .accentColor)
+    case .uploadingPhoto:
+      AnimatedPhotoUpload()
+    case .uploadingDocument:
+      AnimatedDocumentUpload()
+    case .uploadingVideo:
+      AnimatedVideoUpload()
+    case .recordingVoice:
+      VoiceRecordingActivityIndicator(
+        barWidth: 2,
+        spacing: 2,
+        minBarHeight: 3,
+        maxBarHeight: 9,
+        color: .accentColor
+      )
+    }
+  }
+}
+
+private struct ChatToolbarBreadcrumbSubtitle: View, RehostSafeToolbarContent {
+  let context: ReplyThreadToolbarContext
+  let onOpenSpace: (ReplyThreadToolbarContext.SpaceLink) -> Void
+  let onOpenParentThread: (ReplyThreadToolbarContext.ParentLink) -> Void
+
+  var body: some View {
+    HStack(alignment: .center, spacing: 4) {
+      if let space = context.space {
+        breadcrumbButton(title: space.title, accessibilityLabel: "Open space \(space.title)") {
+          onOpenSpace(space)
+        }
+
+        if context.parent != nil {
+          Text("/")
+            .font(.caption)
+            .foregroundStyle(.tertiary)
+        }
+      }
+
+      if let parent = context.parent {
+        breadcrumbButton(title: parent.title, accessibilityLabel: "Open parent chat \(parent.title)") {
+          onOpenParentThread(parent)
+        }
+        .layoutPriority(1)
+      }
+    }
+    .lineLimit(1)
+  }
+
+  private func breadcrumbButton(
+    title: String,
+    accessibilityLabel: String,
+    action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      ChatToolbarSubtitleText(text: title, color: .secondary)
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel(accessibilityLabel)
+  }
+}
+
 // MARK: - Animated Indicators
 
-private struct AnimatedPhotoUpload: View {
+private struct AnimatedPhotoUpload: View, RehostSafeToolbarContent {
   var body: some View {
     UploadProgressIndicator(color: .secondary)
       .frame(width: 14)
   }
 }
 
-private struct AnimatedDocumentUpload: View {
+private struct AnimatedDocumentUpload: View, RehostSafeToolbarContent {
   var body: some View {
     UploadProgressIndicator(color: .secondary)
       .frame(width: 14)
   }
 }
 
-private struct AnimatedVideoUpload: View {
+private struct AnimatedVideoUpload: View, RehostSafeToolbarContent {
   var body: some View {
     UploadProgressIndicator(color: .secondary)
       .frame(width: 14)
@@ -402,39 +507,36 @@ struct ChatSubtitlePreview: View {
   var body: some View {
     VStack(spacing: 0) {
       Text("Chat").fontWeight(.medium)
-      HStack(alignment: .center, spacing: 4) {
-        subtitle.animatedIndicator
-
-        Text(subtitle.shouldKeepOriginalCase ? subtitle.text : subtitle.text.lowercased())
-          .font(.caption)
-          .foregroundStyle(subtitle.foregroundColor)
-      }
-      .padding(.top, -2)
-      .fixedSize()
+      ChatToolbarSubtitleContent(
+        subtitle: subtitle,
+        onOpenSpace: { _ in },
+        onOpenParentThread: { _ in }
+      )
+      .offset(y: -2)
     }
+    .fixedSize()
   }
 }
 
 #Preview {
   VStack(spacing: 20) {
     // Connection States
-    ChatSubtitlePreview(subtitle: .connectionState(.connecting))
-    ChatSubtitlePreview(subtitle: .connectionState(.updating))
-    ChatSubtitlePreview(subtitle: .connectionState(.connected))
+    ChatSubtitlePreview(subtitle: .connectionState("connecting"))
+    ChatSubtitlePreview(subtitle: .connectionState("updating"))
+    ChatSubtitlePreview(subtitle: .connectionState("connected"))
 
     // Typing
-    ChatSubtitlePreview(subtitle: .typing("John is typing"))
-    ChatSubtitlePreview(subtitle: .typing("John and Jane are typing"))
+    ChatSubtitlePreview(subtitle: .composeAction(.init(action: .typing, text: "John")))
+    ChatSubtitlePreview(subtitle: .composeAction(.init(action: .typing, text: "John and Jane")))
 
     // Compose Actions
-    ChatSubtitlePreview(subtitle: .composeAction(.uploadingPhoto))
-    ChatSubtitlePreview(subtitle: .composeAction(.uploadingDocument))
-    ChatSubtitlePreview(subtitle: .composeAction(.uploadingVideo))
-    ChatSubtitlePreview(subtitle: .composeAction(.recordingVoice))
+    ChatSubtitlePreview(subtitle: .composeAction(.init(action: .uploadingPhoto, text: "uploading photo")))
+    ChatSubtitlePreview(subtitle: .composeAction(.init(action: .uploadingDocument, text: "uploading document")))
+    ChatSubtitlePreview(subtitle: .composeAction(.init(action: .uploadingVideo, text: "uploading video")))
+    ChatSubtitlePreview(subtitle: .composeAction(.init(action: .recordingVoice, text: "recording voice")))
 
     // Timezone
-    ChatSubtitlePreview(subtitle: .timezone("America/New_York"))
-    ChatSubtitlePreview(subtitle: .parentThread("Parent Chat"))
+    ChatSubtitlePreview(subtitle: .timezone("9:41 AM"))
 
     // Empty
     ChatSubtitlePreview(subtitle: .empty)
