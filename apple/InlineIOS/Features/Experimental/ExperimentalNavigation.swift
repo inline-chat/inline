@@ -216,6 +216,18 @@ struct ExperimentalDestinationView: View {
       .onAppear {
         ExperimentalHomeNavigationPerformance.completeChatOpen(peer: peer)
       }
+    case let .externalChat(peer, contextSpaceID):
+      ChatView(
+        peer: peer,
+        contextSpaceId: contextSpaceID,
+        autoCleanupUntitledEmptyThreadOnBack: true
+      )
+      .onAppear {
+        if nav.activeSpaceId != contextSpaceID {
+          nav.activeSpaceId = nil
+        }
+        ExperimentalHomeNavigationPerformance.completeChatOpen(peer: peer)
+      }
     case let .chatMessage(peer, messageID):
       ChatView(
         peer: peer,

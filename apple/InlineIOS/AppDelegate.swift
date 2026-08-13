@@ -11,7 +11,7 @@ import UIKit
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
   let notificationHandler = NotificationHandler()
   let nav = Navigation()
-  let router = NavigationModel<AppTab, Destination, Sheet>(initialTab: .chats)
+  let sceneRouterRegistry = IOSSceneRouterRegistry()
   private var protectedDataObserver: NSObjectProtocol?
 
   func application(
@@ -76,20 +76,20 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
   }
 
   @MainActor
-  func handleDeepLink(_ url: URL) -> Bool {
+  func handleDeepLink(_ url: URL, router: Router) -> Bool {
     guard let deepLink = InlineDeepLink(url: url) else { return false }
 
+    let request: AppNavigationRequest
     switch deepLink {
     case let .user(id):
-      router.navigateFromNotification(peer: .user(id: id))
+      request = .chat(peer: .user(id: id))
     case let .chat(id):
-      router.navigateFromNotification(peer: .thread(id: id))
+      request = .chat(peer: .thread(id: id))
     case let .message(chatId, messageId):
-      router.selectedTab = .inbox
-      router[.inbox] = [
-        .chatMessage(peer: .thread(id: chatId), messageID: messageId),
-      ]
+      request = .message(peer: .thread(id: chatId), messageID: messageId)
     }
+    router.navigate(request)
+    openInInboxAfterExternalNavigation(request.peer)
     return true
   }
 
@@ -216,10 +216,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     didReceive response: UNNotificationResponse,
     withCompletionHandler completionHandler: @escaping () -> Void
   ) {
-    defer {
-      completionHandler()
-    }
-
     let userInfo = response.notification.request.content.userInfo
     let userId = Self.coerceInt64(userInfo["userId"])
     let isThread = Self.coerceBool(userInfo["isThread"]) == true
@@ -234,11 +230,81 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
 
     guard let peerId else {
+      completionHandler()
       return
     }
 
-    // nav.navigateToChatFromNotification(peer: peerId)
-    router.navigateFromNotification(peer: peerId)
+    let waitsForSceneActivation = UIApplication.shared.applicationState == .background
+      || !sceneRouterRegistry.hasActiveRouter()
+    let navigationReservation = sceneRouterRegistry.reserveNavigation(
+      waitForActivation: waitsForSceneActivation
+    )
+
+    if waitsForSceneActivation {
+      let accepted = sceneRouterRegistry.navigate(
+        .externalChat(peer: peerId, contextSpaceID: nil),
+        reservation: navigationReservation
+      )
+      if accepted {
+        openInInboxAfterExternalNavigation(peerId)
+      }
+      completionHandler()
+
+      Task { @MainActor in
+        guard let contextSpaceID = await Self.localSpaceID(for: peerId) else { return }
+        sceneRouterRegistry.updatePendingRequest(
+          .externalChat(peer: peerId, contextSpaceID: contextSpaceID),
+          reservation: navigationReservation
+        )
+      }
+      return
+    }
+
+    Task { @MainActor in
+      defer { completionHandler() }
+      let contextSpaceID = await Self.localSpaceID(for: peerId)
+      completeNotificationNavigation(
+        peer: peerId,
+        contextSpaceID: contextSpaceID,
+        reservation: navigationReservation
+      )
+    }
+  }
+
+  @MainActor
+  private func completeNotificationNavigation(
+    peer: Peer,
+    contextSpaceID: Int64?,
+    reservation: UInt64
+  ) {
+    let accepted = sceneRouterRegistry.navigate(
+      .externalChat(peer: peer, contextSpaceID: contextSpaceID),
+      reservation: reservation
+    )
+    if accepted {
+      openInInboxAfterExternalNavigation(peer)
+    }
+  }
+
+  private static func localSpaceID(for peer: Peer) async -> Int64? {
+    await Task.detached(priority: .userInitiated) {
+      do {
+        return try Chat.getByPeerId(peerId: peer)?.spaceId
+      } catch {
+        Log.shared.error("Failed to resolve notification chat context", error: error)
+        return nil
+      }
+    }.value
+  }
+
+  private func openInInboxAfterExternalNavigation(_ peer: Peer) {
+    Task {
+      do {
+        _ = try await InboxMembershipService.shared.open(peer: peer)
+      } catch {
+        Log.shared.error("Failed to open notification chat in Inbox", error: error)
+      }
+    }
   }
 }
 

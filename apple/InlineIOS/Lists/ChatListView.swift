@@ -162,12 +162,7 @@ struct ChatListView: View {
   }
 
   private var currentPeers: Set<Peer> {
-    Set(router.selectedTabPath.compactMap { destination in
-      if case let .chat(peer) = destination {
-        return peer
-      }
-      return nil
-    })
+    Set(router.selectedTabPath.compactMap(\.chatPeer))
   }
 
   private func rowBackground(isPinned: Bool) -> Color {

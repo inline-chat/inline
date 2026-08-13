@@ -588,7 +588,11 @@ private struct ExperimentalAuthedRootView: View {
       restoredSpaceID = nil
     }
 
-    nav.activeSpaceId = restoredSpaceID
+    if case let .externalChat(_, contextSpaceID) = router.selectedTabPath.last {
+      nav.activeSpaceId = restoredSpaceID == contextSpaceID ? restoredSpaceID : nil
+    } else {
+      nav.activeSpaceId = restoredSpaceID
+    }
   }
 
   private func ensureActiveSpaceExists() {

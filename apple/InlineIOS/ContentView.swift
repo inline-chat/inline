@@ -149,6 +149,8 @@ private struct AuthedAppRoot: View {
       SpaceView(spaceId: id)
     case let .chat(peer):
       ChatView(peer: peer)
+    case let .externalChat(peer, contextSpaceID):
+      ChatView(peer: peer, contextSpaceId: contextSpaceID)
     case let .chatMessage(peer, messageID):
       ChatView(peer: peer, focusMessageID: messageID)
     case let .chatInfo(chatItem):
@@ -226,6 +228,10 @@ private struct AuthedAppRoot: View {
 
   private func normalizeSelectedTabIfNeeded(selectedTab: AppTab) {
     guard legacyRootTabs.contains(selectedTab) else {
+      let selectedPath = router[selectedTab]
+      if !selectedPath.isEmpty {
+        router[.chats] = selectedPath
+      }
       router.selectedTab = .chats
       return
     }
