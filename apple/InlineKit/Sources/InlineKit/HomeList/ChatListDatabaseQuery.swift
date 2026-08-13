@@ -9,6 +9,7 @@ public enum ChatListDatabaseQuery {
     spaceID: Int64?,
     includeSpaceChatsInHome: Bool,
     translationLanguage: String,
+    includePreviewSenderIdentity: Bool = false,
     now: Date = Date(),
     calendar: Calendar = .autoupdatingCurrent
   ) throws -> [ChatListItemSnapshot] {
@@ -21,10 +22,20 @@ public enum ChatListDatabaseQuery {
     let request = SQLRequest<Row>(
       sql: """
       SELECT
+        "dialog"."id" AS "dialogID",
         "dialog"."peerUserId" AS "peerUserID",
         "dialog"."peerThreadId" AS "peerThreadID",
         "chat"."id" AS "chatID",
+        "chat"."parentChatId" AS "parentChatID",
         COALESCE("dialog"."spaceId", "chat"."spaceId") AS "spaceID",
+        "space"."name" AS "spaceName",
+        "parentChat"."title" AS "parentChatTitle",
+        "parentChat"."type" AS "parentChatType",
+        "parentPeerUser"."firstName" AS "parentPeerFirstName",
+        "parentPeerUser"."lastName" AS "parentPeerLastName",
+        "parentPeerUser"."email" AS "parentPeerEmail",
+        "parentPeerUser"."username" AS "parentPeerUsername",
+        "parentPeerUser"."phoneNumber" AS "parentPeerPhoneNumber",
         "dialog"."unreadCount" AS "unreadCount",
         "dialog"."unreadMark" AS "unreadMark",
         "dialog"."archived" AS "isArchived",
@@ -34,6 +45,8 @@ public enum ChatListDatabaseQuery {
         "dialog"."order" AS "normalOrder",
         "dialog"."pinnedOrder" AS "pinnedOrder",
         "dialog"."followMode" AS "followMode",
+        "chat"."createdBy" AS "chatCreatedBy",
+        "chat"."isPublic" AS "chatIsPublic",
 
         "chat"."date" AS "chatDate",
         "chat"."type" AS "chatType",
@@ -68,6 +81,11 @@ public enum ChatListDatabaseQuery {
         "lastSender"."email" AS "senderEmail",
         "lastSender"."username" AS "senderUsername",
         "lastSender"."phoneNumber" AS "senderPhoneNumber",
+        "lastSender"."id" AS "senderID",
+        "lastSender"."profileFileId" AS "senderProfileFileID",
+        "lastSender"."profileFileUniqueId" AS "senderProfileFileUniqueID",
+        "lastSender"."profileCdnUrl" AS "senderProfileCDNURL",
+        "lastSender"."profileLocalPath" AS "senderProfileLocalPath",
 
         "draft2"."text" AS "draftText",
         "draft2"."revision" AS "draftRevision",
@@ -86,6 +104,14 @@ public enum ChatListDatabaseQuery {
       FROM "dialog"
       JOIN "chat"
         ON "chat"."id" = COALESCE("dialog"."chatId", "dialog"."peerThreadId")
+      LEFT JOIN "space"
+        ON "space"."id" = COALESCE("dialog"."spaceId", "chat"."spaceId")
+      LEFT JOIN "chat" AS "parentChat"
+        ON "parentChat"."id" = "chat"."parentChatId"
+      LEFT JOIN "dialog" AS "parentDialog"
+        ON "parentDialog"."chatId" = "parentChat"."id"
+      LEFT JOIN "user" AS "parentPeerUser"
+        ON "parentPeerUser"."id" = COALESCE("parentDialog"."peerUserId", "parentChat"."peerUserId")
       LEFT JOIN "user" AS "peerUser"
         ON "peerUser"."id" = "dialog"."peerUserId"
       LEFT JOIN "message" AS "lastMessage"
@@ -125,8 +151,10 @@ public enum ChatListDatabaseQuery {
     #endif
     let hasLocalAvatarPath = rows.contains { rawRow in
       let row = ChatListDatabaseRow(rawRow)
-      let path: String? = row[.profileLocalPath]
-      return path?.isEmpty == false
+      let peerPath: String? = row[.profileLocalPath]
+      let senderPath: String? = row[.senderProfileLocalPath]
+      return peerPath?.isEmpty == false
+        || (includePreviewSenderIdentity && senderPath?.isEmpty == false)
     }
     let profileCacheDirectory = hasLocalAvatarPath
       ? FileHelpers.getLocalCacheDirectory(for: .photos)
@@ -136,6 +164,7 @@ public enum ChatListDatabaseQuery {
         from: ChatListDatabaseRow(rawRow),
         now: now,
         calendar: calendar,
+        includePreviewSenderIdentity: includePreviewSenderIdentity,
         profileCacheDirectory: profileCacheDirectory
       )
     }
@@ -145,6 +174,7 @@ public enum ChatListDatabaseQuery {
     from row: ChatListDatabaseRow,
     now: Date,
     calendar: Calendar,
+    includePreviewSenderIdentity: Bool,
     profileCacheDirectory: URL?
   ) -> ChatListItemSnapshot? {
     let peerUserID: Int64? = row[.peerUserID]
@@ -230,13 +260,21 @@ public enum ChatListDatabaseQuery {
     let lastMessageDate: Date? = row[.lastMessageDate]
     let chatDate: Date? = row[.chatDate]
     let lastUpdatedAt = lastMessageDate ?? chatDate
+    let parentTitle = parentDisplayTitle(row: row)
 
     return ChatListItemSnapshot(
+      dialogID: row[.dialogID],
       peer: peer,
       chatID: chatID,
+      parentChatID: row[.parentChatID],
       spaceID: row[.spaceID],
+      spaceName: spaceDisplayName(row[.spaceName]),
+      parentTitle: parentTitle,
       title: title,
       previewSenderName: draftPreview == nil ? lastMessagePreview?.senderName : nil,
+      previewSenderIdentity: draftPreview == nil && includePreviewSenderIdentity
+        ? previewSenderIdentity(row: row, profileCacheDirectory: profileCacheDirectory)
+        : nil,
       previewText: draftPreview ?? lastMessagePreview?.text,
       translatedPreviewText: draftPreview == nil ? translatedPreview : nil,
       timestampText: ChatListDateFormatter.rowTitle(
@@ -257,10 +295,37 @@ public enum ChatListDatabaseQuery {
       openedDate: row[.openedDate],
       order: row[.normalOrder],
       pinnedOrder: row[.pinnedOrder],
+      chatType: ChatType(rawValue: chatType),
+      chatCreatedBy: row[.chatCreatedBy],
+      chatIsPublic: row[.chatIsPublic],
       contentSignature: ChatListContentSignature(
         messageID: row[.lastMessageID],
         messageRevision: row[.lastMessageRevision],
         draftRevision: row[.draftRevision]
+      )
+    )
+  }
+
+  private static func previewSenderIdentity(
+    row: ChatListDatabaseRow,
+    profileCacheDirectory: URL?
+  ) -> ChatListUserAvatarDescriptor? {
+    guard let senderID: Int64 = row[.senderID] else { return nil }
+    let profileCDNURL: String? = row[.senderProfileCDNURL]
+    let profileLocalPath: String? = row[.senderProfileLocalPath]
+    return ChatListUserAvatarDescriptor(
+      userID: senderID,
+      firstName: row[.senderFirstName],
+      lastName: row[.senderLastName],
+      email: row[.senderEmail],
+      username: row[.senderUsername],
+      profileFileID: row[.senderProfileFileID],
+      profileFileUniqueID: row[.senderProfileFileUniqueID],
+      profileLocalPath: profileLocalPath,
+      remoteURL: profileCDNURL.flatMap(URL.init(string:)),
+      localURL: preparedAvatarLocalURL(
+        path: profileLocalPath,
+        directory: profileCacheDirectory
       )
     )
   }
@@ -391,6 +456,35 @@ public enum ChatListDatabaseQuery {
   private static func normalizedEmoji(_ emoji: String?) -> String? {
     guard let emoji = singleLineText(emoji), let first = emoji.first else { return nil }
     return String(first)
+  }
+
+  private static func spaceDisplayName(_ rawName: String?) -> String? {
+    guard let rawName, rawName.isEmpty == false else { return nil }
+    guard let first = rawName.first, String(first).containsEmoji else {
+      return rawName
+    }
+
+    let remainder = rawName.dropFirst()
+    let name = remainder.first == " " ? remainder.dropFirst() : remainder
+    return name.isEmpty ? "Untitled Space" : String(name)
+  }
+
+  private static func parentDisplayTitle(row: ChatListDatabaseRow) -> String? {
+    let parentChatID: Int64? = row[.parentChatID]
+    guard parentChatID != nil else { return nil }
+
+    let parentType: String? = row[.parentChatType]
+    if parentType == ChatType.privateChat.rawValue {
+      return userDisplayName(
+        firstName: row[.parentPeerFirstName],
+        lastName: row[.parentPeerLastName],
+        username: row[.parentPeerUsername],
+        email: row[.parentPeerEmail],
+        phoneNumber: row[.parentPeerPhoneNumber]
+      ) ?? "Direct Message"
+    }
+
+    return singleLineText(row[.parentChatTitle]) ?? "Chat"
   }
 
   private static func scopePredicate(

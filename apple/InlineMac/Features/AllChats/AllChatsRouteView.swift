@@ -3,6 +3,7 @@ import Combine
 import GRDB
 import InlineKit
 import InlineMacUI
+import InlineUI
 import Logger
 import SwiftUI
 import Translation
@@ -171,7 +172,11 @@ struct AllChatsRouteView: View {
   }
 
   private func toggleArchiveFilter() {
-    filter == .archived ? closeArchiveFilter() : openArchiveFilter()
+    if filter == .archived {
+      closeArchiveFilter()
+    } else {
+      openArchiveFilter()
+    }
   }
 
   private func openArchiveFilter() {
@@ -310,22 +315,49 @@ final class AllChatsViewModel: ObservableObject {
   private let log = Log.scoped("AllChatsViewModel")
   private var chatsCancellable: AnyCancellable?
   private var spacesCancellable: AnyCancellable?
+  private var translationCancellable: AnyCancellable?
+  private var translationLanguageCancellable: AnyCancellable?
+  private var chatsRetryTask: Task<Void, Never>?
+  private var chatsRetryAttempt = 0
+  private var snapshots: [ChatListItemSnapshot] = []
 
   init(db: AppDatabase) {
     self.db = db
+    translationCancellable = TranslationState.shared.subject.sink { [weak self] event in
+      guard let self else { return }
+      let (peer, _) = event
+      guard snapshots.contains(where: { $0.peer == peer }) else { return }
+      apply(Self.makeItems(snapshots))
+      observeChats()
+    }
+    translationLanguageCancellable = NotificationCenter.default
+      .publisher(for: .translationLanguageChanged)
+      .sink { [weak self] _ in
+        self?.observeChats()
+      }
     observeChats()
     observeSpaces()
   }
 
   private func observeChats() {
+    chatsCancellable?.cancel()
+    chatsCancellable = nil
+    chatsRetryTask?.cancel()
+    chatsRetryTask = nil
+
     #if DEBUG
     db.warnIfInMemoryDatabaseForObservation("AllChatsViewModel.chats")
     #endif
 
     chatsCancellable = ValueObservation
       .tracking { db in
-        let chats = try HomeChatItem.all().fetchAll(db)
-        return try Self.makeItems(chats, db: db)
+        try ChatListDatabaseQuery.fetchSnapshots(
+          db,
+          spaceID: nil,
+          includeSpaceChatsInHome: true,
+          translationLanguage: UserLocale.getCurrentLanguage(),
+          includePreviewSenderIdentity: true
+        )
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(
@@ -334,13 +366,15 @@ final class AllChatsViewModel: ObservableObject {
 
           if case let .failure(error) = completion {
             isLoading = false
-            errorText = error.localizedDescription
-            log.error("All chats observation failed: \(error.localizedDescription)")
+            errorText = items.isEmpty ? "Couldn’t load chats. Retrying…" : nil
+            log.error("All chats observation failed: \(Self.safeErrorName(error))")
+            scheduleChatsObservationRetry()
           }
         },
-        receiveValue: { [weak self] items in
+        receiveValue: { [weak self] snapshots in
           guard let self else { return }
-          apply(items)
+          self.snapshots = snapshots
+          apply(Self.makeItems(snapshots))
         }
       )
   }
@@ -366,22 +400,45 @@ final class AllChatsViewModel: ObservableObject {
     self.items = items
       .sorted { lhs, rhs in
         if lhs.lastActivityDate == rhs.lastActivityDate {
-          return lhs.id > rhs.id
+          return Dialog.getDialogId(peerId: lhs.peerId)
+            > Dialog.getDialogId(peerId: rhs.peerId)
         }
         return lhs.lastActivityDate > rhs.lastActivityDate
       }
 
+    chatsRetryAttempt = 0
+    chatsRetryTask?.cancel()
+    chatsRetryTask = nil
     errorText = nil
     isLoading = false
   }
 
-  private nonisolated static func makeItems(_ chats: [HomeChatItem], db: Database) throws -> [AllChatsItem] {
-    let titles = try ReplyThreadTitleFallback.titlesByChatId(for: chats, db: db)
-    return HomeViewModel
-      .filterEmptyChats(chats)
-      .compactMap { chat in
-        AllChatsItem(chat: chat, titleOverride: chat.chat.flatMap { titles[$0.id] })
-      }
+  private func scheduleChatsObservationRetry() {
+    guard chatsRetryTask == nil else { return }
+    chatsRetryAttempt &+= 1
+    let delay = min(pow(2, Double(min(chatsRetryAttempt - 1, 5))) * 0.25, 8)
+    chatsRetryTask = Task { [weak self] in
+      try? await Task.sleep(for: .seconds(delay))
+      guard Task.isCancelled == false, let self else { return }
+      chatsRetryTask = nil
+      observeChats()
+    }
+  }
+
+  private nonisolated static func safeErrorName(_ error: Error) -> String {
+    if error is RowDecodingError {
+      return "RowDecodingError"
+    }
+    if let error = error as? DatabaseError {
+      return "DatabaseError(\(error.resultCode.rawValue))"
+    }
+    return String(reflecting: type(of: error))
+  }
+
+  private nonisolated static func makeItems(
+    _ snapshots: [ChatListItemSnapshot]
+  ) -> [AllChatsItem] {
+    snapshots.map(AllChatsItem.init)
   }
 
   fileprivate func sections(for filter: AllChatsFilter, spaceId: Int64?) -> [AllChatsSection] {
@@ -425,7 +482,7 @@ struct AllChatsSection: Identifiable, Equatable {
 }
 
 struct AllChatsItem: Identifiable, Equatable {
-  let id: Int64
+  let id: Peer
   let peerId: Peer
   let chatId: Int64
   let title: String
@@ -438,121 +495,51 @@ struct AllChatsItem: Identifiable, Equatable {
   let pinned: Bool
   let archived: Bool
   let chatListHidden: Bool
-  let peer: ChatIcon.PeerType?
+  let identity: ChatListIdentityDescriptor?
   let previewSender: AllChatsPreviewSender?
   let spaceId: Int64?
   let spaceName: String?
+  let chatType: ChatType?
+  let chatCreatedBy: Int64?
+  let chatIsPublic: Bool?
 
-  init?(chat: HomeChatItem, titleOverride: String? = nil) {
-    guard chat.chat != nil || chat.user != nil else { return nil }
-
-    let preview = Self.preview(for: chat)
-    id = chat.id
-    peerId = chat.peerId
-    chatId = chat.chat?.id ?? 0
-    title = titleOverride ?? Self.title(for: chat)
-    subtitle = preview.text
-    lastActivityDate = chat.lastMessage?.message.date
-      ?? chat.chat?.date
-      ?? Date.distantPast
-    unreadCount = max(chat.dialog.unreadCount ?? 0, 0)
-    unreadMark = chat.dialog.unreadMark == true
-    unread = unreadCount > 0 || unreadMark
-    prominentUnreadIndicator = Self.hasProminentUnreadIndicator(chat)
-    pinned = chat.dialog.pinned == true
-    archived = chat.dialog.archived == true
-    chatListHidden = chat.dialog.chatListHidden == true
-    previewSender = preview.sender
-    spaceId = chat.dialog.spaceId ?? chat.chat?.spaceId ?? chat.space?.id
-    spaceName = chat.space?.displayName
-
-    if let user = chat.user {
-      peer = .user(user)
-    } else if let chat = chat.chat {
-      peer = .chat(chat)
+  init(snapshot: ChatListItemSnapshot) {
+    id = snapshot.peer
+    peerId = snapshot.peer
+    chatId = snapshot.chatID
+    title = snapshot.title
+    let showsTranslation = TranslationState.shared.isTranslationEnabled(for: snapshot.peer)
+    subtitle = (showsTranslation ? snapshot.translatedPreviewText : nil)
+      ?? snapshot.previewText
+      ?? "No messages"
+    lastActivityDate = snapshot.lastUpdatedAt ?? Date.distantPast
+    unreadCount = snapshot.unreadCount
+    unreadMark = snapshot.unreadMark
+    unread = snapshot.isUnread
+    prominentUnreadIndicator = snapshot.isProminent
+    pinned = snapshot.isPinned
+    archived = snapshot.isArchived
+    chatListHidden = snapshot.isChatListHidden
+    identity = snapshot.identity
+    if let name = snapshot.previewSenderName, name.isEmpty == false {
+      previewSender = AllChatsPreviewSender(
+        name: name,
+        identity: snapshot.previewSenderIdentity
+      )
     } else {
-      peer = nil
+      previewSender = nil
     }
-  }
-
-  private static func title(for item: HomeChatItem) -> String {
-    if let user = item.user?.user {
-      return user.displayName
-    }
-
-    return item.chat?.humanReadableTitle ?? "Chat"
-  }
-
-  private static func preview(for item: HomeChatItem) -> Preview {
-    if let draft = draftText(for: item.dialog) {
-      return Preview(text: draft, sender: nil)
-    }
-
-    guard let lastMessage = item.lastMessage else {
-      return Preview(text: "No messages", sender: nil)
-    }
-
-    let text = normalizedPreviewText(
-      lastMessage.displayTextForLastMessage
-        ?? lastMessage.documentPreviewTextForAllChats
-        ?? lastMessage.message.stringRepresentationPlain
-    )
-
-    return Preview(text: text, sender: previewSender(for: item, message: lastMessage))
-  }
-
-  private static func previewSender(
-    for item: HomeChatItem,
-    message: EmbeddedMessage
-  ) -> AllChatsPreviewSender? {
-    guard item.chat?.type == .thread,
-          let senderInfo = message.senderInfo
-    else {
-      return nil
-    }
-
-    let name = senderInfo.user.shortDisplayName
-    guard name.isEmpty == false else { return nil }
-
-    return AllChatsPreviewSender(name: name, peer: .user(senderInfo))
-  }
-
-  private static func hasProminentUnreadIndicator(_ item: HomeChatItem) -> Bool {
-    if item.dialog.peerUserId != nil {
-      return true
-    }
-
-    if item.dialog.isFollowingReplyThread {
-      return true
-    }
-
-    return item.chat?.type == .privateChat
-  }
-
-  private static func draftText(for dialog: Dialog) -> String? {
-    let draftText = Drafts2.shared.cached(peer: dialog.peerId)?.text ?? dialog.draftMessage?.text
-    guard let draftText else { return nil }
-    let text = normalizedPreviewText(draftText)
-    guard text.isEmpty == false else { return nil }
-    return "Draft: \(text)"
-  }
-
-  private static func normalizedPreviewText(_ text: String) -> String {
-    text
-      .components(separatedBy: .newlines)
-      .joined(separator: " ")
-      .trimmingCharacters(in: .whitespacesAndNewlines)
-  }
-
-  private struct Preview {
-    let text: String
-    let sender: AllChatsPreviewSender?
+    spaceId = snapshot.spaceID
+    spaceName = snapshot.spaceName
+    chatType = snapshot.chatType
+    chatCreatedBy = snapshot.chatCreatedBy
+    chatIsPublic = snapshot.chatIsPublic
   }
 }
 
 struct AllChatsPreviewSender: Equatable {
   let name: String
-  let peer: ChatIcon.PeerType
+  let identity: ChatListUserAvatarDescriptor?
 }
 
 private struct NewThreadListRow: View {
@@ -653,15 +640,13 @@ private struct ChatListRow: View {
     item.peerId
   }
 
-  private var threadChat: Chat? {
-    guard case let .chat(chat) = item.peer else { return nil }
-    return chat
-  }
-
   private var destructiveAction: ChatDestructiveAction? {
     ChatDestructiveActionResolver.action(
       peer: peerId,
-      chat: threadChat,
+      chatType: item.chatType,
+      chatCreatedBy: item.chatCreatedBy,
+      chatSpaceId: item.spaceId,
+      chatIsPublic: item.chatIsPublic,
       currentUserId: dependencies?.auth.getCurrentUserId()
     )
   }
@@ -875,15 +860,17 @@ private struct ChatListRow: View {
 
   @ViewBuilder
   private var fullIcon: some View {
-    if case let .chat(chat) = item.peer {
+    switch item.identity {
+    case let .thread(descriptor):
       SidebarThreadIcon(
-        chat: chat,
+        emoji: descriptor.emoji,
+        isReplyThread: descriptor.isReplyThread,
         size: Self.iconSize,
         shape: .circle
       )
-    } else if let peer = item.peer {
-      ChatIcon(peer: peer, size: Self.iconSize)
-    } else {
+    case let .user(descriptor):
+      avatar(descriptor, size: Self.iconSize)
+    case nil:
       Circle()
         .fill(Color.primary.opacity(0.08))
         .overlay {
@@ -896,21 +883,41 @@ private struct ChatListRow: View {
 
   @ViewBuilder
   private var compactIcon: some View {
-    if case let .chat(chat) = item.peer {
+    switch item.identity {
+    case let .thread(descriptor):
       SidebarThreadIcon(
-        chat: chat,
+        emoji: descriptor.emoji,
+        isReplyThread: descriptor.isReplyThread,
         size: Self.compactIconSize,
         shape: .roundedSquare
       )
-    } else if let peer = item.peer {
-      SidebarChatIcon(peer: peer, size: Self.compactIconSize)
-    } else {
+    case let .user(descriptor):
+      avatar(descriptor, size: Self.compactIconSize)
+    case nil:
       SidebarThreadIcon(
         emoji: nil,
         size: Self.compactIconSize,
         shape: .roundedSquare
       )
     }
+  }
+
+  private func avatar(
+    _ descriptor: ChatListUserAvatarDescriptor,
+    size: CGFloat
+  ) -> some View {
+    UserAvatar(
+      userID: descriptor.userID,
+      firstName: descriptor.firstName,
+      lastName: descriptor.lastName,
+      email: descriptor.email,
+      username: descriptor.username,
+      stableAvatarIdentity: descriptor.stableAvatarIdentity,
+      remoteURL: descriptor.remoteURL,
+      localURL: descriptor.localURL,
+      size: size
+    )
+    .equatable()
   }
 
   private var background: some View {
@@ -1053,8 +1060,21 @@ private struct AllChatsPreviewLine: View {
     HStack(alignment: .center, spacing: 4) {
       if let sender {
         if showsProfilePhotos {
-          SidebarChatIcon(peer: sender.peer, size: Self.iconSize)
+          if let identity = sender.identity {
+            UserAvatar(
+              userID: identity.userID,
+              firstName: identity.firstName,
+              lastName: identity.lastName,
+              email: identity.email,
+              username: identity.username,
+              stableAvatarIdentity: identity.stableAvatarIdentity,
+              remoteURL: identity.remoteURL,
+              localURL: identity.localURL,
+              size: Self.iconSize
+            )
+            .equatable()
             .frame(width: Self.iconSize, height: Self.iconSize)
+          }
         }
 
         (Text(sender.name)
@@ -1088,8 +1108,7 @@ private struct AllChatsTrailingInfo: View {
     HStack(spacing: 3) {
       if showsSpaceName,
          let spaceId = item.spaceId,
-         let spaceName = cleanSpaceName
-      {
+         let spaceName = cleanSpaceName {
         AllChatsSpacePill(name: spaceName) {
           switchToSpace(spaceId)
         }
@@ -1231,18 +1250,6 @@ private enum AllChatsDateFormatter {
     }
 
     return nil
-  }
-}
-
-private extension EmbeddedMessage {
-  var documentPreviewTextForAllChats: String? {
-    guard message.documentId != nil else { return nil }
-    guard let fileName = document?.fileName?.trimmingCharacters(in: .whitespacesAndNewlines),
-          fileName.isEmpty == false
-    else {
-      return nil
-    }
-    return fileName.replacingOccurrences(of: "\n", with: " ")
   }
 }
 

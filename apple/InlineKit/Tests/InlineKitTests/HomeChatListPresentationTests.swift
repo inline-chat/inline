@@ -21,6 +21,256 @@ struct HomeChatListPresentationTests {
     #expect(snapshots.isEmpty)
   }
 
+  @Test("Live snapshot observation refreshes every visible row field")
+  @MainActor
+  func liveSnapshotObservationRefreshesVisibleRowFields() async throws {
+    let database = AppDatabase.empty()
+    let recorder = ChatListSnapshotRecorder()
+    let userID: Int64 = 820
+    let chatID: Int64 = 821
+    let firstMessageID: Int64 = 822
+    let secondMessageID: Int64 = 823
+
+    try await database.dbWriter.write { db in
+      var user = User(id: userID, email: nil, firstName: "Amy")
+      user.profileFileUniqueId = "avatar-v1"
+      try user.insert(db)
+      try Chat(
+        id: chatID,
+        date: date(day: 1),
+        type: .privateChat,
+        title: nil,
+        spaceId: nil,
+        peerUserId: userID,
+        lastMsgId: firstMessageID
+      ).insert(db)
+      try Message(
+        messageId: firstMessageID,
+        fromId: userID,
+        date: date(day: 1),
+        text: "First preview",
+        peerUserId: userID,
+        peerThreadId: nil,
+        chatId: chatID,
+        rev: 1
+      ).insert(db)
+
+      var dialog = Dialog.previewDm
+      dialog.id = Dialog.getDialogId(peerUserId: userID)
+      dialog.peerUserId = userID
+      dialog.chatId = chatID
+      dialog.open = true
+      dialog.order = "a"
+      try dialog.insert(db)
+    }
+
+    let observation = ValueObservation.tracking { db in
+      try ChatListDatabaseQuery.fetchSnapshots(
+        db,
+        spaceID: nil,
+        includeSpaceChatsInHome: true,
+        translationLanguage: "en"
+      )
+    }
+    let cancellable = observation.start(
+      in: database.reader,
+      scheduling: .immediate,
+      onError: recorder.record(error:),
+      onChange: recorder.record
+    )
+    defer { cancellable.cancel() }
+
+    let initial = try #require(await waitForSnapshot(
+      recorder,
+      messageID: firstMessageID
+    )?.first)
+    #expect(initial.title == "Amy")
+    #expect(initial.previewText == "First preview")
+    #expect(initial.unreadCount == 0)
+    #expect(initial.order == "a")
+    #expect(initial.identity?.userDescriptor?.stableAvatarIdentity == "unique:avatar-v1")
+
+    try await database.dbWriter.write { db in
+      var user = try #require(try User.fetchOne(db, id: userID))
+      user.firstName = "Amy Updated"
+      user.profileFileUniqueId = "avatar-v2"
+      try user.update(db)
+
+      var dialog = try #require(try Dialog.fetchOne(db, id: Dialog.getDialogId(peerUserId: userID)))
+      dialog.unreadCount = 4
+      dialog.unreadMark = true
+      dialog.order = "b"
+      dialog.pinned = true
+      dialog.pinnedOrder = "p"
+      try dialog.update(db)
+
+      try Message(
+        messageId: secondMessageID,
+        fromId: userID,
+        date: date(day: 2),
+        text: "Second preview",
+        peerUserId: userID,
+        peerThreadId: nil,
+        chatId: chatID,
+        rev: 2
+      ).insert(db)
+      try Translation(
+        messageId: secondMessageID,
+        chatId: chatID,
+        translation: "Translated preview",
+        entities: nil,
+        language: "en",
+        date: date(day: 2),
+        msgRev: 2
+      ).insert(db)
+      try Chat.updateLastMsgId(
+        db,
+        chatId: chatID,
+        lastMsgId: secondMessageID,
+        date: date(day: 2)
+      )
+    }
+
+    let updated = try #require(await waitForSnapshot(
+      recorder,
+      messageID: secondMessageID
+    )?.first)
+    #expect(updated.title == "Amy Updated")
+    #expect(updated.previewText == "Second preview")
+    #expect(updated.translatedPreviewText == "Translated preview")
+    #expect(updated.lastUpdatedAt == date(day: 2))
+    #expect(updated.unreadCount == 4)
+    #expect(updated.unreadMark)
+    #expect(updated.isPinned)
+    #expect(updated.order == "b")
+    #expect(updated.pinnedOrder == "p")
+    #expect(updated.identity?.userDescriptor?.stableAvatarIdentity == "unique:avatar-v2")
+    #expect(recorder.errorDescription == nil)
+  }
+
+  @Test("Narrow snapshot projection ignores malformed unused relationships")
+  func narrowProjectionAvoidsUnrelatedDecodeFailures() throws {
+    let database = AppDatabase.empty()
+    let userID: Int64 = 801
+    let chatID: Int64 = 802
+
+    try database.dbWriter.write { db in
+      try User(id: userID, email: nil, firstName: "Mo").insert(db)
+      try Chat(
+        id: chatID,
+        date: date(day: 1),
+        type: .privateChat,
+        title: nil,
+        spaceId: nil,
+        peerUserId: userID
+      ).insert(db)
+
+      var dialog = Dialog.previewDm
+      dialog.id = Dialog.getDialogId(peerUserId: userID)
+      dialog.peerUserId = userID
+      dialog.chatId = chatID
+      dialog.open = true
+      try dialog.insert(db)
+
+      // `fileSize` predates its non-optional model representation and remains
+      // nullable in SQLite. A malformed historical avatar must not blank a
+      // chat list that only needs the user's narrow avatar descriptor.
+      try db.execute(
+        sql: """
+        INSERT INTO "file" (
+          "id", "fileType", "fileSize", "uploading", "profileForUserId"
+        ) VALUES (?, ?, NULL, 0, ?)
+        """,
+        arguments: ["malformed-avatar", MessageFileType.photo.rawValue, userID]
+      )
+    }
+
+    #expect(throws: RowDecodingError.self) {
+      try database.reader.read { db in
+        try HomeChatItem.all().fetchAll(db)
+      }
+    }
+
+    let snapshots = try database.reader.read { db in
+      try ChatListDatabaseQuery.fetchSnapshots(
+        db,
+        spaceID: nil,
+        includeSpaceChatsInHome: true,
+        translationLanguage: "en"
+      )
+    }
+
+    #expect(snapshots.map(\.peer) == [.user(id: userID)])
+    #expect(snapshots.first?.title == "Mo")
+  }
+
+  @Test("Snapshot projection carries All Chats rendering and action metadata")
+  func allChatsMetadataProjection() throws {
+    let database = AppDatabase.empty()
+    let spaceID: Int64 = 810
+    let chatID: Int64 = 811
+    let senderID: Int64 = 812
+    let messageID: Int64 = 813
+
+    try database.dbWriter.write { db in
+      try Space(
+        id: spaceID,
+        name: "🧪 Lab",
+        date: date(day: 1)
+      ).insert(db)
+
+      var sender = User(id: senderID, email: nil, firstName: "Dena")
+      sender.profileFileUniqueId = "avatar-unique-id"
+      try sender.insert(db)
+
+      try Chat(
+        id: chatID,
+        date: date(day: 1),
+        type: .thread,
+        title: "Experiments",
+        spaceId: spaceID,
+        lastMsgId: messageID,
+        isPublic: false,
+        createdBy: senderID
+      ).insert(db)
+      try Message(
+        messageId: messageID,
+        fromId: senderID,
+        date: date(day: 2),
+        text: "Ready",
+        peerUserId: nil,
+        peerThreadId: chatID,
+        chatId: chatID
+      ).insert(db)
+
+      var dialog = Dialog.previewThread
+      dialog.id = Dialog.getDialogId(peerThreadId: chatID)
+      dialog.peerThreadId = chatID
+      dialog.chatId = chatID
+      dialog.spaceId = spaceID
+      dialog.open = true
+      try dialog.insert(db)
+    }
+
+    let snapshot = try #require(database.reader.read { db in
+      try ChatListDatabaseQuery.fetchSnapshots(
+        db,
+        spaceID: nil,
+        includeSpaceChatsInHome: true,
+        translationLanguage: "en",
+        includePreviewSenderIdentity: true
+      ).first
+    })
+
+    #expect(snapshot.spaceName == "Lab")
+    #expect(snapshot.previewSenderName == "Dena")
+    #expect(snapshot.previewSenderIdentity?.userID == senderID)
+    #expect(snapshot.previewSenderIdentity?.stableAvatarIdentity == "unique:avatar-unique-id")
+    #expect(snapshot.chatType == .thread)
+    #expect(snapshot.chatCreatedBy == senderID)
+    #expect(snapshot.chatIsPublic == false)
+  }
+
   @Test("Reply-thread anchor preview keeps the document file name")
   func replyThreadDocumentAnchorPreview() throws {
     let database = AppDatabase.empty()
@@ -87,6 +337,8 @@ struct HomeChatListPresentationTests {
     }
 
     #expect(snapshots.first?.title == "📄 Anchor Report.pdf")
+    #expect(snapshots.first?.parentChatID == parentChatID)
+    #expect(snapshots.first?.parentTitle == "Parent")
     let fallback = try database.reader.read { db in
       try ReplyThreadTitleFallback.title(
         for: try #require(try Chat.fetchOne(db, id: replyChatID)),
@@ -533,5 +785,52 @@ struct HomeChatListPresentationTests {
       lastUpdatedAt: activity,
       openedDate: opened
     )
+  }
+
+  private func waitForSnapshot(
+    _ recorder: ChatListSnapshotRecorder,
+    messageID: Int64
+  ) async -> [ChatListItemSnapshot]? {
+    for _ in 0 ..< 100 {
+      if let snapshots = recorder.latest,
+         snapshots.first?.contentSignature.messageID == messageID {
+        return snapshots
+      }
+      try? await Task.sleep(for: .milliseconds(10))
+    }
+    return recorder.latest
+  }
+}
+
+private final class ChatListSnapshotRecorder: @unchecked Sendable {
+  private let lock = NSLock()
+  private var recordedLatest: [ChatListItemSnapshot]?
+  private var recordedErrorDescription: String?
+
+  var latest: [ChatListItemSnapshot]? {
+    lock.withLock { recordedLatest }
+  }
+
+  var errorDescription: String? {
+    lock.withLock { recordedErrorDescription }
+  }
+
+  func record(_ snapshots: [ChatListItemSnapshot]) {
+    lock.withLock {
+      recordedLatest = snapshots
+    }
+  }
+
+  func record(error: Error) {
+    lock.withLock {
+      recordedErrorDescription = String(reflecting: error)
+    }
+  }
+}
+
+private extension ChatListIdentityDescriptor {
+  var userDescriptor: ChatListUserAvatarDescriptor? {
+    guard case let .user(descriptor) = self else { return nil }
+    return descriptor
   }
 }

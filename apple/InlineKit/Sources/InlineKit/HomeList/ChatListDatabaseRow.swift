@@ -8,10 +8,20 @@ import GRDB
 /// making every per-row value access an O(1) integer subscript.
 struct ChatListDatabaseRow {
   enum Column: Int, CaseIterable {
+    case dialogID
     case peerUserID
     case peerThreadID
     case chatID
+    case parentChatID
     case spaceID
+    case spaceName
+    case parentChatTitle
+    case parentChatType
+    case parentPeerFirstName
+    case parentPeerLastName
+    case parentPeerEmail
+    case parentPeerUsername
+    case parentPeerPhoneNumber
     case unreadCount
     case unreadMark
     case isArchived
@@ -21,6 +31,8 @@ struct ChatListDatabaseRow {
     case normalOrder
     case pinnedOrder
     case followMode
+    case chatCreatedBy
+    case chatIsPublic
     case chatDate
     case chatType
     case chatTitle
@@ -52,6 +64,11 @@ struct ChatListDatabaseRow {
     case senderEmail
     case senderUsername
     case senderPhoneNumber
+    case senderID
+    case senderProfileFileID
+    case senderProfileFileUniqueID
+    case senderProfileCDNURL
+    case senderProfileLocalPath
     case draftText
     case draftRevision
     case draftHasAttachments

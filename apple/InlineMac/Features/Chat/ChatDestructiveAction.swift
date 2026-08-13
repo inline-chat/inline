@@ -77,25 +77,40 @@ enum ChatDestructiveActionResolver {
     chat: Chat?,
     currentUserId: Int64? = Auth.shared.getCurrentUserId()
   ) -> ChatDestructiveAction? {
-    guard peer.isThread, let chat, chat.type == .thread else { return nil }
+    guard let chat else { return nil }
+    return action(
+      peer: peer,
+      chatType: chat.type,
+      chatCreatedBy: chat.createdBy,
+      chatSpaceId: chat.spaceId,
+      chatIsPublic: chat.isPublic,
+      currentUserId: currentUserId
+    )
+  }
+
+  static func action(
+    peer: Peer,
+    chatType: ChatType?,
+    chatCreatedBy: Int64?,
+    chatSpaceId: Int64?,
+    chatIsPublic: Bool?,
+    currentUserId: Int64? = Auth.shared.getCurrentUserId()
+  ) -> ChatDestructiveAction? {
+    guard peer.isThread, chatType == .thread else { return nil }
 
     guard let currentUserId else {
       return nil
     }
 
-    if chat.createdBy == nil || chat.createdBy == currentUserId {
+    if chatCreatedBy == nil || chatCreatedBy == currentUserId {
       return .delete
     }
 
-    guard canLeave(chat) else {
+    guard chatSpaceId != nil, chatIsPublic == false else {
       return nil
     }
 
     return .leave
-  }
-
-  private static func canLeave(_ chat: Chat) -> Bool {
-    chat.spaceId != nil && chat.isPublic == false
   }
 }
 

@@ -102,11 +102,16 @@ public struct ChatListContentSignature: Codable, Hashable, Sendable {
 public struct ChatListItemSnapshot: Identifiable, Codable, Hashable, Sendable {
   public var id: Peer { peer }
 
+  public let dialogID: Int64
   public let peer: Peer
   public let chatID: Int64
+  public let parentChatID: Int64?
   public let spaceID: Int64?
+  public let spaceName: String?
+  public let parentTitle: String?
   public let title: String
   public let previewSenderName: String?
+  public let previewSenderIdentity: ChatListUserAvatarDescriptor?
   public let previewText: String?
   public let translatedPreviewText: String?
   public let timestampText: String?
@@ -123,14 +128,22 @@ public struct ChatListItemSnapshot: Identifiable, Codable, Hashable, Sendable {
   public let openedDate: Date?
   public let order: String?
   public let pinnedOrder: String?
+  public let chatType: ChatType?
+  public let chatCreatedBy: Int64?
+  public let chatIsPublic: Bool?
   public let contentSignature: ChatListContentSignature
 
   public init(
+    dialogID: Int64? = nil,
     peer: Peer,
     chatID: Int64,
+    parentChatID: Int64? = nil,
     spaceID: Int64? = nil,
+    spaceName: String? = nil,
+    parentTitle: String? = nil,
     title: String,
     previewSenderName: String? = nil,
+    previewSenderIdentity: ChatListUserAvatarDescriptor? = nil,
     previewText: String? = nil,
     translatedPreviewText: String? = nil,
     timestampText: String? = nil,
@@ -147,13 +160,21 @@ public struct ChatListItemSnapshot: Identifiable, Codable, Hashable, Sendable {
     openedDate: Date? = nil,
     order: String? = nil,
     pinnedOrder: String? = nil,
+    chatType: ChatType? = nil,
+    chatCreatedBy: Int64? = nil,
+    chatIsPublic: Bool? = nil,
     contentSignature: ChatListContentSignature = .empty
   ) {
+    self.dialogID = dialogID ?? Dialog.getDialogId(peerId: peer)
     self.peer = peer
     self.chatID = chatID
+    self.parentChatID = parentChatID
     self.spaceID = spaceID
+    self.spaceName = spaceName
+    self.parentTitle = parentTitle
     self.title = title
     self.previewSenderName = previewSenderName
+    self.previewSenderIdentity = previewSenderIdentity
     self.previewText = previewText
     self.translatedPreviewText = translatedPreviewText
     self.timestampText = timestampText
@@ -170,6 +191,9 @@ public struct ChatListItemSnapshot: Identifiable, Codable, Hashable, Sendable {
     self.openedDate = openedDate
     self.order = order
     self.pinnedOrder = pinnedOrder
+    self.chatType = chatType
+    self.chatCreatedBy = chatCreatedBy
+    self.chatIsPublic = chatIsPublic
     self.contentSignature = contentSignature
   }
 
