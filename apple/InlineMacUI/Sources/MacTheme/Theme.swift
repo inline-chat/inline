@@ -224,8 +224,8 @@ public enum Theme {
     semanticColor(role: .bubble)
   }
 
-  public static let messageBubbleGradientTopOverlayAlpha: CGFloat = 0.25
-  public static let messageBubbleGradientBottomOverlayAlpha: CGFloat = 0.05
+  public static let messageBubbleGradientTopOverlayAlpha: CGFloat = 0.26
+  public static let messageBubbleGradientBottomOverlayAlpha: CGFloat = 0.02
 
   public static func messageBubbleGradientOverlayAlpha(
     atWindowFraction fraction: CGFloat

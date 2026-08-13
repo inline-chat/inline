@@ -97,11 +97,11 @@ struct ThemeTests {
 
   @Test("bubble lighting is continuous and retains a soft floor")
   func bubbleLightingGradientIsContinuous() {
-    #expect(abs(Theme.messageBubbleGradientOverlayAlpha(atWindowFraction: -1) - 0.25) < 0.001)
-    #expect(abs(Theme.messageBubbleGradientOverlayAlpha(atWindowFraction: 0) - 0.25) < 0.001)
-    #expect(abs(Theme.messageBubbleGradientOverlayAlpha(atWindowFraction: 0.5) - 0.15) < 0.001)
-    #expect(abs(Theme.messageBubbleGradientOverlayAlpha(atWindowFraction: 1) - 0.05) < 0.001)
-    #expect(abs(Theme.messageBubbleGradientOverlayAlpha(atWindowFraction: 2) - 0.05) < 0.001)
+    #expect(abs(Theme.messageBubbleGradientOverlayAlpha(atWindowFraction: -1) - 0.26) < 0.001)
+    #expect(abs(Theme.messageBubbleGradientOverlayAlpha(atWindowFraction: 0) - 0.26) < 0.001)
+    #expect(abs(Theme.messageBubbleGradientOverlayAlpha(atWindowFraction: 0.5) - 0.14) < 0.001)
+    #expect(abs(Theme.messageBubbleGradientOverlayAlpha(atWindowFraction: 1) - 0.02) < 0.001)
+    #expect(abs(Theme.messageBubbleGradientOverlayAlpha(atWindowFraction: 2) - 0.02) < 0.001)
   }
 
   @Test("all semantic emphasis roles resolve from one primary seed")
