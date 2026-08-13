@@ -5,6 +5,12 @@ import Logger
 
 private let translationRequestTimeout: TimeInterval = 20
 
+public enum TranslationProcessingOutcome: Sendable {
+  case completed
+  case retryableFailure
+  case cancelled
+}
+
 public actor TranslationViewModel {
   private let log = Log.scoped("TranslationViewModel")
 
@@ -182,6 +188,18 @@ public actor TranslationViewModel {
   ///   - peerId: The peer ID to translate messages for
   ///   - messages: Array of messages to check for translation
   public nonisolated static func translateMessages(for peerId: Peer, messages: [FullMessage]) {
+    Task(priority: .userInitiated) {
+      _ = await processMessagesForTranslation(for: peerId, messages: messages)
+    }
+  }
+
+  /// Processes a bounded batch and reports whether the current signature is
+  /// complete. Home uses this result to release failed claims instead of
+  /// permanently treating a fire-and-forget dispatch as success.
+  public nonisolated static func processMessagesForTranslation(
+    for peerId: Peer,
+    messages: [FullMessage]
+  ) async -> TranslationProcessingOutcome {
     let log = Log.scoped("TranslationViewModel")
 
     log.trace("Processing \(messages.count) messages for translation, peer: \(peerId)")
@@ -189,82 +207,97 @@ public actor TranslationViewModel {
     // Check if translation is enabled for this peer
     guard TranslationState.shared.isTranslationEnabled(for: peerId) else {
       log.trace("Translation disabled for peer \(peerId)")
-      return
+      return .cancelled
     }
 
     // Get user's preferred language
     let targetLanguage = UserLocale.getCurrentLanguage()
     log.trace("Target language: \(targetLanguage)")
 
-    // Do everything on a background thread to avoid impacting UI
-    Task(priority: .userInitiated) {
-      do {
-        // Filter out sending/failed messages
-        let validMessages = messages.filter { message in
-          message.message.status != .sending && message.message.status != .failed
-        }
+    do {
+      try Task.checkCancellation()
 
-        guard !validMessages.isEmpty else {
-          log.trace("No valid messages to process for translation")
-          return
-        }
+      // Filter out sending/failed messages. Their unchanged signature remains
+      // retryable because delivery state may settle without a message edit.
+      let validMessages = messages.filter { message in
+        message.message.status != .sending && message.message.status != .failed
+      }
 
-        // Filter messages needing translation
-        let messagesNeedingTranslation = try await TranslationManager.shared.filterMessagesNeedingTranslation(
-          messages: validMessages,
-          targetLanguage: targetLanguage
-        )
+      guard !validMessages.isEmpty else {
+        log.trace("No valid messages to process for translation")
+        return .retryableFailure
+      }
 
-        guard !messagesNeedingTranslation.isEmpty else {
-          log.trace("No messages need translation")
-          return
-        }
+      let messagesNeedingTranslation = try await TranslationManager.shared.filterMessagesNeedingTranslation(
+        messages: validMessages,
+        targetLanguage: targetLanguage
+      )
+      try Task.checkCancellation()
 
-        log.trace("Found \(messagesNeedingTranslation.count) messages needing translation")
+      guard !messagesNeedingTranslation.isEmpty else {
+        log.trace("No messages need translation")
+        return .completed
+      }
 
-        // Mark messages as being translated
-        let messageIds = messagesNeedingTranslation.map(\.messageId)
-        await TranslatingStatePublisher.shared.addBatch(
-          messageIds: messageIds,
-          peerId: peerId
-        )
+      log.trace("Found \(messagesNeedingTranslation.count) messages needing translation")
 
-        // Request translations from API
-        try await performTranslationRequestWithTimeout {
-          try await TranslationManager.shared.requestTranslations(
-            messages: messagesNeedingTranslation,
-            chatId: messagesNeedingTranslation[0].chatId,
-            peerId: peerId
-          )
-        }
+      let messageIds = messagesNeedingTranslation.map(\.messageId)
+      await TranslatingStatePublisher.shared.addBatch(
+        messageIds: messageIds,
+        peerId: peerId
+      )
 
-        log.trace("Successfully requested translations for \(messageIds.count) messages")
-
-        // Remove messages from translating state
-        await TranslatingStatePublisher.shared.removeBatch(
-          messageIds: messageIds,
-          peerId: peerId
-        )
-
-        // Trigger message updates
-        for message in messagesNeedingTranslation {
-          await MessagesPublisher.shared.messageUpdated(
-            message: message,
-            peer: peerId,
-            animated: true
-          )
-        }
-
-        log.trace("Completed translation cycle for \(messageIds.count) messages")
-      } catch {
-        log.error("Failed to process translations", error: error)
-        // Clean up translating state in case of error
-        let messageIds = messages.map(\.message.messageId)
-        await TranslatingStatePublisher.shared.removeBatch(
-          messageIds: messageIds,
+      try await performTranslationRequestWithTimeout {
+        try await TranslationManager.shared.requestTranslations(
+          messages: messagesNeedingTranslation,
+          chatId: messagesNeedingTranslation[0].chatId,
           peerId: peerId
         )
       }
+      try Task.checkCancellation()
+
+      // Realtime send completes after applying its updates. Still verify the
+      // database row and source revision before acknowledging this signature.
+      for message in messagesNeedingTranslation {
+        guard let translation = try await TranslationManager.shared.getTranslation(
+          messageId: message.messageId,
+          chatId: message.chatId,
+          language: targetLanguage
+        ), translation.msgRev >= message.rev else {
+          throw TranslationError.persistenceNotObserved
+        }
+      }
+
+      log.trace("Successfully persisted translations for \(messageIds.count) messages")
+
+      await TranslatingStatePublisher.shared.removeBatch(
+        messageIds: messageIds,
+        peerId: peerId
+      )
+
+      for message in messagesNeedingTranslation {
+        await MessagesPublisher.shared.messageUpdated(
+          message: message,
+          peer: peerId,
+          animated: true
+        )
+      }
+
+      log.trace("Completed translation cycle for \(messageIds.count) messages")
+      return .completed
+    } catch is CancellationError {
+      await TranslatingStatePublisher.shared.removeBatch(
+        messageIds: messages.map(\.message.messageId),
+        peerId: peerId
+      )
+      return .cancelled
+    } catch {
+      log.error("Failed to process translations", error: error)
+      await TranslatingStatePublisher.shared.removeBatch(
+        messageIds: messages.map(\.message.messageId),
+        peerId: peerId
+      )
+      return .retryableFailure
     }
   }
 
@@ -315,6 +348,7 @@ public actor TranslationViewModel {
 
 enum TranslationError: Error {
   case timeout
+  case persistenceNotObserved
 }
 
 private func performTranslationRequestWithTimeout(

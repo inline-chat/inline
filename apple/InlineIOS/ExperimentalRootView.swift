@@ -5,6 +5,7 @@ import Logger
 import QuartzCore
 import RealtimeV2
 import SwiftUI
+import Translation
 import UIKit
 
 private enum RootTab: String, Hashable {
@@ -99,6 +100,7 @@ struct ExperimentalRootView: View {
 private struct ExperimentalAuthedRootView: View {
   @State private var nav = ExperimentalNavigationModel()
   @State private var homeActions = ExperimentalHomeActionCoordinator()
+  @State private var translationCoordinator = ExperimentalHomeTranslationCoordinator()
   @State private var rootTab: RootTab = .allChats
   @State private var lastContentRootTab: RootTab = .allChats
   @State private var searchQuery = ""
@@ -150,6 +152,24 @@ private struct ExperimentalAuthedRootView: View {
         Task {
           await refetchCoreDataAfterLocalDataCleared()
         }
+      }
+      .onChange(of: homeListStore.state.revision) { _, _ in
+        translationCoordinator.process(
+          presentation: homeListStore.state.presentation,
+          currentPeers: currentChatPeers
+        )
+      }
+      .onReceive(TranslationState.shared.subject) { event in
+        let (peer, isEnabled) = event
+        translationCoordinator.translationStateChanged(
+          peer: peer,
+          isEnabled: isEnabled,
+          presentation: homeListStore.state.presentation,
+          currentPeers: currentChatPeers
+        )
+      }
+      .onDisappear {
+        translationCoordinator.cancel()
       }
   }
 
@@ -272,6 +292,10 @@ private struct ExperimentalAuthedRootView: View {
       break
     }
     didMigrateExplicitTabs = true
+  }
+
+  private var currentChatPeers: Set<Peer> {
+    Set(router.selectedTabPath.compactMap(\.chatPeer))
   }
 
   private func rootPage(nav: ExperimentalNavigationModel) -> some View {
