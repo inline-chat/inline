@@ -39,7 +39,9 @@ let package = Package(
   targets: [
     .target(
       name: "InlineAvatarRendering",
-      dependencies: [],
+      dependencies: [
+        .product(name: "InlineAvatarCore", package: "InlineKit"),
+      ],
       swiftSettings: swiftSettings
     ),
 
@@ -53,6 +55,7 @@ let package = Package(
       name: "InlineUI",
       dependencies: baseDependencies + [
         .product(name: "Kingfisher", package: "Kingfisher"),
+        .product(name: "InlineAvatarCore", package: "InlineKit"),
         "ReactionPickerEmojis",
       ],
       swiftSettings: swiftSettings

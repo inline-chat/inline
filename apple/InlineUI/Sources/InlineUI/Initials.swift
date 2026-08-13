@@ -1,3 +1,4 @@
+import InlineAvatarCore
 import InlineKit
 import SwiftUI
 
@@ -9,6 +10,7 @@ public struct InitialsCircle: View, Equatable {
   let symbolWeight: Font.Weight
   let emoji: String?
   let backgroundOpacity: Double
+  let avatarStyle: InlineAvatarStyle
 
   public nonisolated static func == (lhs: InitialsCircle, rhs: InitialsCircle) -> Bool {
     lhs.name == rhs.name &&
@@ -19,34 +21,12 @@ public struct InitialsCircle: View, Equatable {
       lhs.backgroundOpacity == rhs.backgroundOpacity
   }
 
-  @Environment(\.colorScheme) private var colorScheme
-
   @MainActor
   public enum ColorPalette {
-    @MainActor
-
-    static let colors: [Color] = [
-      .pink.adjustLuminosity(by: -0.1),
-      .orange,
-      .purple,
-      .yellow.adjustLuminosity(by: -0.1),
-      .teal,
-      .blue,
-      .teal,
-      .green,
-      // .primary,
-      .red,
-      .indigo,
-      .mint,
-      .cyan,
-//      .gray,
-//      .brown,
-    ]
+    static let colors = AvatarColorUtility.colors
 
     public static func color(for name: String) -> Color {
-      // let hash = name.hashValue
-      let hash = name.utf8.reduce(0) { $0 + Int($1) }
-      return colors[abs(hash) % colors.count]
+      AvatarColorUtility.colorFor(name: name)
     }
   }
 
@@ -54,23 +34,15 @@ public struct InitialsCircle: View, Equatable {
     name.first.map(String.init)?.uppercased() ?? ""
   }
 
-  private var backgroundColor: Color {
-    let baseColor = ColorPalette.color(for: name)
-    return colorScheme == .dark
-      ? baseColor.adjustLuminosity(by: -0.1)
-      : baseColor.adjustLuminosity(by: 0)
-  }
-
   private var foregroundColor: Color {
-    .white
+    Color(avatarColor: avatarStyle.foregroundColor)
   }
 
   private var backgroundGradient: LinearGradient {
     LinearGradient(
-      colors: [
-        backgroundColor.adjustLuminosity(by: 0.2).opacity(backgroundOpacity),
-        backgroundColor.adjustLuminosity(by: 0).opacity(backgroundOpacity),
-      ],
+      gradient: Gradient(stops: avatarStyle.gradientStops.map {
+        .init(color: Color(avatarColor: $0.color), location: $0.location)
+      }),
       startPoint: .top,
       endPoint: .bottom
     )
@@ -90,6 +62,7 @@ public struct InitialsCircle: View, Equatable {
     self.symbolWeight = symbolWeight
     self.emoji = emoji
     self.backgroundOpacity = backgroundOpacity
+    avatarStyle = .resolved(seed: name, backgroundOpacity: backgroundOpacity)
   }
 
   public var body: some View {
@@ -98,22 +71,22 @@ public struct InitialsCircle: View, Equatable {
       .overlay(
         Circle()
           .stroke(
-            backgroundColor.adjustLuminosity(by: -0.4).opacity(0.1 * backgroundOpacity),
-            lineWidth: 0.5
+            Color(avatarColor: avatarStyle.borderColor),
+            lineWidth: avatarStyle.borderWidth
           )
       )
       .overlay {
         if let emoji {
           Text(emoji)
-            .foregroundColor(foregroundColor.opacity(1.0))
+            .foregroundStyle(foregroundColor)
             .font(.system(size: size * 0.55, weight: .regular))
         } else if let symbol {
           Image(systemName: symbol)
-            .foregroundColor(foregroundColor.opacity(1.0))
+            .foregroundStyle(foregroundColor)
             .font(.system(size: size * 0.46, weight: symbolWeight))
         } else {
           Text(initials)
-            .foregroundColor(foregroundColor.opacity(1.0))
+            .foregroundStyle(foregroundColor)
             .font(.system(size: size * 0.55, weight: .regular))
             .lineLimit(1)
         }

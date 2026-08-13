@@ -1,36 +1,21 @@
+import InlineAvatarCore
 import SwiftUI
 
 @MainActor
 public enum AvatarColorUtility {
-  public static let colors: [Color] = [
-    .pink.adjustLuminosity(by: -0.1),
-    .orange,
-    .purple,
-    .yellow.adjustLuminosity(by: -0.1),
-    .teal,
-    .blue,
-    .teal,
-    .green,
-//    .primary,
-    .red,
-    .indigo,
-    .mint,
-    .cyan,
-  ]
+  public static let colors = InlineAvatarStyle.palette.map(Color.init(avatarColor:))
 
   public static func formatNameForHashing(firstName: String?, lastName: String?, email: String?) -> String {
-    let formattedFirstName = firstName ?? email?.components(separatedBy: "@").first ?? "User"
-    let name = "\(formattedFirstName)\(lastName != nil ? " \(lastName!)" : "")"
-    return name
+    InlineAvatarPresentation.nameSeed(firstName: firstName, lastName: lastName, email: email)
   }
 
   static func paletteIndex(for name: String, paletteCount: Int) -> Int {
-    let hash = name.utf8.reduce(0) { $0 + Int($1) }
-    return abs(hash) % paletteCount
+    InlineAvatarStyle.paletteIndex(for: name, paletteCount: paletteCount)
   }
 
   public static func colorFor(name: String) -> Color {
-    colors[paletteIndex(for: name, paletteCount: colors.count)]
+    let index = InlineAvatarStyle.paletteIndex(for: name)
+    return Color(avatarColor: InlineAvatarStyle.palette[index])
   }
 
   #if os(iOS)
@@ -38,4 +23,16 @@ public enum AvatarColorUtility {
     UIColor(colorFor(name: name))
   }
   #endif
+}
+
+extension Color {
+  init(avatarColor: InlineAvatarColor) {
+    self.init(
+      .sRGB,
+      red: avatarColor.red,
+      green: avatarColor.green,
+      blue: avatarColor.blue,
+      opacity: avatarColor.alpha
+    )
+  }
 }

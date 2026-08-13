@@ -45,12 +45,17 @@ final class NotificationService: UNNotificationServiceExtension {
         } else {
           nil
         }
-        self?.applyIntent(sender: sender, imageData: imageData)
+        let avatarSource: InlineMessageIntentDonation.UserAvatar.Source = if let imageData {
+          .imageData(imageData)
+        } else {
+          .configuredPhotoUnavailable
+        }
+        self?.applyIntent(sender: sender, avatarSource: avatarSource)
       }
       avatarTask?.resume()
     } else {
       logger.info("no avatar URL provided")
-      applyIntent(sender: sender, imageData: nil)
+      applyIntent(sender: sender, avatarSource: .noPhotoConfigured)
     }
   }
 
@@ -260,7 +265,10 @@ private extension NotificationService {
     }
   }
 
-  func applyIntent(sender: SenderPayload, imageData: Data?) {
+  func applyIntent(
+    sender: SenderPayload,
+    avatarSource: InlineMessageIntentDonation.UserAvatar.Source
+  ) {
     guard let bestAttemptContent else { return }
 
     logger.info("applying notification intent")
@@ -285,7 +293,7 @@ private extension NotificationService {
 
     let senderName = senderNameComponents(sender.displayName)
     let senderAvatar = InlineMessageIntentDonation.Avatar.user(.init(
-      imageData: imageData,
+      source: avatarSource,
       firstName: senderName.givenName,
       lastName: senderName.familyName,
       displayName: sender.displayName,

@@ -29,7 +29,13 @@ public enum InlineMessageIntentDonation {
   }
 
   public struct UserAvatar: Sendable, Equatable {
-    public let imageData: Data?
+    public enum Source: Sendable, Equatable {
+      case imageData(Data)
+      case noPhotoConfigured
+      case configuredPhotoUnavailable
+    }
+
+    public let source: Source
     public let firstName: String?
     public let lastName: String?
     public let displayName: String?
@@ -38,7 +44,7 @@ public enum InlineMessageIntentDonation {
     public let stableIdentifier: String
 
     public init(
-      imageData: Data? = nil,
+      source: Source,
       firstName: String?,
       lastName: String?,
       displayName: String?,
@@ -46,7 +52,7 @@ public enum InlineMessageIntentDonation {
       username: String?,
       stableIdentifier: String
     ) {
-      self.imageData = imageData
+      self.source = source
       self.firstName = firstName
       self.lastName = lastName
       self.displayName = displayName
@@ -271,8 +277,13 @@ extension InlineMessageIntentDonation {
         scale: 1
       )
     case let .user(user):
-      if let imageData = user.imageData, !imageData.isEmpty {
-        return imageData
+      switch user.source {
+      case let .imageData(imageData):
+        return imageData.isEmpty ? nil : imageData
+      case .configuredPhotoUnavailable:
+        return nil
+      case .noPhotoConfigured:
+        break
       }
       return InlineAvatarBitmapRenderer.userInitialsImageData(
         identity: InlineUserAvatarRenderIdentity(
@@ -287,6 +298,13 @@ extension InlineMessageIntentDonation {
         scale: 1
       )
     }
+  }
+
+  static func usesGeneratedInitials(_ avatar: UserAvatar) -> Bool {
+    if case .noPhotoConfigured = avatar.source {
+      return true
+    }
+    return false
   }
 
   private static func normalized(_ value: String?) -> String? {

@@ -17,6 +17,10 @@ let package = Package(
   products: [
     // Products define the executables and libraries a package produces, making them visible to other packages.
     .library(
+      name: "InlineAvatarCore",
+      targets: ["InlineAvatarCore"]
+    ),
+    .library(
       name: "InlineKit",
       targets: ["InlineKit"]
     ),
@@ -90,6 +94,11 @@ let package = Package(
     // Targets can depend on other targets in this package and products from dependencies.
 
     .target(
+      name: "InlineAvatarCore",
+      swiftSettings: swiftSettings
+    ),
+
+    .target(
       name: "Logger",
       dependencies: [
         .product(name: "Sentry", package: "sentry-cocoa"),
@@ -116,6 +125,7 @@ let package = Package(
         "Logger",
         "Auth",
         "RealtimeV2",
+        "InlineAvatarCore",
       ],
       swiftSettings: swiftSettings
     ),
@@ -207,8 +217,15 @@ let package = Package(
     ),
 
     .testTarget(
+      name: "InlineAvatarCoreTests",
+      dependencies: ["InlineAvatarCore"],
+      swiftSettings: swiftSettings
+    ),
+
+    .testTarget(
       name: "InlineKitTests",
       dependencies: [
+        "InlineAvatarCore",
         "InlineKit",
         .product(name: "InlineThumbnailing", package: "InlineThumbnailing"),
       ],

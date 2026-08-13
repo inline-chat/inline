@@ -3,10 +3,19 @@ import AppKit
 import CoreGraphics
 import Foundation
 import ImageIO
+import InlineAvatarCore
 import InlineProtocol
 import Logger
 import UniformTypeIdentifiers
 import UserNotifications
+
+#if DEBUG || DEBUG_BUILD
+public enum MacNotificationPlaygroundAvatarMode: String, CaseIterable, Sendable, Hashable {
+  case photo
+  case initials
+  case none
+}
+#endif
 
 public actor MacNotifications {
   public static let shared = MacNotifications()
@@ -25,15 +34,17 @@ public actor MacNotifications {
     soundEnabled
   }
 
+  @discardableResult
   nonisolated func showMessageNotification(
     title: String,
     subtitle: String? = nil,
     body: String,
     userInfo: [AnyHashable: Any],
     imageURL: URL? = nil,
-    forceSound: Bool = false
-  ) async {
-    guard Self.canPostSystemNotifications(bundleURL: Bundle.main.bundleURL) else { return }
+    forceSound: Bool = false,
+    soundOverride: Bool? = nil
+  ) async -> Bool {
+    guard Self.canPostSystemNotifications(bundleURL: Bundle.main.bundleURL) else { return false }
 
     let content = UNMutableNotificationContent()
     content.title = title
@@ -43,7 +54,7 @@ public actor MacNotifications {
     }
     content.userInfo = userInfo
     let isSoundEnabled = await isSoundEnabled()
-    content.sound = (forceSound || isSoundEnabled) ? .default : nil
+    content.sound = (soundOverride ?? (forceSound || isSoundEnabled)) ? .default : nil
 
     if let imageURL {
       do {
@@ -68,8 +79,10 @@ public actor MacNotifications {
     do {
       let center = UNUserNotificationCenter.current()
       try await center.add(request)
+      return true
     } catch {
       log.error("Failed to show notification", error: error)
+      return false
     }
   }
 
@@ -77,6 +90,37 @@ public actor MacNotifications {
     bundleURL.pathExtension == "app"
   }
 }
+
+#if DEBUG || DEBUG_BUILD
+extension MacNotifications {
+  @discardableResult
+  public func showPlaygroundNotification(
+    avatarMode: MacNotificationPlaygroundAvatarMode,
+    senderName: String,
+    body: String,
+    isThread: Bool,
+    soundEnabled: Bool
+  ) async -> Bool {
+    let imageURL = await avatarBuilder.playgroundAttachmentURL(
+      mode: avatarMode,
+      senderName: senderName
+    )
+    return await showMessageNotification(
+      title: isThread ? "Design" : senderName,
+      subtitle: isThread ? senderName : nil,
+      body: body,
+      userInfo: [
+        "playgroundNotification": true,
+        "playgroundAvatarMode": avatarMode.rawValue,
+        "playgroundSoundEnabled": soundEnabled,
+        "isThread": isThread,
+      ],
+      imageURL: imageURL,
+      soundOverride: soundEnabled
+    )
+  }
+}
+#endif
 
 extension MacNotifications {
   public func showMessageFailedNotification(
@@ -141,7 +185,7 @@ extension MacNotifications {
     let imageURL = if chat?.type == .thread {
       ThreadIconNotificationAttachmentRenderer.attachmentURL(for: chat)
     } else {
-      await avatarBuilder.attachmentURL(for: user)
+      await avatarBuilder.attachmentURL(for: user, fallbackUserID: protocolMsg.fromID)
     }
     let trimmedText = protocolMsg.hasMessage ? protocolMsg.message.trimmingCharacters(in: .whitespacesAndNewlines) : nil
     let isUrgentNudge = {
@@ -398,11 +442,26 @@ private actor AvatarAttachmentBuilder {
     thumbnailMaxPixel = max(Int(avatarDiameter * 3), 132)
   }
 
-  func attachmentURL(for userInfo: UserInfo?) async -> URL? {
-    guard let source = await loadAvatarSource(for: userInfo) else {
+  func attachmentURL(for userInfo: UserInfo?, fallbackUserID: Int64) async -> URL? {
+    guard let userInfo else { return nil }
+
+    let source: AvatarSource
+    if let loadedSource = await loadAvatarSource(for: userInfo) {
+      source = loadedSource
+    } else if MacNotificationAvatarPolicy.shouldGenerateInitials(for: userInfo),
+              let fallbackSource = makeFallbackAvatarSource(
+                for: userInfo,
+                fallbackUserID: fallbackUserID
+              ) {
+      source = fallbackSource
+    } else {
       return nil
     }
 
+    return attachmentURL(for: source)
+  }
+
+  private func attachmentURL(for source: AvatarSource) -> URL? {
     if let cached = cachedAttachments[source.cacheKey] {
       if FileManager.default.fileExists(atPath: cached.path) {
         return cached
@@ -419,30 +478,102 @@ private actor AvatarAttachmentBuilder {
     return outputURL
   }
 
-  private func loadAvatarSource(for userInfo: UserInfo?) async -> AvatarSource? {
-    guard let userInfo else {
+#if DEBUG || DEBUG_BUILD
+  func playgroundAttachmentURL(
+    mode: MacNotificationPlaygroundAvatarMode,
+    senderName: String
+  ) -> URL? {
+    let source: AvatarSource?
+    switch mode {
+    case .photo:
+      source = makePlaygroundPhotoSource()
+    case .initials:
+      source = makeFallbackAvatarSource(
+        for: UserInfo(
+          user: User(id: -100, email: nil, firstName: senderName),
+          profilePhotos: nil
+        ),
+        fallbackUserID: -100
+      )
+    case .none:
+      source = nil
+    }
+
+    return source.flatMap { attachmentURL(for: $0) }
+  }
+
+  private func makePlaygroundPhotoSource() -> AvatarSource? {
+    let pixelSize = max(thumbnailMaxPixel, 132)
+    guard let context = CGContext(
+      data: nil,
+      width: pixelSize,
+      height: pixelSize,
+      bitsPerComponent: 8,
+      bytesPerRow: 0,
+      space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ) else {
       return nil
     }
 
-    if let localURL = userInfo.profilePhoto?.first?.getLocalURL(),
-       FileManager.default.fileExists(atPath: localURL.path),
-       let image = await retrieveImage(from: .local(localURL)) {
-      return AvatarSource(cacheKey: cacheKey(for: localURL), image: image)
-    }
+    let size = CGFloat(pixelSize)
+    context.setFillColor(NSColor.systemTeal.cgColor)
+    context.fill(CGRect(x: 0, y: 0, width: size, height: size))
+    context.setFillColor(NSColor(calibratedRed: 0.16, green: 0.10, blue: 0.08, alpha: 1).cgColor)
+    context.fillEllipse(in: CGRect(x: size * 0.24, y: size * 0.38, width: size * 0.52, height: size * 0.52))
+    context.setFillColor(NSColor(calibratedRed: 0.95, green: 0.72, blue: 0.56, alpha: 1).cgColor)
+    context.fillEllipse(in: CGRect(x: size * 0.30, y: size * 0.34, width: size * 0.40, height: size * 0.46))
+    context.setFillColor(NSColor.systemIndigo.cgColor)
+    context.fillEllipse(in: CGRect(x: size * 0.16, y: -size * 0.20, width: size * 0.68, height: size * 0.62))
 
+    guard let image = context.makeImage() else { return nil }
+    return AvatarSource(cacheKey: "playground-photo-v1", image: image)
+  }
+#endif
+
+  private func loadAvatarSource(for userInfo: UserInfo) async -> AvatarSource? {
     if let localURL = userInfo.user.getLocalURL(),
        FileManager.default.fileExists(atPath: localURL.path),
        let image = await retrieveImage(from: .local(localURL)) {
       return AvatarSource(cacheKey: cacheKey(for: localURL), image: image)
     }
 
-    if let remoteURL = userInfo.profilePhoto?.first?.getRemoteURL() ?? userInfo.user.getRemoteURL() {
+    if let remoteURL = userInfo.user.getRemoteURL() {
       if let image = await retrieveImage(from: .remote(remoteURL)) {
         return AvatarSource(cacheKey: remoteURL.absoluteString, image: image)
       }
     }
 
     return nil
+  }
+
+  private func makeFallbackAvatarSource(
+    for userInfo: UserInfo,
+    fallbackUserID: Int64
+  ) -> AvatarSource? {
+    let user = userInfo.user
+    let identity = InlineAvatarUserIdentity(
+      firstName: user.firstName,
+      lastName: user.lastName,
+      displayName: nil,
+      email: user.email,
+      username: user.username,
+      stableIdentifier: "user:\(user.id == 0 ? fallbackUserID : user.id)"
+    )
+    let presentation = InlineAvatarPresentation.user(identity: identity)
+    let size = CGSize(width: avatarDiameter, height: avatarDiameter)
+    guard let image = MacNotificationAvatarRenderer.makeImage(
+      presentation: presentation,
+      size: size
+    ) else {
+      log.error("Failed to render initials notification avatar")
+      return nil
+    }
+
+    return AvatarSource(
+      cacheKey: "fallback-v1:\(identity.stableIdentifier):\(presentation.seed)",
+      image: image
+    )
   }
 
   private func cacheKey(for localURL: URL) -> String {
@@ -619,6 +750,200 @@ private actor AvatarAttachmentBuilder {
     if let index = cacheOrder.firstIndex(of: key) {
       cacheOrder.remove(at: index)
     }
+  }
+}
+
+enum MacNotificationAvatarPolicy {
+  static func shouldGenerateInitials(for userInfo: UserInfo?) -> Bool {
+    guard let userInfo else { return false }
+    return !hasConfiguredProfilePhoto(userInfo)
+  }
+
+  private static func hasConfiguredProfilePhoto(_ userInfo: UserInfo) -> Bool {
+    let user = userInfo.user
+    return [
+      user.profileFileId,
+      user.profileCdnUrl,
+      user.profileLocalPath,
+      user.profileFileUniqueId,
+    ].contains { value in
+      guard let value else { return false }
+      return !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+  }
+}
+
+enum MacNotificationAvatarRenderer {
+  static func makeImage(
+    presentation: InlineUserAvatarPresentation,
+    size: CGSize
+  ) -> CGImage? {
+    let width = max(Int(size.width.rounded(.up)), 1)
+    let height = max(Int(size.height.rounded(.up)), 1)
+    guard let representation = NSBitmapImageRep(
+      bitmapDataPlanes: nil,
+      pixelsWide: width,
+      pixelsHigh: height,
+      bitsPerSample: 8,
+      samplesPerPixel: 4,
+      hasAlpha: true,
+      isPlanar: false,
+      colorSpaceName: .deviceRGB,
+      bytesPerRow: 0,
+      bitsPerPixel: 0
+    ) else {
+      return nil
+    }
+    representation.size = size
+
+    guard let graphicsContext = NSGraphicsContext(bitmapImageRep: representation) else {
+      return nil
+    }
+
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = graphicsContext
+    graphicsContext.imageInterpolation = .high
+
+    let bounds = CGRect(origin: .zero, size: size)
+    drawBackground(style: presentation.style, in: bounds, context: graphicsContext.cgContext)
+
+    if let initials = presentation.initials {
+      drawText(
+        initials,
+        font: .systemFont(ofSize: min(size.width, size.height) * 0.55, weight: .regular),
+        color: platformColor(presentation.style.foregroundColor),
+        in: bounds
+      )
+    } else {
+      drawSymbol(
+        "person.fill",
+        pointSize: min(size.width, size.height) * 0.46,
+        color: platformColor(presentation.style.foregroundColor),
+        in: bounds
+      )
+    }
+
+    NSGraphicsContext.restoreGraphicsState()
+    return representation.cgImage
+  }
+
+  private static func drawBackground(
+    style: InlineAvatarStyle,
+    in bounds: CGRect,
+    context: CGContext
+  ) {
+    let stops = style.gradientStops
+    let colors = stops.map { platformColor($0.color).cgColor } as CFArray
+    let locations = stops.map { CGFloat($0.location) }
+
+    context.saveGState()
+    context.addEllipse(in: bounds)
+    context.clip()
+    if let gradient = CGGradient(
+      colorsSpace: CGColorSpace(name: CGColorSpace.sRGB),
+      colors: colors,
+      locations: locations
+    ) {
+      context.drawLinearGradient(
+        gradient,
+        start: CGPoint(x: bounds.midX, y: bounds.maxY),
+        end: CGPoint(x: bounds.midX, y: bounds.minY),
+        options: []
+      )
+    } else {
+      let fallbackColor = stops.last?.color ?? style.baseColor
+      context.setFillColor(platformColor(fallbackColor).cgColor)
+      context.fill(bounds)
+    }
+    context.restoreGState()
+
+    context.saveGState()
+    context.addEllipse(in: bounds.insetBy(dx: 0.25, dy: 0.25))
+    context.setStrokeColor(platformColor(style.borderColor).cgColor)
+    context.setLineWidth(CGFloat(style.borderWidth))
+    context.strokePath()
+    context.restoreGState()
+  }
+
+  private static func drawText(
+    _ text: String,
+    font: NSFont,
+    color: NSColor,
+    in bounds: CGRect
+  ) {
+    let paragraph = NSMutableParagraphStyle()
+    paragraph.alignment = .center
+    let attributes: [NSAttributedString.Key: Any] = [
+      .font: font,
+      .foregroundColor: color,
+      .paragraphStyle: paragraph,
+    ]
+    let attributedString = NSAttributedString(string: text, attributes: attributes)
+    let measured = attributedString.boundingRect(
+      with: bounds.size,
+      options: [.usesLineFragmentOrigin, .usesFontLeading],
+      context: nil
+    )
+    attributedString.draw(in: CGRect(
+      x: bounds.midX - measured.width / 2,
+      y: bounds.midY - measured.height / 2,
+      width: measured.width,
+      height: measured.height
+    ))
+  }
+
+  private static func drawSymbol(
+    _ symbolName: String,
+    pointSize: CGFloat,
+    color: NSColor,
+    in bounds: CGRect
+  ) {
+    guard let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) else {
+      return
+    }
+    let configuration = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .regular)
+    let configuredImage = image.withSymbolConfiguration(configuration) ?? image
+    let drawRect = aspectFitRect(
+      for: configuredImage.size,
+      in: bounds.insetBy(dx: bounds.width * 0.2, dy: bounds.height * 0.2)
+    )
+
+    let tintedImage = NSImage(size: configuredImage.size)
+    tintedImage.lockFocus()
+    configuredImage.draw(
+      in: CGRect(origin: .zero, size: configuredImage.size),
+      from: .zero,
+      operation: .sourceOver,
+      fraction: 1
+    )
+    color.setFill()
+    CGRect(origin: .zero, size: configuredImage.size).fill(using: .sourceIn)
+    tintedImage.unlockFocus()
+    tintedImage.draw(in: drawRect)
+  }
+
+  private static func platformColor(_ color: InlineAvatarColor) -> NSColor {
+    NSColor(
+      srgbRed: CGFloat(color.red),
+      green: CGFloat(color.green),
+      blue: CGFloat(color.blue),
+      alpha: CGFloat(color.alpha)
+    )
+  }
+
+  private static func aspectFitRect(for imageSize: CGSize, in bounds: CGRect) -> CGRect {
+    guard imageSize.width > 0, imageSize.height > 0 else {
+      return bounds
+    }
+
+    let scale = min(bounds.width / imageSize.width, bounds.height / imageSize.height)
+    let scaledSize = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
+    return CGRect(
+      x: bounds.midX - scaledSize.width / 2,
+      y: bounds.midY - scaledSize.height / 2,
+      width: scaledSize.width,
+      height: scaledSize.height
+    )
   }
 }
 

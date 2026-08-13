@@ -79,6 +79,7 @@ struct SharedUser: Codable, Equatable {
   var email: String?
   var username: String?
   var profileCdnUrl: String?
+  var profileFileId: String?
   var profileLocalPath: String?
   var profileFileUniqueId: String?
   var profileSharedLocalPath: String?
@@ -91,6 +92,7 @@ struct SharedUser: Codable, Equatable {
     email: String? = nil,
     username: String? = nil,
     profileCdnUrl: String? = nil,
+    profileFileId: String? = nil,
     profileLocalPath: String? = nil,
     profileFileUniqueId: String? = nil,
     profileSharedLocalPath: String? = nil
@@ -102,6 +104,7 @@ struct SharedUser: Codable, Equatable {
     self.email = email
     self.username = username
     self.profileCdnUrl = profileCdnUrl
+    self.profileFileId = profileFileId
     self.profileLocalPath = profileLocalPath
     self.profileFileUniqueId = profileFileUniqueId
     self.profileSharedLocalPath = profileSharedLocalPath
@@ -188,7 +191,7 @@ private extension SharedUser {
 
   var intentAvatar: InlineMessageIntentDonation.Avatar {
     .user(.init(
-      imageData: intentAvatarData,
+      source: intentAvatarSource,
       firstName: firstName,
       lastName: lastName,
       displayName: displayName,
@@ -215,6 +218,18 @@ private extension SharedUser {
   var intentAvatarData: Data? {
     guard let sharedAvatarURL else { return nil }
     return try? Data(contentsOf: sharedAvatarURL)
+  }
+
+  var intentAvatarSource: InlineMessageIntentDonation.UserAvatar.Source {
+    if let intentAvatarData {
+      return .imageData(intentAvatarData)
+    }
+    return hasConfiguredProfilePhoto ? .configuredPhotoUnavailable : .noPhotoConfigured
+  }
+
+  var hasConfiguredProfilePhoto: Bool {
+    [profileCdnUrl, profileFileId, profileLocalPath, profileFileUniqueId]
+      .contains { $0?.trimmedForIntent != nil }
   }
 }
 

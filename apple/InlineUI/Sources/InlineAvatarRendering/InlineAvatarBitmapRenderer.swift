@@ -1,34 +1,12 @@
 import CoreGraphics
 import Foundation
+import InlineAvatarCore
 
 #if canImport(UIKit)
 import UIKit
 #endif
 
-public struct InlineUserAvatarRenderIdentity: Sendable, Equatable {
-  public var firstName: String?
-  public var lastName: String?
-  public var displayName: String?
-  public var email: String?
-  public var username: String?
-  public var stableIdentifier: String
-
-  public init(
-    firstName: String?,
-    lastName: String?,
-    displayName: String?,
-    email: String?,
-    username: String?,
-    stableIdentifier: String
-  ) {
-    self.firstName = firstName
-    self.lastName = lastName
-    self.displayName = displayName
-    self.email = email
-    self.username = username
-    self.stableIdentifier = stableIdentifier
-  }
-}
+public typealias InlineUserAvatarRenderIdentity = InlineAvatarUserIdentity
 
 public struct InlineThreadAvatarRenderIdentity: Sendable, Equatable {
   public var emoji: String?
@@ -133,31 +111,31 @@ private extension InlineAvatarBitmapRenderer {
     size: CGSize,
     scale: CGFloat
   ) -> Data? {
-    let seed = colorSeed(identity: identity)
-    let initials = initials(identity: identity)
+    let presentation = InlineAvatarPresentation.user(identity: identity)
     let format = UIGraphicsImageRendererFormat()
     format.scale = scale
     format.opaque = false
 
     let image = UIGraphicsImageRenderer(size: size, format: format).image { context in
       let bounds = CGRect(origin: .zero, size: size)
-      drawUserBackground(in: context.cgContext, bounds: bounds, seed: seed)
+      drawUserBackground(in: context.cgContext, bounds: bounds, style: presentation.style)
 
-      if let initials {
+      if let initials = presentation.initials {
         drawCenteredText(
           initials,
           font: .systemFont(
-            ofSize: min(size.width, size.height) * (initials.count > 1 ? 0.43 : 0.54),
-            weight: .semibold
+            ofSize: min(size.width, size.height) * 0.55,
+            weight: .regular
           ),
-          color: .white,
+          color: platformColor(presentation.style.foregroundColor),
           in: bounds
         )
       } else {
         drawCenteredSymbol(
           "person.fill",
           pointSize: min(size.width, size.height) * 0.46,
-          color: .white.withAlphaComponent(0.94),
+          weight: .regular,
+          color: platformColor(presentation.style.foregroundColor),
           in: bounds
         )
       }
@@ -203,98 +181,27 @@ private extension InlineAvatarBitmapRenderer {
     return image.pngData()
   }
 
-  static func colorSeed(identity: InlineUserAvatarRenderIdentity) -> String {
-    if let first = normalizedString(identity.firstName) {
-      if let last = normalizedString(identity.lastName) {
-        return "\(first) \(last)"
-      }
-      return first
-    }
-    if let displayName = normalizedString(identity.displayName) {
-      return displayName
-    }
-    if let username = normalizedUsername(identity.username) {
-      return username
-    }
-    if let emailLocalPart = normalizedEmailLocalPart(identity.email) {
-      return emailLocalPart
-    }
-    return identity.stableIdentifier
-  }
-
-  static func initials(identity: InlineUserAvatarRenderIdentity) -> String? {
-    if let first = firstGrapheme(normalizedString(identity.firstName)) {
-      if let last = firstGrapheme(normalizedString(identity.lastName)) {
-        return "\(first)\(last)".localizedUppercase
-      }
-      return first.localizedUppercase
-    }
-
-    if let displayName = normalizedString(identity.displayName) {
-      let parts = displayName.split(whereSeparator: { $0.isWhitespace })
-      if let firstPart = parts.first,
-         let first = firstGrapheme(String(firstPart)) {
-        if parts.count > 1,
-           let secondPart = parts.dropFirst().first,
-           let second = firstGrapheme(String(secondPart)) {
-          return "\(first)\(second)".localizedUppercase
-        }
-        return first.localizedUppercase
-      }
-    }
-
-    if let username = normalizedUsername(identity.username),
-       let first = firstGrapheme(username) {
-      return first.localizedUppercase
-    }
-
-    if let emailLocalPart = normalizedEmailLocalPart(identity.email),
-       let first = firstGrapheme(emailLocalPart) {
-      return first.localizedUppercase
-    }
-
-    return nil
-  }
-
   static func normalizedString(_ value: String?) -> String? {
     guard let value else { return nil }
     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
     return trimmed.isEmpty ? nil : trimmed
   }
 
-  static func normalizedUsername(_ value: String?) -> String? {
-    normalizedString(value)?
-      .trimmingCharacters(in: CharacterSet(charactersIn: "@"))
-      .nilIfEmpty
-  }
-
-  static func normalizedEmailLocalPart(_ value: String?) -> String? {
-    guard let email = normalizedString(value) else { return nil }
-    return email.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: true)
-      .first
-      .map(String.init)?
-      .nilIfEmpty
-  }
-
-  static func firstGrapheme(_ value: String?) -> String? {
-    guard let first = value?.first else { return nil }
-    return String(first)
-  }
-
-  static func drawUserBackground(in ctx: CGContext, bounds: CGRect, seed: String) {
-    let baseColor = userColor(for: seed)
+  static func drawUserBackground(in ctx: CGContext, bounds: CGRect, style: InlineAvatarStyle) {
+    let topColor = style.gradientStops.first?.color ?? style.baseColor
+    let bottomColor = style.gradientStops.last?.color ?? style.baseColor
     drawCircularGradient(
       in: ctx,
       bounds: bounds,
-      topColor: adjustedBrightness(baseColor, by: 0.18),
-      bottomColor: adjustedBrightness(baseColor, by: -0.02),
-      fallbackColor: baseColor
+      topColor: platformColor(topColor),
+      bottomColor: platformColor(bottomColor),
+      fallbackColor: platformColor(bottomColor)
     )
 
     ctx.saveGState()
     ctx.addEllipse(in: bounds.insetBy(dx: 0.25, dy: 0.25))
-    ctx.setStrokeColor(adjustedBrightness(baseColor, by: -0.35).withAlphaComponent(0.16).cgColor)
-    ctx.setLineWidth(0.5)
+    ctx.setStrokeColor(platformColor(style.borderColor).cgColor)
+    ctx.setLineWidth(CGFloat(style.borderWidth))
     ctx.strokePath()
     ctx.restoreGState()
   }
@@ -339,10 +246,6 @@ private extension InlineAvatarBitmapRenderer {
     ctx.restoreGState()
   }
 
-  static func userColor(for seed: String) -> UIColor {
-    color(for: seed, palette: userPalette)
-  }
-
   static func threadColor(for seed: String) -> UIColor {
     color(for: seed, palette: threadPalette)
   }
@@ -351,23 +254,6 @@ private extension InlineAvatarBitmapRenderer {
     let index = paletteIndex(for: seed, paletteCount: palette.count)
     let color = palette[index]
     return UIColor(red: color.red, green: color.green, blue: color.blue, alpha: 1)
-  }
-
-  static var userPalette: [(red: CGFloat, green: CGFloat, blue: CGFloat)] {
-    [
-      (0.86, 0.15, 0.47),
-      (1.00, 0.58, 0.00),
-      (0.54, 0.32, 0.92),
-      (0.86, 0.64, 0.02),
-      (0.00, 0.63, 0.58),
-      (0.02, 0.48, 1.00),
-      (0.00, 0.72, 0.65),
-      (0.20, 0.68, 0.30),
-      (0.92, 0.22, 0.20),
-      (0.35, 0.34, 0.84),
-      (0.12, 0.72, 0.48),
-      (0.00, 0.68, 0.86),
-    ]
   }
 
   static var threadPalette: [(red: CGFloat, green: CGFloat, blue: CGFloat)] {
@@ -466,10 +352,11 @@ private extension InlineAvatarBitmapRenderer {
   static func drawCenteredSymbol(
     _ symbolName: String,
     pointSize: CGFloat,
+    weight: UIImage.SymbolWeight = .bold,
     color: UIColor,
     in bounds: CGRect
   ) {
-    let configuration = UIImage.SymbolConfiguration(pointSize: pointSize, weight: .bold)
+    let configuration = UIImage.SymbolConfiguration(pointSize: pointSize, weight: weight)
     guard let image = UIImage(systemName: symbolName, withConfiguration: configuration)?
       .withTintColor(color, renderingMode: .alwaysOriginal)
     else {
@@ -497,11 +384,14 @@ private extension InlineAvatarBitmapRenderer {
       height: scaledSize.height
     )
   }
-}
 
-private extension String {
-  var nilIfEmpty: String? {
-    isEmpty ? nil : self
+  static func platformColor(_ color: InlineAvatarColor) -> UIColor {
+    UIColor(
+      red: CGFloat(color.red),
+      green: CGFloat(color.green),
+      blue: CGFloat(color.blue),
+      alpha: CGFloat(color.alpha)
+    )
   }
 }
 #endif

@@ -210,6 +210,7 @@ actor AppDataUpdater {
         email: user.email,
         username: user.username,
         profileCdnUrl: user.profileCdnUrl,
+        profileFileId: user.profileFileId,
         profileLocalPath: user.profileLocalPath,
         profileFileUniqueId: user.profileFileUniqueId,
         profileSharedLocalPath: intentAvatarLocalPath(for: user)
@@ -261,10 +262,16 @@ actor AppDataUpdater {
       )
     }
 
+    // A configured photo that is temporarily unavailable must stay visibly
+    // unavailable. Initials mean the account has no configured profile photo.
+    guard !hasConfiguredProfilePhoto(user) else {
+      return nil
+    }
+
     let identity = InlineUserAvatarRenderIdentity(
       firstName: user.firstName,
       lastName: user.lastName,
-      displayName: user.displayName,
+      displayName: nil,
       email: user.email,
       username: user.username,
       stableIdentifier: "user:\(user.id)"
@@ -282,6 +289,18 @@ actor AppDataUpdater {
       identity: "fallback-\(intentAvatarFallbackIdentity(for: user))",
       filenameExtension: "png"
     )
+  }
+
+  private static func hasConfiguredProfilePhoto(_ user: User) -> Bool {
+    [
+      user.profileFileId,
+      user.profileCdnUrl,
+      user.profileLocalPath,
+      user.profileFileUniqueId,
+    ].contains { value in
+      guard let value else { return false }
+      return !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
   }
 
   private static func intentAvatarFallbackIdentity(for user: User) -> String {

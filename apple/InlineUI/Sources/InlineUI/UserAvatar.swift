@@ -1,4 +1,5 @@
 import Foundation
+import InlineAvatarCore
 import InlineKit
 import Kingfisher
 import Logger
@@ -12,6 +13,7 @@ public struct UserAvatar: View, Equatable {
       && lhs.ignoresSafeArea == rhs.ignoresSafeArea
       && lhs.backgroundOpacity == rhs.backgroundOpacity
       && lhs.cacheRemoteAvatar == rhs.cacheRemoteAvatar
+      && lhs.hasConfiguredPhoto == rhs.hasConfiguredPhoto
       && Self.avatarIdentity(
         stableAvatarIdentity: lhs.stableAvatarIdentity,
         remoteUrl: lhs.remoteUrl,
@@ -34,26 +36,28 @@ public struct UserAvatar: View, Equatable {
   let userId: Int64
   let backgroundOpacity: Double
   let cacheRemoteAvatar: Bool
+  let hasConfiguredPhoto: Bool
 
   var stableAvatarIdentity: String?
   var remoteUrl: URL?
   var localUrl: URL?
 
   let nameForInitials: String
+  let showsPersonSymbol: Bool
 
   private static let profilePhotoSizeKind = "f"
 
-  @Environment(\.colorScheme) private var colorScheme
   @Environment(\.displayScale) private var displayScale
-  @State private var avatarLoadFailed = false
   @State private var startedRemoteCacheUrl: URL?
 
-  public static func getNameForInitials(user: User) -> String {
-    AvatarColorUtility.formatNameForHashing(
+  public nonisolated static func getNameForInitials(user: User) -> String {
+    avatarPresentation(
       firstName: user.firstName,
       lastName: user.lastName,
-      email: user.email
-    )
+      email: user.email,
+      username: user.username,
+      stableIdentifier: "user:\(user.id)"
+    ).seed
   }
 
   public init(
@@ -73,10 +77,19 @@ public struct UserAvatar: View, Equatable {
     remoteUrl = user.getRemoteURL()
     localUrl = Self.existingFileUrl(localAvatarURL) ?? Self.existingFileUrl(user.getLocalURL())
     stableAvatarIdentity = user.stableAvatarIdentity
+    hasConfiguredPhoto = stableAvatarIdentity != nil || remoteUrl != nil || localUrl != nil
     self.ignoresSafeArea = ignoresSafeArea
     self.backgroundOpacity = backgroundOpacity
     self.cacheRemoteAvatar = cacheRemoteAvatar
-    nameForInitials = Self.getNameForInitials(user: user)
+    let presentation = Self.avatarPresentation(
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      username: user.username,
+      stableIdentifier: "user:\(user.id)"
+    )
+    nameForInitials = presentation.seed
+    showsPersonSymbol = presentation.showsPersonSymbol
   }
 
   public init(
@@ -91,6 +104,7 @@ public struct UserAvatar: View, Equatable {
     remoteUrl = user.getRemoteURL() // ?? userInfo.profilePhoto?.first?.getRemoteURL()
     localUrl = Self.existingFileUrl(user.getLocalURL()) // ?? userInfo.profilePhoto?.first?.getLocalURL()
     stableAvatarIdentity = userInfo.stableAvatarIdentity
+    hasConfiguredPhoto = stableAvatarIdentity != nil || remoteUrl != nil || localUrl != nil
     firstName = user.firstName
     lastName = user.lastName
     email = user.email
@@ -99,7 +113,15 @@ public struct UserAvatar: View, Equatable {
     self.ignoresSafeArea = ignoresSafeArea
     self.backgroundOpacity = backgroundOpacity
     self.cacheRemoteAvatar = cacheRemoteAvatar
-    nameForInitials = Self.getNameForInitials(user: user)
+    let presentation = Self.avatarPresentation(
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      username: user.username,
+      stableIdentifier: "user:\(user.id)"
+    )
+    nameForInitials = presentation.seed
+    showsPersonSymbol = presentation.showsPersonSymbol
   }
 
   /// Creates an avatar from values that were prepared off the main actor.
@@ -126,15 +148,20 @@ public struct UserAvatar: View, Equatable {
     self.stableAvatarIdentity = stableAvatarIdentity
     remoteUrl = remoteURL
     localUrl = localURL
+    hasConfiguredPhoto = stableAvatarIdentity != nil || remoteURL != nil || localURL != nil
     self.size = size
     self.ignoresSafeArea = ignoresSafeArea
     self.backgroundOpacity = backgroundOpacity
     self.cacheRemoteAvatar = cacheRemoteAvatar
-    nameForInitials = AvatarColorUtility.formatNameForHashing(
+    let presentation = Self.avatarPresentation(
       firstName: firstName,
       lastName: lastName,
-      email: email
+      email: email,
+      username: username,
+      stableIdentifier: stableAvatarIdentity ?? "user:\(userID)"
     )
+    nameForInitials = presentation.seed
+    showsPersonSymbol = presentation.showsPersonSymbol
   }
 
   public init(
@@ -153,11 +180,16 @@ public struct UserAvatar: View, Equatable {
     self.ignoresSafeArea = ignoresSafeArea
     self.backgroundOpacity = backgroundOpacity
     self.cacheRemoteAvatar = cacheRemoteAvatar
-    nameForInitials = AvatarColorUtility.formatNameForHashing(
+    hasConfiguredPhoto = apiUser.photo?.isEmpty == false
+    let presentation = Self.avatarPresentation(
       firstName: apiUser.firstName,
       lastName: apiUser.lastName,
-      email: apiUser.email
+      email: apiUser.email,
+      username: apiUser.username,
+      stableIdentifier: "user:\(apiUser.id)"
     )
+    nameForInitials = presentation.seed
+    showsPersonSymbol = presentation.showsPersonSymbol
   }
 
   @ViewBuilder
@@ -170,7 +202,7 @@ public struct UserAvatar: View, Equatable {
     InitialsCircle(
       name: nameForInitials,
       size: size,
-      symbol: shouldShowPersonSymbol ? "person.fill" : nil,
+      symbol: showsPersonSymbol ? "person.fill" : nil,
       backgroundOpacity: backgroundOpacity
     )
     .equatable()
@@ -178,24 +210,32 @@ public struct UserAvatar: View, Equatable {
     .fixedSize()
   }
 
-  private var shouldShowPersonSymbol: Bool {
-    firstName == nil && lastName == nil && email == nil && username == nil
-  }
-
-  private var backgroundColor: Color {
-    AvatarColorUtility.colorFor(name: nameForInitials)
-      .adjustLuminosity(by: colorScheme == .dark ? -0.1 : 0)
-  }
-
   private var backgroundGradient: LinearGradient {
-    LinearGradient(
-      colors: [
-        backgroundColor.adjustLuminosity(by: 0.2),
-        backgroundColor.adjustLuminosity(by: 0),
-      ],
+    let style = InlineAvatarStyle.resolved(seed: nameForInitials)
+    return LinearGradient(
+      gradient: Gradient(stops: style.gradientStops.map {
+        .init(color: Color(avatarColor: $0.color), location: $0.location)
+      }),
       startPoint: .top,
       endPoint: .bottom
     )
+  }
+
+  private nonisolated static func avatarPresentation(
+    firstName: String?,
+    lastName: String?,
+    email: String?,
+    username: String?,
+    stableIdentifier: String
+  ) -> InlineUserAvatarPresentation {
+    InlineAvatarPresentation.user(identity: .init(
+      firstName: firstName,
+      lastName: lastName,
+      displayName: nil,
+      email: email,
+      username: username,
+      stableIdentifier: stableIdentifier
+    ))
   }
 
   private var avatarUrl: URL? {
@@ -251,19 +291,11 @@ public struct UserAvatar: View, Equatable {
         .loadDiskFileSynchronously()
         .cancelOnDisappear(true)
         .placeholder {
-          if avatarLoadFailed {
-            initials
-          } else {
-            placeholder
-          }
+          placeholder
         }
         .onSuccess { result in
-          avatarLoadFailed = false
           let downloadedData = result.cacheType == .none ? result.data() : nil
           cacheRemoteAvatarIfNeeded(sourceUrl: avatarUrl, downloadedData: downloadedData)
-        }
-        .onFailure { _ in
-          avatarLoadFailed = true
         }
         .resizable()
         // For non-square profile photos.
@@ -272,6 +304,8 @@ public struct UserAvatar: View, Equatable {
         .background(backgroundGradient)
         .clipShape(Circle())
         .fixedSize()
+    } else if hasConfiguredPhoto {
+      placeholder
     } else {
       initials
     }

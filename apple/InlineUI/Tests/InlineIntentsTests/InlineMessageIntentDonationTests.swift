@@ -133,4 +133,38 @@ struct InlineMessageIntentDonationTests {
   func preferredAvatarSize() {
     #expect(InlineMessageIntentDonation.preferredAvatarPixelSize == 360)
   }
+
+  @Test("initials are reserved for users without a configured photo")
+  func userAvatarFallbackSemantics() {
+    let identity = (
+      firstName: "Ada",
+      lastName: "Lovelace",
+      displayName: "Ada Lovelace",
+      email: Optional<String>.none,
+      username: Optional<String>.none,
+      stableIdentifier: "user:1"
+    )
+    let missingPhoto = InlineMessageIntentDonation.UserAvatar(
+      source: .noPhotoConfigured,
+      firstName: identity.firstName,
+      lastName: identity.lastName,
+      displayName: identity.displayName,
+      email: identity.email,
+      username: identity.username,
+      stableIdentifier: identity.stableIdentifier
+    )
+    let unavailablePhoto = InlineMessageIntentDonation.UserAvatar(
+      source: .configuredPhotoUnavailable,
+      firstName: identity.firstName,
+      lastName: identity.lastName,
+      displayName: identity.displayName,
+      email: identity.email,
+      username: identity.username,
+      stableIdentifier: identity.stableIdentifier
+    )
+
+    #expect(InlineMessageIntentDonation.usesGeneratedInitials(missingPhoto))
+    #expect(!InlineMessageIntentDonation.usesGeneratedInitials(unavailablePhoto))
+    #expect(InlineMessageIntentDonation.avatarData(.user(unavailablePhoto)) == nil)
+  }
 }
