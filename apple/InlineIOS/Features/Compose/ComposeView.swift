@@ -52,8 +52,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   let buttonLeadingPadding: CGFloat = 10.0
   private let composeEdgeInset: CGFloat = 7.0
   private let composePlusSpacing: CGFloat = 9.5
-  private let composePlusButtonVisualSize: CGFloat = 36.0
-  private let composePlusButtonBottomInset: CGFloat = 7.0
+  private let composePlusButtonVisualSize: CGFloat = 42.0
+  private let composePlusButtonBottomInset: CGFloat = 4.0
   private let composeHorizontalInset: CGFloat = 10.0
   private let composeControlTrailingInset: CGFloat = 6.0
 

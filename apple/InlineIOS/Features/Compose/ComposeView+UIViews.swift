@@ -71,7 +71,7 @@ private final class ComposeGlassGroupView: UIView {
 private final class ComposePlusGlassButton: UIVisualEffectView {
   private enum Constants {
     static let hitTargetExpansion: CGFloat = 4
-    static let cornerRadius: CGFloat = 18
+    static let cornerRadius: CGFloat = 21
   }
 
   var onTouchDown: (() -> Void)?
