@@ -4,7 +4,7 @@ import Translation
 
 /// Common presentation model for sidebar chat- and contact-like rows.
 struct ChatListItem: Hashable, Identifiable {
-  enum Kind: String, Hashable {
+  enum Kind: String, Hashable, Sendable {
     case thread
     case contact
   }
@@ -15,7 +15,7 @@ struct ChatListItem: Hashable, Identifiable {
     case pinned
   }
 
-  struct Identifier: Hashable {
+  struct Identifier: Hashable, Sendable {
     let kind: Kind
     let rawValue: Int64
   }

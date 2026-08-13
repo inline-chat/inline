@@ -53,7 +53,7 @@ public struct PasteboardAttachmentResult {
 }
 
 public enum InlinePasteboard {
-  private static let preferredImageTypes: [NSPasteboard.PasteboardType] = [
+  static let preferredImageTypes: [NSPasteboard.PasteboardType] = [
     .png,
     NSPasteboard.PasteboardType("public.jpeg"),
     NSPasteboard.PasteboardType("public.heic"),
@@ -67,7 +67,7 @@ public enum InlinePasteboard {
     NSPasteboard.PasteboardType("public.image"),
   ]
 
-  private static let preferredVideoTypes: [NSPasteboard.PasteboardType] = [
+  static let preferredVideoTypes: [NSPasteboard.PasteboardType] = [
     NSPasteboard.PasteboardType("public.mpeg-4"),
     NSPasteboard.PasteboardType("com.apple.quicktime-movie"),
     NSPasteboard.PasteboardType("com.apple.m4v-video"),
@@ -83,6 +83,7 @@ public enum InlinePasteboard {
     .fileURL,
     .pdf,
   ] + preferredImageTypes + preferredVideoTypes
+    + NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) }
 
   public static let draggedTypeIdentifiers = draggedTypes.map(\.rawValue)
 
@@ -300,7 +301,7 @@ public enum InlinePasteboard {
     )
   }
 
-  private static func fileURLFailure(_ url: URL) -> PasteboardAttachmentFailure? {
+  static func fileURLFailure(_ url: URL) -> PasteboardAttachmentFailure? {
     if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
       return .directory(url)
     }
@@ -317,27 +318,28 @@ public enum InlinePasteboard {
     return nil
   }
 
-  private static func isAnimatedImageType(_ type: NSPasteboard.PasteboardType) -> Bool {
+  static func isAnimatedImageType(_ type: NSPasteboard.PasteboardType) -> Bool {
     [
       "com.compuserve.gif",
       "public.gif",
     ].contains(type.rawValue)
   }
 
-  private static func isVideoFileExtension(_ value: String) -> Bool {
+  static func isVideoFileExtension(_ value: String) -> Bool {
     [
       "3gp", "avi", "flv", "m4v", "mkv", "mov", "mp4", "webm", "wmv",
     ].contains(value)
   }
 
-  private static func isImageFileExtension(_ value: String) -> Bool {
+  static func isImageFileExtension(_ value: String) -> Bool {
     [
       "avif", "bmp", "heic", "heif", "jpeg", "jpg", "png", "tif", "tiff", "webp",
     ].contains(value)
   }
 
-  private static func fileExtension(for type: NSPasteboard.PasteboardType) -> String {
+  static func fileExtension(for type: NSPasteboard.PasteboardType) -> String {
     switch type.rawValue {
+    case "com.adobe.pdf": "pdf"
     case "public.mpeg-4": "mp4"
     case "com.apple.quicktime-movie", "public.movie": "mov"
     case "com.apple.m4v-video": "m4v"
@@ -364,7 +366,7 @@ public enum InlinePasteboard {
     return url
   }
 
-  private static func readFileURLs(from pasteboard: NSPasteboard) -> [URL] {
+  static func readFileURLs(from pasteboard: NSPasteboard) -> [URL] {
     // NSPasteboardReading consumes the sandbox extensions granted by drag/drop.
     // Reading only the raw file-url string can make a valid external file look unreadable.
     let options: [NSPasteboard.ReadingOptionKey: Any] = [
@@ -381,7 +383,7 @@ public enum InlinePasteboard {
     }
   }
 
-  private static func resolveFileURL(
+  static func resolveFileURL(
     _ value: String,
     decodedFileURLs: [URL]
   ) -> URL? {

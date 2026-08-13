@@ -17,6 +17,7 @@ final class SidebarViewModel {
     let id: ChatListItem.Identifier
     let peerId: Peer
     let chatId: Int64
+    let parentChatId: Int64?
     let spaceId: Int64?
     let title: String
     let parentTitle: String?
@@ -30,6 +31,7 @@ final class SidebarViewModel {
     let open: Bool
     let order: String?
     let pinnedOrder: String?
+    let lastActivityAt: Date
     let peer: ChatIcon.PeerType?
 
     init?(listItem: ChatListItem) {
@@ -38,6 +40,7 @@ final class SidebarViewModel {
       id = listItem.id
       self.peerId = peerId
       chatId = listItem.chat?.id ?? 0
+      parentChatId = listItem.chat?.parentChatId
       spaceId = listItem.spaceId
       title = listItem.displayTitle
       parentTitle = listItem.parentTitle
@@ -51,6 +54,10 @@ final class SidebarViewModel {
       open = listItem.dialog?.open == true
       order = listItem.dialog?.order
       pinnedOrder = listItem.dialog?.pinnedOrder
+      lastActivityAt = listItem.lastMessage?.message.date
+        ?? listItem.chat?.date
+        ?? listItem.member?.date
+        ?? .distantPast
 
       if let user = listItem.user {
         peer = .user(user)
@@ -355,7 +362,9 @@ final class SidebarViewModel {
   }
 
   private func applySpaces(_ spaces: [HomeSpaceItem]) {
-    self.spaces = spaces.map(\.space)
+    let nextSpaces = spaces.map(\.space)
+    guard self.spaces != nextSpaces else { return }
+    self.spaces = nextSpaces
   }
 
   private func refreshItems() {
@@ -363,8 +372,14 @@ final class SidebarViewModel {
 
     if isInboxMode {
       let active = items.compactMap(Item.init(listItem:))
-      activeItems = active
-      archivedItems = []
+      let activeChanged = activeItems != active
+      let archivedChanged = archivedItems.isEmpty == false
+      if activeChanged {
+        activeItems = active
+      }
+      if archivedChanged {
+        archivedItems = []
+      }
       return
     }
 
@@ -376,8 +391,14 @@ final class SidebarViewModel {
       .filter { $0.dialog?.archived == true }
       .compactMap(Item.init(listItem:))
 
-    activeItems = active
-    archivedItems = archived
+    let activeChanged = activeItems != active
+    let archivedChanged = archivedItems != archived
+    if activeChanged {
+      activeItems = active
+    }
+    if archivedChanged {
+      archivedItems = archived
+    }
   }
 
   private func mergeUniqueItems(_ items: [ChatListItem]) -> [ChatListItem] {

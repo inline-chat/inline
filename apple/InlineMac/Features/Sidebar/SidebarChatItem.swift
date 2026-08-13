@@ -6,7 +6,7 @@ import SwiftUI
 
 enum SidebarItemSize: String, CaseIterable, Identifiable {
   case compact
-  case large
+  case standard
 
   var id: String { rawValue }
 
@@ -14,8 +14,17 @@ enum SidebarItemSize: String, CaseIterable, Identifiable {
     switch self {
     case .compact:
       "Compact"
-    case .large:
-      "Large"
+    case .standard:
+      "Standard"
+    }
+  }
+
+  var detail: LocalizedStringResource {
+    switch self {
+    case .compact:
+      "Single-line rows"
+    case .standard:
+      "One-line message preview"
     }
   }
 
@@ -23,7 +32,7 @@ enum SidebarItemSize: String, CaseIterable, Identifiable {
     switch self {
     case .compact:
       30
-    case .large:
+    case .standard:
       44
     }
   }
@@ -32,7 +41,7 @@ enum SidebarItemSize: String, CaseIterable, Identifiable {
     switch self {
     case .compact:
       22
-    case .large:
+    case .standard:
       32
     }
   }
@@ -42,22 +51,30 @@ struct SidebarChatItemView: Equatable, View {
   let item: SidebarViewModel.Item
   let selected: Bool
   var titleDimmed = false
-  var size: SidebarItemSize = .large
+  var size: SidebarItemSize = .standard
   var unreadBadgeStyle: UnreadBadgeStyle = .defaultValue
   var showsCloseButton = false
   var opensOnMouseDown = true
+  var allowsHoverEffects = true
+  var forceHoverAppearance = false
   var isTemporary = false
   var isDropTargeted = false
+  var indentationLevel = 0
+  var disclosureExpanded: Bool?
+  var usesFullWidthCollectionLayout = false
   var onOpen: (() -> Void)?
   var onClose: (() -> Void)?
   var onPersist: (() -> Void)?
+  var onToggleDisclosure: (() -> Void)?
 
   // Env and State
   @Environment(\.nav) private var nav
   @Environment(\.colorScheme) private var colorScheme
   @Environment(\.dependencies) private var dependencies
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var isHovered = false
   @State private var isCloseHovered = false
+  @State private var isDisclosureHovered = false
   @State private var isPressing = false
   @State private var pendingDestructiveAction: ChatDestructiveAction?
 
@@ -106,7 +123,7 @@ struct SidebarChatItemView: Equatable, View {
   }
 
   private var showsPreview: Bool {
-    size == .large && visibleParentTitle == nil
+    size != .compact && visibleParentTitle == nil
   }
 
   private var titleAccessory: SidebarChatItemAccessory? {
@@ -142,8 +159,13 @@ struct SidebarChatItemView: Equatable, View {
       && lhs.unreadBadgeStyle == rhs.unreadBadgeStyle
       && lhs.showsCloseButton == rhs.showsCloseButton
       && lhs.opensOnMouseDown == rhs.opensOnMouseDown
+      && lhs.allowsHoverEffects == rhs.allowsHoverEffects
+      && lhs.forceHoverAppearance == rhs.forceHoverAppearance
       && lhs.isTemporary == rhs.isTemporary
       && lhs.isDropTargeted == rhs.isDropTargeted
+      && lhs.indentationLevel == rhs.indentationLevel
+      && lhs.disclosureExpanded == rhs.disclosureExpanded
+      && lhs.usesFullWidthCollectionLayout == rhs.usesFullWidthCollectionLayout
   }
 
   var body: some View {
@@ -151,6 +173,7 @@ struct SidebarChatItemView: Equatable, View {
       if unreadBadgeStyle == .dot {
         unreadBadge
           .padding(.leading, Theme.sidebarItemUnreadDotLeadingSpacing)
+          .opacity(showsDisclosureControl ? 0 : 1)
       }
 
       HStack(spacing: 0) {
@@ -178,8 +201,16 @@ struct SidebarChatItemView: Equatable, View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
       }
-      .padding(.leading, Theme.sidebarItemInnerSpacing)
+      .padding(.leading, Theme.sidebarItemInnerSpacing + CGFloat(indentationLevel) * 16)
       .padding(.trailing, Theme.sidebarItemOuterSpacing)
+
+      if disclosureExpanded != nil {
+        disclosureButton
+          .opacity(showsDisclosureControl ? 1 : 0)
+          // Keep the generous invisible target active so entering from the
+          // collection's leading edge can reveal the tiny visual chevron.
+          .allowsHitTesting(true)
+      }
     }
     .frame(height: rowHeight)
     .animation(.smoothSnappy, value: size)
@@ -189,20 +220,23 @@ struct SidebarChatItemView: Equatable, View {
     .animation(.smoothSnappy, value: item.prominentUnreadDot)
     .animation(.smoothSnappy, value: unreadBadgeStyle)
     .animation(.smoothSnappy, value: item.pinned)
-    .contentShape(.interaction, .rect(cornerRadius: Theme.sidebarItemRadius))
+    .animation(reduceMotion ? nil : .easeInOut(duration: 0.14), value: showsDisclosureControl)
     .background(background)
     // Outer paddings
-    .padding(.horizontal, -Theme.sidebarNativeDefaultEdgeInsets + 8)
+    .padding(.horizontal, outerHorizontalPadding)
     .padding(.vertical, Self.outerPaddingVertical)
+    .contentShape(.interaction, .rect(cornerRadius: Theme.sidebarItemRadius))
     .onHover {
+      guard allowsHoverEffects else { return }
       isHovered = $0
       if $0 == false {
         isCloseHovered = false
+        isDisclosureHovered = false
       }
     }
     .modifier(SidebarOpenInteractionModifier(
       opensOnMouseDown: opensOnMouseDown,
-      isCloseHovered: isCloseHovered,
+      isControlHovered: isCloseHovered || isDisclosureHovered,
       isPressing: $isPressing,
       open: open
     ))
@@ -369,6 +403,35 @@ struct SidebarChatItemView: Equatable, View {
     .onHover { isCloseHovered = $0 }
   }
 
+  private var showsDisclosureControl: Bool {
+    disclosureExpanded != nil && (hasHoverAppearance || isDisclosureHovered)
+  }
+
+  private var outerHorizontalPadding: CGFloat {
+    usesFullWidthCollectionLayout
+      ? 8
+      : -Theme.sidebarNativeDefaultEdgeInsets + 8
+  }
+
+  private var disclosureButton: some View {
+    Button {
+      onToggleDisclosure?()
+    } label: {
+      Image(systemName: "chevron.right")
+        .font(.system(size: 6.5, weight: .bold))
+        .foregroundStyle(.secondary)
+        .rotationEffect(.degrees(disclosureExpanded == true ? 90 : 0))
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.16), value: disclosureExpanded)
+        .frame(width: 24, height: rowHeight)
+        .contentShape(.interaction, .rect)
+    }
+    .buttonStyle(.plain)
+    .offset(x: (Theme.sidebarItemInnerSpacing - 24) / 2)
+    .help(disclosureExpanded == true ? "Collapse reply threads" : "Expand reply threads")
+    .accessibilityLabel(disclosureExpanded == true ? "Collapse reply threads" : "Expand reply threads")
+    .onHover { isDisclosureHovered = $0 }
+  }
+
   private func accessoryView(_ accessory: SidebarChatItemAccessory) -> some View {
     Group {
       switch accessory {
@@ -418,12 +481,14 @@ struct SidebarChatItemView: Equatable, View {
 
   private var backgroundColor: Color {
     if isActive {
-      colorScheme == .dark ? .white.opacity(0.1) : .black.opacity(0.07)
-    } else if isHovered || isDropTargeted {
-      colorScheme == .dark ? .white.opacity(0.06) : .black.opacity(0.05)
-    } else {
-      .clear
+      if colorScheme == .dark { return .white.opacity(0.1) }
+      return .black.opacity(0.07)
     }
+    if hasHoverAppearance || isDropTargeted {
+      if colorScheme == .dark { return .white.opacity(0.06) }
+      return .black.opacity(0.05)
+    }
+    return .clear
   }
 
   private var isActive: Bool {
@@ -460,7 +525,11 @@ struct SidebarChatItemView: Equatable, View {
   }
 
   private var showsCloseControl: Bool {
-    showsCloseButton && isHovered
+    showsCloseButton && hasHoverAppearance
+  }
+
+  private var hasHoverAppearance: Bool {
+    forceHoverAppearance || isHovered
   }
 
   private func open() {
@@ -620,7 +689,7 @@ private struct SidebarComposeActivityPreview: View {
 
 private struct SidebarOpenInteractionModifier: ViewModifier {
   let opensOnMouseDown: Bool
-  let isCloseHovered: Bool
+  let isControlHovered: Bool
   @Binding var isPressing: Bool
   let open: () -> Void
 
@@ -633,7 +702,7 @@ private struct SidebarOpenInteractionModifier: ViewModifier {
     } else {
       content
         .onTapGesture {
-          guard isCloseHovered == false else { return }
+          guard isControlHovered == false else { return }
           open()
         }
     }
@@ -652,7 +721,7 @@ private struct SidebarOpenInteractionModifier: ViewModifier {
 
   private func openOnMouseDown() {
     guard didOpenDuringPress == false else { return }
-    guard isCloseHovered == false else { return }
+    guard isControlHovered == false else { return }
     didOpenDuringPress = true
     isPressing = true
     open()

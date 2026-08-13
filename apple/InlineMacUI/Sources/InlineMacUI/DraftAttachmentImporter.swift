@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ImageIO
 import InlineKit
 
 public struct DraftAttachmentImportSummary: Sendable {
@@ -58,23 +59,52 @@ public enum DraftAttachmentImporter {
     await importAttachments(attachments, into: peer, writer: drafts)
   }
 
+  public static func `import`(
+    _ attachments: [PreparedPasteboardAttachment],
+    into peer: Peer,
+    drafts: Drafts2 = .shared
+  ) async -> DraftAttachmentImportSummary {
+    await importPreparedAttachments(attachments, into: peer, writer: drafts)
+  }
+
+  static func importPreparedAttachments(
+    _ attachments: [PreparedPasteboardAttachment],
+    into peer: Peer,
+    writer: any DraftAttachmentWriting
+  ) async -> DraftAttachmentImportSummary {
+    var importedCount = 0
+    var ignoredCount = 0
+    var failures: [String] = []
+
+    for attachment in attachments {
+      switch await importPreparedAttachment(attachment, into: peer, writer: writer) {
+      case .imported:
+        importedCount += 1
+      case .ignored:
+        ignoredCount += 1
+      case let .failed(message):
+        failures.append(message)
+      }
+    }
+
+    return DraftAttachmentImportSummary(
+      importedCount: importedCount,
+      ignoredCount: ignoredCount,
+      failures: failures
+    )
+  }
+
   static func importAttachments(
     _ attachments: [PasteboardAttachment],
     into peer: Peer,
     writer: any DraftAttachmentWriting
   ) async -> DraftAttachmentImportSummary {
-    let tasks = attachments.map { attachment in
-      Task { @MainActor in
-        await importAttachment(attachment, into: peer, writer: writer)
-      }
-    }
-
     var importedCount = 0
     var ignoredCount = 0
     var failures: [String] = []
 
-    for task in tasks {
-      switch await task.value {
+    for attachment in attachments {
+      switch await importAttachment(attachment, into: peer, writer: writer) {
       case .imported:
         importedCount += 1
       case .ignored:
@@ -95,6 +125,76 @@ public enum DraftAttachmentImporter {
     case imported
     case ignored
     case failed(String)
+  }
+
+  private struct SendableCGImage: @unchecked Sendable {
+    let value: CGImage
+  }
+
+  private static func importPreparedAttachment(
+    _ attachment: PreparedPasteboardAttachment,
+    into peer: Peer,
+    writer: any DraftAttachmentWriting
+  ) async -> Outcome {
+    switch attachment {
+    case let .imageFile(url):
+      let decoded = await Task.detached(priority: .userInitiated) {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+        else { return nil as SendableCGImage? }
+        return SendableCGImage(value: image)
+      }.value
+      guard let decoded else {
+        return outcome(from: await importFile(url, peer: peer, writer: writer))
+      }
+      let image = NSImage(cgImage: decoded.value, size: .zero)
+      let preferredFormat: ImageFormat? = url.pathExtension.lowercased() == "png" ? .png : nil
+      let result = await awaitResult { completion in
+        _ = writer.addImage(
+          peer: peer,
+          image: image,
+          preferredFormat: preferredFormat,
+          onComplete: completion
+        )
+      }
+      return await outcome(
+        from: result,
+        fallbackURL: url,
+        peer: peer,
+        writer: writer
+      )
+
+    case let .animatedImage(url):
+      let result = await awaitResult { completion in
+        _ = writer.addAnimatedImage(peer: peer, url: url, onComplete: completion)
+      }
+      return await outcome(
+        from: result,
+        fallbackURL: url,
+        peer: peer,
+        writer: writer
+      )
+
+    case let .video(url):
+      let result = await awaitResult { completion in
+        _ = writer.addVideo(peer: peer, url: url, thumbnail: nil, onComplete: completion)
+      }
+      return await outcome(
+        from: result,
+        fallbackURL: url,
+        peer: peer,
+        writer: writer
+      )
+
+    case let .file(url):
+      guard !isDirectory(url) else {
+        return .failed("Folders aren't supported yet.")
+      }
+      return outcome(from: await importFile(url, peer: peer, writer: writer))
+
+    case .text:
+      return .ignored
+    }
   }
 
   private static func importAttachment(

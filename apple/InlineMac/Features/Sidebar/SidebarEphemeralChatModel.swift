@@ -7,13 +7,23 @@ import Observation
 @MainActor
 @Observable
 final class SidebarEphemeralChatModel {
+  private struct Projection {
+    let parentItem: SidebarViewModel.Item?
+    let item: SidebarViewModel.Item?
+
+    static let empty = Self(parentItem: nil, item: nil)
+  }
+
   struct Scope: Equatable {
     let peer: Peer
     let spaceId: Int64?
     let includeSpaceChatsInHome: Bool
   }
 
-  var item: SidebarViewModel.Item?
+  private var projection = Projection.empty
+
+  var item: SidebarViewModel.Item? { projection.item }
+  var parentItem: SidebarViewModel.Item? { projection.parentItem }
 
   @ObservationIgnored private let db: AppDatabase
   @ObservationIgnored private let log = Log.scoped("SidebarEphemeralChat")
@@ -45,7 +55,7 @@ final class SidebarEphemeralChatModel {
     self.scope = scope
     cancellable?.cancel()
     cancellable = nil
-    item = nil
+    projection = .empty
 
     bind(scope)
   }
@@ -57,7 +67,7 @@ final class SidebarEphemeralChatModel {
 
   func cancel() {
     scope = nil
-    item = nil
+    projection = .empty
     cancellable?.cancel()
     cancellable = nil
   }
@@ -69,18 +79,21 @@ final class SidebarEphemeralChatModel {
 
     cancellable = ValueObservation
       .tracking { db in
-        let chat = try Self.request(scope: scope)
-          .fetchOne(db)
-        let title: String?
-        let parentTitle: String?
-        if let itemChat = chat?.chat {
-          title = try ReplyThreadTitleFallback.title(for: itemChat, db: db)
-          parentTitle = try ReplyThreadTitleFallback.parentTitlesByChatId(for: [itemChat], db: db)[itemChat.id]
+        let chat = try Self.request(scope: scope).fetchOne(db)
+        let parent: HomeChatItem?
+        if let parentChatID = chat?.chat?.parentChatId {
+          parent = try Self.request(scope: Scope(
+            peer: .thread(id: parentChatID),
+            spaceId: scope.spaceId,
+            includeSpaceChatsInHome: scope.includeSpaceChatsInHome
+          )).fetchOne(db)
         } else {
-          title = nil
-          parentTitle = nil
+          parent = nil
         }
-        return chat.map { ChatListItem(chatItem: $0, titleOverride: title, parentTitle: parentTitle) }
+        return Projection(
+          parentItem: try parent.flatMap { try Self.sidebarItem($0, db: db) },
+          item: try chat.flatMap { try Self.sidebarItem($0, db: db) }
+        )
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(
@@ -89,10 +102,35 @@ final class SidebarEphemeralChatModel {
             self?.log.error("Temporary sidebar chat observation failed: \(error.localizedDescription)")
           }
         },
-        receiveValue: { [weak self] chat in
-          self?.item = chat.flatMap { SidebarViewModel.Item(listItem: $0) }
+        receiveValue: { [weak self] projection in
+          // Publish the pair atomically so no observation can render the reply
+          // as an orphan root or produce a second parent-only settle.
+          self?.projection = projection
         }
       )
+  }
+
+  private nonisolated static func sidebarItem(
+    _ homeItem: HomeChatItem,
+    db: Database
+  ) throws -> SidebarViewModel.Item? {
+    let title: String?
+    let parentTitle: String?
+    if let chat = homeItem.chat {
+      title = try ReplyThreadTitleFallback.title(for: chat, db: db)
+      parentTitle = try ReplyThreadTitleFallback.parentTitlesByChatId(
+        for: [chat],
+        db: db
+      )[chat.id]
+    } else {
+      title = nil
+      parentTitle = nil
+    }
+    return SidebarViewModel.Item(listItem: ChatListItem(
+      chatItem: homeItem,
+      titleOverride: title,
+      parentTitle: parentTitle
+    ))
   }
 
   private nonisolated static func request(scope: Scope) -> QueryInterfaceRequest<HomeChatItem> {

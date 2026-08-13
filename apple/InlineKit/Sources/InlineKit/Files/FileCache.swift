@@ -503,7 +503,7 @@ public actor FileCache: Sendable {
   }
 
   private static func temporaryLocalMediaID() -> Int64 {
-    Int64(bitPattern: UInt64(arc4random()) | (UInt64(arc4random()) << 32)) * -1
+    makeTemporaryLocalMediaID()
   }
 
   public static func saveDocument(url: URL) throws -> InlineKit.DocumentInfo {

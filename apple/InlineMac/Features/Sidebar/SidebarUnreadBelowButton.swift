@@ -2,10 +2,40 @@ import InlineMacUI
 import SwiftUI
 
 struct SidebarUnreadBelowButton: View {
+  enum Direction: Equatable {
+    case above
+    case below
+
+    var systemImage: String {
+      switch self {
+      case .above: "arrow.up"
+      case .below: "arrow.down"
+      }
+    }
+
+    var help: String {
+      switch self {
+      case .above: "Jump to unread chats above"
+      case .below: "Jump to unread chats below"
+      }
+    }
+
+    var transitionOffset: CGFloat {
+      switch self {
+      case .above: -12
+      case .below: 12
+      }
+    }
+  }
+
   static let bottomBarTopOffset: CGFloat = -38
-  static var transition: AnyTransition {
+  static func transition(for direction: Direction) -> AnyTransition {
     .modifier(
-      active: SidebarUnreadBelowTransition(opacity: 0, y: 12, scale: 0.96),
+      active: SidebarUnreadBelowTransition(
+        opacity: 0,
+        y: direction.transitionOffset,
+        scale: 0.96
+      ),
       identity: SidebarUnreadBelowTransition(opacity: 1, y: 0, scale: 1)
     )
   }
@@ -15,6 +45,7 @@ struct SidebarUnreadBelowButton: View {
   }
 
   let count: Int
+  var direction: Direction = .below
   let action: () -> Void
 
   @Environment(\.colorScheme) private var colorScheme
@@ -46,15 +77,15 @@ struct SidebarUnreadBelowButton: View {
   @ViewBuilder
   private var button: some View {
     let content = Button(action: action) {
-      Image(systemName: "arrow.down")
+      Image(systemName: direction.systemImage)
         .font(.system(size: 13, weight: .semibold))
         .foregroundStyle(iconColor)
         .frame(width: Self.buttonSize, height: Self.buttonSize)
         .contentShape(.interaction, Circle())
     }
     .focusable(false)
-    .help("Jump to unread chats below")
-    .accessibilityLabel("Jump to unread chats below")
+    .help(direction.help)
+    .accessibilityLabel(direction.help)
     .accessibilityValue(Text("\(count)"))
 
     if #available(macOS 26.0, *) {

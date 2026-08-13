@@ -3,6 +3,12 @@ import GRDB
 import InlineProtocol
 import Logger
 
+/// Generates a temporary server-facing media ID without ever entering the
+/// positive range reserved for server records.
+func makeTemporaryLocalMediaID() -> Int64 {
+  Int64.random(in: Int64.min ... -1)
+}
+
 // MARK: - Photo
 
 public struct Photo: Codable, Equatable, Hashable, Sendable, Identifiable, FetchableRecord, PersistableRecord {
@@ -494,7 +500,7 @@ public extension Photo {
     height: Int? = nil
   ) throws -> PhotoInfo {
     // Create a temporary negative ID to avoid conflicts with server IDs
-    let tempId = Int64(bitPattern: UInt64(arc4random()) | (UInt64(arc4random()) << 32)) * -1
+    let tempId = makeTemporaryLocalMediaID()
 
     // Create and save the photo
     var photo_ = Photo(
@@ -539,7 +545,7 @@ extension Document {
     thumbnail: Photo? = nil
   ) throws -> DocumentInfo {
     // Create a temporary negative ID
-    let tempId = Int64(bitPattern: UInt64(arc4random()) | (UInt64(arc4random()) << 32)) * -1
+    let tempId = makeTemporaryLocalMediaID()
 
     // Create and save the document
     let document_ = Document(

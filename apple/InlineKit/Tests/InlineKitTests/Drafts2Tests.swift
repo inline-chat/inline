@@ -6,6 +6,13 @@ import Testing
 
 @Suite("Drafts2")
 struct Drafts2Tests {
+  @Test("temporary local media IDs never overlap server IDs")
+  func temporaryLocalMediaIDsStayNegative() {
+    for _ in 0..<256 {
+      #expect(makeTemporaryLocalMediaID() < 0)
+    }
+  }
+
   @Test("text updates are immediately loadable from cache")
   func textUpdatesAreImmediatelyLoadableFromCache() {
     let drafts = Drafts2(database: AppDatabase.empty())
@@ -204,6 +211,43 @@ struct Drafts2Tests {
       Issue.record("Expected cancelled materialization")
       return
     }
+  }
+
+  @MainActor
+  @Test("account reset cancels pending attachments for every peer")
+  func accountResetCancelsAllPendingAttachments() async {
+    let drafts = Drafts2(database: AppDatabase.empty())
+    let firstPeer: InlineKit.Peer = .user(id: 91)
+    let secondPeer: InlineKit.Peer = .thread(id: 92)
+    let results = AsyncStream.makeStream(of: Drafts2AttachmentResult.self)
+
+    for peer in [firstPeer, secondPeer] {
+      _ = drafts.startMaterialization(
+        peer: peer,
+        prefix: "pending_account_reset",
+        makeMedia: {
+          try await Task.sleep(for: .seconds(30))
+          return .document(documentInfo(id: -900))
+        },
+        onComplete: { results.continuation.yield($0) }
+      )
+      #expect(drafts.hasPendingAttachments(peer: peer))
+      #expect(drafts.pendingAttachmentIDs(peer: peer).count == 1)
+    }
+
+    drafts.cancelAllPendingAttachments()
+    #expect(!drafts.hasPendingAttachments(peer: firstPeer))
+    #expect(!drafts.hasPendingAttachments(peer: secondPeer))
+
+    var cancelledCount = 0
+    for await result in results.stream {
+      if case .cancelled = result {
+        cancelledCount += 1
+      }
+      if cancelledCount == 2 { break }
+    }
+    results.continuation.finish()
+    #expect(cancelledCount == 2)
   }
 
   private func mentionEntities() -> MessageEntities {

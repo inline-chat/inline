@@ -29,7 +29,7 @@ final class MediaHelpers: Sendable {
   ) throws -> PhotoInfo {
     try database.dbWriter.write { db in
       // Create a temporary negative ID to avoid conflicts with server IDs
-      let tempId = Int64(bitPattern: UInt64(arc4random()) | (UInt64(arc4random()) << 32)) * -1
+      let tempId = makeTemporaryLocalMediaID()
 
       // Create and save the photo
       var photo_ = Photo(
@@ -165,7 +165,7 @@ final class MediaHelpers: Sendable {
   ) throws -> Video {
     try database.dbWriter.write { db in
       // Create a temporary negative ID
-      let tempId = Int64(bitPattern: UInt64(arc4random()) | (UInt64(arc4random()) << 32)) * -1
+      let tempId = makeTemporaryLocalMediaID()
 
       // Create and save the video
       let video = Video(
@@ -292,7 +292,7 @@ final class MediaHelpers: Sendable {
   ) throws -> Document {
     try database.dbWriter.write { db in
       // Create a temporary negative ID
-      let tempId = Int64(bitPattern: UInt64(arc4random()) | (UInt64(arc4random()) << 32)) * -1
+      let tempId = makeTemporaryLocalMediaID()
 
       // Create and save the document
       let document = Document(

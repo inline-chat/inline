@@ -390,6 +390,7 @@ class LegacyComposeAppKit: NSView {
     setupView()
     setupObservers()
     setupKeyDownHandler()
+    restorePendingDraftAttachmentPlaceholders()
   }
 
   func setPeerUser(_ user: InlineKit.User?) {
@@ -2882,7 +2883,11 @@ extension LegacyComposeAppKit {
 
   private func handleDraftAttachmentResult(_ result: Drafts2AttachmentResult) {
     switch result {
-      case .pending:
+      case let .pending(pendingId):
+        if !attachments.containsAttachment(id: pendingId) {
+          attachments.addPendingAttachment(id: pendingId)
+          updateHeight(animate: true)
+        }
         updateSendButtonIfNeeded()
       case let .success(pendingId, attachment):
         removeDraftAttachmentPlaceholder(id: pendingId)
@@ -2952,6 +2957,12 @@ extension LegacyComposeAppKit {
     attachments.removeImageView(id: id)
     attachments.removeVideoView(id: id)
     attachments.removeDocumentView(id: id)
+  }
+
+  private func restorePendingDraftAttachmentPlaceholders() {
+    for pendingId in drafts2.pendingAttachmentIDs(peer: peerId) {
+      handleDraftAttachmentResult(.pending(pendingId: pendingId))
+    }
   }
 }
 

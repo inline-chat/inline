@@ -439,6 +439,40 @@ public final class Drafts2: @unchecked Sendable {
     }
   }
 
+  public func pendingAttachmentIDs(peer: Peer) -> [String] {
+    let peerKey = peer.toString()
+    return stateQueue.sync {
+      Array(pendingAttachmentIdsByPeerKey[peerKey] ?? []).sorted()
+    }
+  }
+
+  /// Stops every in-flight attachment materialization before an account's
+  /// database is cleared. Removing the pending IDs first prevents a task that
+  /// races cancellation from committing media into the next account's draft
+  /// cache.
+  public func cancelAllPendingAttachments() {
+    let pendingTasks = stateQueue.sync { () -> [Task<Void, Never>] in
+      pendingAttachmentIdsByPeerKey.removeAll()
+      let tasks = Array(pendingAttachmentTasks.values)
+      pendingAttachmentTasks.removeAll()
+      return tasks
+    }
+    pendingTasks.forEach { $0.cancel() }
+  }
+
+  /// Clears account-owned in-memory draft state after draining writes that
+  /// were accepted by the old account. Call this before clearing its database.
+  public func resetForAccountChange() async {
+    cancelAllPendingAttachments()
+    await writer.flush()
+    stateQueue.sync {
+      loadedPeerKeys.removeAll()
+      cache.removeAll()
+      latestRevisionByPeerKey.removeAll()
+      attachmentObservers.removeAll()
+    }
+  }
+
   public func clear(peer: Peer) {
     let peerKey = peer.toString()
     let pendingTasks = stateQueue.sync { () -> [Task<Void, Never>] in

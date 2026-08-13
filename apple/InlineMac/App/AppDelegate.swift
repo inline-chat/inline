@@ -817,6 +817,7 @@ extension AppDelegate {
 
     Analytics.logout()
 
+    await Drafts2.shared.resetForAccountChange()
     await QuickSearchUsageStore.shared.clearCurrentAccount()
     await dependencies.commandBarCatalog.reset()
 

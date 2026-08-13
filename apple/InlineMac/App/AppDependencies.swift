@@ -155,6 +155,15 @@ extension AppDependencies {
       openChatRoute(peer: threadPeer)
       return
     }
+
+    guard AppSettings.shared.sidebarAsInbox else { return }
+
+    // The projection can only render a reply beneath its semantic parent when
+    // both dialogs are present in the sidebar source.
+    SidebarState.shared.keepReplyThreadInSidebar(
+      parentPeer: parentPeer,
+      threadPeer: threadPeer
+    )
   }
 
   /// User-initiated chat open. Nav3 uses the temporary preload path here.

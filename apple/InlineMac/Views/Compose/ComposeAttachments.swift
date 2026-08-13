@@ -280,6 +280,19 @@ final class ComposeAttachments: NSView {
 
   // MARK: - Documents
 
+  public func addPendingAttachment(id: String) {
+    addPendingDocument(
+      fileName: "Preparing attachment",
+      fileSize: nil,
+      reservesThumbnailSpace: false,
+      id: id
+    )
+  }
+
+  public func containsAttachment(id: String) -> Bool {
+    attachments[id] != nil || videoAttachments[id] != nil || documentModels[id] != nil
+  }
+
   public func addDocumentView(_ documentInfo: DocumentInfo, id: String) {
     // Check if we already have this document
     if let existingView = docAttachments[id] {

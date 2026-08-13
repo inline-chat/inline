@@ -99,6 +99,30 @@ struct DraftAttachmentImporterTests {
     #expect(summary.ignoredCount == 1)
     #expect(writer.calls.isEmpty)
   }
+
+  @Test("prepared image files decode away from the capture path and keep their peer")
+  func preparedImageFile() async throws {
+    let writer = FakeDraftAttachmentWriter()
+    let peer = Peer.thread(id: 73)
+    let url = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString)
+      .appendingPathExtension("png")
+    try #require(Data(base64Encoded:
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    )).write(to: url)
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    let summary = await DraftAttachmentImporter.importPreparedAttachments(
+      [.imageFile(url)],
+      into: peer,
+      writer: writer
+    )
+
+    #expect(summary.importedCount == 1)
+    #expect(summary.failedCount == 0)
+    #expect(writer.calls.map(\.kind) == [.image])
+    #expect(writer.calls.first?.peer == peer)
+  }
 }
 
 @MainActor
