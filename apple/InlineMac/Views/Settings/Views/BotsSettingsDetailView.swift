@@ -26,6 +26,28 @@ struct BotsSettingsDetailView: View {
   var body: some View {
     Form {
       Section {
+        LabeledContent("Inline CLI") {
+          Button("Install or Update…") {
+            AppMenu.shared.installCLI()
+          }
+          .disabled(dependencies == nil || dependencies?.cliInstaller.phase.isBusy == true)
+        }
+
+        LabeledContent("Agent Harness") {
+          Button("Set Up Agent…") {
+            guard let dependencies else { return }
+            AgentSetupWindowController.show(using: dependencies)
+          }
+          .disabled(dependencies == nil)
+        }
+      } header: {
+        SettingsSectionHeader(
+          "Agent Setup",
+          subtitle: "Install Inline’s CLI and connect Codex, Claude, OpenCode, Amp, Hermes, or OpenClaw."
+        )
+      }
+
+      Section {
         LabeledContent("Name") {
           TextField("Bot Name", text: $name, prompt: Text("Bot Name"))
             .focused($focusedField, equals: .name)

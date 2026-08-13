@@ -94,6 +94,18 @@ final class AppMenu: NSObject {
     cliInstallerMenuItem = installCLIMenuItem
     bindCLIInstallerMenuItemState()
 
+    let setupAgentMenuItem = NSMenuItem(
+      title: "Set Up an Agent…",
+      action: #selector(handleAgentSetupMenuAction(_:)),
+      keyEquivalent: ""
+    )
+    setupAgentMenuItem.target = self
+    setupAgentMenuItem.image = NSImage(
+      systemSymbolName: "cpu",
+      accessibilityDescription: nil
+    )
+    appMenu.addItem(setupAgentMenuItem)
+
     appMenu.addItem(NSMenuItem.separator())
 
     let servicesMenu = NSMenu()
@@ -997,6 +1009,11 @@ final class AppMenu: NSObject {
   @MainActor func installCLI(sender: Any? = nil) {
     guard let dependencies else { return }
     CLIInstallerWindowController.show(using: dependencies, sender: sender)
+  }
+
+  @MainActor @objc private func handleAgentSetupMenuAction(_ sender: Any?) {
+    guard let dependencies else { return }
+    AgentSetupWindowController.show(using: dependencies, sender: sender)
   }
 
   @MainActor private func bindCLIInstallerMenuItemState() {
