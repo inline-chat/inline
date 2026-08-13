@@ -198,7 +198,20 @@ private struct AuthedAppRoot: View {
       }
 
     case let .addMember(spaceId):
-      InviteToSpaceView(spaceId: spaceId)
+      InviteView(
+        destination: .space(id: spaceId),
+        onCreateSpace: { router.presentSheet(.createSpace) }
+      )
+
+    case .inviteToInline:
+      InviteView(
+        destination: .inline,
+        onOpenChat: { peer in
+          router.dismissSheet()
+          router.push(.chat(peer: peer), for: router.selectedTab)
+        },
+        onCreateSpace: { router.presentSheet(.createSpace) }
+      )
 
     case let .members(spaceId):
       ExperimentalMembersSheetView(spaceId: spaceId)

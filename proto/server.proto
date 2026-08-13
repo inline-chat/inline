@@ -101,7 +101,11 @@ message ServerChatUpdateClearHistory {
 message ServerChatUpdateDeleteChat { int64 chat_id = 1; }
 
 // Update for a chat when it is created
-message ServerChatUpdateNewChat { int64 chat_id = 1; }
+message ServerChatUpdateNewChat {
+  int64 chat_id = 1;
+  // Contact invitations must not reveal the peer profile to this recipient.
+  optional int64 id_only_user_for_id = 2;
+}
 
 // Update for a chat when a participant is removed
 message ServerChatUpdateParticipantDelete {

@@ -19,7 +19,11 @@ type SendEmailInput = {
  * @see CodeTemplateInput
  * @see InvitedToSpaceTemplateInput
  */
-type SendEmailContent = CodeTemplateInput | InvitedToSpaceTemplateInput | AdminActionTemplateInput
+type SendEmailContent =
+  | CodeTemplateInput
+  | InvitedToSpaceTemplateInput
+  | InvitedToInlineTemplateInput
+  | AdminActionTemplateInput
 
 export const sendEmail = async (input: SendEmailInput) => {
   const template = await getTemplate(input.content)
@@ -91,6 +95,9 @@ const getTemplate = async (content: SendEmailContent): Promise<TextTemplate> => 
     case "invitedToSpace":
       return InvitedToSpaceTemplate(content.variables)
 
+    case "invitedToInline":
+      return InvitedToInlineTemplate(content.variables)
+
     case "adminAction":
       return AdminActionTemplate(content.variables)
   }
@@ -113,6 +120,14 @@ interface InvitedToSpaceTemplateInput extends TemplateInput {
     isExistingUser: boolean
     firstName: string | undefined
     invitedByUserName: UserName | undefined
+  }
+}
+
+interface InvitedToInlineTemplateInput extends TemplateInput {
+  template: "invitedToInline"
+  variables: {
+    firstName: string | undefined
+    invitedByName: string
   }
 }
 
@@ -175,6 +190,23 @@ For iPhone/iPad: https://testflight.apple.com/join/FkC3f7fz
 For Mac: https://testflight.apple.com/join/Z8zUcWZH
     `
 }
+  `.trim()
+  return { subject, text }
+}
+
+function InvitedToInlineTemplate({
+  firstName,
+  invitedByName,
+}: InvitedToInlineTemplateInput["variables"]): TextTemplate {
+  const subject = `${invitedByName} invited you to chat on Inline`
+  const text = `
+Hey ${firstName ? `${firstName},` : "-"}
+
+${invitedByName} invited you to chat on Inline.
+
+Open Inline to start the conversation: https://inline.chat/download
+
+Inline Team
   `.trim()
   return { subject, text }
 }

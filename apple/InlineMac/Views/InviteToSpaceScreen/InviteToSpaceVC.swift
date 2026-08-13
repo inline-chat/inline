@@ -20,16 +20,19 @@ class InviteToSpaceViewController: NSViewController {
   }
 
   private lazy var swiftUIView: some View =
-    InviteToSpaceView(
-      spaceId: self.spaceId,
-      onManageMembers: { [dependencies, spaceId] in
+    InviteView(
+      destination: .space(id: self.spaceId),
+      onManageMembers: { [dependencies] destinationSpaceID in
         if let nav2 = dependencies.nav2 {
-          nav2.navigate(to: .members(spaceId: spaceId))
+          nav2.navigate(to: .members(spaceId: destinationSpaceID))
         } else if let nav3 = dependencies.nav3 {
-          nav3.open(.members(spaceId: spaceId))
+          nav3.open(.members(spaceId: destinationSpaceID))
         } else {
-          dependencies.nav.open(.members(spaceId: spaceId))
+          dependencies.nav.open(.members(spaceId: destinationSpaceID))
         }
+      },
+      onOpenChat: { [dependencies] peer in
+        dependencies.openChatRoute(peer: peer)
       }
     )
       .environment(dependencies: dependencies)

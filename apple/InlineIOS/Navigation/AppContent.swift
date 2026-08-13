@@ -250,6 +250,7 @@ enum Sheet: SheetType, Codable {
   case connectors(callbackURL: String)
 
   case addMember(spaceId: Int64)
+  case inviteToInline
   case members(spaceId: Int64)
   case chatInfo(chatItem: SpaceChatItem)
   var id: String {
@@ -265,6 +266,9 @@ enum Sheet: SheetType, Codable {
 
     case let .addMember(spaceId):
       "addMember_\(spaceId)"
+
+    case .inviteToInline:
+      "inviteToInline"
 
     case let .members(spaceId):
       "members_\(spaceId)"

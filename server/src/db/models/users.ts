@@ -84,20 +84,22 @@ export class UsersModel {
    * @returns The user
    */
   static async getUserByPhoneNumber(phoneNumber: string): Promise<DbUser | undefined> {
-    // Parse phone number
-    const parsedPhoneNumber = parsePhoneNumber(phoneNumber)
-    if (!parsedPhoneNumber?.isValid()) {
-      throw RealtimeRpcError.PhoneNumberInvalid()
-    }
-
-    // E.164 phone numbers
-    const e164PhoneNumber = parsedPhoneNumber.number
+    const e164PhoneNumber = UsersModel.normalizePhoneNumber(phoneNumber)
 
     const user = await db._query.users.findFirst({
       where: eq(users.phoneNumber, e164PhoneNumber),
     })
 
     return user
+  }
+
+  static normalizePhoneNumber(phoneNumber: string): string {
+    const parsedPhoneNumber = parsePhoneNumber(phoneNumber)
+    if (!parsedPhoneNumber?.isValid()) {
+      throw RealtimeRpcError.PhoneNumberInvalid()
+    }
+
+    return parsedPhoneNumber.number
   }
 
   /**
@@ -120,16 +122,10 @@ export class UsersModel {
     }
 
     if ("phoneNumber" in input) {
-      // Validate and clean phone number
-      const parsedPhoneNumber = parsePhoneNumber(input.phoneNumber)
-      if (!parsedPhoneNumber?.isValid()) {
-        throw RealtimeRpcError.PhoneNumberInvalid()
-      }
-
-      phoneNumber = parsedPhoneNumber.number
+      phoneNumber = UsersModel.normalizePhoneNumber(input.phoneNumber)
     }
 
-    const user = await db
+    const [created] = await db
       .insert(users)
       .values({
         email,
@@ -142,14 +138,28 @@ export class UsersModel {
         lastName: null,
         username: null,
       })
+      .onConflictDoNothing()
       .returning()
 
-    if (!user[0]) {
-      log.error("Failed to create user when invited", { input })
+    if (created) {
+      return created
+    }
+
+    const existing = email
+      ? await UsersModel.getUserByEmail(email)
+      : phoneNumber
+        ? await UsersModel.getUserByPhoneNumber(phoneNumber)
+        : undefined
+
+    if (UsersModel.isDeleted(existing)) {
+      throw RealtimeRpcError.UserIdInvalid()
+    }
+    if (!existing) {
+      log.error("Failed to resolve user after invited-user conflict", { hasEmail: email !== undefined })
       throw RealtimeRpcError.InternalError()
     }
 
-    return user[0]
+    return existing
   }
   // Update user's online status
   static async setOnline(id: number, online: boolean): Promise<{ online: boolean; lastOnline: Date | null }> {
@@ -240,17 +250,16 @@ export class UsersModel {
     }
 
     const exactUsername = normalizedQuery.toLowerCase()
-    const partialMatch = `%${normalizedQuery}%`
     const queryMatch = includeBotCreatorId
       ? sql`(
-          ${users.username} ilike ${partialMatch}
+          strpos(lower(${users.username}), ${exactUsername}) > 0
           or (
             ${users.bot} is true
             and ${users.botCreatorId} = ${includeBotCreatorId}
-            and concat_ws(' ', ${users.firstName}, ${users.lastName}) ilike ${partialMatch}
+            and strpos(lower(concat_ws(' ', ${users.firstName}, ${users.lastName})), ${exactUsername}) > 0
           )
         )`
-      : sql`${users.username} ilike ${partialMatch}`
+      : sql`strpos(lower(${users.username}), ${exactUsername}) > 0`
     const botVisibility = includeBotCreatorId
       ? sql`(
           ${users.bot} is not true
@@ -270,6 +279,7 @@ export class UsersModel {
         queryMatch,
         botVisibility,
         excludeUserId ? not(eq(users.id, excludeUserId)) : undefined,
+        eq(users.pendingSetup, false),
         userNotDeleted(),
       ),
       orderBy: [searchOrder, users.id],

@@ -64,6 +64,10 @@ export class InMemoryRateLimiter {
     return { allowed, retryAfterSeconds }
   }
 
+  reset(key: string): void {
+    this.buckets.delete(key)
+  }
+
   clear(): void {
     this.buckets.clear()
   }

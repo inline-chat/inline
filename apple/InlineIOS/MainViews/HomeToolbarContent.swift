@@ -65,6 +65,12 @@ struct HomeToolbarContent: ToolbarContent {
   private var dotsButton: some View {
     Menu {
       Button {
+        router.presentSheet(.inviteToInline)
+      } label: {
+        Label("Invite to Inline", systemImage: "person.badge.plus")
+      }
+
+      Button {
         router.presentSheet(.createSpace)
       } label: {
         Label("Create Space", systemImage: "building")

@@ -14,7 +14,7 @@ import type { Static } from "elysia"
 import { Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { and, eq } from "drizzle-orm"
-import type { Update } from "@inline-chat/protocol/core"
+import type { Update, User } from "@inline-chat/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { UsersModel } from "@in/server/db/models/users"
@@ -38,6 +38,7 @@ export const Response = Type.Object({
 export const handler = async (
   input: Static<typeof Input>,
   context: HandlerContext,
+  options: { peerForCurrentUser?: User } = {},
 ): Promise<Static<typeof Response>> => {
   const peerId = Number(input.userId)
   if (isNaN(peerId)) {
@@ -59,13 +60,8 @@ export const handler = async (
   const currentUserName = currentUser?.firstName
   const title = isSelfChat ? `${currentUserName} (You)` : null
 
-  const existingChat = await db._query.chats.findFirst({
-    where: and(eq(chats.type, "private"), eq(chats.minUserId, minUserId), eq(chats.maxUserId, maxUserId)),
-  })
-  const createdChat = !existingChat
-
-  // Create or get existing chat
-  const [chat] = await db
+  // Insert first so concurrent requests agree on which call created the chat.
+  const [insertedChat] = await db
     .insert(chats)
     .values({
       title,
@@ -74,11 +70,17 @@ export const handler = async (
       minUserId,
       maxUserId,
     })
-    .onConflictDoUpdate({
-      target: [chats.minUserId, chats.maxUserId],
-      set: { title },
-    })
+    .onConflictDoNothing()
     .returning()
+
+  const createdChat = insertedChat !== undefined
+  const [chat] = insertedChat
+    ? [insertedChat]
+    : await db
+        .update(chats)
+        .set({ title })
+        .where(and(eq(chats.type, "private"), eq(chats.minUserId, minUserId), eq(chats.maxUserId, maxUserId)))
+        .returning()
 
   if (!chat) {
     Log.shared.error("Failed to create private chat")
@@ -162,7 +164,11 @@ export const handler = async (
     throw new InlineError(InlineError.ApiError.INTERNAL)
   }
 
-  const persistedUpdate = createdChat ? await persistNewChatUpdate(chat.id) : undefined
+  const persistedUpdate = createdChat
+    ? await persistNewChatUpdate(chat.id, {
+        idOnlyUserForId: options.peerForCurrentUser ? context.currentUserId : undefined,
+      })
+    : undefined
 
   // Push update to both users
   pushUpdate({
@@ -174,7 +180,13 @@ export const handler = async (
     Log.shared.error("Failed to push update to user", { error })
   })
 
-  pushUpdate({ chat, user, pushToUserId: context.currentUserId, update: persistedUpdate }).catch((error) => {
+  pushUpdate({
+    chat,
+    user,
+    pushToUserId: context.currentUserId,
+    update: persistedUpdate,
+    encodedUser: options.peerForCurrentUser,
+  }).catch((error) => {
     Log.shared.error("Failed to push update to user", { error })
   })
 
@@ -195,8 +207,9 @@ const pushUpdate = async (input: {
   user: DbUserWithProfile
   pushToUserId: number
   update?: UpdateSeqAndDate
+  encodedUser?: User
 }) => {
-  const { chat, user, pushToUserId, update: persisted } = input
+  const { chat, user, pushToUserId, update: persisted, encodedUser } = input
 
   const encodingForUserId = pushToUserId
   const encodedChat = await Encoders.chatForUser(chat, { encodingForUserId })
@@ -205,11 +218,13 @@ const pushUpdate = async (input: {
       oneofKind: "newChat",
       newChat: {
         chat: encodedChat,
-        user: Encoders.user({
-          user,
-          min: true,
-          photoFile: user.photoFile ?? undefined,
-        }),
+        user:
+          encodedUser ??
+          Encoders.user({
+            user,
+            min: true,
+            photoFile: user.photoFile ?? undefined,
+          }),
       },
     },
   }
@@ -222,11 +237,16 @@ const pushUpdate = async (input: {
   RealtimeUpdates.pushToUser(pushToUserId, [update])
 }
 
-const persistNewChatUpdate = async (chatId: number): Promise<UpdateSeqAndDate> => {
+const persistNewChatUpdate = async (
+  chatId: number,
+  options: { idOnlyUserForId?: number },
+): Promise<UpdateSeqAndDate> => {
   const chatUpdatePayload: ServerUpdate["update"] = {
     oneofKind: "newChat",
     newChat: {
       chatId: BigInt(chatId),
+      idOnlyUserForId:
+        options.idOnlyUserForId !== undefined ? BigInt(options.idOnlyUserForId) : undefined,
     },
   }
 

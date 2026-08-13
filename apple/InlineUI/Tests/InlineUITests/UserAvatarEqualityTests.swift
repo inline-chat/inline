@@ -57,4 +57,32 @@ struct UserAvatarEqualityTests {
     #expect(avatar.localUrl == sharedAvatarURL)
     #expect(avatar.remoteUrl == URL(string: "https://cdn.inline.chat/avatar.jpg"))
   }
+
+  @Test("API user preserves public-search photo identity and URL")
+  @MainActor
+  func apiUserPreservesSearchPhoto() throws {
+    let user = try JSONDecoder().decode(ApiUser.self, from: Data(#"""
+      {
+        "id": 42,
+        "firstName": "Avatar",
+        "lastName": "Person",
+        "date": 1,
+        "username": "avatar",
+        "photo": [{
+          "fileUniqueId": "profile-unique-1",
+          "width": 128,
+          "height": 128,
+          "fileSize": 4096,
+          "mimeType": "image/jpeg",
+          "temporaryUrl": "https://cdn.inline.chat/avatar.jpg?token=signed"
+        }]
+      }
+      """#.utf8))
+
+    let avatar = UserAvatar(apiUser: user, size: 32, cacheRemoteAvatar: false)
+
+    #expect(avatar.stableAvatarIdentity == "unique:profile-unique-1")
+    #expect(avatar.remoteUrl == URL(string: "https://cdn.inline.chat/avatar.jpg?token=signed"))
+    #expect(avatar.hasConfiguredPhoto)
+  }
 }

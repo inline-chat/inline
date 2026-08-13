@@ -20,6 +20,7 @@ enum Nav3Route: Hashable, Codable {
   case profile(userId: Int64)
   case createSpace
   case newChat(spaceId: Int64?)
+  case inviteToInline
   case inviteToSpace(spaceId: Int64?)
   case members(spaceId: Int64)
   case spaceSettings(spaceId: Int64)

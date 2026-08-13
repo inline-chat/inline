@@ -379,6 +379,9 @@ public extension User {
         user.phoneNumber = user.phoneNumber ?? existing.phoneNumber
         user.email = user.email ?? existing.email
         user.timeZone = user.timeZone ?? existing.timeZone
+        user.pendingSetup = user.pendingSetup ?? existing.pendingSetup
+        user.online = user.online ?? existing.online
+        user.lastOnline = user.lastOnline ?? existing.lastOnline
       }
       user.profileCdnUrl = removesProfilePhoto ? nil : user.profileCdnUrl ?? existing.profileCdnUrl
       user.profileLocalPath = shouldClearCache ? nil : existing.profileLocalPath

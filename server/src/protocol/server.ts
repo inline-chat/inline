@@ -378,6 +378,12 @@ export interface ServerChatUpdateNewChat {
      * @generated from protobuf field: int64 chat_id = 1;
      */
     chatId: bigint;
+    /**
+     * Contact invitations must not reveal the peer profile to this recipient.
+     *
+     * @generated from protobuf field: optional int64 id_only_user_for_id = 2;
+     */
+    idOnlyUserForId?: bigint;
 }
 /**
  * Update for a chat when a participant is removed
@@ -1723,7 +1729,8 @@ export const ServerChatUpdateDeleteChat = new ServerChatUpdateDeleteChat$Type();
 class ServerChatUpdateNewChat$Type extends MessageType<ServerChatUpdateNewChat> {
     constructor() {
         super("server.ServerChatUpdateNewChat", [
-            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "id_only_user_for_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<ServerChatUpdateNewChat>): ServerChatUpdateNewChat {
@@ -1741,6 +1748,9 @@ class ServerChatUpdateNewChat$Type extends MessageType<ServerChatUpdateNewChat> 
                 case /* int64 chat_id */ 1:
                     message.chatId = reader.int64().toBigInt();
                     break;
+                case /* optional int64 id_only_user_for_id */ 2:
+                    message.idOnlyUserForId = reader.int64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -1756,6 +1766,9 @@ class ServerChatUpdateNewChat$Type extends MessageType<ServerChatUpdateNewChat> 
         /* int64 chat_id = 1; */
         if (message.chatId !== 0n)
             writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* optional int64 id_only_user_for_id = 2; */
+        if (message.idOnlyUserForId !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.idOnlyUserForId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

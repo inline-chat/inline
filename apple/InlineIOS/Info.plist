@@ -48,6 +48,8 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Inline needs access to your camera to take and share photos in your conversations.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Inline uses your contacts on this device to help you find people to invite. Your address book is not uploaded.</string>
 	<key>NSDocumentsFolderUsageDescription</key>
 	<string>Inline needs access to documents to share files in your conversations.</string>
 	<key>NSMicrophoneUsageDescription</key>

@@ -1,3 +1,4 @@
+import Foundation
 import GRDB
 import InlineProtocol
 import Testing
@@ -47,7 +48,7 @@ struct UserProtocolSaveTests {
     let dbQueue = try makeInMemoryDB()
 
     try dbQueue.write { db in
-      try User(
+      var existing = User(
         id: 101,
         email: "old@example.com",
         firstName: "Old",
@@ -55,7 +56,10 @@ struct UserProtocolSaveTests {
         username: "oldhandle",
         bio: "Old bio"
       )
-      .insert(db)
+      existing.pendingSetup = false
+      existing.online = true
+      existing.lastOnline = Date(timeIntervalSince1970: 123)
+      try existing.insert(db)
 
       var protocolUser = InlineProtocol.User()
       protocolUser.id = 101
@@ -69,6 +73,9 @@ struct UserProtocolSaveTests {
       #expect(saved.lastName == "Name")
       #expect(saved.bio == "Old bio")
       #expect(saved.username == "oldhandle")
+      #expect(saved.pendingSetup == false)
+      #expect(saved.online == true)
+      #expect(saved.lastOnline == Date(timeIntervalSince1970: 123))
     }
   }
 }

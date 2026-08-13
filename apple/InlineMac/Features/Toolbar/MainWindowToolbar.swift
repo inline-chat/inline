@@ -203,6 +203,9 @@ private enum NavHistoryMenuLabel {
     case .inviteToSpace:
       return "Invite to Space"
 
+    case .inviteToInline:
+      return "Invite to Inline"
+
     case let .members(spaceId):
       return spaceRouteTitle(spaceId: spaceId, suffix: "Members", fallback: "Members")
 
@@ -244,6 +247,9 @@ private enum NavHistoryMenuLabel {
       return "square.and.pencil"
 
     case .inviteToSpace:
+      return "person.badge.plus"
+
+    case .inviteToInline:
       return "person.badge.plus"
 
     case .members:

@@ -1087,6 +1087,8 @@ enum Method {
   LIST_CONNECTORS = 100;
   PREPARE_CONNECTOR_OAUTH = 101;
   DISCONNECT_CONNECTOR = 102;
+  SEARCH_USERS = 103;
+  INVITE_TO_INLINE = 104;
 }
 
 message RpcCall {
@@ -1194,6 +1196,8 @@ message RpcCall {
     ListConnectorsInput listConnectors = 101;
     PrepareConnectorOAuthInput prepareConnectorOAuth = 102;
     DisconnectConnectorInput disconnectConnector = 103;
+    SearchUsersInput searchUsers = 104;
+    InviteToInlineInput inviteToInline = 105;
   }
 }
 
@@ -1303,6 +1307,8 @@ message RpcResult {
     ListConnectorsResult listConnectors = 101;
     PrepareConnectorOAuthResult prepareConnectorOAuth = 102;
     DisconnectConnectorResult disconnectConnector = 103;
+    SearchUsersResult searchUsers = 104;
+    InviteToInlineResult inviteToInline = 105;
   }
 }
 
@@ -3170,6 +3176,27 @@ message InviteToSpaceResult {
   Member member = 2;
   Chat chat = 3;
   Dialog dialog = 4;
+}
+
+message SearchUsersInput {
+  string query = 1;
+  optional int32 limit = 2;
+}
+
+message SearchUsersResult { repeated User users = 1; }
+
+message InviteToInlineInput {
+  oneof via {
+    int64 user_id = 1;
+    string email = 2;
+    string phone_number = 3;
+  }
+}
+
+message InviteToInlineResult {
+  User user = 1;
+  Chat chat = 2;
+  Dialog dialog = 3;
 }
 
 message GetChatParticipantsInput { int64 chat_id = 1; }

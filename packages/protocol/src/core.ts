@@ -3124,6 +3124,18 @@ export interface RpcCall {
          */
         disconnectConnector: DisconnectConnectorInput;
     } | {
+        oneofKind: "searchUsers";
+        /**
+         * @generated from protobuf field: SearchUsersInput searchUsers = 104;
+         */
+        searchUsers: SearchUsersInput;
+    } | {
+        oneofKind: "inviteToInline";
+        /**
+         * @generated from protobuf field: InviteToInlineInput inviteToInline = 105;
+         */
+        inviteToInline: InviteToInlineInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -3744,6 +3756,18 @@ export interface RpcResult {
          * @generated from protobuf field: DisconnectConnectorResult disconnectConnector = 103;
          */
         disconnectConnector: DisconnectConnectorResult;
+    } | {
+        oneofKind: "searchUsers";
+        /**
+         * @generated from protobuf field: SearchUsersResult searchUsers = 104;
+         */
+        searchUsers: SearchUsersResult;
+    } | {
+        oneofKind: "inviteToInline";
+        /**
+         * @generated from protobuf field: InviteToInlineResult inviteToInline = 105;
+         */
+        inviteToInline: InviteToInlineResult;
     } | {
         oneofKind: undefined;
     };
@@ -8527,6 +8551,74 @@ export interface InviteToSpaceResult {
     dialog?: Dialog;
 }
 /**
+ * @generated from protobuf message SearchUsersInput
+ */
+export interface SearchUsersInput {
+    /**
+     * @generated from protobuf field: string query = 1;
+     */
+    query: string;
+    /**
+     * @generated from protobuf field: optional int32 limit = 2;
+     */
+    limit?: number;
+}
+/**
+ * @generated from protobuf message SearchUsersResult
+ */
+export interface SearchUsersResult {
+    /**
+     * @generated from protobuf field: repeated User users = 1;
+     */
+    users: User[];
+}
+/**
+ * @generated from protobuf message InviteToInlineInput
+ */
+export interface InviteToInlineInput {
+    /**
+     * @generated from protobuf oneof: via
+     */
+    via: {
+        oneofKind: "userId";
+        /**
+         * @generated from protobuf field: int64 user_id = 1;
+         */
+        userId: bigint;
+    } | {
+        oneofKind: "email";
+        /**
+         * @generated from protobuf field: string email = 2;
+         */
+        email: string;
+    } | {
+        oneofKind: "phoneNumber";
+        /**
+         * @generated from protobuf field: string phone_number = 3;
+         */
+        phoneNumber: string;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
+ * @generated from protobuf message InviteToInlineResult
+ */
+export interface InviteToInlineResult {
+    /**
+     * @generated from protobuf field: User user = 1;
+     */
+    user?: User;
+    /**
+     * @generated from protobuf field: Chat chat = 2;
+     */
+    chat?: Chat;
+    /**
+     * @generated from protobuf field: Dialog dialog = 3;
+     */
+    dialog?: Dialog;
+}
+/**
  * @generated from protobuf message GetChatParticipantsInput
  */
 export interface GetChatParticipantsInput {
@@ -9763,7 +9855,15 @@ export enum Method {
     /**
      * @generated from protobuf enum value: DISCONNECT_CONNECTOR = 102;
      */
-    DISCONNECT_CONNECTOR = 102
+    DISCONNECT_CONNECTOR = 102,
+    /**
+     * @generated from protobuf enum value: SEARCH_USERS = 103;
+     */
+    SEARCH_USERS = 103,
+    /**
+     * @generated from protobuf enum value: INVITE_TO_INLINE = 104;
+     */
+    INVITE_TO_INLINE = 104
 }
 /**
  * @generated from protobuf enum GridConnectionUnavailableReason
@@ -15742,7 +15842,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 100, name: "collapseHistory", kind: "message", oneof: "input", T: () => CollapseHistoryInput },
             { no: 101, name: "listConnectors", kind: "message", oneof: "input", T: () => ListConnectorsInput },
             { no: 102, name: "prepareConnectorOAuth", kind: "message", oneof: "input", T: () => PrepareConnectorOAuthInput },
-            { no: 103, name: "disconnectConnector", kind: "message", oneof: "input", T: () => DisconnectConnectorInput }
+            { no: 103, name: "disconnectConnector", kind: "message", oneof: "input", T: () => DisconnectConnectorInput },
+            { no: 104, name: "searchUsers", kind: "message", oneof: "input", T: () => SearchUsersInput },
+            { no: 105, name: "inviteToInline", kind: "message", oneof: "input", T: () => InviteToInlineInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -16367,6 +16469,18 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         disconnectConnector: DisconnectConnectorInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).disconnectConnector)
                     };
                     break;
+                case /* SearchUsersInput searchUsers */ 104:
+                    message.input = {
+                        oneofKind: "searchUsers",
+                        searchUsers: SearchUsersInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).searchUsers)
+                    };
+                    break;
+                case /* InviteToInlineInput inviteToInline */ 105:
+                    message.input = {
+                        oneofKind: "inviteToInline",
+                        inviteToInline: InviteToInlineInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).inviteToInline)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -16685,6 +16799,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* DisconnectConnectorInput disconnectConnector = 103; */
         if (message.input.oneofKind === "disconnectConnector")
             DisconnectConnectorInput.internalBinaryWrite(message.input.disconnectConnector, writer.tag(103, WireType.LengthDelimited).fork(), options).join();
+        /* SearchUsersInput searchUsers = 104; */
+        if (message.input.oneofKind === "searchUsers")
+            SearchUsersInput.internalBinaryWrite(message.input.searchUsers, writer.tag(104, WireType.LengthDelimited).fork(), options).join();
+        /* InviteToInlineInput inviteToInline = 105; */
+        if (message.input.oneofKind === "inviteToInline")
+            InviteToInlineInput.internalBinaryWrite(message.input.inviteToInline, writer.tag(105, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -16800,7 +16920,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 100, name: "collapseHistory", kind: "message", oneof: "result", T: () => CollapseHistoryResult },
             { no: 101, name: "listConnectors", kind: "message", oneof: "result", T: () => ListConnectorsResult },
             { no: 102, name: "prepareConnectorOAuth", kind: "message", oneof: "result", T: () => PrepareConnectorOAuthResult },
-            { no: 103, name: "disconnectConnector", kind: "message", oneof: "result", T: () => DisconnectConnectorResult }
+            { no: 103, name: "disconnectConnector", kind: "message", oneof: "result", T: () => DisconnectConnectorResult },
+            { no: 104, name: "searchUsers", kind: "message", oneof: "result", T: () => SearchUsersResult },
+            { no: 105, name: "inviteToInline", kind: "message", oneof: "result", T: () => InviteToInlineResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -17425,6 +17547,18 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         disconnectConnector: DisconnectConnectorResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).disconnectConnector)
                     };
                     break;
+                case /* SearchUsersResult searchUsers */ 104:
+                    message.result = {
+                        oneofKind: "searchUsers",
+                        searchUsers: SearchUsersResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).searchUsers)
+                    };
+                    break;
+                case /* InviteToInlineResult inviteToInline */ 105:
+                    message.result = {
+                        oneofKind: "inviteToInline",
+                        inviteToInline: InviteToInlineResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).inviteToInline)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -17743,6 +17877,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* DisconnectConnectorResult disconnectConnector = 103; */
         if (message.result.oneofKind === "disconnectConnector")
             DisconnectConnectorResult.internalBinaryWrite(message.result.disconnectConnector, writer.tag(103, WireType.LengthDelimited).fork(), options).join();
+        /* SearchUsersResult searchUsers = 104; */
+        if (message.result.oneofKind === "searchUsers")
+            SearchUsersResult.internalBinaryWrite(message.result.searchUsers, writer.tag(104, WireType.LengthDelimited).fork(), options).join();
+        /* InviteToInlineResult inviteToInline = 105; */
+        if (message.result.oneofKind === "inviteToInline")
+            InviteToInlineResult.internalBinaryWrite(message.result.inviteToInline, writer.tag(105, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -32847,6 +32987,237 @@ class InviteToSpaceResult$Type extends MessageType<InviteToSpaceResult> {
  * @generated MessageType for protobuf message InviteToSpaceResult
  */
 export const InviteToSpaceResult = new InviteToSpaceResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SearchUsersInput$Type extends MessageType<SearchUsersInput> {
+    constructor() {
+        super("SearchUsersInput", [
+            { no: 1, name: "query", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SearchUsersInput>): SearchUsersInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.query = "";
+        if (value !== undefined)
+            reflectionMergePartial<SearchUsersInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SearchUsersInput): SearchUsersInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string query */ 1:
+                    message.query = reader.string();
+                    break;
+                case /* optional int32 limit */ 2:
+                    message.limit = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SearchUsersInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string query = 1; */
+        if (message.query !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.query);
+        /* optional int32 limit = 2; */
+        if (message.limit !== undefined)
+            writer.tag(2, WireType.Varint).int32(message.limit);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SearchUsersInput
+ */
+export const SearchUsersInput = new SearchUsersInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SearchUsersResult$Type extends MessageType<SearchUsersResult> {
+    constructor() {
+        super("SearchUsersResult", [
+            { no: 1, name: "users", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => User }
+        ]);
+    }
+    create(value?: PartialMessage<SearchUsersResult>): SearchUsersResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.users = [];
+        if (value !== undefined)
+            reflectionMergePartial<SearchUsersResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SearchUsersResult): SearchUsersResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated User users */ 1:
+                    message.users.push(User.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SearchUsersResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated User users = 1; */
+        for (let i = 0; i < message.users.length; i++)
+            User.internalBinaryWrite(message.users[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SearchUsersResult
+ */
+export const SearchUsersResult = new SearchUsersResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class InviteToInlineInput$Type extends MessageType<InviteToInlineInput> {
+    constructor() {
+        super("InviteToInlineInput", [
+            { no: 1, name: "user_id", kind: "scalar", oneof: "via", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "email", kind: "scalar", oneof: "via", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "phone_number", kind: "scalar", oneof: "via", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<InviteToInlineInput>): InviteToInlineInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.via = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<InviteToInlineInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: InviteToInlineInput): InviteToInlineInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 user_id */ 1:
+                    message.via = {
+                        oneofKind: "userId",
+                        userId: reader.int64().toBigInt()
+                    };
+                    break;
+                case /* string email */ 2:
+                    message.via = {
+                        oneofKind: "email",
+                        email: reader.string()
+                    };
+                    break;
+                case /* string phone_number */ 3:
+                    message.via = {
+                        oneofKind: "phoneNumber",
+                        phoneNumber: reader.string()
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: InviteToInlineInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 user_id = 1; */
+        if (message.via.oneofKind === "userId")
+            writer.tag(1, WireType.Varint).int64(message.via.userId);
+        /* string email = 2; */
+        if (message.via.oneofKind === "email")
+            writer.tag(2, WireType.LengthDelimited).string(message.via.email);
+        /* string phone_number = 3; */
+        if (message.via.oneofKind === "phoneNumber")
+            writer.tag(3, WireType.LengthDelimited).string(message.via.phoneNumber);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message InviteToInlineInput
+ */
+export const InviteToInlineInput = new InviteToInlineInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class InviteToInlineResult$Type extends MessageType<InviteToInlineResult> {
+    constructor() {
+        super("InviteToInlineResult", [
+            { no: 1, name: "user", kind: "message", T: () => User },
+            { no: 2, name: "chat", kind: "message", T: () => Chat },
+            { no: 3, name: "dialog", kind: "message", T: () => Dialog }
+        ]);
+    }
+    create(value?: PartialMessage<InviteToInlineResult>): InviteToInlineResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<InviteToInlineResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: InviteToInlineResult): InviteToInlineResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* User user */ 1:
+                    message.user = User.internalBinaryRead(reader, reader.uint32(), options, message.user);
+                    break;
+                case /* Chat chat */ 2:
+                    message.chat = Chat.internalBinaryRead(reader, reader.uint32(), options, message.chat);
+                    break;
+                case /* Dialog dialog */ 3:
+                    message.dialog = Dialog.internalBinaryRead(reader, reader.uint32(), options, message.dialog);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: InviteToInlineResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* User user = 1; */
+        if (message.user)
+            User.internalBinaryWrite(message.user, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* Chat chat = 2; */
+        if (message.chat)
+            Chat.internalBinaryWrite(message.chat, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* Dialog dialog = 3; */
+        if (message.dialog)
+            Dialog.internalBinaryWrite(message.dialog, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message InviteToInlineResult
+ */
+export const InviteToInlineResult = new InviteToInlineResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class GetChatParticipantsInput$Type extends MessageType<GetChatParticipantsInput> {
     constructor() {

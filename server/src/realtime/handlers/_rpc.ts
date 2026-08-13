@@ -111,6 +111,8 @@ import {
   listConnectors,
   prepareConnectorOAuth,
 } from "@in/server/functions/connectors"
+import { searchUsersHandler } from "@in/server/realtime/handlers/users.search"
+import { inviteToInline } from "@in/server/functions/user.inviteToInline"
 
 const log = new Log("rpc")
 
@@ -774,6 +776,25 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       const result = await disconnectConnector(call.input.disconnectConnector, handlerContext)
       return { oneofKind: "disconnectConnector", disconnectConnector: result }
+    }
+
+    case Method.SEARCH_USERS: {
+      if (call.input.oneofKind !== "searchUsers") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await searchUsersHandler(call.input.searchUsers, handlerContext)
+      return { oneofKind: "searchUsers", searchUsers: result }
+    }
+
+    case Method.INVITE_TO_INLINE: {
+      if (call.input.oneofKind !== "inviteToInline") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await inviteToInline(call.input.inviteToInline, {
+        currentUserId: handlerContext.userId,
+        currentSessionId: handlerContext.sessionId,
+      })
+      return { oneofKind: "inviteToInline", inviteToInline: result }
     }
 
     case Method.UPDATE_PUSH_NOTIFICATION_DETAILS: {

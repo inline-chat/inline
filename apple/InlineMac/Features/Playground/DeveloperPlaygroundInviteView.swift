@@ -1,5 +1,6 @@
 #if DEBUG || DEBUG_BUILD
 import AppKit
+import Contacts
 import InlineUI
 import SwiftUI
 
@@ -124,6 +125,38 @@ private struct DeveloperInvitePreviewState {
   var email = "preview@example.com"
   var phone = "+1 415 555 0128"
   var selectedUserID: Int64? = 201
+  var unifiedQuery = "alex"
+  var selectedTargets: [DeveloperInviteTarget] = []
+  var justInvited: [DeveloperInviteTarget] = [
+    .init(
+      id: "user:204",
+      kind: .user,
+      title: "Mina Park",
+      detail: "@minapark",
+      symbol: "person.crop.circle"
+    ),
+  ]
+}
+
+private struct DeveloperInviteTarget: Identifiable, Hashable, Sendable {
+  enum Kind: Hashable, Sendable {
+    case user
+    case email
+    case phone
+  }
+
+  let id: String
+  let kind: Kind
+  let title: String
+  let detail: String?
+  let symbol: String
+
+  var compactTitle: String {
+    if let detail, detail.isEmpty == false {
+      return "\(title)  \(detail)"
+    }
+    return title
+  }
 }
 
 private enum DeveloperInviteMethod: String, CaseIterable, Identifiable {
@@ -166,32 +199,706 @@ private enum DeveloperInviteRole: String, CaseIterable, Identifiable {
 
 private struct DeveloperInviteFocusedLayout: View {
   @Binding var state: DeveloperInvitePreviewState
+  @State private var importedContacts: [DeveloperInviteContact] = []
+  @State private var contactsState = DeveloperContactsState.idle
+  @State private var isShowingContactsPermission = false
 
   var body: some View {
-    VStack(spacing: 22) {
-      DeveloperInviteHeroHeader(centered: true)
+    VStack(spacing: 26) {
+      DeveloperInviteSettingsHeader()
 
       DeveloperInviteCard {
-        VStack(alignment: .leading, spacing: 18) {
-          DeveloperInviteMethodPicker(method: $state.method)
-          DeveloperInviteInput(state: $state)
+        VStack(alignment: .leading, spacing: 16) {
+          DeveloperInviteUnifiedInput(
+            query: $state.unifiedQuery,
+            contactsState: contactsState,
+            onOpenContacts: { isShowingContactsPermission = true }
+          )
 
-          if state.method == .username {
-            DeveloperInviteResults(state: $state, presentation: .rows)
+          DeveloperInviteAutocomplete(
+            query: state.unifiedQuery,
+            contacts: importedContacts,
+            selectedTargets: state.selectedTargets,
+            onToggle: toggleTarget
+          )
+
+          if state.selectedTargets.isEmpty == false {
+            Divider()
+            DeveloperInviteSelectionAccessForm(
+              state: $state,
+              onRemove: toggleTarget
+            )
+
+            HStack {
+              DeveloperInviteFocusedPrimaryButton(
+                count: state.selectedTargets.count,
+                action: inviteSelected
+              )
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
           }
 
-          Divider()
-          DeveloperInviteAccessControls(state: $state, compact: false)
-          DeveloperInvitePrimaryButton(state: state)
+          if contactsState == .denied {
+            Text("Contacts access is off. You can enable it in System Settings.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
         }
       }
-      .frame(maxWidth: 520)
+      .frame(maxWidth: 560)
 
-      Button("Manage current members") {}
-        .buttonStyle(.link)
+      if state.justInvited.isEmpty == false {
+        DeveloperInviteJustInvited(targets: state.justInvited) { target in
+          withAnimation(.snappy(duration: 0.18)) {
+            state.justInvited.removeAll { $0.id == target.id }
+          }
+        }
+        .frame(maxWidth: 560)
+      }
     }
     .frame(maxWidth: .infinity)
+    .sheet(isPresented: $isShowingContactsPermission) {
+      DeveloperInviteContactsPermissionSheet(
+        contactsState: contactsState,
+        onAllow: {
+          isShowingContactsPermission = false
+          importContacts()
+        },
+        onCancel: { isShowingContactsPermission = false }
+      )
+    }
   }
+
+  private func toggleTarget(_ target: DeveloperInviteTarget) {
+    if let index = state.selectedTargets.firstIndex(where: { $0.id == target.id }) {
+      state.selectedTargets.remove(at: index)
+    } else {
+      state.selectedTargets.append(target)
+    }
+  }
+
+  private func inviteSelected() {
+    withAnimation(.snappy(duration: 0.18)) {
+      let newTargets = state.selectedTargets.filter { selected in
+        state.justInvited.contains(where: { $0.id == selected.id }) == false
+      }
+      state.justInvited.insert(contentsOf: newTargets, at: 0)
+      state.selectedTargets.removeAll()
+    }
+  }
+
+  private func importContacts() {
+    contactsState = .loading
+    Task {
+      let result = await DeveloperContactLoader.shared.load()
+      switch result {
+      case let .success(contacts):
+        importedContacts = contacts
+        contactsState = .loaded
+      case .failure:
+        contactsState = .denied
+      }
+    }
+  }
+}
+
+private struct DeveloperInviteSettingsHeader: View {
+  var body: some View {
+    VStack(spacing: 10) {
+      DeveloperInviteHeaderMark(size: 76)
+
+      VStack(spacing: 3) {
+        Text("Invite to Acme Design")
+          .font(.title2.weight(.semibold))
+        Text("Find an Inline user or invite someone by email, phone, or your contacts.")
+          .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
+      }
+    }
+    .frame(maxWidth: 560)
+  }
+}
+
+private struct DeveloperInviteHeaderMark: View {
+  let size: CGFloat
+
+  var body: some View {
+    ZStack {
+      RoundedRectangle(cornerRadius: size * 0.28)
+        .fill(
+          LinearGradient(
+            colors: [Color.accentColor, Color.accentColor.opacity(0.72)],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+          )
+        )
+      Image(systemName: "person.badge.plus")
+        .font(.system(size: size * 0.42, weight: .semibold))
+        .foregroundStyle(.white)
+    }
+    .frame(width: size, height: size)
+    .accessibilityHidden(true)
+  }
+}
+
+private struct DeveloperInviteUnifiedInput: View {
+  @Binding var query: String
+  let contactsState: DeveloperContactsState
+  let onOpenContacts: () -> Void
+
+  @ViewBuilder
+  var body: some View {
+    let field = HStack(spacing: 9) {
+      Image(systemName: "magnifyingglass")
+        .foregroundStyle(.secondary)
+      TextField("Search by username, or invite by email or phone", text: $query)
+        .textFieldStyle(.plain)
+      if query.isEmpty == false {
+        Button {
+          query = ""
+        } label: {
+          Image(systemName: "xmark.circle.fill")
+            .foregroundStyle(.tertiary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Clear search")
+      }
+    }
+    .padding(.leading, 13)
+    .padding(.trailing, 54)
+    .frame(height: 40)
+    .contentShape(Capsule())
+    .overlay(alignment: .trailing) {
+      HStack(spacing: 9) {
+        Divider()
+          .frame(height: 18)
+
+        if contactsState == .loading {
+          ProgressView()
+            .controlSize(.small)
+            .frame(width: 20)
+            .accessibilityLabel("Loading Contacts")
+        } else {
+          Button(action: onOpenContacts) {
+            Image(systemName: "person.crop.circle.badge.plus")
+              .foregroundStyle(.secondary)
+              .frame(width: 20, height: 20)
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel("Find from Contacts")
+          .help("Find from Contacts")
+        }
+      }
+      .padding(.trailing, 13)
+    }
+
+    if #available(macOS 26.0, *) {
+      field
+        .glassEffect(.regular.interactive(), in: .capsule)
+    } else {
+      field
+        .background(.regularMaterial, in: Capsule())
+        .overlay {
+          Capsule()
+            .stroke(Color(nsColor: .separatorColor).opacity(0.75), lineWidth: 0.5)
+        }
+    }
+  }
+}
+
+private struct DeveloperInviteAutocomplete: View {
+  let query: String
+  let contacts: [DeveloperInviteContact]
+  let selectedTargets: [DeveloperInviteTarget]
+  let onToggle: (DeveloperInviteTarget) -> Void
+
+  private let users = [
+    DeveloperInvitePerson(id: 201, firstName: "Alex", lastName: "Morgan", username: "alex"),
+    DeveloperInvitePerson(id: 202, firstName: "Alexandra", lastName: "Chen", username: "alexandra"),
+    DeveloperInvitePerson(id: 203, firstName: "Alexander", lastName: "Singh", username: "asingh"),
+  ]
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      if matchingUsers.isEmpty == false {
+        DeveloperInviteTargetSection(title: "Invite users") {
+          ForEach(matchingUsers) { target in
+            DeveloperInviteCompactTargetRow(
+              target: target,
+              selected: isSelected(target),
+              onToggle: onToggle
+            )
+          }
+        }
+      }
+
+      if matchingContacts.isEmpty == false {
+        DeveloperInviteTargetSection(title: "Contacts") {
+          ForEach(matchingContacts) { target in
+            DeveloperInviteCompactTargetRow(
+              target: target,
+              selected: isSelected(target),
+              onToggle: onToggle
+            )
+          }
+        }
+      }
+
+      if let emailTarget {
+        DeveloperInviteTargetSection(title: "Send email invite") {
+          DeveloperInviteCompactTargetRow(
+            target: emailTarget,
+            selected: isSelected(emailTarget),
+            onToggle: onToggle
+          )
+        }
+      }
+
+      if let phoneTarget {
+        DeveloperInviteTargetSection(title: "Invite phone number") {
+          DeveloperInviteCompactTargetRow(
+            target: phoneTarget,
+            selected: isSelected(phoneTarget),
+            onToggle: onToggle
+          )
+        }
+      }
+
+      if normalizedQuery.isEmpty == false, hasResults == false {
+        Text("Enter at least two username characters, an email, or a phone number.")
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
+          .frame(maxWidth: .infinity)
+          .frame(minHeight: 42)
+      }
+    }
+  }
+
+  private var normalizedQuery: String {
+    query.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private var matchingUsers: [DeveloperInviteTarget] {
+    let needle = normalizedQuery.trimmingCharacters(in: CharacterSet(charactersIn: "@"))
+    guard needle.count >= 2, emailTarget == nil, phoneTarget == nil else { return [] }
+    return users
+      .filter {
+        $0.username.localizedCaseInsensitiveContains(needle)
+          || "\($0.firstName) \($0.lastName)".localizedCaseInsensitiveContains(needle)
+      }
+      .map {
+        .init(
+          id: "user:\($0.id)",
+          kind: .user,
+          title: "\($0.firstName) \($0.lastName)",
+          detail: "@\($0.username)",
+          symbol: "person.crop.circle"
+        )
+      }
+  }
+
+  private var matchingContacts: [DeveloperInviteTarget] {
+    guard normalizedQuery.isEmpty == false else { return [] }
+    return contacts
+      .filter { $0.matches(normalizedQuery) }
+      .prefix(5)
+      .map(\.inviteTarget)
+  }
+
+  private var emailTarget: DeveloperInviteTarget? {
+    guard normalizedQuery.contains("@"), normalizedQuery.contains(" ") == false else { return nil }
+    return .init(
+      id: "email:\(normalizedQuery.lowercased())",
+      kind: .email,
+      title: normalizedQuery,
+      detail: nil,
+      symbol: "envelope"
+    )
+  }
+
+  private var phoneTarget: DeveloperInviteTarget? {
+    let digits = normalizedQuery.filter(\.isNumber)
+    guard digits.count >= 7, normalizedQuery.contains("@") == false else { return nil }
+    return .init(
+      id: "phone:\(digits)",
+      kind: .phone,
+      title: normalizedQuery,
+      detail: nil,
+      symbol: "phone"
+    )
+  }
+
+  private var hasResults: Bool {
+    matchingUsers.isEmpty == false || matchingContacts.isEmpty == false
+      || emailTarget != nil || phoneTarget != nil
+  }
+
+  private func isSelected(_ target: DeveloperInviteTarget) -> Bool {
+    selectedTargets.contains { $0.id == target.id }
+  }
+}
+
+private struct DeveloperInviteTargetSection<Content: View>: View {
+  let title: String
+  @ViewBuilder let content: Content
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      Text(title)
+        .font(.caption.weight(.medium))
+        .foregroundStyle(.secondary)
+      VStack(spacing: 1) {
+        content
+      }
+    }
+  }
+}
+
+private struct DeveloperInviteCompactTargetRow: View {
+  let target: DeveloperInviteTarget
+  let selected: Bool
+  let onToggle: (DeveloperInviteTarget) -> Void
+
+  var body: some View {
+    Button {
+      onToggle(target)
+    } label: {
+      HStack(spacing: 9) {
+        if target.kind == .user {
+          UserAvatar(
+            userID: userID,
+            firstName: target.title,
+            lastName: nil,
+            email: nil,
+            username: target.detail,
+            stableAvatarIdentity: nil,
+            remoteURL: nil,
+            localURL: nil,
+            size: 24,
+            cacheRemoteAvatar: false
+          )
+          .frame(width: 24)
+        } else {
+          Image(systemName: target.symbol)
+            .foregroundStyle(.secondary)
+            .frame(width: 24)
+        }
+        Text(target.compactTitle)
+          .font(.subheadline)
+          .foregroundStyle(.primary)
+          .lineLimit(1)
+        Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+          .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+          .frame(maxWidth: .infinity, alignment: .trailing)
+      }
+      .contentShape(Rectangle())
+      .padding(.horizontal, 8)
+      .frame(height: 32)
+      .background(selected ? Color.accentColor.opacity(0.08) : Color.clear)
+    }
+    .buttonStyle(.plain)
+  }
+
+  private var userID: Int64 {
+    Int64(target.id.split(separator: ":").last ?? "") ?? 0
+  }
+}
+
+private struct DeveloperInviteSelectionAccessForm: View {
+  @Binding var state: DeveloperInvitePreviewState
+  let onRemove: (DeveloperInviteTarget) -> Void
+
+  var body: some View {
+    Form {
+      Section {
+        ForEach(state.selectedTargets) { target in
+          DeveloperInviteSelectedTargetRow(target: target, onRemove: onRemove)
+        }
+      } header: {
+        Text(sectionTitle)
+      }
+
+      Section("Access") {
+        Picker("Access", selection: $state.role) {
+          ForEach(DeveloperInviteRole.allCases) { role in
+            Text(verbatim: role.title)
+              .tag(role)
+          }
+        }
+
+        if state.role == .member {
+          Toggle("Can access all public chats", isOn: $state.canAccessPublicChats)
+        }
+      }
+    }
+    .formStyle(.grouped)
+    .scrollContentBackground(.hidden)
+    .scrollDisabled(state.selectedTargets.count <= 5)
+    .frame(height: min(330, 168 + CGFloat(state.selectedTargets.count) * 34))
+  }
+
+  private var sectionTitle: LocalizedStringResource {
+    state.selectedTargets.count == 1
+      ? "Inviting one person"
+      : "Inviting \(state.selectedTargets.count) people"
+  }
+}
+
+private struct DeveloperInviteSelectedTargetRow: View {
+  let target: DeveloperInviteTarget
+  let onRemove: (DeveloperInviteTarget) -> Void
+
+  var body: some View {
+    HStack(spacing: 9) {
+      if target.kind == .user {
+        UserAvatar(
+          userID: userID,
+          firstName: target.title,
+          lastName: nil,
+          email: nil,
+          username: target.detail,
+          stableAvatarIdentity: nil,
+          remoteURL: nil,
+          localURL: nil,
+          size: 22,
+          cacheRemoteAvatar: false
+        )
+        .frame(width: 22)
+      } else {
+        Image(systemName: target.symbol)
+          .foregroundStyle(.secondary)
+          .frame(width: 22)
+      }
+      Text(target.compactTitle)
+        .lineLimit(1)
+        .frame(maxWidth: .infinity, alignment: .leading)
+      Button {
+        onRemove(target)
+      } label: {
+        Image(systemName: "xmark.circle.fill")
+          .foregroundStyle(.tertiary)
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("Remove \(target.title) from invitation")
+    }
+  }
+
+  private var userID: Int64 {
+    Int64(target.id.split(separator: ":").last ?? "") ?? 0
+  }
+}
+
+private struct DeveloperInviteFocusedPrimaryButton: View {
+  let count: Int
+  let action: () -> Void
+
+  @ViewBuilder
+  var body: some View {
+    let button = Button(action: action) {
+      Text(title)
+        .font(.system(size: 13, weight: .semibold))
+        .padding(.horizontal, 20)
+    }
+    .controlSize(.large)
+    .buttonBorderShape(.capsule)
+    .overlay {
+      ButtonShineOverlay(active: true)
+    }
+    .clipShape(Capsule())
+
+    if #available(macOS 26.0, *) {
+      button
+        .buttonStyle(.glassProminent)
+    } else {
+      button
+        .buttonStyle(.borderedProminent)
+    }
+  }
+
+  private var title: LocalizedStringResource {
+    count == 1 ? "Invite one person" : "Invite \(count) people"
+  }
+}
+
+private struct DeveloperInviteContactsPermissionSheet: View {
+  let contactsState: DeveloperContactsState
+  let onAllow: () -> Void
+  let onCancel: () -> Void
+
+  var body: some View {
+    VStack(spacing: 18) {
+      Image(systemName: "person.crop.circle.badge.plus")
+        .font(.system(size: 38, weight: .medium))
+        .foregroundStyle(Color.accentColor)
+
+      VStack(spacing: 6) {
+        Text("Find people from Contacts")
+          .font(.title3.weight(.semibold))
+        Text("Inline will read names, email addresses, and phone numbers from Contacts to suggest invitations. Matching stays on this Mac.")
+          .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+
+      HStack(spacing: 10) {
+        Button("Not Now", action: onCancel)
+          .keyboardShortcut(.cancelAction)
+        Button(allowButtonTitle, action: onAllow)
+          .buttonStyle(.borderedProminent)
+          .keyboardShortcut(.defaultAction)
+      }
+    }
+    .padding(24)
+    .frame(width: 380)
+  }
+
+  private var allowButtonTitle: LocalizedStringResource {
+    contactsState == .loaded ? "Refresh Contacts" : "Allow Contacts Access"
+  }
+}
+
+private struct DeveloperInviteJustInvited: View {
+  let targets: [DeveloperInviteTarget]
+  let onRevoke: (DeveloperInviteTarget) -> Void
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 7) {
+      Text("Just invited")
+        .font(.headline)
+
+      VStack(spacing: 1) {
+        ForEach(targets) { target in
+          DeveloperInviteCompletedRow(target: target, onRevoke: onRevoke)
+        }
+      }
+      .padding(6)
+      .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+    }
+  }
+}
+
+private struct DeveloperInviteCompletedRow: View {
+  let target: DeveloperInviteTarget
+  let onRevoke: (DeveloperInviteTarget) -> Void
+  @State private var isHoveringAction = false
+
+  var body: some View {
+    HStack(spacing: 9) {
+      Image(systemName: target.symbol)
+        .foregroundStyle(.secondary)
+        .frame(width: 22)
+      Text(target.compactTitle)
+        .font(.subheadline)
+        .lineLimit(1)
+      Button {
+        onRevoke(target)
+      } label: {
+        Image(systemName: isHoveringAction ? "xmark.circle.fill" : "checkmark.circle.fill")
+          .foregroundStyle(isHoveringAction ? Color.red : Color.green)
+      }
+      .buttonStyle(.plain)
+      .onHover { isHoveringAction = $0 }
+      .accessibilityLabel("Revoke invitation for \(target.title)")
+      .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+    .padding(.horizontal, 8)
+    .frame(height: 32)
+  }
+}
+
+private struct DeveloperInviteContact: Identifiable, Hashable, Sendable {
+  let id: String
+  let name: String
+  let value: String
+  let kind: DeveloperInviteTarget.Kind
+
+  var inviteTarget: DeveloperInviteTarget {
+    .init(
+      id: "contact:\(id):\(value)",
+      kind: kind,
+      title: name,
+      detail: value,
+      symbol: kind == .email ? "envelope" : "phone"
+    )
+  }
+
+  func matches(_ query: String) -> Bool {
+    name.localizedCaseInsensitiveContains(query) || value.localizedCaseInsensitiveContains(query)
+  }
+}
+
+private enum DeveloperContactsState {
+  case idle
+  case loading
+  case loaded
+  case denied
+}
+
+private actor DeveloperContactLoader {
+  static let shared = DeveloperContactLoader()
+
+  func load() async -> Result<[DeveloperInviteContact], any Error> {
+    let store = CNContactStore()
+
+    do {
+      let granted = try await requestAccess(using: store)
+      guard granted else { return .failure(DeveloperContactError.accessDenied) }
+
+      let keys = [
+        CNContactIdentifierKey,
+        CNContactGivenNameKey,
+        CNContactFamilyNameKey,
+        CNContactEmailAddressesKey,
+        CNContactPhoneNumbersKey,
+      ] as [CNKeyDescriptor]
+      let request = CNContactFetchRequest(keysToFetch: keys)
+      var results: [DeveloperInviteContact] = []
+
+      try store.enumerateContacts(with: request) { contact, _ in
+        let name = [contact.givenName, contact.familyName]
+          .filter { $0.isEmpty == false }
+          .joined(separator: " ")
+        let displayName = name.isEmpty ? "Contact" : name
+
+        if let email = contact.emailAddresses.first?.value as String? {
+          results.append(.init(
+            id: contact.identifier,
+            name: displayName,
+            value: email,
+            kind: .email
+          ))
+        } else if let phone = contact.phoneNumbers.first?.value.stringValue {
+          results.append(.init(
+            id: contact.identifier,
+            name: displayName,
+            value: phone,
+            kind: .phone
+          ))
+        }
+      }
+
+      return .success(results)
+    } catch {
+      return .failure(error)
+    }
+  }
+
+  private func requestAccess(using store: CNContactStore) async throws -> Bool {
+    try await withCheckedThrowingContinuation { continuation in
+      store.requestAccess(for: .contacts) { granted, error in
+        if let error {
+          continuation.resume(throwing: error)
+        } else {
+          continuation.resume(returning: granted)
+        }
+      }
+    }
+  }
+}
+
+private enum DeveloperContactError: Error {
+  case accessDenied
 }
 
 private struct DeveloperInviteSplitLayout: View {

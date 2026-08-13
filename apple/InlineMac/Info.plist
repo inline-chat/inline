@@ -22,6 +22,8 @@
 	<string>$(INLINE_USER_PROFILE)</string>
 	<key>InlineCLIAuthProtocolVersion</key>
 	<integer>1</integer>
+	<key>NSContactsUsageDescription</key>
+	<string>Inline uses your contacts on this Mac to help you find people to invite. Your address book is not uploaded.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Inline needs access to your microphone to record voice messages.</string>
 	<key>NSObservationTrackingEnabled</key>

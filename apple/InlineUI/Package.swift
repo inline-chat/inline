@@ -94,7 +94,10 @@ let package = Package(
 
     .target(
       name: "Invite",
-      dependencies: baseDependencies + ["InlineUI"],
+      dependencies: baseDependencies + [
+        "InlineUI",
+        .product(name: "Logger", package: "InlineKit"),
+      ],
       swiftSettings: swiftSettings
     ),
 

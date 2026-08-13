@@ -267,6 +267,7 @@ struct ExperimentalDestinationView: View {
 struct ExperimentalSheetView: View {
   let sheet: Sheet
   let onSelectSpace: (Int64) -> Void
+  @Environment(Router.self) private var router
 
   var body: some View {
     switch sheet {
@@ -281,7 +282,19 @@ struct ExperimentalSheetView: View {
     case .createSpace:
       CreateSpace(onCreated: onSelectSpace)
     case let .addMember(spaceId):
-      InviteToSpaceView(spaceId: spaceId)
+      InviteView(
+        destination: .space(id: spaceId),
+        onCreateSpace: { router.presentSheet(.createSpace) }
+      )
+    case .inviteToInline:
+      InviteView(
+        destination: .inline,
+        onOpenChat: { peer in
+          router.dismissSheet()
+          router.push(.chat(peer: peer), for: router.selectedTab)
+        },
+        onCreateSpace: { router.presentSheet(.createSpace) }
+      )
     case let .members(spaceId):
       ExperimentalMembersSheetView(spaceId: spaceId)
     case let .chatInfo(chatItem):

@@ -61,6 +61,9 @@ export class RealtimeRpcError extends Error {
       RealtimeRpcError.InternalError,
     )
   }
+  public static RateLimit() {
+    return RealtimeRpcError.create(RpcError_Code.RATE_LIMIT, "Too many requests", 429, RealtimeRpcError.RateLimit)
+  }
   public static PeerIdInvalid() {
     return RealtimeRpcError.create(
       RpcError_Code.PEER_ID_INVALID,

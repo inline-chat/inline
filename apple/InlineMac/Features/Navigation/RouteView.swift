@@ -45,6 +45,9 @@ struct RouteView: View {
     case let .inviteToSpace(spaceId):
       InviteToSpaceRouteView(spaceId: spaceId)
 
+    case .inviteToInline:
+      InviteToSpaceRouteView(spaceId: nil)
+
     case let .members(spaceId):
       MembersRouteView(spaceId: spaceId)
 

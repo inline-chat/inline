@@ -51,23 +51,28 @@ struct InviteToSpaceRouteView: View {
   @Environment(\.dependencies) private var dependencies
 
   var body: some View {
-    if let spaceId {
-      InviteToSpaceView(
-        spaceId: spaceId,
-        onManageMembers: {
+    InviteView(
+      destination: spaceId.map { .space(id: $0) } ?? .inline,
+      onManageMembers: spaceId.map { _ in
+        { destinationSpaceID in
           if let nav2 = dependencies?.nav2 {
-            nav2.navigate(to: .members(spaceId: spaceId))
+            nav2.navigate(to: .members(spaceId: destinationSpaceID))
           } else {
-            nav.open(.members(spaceId: spaceId))
+            nav.open(.members(spaceId: destinationSpaceID))
           }
         }
-      )
-    } else {
-      RoutePlaceholderView(
-        title: "Open a space to invite members",
-        systemImage: "person.badge.plus"
-      )
-    }
+      },
+      onOpenChat: { peer in
+        if let dependencies {
+          dependencies.openChatRoute(peer: peer)
+        } else {
+          nav.open(.chat(peer: peer))
+        }
+      },
+      onCreateSpace: {
+        nav.open(.createSpace)
+      }
+    )
   }
 }
 

@@ -520,7 +520,10 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
             oneofKind: "newChat",
             newChat: {
               chat: encodedChat,
-              user: peerUser,
+              user:
+                serverUpdate.update.newChat.idOnlyUserForId === BigInt(userId) && peerUser
+                  ? { id: peerUser.id, min: true }
+                  : peerUser,
             },
           },
         })
@@ -689,6 +692,8 @@ async function buildChatSidecarsForUpdates(input: ChatSidecarsForUpdatesInput): 
   const spaceMap = new Map<string, ProtocolSpace>()
   const userGroupMap = new Map<string, ProtocolUserGroup>()
   const userIds = new Set<number>()
+  const structuralUserIds = new Set<number>()
+  const idOnlyUserIds = new Set<number>()
   const chatIds = new Set<number>()
   const spaceIds = new Set<number>()
   const groupIds = new Set<number>()
@@ -701,7 +706,7 @@ async function buildChatSidecarsForUpdates(input: ChatSidecarsForUpdatesInput): 
   if (!primaryChat) {
     log.warn("Failed to find chat for delivered update sidecars", { chatId: input.chatId })
   } else {
-    collectChatSidecarRefs(primaryChat, input.userId, { chatIds, userIds, spaceIds })
+    collectChatSidecarRefs(primaryChat, input.userId, { chatIds, userIds: structuralUserIds, spaceIds })
   }
 
   for (const update of input.updates) {
@@ -715,7 +720,14 @@ async function buildChatSidecarsForUpdates(input: ChatSidecarsForUpdatesInput): 
         break
 
       case "newChat":
-        collectProtocolChatSidecarRefs(update.update.newChat.chat, { chatIds, userIds, spaceIds })
+        collectProtocolChatSidecarRefs(update.update.newChat.chat, {
+          chatIds,
+          userIds: structuralUserIds,
+          spaceIds,
+        })
+        if (isIdOnlyUser(update.update.newChat.user)) {
+          idOnlyUserIds.add(Number(update.update.newChat.user.id))
+        }
         break
 
       case "chatMoved":
@@ -742,7 +754,7 @@ async function buildChatSidecarsForUpdates(input: ChatSidecarsForUpdatesInput): 
   const chatRows = await getSidecarChats(primaryChat, chatIds)
   const encodedChats = await Encoders.chatsForUser(chatRows, { encodingForUserId: input.userId })
   for (const [index, chat] of chatRows.entries()) {
-    collectChatSidecarRefs(chat, input.userId, { chatIds, userIds, spaceIds })
+    collectChatSidecarRefs(chat, input.userId, { chatIds, userIds: structuralUserIds, spaceIds })
     const encoded = encodedChats[index]
     if (!encoded) {
       continue
@@ -765,6 +777,12 @@ async function buildChatSidecarsForUpdates(input: ChatSidecarsForUpdatesInput): 
     for (const dialog of dialogRows) {
       const encoded = Encoders.dialog(dialog, { unreadCount: unreadCountByChatId.get(dialog.chatId) ?? 0 })
       dialogMap.set(String(encoded.chatId), encoded)
+    }
+  }
+
+  for (const userId of structuralUserIds) {
+    if (!idOnlyUserIds.has(userId)) {
+      userIds.add(userId)
     }
   }
 
@@ -1333,6 +1351,16 @@ function sanitizeUser(user: User | undefined): User | undefined {
     bot: user.bot,
     profilePhoto: user.profilePhoto,
   }
+}
+
+function isIdOnlyUser(user: User | undefined): user is User {
+  if (!user || user.min !== true) {
+    return false
+  }
+
+  return Object.entries(user).every(
+    ([key, value]) => value === undefined || key === "id" || key === "min",
+  )
 }
 
 function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update | null {
