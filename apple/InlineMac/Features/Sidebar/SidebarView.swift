@@ -6,6 +6,7 @@ import InlineMacUI
 import struct InlineProtocol.GridHomeSpace
 import InlineUI
 import Logger
+import OSLog
 import RealtimeV2
 import SwiftUI
 
@@ -25,6 +26,10 @@ private final class SidebarDropImportJob {
 }
 
 struct SidebarView: View {
+  private static let firstFrameDiagnostics = OSLog(
+    subsystem: Bundle.main.bundleIdentifier ?? "chat.inline.InlineMac",
+    category: "SidebarFirstFrame"
+  )
   @Environment(\.dependencies) private var dependencies
   @Environment(\.mainWindowID) private var mainWindowID
   @Environment(\.nav) var nav
@@ -50,7 +55,6 @@ struct SidebarView: View {
   @State private var pendingSpaceAction: SidebarSpacePendingAction?
   @State private var fetchingDialogSpaceIds = Set<Int64>()
   @State private var sidebarDrag = SidebarDragViewModel()
-  @State private var ephemeralChat = SidebarEphemeralChatModel()
   @State private var cleanupOwnerID = UUID()
   @State private var visibleSidebarItemIDs = Set<ChatListItem.Identifier>()
   @State private var hasMeasuredSidebarViewport = false
@@ -70,6 +74,15 @@ struct SidebarView: View {
 
   init(isCollapsed: Bool = false) {
     self.isCollapsed = isCollapsed
+    // Presentation state affects structural row membership, so restore it
+    // before the collection's first row construction. Loading it from the
+    // initial auth `onChange` produced one known-wrong expanded scene first.
+    let userID = Auth.shared.getCurrentUserId()
+    let store = SidebarPresentationStateStore()
+    _appKitPresentationStateUserID = State(initialValue: userID)
+    _detachedAppKitReplyIDs = State(initialValue: store.detachedReplyIDs(userID: userID))
+    _collapsedAppKitThreadParentIDs = State(initialValue: store.collapsedParentIDs(userID: userID))
+    _collapsedAppKitSections = State(initialValue: store.collapsedSections(userID: userID))
   }
 
   var body: some View {
@@ -141,7 +154,7 @@ struct SidebarView: View {
       dependencies?.nav3ChatOpenPreloader?.cancelPendingOpenIfNeeded(for: route)
     }
     .onChange(of: selectedPeer, initial: true) { _, _ in
-      syncEphemeralChat(preferredTemporarySidebarPeer)
+      viewModel.setTemporaryPeer(preferredTemporarySidebarPeer)
     }
     .onChange(of: nav.selectedSpaceId, initial: true) { oldSpaceId, spaceId in
       if oldSpaceId != spaceId {
@@ -150,7 +163,6 @@ struct SidebarView: View {
       }
       syncUnreadCountsScope(spaceId: spaceId)
       syncSource(spaceId: spaceId)
-      refreshEphemeralChatScope(preferredTemporarySidebarPeer)
       refreshSpaceIfNeeded(spaceId)
       if let spaceId {
         Task { await gridStore.load(spaceID: spaceId) }
@@ -165,7 +177,6 @@ struct SidebarView: View {
       }
       sidebarDrag.cancel()
       syncSource(spaceId: nav.selectedSpaceId)
-      refreshEphemeralChatScope(preferredTemporarySidebarPeer)
       refreshSidebarCleanup()
     }
     .onChange(of: auth.currentUserId, initial: true) { oldUserID, userID in
@@ -179,7 +190,6 @@ struct SidebarView: View {
     .onChange(of: settings.includeSpaceChatsInHomeSidebar, initial: true) { _, includeSpaceChats in
       syncUnreadCountsScope(spaceId: nav.selectedSpaceId, includeSpaceChatsInHome: includeSpaceChats)
       viewModel.setIncludeSpaceChatsInHome(includeSpaceChats)
-      refreshEphemeralChatScope(preferredTemporarySidebarPeer)
     }
     .onChange(of: effectiveSidebarSort, initial: true) { _, sortMode in
       viewModel.setSortMode(sortMode)
@@ -192,15 +202,27 @@ struct SidebarView: View {
     }
     .onChange(of: visibleItems.map(\.peerId)) { _, _ in
       pruneVisibleSidebarItems()
-      reconcileEphemeralChat()
       revealCurrentReplyThreadInHierarchy()
     }
     .onChange(of: dependencies?.nav3?.currentReplyThreadPeer, initial: true) { _, _ in
-      syncEphemeralChat(preferredTemporarySidebarPeer)
+      viewModel.setTemporaryPeer(preferredTemporarySidebarPeer)
       revealCurrentReplyThreadInHierarchy()
     }
     .onChange(of: viewModel.spaces.map(\.id)) { _, _ in
       validateSelectedSpace()
+    }
+    .onChange(of: viewModel.hasResolvedSpaces, initial: true) { _, resolved in
+      guard resolved else { return }
+      validateSelectedSpace()
+    }
+    .onChange(of: showsGridRow, initial: true) { oldValue, newValue in
+      os_log(
+        .info,
+        log: Self.firstFrameDiagnostics,
+        "component=swiftui event=grid-membership old=%{public}d new=%{public}d",
+        oldValue ? 1 : 0,
+        newValue ? 1 : 0
+      )
     }
     .onAppear {
       unreadCounts.start()
@@ -225,7 +247,6 @@ struct SidebarView: View {
     }
     .onDisappear {
       sidebarDrag.cancel()
-      ephemeralChat.cancel()
       hideConnectedTask?.cancel()
       hideConnectedTask = nil
       resetSidebarVisibility()
@@ -266,6 +287,10 @@ struct SidebarView: View {
     return SidebarCollectionBody(
       rows: makeAppKitRows(tree: tree),
       tree: tree,
+      isContentReady: viewModel.isReady(
+        selectedSpaceId: nav.selectedSpaceId,
+        mode: settings.sidebarAsInbox ? .inbox : .chatList
+      ),
       reorderPolicy: effectiveSidebarSort == .recentActivity ? .pinningOnly : .manual,
       scrollRequest: appKitScrollRequest,
       renderState: appKitRenderState,
@@ -1184,19 +1209,13 @@ struct SidebarView: View {
   private var visibleTemporaryItem: SidebarViewModel.Item? {
     guard settings.sidebarAsInbox else { return nil }
     guard isArchiveVisible == false else { return nil }
-    guard let item = ephemeralChat.item else { return nil }
-    guard visibleItems.contains(where: { $0.peerId == item.peerId }) == false else { return nil }
-    return item
+    return viewModel.temporaryItems.last
   }
 
   private var visibleTemporaryItems: [SidebarViewModel.Item] {
     guard settings.sidebarAsInbox else { return [] }
     guard isArchiveVisible == false else { return [] }
-    return [ephemeralChat.parentItem, ephemeralChat.item]
-      .compactMap { $0 }
-      .filter { candidate in
-        visibleItems.contains(where: { $0.peerId == candidate.peerId }) == false
-      }
+    return viewModel.temporaryItems
   }
 
   private var visibleItemAnimationKeys: [String] {
@@ -1603,7 +1622,7 @@ struct SidebarView: View {
     guard settings.sidebarAsInbox else { return }
 
     if isTemporaryItem(item) {
-      ephemeralChat.cancel()
+      viewModel.setTemporaryPeer(nil)
       return
     }
 
@@ -1679,53 +1698,6 @@ struct SidebarView: View {
     }
 
     return false
-  }
-
-  private func syncEphemeralChat(_ peer: Peer?) {
-    guard settings.sidebarAsInbox else {
-      ephemeralChat.cancel()
-      return
-    }
-    guard let peer else { return }
-    guard isPeerVisibleInSidebar(peer) == false else { return }
-
-    ephemeralChat.setScope(
-      peer: peer,
-      spaceId: nav.selectedSpaceId,
-      includeSpaceChatsInHome: settings.includeSpaceChatsInHomeSidebar
-    )
-  }
-
-  private func refreshEphemeralChatScope(_ peer: Peer?) {
-    guard settings.sidebarAsInbox else {
-      ephemeralChat.cancel()
-      return
-    }
-
-    if ephemeralChat.isScoped(
-      spaceId: nav.selectedSpaceId,
-      includeSpaceChatsInHome: settings.includeSpaceChatsInHomeSidebar
-    ) == false {
-      ephemeralChat.cancel()
-    }
-
-    syncEphemeralChat(peer)
-  }
-
-  private func reconcileEphemeralChat() {
-    guard settings.sidebarAsInbox else {
-      ephemeralChat.cancel()
-      return
-    }
-    guard let peer = ephemeralChat.peer else { return }
-
-    if isPeerVisibleInSidebar(peer) {
-      ephemeralChat.cancel()
-    }
-  }
-
-  private func isPeerVisibleInSidebar(_ peer: Peer) -> Bool {
-    visibleItems.contains { $0.peerId == peer }
   }
 
   private func isTemporaryItem(_ item: SidebarViewModel.Item) -> Bool {
@@ -2273,6 +2245,12 @@ struct SidebarView: View {
   private func validateSelectedSpace() {
     guard let spaceId = nav.selectedSpaceId else { return }
     guard viewModel.hasSpace(id: spaceId) == false else { return }
+    os_log(
+      .default,
+      log: Self.firstFrameDiagnostics,
+      "component=swiftui event=restored-space-invalid spaces=%{public}d action=select-home",
+      viewModel.spaces.count
+    )
     nav.selectHome()
   }
 

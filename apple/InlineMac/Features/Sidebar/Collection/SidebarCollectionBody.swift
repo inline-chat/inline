@@ -2,6 +2,7 @@ import AppKit
 import InlineKit
 import InlineMacUI
 import Logger
+import OSLog
 import QuartzCore
 import SwiftUI
 
@@ -14,6 +15,7 @@ import SwiftUI
 struct SidebarCollectionBody: NSViewControllerRepresentable {
   let rows: [SidebarCollectionRow]
   let tree: SidebarCollectionTree
+  let isContentReady: Bool
   let reorderPolicy: SidebarCollectionReorderPolicy
   let scrollRequest: SidebarCollectionScrollRequest?
   let renderState: SidebarCollectionRenderState
@@ -27,6 +29,7 @@ struct SidebarCollectionBody: NSViewControllerRepresentable {
       input: SidebarCollectionBodyInput(
         rows: rows,
         tree: tree,
+        isContentReady: isContentReady,
         reorderPolicy: reorderPolicy,
         renderState: renderState
       ),
@@ -43,6 +46,7 @@ struct SidebarCollectionBody: NSViewControllerRepresentable {
       input: SidebarCollectionBodyInput(
         rows: rows,
         tree: tree,
+        isContentReady: isContentReady,
         reorderPolicy: reorderPolicy,
         renderState: renderState
       ),
@@ -84,6 +88,7 @@ private struct SidebarCollectionUnreadButtonHost: View {
 private struct SidebarCollectionBodyInput {
   let rows: [SidebarCollectionRow]
   let tree: SidebarCollectionTree
+  let isContentReady: Bool
   let reorderPolicy: SidebarCollectionReorderPolicy
   let renderState: SidebarCollectionRenderState
 }
@@ -239,6 +244,14 @@ final class SidebarCollectionBodyController: NSViewController {
   private var unreadAboveHost: NSHostingView<SidebarCollectionUnreadButtonHost>?
   private var unreadBelowHost: NSHostingView<SidebarCollectionUnreadButtonHost>?
   private let log = Log.scoped("SidebarCollectionBody")
+  private static let diagnostics = OSLog(
+    subsystem: Bundle.main.bundleIdentifier ?? "chat.inline.InlineMac",
+    category: "SidebarFirstFrame"
+  )
+  private static let signposts = OSLog(
+    subsystem: Bundle.main.bundleIdentifier ?? "chat.inline.InlineMac",
+    category: "SidebarFirstFrame"
+  )
 
   private var dataSource: NSCollectionViewDiffableDataSource<Section, SidebarCollectionRow.ID>?
   private var externalRows: [SidebarCollectionRow] = []
@@ -279,6 +292,10 @@ final class SidebarCollectionBodyController: NSViewController {
   private var frameObserver: NSObjectProtocol?
   private var lastViewportSize: CGSize?
   private var scrollEdgeVisibility: SidebarScrollEdgeVisibility?
+  private var isAwaitingContent = false
+  private var firstCompletedAt: TimeInterval?
+  private var lastCompletedStructuralIDs: [SidebarCollectionRow.ID]?
+  private var scheduledVerificationGeneration: Int?
   private var escapeMonitor: Any?
   private var resignObserver: NSObjectProtocol?
   private var autoscrollTimer: Timer?
@@ -454,17 +471,22 @@ final class SidebarCollectionBodyController: NSViewController {
 
   private func viewportFrameDidChange() {
     synchronizeCollectionWidthWithViewport()
+    // A frame change is part of the same AppKit display transaction. Deferring
+    // materialization to the next run-loop turn lets the compositor expose a
+    // viewport whose newly visible items do not exist yet.
     collectionView.layoutSubtreeIfNeeded()
     collectionView.displayIfNeeded()
     layoutScrollEdgeViews()
     updateScrollEdges(animated: false)
     updateUnreadViewportButtons(force: true)
+    traceViewport(event: "frame")
+    schedulePresentationVerification()
   }
 
   private func configureScrollEdgeView(_ edgeView: NSView) {
     edgeView.wantsLayer = true
     edgeView.layer?.backgroundColor = NSColor.separatorColor
-      .withAlphaComponent(0.45)
+      .withAlphaComponent(0.12)
       .cgColor
     edgeView.alphaValue = 0
   }
@@ -538,6 +560,31 @@ final class SidebarCollectionBodyController: NSViewController {
     dragPreviewContent: @escaping (SidebarCollectionRow) -> AnyView,
     actions: SidebarCollectionActions
   ) {
+    self.content = content
+    self.dragPreviewContent = dragPreviewContent
+    self.actions = actions
+    currentScrollRequest = scrollRequest
+
+    if input.isContentReady == false {
+      if isAwaitingContent == false {
+        os_log(
+          .info,
+          log: Self.diagnostics,
+          "component=collection event=hold-loading applied=%{public}d current-rows=%{public}d incoming-rows=%{public}d",
+          hasAppliedInitialSnapshot ? 1 : 0,
+          presentation?.rows.count ?? 0,
+          input.rows.count
+        )
+      }
+      isAwaitingContent = true
+      if reorderSession != nil {
+        cancelReorder(animated: false, reason: "model-loading")
+      }
+      return
+    }
+
+    let resumedFromLoading = isAwaitingContent
+    isAwaitingContent = false
     let inputRows = input.rows
     let rows = rowsWithLatentEmptyPinnedGuide(inputRows)
     let tree = input.tree
@@ -556,11 +603,6 @@ final class SidebarCollectionBodyController: NSViewController {
     let reorderPolicyChanged = reorderPolicy != input.reorderPolicy
     reorderPolicy = input.reorderPolicy
     latestRenderState = input.renderState
-    self.content = content
-    self.dragPreviewContent = dragPreviewContent
-    self.actions = actions
-    currentScrollRequest = scrollRequest
-
     if reorderPolicyChanged, reorderSession != nil {
       cancelReorder(animated: false, reason: "policy-update")
       handleScrollRequestIfPossible()
@@ -595,23 +637,29 @@ final class SidebarCollectionBodyController: NSViewController {
       )
       requestDisplayRows(
         rebasedRows,
-        animatingDifferences: suppressesModeTransitionAnimations == false
+        animatingDifferences: resumedFromLoading == false
+          && suppressesModeTransitionAnimations == false
           && (previousExternalIDs != inputRows.map(\.id)
             || reconciliation?.cancelledMoveIDs.isEmpty == false),
-        reason: sidebarModeChanged ? "sidebar-mode-update" : "optimistic-rebase"
+        reason: resumedFromLoading
+          ? "model-ready"
+          : (sidebarModeChanged ? "sidebar-mode-update" : "optimistic-rebase")
       )
     } else {
       optimisticState = OptimisticState(confirmed: tree.snapshot)
       requestDisplayRows(
         rows,
-        animatingDifferences: suppressesModeTransitionAnimations == false
+        animatingDifferences: resumedFromLoading == false
+          && suppressesModeTransitionAnimations == false
           && (previousExternalIDs != inputRows.map(\.id)
             || reconciliation?.cancelledMoveIDs.isEmpty == false),
-        reason: sidebarModeChanged
-          ? "sidebar-mode-update"
-          : (reconciliation?.acknowledgedMoveIDs.isEmpty == false
-            ? "optimistic-acknowledged"
-            : "model-update")
+        reason: resumedFromLoading
+          ? "model-ready"
+          : (sidebarModeChanged
+            ? "sidebar-mode-update"
+            : (reconciliation?.acknowledgedMoveIDs.isEmpty == false
+              ? "optimistic-acknowledged"
+              : "model-update"))
       )
     }
 
@@ -681,6 +729,12 @@ final class SidebarCollectionBodyController: NSViewController {
       animatingDifferences: animatingDifferences,
       completions: completion.map { [$0] } ?? []
     )
+    tracePresentation(
+      event: "request",
+      presentation: nextPresentation,
+      reason: reason,
+      animated: animatingDifferences
+    )
 
     guard dataSource != nil else {
       pendingDisplayUpdate = coalescing(pendingDisplayUpdate, with: update)
@@ -705,6 +759,12 @@ final class SidebarCollectionBodyController: NSViewController {
         log.debug(
           "presentation #\(nextPresentation.generation) queued reason=\(reason) "
             + "rows=\(rows.count)"
+        )
+        tracePresentation(
+          event: "queued",
+          presentation: nextPresentation,
+          reason: reason,
+          animated: animatingDifferences
         )
       }
       return
@@ -761,6 +821,20 @@ final class SidebarCollectionBodyController: NSViewController {
     log.debug(
       "presentation #\(next.generation) apply reason=\(update.reason) "
         + "rows=\(next.rows.count) animated=\(animate)"
+    )
+    tracePresentation(
+      event: "apply",
+      presentation: next,
+      reason: update.reason,
+      animated: animate
+    )
+    os_signpost(
+      .event,
+      log: Self.signposts,
+      name: "SidebarPresentationApply",
+      "generation=%{public}d rows=%{public}d",
+      next.generation,
+      next.rows.count
     )
 
     if hasAppliedInitialSnapshot == false {
@@ -839,6 +913,7 @@ final class SidebarCollectionBodyController: NSViewController {
     snapshotApplyInFlight = false
     inFlightGeneration = nil
     hasAppliedInitialSnapshot = true
+    let completedPresentation = presentation
     transitionRowByID = presentation?.rowByID ?? [:]
     let refreshScope = inFlightRefreshScope
     inFlightRefreshScope = .none
@@ -865,6 +940,33 @@ final class SidebarCollectionBodyController: NSViewController {
     }
 
     log.debug("presentation #\(generation) complete next=\(nextUpdate != nil)")
+    if let presentation = completedPresentation {
+      let now = ProcessInfo.processInfo.systemUptime
+      if firstCompletedAt == nil {
+        firstCompletedAt = now
+      } else if let firstCompletedAt,
+                now - firstCompletedAt < 1,
+                let previousIDs = lastCompletedStructuralIDs,
+                previousIDs != presentation.orderedIDs {
+        os_log(
+          .default,
+          log: Self.diagnostics,
+          "component=collection event=early-structural-reapply generation=%{public}d previous-rows=%{public}d rows=%{public}d elapsed-ms=%{public}d",
+          generation,
+          previousIDs.count,
+          presentation.rows.count,
+          Int((now - firstCompletedAt) * 1_000)
+        )
+      }
+      lastCompletedStructuralIDs = presentation.orderedIDs
+      tracePresentation(
+        event: "complete",
+        presentation: presentation,
+        reason: nextUpdate == nil ? "settled" : "has-next",
+        animated: false
+      )
+      schedulePresentationVerification(generation: generation)
+    }
   }
 
   private func performPendingDisplayUpdateIfNeeded() {
@@ -881,6 +983,142 @@ final class SidebarCollectionBodyController: NSViewController {
   private var hasUsableInitialViewport: Bool {
     let viewport = scrollView.contentView.bounds
     return hasCompletedViewLayout && viewport.width > 1 && viewport.height > 1
+  }
+
+  private func tracePresentation(
+    event: String,
+    presentation: SidebarBodyPresentation,
+    reason: String,
+    animated: Bool
+  ) {
+    var chatCount = 0
+    var headerCount = 0
+    var guideCount = 0
+    var chromeCount = 0
+    for row in presentation.rows {
+      switch row.kind {
+      case .chat:
+        chatCount += 1
+      case .sectionHeader, .archiveHeader:
+        headerCount += 1
+      case .pinDropGuide:
+        guideCount += 1
+      case .allChats, .grid, .newThread, .emptyState:
+        chromeCount += 1
+      }
+    }
+    let viewport = scrollView.contentView.bounds
+    os_log(
+      .info,
+      log: Self.diagnostics,
+      "component=collection event=%{public}@ generation=%{public}d reason=%{public}@ rows=%{public}d chats=%{public}d headers=%{public}d guides=%{public}d chrome=%{public}d animated=%{public}d viewport-w=%{public}d viewport-h=%{public}d",
+      event as NSString,
+      presentation.generation,
+      reason as NSString,
+      presentation.rows.count,
+      chatCount,
+      headerCount,
+      guideCount,
+      chromeCount,
+      animated ? 1 : 0,
+      Int(viewport.width.rounded()),
+      Int(viewport.height.rounded())
+    )
+  }
+
+  private func traceViewport(event: String) {
+    let viewport = scrollView.contentView.bounds
+    os_log(
+      .debug,
+      log: Self.diagnostics,
+      "component=collection event=viewport-%{public}@ generation=%{public}d viewport-w=%{public}d viewport-h=%{public}d document-h=%{public}d visible-items=%{public}d",
+      event as NSString,
+      presentation?.generation ?? 0,
+      Int(viewport.width.rounded()),
+      Int(viewport.height.rounded()),
+      Int(collectionView.frame.height.rounded()),
+      collectionView.visibleItems().count
+    )
+  }
+
+  private func schedulePresentationVerification(generation: Int? = nil) {
+    guard let presentation else { return }
+    let generation = generation ?? presentation.generation
+    scheduledVerificationGeneration = generation
+    DispatchQueue.main.async { [weak self] in
+      guard let self,
+            scheduledVerificationGeneration == generation,
+            self.presentation?.generation == generation
+      else { return }
+      scheduledVerificationGeneration = nil
+      collectionView.layoutSubtreeIfNeeded()
+      collectionView.displayIfNeeded()
+      verifyPresentationMaterialization(generation: generation)
+    }
+  }
+
+  private func verifyPresentationMaterialization(generation: Int) {
+    guard let dataSource, let presentation else { return }
+    guard reorderSession == nil, localSettle == nil else { return }
+    let snapshotCount = dataSource.snapshot().itemIdentifiers.count
+    let expectedCount = presentation.orderedIDs.count
+    let representedIndexPaths = Set(collectionView.visibleItems().compactMap {
+      collectionView.indexPath(for: $0)
+    })
+    let viewport = scrollView.contentView.bounds
+    let expectedVisibleIndexPaths = Set<IndexPath>(
+      layout.layoutAttributesForElements(in: viewport).compactMap { attributes in
+        guard attributes.alpha > 0.01,
+              attributes.isHidden == false,
+              attributes.frame.intersects(viewport)
+        else { return nil }
+        return attributes.indexPath
+      }
+    )
+    let missingVisibleCount = expectedVisibleIndexPaths.subtracting(representedIndexPaths).count
+    let visibleCount = representedIndexPaths.count
+    let snapshotMatches = snapshotCount == expectedCount
+    let geometryValid = viewport.width > 1
+      && viewport.height > 1
+      && abs(collectionView.frame.width - viewport.width) <= 1
+
+    if snapshotMatches == false || geometryValid == false || missingVisibleCount > 0 {
+      os_log(
+        .error,
+        log: Self.diagnostics,
+        "component=collection event=verification-failed generation=%{public}d expected=%{public}d snapshot=%{public}d expected-visible=%{public}d visible-items=%{public}d missing-visible=%{public}d geometry-valid=%{public}d viewport-w=%{public}d viewport-h=%{public}d document-w=%{public}d",
+        generation,
+        expectedCount,
+        snapshotCount,
+        expectedVisibleIndexPaths.count,
+        visibleCount,
+        missingVisibleCount,
+        geometryValid ? 1 : 0,
+        Int(viewport.width.rounded()),
+        Int(viewport.height.rounded()),
+        Int(collectionView.frame.width.rounded())
+      )
+      os_signpost(
+        .event,
+        log: Self.signposts,
+        name: "SidebarPresentationDefect",
+        "generation=%{public}d expected=%{public}d snapshot=%{public}d missingVisible=%{public}d",
+        generation,
+        expectedCount,
+        snapshotCount,
+        missingVisibleCount
+      )
+    } else {
+      os_log(
+        .debug,
+        log: Self.diagnostics,
+        "component=collection event=verified generation=%{public}d rows=%{public}d expected-visible=%{public}d visible-items=%{public}d",
+        generation,
+        expectedCount,
+        expectedVisibleIndexPaths.count,
+        visibleCount
+      )
+    }
   }
 
   // MARK: - Hosted row refresh

@@ -108,23 +108,11 @@ struct SidebarDragPreviewView: View {
 
   @ViewBuilder
   private var avatar: some View {
-    if case let .chat(chat) = item.peer {
-      SidebarThreadIcon(
-        chat: chat,
-        size: iconSize,
-        shape: isCompact ? .roundedSquare : .circle
-      )
-    } else if let peer = item.peer {
-      ChatIcon(peer: peer, size: iconSize)
-    } else {
-      Circle()
-        .fill(Color.primary.opacity(0.08))
-        .overlay {
-          Image(systemName: "bubble.left")
-            .font(.system(size: iconSize * 0.45, weight: .medium))
-            .foregroundStyle(.secondary)
-        }
-    }
+    SidebarChatIdentityIcon(
+      identity: item.identity,
+      size: iconSize,
+      shape: isCompact ? .roundedSquare : .circle
+    )
   }
 
   private var unreadBadge: some View {

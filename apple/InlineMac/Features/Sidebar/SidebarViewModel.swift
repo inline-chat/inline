@@ -4,6 +4,8 @@ import GRDB
 import InlineKit
 import Logger
 import Observation
+import OSLog
+import Translation
 
 @MainActor
 @Observable
@@ -32,59 +34,80 @@ final class SidebarViewModel {
     let order: String?
     let pinnedOrder: String?
     let lastActivityAt: Date
-    let peer: ChatIcon.PeerType?
+    let identity: ChatListIdentityDescriptor?
+    let chatType: ChatType?
+    let chatCreatedBy: Int64?
+    let chatIsPublic: Bool?
 
-    init?(listItem: ChatListItem) {
-      guard let peerId = listItem.peerId else { return nil }
-
-      id = listItem.id
-      self.peerId = peerId
-      chatId = listItem.chat?.id ?? 0
-      parentChatId = listItem.chat?.parentChatId
-      spaceId = listItem.spaceId
-      title = listItem.displayTitle
-      parentTitle = listItem.parentTitle
-      preview = listItem.sidebarBasePreviewText
-      unreadCount = max(listItem.dialog?.unreadCount ?? 0, 0)
-      unreadMark = listItem.dialog?.unreadMark == true
-      unread = unreadCount > 0 || unreadMark
-      prominentUnreadDot = listItem.hasProminentUnreadDot
-      pinned = listItem.dialog?.pinned == true
-      archived = listItem.dialog?.archived == true
-      open = listItem.dialog?.open == true
-      order = listItem.dialog?.order
-      pinnedOrder = listItem.dialog?.pinnedOrder
-      lastActivityAt = listItem.lastMessage?.message.date
-        ?? listItem.chat?.date
-        ?? listItem.member?.date
-        ?? .distantPast
-
-      if let user = listItem.user {
-        peer = .user(user)
-      } else if let chat = listItem.chat {
-        peer = .chat(chat)
+    init(snapshot: ChatListItemSnapshot, kind: ChatListItem.Kind = .thread) {
+      id = ChatListItem.Identifier(kind: kind, rawValue: snapshot.dialogID)
+      peerId = snapshot.peer
+      chatId = snapshot.chatID
+      parentChatId = snapshot.parentChatID
+      spaceId = snapshot.spaceID
+      title = snapshot.title
+      parentTitle = snapshot.parentTitle
+      let showsTranslation = TranslationState.shared.isTranslationEnabled(for: snapshot.peer)
+      let text = (showsTranslation ? snapshot.translatedPreviewText : nil)
+        ?? snapshot.previewText
+        ?? ""
+      if let sender = snapshot.previewSenderName, sender.isEmpty == false, text.isEmpty == false {
+        preview = "\(sender): \(text)"
       } else {
-        peer = nil
+        preview = text
       }
+      unreadCount = snapshot.unreadCount
+      unreadMark = snapshot.unreadMark
+      unread = snapshot.isUnread
+      prominentUnreadDot = snapshot.isProminent
+      pinned = snapshot.isPinned
+      archived = snapshot.isArchived
+      open = snapshot.isOpen
+      order = snapshot.order
+      pinnedOrder = snapshot.pinnedOrder
+      lastActivityAt = snapshot.lastUpdatedAt ?? .distantPast
+      identity = snapshot.identity
+      chatType = snapshot.chatType
+      chatCreatedBy = snapshot.chatCreatedBy
+      chatIsPublic = snapshot.chatIsPublic
     }
   }
 
   var activeItems: [Item] = []
   var archivedItems: [Item] = []
+  var temporaryItems: [Item] = []
+  var isChatProjectionReady = false
+  var hasResolvedSpaces = false
   var spaces: [Space] = []
   var errorText: String?
 
   @ObservationIgnored private let log = Log.scoped("SidebarViewModel")
+  private static let diagnostics = OSLog(
+    subsystem: Bundle.main.bundleIdentifier ?? "chat.inline.InlineMac",
+    category: "SidebarFirstFrame"
+  )
+  private static let signposts = OSLog(
+    subsystem: Bundle.main.bundleIdentifier ?? "chat.inline.InlineMac",
+    category: "SidebarFirstFrame"
+  )
   @ObservationIgnored private let db: AppDatabase
   @ObservationIgnored private var source: Source?
-  @ObservationIgnored private var threadItems: [ChatListItem] = []
-  @ObservationIgnored private var contactItems: [ChatListItem] = []
-  @ObservationIgnored private var threadsCancellable: AnyCancellable?
-  @ObservationIgnored private var contactsCancellable: AnyCancellable?
+  @ObservationIgnored private var snapshots: [ChatListItemSnapshot] = []
+  @ObservationIgnored private var temporaryPeer: Peer?
+  @ObservationIgnored private var chatsCancellable: AnyCancellable?
+  @ObservationIgnored private var translationCancellable: AnyCancellable?
+  @ObservationIgnored private var translationLanguageCancellable: AnyCancellable?
   @ObservationIgnored private var spacesCancellable: AnyCancellable?
+  @ObservationIgnored private var chatsRetryTask: Task<Void, Never>?
+  @ObservationIgnored private var chatsRetryAttempt = 0
+  @ObservationIgnored private var spacesRetryTask: Task<Void, Never>?
+  @ObservationIgnored private var spacesRetryAttempt = 0
   @ObservationIgnored private var includeSpaceChatsInHome = true
   @ObservationIgnored private var sortMode = SidebarSortMode.openedOrder
   @ObservationIgnored private var started = false
+  @ObservationIgnored private var chatsObservationGeneration = 0
+  @ObservationIgnored private var hasReceivedChatValue = false
+  @ObservationIgnored private var sourceBindStartedAt: TimeInterval?
 
   private enum Source: Equatable {
     case home(ContentMode)
@@ -108,6 +131,19 @@ final class SidebarViewModel {
       }
     }
 
+    var diagnosticCode: String {
+      switch self {
+      case .home(.inbox):
+        "home-inbox"
+      case .home(.chatList):
+        "home-all"
+      case .space(_, .inbox):
+        "space-inbox"
+      case .space(_, .chatList):
+        "space-all"
+      }
+    }
+
   }
 
   init(
@@ -115,10 +151,27 @@ final class SidebarViewModel {
     startsObserving: Bool = true,
     selectedSpaceId: Int64? = nil,
     mode: ContentMode = .chatList,
-    sortMode: SidebarSortMode = .openedOrder
+    sortMode: SidebarSortMode = .openedOrder,
+    temporaryPeer: Peer? = nil
   ) {
     self.db = db
     self.sortMode = sortMode
+    self.temporaryPeer = temporaryPeer
+    translationCancellable = TranslationState.shared.subject.sink { [weak self] event in
+      guard let self else { return }
+      let (peer, _) = event
+      guard snapshots.contains(where: { $0.peer == peer }) else { return }
+      refreshItems()
+      if let source {
+        observeChats(for: source)
+      }
+    }
+    translationLanguageCancellable = NotificationCenter.default
+      .publisher(for: .translationLanguageChanged)
+      .sink { [weak self] _ in
+        guard let self, let source else { return }
+        observeChats(for: source)
+      }
     if startsObserving {
       start(selectedSpaceId: selectedSpaceId, mode: mode, sortMode: sortMode)
     }
@@ -161,6 +214,18 @@ final class SidebarViewModel {
     spaces.contains { $0.id == id }
   }
 
+  /// Readiness belongs to a specific source, not merely to whichever source
+  /// most recently published. SwiftUI preference changes can render before
+  /// their `onChange` handler rebinds the model; reject that mixed old/new
+  /// scene until the requested source has produced its first coherent value.
+  func isReady(selectedSpaceId: Int64?, mode: ContentMode) -> Bool {
+    guard isChatProjectionReady else { return false }
+    if let selectedSpaceId {
+      return source == .space(selectedSpaceId, mode)
+    }
+    return source == .home(mode)
+  }
+
   func setIncludeSpaceChatsInHome(_ include: Bool) {
     guard includeSpaceChatsInHome != include else { return }
     includeSpaceChatsInHome = include
@@ -173,181 +238,196 @@ final class SidebarViewModel {
     refreshItems()
   }
 
+  /// Selected closed chats are projected from the same snapshot as normal
+  /// membership. This keeps first-frame membership under one observation
+  /// instead of racing a second full database query.
+  func setTemporaryPeer(_ peer: Peer?) {
+    guard temporaryPeer != peer else { return }
+    temporaryPeer = peer
+    refreshItems()
+    os_log(
+      .info,
+      log: Self.diagnostics,
+      "component=model event=temporary-peer ready=%{public}d present=%{public}d rows=%{public}d",
+      isChatProjectionReady ? 1 : 0,
+      peer != nil ? 1 : 0,
+      temporaryItems.count
+    )
+  }
+
   private func bindSource(_ source: Source) {
     guard self.source != source else { return }
     self.source = source
-    threadsCancellable?.cancel()
-    contactsCancellable?.cancel()
-    threadsCancellable = nil
-    contactsCancellable = nil
+    chatsCancellable?.cancel()
+    chatsCancellable = nil
+    chatsRetryTask?.cancel()
+    chatsRetryTask = nil
+    chatsRetryAttempt = 0
 
-    threadItems = []
-    contactItems = []
+    // Flip readiness before clearing projection values. The collection keeps
+    // its last coherent scene until this source's first database value arrives.
+    isChatProjectionReady = false
+    hasReceivedChatValue = false
+    sourceBindStartedAt = ProcessInfo.processInfo.systemUptime
+    snapshots = []
     activeItems = []
     archivedItems = []
+    temporaryItems = []
     errorText = nil
 
-    switch source {
-    case .home(.chatList):
-      bindHomeChats()
-    case let .space(spaceId, .chatList):
-      bindSpaceChats(spaceId)
-      bindSpaceContacts(spaceId)
-    case .home(.inbox):
-      bindInboxItems(spaceId: nil)
-    case let .space(spaceId, .inbox):
-      bindInboxItems(spaceId: spaceId)
-    }
+    os_log(
+      .info,
+      log: Self.diagnostics,
+      "component=model event=source-bind source=%{public}@",
+      source.diagnosticCode as NSString
+    )
+
+    observeChats(for: source)
   }
 
-  private func bindInboxItems(spaceId: Int64?) {
-    #if DEBUG
-    db.warnIfInMemoryDatabaseForObservation("SidebarViewModel.inbox")
-    #endif
+  private func observeChats(for source: Source) {
+    guard self.source == source else { return }
+    chatsCancellable?.cancel()
+    chatsCancellable = nil
+    chatsRetryTask?.cancel()
+    chatsRetryTask = nil
+    chatsObservationGeneration &+= 1
+    let generation = chatsObservationGeneration
+    let startedAt = ProcessInfo.processInfo.systemUptime
 
-    threadsCancellable = ValueObservation
-      .tracking { db in
-        let chats = try HomeChatItem
-          .sidebarInbox(spaceId: spaceId)
-          .fetchAll(db)
-        return try Self.chatListItems(chats, db: db)
-      }
-      .publisher(in: db.dbWriter, scheduling: .immediate)
-      .sink(
-        receiveCompletion: { [weak self] completion in
-          if case let .failure(error) = completion {
-            self?.log.error("Sidebar inbox observation failed: \(error.localizedDescription)")
-          }
-        },
-        receiveValue: { [weak self] chats in
-          guard let self else { return }
-          threadItems = chats
-          contactItems = []
-          refreshItems()
-        }
-      )
-  }
+    os_log(
+      .info,
+      log: Self.diagnostics,
+      "component=model event=observe-start generation=%{public}d source=%{public}@",
+      generation,
+      source.diagnosticCode as NSString
+    )
+    os_signpost(
+      .event,
+      log: Self.signposts,
+      name: "SidebarModelObserveStart",
+      "generation=%{public}d",
+      generation
+    )
 
-  private func bindHomeChats() {
     #if DEBUG
     db.warnIfInMemoryDatabaseForObservation("SidebarViewModel.chats")
     #endif
 
-    threadsCancellable = ValueObservation
+    chatsCancellable = ValueObservation
       .tracking { db in
-        let chats = try HomeChatItem.all().fetchAll(db)
-        return try Self.chatListItems(chats, db: db)
-      }
-      .publisher(in: db.dbWriter, scheduling: .immediate)
-      .sink(
-        receiveCompletion: { [weak self] completion in
-          guard let self else { return }
-
-          switch completion {
-          case .finished:
-            break
-          case let .failure(error):
-            errorText = error.localizedDescription
-            log.error("Sidebar observation failed: \(error.localizedDescription)")
-          }
-        },
-        receiveValue: { [weak self] chats in
-          guard let self else { return }
-          threadItems = chats
-          contactItems = []
-          refreshItems()
-        }
-      )
-  }
-
-  private func bindSpaceChats(_ spaceId: Int64) {
-    #if DEBUG
-    db.warnIfInMemoryDatabaseForObservation("SidebarViewModel.spaceChats")
-    #endif
-
-    threadsCancellable = ValueObservation
-      .tracking { db in
-        let chats = try Dialog
-          .sidebarSpaceChatItemQuery(spaceId: spaceId)
-          .fetchAll(db)
-        return try Self.chatListItems(chats, db: db)
-      }
-      .publisher(in: db.dbWriter, scheduling: .immediate)
-      .sink(
-        receiveCompletion: { [weak self] completion in
-          if case let .failure(error) = completion {
-            self?.log.error("Sidebar space chats observation failed: \(error.localizedDescription)")
-          }
-        },
-        receiveValue: { [weak self] chats in
-          guard let self else { return }
-          threadItems = chats
-          refreshItems()
-        }
-      )
-  }
-
-  private func bindSpaceContacts(_ spaceId: Int64) {
-    #if DEBUG
-    db.warnIfInMemoryDatabaseForObservation("SidebarViewModel.spaceContacts")
-    #endif
-
-    contactsCancellable = ValueObservation
-      .tracking { db in
-        let contacts = try Dialog.applyingChatListVisibilityFilter(
-          Dialog.spaceChatItemQueryForUser()
+        try ChatListDatabaseQuery.fetchSnapshots(
+          db,
+          spaceID: source.spaceId,
+          includeSpaceChatsInHome: true,
+          translationLanguage: UserLocale.getCurrentLanguage()
         )
-          .filter(
-            sql: "dialog.peerUserId IN (SELECT userId FROM member WHERE spaceId = ?)",
-            arguments: StatementArguments([spaceId])
-          )
-          .fetchAll(db)
-        return try Self.chatListItems(contacts, db: db)
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(
         receiveCompletion: { [weak self] completion in
-          if case let .failure(error) = completion {
-            self?.log.error("Sidebar space contacts observation failed: \(error.localizedDescription)")
-          }
-        },
-        receiveValue: { [weak self] contacts in
           guard let self else { return }
-          contactItems = contacts
+          guard case let .failure(error) = completion,
+                self.source == source,
+                chatsObservationGeneration == generation
+          else { return }
+          errorText = activeItems.isEmpty && archivedItems.isEmpty
+            ? "Couldn’t load chats. Retrying…"
+            : nil
+          hasReceivedChatValue = true
+          updateChatProjectionReadiness()
+          log.error("Sidebar observation failed: \(Self.safeErrorName(error))")
+          os_log(
+            .error,
+            log: Self.diagnostics,
+            "component=model event=observe-failed generation=%{public}d source=%{public}@ error=%{public}@",
+            generation,
+            source.diagnosticCode as NSString,
+            Self.safeErrorName(error) as NSString
+          )
+          os_signpost(
+            .event,
+            log: Self.signposts,
+            name: "SidebarModelObserveFailed",
+            "generation=%{public}d",
+            generation
+          )
+          scheduleChatsObservationRetry(for: source)
+        },
+        receiveValue: { [weak self] snapshots in
+          guard let self,
+                self.source == source,
+                chatsObservationGeneration == generation
+          else { return }
+          let previousActive = activeItems
+          let previousArchived = archivedItems
+          let previousTemporary = temporaryItems
+          self.snapshots = snapshots
+          chatsRetryAttempt = 0
+          chatsRetryTask?.cancel()
+          chatsRetryTask = nil
+          errorText = nil
           refreshItems()
+          hasReceivedChatValue = true
+          updateChatProjectionReadiness()
+
+          let elapsedMilliseconds = Int(
+            ((ProcessInfo.processInfo.systemUptime - startedAt) * 1_000).rounded()
+          )
+          let openCount = snapshots.lazy.filter(\.isOpen).count
+          let pinnedCount = snapshots.lazy.filter(\.isPinned).count
+          let membershipChanged = previousActive.map(\.id) != activeItems.map(\.id)
+            || previousArchived.map(\.id) != archivedItems.map(\.id)
+            || previousTemporary.map(\.id) != temporaryItems.map(\.id)
+          let contentChanged = previousActive != activeItems
+            || previousArchived != archivedItems
+            || previousTemporary != temporaryItems
+          os_log(
+            .info,
+            log: Self.diagnostics,
+            "component=model event=publish generation=%{public}d source=%{public}@ elapsed-ms=%{public}d snapshots=%{public}d open=%{public}d pinned=%{public}d active=%{public}d archived=%{public}d temporary=%{public}d membership-changed=%{public}d content-changed=%{public}d",
+            generation,
+            source.diagnosticCode as NSString,
+            elapsedMilliseconds,
+            snapshots.count,
+            openCount,
+            pinnedCount,
+            activeItems.count,
+            archivedItems.count,
+            temporaryItems.count,
+            membershipChanged ? 1 : 0,
+            contentChanged ? 1 : 0
+          )
+          os_signpost(
+            .event,
+            log: Self.signposts,
+            name: "SidebarModelPublish",
+            "generation=%{public}d snapshots=%{public}d active=%{public}d temporary=%{public}d",
+            generation,
+            snapshots.count,
+            activeItems.count,
+            temporaryItems.count
+          )
         }
       )
   }
 
-  private nonisolated static func chatListItems(_ chats: [HomeChatItem], db: Database) throws -> [ChatListItem] {
-    let filteredChats = HomeViewModel.filterEmptyChats(chats)
-    let titles = try ReplyThreadTitleFallback.titlesByChatId(for: filteredChats, db: db)
-    let parentTitles = try ReplyThreadTitleFallback.parentTitlesByChatId(for: filteredChats, db: db)
-    return filteredChats.map { chat in
-      ChatListItem(
-        chatItem: chat,
-        titleOverride: chat.chat.flatMap { titles[$0.id] },
-        parentTitle: chat.chat.flatMap { parentTitles[$0.id] }
-      )
-    }
-  }
-
-  private nonisolated static func chatListItems(_ items: [SpaceChatItem], db: Database) throws -> [ChatListItem] {
-    let chats = items.compactMap(\.chat)
-    let titles = try ReplyThreadTitleFallback.titlesByChatId(for: chats, db: db)
-    let parentTitles = try ReplyThreadTitleFallback.parentTitlesByChatId(for: chats, db: db)
-
-    return items.map { item in
-      let titleOverride = item.chat.flatMap { titles[$0.id] }
-      let parentTitle = item.chat.flatMap { parentTitles[$0.id] }
-      if item.userInfo != nil {
-        return ChatListItem(spaceContactItem: item, titleOverride: titleOverride, parentTitle: parentTitle)
-      }
-      return ChatListItem(spaceChatItem: item, titleOverride: titleOverride, parentTitle: parentTitle)
+  private func scheduleChatsObservationRetry(for source: Source) {
+    guard chatsRetryTask == nil, self.source == source else { return }
+    chatsRetryAttempt &+= 1
+    let delay = min(pow(2, Double(min(chatsRetryAttempt - 1, 5))) * 0.25, 8)
+    chatsRetryTask = Task { [weak self] in
+      try? await Task.sleep(for: .seconds(delay))
+      guard Task.isCancelled == false, let self, self.source == source else { return }
+      chatsRetryTask = nil
+      observeChats(for: source)
     }
   }
 
   private func observeSpaces() {
+    spacesRetryTask?.cancel()
+    spacesRetryTask = nil
+
     #if DEBUG
     db.warnIfInMemoryDatabaseForObservation("SidebarViewModel.spaces")
     #endif
@@ -365,80 +445,179 @@ final class SidebarViewModel {
         receiveCompletion: { [weak self] completion in
           guard let self else { return }
 
-          switch completion {
-          case .finished:
-            break
-          case let .failure(error):
-            log.error("Sidebar spaces observation failed: \(error.localizedDescription)")
-          }
+          guard case let .failure(error) = completion else { return }
+          log.error("Sidebar spaces observation failed: \(Self.safeErrorName(error))")
+          os_log(
+            .error,
+            log: Self.diagnostics,
+            "component=model event=spaces-observe-failed error=%{public}@",
+            Self.safeErrorName(error) as NSString
+          )
+          os_signpost(
+            .event,
+            log: Self.signposts,
+            name: "SidebarSpacesObserveFailed"
+          )
+          scheduleSpacesObservationRetry()
         },
         receiveValue: { [weak self] spaces in
-          self?.applySpaces(spaces)
+          guard let self else { return }
+          spacesRetryAttempt = 0
+          spacesRetryTask?.cancel()
+          spacesRetryTask = nil
+          applySpaces(spaces)
         }
       )
   }
 
+  private func scheduleSpacesObservationRetry() {
+    guard spacesRetryTask == nil else { return }
+    spacesRetryAttempt &+= 1
+    let delay = min(pow(2, Double(min(spacesRetryAttempt - 1, 5))) * 0.25, 8)
+    spacesRetryTask = Task { [weak self] in
+      try? await Task.sleep(for: .seconds(delay))
+      guard Task.isCancelled == false, let self else { return }
+      spacesRetryTask = nil
+      observeSpaces()
+    }
+  }
+
   private func applySpaces(_ spaces: [HomeSpaceItem]) {
     let nextSpaces = spaces.map(\.space)
-    guard self.spaces != nextSpaces else { return }
-    self.spaces = nextSpaces
+    let changed = self.spaces != nextSpaces
+    if changed {
+      self.spaces = nextSpaces
+    }
+    if hasResolvedSpaces == false {
+      hasResolvedSpaces = true
+    }
+    updateChatProjectionReadiness()
+    os_log(
+      .info,
+      log: Self.diagnostics,
+      "component=model event=spaces-publish count=%{public}d changed=%{public}d",
+      nextSpaces.count,
+      changed ? 1 : 0
+    )
+  }
+
+  private func updateChatProjectionReadiness() {
+    let nextReady: Bool
+    switch source {
+    case .home:
+      nextReady = hasReceivedChatValue
+    case let .space(spaceID, _):
+      nextReady = hasReceivedChatValue
+        && hasResolvedSpaces
+        && spaces.contains(where: { $0.id == spaceID })
+    case nil:
+      nextReady = false
+    }
+    if isChatProjectionReady != nextReady {
+      isChatProjectionReady = nextReady
+      let heldMilliseconds = sourceBindStartedAt.map {
+        Int(((ProcessInfo.processInfo.systemUptime - $0) * 1_000).rounded())
+      } ?? 0
+      os_log(
+        .info,
+        log: Self.diagnostics,
+        "component=model event=readiness ready=%{public}d source=%{public}@ held-ms=%{public}d chat-value=%{public}d spaces-resolved=%{public}d",
+        nextReady ? 1 : 0,
+        (source?.diagnosticCode ?? "none") as NSString,
+        heldMilliseconds,
+        hasReceivedChatValue ? 1 : 0,
+        hasResolvedSpaces ? 1 : 0
+      )
+      if nextReady {
+        sourceBindStartedAt = nil
+        os_signpost(
+          .event,
+          log: Self.signposts,
+          name: "SidebarModelReady",
+          "active=%{public}d archived=%{public}d temporary=%{public}d",
+          activeItems.count,
+          archivedItems.count,
+          temporaryItems.count
+        )
+      }
+    }
   }
 
   private func refreshItems() {
-    let items = sortItems(filterHomeItems(mergeUniqueItems(threadItems + contactItems)))
+    let items = sortItems(filterHomeItems(snapshots))
+    let kind: ChatListItem.Kind = isHomeSource ? .thread : .contact
+    let projectedItems = items.map {
+      Item(snapshot: $0, kind: isUserPeer($0.peer) ? kind : .thread)
+    }
 
     if isInboxMode {
-      let active = items.compactMap(Item.init(listItem:))
+      let active = projectedItems.filter { $0.open || $0.pinned }
+      let temporary = makeTemporaryItems(from: projectedItems, excluding: active)
       let activeChanged = activeItems != active
       let archivedChanged = archivedItems.isEmpty == false
+      let temporaryChanged = temporaryItems != temporary
       if activeChanged {
         activeItems = active
       }
       if archivedChanged {
         archivedItems = []
       }
+      if temporaryChanged {
+        temporaryItems = temporary
+      }
       return
     }
 
-    let active = items
-      .filter { $0.dialog?.archived != true }
-      .compactMap(Item.init(listItem:))
+    let active = projectedItems.filter { $0.archived == false }
 
-    let archived = items
-      .filter { $0.dialog?.archived == true }
-      .compactMap(Item.init(listItem:))
+    let archived = projectedItems.filter(\.archived)
 
     let activeChanged = activeItems != active
     let archivedChanged = archivedItems != archived
+    let temporaryChanged = temporaryItems.isEmpty == false
     if activeChanged {
       activeItems = active
     }
     if archivedChanged {
       archivedItems = archived
     }
-  }
-
-  private func mergeUniqueItems(_ items: [ChatListItem]) -> [ChatListItem] {
-    var seen = Set<ChatListItem.Identifier>()
-    return items.filter { item in
-      seen.insert(item.id).inserted
+    if temporaryChanged {
+      temporaryItems = []
     }
   }
 
-  private func filterHomeItems(_ items: [ChatListItem]) -> [ChatListItem] {
-    guard includeSpaceChatsInHome == false else { return items }
-    guard isHomeSource else { return items }
-    return items.filter { $0.isSpaceScoped == false }
+  private func makeTemporaryItems(from items: [Item], excluding active: [Item]) -> [Item] {
+    guard let temporaryPeer,
+          active.contains(where: { $0.peerId == temporaryPeer }) == false,
+          let selected = items.first(where: { $0.peerId == temporaryPeer })
+    else { return [] }
+
+    var result: [Item] = []
+    if let parentChatId = selected.parentChatId,
+       let parent = items.first(where: { $0.chatId == parentChatId }),
+       active.contains(where: { $0.peerId == parent.peerId }) == false {
+      result.append(parent)
+    }
+    if result.contains(where: { $0.peerId == selected.peerId }) == false {
+      result.append(selected)
+    }
+    return result
   }
 
-  private func sortItems(_ items: [ChatListItem]) -> [ChatListItem] {
+  private func filterHomeItems(_ items: [ChatListItemSnapshot]) -> [ChatListItemSnapshot] {
+    guard includeSpaceChatsInHome == false else { return items }
+    guard isHomeSource else { return items }
+    return items.filter { $0.spaceID == nil }
+  }
+
+  private func sortItems(_ items: [ChatListItemSnapshot]) -> [ChatListItemSnapshot] {
     if isInboxMode {
       return sortInboxItems(items)
     }
 
     return items.sorted { lhs, rhs in
-      let pinned1 = lhs.dialog?.pinned ?? false
-      let pinned2 = rhs.dialog?.pinned ?? false
+      let pinned1 = lhs.isPinned
+      let pinned2 = rhs.isPinned
       if pinned1 != pinned2 { return pinned1 }
 
       if sortMode == .openedOrder, pinned1, pinned2 {
@@ -472,18 +651,18 @@ final class SidebarViewModel {
     }
   }
 
-  private func sortInboxItems(_ items: [ChatListItem]) -> [ChatListItem] {
+  private func sortInboxItems(_ items: [ChatListItemSnapshot]) -> [ChatListItemSnapshot] {
     return items.sorted { lhs, rhs in
-      let pinned1 = lhs.dialog?.pinned ?? false
-      let pinned2 = rhs.dialog?.pinned ?? false
+      let pinned1 = lhs.isPinned
+      let pinned2 = rhs.isPinned
       if pinned1 != pinned2 { return pinned1 }
 
       switch sortMode {
       case .openedOrder:
         if pinned1, pinned2 {
-          return ordered(lhs.dialog?.pinnedOrder, before: rhs.dialog?.pinnedOrder, lhs: lhs, rhs: rhs)
+          return ordered(lhs.pinnedOrder, before: rhs.pinnedOrder, lhs: lhs, rhs: rhs)
         }
-        return ordered(lhs.dialog?.order, before: rhs.dialog?.order, lhs: lhs, rhs: rhs)
+        return ordered(lhs.order, before: rhs.order, lhs: lhs, rhs: rhs)
       case .recentActivity:
         let lhsActivity = sortDate(for: lhs)
         let rhsActivity = sortDate(for: rhs)
@@ -495,18 +674,15 @@ final class SidebarViewModel {
     }
   }
 
-  private func stableOrder(_ lhs: ChatListItem, _ rhs: ChatListItem) -> Bool {
-    if lhs.id.rawValue != rhs.id.rawValue {
-      return lhs.id.rawValue > rhs.id.rawValue
-    }
-    return lhs.id.kind.rawValue > rhs.id.kind.rawValue
+  private func stableOrder(_ lhs: ChatListItemSnapshot, _ rhs: ChatListItemSnapshot) -> Bool {
+    lhs.dialogID > rhs.dialogID
   }
 
   private func ordered(
     _ lhsOrder: String?,
     before rhsOrder: String?,
-    lhs: ChatListItem,
-    rhs: ChatListItem
+    lhs: ChatListItemSnapshot,
+    rhs: ChatListItemSnapshot
   ) -> Bool {
     switch (lhsOrder, rhsOrder) {
     case let (lhsOrder?, rhsOrder?):
@@ -523,28 +699,82 @@ final class SidebarViewModel {
     }
   }
 
-  private func sortDate(for item: ChatListItem) -> Date {
-    item.lastMessage?.message.date
-      ?? item.chat?.date
-      ?? item.member?.date
-      ?? Date.distantPast
-  }
-}
-
-private extension ChatListItem {
-  var hasProminentUnreadDot: Bool {
-    isDirectMessage || dialog?.isFollowingReplyThread == true
+  private func sortDate(for item: ChatListItemSnapshot) -> Date {
+    item.lastUpdatedAt ?? .distantPast
   }
 
-  var isDirectMessage: Bool {
-    if dialog?.peerUserId != nil {
-      return true
-    }
+  private func isUserPeer(_ peer: Peer) -> Bool {
+    if case .user = peer { return true }
+    return false
+  }
 
-    if case .user? = peerId {
-      return true
+  private nonisolated static func safeErrorName(_ error: Error) -> String {
+    if let error = error as? RowDecodingError {
+      return safeRowDecodingErrorName(error)
     }
+    if let error = error as? DatabaseError {
+      return "DatabaseError(\(error.resultCode.rawValue))"
+    }
+    return String(reflecting: type(of: error))
+  }
 
-    return chat?.type == .privateChat
+  /// GRDB's full decoding description includes the entire row. Extract only
+  /// schema/type tokens so diagnostics identify the defect without logging
+  /// names, message previews, IDs, SQL arguments, or other user data.
+  private nonisolated static func safeRowDecodingErrorName(
+    _ error: RowDecodingError
+  ) -> String {
+    let description = error.description
+    let expectedType = safeDiagnosticToken(
+      between: "could not decode ",
+      and: " from database value",
+      in: description
+    )
+    let column = description
+      .split(separator: "\n")
+      .lazy
+      .compactMap { line -> String? in
+        let prefix = "column: "
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix(prefix) else { return nil }
+        return safeDiagnosticToken(String(trimmed.dropFirst(prefix.count)))
+      }
+      .first
+      ?? safeDiagnosticToken(
+        after: "column not found: ",
+        in: description
+      )
+    return "RowDecodingError(type=\(expectedType ?? "unknown"),column=\(column ?? "unknown"))"
+  }
+
+  private nonisolated static func safeDiagnosticToken(
+    between prefix: String,
+    and suffix: String,
+    in value: String
+  ) -> String? {
+    guard let start = value.range(of: prefix)?.upperBound,
+          let end = value[start...].range(of: suffix)?.lowerBound
+    else { return nil }
+    return safeDiagnosticToken(String(value[start ..< end]))
+  }
+
+  private nonisolated static func safeDiagnosticToken(
+    after prefix: String,
+    in value: String
+  ) -> String? {
+    guard let start = value.range(of: prefix)?.upperBound else { return nil }
+    let tail = value[start...].prefix { $0 != "\n" }
+    return safeDiagnosticToken(String(tail))
+  }
+
+  private nonisolated static func safeDiagnosticToken(_ value: String) -> String? {
+    let token = value.trimmingCharacters(in: CharacterSet(charactersIn: " \t\"'"))
+    guard token.isEmpty == false,
+          token.unicodeScalars.allSatisfy({
+            CharacterSet.alphanumerics.contains($0)
+              || CharacterSet(charactersIn: "._[]?<>-").contains($0)
+          })
+    else { return nil }
+    return String(token.prefix(80))
   }
 }

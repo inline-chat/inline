@@ -61,6 +61,45 @@ struct SidebarThreadIcon: View, Equatable {
   }
 }
 
+struct SidebarChatIdentityIcon: View, Equatable {
+  let identity: ChatListIdentityDescriptor?
+  let size: CGFloat
+  let shape: SidebarThreadIcon.IconShape
+
+  var body: some View {
+    switch identity {
+    case let .thread(descriptor):
+      SidebarThreadIcon(
+        emoji: descriptor.emoji,
+        isReplyThread: descriptor.isReplyThread,
+        size: size,
+        shape: shape
+      )
+    case let .user(descriptor):
+      UserAvatar(
+        userID: descriptor.userID,
+        firstName: descriptor.firstName,
+        lastName: descriptor.lastName,
+        email: descriptor.email,
+        username: descriptor.username,
+        stableAvatarIdentity: descriptor.stableAvatarIdentity,
+        remoteURL: descriptor.remoteURL,
+        localURL: descriptor.localURL,
+        size: size
+      )
+      .equatable()
+    case nil:
+      Circle()
+        .fill(Color.primary.opacity(0.08))
+        .overlay {
+          Image(systemName: "bubble.left")
+            .font(.system(size: size * 0.45, weight: .medium))
+            .foregroundStyle(.secondary)
+        }
+    }
+  }
+}
+
 #Preview {
   HStack(spacing: 12) {
     SidebarThreadIcon(emoji: "💬", shape: .none)

@@ -49,7 +49,8 @@ struct MainWindowRootView: View {
       startsObserving: initialTopLevelRoute == .main,
       selectedSpaceId: nav3.selectedSpaceId,
       mode: sidebarMode,
-      sortMode: sidebarSort
+      sortMode: sidebarSort,
+      temporaryPeer: nav3.currentReplyThreadPeer ?? nav3.currentRoute.selectedPeer
     ))
     _topLevelRoute = State(initialValue: initialTopLevelRoute)
   }
@@ -156,6 +157,9 @@ struct MainWindowRootView: View {
     if route == .main {
       AppSettings.shared.resolveSidebarModeForCurrentAccount()
       MacPermissions.ensureNotificationAuthorizationIfNeeded()
+      sidebarViewModel.setTemporaryPeer(
+        nav3.currentReplyThreadPeer ?? nav3.currentRoute.selectedPeer
+      )
       sidebarViewModel.start(
         selectedSpaceId: nav3.selectedSpaceId,
         mode: sidebarMode,

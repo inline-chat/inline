@@ -99,15 +99,13 @@ struct SidebarChatItemView: Equatable, View {
     item.peerId
   }
 
-  private var threadChat: Chat? {
-    guard case let .chat(chat) = item.peer else { return nil }
-    return chat
-  }
-
   private var destructiveAction: ChatDestructiveAction? {
     ChatDestructiveActionResolver.action(
       peer: peerId,
-      chat: threadChat,
+      chatType: item.chatType,
+      chatCreatedBy: item.chatCreatedBy,
+      chatSpaceId: item.spaceId,
+      chatIsPublic: item.chatIsPublic,
       currentUserId: dependencies?.auth.getCurrentUserId()
     )
   }
@@ -455,23 +453,11 @@ struct SidebarChatItemView: Equatable, View {
 
   @ViewBuilder
   private var avatar: some View {
-    if case let .chat(chat) = item.peer {
-      SidebarThreadIcon(
-        chat: chat,
-        size: iconSize,
-        shape: size == .compact ? .none : .circle
-      )
-    } else if let peer = item.peer {
-      ChatIcon(peer: peer, size: iconSize)
-    } else {
-      Circle()
-        .fill(Color.primary.opacity(0.08))
-        .overlay {
-          Image(systemName: "bubble.left")
-            .font(.system(size: iconSize * 0.45, weight: .medium))
-            .foregroundStyle(.secondary)
-        }
-    }
+    SidebarChatIdentityIcon(
+      identity: item.identity,
+      size: iconSize,
+      shape: size == .compact ? .none : .circle
+    )
   }
 
   private var background: some View {
@@ -760,14 +746,18 @@ private struct SidebarCloseButtonStyle: ButtonStyle {
 #Preview {
   SidebarChatItemView(
     item: SidebarViewModel.Item(
-      listItem: ChatListItem(chatItem: HomeChatItem(
-        dialog: Dialog(optimisticForChat: .preview),
-        user: nil,
-        chat: Chat.preview,
-        lastMessage: nil,
-        space: nil
-      ))
-    )!,
+      snapshot: ChatListItemSnapshot(
+        peer: .thread(id: 9_001),
+        chatID: 9_001,
+        title: "Preview Chat",
+        previewText: "Latest message",
+        identity: .thread(ChatListThreadIconDescriptor(
+          emoji: "💬",
+          title: "Preview Chat",
+          isReplyThread: false
+        ))
+      )
+    ),
     selected: true
   )
   .padding()

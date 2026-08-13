@@ -1,17 +1,28 @@
 import Combine
+import Foundation
 import GRDB
 import InlineKit
 import Logger
 import Observation
+import Translation
 
 @MainActor
 @Observable
 final class SidebarEphemeralChatModel {
   private struct Projection {
-    let parentItem: SidebarViewModel.Item?
-    let item: SidebarViewModel.Item?
+    let parentSnapshot: ChatListItemSnapshot?
+    let itemSnapshot: ChatListItemSnapshot?
+    let kind: ChatListItem.Kind
 
-    static let empty = Self(parentItem: nil, item: nil)
+    var parentItem: SidebarViewModel.Item? {
+      parentSnapshot.map { SidebarViewModel.Item(snapshot: $0) }
+    }
+
+    var item: SidebarViewModel.Item? {
+      itemSnapshot.map { SidebarViewModel.Item(snapshot: $0, kind: kind) }
+    }
+
+    static let empty = Self(parentSnapshot: nil, itemSnapshot: nil, kind: .thread)
   }
 
   struct Scope: Equatable {
@@ -29,6 +40,10 @@ final class SidebarEphemeralChatModel {
   @ObservationIgnored private let log = Log.scoped("SidebarEphemeralChat")
   @ObservationIgnored private var scope: Scope?
   @ObservationIgnored private var cancellable: AnyCancellable?
+  @ObservationIgnored private var translationCancellable: AnyCancellable?
+  @ObservationIgnored private var translationLanguageCancellable: AnyCancellable?
+  @ObservationIgnored private var retryTask: Task<Void, Never>?
+  @ObservationIgnored private var retryAttempt = 0
 
   var peer: Peer? {
     scope?.peer
@@ -36,6 +51,25 @@ final class SidebarEphemeralChatModel {
 
   init(db: AppDatabase = .shared) {
     self.db = db
+    translationCancellable = TranslationState.shared.subject.sink { [weak self] event in
+      guard let self else { return }
+      let (peer, _) = event
+      guard projection.itemSnapshot?.peer == peer || projection.parentSnapshot?.peer == peer else { return }
+      projection = Projection(
+        parentSnapshot: projection.parentSnapshot,
+        itemSnapshot: projection.itemSnapshot,
+        kind: projection.kind
+      )
+      if let scope {
+        bind(scope)
+      }
+    }
+    translationLanguageCancellable = NotificationCenter.default
+      .publisher(for: .translationLanguageChanged)
+      .sink { [weak self] _ in
+        guard let self, let scope else { return }
+        bind(scope)
+      }
   }
 
   /// Read-only preview slot for the selected chat. Promotion to a real sidebar
@@ -55,6 +89,9 @@ final class SidebarEphemeralChatModel {
     self.scope = scope
     cancellable?.cancel()
     cancellable = nil
+    retryTask?.cancel()
+    retryTask = nil
+    retryAttempt = 0
     projection = .empty
 
     bind(scope)
@@ -70,92 +107,85 @@ final class SidebarEphemeralChatModel {
     projection = .empty
     cancellable?.cancel()
     cancellable = nil
+    retryTask?.cancel()
+    retryTask = nil
+    retryAttempt = 0
   }
 
   private func bind(_ scope: Scope) {
+    guard self.scope == scope else { return }
+    cancellable?.cancel()
+    cancellable = nil
+    retryTask?.cancel()
+    retryTask = nil
+
     #if DEBUG
     db.warnIfInMemoryDatabaseForObservation("SidebarEphemeralChat")
     #endif
 
     cancellable = ValueObservation
       .tracking { db in
-        let chat = try Self.request(scope: scope).fetchOne(db)
-        let parent: HomeChatItem?
-        if let parentChatID = chat?.chat?.parentChatId {
-          parent = try Self.request(scope: Scope(
-            peer: .thread(id: parentChatID),
-            spaceId: scope.spaceId,
-            includeSpaceChatsInHome: scope.includeSpaceChatsInHome
-          )).fetchOne(db)
+        let snapshots = try ChatListDatabaseQuery.fetchSnapshots(
+          db,
+          spaceID: scope.spaceId,
+          includeSpaceChatsInHome: scope.includeSpaceChatsInHome,
+          translationLanguage: UserLocale.getCurrentLanguage()
+        )
+        let chat = snapshots.first { $0.peer == scope.peer }
+        let parent = chat?.parentChatID.flatMap { parentChatID in
+          snapshots.first { $0.peer == .thread(id: parentChatID) }
+        }
+        let kind: ChatListItem.Kind
+        if scope.spaceId != nil, case .user = scope.peer {
+          kind = .contact
         } else {
-          parent = nil
+          kind = .thread
         }
         return Projection(
-          parentItem: try parent.flatMap { try Self.sidebarItem($0, db: db) },
-          item: try chat.flatMap { try Self.sidebarItem($0, db: db) }
+          parentSnapshot: parent,
+          itemSnapshot: chat,
+          kind: kind
         )
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(
         receiveCompletion: { [weak self] completion in
-          if case let .failure(error) = completion {
-            self?.log.error("Temporary sidebar chat observation failed: \(error.localizedDescription)")
-          }
+          guard let self, self.scope == scope else { return }
+          guard case let .failure(error) = completion else { return }
+          log.error("Temporary sidebar chat observation failed: \(Self.safeErrorName(error))")
+          scheduleRetry(for: scope)
         },
         receiveValue: { [weak self] projection in
           // Publish the pair atomically so no observation can render the reply
           // as an orphan root or produce a second parent-only settle.
-          self?.projection = projection
+          guard let self, self.scope == scope else { return }
+          retryAttempt = 0
+          retryTask?.cancel()
+          retryTask = nil
+          self.projection = projection
         }
       )
   }
 
-  private nonisolated static func sidebarItem(
-    _ homeItem: HomeChatItem,
-    db: Database
-  ) throws -> SidebarViewModel.Item? {
-    let title: String?
-    let parentTitle: String?
-    if let chat = homeItem.chat {
-      title = try ReplyThreadTitleFallback.title(for: chat, db: db)
-      parentTitle = try ReplyThreadTitleFallback.parentTitlesByChatId(
-        for: [chat],
-        db: db
-      )[chat.id]
-    } else {
-      title = nil
-      parentTitle = nil
+  private func scheduleRetry(for scope: Scope) {
+    guard retryTask == nil, self.scope == scope else { return }
+    retryAttempt &+= 1
+    let delay = min(pow(2, Double(min(retryAttempt - 1, 5))) * 0.25, 8)
+    retryTask = Task { [weak self] in
+      try? await Task.sleep(for: .seconds(delay))
+      guard Task.isCancelled == false, let self, self.scope == scope else { return }
+      retryTask = nil
+      bind(scope)
     }
-    return SidebarViewModel.Item(listItem: ChatListItem(
-      chatItem: homeItem,
-      titleOverride: title,
-      parentTitle: parentTitle
-    ))
   }
 
-  private nonisolated static func request(scope: Scope) -> QueryInterfaceRequest<HomeChatItem> {
-    var request = HomeChatItem
-      .all()
-      .filter(
-        sql: "\"dialog\".\"id\" = ?",
-        arguments: StatementArguments([Dialog.getDialogId(peerId: scope.peer)])
-      )
-
-    if let spaceId = scope.spaceId {
-      request = request.filter(
-        sql: """
-        ("dialog"."spaceId" = ? OR "chat"."spaceId" = ? OR "dialog"."peerUserId" IN (
-          SELECT "member"."userId"
-          FROM "member"
-          WHERE "member"."spaceId" = ?
-        ))
-        """,
-        arguments: StatementArguments([spaceId, spaceId, spaceId])
-      )
-    } else if scope.includeSpaceChatsInHome == false {
-      request = request.filter(sql: #"COALESCE("dialog"."spaceId", "chat"."spaceId") IS NULL"#)
+  private nonisolated static func safeErrorName(_ error: Error) -> String {
+    if error is RowDecodingError {
+      return "RowDecodingError"
     }
-
-    return request
+    if let error = error as? DatabaseError {
+      return "DatabaseError(\(error.resultCode.rawValue))"
+    }
+    return String(reflecting: type(of: error))
   }
 }
