@@ -116,8 +116,15 @@ private struct ExperimentalAuthedRootView: View {
   @State private var pendingSearchExit: PendingSearchExit?
   @State private var isCreatingThread = false
   @State private var isNotificationSettingsPresented = false
+  @State private var didRestoreSceneHomeState = false
+  @SceneStorage("ios.home.activeSpaceID.v1")
+  private var sceneActiveSpaceIDRaw = ""
+  @SceneStorage("ios.home.allChatsFilter.v1")
+  private var allChatsFilterRaw = ChatListFilter.all.rawValue
   @AppStorage("ios.experimental.root.didMigrateExplicitTabs")
   private var didMigrateExplicitTabs = false
+  @AppStorage("ios.home.didMigrateActiveSpaceToScene.v1")
+  private var didMigrateActiveSpaceToScene = false
   @AppStorage(ExperimentalHomePreferenceKeys.chatScope)
   private var homeChatScopeRaw = ExperimentalHomeChatScope.all.rawValue
   @AppStorage(ExperimentalHomePreferenceKeys.chatItemRenderMode)
@@ -133,6 +140,7 @@ private struct ExperimentalAuthedRootView: View {
   @EnvironmentStateObject private var compactSpaceList: CompactSpaceList
   @EnvironmentStateObject private var homeListStore: ExperimentalHomeListStore
   @EnvironmentObject private var notificationSettings: NotificationSettingsManager
+  @EnvironmentObject private var notificationHandler: NotificationHandler
   @EnvironmentObject private var realtimeState: RealtimeState
 
   init() {
@@ -150,6 +158,9 @@ private struct ExperimentalAuthedRootView: View {
 
   var body: some View {
     rootNavigation
+      // The stack wraps the root TabView, so pushed destinations naturally replace
+      // the tab surface. Legacy per-destination tab-bar hiding is unnecessary here.
+      .environment(\.inlineHideTabBar, false)
       .environmentObject(data)
       .environmentObject(compactSpaceList)
       .environmentObject(homeListStore)
@@ -160,6 +171,15 @@ private struct ExperimentalAuthedRootView: View {
         Task {
           await refetchCoreDataAfterLocalDataCleared()
         }
+      }
+      .task {
+        restoreSceneHomeStateIfNeeded()
+        await loadHomeDataOnAppear()
+      }
+      .onChange(of: compactSpaceList.spaces) { _, _ in
+        nav.pruneDialogFetchState(validSpaceIds: Set(compactSpaceList.spaces.map(\.id)))
+        ensureActiveSpaceExists()
+        Task { await refreshDialogsForCurrentSelection() }
       }
       .onChange(of: homeListStore.state.revision) { _, _ in
         translationCoordinator.process(
@@ -195,7 +215,11 @@ private struct ExperimentalAuthedRootView: View {
           experimentalToolbarContent()
         }
         .navigationDestination(for: Destination.self) { destination in
-          ExperimentalDestinationView(nav: bindableNav, destination: destination)
+          ExperimentalDestinationView(
+            nav: bindableNav,
+            destination: destination,
+            onRetryHome: retryHomeData
+          )
         }
     }
     // Prevent child views (e.g. ChatView) from leaking their toolbar appearance
@@ -203,14 +227,21 @@ private struct ExperimentalAuthedRootView: View {
     .toolbarColorScheme(colorScheme, for: .navigationBar)
     .toolbarBackground(.visible, for: .navigationBar)
     .sheet(item: $bindableRouter.presentedSheet) { sheet in
-      if case .chatInfo = sheet {
+      switch sheet {
+      case .chatInfo:
         ExperimentalSheetView(sheet: sheet)
           .presentationDetents([.medium, .large])
-      } else {
+      case .createSpace:
+        ExperimentalSheetView(sheet: sheet)
+          .presentationDetents([.medium, .large])
+          .presentationDragIndicator(.visible)
+          .presentationContentInteraction(.scrolls)
+      default:
         ExperimentalSheetView(sheet: sheet)
       }
     }
     .onAppear {
+      restoreSceneHomeStateIfNeeded()
       migrateLegacyRootTabsIfNeeded()
       let routedTab = RootTab(appTab: bindableRouter.selectedTab)
       let desiredRootTab = switch routedTab {
@@ -282,12 +313,17 @@ private struct ExperimentalAuthedRootView: View {
       completePendingSearchExit()
     }
     .onChange(of: nav.activeSpaceId) { _, _ in
+      sceneActiveSpaceIDRaw = nav.activeSpaceId.map(String.init) ?? ""
       configureHomeList()
+      Task { await reloadHomeData(forceDialogs: true) }
     }
     .onChange(of: sortModeRaw) { _, _ in
       configureHomeList()
     }
     .onChange(of: homeChatScopeRaw) { _, _ in
+      configureHomeList()
+    }
+    .onChange(of: allChatsFilterRaw) { _, _ in
       configureHomeList()
     }
   }
@@ -486,7 +522,8 @@ private struct ExperimentalAuthedRootView: View {
     homeListStore.setConfiguration(ExperimentalHomeListConfiguration(
       spaceID: nav.activeSpaceId,
       includeSpaceChatsInHome: homeScope == .all,
-      sort: sortMode.chatListSort
+      inboxSort: sortMode.chatListSort,
+      allChatsFilter: ChatListFilter(rawValue: allChatsFilterRaw) ?? .all
     ))
   }
 
@@ -498,7 +535,9 @@ private struct ExperimentalAuthedRootView: View {
 
     return ExperimentalHomeView(
       nav: bindableNav,
-      initialTab: rootTab == .inbox ? .inbox : .allChats
+      initialTab: rootTab == .inbox ? .inbox : .allChats,
+      allChatsFilter: ChatListFilter(rawValue: allChatsFilterRaw) ?? .all,
+      onRetry: retryHomeData
     )
   }
 
@@ -512,32 +551,185 @@ private struct ExperimentalAuthedRootView: View {
       selectedSpaceId: selectedSpaceId,
       onSelectHome: {
         selectedSpaceId.wrappedValue = nil
-        selectAllChatsAfterSpaceChange()
+        returnToCurrentTabRootAfterSpaceChange()
       },
       onSelectSpace: { space in
         if selectedSpaceId.wrappedValue != space.id {
           selectedSpaceId.wrappedValue = space.id
         }
-        selectAllChatsAfterSpaceChange()
+        returnToCurrentTabRootAfterSpaceChange()
       },
       onCreateSpace: {
-        router.push(.createSpace, for: router.selectedTab)
+        router.presentSheet(.createSpace)
       },
       showsConnectionStateInTitle: false
     )
 
     picker
+      .offset(x: activeSpace == nil ? -2 : 0)
   }
 
-  private func selectAllChatsAfterSpaceChange() {
-    let previousTab = router.selectedTab
-    router.popToRoot(for: previousTab)
+  private func returnToCurrentTabRootAfterSpaceChange() {
+    router.popToRoot(for: router.selectedTab)
+  }
 
-    lastContentRootTab = .allChats
-    persistedRootTabRaw = RootTab.allChats.rawValue
-    rootTab = .allChats
-    router.selectedTab = .allChats
-    router.popToRoot(for: .allChats)
+  private func restoreSceneHomeStateIfNeeded() {
+    guard !didRestoreSceneHomeState else { return }
+    didRestoreSceneHomeState = true
+
+    let restoredSpaceID: Int64?
+    if let sceneSpaceID = Int64(sceneActiveSpaceIDRaw) {
+      restoredSpaceID = sceneSpaceID
+    } else if !didMigrateActiveSpaceToScene {
+      restoredSpaceID = ExperimentalNavigationModel.loadLegacyActiveSpaceId()
+      didMigrateActiveSpaceToScene = true
+      sceneActiveSpaceIDRaw = restoredSpaceID.map(String.init) ?? ""
+    } else {
+      restoredSpaceID = nil
+    }
+
+    nav.activeSpaceId = restoredSpaceID
+  }
+
+  private func ensureActiveSpaceExists() {
+    guard let activeSpaceID = nav.activeSpaceId else { return }
+    guard !compactSpaceList.spaces.isEmpty else { return }
+    if !compactSpaceList.spaces.contains(where: { $0.id == activeSpaceID }) {
+      nav.activeSpaceId = nil
+    }
+  }
+
+  private func loadHomeDataOnAppear() async {
+    let shouldBootstrap = nav.consumeNeedsHomeBootstrap()
+    await reloadHomeData(
+      includeBootstrapData: shouldBootstrap,
+      forceDialogs: nav.activeSpaceId != nil
+    )
+  }
+
+  private func reloadHomeData(
+    includeBootstrapData: Bool = false,
+    forceDialogs: Bool = false
+  ) async {
+    let refreshRevision = nav.homeRefreshRevision
+    var availableSpaces = compactSpaceList.spaces
+
+    if includeBootstrapData {
+      notificationHandler.setAuthenticated(value: true)
+
+      do {
+        _ = try await realtimeV2.send(.getMe())
+        nav.recordHomeRefreshResult(requestID: "me", succeeded: true, revision: refreshRevision)
+      } catch {
+        nav.recordHomeRefreshResult(
+          requestID: "me",
+          succeeded: false,
+          revision: refreshRevision,
+          reportFailure: !Task.isCancelled
+        )
+        Log.shared.error("Failed to getMe", error: error)
+      }
+
+      do {
+        _ = try await realtimeV2.send(.getChats())
+        nav.recordHomeRefreshResult(requestID: "chats", succeeded: true, revision: refreshRevision)
+      } catch {
+        nav.recordHomeRefreshResult(
+          requestID: "chats",
+          succeeded: false,
+          revision: refreshRevision,
+          reportFailure: !Task.isCancelled
+        )
+        Log.shared.error("Failed to getChats", error: error)
+      }
+
+      do {
+        availableSpaces = try await data.getSpaces()
+        nav.pruneDialogFetchState(validSpaceIds: Set(availableSpaces.map(\.id)))
+        reconcileActiveSpace(with: availableSpaces)
+        nav.recordHomeRefreshResult(requestID: "spaces", succeeded: true, revision: refreshRevision)
+      } catch {
+        nav.recordHomeRefreshResult(
+          requestID: "spaces",
+          succeeded: false,
+          revision: refreshRevision,
+          reportFailure: !Task.isCancelled
+        )
+        Log.shared.error("Failed to getSpaces", error: error)
+      }
+    }
+
+    guard !Task.isCancelled else { return }
+    await refreshDialogsForCurrentSelection(
+      force: forceDialogs,
+      availableSpaces: availableSpaces,
+      refreshRevision: refreshRevision
+    )
+  }
+
+  private func reconcileActiveSpace(with spaces: [Space]) {
+    guard let activeSpaceID = nav.activeSpaceId else { return }
+    if !spaces.contains(where: { $0.id == activeSpaceID }) {
+      nav.activeSpaceId = nil
+    }
+  }
+
+  private func refreshDialogsForCurrentSelection(
+    force: Bool = false,
+    availableSpaces: [Space]? = nil,
+    refreshRevision: Int? = nil
+  ) async {
+    let revision = refreshRevision ?? nav.homeRefreshRevision
+    if let spaceID = nav.activeSpaceId {
+      await fetchDialogsIfNeeded(spaceID: spaceID, force: force, refreshRevision: revision)
+    } else {
+      // Cached rows remain interactive while remote reconciliation continues.
+      let spaceIDs = (availableSpaces ?? compactSpaceList.spaces).map(\.id)
+      for batchStart in stride(from: 0, to: spaceIDs.count, by: 4) {
+        guard !Task.isCancelled, revision == nav.homeRefreshRevision else { return }
+        let batchEnd = min(batchStart + 4, spaceIDs.count)
+        let batch = spaceIDs[batchStart ..< batchEnd]
+        await withTaskGroup(of: Void.self) { group in
+          for spaceID in batch {
+            group.addTask { @MainActor in
+              await fetchDialogsIfNeeded(
+                spaceID: spaceID,
+                force: force,
+                refreshRevision: revision
+              )
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private func fetchDialogsIfNeeded(
+    spaceID: Int64,
+    force: Bool = false,
+    refreshRevision: Int
+  ) async {
+    guard nav.beginDialogsFetchIfNeeded(spaceId: spaceID, force: force) else { return }
+    do {
+      try await data.getDialogs(spaceId: spaceID)
+      nav.completeDialogsFetch(spaceId: spaceID, succeeded: true, revision: refreshRevision)
+    } catch {
+      nav.completeDialogsFetch(
+        spaceId: spaceID,
+        succeeded: false,
+        revision: refreshRevision,
+        reportFailure: !Task.isCancelled
+      )
+      Log.shared.error("Failed to get dialogs", error: error)
+    }
+  }
+
+  private func retryHomeData() {
+    nav.clearHomeRefreshFailures()
+    homeListStore.refresh()
+    Task {
+      await reloadHomeData(includeBootstrapData: true, forceDialogs: true)
+    }
   }
 
   private func createThreadInstantly(spaceId: Int64?) {
@@ -595,6 +787,14 @@ private struct ExperimentalAuthedRootView: View {
       }
       .sharedBackgroundVisibility(.hidden)
 
+      if showsAllChatsFilter {
+        ToolbarItem(placement: .topBarTrailing) {
+          allChatsFilterMenu()
+        }
+
+        ToolbarSpacer(.fixed, placement: .topBarTrailing)
+      }
+
       if let connectionState = realtimeState.displayedConnectionState {
         ToolbarItem(placement: .topBarTrailing) {
           connectionProgressIndicator(connectionState)
@@ -620,6 +820,9 @@ private struct ExperimentalAuthedRootView: View {
 
       ToolbarItemGroup(placement: .topBarTrailing) {
         newChatButton(activeSpaceId: nav.activeSpaceId)
+        if showsAllChatsFilter {
+          allChatsFilterMenu()
+        }
         if let connectionState = realtimeState.displayedConnectionState {
           connectionProgressIndicator(connectionState)
         }
@@ -640,6 +843,32 @@ private struct ExperimentalAuthedRootView: View {
     }
     .disabled(isCreatingThread)
     .accessibilityLabel("New Thread")
+  }
+
+  private func allChatsFilterMenu() -> some View {
+    let unreadOnly = Binding(
+      get: { allChatsFilterRaw == ChatListFilter.unread.rawValue },
+      set: { allChatsFilterRaw = $0 ? ChatListFilter.unread.rawValue : ChatListFilter.all.rawValue }
+    )
+
+    return Menu {
+      Toggle(isOn: unreadOnly) {
+        Label("Unread", systemImage: "envelope.badge")
+      }
+    } label: {
+      Image(
+        systemName: unreadOnly.wrappedValue
+          ? "line.3.horizontal.decrease.circle.fill"
+          : "line.3.horizontal.decrease"
+      )
+      .foregroundStyle(unreadOnly.wrappedValue ? Color.accentColor : Color.primary)
+    }
+    .accessibilityLabel("Filter All Chats")
+    .accessibilityValue(unreadOnly.wrappedValue ? "Unread" : "All Chats")
+  }
+
+  private var showsAllChatsFilter: Bool {
+    RootTab(appTab: router.selectedTab) == .allChats && router.selectedTabPath.isEmpty
   }
 
   private func connectionProgressIndicator(
@@ -727,7 +956,8 @@ private struct ExperimentalAuthedRootView: View {
     }
 
     do {
-      _ = try await data.getSpaces()
+      let spaces = try await data.getSpaces()
+      reconcileActiveSpace(with: spaces)
     } catch {
       Log.shared.error("Failed to reload spaces after clearing local data", error: error)
     }
@@ -894,7 +1124,7 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
       }
     )
     let sortMenu = UIMenu(
-      title: "Sort By",
+      title: "Inbox Sort",
       options: [.displayInline, .singleSelection],
       children: ExperimentalHomeSortMode.allCases.map { mode in
         UIAction(title: mode.title, state: mode == sortMode ? .on : .off) { _ in

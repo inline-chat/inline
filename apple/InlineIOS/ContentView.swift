@@ -173,6 +173,9 @@ private struct AuthedAppRoot: View {
     switch sheet {
     case .createSpace:
       CreateSpace()
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .presentationContentInteraction(.scrolls)
 
     case .alphaSheet:
       AlphaSheet()

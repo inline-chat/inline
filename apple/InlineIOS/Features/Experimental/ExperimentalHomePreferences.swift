@@ -3,9 +3,43 @@ import InlineKit
 
 enum ExperimentalHomePreferenceKeys {
   static let isEnabled = "enableExperimentalView"
+  static let defaultMigrationVersion = "ios.experimental.home.defaultMigrationVersion"
+  static let forceLegacyRollback = "ios.home.forceLegacyRollback"
   static let chatScope = "ios.experimental.home.chatScope"
   static let chatItemRenderMode = "ios.experimental.home.chatItemRenderMode"
   static let sortMode = "ios.experimental.home.sortMode"
+  static let unreadBadgeStyle = "unreadBadgeStyle"
+}
+
+enum ExperimentalHomeUnreadBadgeStyle: String, CaseIterable, Identifiable {
+  case dot
+  case numbered
+
+  static let defaultValue = ExperimentalHomeUnreadBadgeStyle.dot
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .dot:
+      "Dot"
+    case .numbered:
+      "Numbered"
+    }
+  }
+
+  var systemImage: String {
+    switch self {
+    case .dot:
+      "circle.fill"
+    case .numbered:
+      "1.circle.fill"
+    }
+  }
+}
+
+enum ExperimentalHomeRollout {
+  static let currentDefaultMigrationVersion = 1
 }
 
 enum ExperimentalHomeChatScope: String, CaseIterable, Identifiable {

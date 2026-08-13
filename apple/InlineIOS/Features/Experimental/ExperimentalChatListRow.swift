@@ -1,25 +1,31 @@
 import InlineKit
 import InlineUI
 import SwiftUI
+import Translation
 
 struct ExperimentalChatListRow: View, @MainActor Equatable {
   let item: ChatListItemSnapshot
   let layoutMode: ChatListLayoutMode
   let showsPinnedIndicator: Bool
   let showsActivityTime: Bool
-
-  @ScaledMetric(relativeTo: .body) private var metricScale: CGFloat = 1
+  let unreadBadgeStyle: ExperimentalHomeUnreadBadgeStyle
+  @State private var showsTranslatedPreview: Bool
 
   init(
     item: ChatListItemSnapshot,
     layoutMode: ChatListLayoutMode,
     showsPinnedIndicator: Bool = true,
-    showsActivityTime: Bool = false
+    showsActivityTime: Bool = false,
+    unreadBadgeStyle: ExperimentalHomeUnreadBadgeStyle = .defaultValue
   ) {
     self.item = item
     self.layoutMode = layoutMode
     self.showsPinnedIndicator = showsPinnedIndicator
     self.showsActivityTime = showsActivityTime
+    self.unreadBadgeStyle = unreadBadgeStyle
+    _showsTranslatedPreview = State(
+      initialValue: TranslationState.shared.isTranslationEnabled(for: item.peer)
+    )
   }
 
   static func == (lhs: Self, rhs: Self) -> Bool {
@@ -27,12 +33,12 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
       && lhs.layoutMode == rhs.layoutMode
       && lhs.showsPinnedIndicator == rhs.showsPinnedIndicator
       && lhs.showsActivityTime == rhs.showsActivityTime
-      && lhs.metricScale == rhs.metricScale
+      && lhs.unreadBadgeStyle == rhs.unreadBadgeStyle
   }
 
   var body: some View {
     ZStack(alignment: .leading) {
-      if item.unreadMark, item.unreadCount == 0 {
+      if unreadBadgeStyle == .dot, item.isUnread {
         dotUnreadIndicator
       }
 
@@ -53,13 +59,19 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
     .contentShape(Rectangle())
     .accessibilityElement(children: .combine)
     .accessibilityLabel(accessibilityLabel)
+    .onReceive(TranslationState.shared.subject) { event in
+      let (peer, isEnabled) = event
+      guard peer == item.peer else { return }
+      guard showsTranslatedPreview != isEnabled else { return }
+      showsTranslatedPreview = isEnabled
+    }
   }
 
   private var titleLine: some View {
     HStack(alignment: .firstTextBaseline, spacing: 7) {
       Text(item.title)
         .font(titleFont)
-        .foregroundStyle(.primary)
+        .foregroundStyle(titleColor)
         .lineLimit(1)
         .truncationMode(.tail)
         .layoutPriority(1)
@@ -73,11 +85,9 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
           .accessibilityHidden(true)
       }
 
-      if showsActivityTime,
-         layoutMode != .compact,
-         let timestampText = item.timestampText {
+      if let timestampText = displayedTimestampText {
         Text(timestampText)
-          .font(.system(size: 11))
+          .font(.footnote)
           .foregroundStyle(.tertiary)
           .lineLimit(1)
           .fixedSize(horizontal: true, vertical: false)
@@ -92,18 +102,23 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
   }
 
   private var previewLine: some View {
-    HStack(alignment: .center, spacing: 8) {
-      ChatListComposeActivityPreview(
-        peer: item.peer,
-        senderName: item.previewSenderName,
-        text: resolvedPreviewText,
-        layoutMode: layoutMode,
-        previewLines: metrics.previewLines
-      )
-      .frame(maxWidth: .infinity, alignment: .leading)
+    HStack(alignment: .bottom, spacing: 8) {
+      previewContent
+        .frame(maxWidth: .infinity, alignment: .leading)
 
       numberedUnreadIndicator
     }
+  }
+
+  @ViewBuilder
+  private var previewContent: some View {
+    ChatListComposeActivityPreview(
+      peer: item.peer,
+      senderName: resolvedPreviewSenderName,
+      text: resolvedPreviewText,
+      layoutMode: layoutMode,
+      previewLines: metrics.previewLines
+    )
   }
 
   @ViewBuilder
@@ -130,35 +145,33 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
           isReplyThread: descriptor.isReplyThread,
           accessibilityLabel: descriptor.title
         ),
-        size: layoutMode == .compact
-          ? .compact(metrics.avatarSize * 0.9)
-          : .large(metrics.avatarSize),
-        shape: layoutMode == .compact ? .none : .circle,
-        symbolColor: layoutMode == .compact ? .primary : .secondary
+        size: .large(metrics.avatarSize),
+        shape: .circle,
+        symbolColor: .primary,
+        contentScaleMultiplier: metrics.iconContentScale
       )
       .equatable()
-      .frame(width: metrics.avatarSize, height: metrics.avatarSize)
+      .opacity(metrics.iconOpacity)
     case nil:
       ThreadIconView(
         ThreadIconDescriptor(emoji: nil, title: item.title),
-        size: layoutMode == .compact
-          ? .compact(metrics.avatarSize * 0.9)
-          : .large(metrics.avatarSize),
-        shape: layoutMode == .compact ? .none : .circle,
-        symbolColor: layoutMode == .compact ? .primary : .secondary
+        size: .large(metrics.avatarSize),
+        shape: .circle,
+        symbolColor: .primary,
+        contentScaleMultiplier: metrics.iconContentScale
       )
       .equatable()
-      .frame(width: metrics.avatarSize, height: metrics.avatarSize)
+      .opacity(metrics.iconOpacity)
     }
   }
 
   @ViewBuilder
   private var dotUnreadIndicator: some View {
     Group {
-      if item.unreadMark, item.unreadCount == 0 {
+      if unreadBadgeStyle == .dot, item.isUnread {
         Circle()
           .fill(item.isProminent ? Color.accentColor : Color.secondary)
-          .frame(width: 6 * metricScale, height: 6 * metricScale)
+          .frame(width: 8, height: 8)
           .accessibilityHidden(true)
       }
     }
@@ -166,28 +179,50 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
 
   @ViewBuilder
   private var numberedUnreadIndicator: some View {
-    if item.unreadCount > 0 {
-      Text(item.unreadCount > 99 ? "99+" : "\(item.unreadCount)")
-        .font(.caption2.weight(.semibold))
-        .foregroundStyle(.white)
-        .padding(.horizontal, 6 * metricScale)
-        .frame(minWidth: 20 * metricScale, minHeight: 20 * metricScale)
-        .background(item.isProminent ? Color.accentColor : Color.secondary, in: Capsule())
-        .accessibilityLabel("\(item.unreadCount) unread messages")
+    if unreadBadgeStyle == .numbered, item.isUnread {
+      let displayedCount = max(item.unreadCount, 1)
+      Text(displayedCount > 99 ? "99+" : "\(displayedCount)")
+        .font(.caption.weight(.semibold).monospacedDigit())
+        .foregroundStyle(item.isProminent ? Color.white : Color(.systemBackground))
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .frame(minWidth: 22, minHeight: 22)
+        .background(
+          item.isProminent ? Color.accentColor : Color(.systemGray2),
+          in: Capsule()
+        )
+        .accessibilityLabel(
+          item.unreadCount > 0 ? "\(item.unreadCount) unread messages" : "Marked unread"
+        )
     }
   }
 
-  private var showsNumberedUnread: Bool {
-    item.unreadCount > 0
-  }
-
   private var unreadGutter: CGFloat {
-    11 * metricScale
+    11
   }
 
   private var resolvedPreviewText: String? {
-    let preview = item.previewText?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let source = if showsTranslatedPreview {
+      item.translatedPreviewText ?? item.previewText
+    } else {
+      item.previewText
+    }
+    let preview = source?.trimmingCharacters(in: .whitespacesAndNewlines)
     return preview?.isEmpty == false ? preview : nil
+  }
+
+  private var resolvedPreviewSenderName: String? {
+    let sender = item.previewSenderName?.trimmingCharacters(in: .whitespacesAndNewlines)
+    return sender?.isEmpty == false ? sender : nil
+  }
+
+  private var displayedTimestampText: String? {
+    guard showsActivityTime,
+          layoutMode != .compact,
+          resolvedPreviewText != nil
+    else { return nil }
+
+    return item.timestampText
   }
 
   private var accessibilityLabel: String {
@@ -199,38 +234,63 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
         parts.append(resolvedPreviewText)
       }
     }
-    if showsActivityTime,
-       layoutMode != .compact,
-       let timestampText = item.timestampText {
+    if let timestampText = displayedTimestampText {
       parts.append(timestampText)
     }
     if item.isUnread {
       parts.append(item.unreadCount > 0 ? "\(item.unreadCount) unread" : "unread")
     }
-    if item.isPinned, showsPinnedIndicator {
+    if item.isPinned {
       parts.append("pinned")
     }
     return parts.joined(separator: ", ")
   }
 
   private var metrics: Metrics {
-    let base = switch layoutMode {
+    switch layoutMode {
     case .compact:
-      Metrics(avatarSize: 34, minimumHeight: 35, horizontalSpacing: 10, textSpacing: 0, previewLines: 0)
+      Metrics(
+        avatarSize: 32,
+        iconContentScale: 0.88,
+        iconOpacity: 0.84,
+        minimumHeight: 44,
+        horizontalSpacing: 12,
+        textSpacing: 0,
+        previewLines: 0
+      )
     case .standard:
-      Metrics(avatarSize: 44, minimumHeight: 52, horizontalSpacing: 10, textSpacing: 2, previewLines: 1)
+      Metrics(
+        avatarSize: 44,
+        iconContentScale: 0.88,
+        iconOpacity: 0.84,
+        minimumHeight: 52,
+        horizontalSpacing: 10,
+        textSpacing: 0,
+        previewLines: 1
+      )
     case .large:
-      Metrics(avatarSize: 56, minimumHeight: 66, horizontalSpacing: 12, textSpacing: 2, previewLines: 2)
+      Metrics(
+        avatarSize: 56,
+        iconContentScale: 0.88,
+        iconOpacity: 0.84,
+        minimumHeight: 72,
+        horizontalSpacing: 12,
+        textSpacing: 0,
+        previewLines: 2
+      )
     }
-    return base.scaled(by: metricScale)
+  }
+
+  private var titleColor: Color {
+    layoutMode == .compact ? Color.primary.opacity(0.88) : .primary
   }
 
   private var titleFont: Font {
     switch layoutMode {
     case .compact:
-      .system(size: 18, weight: item.isUnread ? .semibold : .medium)
+      .body.weight(item.isUnread ? .semibold : .medium)
     case .standard, .large:
-      .system(size: 16, weight: item.isUnread ? .semibold : .medium)
+      .callout.weight(item.isUnread ? .semibold : .medium)
     }
   }
 }
@@ -245,6 +305,7 @@ private struct ChatListComposeActivityPreview: View {
 
   @ScaledMetric(relativeTo: .subheadline) private var singleLineHeight: CGFloat = 18
   @ScaledMetric(relativeTo: .subheadline) private var largePreviewHeight: CGFloat = 38
+  @ScaledMetric(relativeTo: .subheadline) private var largeMessageFontSize: CGFloat = 14
   @State private var activityState: ComposeActionActivityState
 
   init(
@@ -285,7 +346,7 @@ private struct ChatListComposeActivityPreview: View {
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
-    .frame(height: previewHeight, alignment: .leading)
+    .frame(height: previewHeight, alignment: previewAlignment)
     .clipped()
     .animation(.easeInOut(duration: 0.18), value: activityState.presentation)
   }
@@ -293,10 +354,25 @@ private struct ChatListComposeActivityPreview: View {
   @ViewBuilder
   private var preview: some View {
     if let text {
-      ChatListPreviewText(senderName: senderName, text: text)
-        .font(.system(size: 14))
-        .lineLimit(previewLines)
+      if layoutMode == .large, let senderName {
+        VStack(alignment: .leading, spacing: 0) {
+          Text(senderName)
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(Color.primary.opacity(0.84))
+            .lineLimit(1)
+
+          Text(text)
+            .font(.system(size: largeMessageFontSize))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
         .truncationMode(.tail)
+      } else {
+        ChatListPreviewText(senderName: senderName, text: text)
+          .font(.subheadline)
+          .lineLimit(previewLines)
+          .truncationMode(.tail)
+      }
     } else {
       Color.clear
     }
@@ -304,6 +380,10 @@ private struct ChatListComposeActivityPreview: View {
 
   private var previewHeight: CGFloat {
     layoutMode == .large ? largePreviewHeight : singleLineHeight
+  }
+
+  private var previewAlignment: Alignment {
+    layoutMode == .large ? .topLeading : .leading
   }
 
   private static var swapTransition: AnyTransition {
@@ -320,7 +400,9 @@ private struct ChatListPreviewText: View {
 
   var body: some View {
     if let senderName, senderName.isEmpty == false {
-      Text("\(Text(senderName).foregroundStyle(.primary)): \(Text(text).foregroundStyle(.secondary))")
+      Text(
+        "\(Text(senderName).fontWeight(.medium).foregroundStyle(Color.primary.opacity(0.80))): \(Text(text).foregroundStyle(.secondary))"
+      )
     } else {
       Text(text)
         .foregroundStyle(.secondary)
@@ -330,18 +412,10 @@ private struct ChatListPreviewText: View {
 
 private struct Metrics {
   let avatarSize: CGFloat
+  let iconContentScale: CGFloat
+  let iconOpacity: Double
   let minimumHeight: CGFloat
   let horizontalSpacing: CGFloat
   let textSpacing: CGFloat
   let previewLines: Int
-
-  func scaled(by scale: CGFloat) -> Self {
-    Self(
-      avatarSize: avatarSize * scale,
-      minimumHeight: minimumHeight * scale,
-      horizontalSpacing: horizontalSpacing * scale,
-      textSpacing: textSpacing * scale,
-      previewLines: previewLines
-    )
-  }
 }

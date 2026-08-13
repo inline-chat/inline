@@ -4,6 +4,7 @@ import Invite
 import Logger
 import RealtimeV2
 import SwiftUI
+import UIKit
 
 @MainActor
 @Observable
@@ -18,7 +19,6 @@ final class ExperimentalNavigationModel {
 
   var activeSpaceId: Int64? {
     didSet {
-      saveActiveSpaceId(activeSpaceId)
       guard oldValue != activeSpaceId else { return }
       homeRefreshRevision += 1
       failedHomeRefreshRequestIDs.removeAll()
@@ -29,8 +29,8 @@ final class ExperimentalNavigationModel {
     failedHomeRefreshRequestIDs.isEmpty ? nil : "Some chats could not be refreshed."
   }
 
-  init() {
-    activeSpaceId = Self.loadActiveSpaceId()
+  init(activeSpaceId: Int64? = nil) {
+    self.activeSpaceId = activeSpaceId
   }
 
   func consumeNeedsHomeBootstrap() -> Bool {
@@ -93,7 +93,7 @@ final class ExperimentalNavigationModel {
     homeRefreshRevision += 1
   }
 
-  private static func loadActiveSpaceId() -> Int64? {
+  static func loadLegacyActiveSpaceId() -> Int64? {
     let defaults = UserDefaults.standard
 
     if let value = defaults.object(forKey: activeSpaceDefaultsKey) as? Int64 {
@@ -106,15 +106,6 @@ final class ExperimentalNavigationModel {
       return value.int64Value
     }
     return nil
-  }
-
-  private func saveActiveSpaceId(_ spaceId: Int64?) {
-    let defaults = UserDefaults.standard
-    if let spaceId {
-      defaults.set(spaceId, forKey: Self.activeSpaceDefaultsKey)
-    } else {
-      defaults.removeObject(forKey: Self.activeSpaceDefaultsKey)
-    }
   }
 }
 
@@ -199,6 +190,7 @@ enum ExperimentalHomeNavigationPerformance {
 struct ExperimentalDestinationView: View {
   @Bindable var nav: ExperimentalNavigationModel
   let destination: Destination
+  var onRetryHome: () -> Void = {}
 
   var body: some View {
     content
@@ -208,9 +200,9 @@ struct ExperimentalDestinationView: View {
   private var content: some View {
     switch destination {
     case .chats:
-      ExperimentalHomeView(nav: nav, initialTab: .inbox)
+      ExperimentalHomeView(nav: nav, initialTab: .inbox, onRetry: onRetryHome)
     case .archived:
-      ExperimentalHomeView(nav: nav, initialTab: .archived)
+      ExperimentalHomeView(nav: nav, initialTab: .archived, onRetry: onRetryHome)
     case .spaces:
       SpacesView()
     case let .space(id):
@@ -292,60 +284,66 @@ enum ExperimentalHomeTab: Hashable {
 struct ExperimentalHomeView: View {
   @Bindable var nav: ExperimentalNavigationModel
   let initialTab: ExperimentalHomeTab
+  var allChatsFilter: ChatListFilter = .all
+  var onRetry: () -> Void = {}
 
-  @EnvironmentObject private var compactSpaceList: CompactSpaceList
-  @EnvironmentObject private var data: DataManager
   @EnvironmentObject private var homeListStore: ExperimentalHomeListStore
-  @EnvironmentObject private var notificationHandler: NotificationHandler
-  @Environment(\.realtimeV2) private var realtimeV2
 
   @AppStorage(ExperimentalHomePreferenceKeys.chatItemRenderMode)
   private var chatItemRenderModeRaw = ExperimentalHomeChatItemRenderMode.twoLineLastMessage.rawValue
+
+  @AppStorage(ExperimentalHomePreferenceKeys.unreadBadgeStyle)
+  private var unreadBadgeStyleRawValue = ExperimentalHomeUnreadBadgeStyle.defaultValue.rawValue
 
   var body: some View {
     Group {
       switch initialTab {
       case .inbox:
         ExperimentalChatListView(
-          items: homeListStore.state.presentation.inbox,
+          items: homeListStore.state.presentation.inboxUnpinned,
+          inboxPinnedItems: homeListStore.state.presentation.inboxPinned,
           daySections: [],
           mode: .inbox,
           emptyStyle: .inbox,
           emptyTitle: "Inbox is clear",
           emptySubtitle: "Open a chat from All Chats to keep it here.",
-          sectionHeader: nil,
           chatItemRenderMode: chatItemRenderMode,
+          unreadBadgeStyle: unreadBadgeStyle,
           isLoading: homeListStore.state.isLoading,
           status: homeStatus,
-          onRetry: retryHomeData
+          onRetry: onRetry
         )
       case .allChats:
         ExperimentalChatListView(
           items: [],
+          inboxPinnedItems: [],
           daySections: homeListStore.state.presentation.allChatSections,
           mode: .allChats,
-          emptyStyle: .inlineLogo,
-          emptyTitle: "No chats",
-          emptySubtitle: "Start a new thread with the plus button.",
-          sectionHeader: nil,
+          emptyStyle: allChatsFilter == .unread ? .unreadFilter : .inlineLogo,
+          emptyTitle: allChatsFilter == .unread ? "No unread chats" : "No chats",
+          emptySubtitle: allChatsFilter == .unread
+            ? "You’re caught up."
+            : "Start a new thread with the plus button.",
           chatItemRenderMode: chatItemRenderMode,
+          unreadBadgeStyle: unreadBadgeStyle,
           isLoading: homeListStore.state.isLoading,
           status: homeStatus,
-          onRetry: retryHomeData
+          onRetry: onRetry
         )
       case .archived:
         ExperimentalChatListView(
           items: homeListStore.state.presentation.archived,
+          inboxPinnedItems: [],
           daySections: [],
           mode: .archived,
           emptyStyle: .text,
           emptyTitle: "No archived chats",
           emptySubtitle: "Archived chats will show up here.",
-          sectionHeader: "Archived Chats",
           chatItemRenderMode: chatItemRenderMode,
+          unreadBadgeStyle: unreadBadgeStyle,
           isLoading: homeListStore.state.isLoading,
           status: homeStatus,
-          onRetry: retryHomeData
+          onRetry: onRetry
         )
       }
     }
@@ -353,21 +351,14 @@ struct ExperimentalHomeView: View {
     .background(Color(.systemBackground))
     .navigationBarTitleDisplayMode(.inline)
     .navigationTitle("")
-    .task {
-      await loadHomeDataOnAppear()
-    }
-    .onChange(of: compactSpaceList.spaces) { _, _ in
-      nav.pruneDialogFetchState(validSpaceIds: Set(compactSpaceList.spaces.map(\.id)))
-      ensureActiveSpaceExists()
-      Task { await refreshDialogsForCurrentSelection() }
-    }
-    .onChange(of: nav.activeSpaceId) { _, _ in
-      Task { await reloadHomeData(forceDialogs: true) }
-    }
   }
 
   private var chatItemRenderMode: ExperimentalHomeChatItemRenderMode {
     ExperimentalHomeChatItemRenderMode(rawValue: chatItemRenderModeRaw) ?? .twoLineLastMessage
+  }
+
+  private var unreadBadgeStyle: ExperimentalHomeUnreadBadgeStyle {
+    ExperimentalHomeUnreadBadgeStyle(rawValue: unreadBadgeStyleRawValue) ?? .defaultValue
   }
 
   private var homeStatus: ExperimentalHomeStatus? {
@@ -380,138 +371,6 @@ struct ExperimentalHomeView: View {
     return nil
   }
 
-  private func ensureActiveSpaceExists() {
-    guard let activeSpaceId = nav.activeSpaceId else { return }
-    guard !compactSpaceList.spaces.isEmpty else { return }
-    if !compactSpaceList.spaces.contains(where: { $0.id == activeSpaceId }) {
-      nav.activeSpaceId = nil
-    }
-  }
-
-  private func loadHomeDataOnAppear() async {
-    let shouldBootstrap = nav.consumeNeedsHomeBootstrap()
-    await reloadHomeData(
-      includeBootstrapData: shouldBootstrap,
-      forceDialogs: nav.activeSpaceId != nil
-    )
-  }
-
-  private func reloadHomeData(
-    includeBootstrapData: Bool = false,
-    forceDialogs: Bool = false
-  ) async {
-    let refreshRevision = nav.homeRefreshRevision
-    var availableSpaces = compactSpaceList.spaces
-
-    if includeBootstrapData {
-      notificationHandler.setAuthenticated(value: true)
-
-      do {
-        _ = try await realtimeV2.send(.getMe())
-        nav.recordHomeRefreshResult(requestID: "me", succeeded: true, revision: refreshRevision)
-      } catch {
-        nav.recordHomeRefreshResult(
-          requestID: "me",
-          succeeded: false,
-          revision: refreshRevision,
-          reportFailure: !Task.isCancelled
-        )
-        Log.shared.error("Failed to getMe", error: error)
-      }
-
-      do {
-        _ = try await realtimeV2.send(.getChats())
-        nav.recordHomeRefreshResult(requestID: "chats", succeeded: true, revision: refreshRevision)
-      } catch {
-        nav.recordHomeRefreshResult(
-          requestID: "chats",
-          succeeded: false,
-          revision: refreshRevision,
-          reportFailure: !Task.isCancelled
-        )
-        Log.shared.error("Failed to getChats", error: error)
-      }
-
-      do {
-        availableSpaces = try await data.getSpaces()
-        nav.pruneDialogFetchState(validSpaceIds: Set(availableSpaces.map(\.id)))
-        nav.recordHomeRefreshResult(requestID: "spaces", succeeded: true, revision: refreshRevision)
-      } catch {
-        nav.recordHomeRefreshResult(
-          requestID: "spaces",
-          succeeded: false,
-          revision: refreshRevision,
-          reportFailure: !Task.isCancelled
-        )
-        Log.shared.error("Failed to getSpaces", error: error)
-      }
-    }
-
-    guard !Task.isCancelled else { return }
-    await refreshDialogsForCurrentSelection(
-      force: forceDialogs,
-      availableSpaces: availableSpaces,
-      refreshRevision: refreshRevision
-    )
-  }
-
-  private func refreshDialogsForCurrentSelection(
-    force: Bool = false,
-    availableSpaces: [Space]? = nil,
-    refreshRevision: Int? = nil
-  ) async {
-    let revision = refreshRevision ?? nav.homeRefreshRevision
-    if let spaceId = nav.activeSpaceId {
-      await fetchDialogsIfNeeded(spaceId: spaceId, force: force, refreshRevision: revision)
-    } else {
-      // Cached rows remain interactive while remote reconciliation continues.
-      let spaceIDs = (availableSpaces ?? compactSpaceList.spaces).map(\.id)
-      for batchStart in stride(from: 0, to: spaceIDs.count, by: 4) {
-        guard !Task.isCancelled, revision == nav.homeRefreshRevision else { return }
-        let batchEnd = min(batchStart + 4, spaceIDs.count)
-        let batch = spaceIDs[batchStart ..< batchEnd]
-        await withTaskGroup(of: Void.self) { group in
-          for spaceID in batch {
-            group.addTask { @MainActor in
-              await fetchDialogsIfNeeded(
-                spaceId: spaceID,
-                force: force,
-                refreshRevision: revision
-              )
-            }
-          }
-        }
-      }
-    }
-  }
-
-  private func fetchDialogsIfNeeded(
-    spaceId: Int64,
-    force: Bool = false,
-    refreshRevision: Int
-  ) async {
-    guard nav.beginDialogsFetchIfNeeded(spaceId: spaceId, force: force) else { return }
-    do {
-      try await data.getDialogs(spaceId: spaceId)
-      nav.completeDialogsFetch(spaceId: spaceId, succeeded: true, revision: refreshRevision)
-    } catch {
-      nav.completeDialogsFetch(
-        spaceId: spaceId,
-        succeeded: false,
-        revision: refreshRevision,
-        reportFailure: !Task.isCancelled
-      )
-      Log.shared.error("Failed to get dialogs", error: error)
-    }
-  }
-
-  private func retryHomeData() {
-    nav.clearHomeRefreshFailures()
-    homeListStore.refresh()
-    Task {
-      await reloadHomeData(includeBootstrapData: true, forceDialogs: true)
-    }
-  }
 }
 
 private enum ExperimentalChatListMode: Equatable {
@@ -529,16 +388,18 @@ private struct ExperimentalChatListView: View {
     case text
     case inlineLogo
     case inbox
+    case unreadFilter
   }
 
   let items: [ChatListItemSnapshot]
+  let inboxPinnedItems: [ChatListItemSnapshot]
   let daySections: [ChatListDaySection]
   let mode: ExperimentalChatListMode
   let emptyStyle: EmptyStyle
   let emptyTitle: String
   let emptySubtitle: String
-  let sectionHeader: String?
   let chatItemRenderMode: ExperimentalHomeChatItemRenderMode
+  let unreadBadgeStyle: ExperimentalHomeUnreadBadgeStyle
   let isLoading: Bool
   let status: ExperimentalHomeStatus?
   let onRetry: () -> Void
@@ -551,11 +412,7 @@ private struct ExperimentalChatListView: View {
   @Environment(ExperimentalHomeActionCoordinator.self) private var homeActions
 
   var body: some View {
-    VStack(spacing: 0) {
-      if let status {
-        ExperimentalHomeStatusView(status: status, onRetry: onRetry)
-      }
-
+    Group {
       if isLoading && isEmpty {
         ExperimentalLoadingStateView()
       } else if isEmpty, case .error = status {
@@ -567,30 +424,36 @@ private struct ExperimentalChatListView: View {
           if mode == .allChats {
             ForEach(daySections) { section in
               Section {
-                rows(for: section.items)
-              } header: {
                 ExperimentalChatDaySectionHeader(day: section.id)
                   .listRowInsets(sectionHeaderInsets)
+                  .listRowSeparator(.hidden)
+                  .listRowBackground(Color.clear)
+
+                rows(for: section.items)
               }
             }
-          } else if let sectionHeader {
-            Section {
-              rows(for: items)
-            } header: {
-              Text(sectionHeader)
-                .textCase(nil)
+          } else if mode == .inbox {
+            ForEach(inboxSections) { section in
+              Section {
+                ExperimentalChatSectionHeader(title: section.title)
+                  .listRowInsets(sectionHeaderInsets)
+                  .listRowSeparator(.hidden)
+                  .listRowBackground(Color.clear)
+
+                rows(for: section.items)
+              }
             }
           } else {
             rows(for: items)
           }
         }
         .listStyle(.plain)
-        .listSectionSpacing(
-          chatItemRenderMode == .noLastMessage ? .custom(0) : .default
-        )
+        .contentMargins(.top, listTopContentMargin, for: .scrollContent)
+        .listSectionSpacing(.custom(listSectionSpacing))
+        .environment(\.defaultMinListRowHeight, defaultMinimumListRowHeight)
         .animation(
           mode == .inbox ? .snappy(duration: 0.25, extraBounce: 0) : nil,
-          value: animatedRowIDs
+          value: animatedInboxRows
         )
       }
     }
@@ -598,12 +461,14 @@ private struct ExperimentalChatListView: View {
 
   /// A focused animation trigger for Inbox membership and ordering changes.
   /// Content updates keep the same identity sequence and do not animate.
-  private var animatedRowIDs: [Peer] {
-    mode == .inbox ? items.map(\.id) : []
+  private var animatedInboxRows: [InboxRowLocation] {
+    guard mode == .inbox else { return [] }
+    return inboxPinnedItems.map { InboxRowLocation(peer: $0.peer, section: .pinned) }
+      + items.map { InboxRowLocation(peer: $0.peer, section: .inbox) }
   }
 
   private var isEmpty: Bool {
-    items.isEmpty && daySections.isEmpty
+    items.isEmpty && inboxPinnedItems.isEmpty && daySections.isEmpty
   }
 
   @ViewBuilder
@@ -615,14 +480,42 @@ private struct ExperimentalChatListView: View {
       ExperimentalInlineLogoEmptyStateView()
     case .inbox:
       ExperimentalInboxEmptyStateView(title: emptyTitle, subtitle: emptySubtitle)
+    case .unreadFilter:
+      ContentUnavailableView(
+        emptyTitle,
+        systemImage: "checkmark.message",
+        description: Text(emptySubtitle)
+      )
     }
   }
 
   private var sectionHeaderInsets: EdgeInsets {
-    if chatItemRenderMode == .noLastMessage {
-      return EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16)
+    EdgeInsets(top: 1, leading: 20, bottom: 1, trailing: 20)
+  }
+
+  private var listTopContentMargin: CGFloat {
+    chatItemRenderMode == .noLastMessage ? 0 : 2
+  }
+
+  private var listSectionSpacing: CGFloat {
+    switch (mode, chatItemRenderMode) {
+    case (.inbox, .noLastMessage):
+      4
+    case (.inbox, _):
+      8
+    case (.allChats, .noLastMessage):
+      5
+    case (.allChats, _):
+      10
+    case (.archived, _):
+      8
     }
-    return EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16)
+  }
+
+  private var defaultMinimumListRowHeight: CGFloat {
+    // Chat rows own their explicit 44/52/72pt floors. Removing List's global
+    // 44pt floor lets section labels stay compact without shrinking tap rows.
+    1
   }
 
   private func rows(for sectionItems: [ChatListItemSnapshot]) -> some View {
@@ -635,6 +528,7 @@ private struct ExperimentalChatListView: View {
             : .visible,
           edges: .bottom
         )
+        .listRowSeparatorTint(Color(.separator).opacity(0.55))
         // Keep spacing inside the link so its tap and context-menu source
         // cover the complete native List row rather than only its contents.
         .listRowInsets(EdgeInsets())
@@ -646,8 +540,9 @@ private struct ExperimentalChatListView: View {
       ExperimentalChatListRow(
         item: item,
         layoutMode: chatItemRenderMode.chatListLayoutMode,
-        showsPinnedIndicator: mode == .inbox,
-        showsActivityTime: mode == .allChats
+        showsPinnedIndicator: false,
+        showsActivityTime: true,
+        unreadBadgeStyle: unreadBadgeStyle
       )
       .equatable()
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -676,28 +571,91 @@ private struct ExperimentalChatListView: View {
     }
   }
 
+  private enum InboxSection: Hashable {
+    case pinned
+    case inbox
+  }
+
+  private struct InboxListSection: Identifiable {
+    let id: InboxSection
+    let title: LocalizedStringResource
+    let items: [ChatListItemSnapshot]
+  }
+
+  private var inboxSections: [InboxListSection] {
+    var sections: [InboxListSection] = []
+    sections.reserveCapacity(2)
+    if !inboxPinnedItems.isEmpty {
+      sections.append(InboxListSection(
+        id: .pinned,
+        title: "Pinned",
+        items: inboxPinnedItems
+      ))
+    }
+    if !items.isEmpty {
+      sections.append(InboxListSection(
+        id: .inbox,
+        title: "Inbox",
+        items: items
+      ))
+    }
+    return sections
+  }
+
+  private struct InboxRowLocation: Equatable {
+    let peer: Peer
+    let section: InboxSection
+  }
+
   private var rowContentInsets: EdgeInsets {
     EdgeInsets(
       top: chatItemRenderMode.listVerticalInset,
-      leading: 12,
+      leading: 16,
       bottom: chatItemRenderMode.listVerticalInset,
-      trailing: 16
+      trailing: 20
     )
   }
 
   @ViewBuilder
   private func contextMenuActions(for item: ChatListItemSnapshot) -> some View {
     if mode == .inbox {
-      closeButton(for: item)
+      contextMenuNavigateToChatButton(for: item)
+      contextMenuReadUnreadButton(for: item)
       contextMenuPinButton(for: item)
-      readUnreadButton(for: item)
-    } else if mode == .allChats {
-      openButton(for: item)
-      readUnreadButton(for: item)
+      copyLinkButton(for: item)
       Divider()
-      archiveButton(for: item)
+      contextMenuCloseButton(for: item)
+      contextMenuArchiveButton(for: item)
+    } else if mode == .allChats {
+      contextMenuOpenButton(for: item)
+      contextMenuReadUnreadButton(for: item)
+      copyLinkButton(for: item)
+      Divider()
+      contextMenuArchiveButton(for: item)
     } else if mode == .archived {
-      unarchiveButton(for: item)
+      contextMenuUnarchiveButton(for: item)
+      contextMenuReadUnreadButton(for: item)
+      copyLinkButton(for: item)
+    }
+  }
+
+  private func contextMenuNavigateToChatButton(for item: ChatListItemSnapshot) -> some View {
+    Button {
+      ExperimentalHomeNavigationPerformance.beginChatOpen(
+        peer: item.peer,
+        source: "inbox_context_menu"
+      )
+      router.push(.chat(peer: item.peer))
+    } label: {
+      Label("Open", systemImage: "arrow.up.right")
+    }
+  }
+
+  private func contextMenuCloseButton(for item: ChatListItemSnapshot) -> some View {
+    Button {
+      performClose(peer: item.peer)
+    } label: {
+      Label("Close", systemImage: "xmark.circle")
     }
   }
 
@@ -709,8 +667,63 @@ private struct ExperimentalChatListView: View {
     } label: {
       Label(
         item.isPinned ? "Unpin" : "Pin",
-        systemImage: item.isPinned ? "pin.slash.fill" : "pin.fill"
+        systemImage: item.isPinned ? "pin.slash" : "pin"
       )
+    }
+  }
+
+  private func contextMenuReadUnreadButton(for item: ChatListItemSnapshot) -> some View {
+    Button {
+      performReadUnreadUpdate(peer: item.peer, isUnread: item.isUnread)
+    } label: {
+      Label(
+        item.isUnread ? "Mark as Read" : "Mark as Unread",
+        systemImage: item.isUnread ? "checkmark.message" : "envelope.badge"
+      )
+    }
+  }
+
+  @ViewBuilder
+  private func contextMenuOpenButton(for item: ChatListItemSnapshot) -> some View {
+    if !item.isOpen {
+      Button {
+        performOpen(item)
+      } label: {
+        Label("Open", systemImage: "tray.and.arrow.down")
+      }
+    }
+  }
+
+  private func contextMenuArchiveButton(for item: ChatListItemSnapshot) -> some View {
+    Button(role: .destructive) {
+      performArchive(item)
+    } label: {
+      Label("Archive", systemImage: "archivebox")
+    }
+  }
+
+  private func contextMenuUnarchiveButton(for item: ChatListItemSnapshot) -> some View {
+    Button {
+      performUnarchive(item)
+    } label: {
+      Label("Unarchive", systemImage: "arrow.uturn.backward")
+    }
+  }
+
+  @ViewBuilder
+  private func copyLinkButton(for item: ChatListItemSnapshot) -> some View {
+    if case let .thread(id) = item.peer,
+       let url = InlineDeepLink.chat(id: id).webURL {
+      Button {
+        UIPasteboard.general.url = url
+        ToastManager.shared.showToast(
+          "Copied link",
+          type: .success,
+          systemImage: "link"
+        )
+      } label: {
+        Label("Copy Link", systemImage: "link")
+      }
     }
   }
 
@@ -741,9 +754,6 @@ private struct ExperimentalChatListView: View {
 
   @ViewBuilder
   private func leadingSwipeActions(for item: ChatListItemSnapshot) -> some View {
-    if mode == .allChats {
-      archiveButton(for: item)
-    }
     readUnreadButton(for: item)
   }
 
@@ -816,36 +826,35 @@ private struct ExperimentalChatListView: View {
     }
   }
 
-  private func archiveButton(for item: ChatListItemSnapshot) -> some View {
-    Button(role: .destructive) {
-      Task {
-        do {
-          let didPerform = try await homeActions.perform(peer: item.peer) {
-            try await data.updateDialog(
-              peerId: item.peer,
-              archived: true,
-              spaceId: item.spaceID,
-              deleteEmptyThreadIfArchiving: false
-            )
-          }
-          guard didPerform else { return }
-          ToastManager.shared.showToast(
-            "Archived",
-            description: "View it later in ••• → Archive.",
-            type: .success,
-            systemImage: "archivebox.fill"
-          )
-        } catch {
-          Log.shared.error("Failed to archive chat", error: error)
-          ToastManager.shared.showToast(
-            "Could not archive chat",
-            type: .error,
-            systemImage: "exclamationmark.triangle.fill"
+  private func performArchive(_ item: ChatListItemSnapshot) {
+    Task {
+      do {
+        let didPerform = try await homeActions.perform(peer: item.peer) {
+          try await data.updateDialog(
+            peerId: item.peer,
+            archived: true,
+            spaceId: item.spaceID,
+            deleteEmptyThreadIfArchiving: false
           )
         }
+        guard didPerform else { return }
+        ToastManager.shared.showToast(
+          "Archived",
+          type: .success,
+          systemImage: "archivebox.fill",
+          action: {
+            performUnarchive(item)
+          },
+          actionTitle: "Undo"
+        )
+      } catch {
+        Log.shared.error("Failed to archive chat", error: error)
+        ToastManager.shared.showToast(
+          "Could not archive chat",
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
+        )
       }
-    } label: {
-      Label("Archive", systemImage: "archivebox.fill")
     }
   }
 
@@ -912,24 +921,7 @@ private struct ExperimentalChatListView: View {
 
   private func readUnreadButton(for item: ChatListItemSnapshot) -> some View {
     Button {
-      Task {
-        do {
-          _ = try await homeActions.perform(peer: item.peer) {
-            if item.isUnread {
-              _ = try await realtimeV2.send(.readMessages(peerId: item.peer))
-            } else {
-              _ = try await realtimeV2.send(.markAsUnread(peerId: item.peer))
-            }
-          }
-        } catch {
-          Log.shared.error("Failed to update read state", error: error)
-          ToastManager.shared.showToast(
-            "Could not update unread state",
-            type: .error,
-            systemImage: "exclamationmark.triangle.fill"
-          )
-        }
-      }
+      performReadUnreadUpdate(peer: item.peer, isUnread: item.isUnread)
     } label: {
       Label(
         item.isUnread ? "Read" : "Unread",
@@ -939,63 +931,62 @@ private struct ExperimentalChatListView: View {
     .tint(.blue)
   }
 
+  private func performReadUnreadUpdate(peer: Peer, isUnread: Bool) {
+    Task {
+      do {
+        _ = try await homeActions.perform(peer: peer) {
+          if isUnread {
+            _ = try await realtimeV2.send(.readMessages(peerId: peer))
+          } else {
+            _ = try await realtimeV2.send(.markAsUnread(peerId: peer))
+          }
+        }
+      } catch {
+        Log.shared.error("Failed to update read state", error: error)
+        ToastManager.shared.showToast(
+          "Could not update unread state",
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
+        )
+      }
+    }
+  }
+
   private func unarchiveButton(for item: ChatListItemSnapshot) -> some View {
     Button {
-      Task {
-        do {
-          let didPerform = try await homeActions.perform(peer: item.peer) {
-            try await data.updateDialog(
-              peerId: item.peer,
-              archived: false,
-              spaceId: item.spaceID,
-              deleteEmptyThreadIfArchiving: false
-            )
-          }
-          guard didPerform else { return }
-          ToastManager.shared.showToast(
-            "Restored to All Chats",
-            type: .success,
-            systemImage: "arrow.uturn.backward.circle.fill"
-          )
-        } catch {
-          Log.shared.error("Failed to unarchive chat", error: error)
-          ToastManager.shared.showToast(
-            "Could not restore chat",
-            type: .error,
-            systemImage: "exclamationmark.triangle.fill"
-          )
-        }
-      }
+      performUnarchive(item)
     } label: {
       Label("Unarchive", systemImage: "arrow.uturn.backward.circle.fill")
     }
     .tint(.blue)
   }
-}
 
-private struct ExperimentalHomeStatusView: View {
-  let status: ExperimentalHomeStatus
-  let onRetry: () -> Void
-
-  var body: some View {
-    HStack(spacing: 8) {
-      switch status {
-      case let .error(message):
-        Image(systemName: "exclamationmark.triangle.fill")
-          .foregroundStyle(.orange)
-        Text(message)
-        Spacer(minLength: 8)
-        Button("Retry", action: onRetry)
-          .fontWeight(.semibold)
+  private func performUnarchive(_ item: ChatListItemSnapshot) {
+    Task {
+      do {
+        let didPerform = try await homeActions.perform(peer: item.peer) {
+          try await data.updateDialog(
+            peerId: item.peer,
+            archived: false,
+            spaceId: item.spaceID,
+            deleteEmptyThreadIfArchiving: false
+          )
+        }
+        guard didPerform else { return }
+        ToastManager.shared.showToast(
+          "Restored to All Chats",
+          type: .success,
+          systemImage: "arrow.uturn.backward.circle.fill"
+        )
+      } catch {
+        Log.shared.error("Failed to unarchive chat", error: error)
+        ToastManager.shared.showToast(
+          "Could not restore chat",
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
+        )
       }
     }
-    .font(.footnote)
-    .foregroundStyle(.secondary)
-    .padding(.horizontal, 16)
-    .padding(.vertical, 8)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .background(Color(.secondarySystemBackground))
-    .accessibilityElement(children: .combine)
   }
 }
 
@@ -1014,29 +1005,42 @@ private struct ExperimentalHomeFailureStateView: View {
   }
 }
 
+private struct ExperimentalChatSectionHeader: View {
+  let title: LocalizedStringResource
+
+  var body: some View {
+    Text(title)
+      .modifier(ExperimentalChatSectionHeaderStyle())
+  }
+}
+
 private struct ExperimentalChatDaySectionHeader: View {
   let day: Date
 
   var body: some View {
     title
-      .font(.footnote.weight(.semibold))
-      .foregroundStyle(.secondary)
-      .textCase(nil)
-      .frame(maxWidth: .infinity, alignment: .leading)
+      .modifier(ExperimentalChatSectionHeaderStyle())
   }
 
   private var title: Text {
     let calendar = Calendar.autoupdatingCurrent
-    if calendar.isDateInToday(day) {
-      return Text("Today")
-    }
-    if calendar.isDateInYesterday(day) {
-      return Text("Yesterday")
-    }
     if calendar.component(.year, from: day) == calendar.component(.year, from: Date()) {
       return Text(day, format: .dateTime.month(.abbreviated).day())
     }
     return Text(day, format: .dateTime.month(.abbreviated).day().year())
+  }
+}
+
+private struct ExperimentalChatSectionHeaderStyle: ViewModifier {
+  @ScaledMetric(relativeTo: .headline) private var fontSize: CGFloat = 16
+
+  func body(content: Content) -> some View {
+    content
+      .font(.system(size: fontSize, weight: .semibold))
+      .foregroundStyle(.secondary)
+      .textCase(nil)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .accessibilityAddTraits(.isHeader)
   }
 }
 
@@ -1059,7 +1063,7 @@ private extension ExperimentalHomeChatItemRenderMode {
     case .oneLineLastMessage, .twoLineLastMessage:
       5
     case .large:
-      8
+      2
     }
   }
 }
@@ -1105,7 +1109,7 @@ private struct ExperimentalInboxEmptyStateView: View {
   var body: some View {
     VStack(spacing: 8) {
       Image(systemName: "tray")
-        .font(.system(size: 30, weight: .regular))
+        .font(.title)
         .symbolRenderingMode(.hierarchical)
         .foregroundStyle(.tertiary)
         .accessibilityHidden(true)
@@ -1126,18 +1130,12 @@ private struct ExperimentalInboxEmptyStateView: View {
 }
 
 private struct ExperimentalInlineLogoEmptyStateView: View {
-  @Environment(\.colorScheme) private var colorScheme
-
-  private var imageOpacity: Double {
-    colorScheme == .dark ? 0.2 : 1.0
-  }
-
   var body: some View {
-    Image("inline-logo-bg")
+    Image("inlineIcon")
       .resizable()
       .scaledToFit()
-      .frame(maxWidth: 320, maxHeight: 320)
-      .opacity(imageOpacity)
+      .frame(width: 64, height: 64)
+      .opacity(0.09)
       .accessibilityHidden(true)
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .background(Color(.systemBackground))

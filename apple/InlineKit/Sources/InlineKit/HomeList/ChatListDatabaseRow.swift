@@ -45,6 +45,7 @@ struct ChatListDatabaseRow {
     case lastMessageVideoID
     case lastMessageDocumentID
     case lastMessageContentPayload
+    case lastMessageTranslation
     case lastDocumentFileName
     case senderFirstName
     case senderLastName

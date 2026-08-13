@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ExperimentalView: View {
   @AppStorage(ExperimentalHomePreferenceKeys.isEnabled)
-  private var isNewHomeEnabled = false
+  private var isNewHomeEnabled = true
 
   var body: some View {
     List {
@@ -10,7 +10,7 @@ struct ExperimentalView: View {
         Toggle(isOn: $isNewHomeEnabled) {
           VStack(alignment: .leading, spacing: 3) {
             Text("New Home")
-            Text("Use the experimental Inbox, All Chats, and Search tabs.")
+            Text("Use the new Inbox, All Chats, and Search tabs.")
               .font(.footnote)
               .foregroundStyle(.secondary)
           }

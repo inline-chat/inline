@@ -91,6 +91,7 @@ public struct ThreadIconView: View, Equatable {
   public let shape: ThreadIconShape
   public let symbolColor: ThreadIconSymbolColor
   public let background: ThreadIconBackground
+  public let contentScaleMultiplier: CGFloat
 
   @Environment(\.colorScheme) private var colorScheme
 
@@ -99,7 +100,8 @@ public struct ThreadIconView: View, Equatable {
       lhs.size == rhs.size &&
       lhs.shape == rhs.shape &&
       lhs.symbolColor == rhs.symbolColor &&
-      lhs.background == rhs.background
+      lhs.background == rhs.background &&
+      lhs.contentScaleMultiplier == rhs.contentScaleMultiplier
   }
 
   public init(
@@ -107,13 +109,15 @@ public struct ThreadIconView: View, Equatable {
     size: ThreadIconSize,
     shape: ThreadIconShape = .circle,
     symbolColor: ThreadIconSymbolColor = .secondary,
-    background: ThreadIconBackground = .automatic
+    background: ThreadIconBackground = .automatic,
+    contentScaleMultiplier: CGFloat = 1
   ) {
     self.descriptor = descriptor
     self.size = size
     self.shape = shape
     self.symbolColor = symbolColor
     self.background = background
+    self.contentScaleMultiplier = max(contentScaleMultiplier, 0)
   }
 
   public var body: some View {
@@ -156,14 +160,20 @@ public struct ThreadIconView: View, Equatable {
   private var content: some View {
     if let emoji = descriptor.emoji {
       Text(emoji)
-        .font(.system(size: resolvedSize * contentScale.emojiRatio, weight: .regular))
+        .font(.system(
+          size: resolvedSize * contentScale.emojiRatio * contentScaleMultiplier,
+          weight: .regular
+        ))
         .foregroundStyle(resolvedSymbolColor)
         .lineLimit(1)
         .minimumScaleFactor(0.75)
         .accessibilityHidden(true)
     } else {
       Image(systemName: ThreadIconDefaults.fallbackSymbolName(isReplyThread: descriptor.isReplyThread))
-        .font(.system(size: resolvedSize * contentScale.symbolRatio, weight: .semibold))
+        .font(.system(
+          size: resolvedSize * contentScale.symbolRatio * contentScaleMultiplier,
+          weight: .semibold
+        ))
         .foregroundStyle(resolvedSymbolColor)
         .accessibilityHidden(true)
     }

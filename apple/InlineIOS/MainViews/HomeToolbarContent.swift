@@ -65,7 +65,7 @@ struct HomeToolbarContent: ToolbarContent, RehostSafeToolbarContent {
   private var dotsButton: some View {
     Menu {
       Button {
-        router.push(.createSpace)
+        router.presentSheet(.createSpace)
       } label: {
         Label("Create Space", systemImage: "building")
       }
@@ -96,7 +96,7 @@ struct HomeToolbarContent: ToolbarContent, RehostSafeToolbarContent {
   @ViewBuilder
   private var createSpaceButton: some View {
     Button {
-      router.push(.createSpace)
+      router.presentSheet(.createSpace)
     } label: {
       Image(systemName: "plus")
         .foregroundStyle(.primary)

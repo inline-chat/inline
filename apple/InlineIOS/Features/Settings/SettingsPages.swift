@@ -60,6 +60,9 @@ struct AppearanceSettingsView: View {
   @AppStorage(EmojiSkinTonePreferenceStore.key)
   private var preferredEmojiSkinToneRawValue = EmojiSkinTone.standard.rawValue
 
+  @AppStorage(ExperimentalHomePreferenceKeys.unreadBadgeStyle)
+  private var unreadBadgeStyleRawValue = ExperimentalHomeUnreadBadgeStyle.defaultValue.rawValue
+
   var body: some View {
     List {
       Section {
@@ -67,6 +70,19 @@ struct AppearanceSettingsView: View {
           ThemeSelectionView()
         } label: {
           SettingsItem(icon: "paintpalette.fill", iconColor: .blue, title: "Theme")
+        }
+      }
+
+      Section("Chat List") {
+        SettingsItem(icon: "circle.inset.filled", iconColor: .gray, title: "Unread Badges") {
+          Picker("Unread Badges", selection: $unreadBadgeStyleRawValue) {
+            ForEach(ExperimentalHomeUnreadBadgeStyle.allCases) { style in
+              Label(style.title, systemImage: style.systemImage)
+                .tag(style.rawValue)
+            }
+          }
+          .labelsHidden()
+          .pickerStyle(.menu)
         }
       }
 

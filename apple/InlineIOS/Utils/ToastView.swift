@@ -7,10 +7,9 @@ struct ToastView: View {
   @State private var previousMessage: String = ""
   private let toastManager = ToastManager.shared
   private let bubbleCornerRadius: CGFloat = 24
-  private let clusterSpacing: CGFloat = 12
 
   var body: some View {
-    toastCluster
+    toastBubble
       .animation(.spring(response: 0.4, dampingFraction: 0.8), value: toast.id)
       .transition(.move(edge: transitionEdge).combined(with: .opacity))
       .scaleEffect(toast.message != previousMessage ? 1.02 : 1.0)
@@ -38,36 +37,6 @@ struct ToastView: View {
         4
       default:
         1
-    }
-  }
-
-  @ViewBuilder
-  private var toastCluster: some View {
-    if #available(iOS 26.0, *), toast.actionTitle != nil {
-      GlassEffectContainer(spacing: clusterSpacing) {
-        toastClusterContent
-      }
-    } else {
-      toastClusterContent
-    }
-  }
-
-  @ViewBuilder
-  private var toastClusterContent: some View {
-    if toast.actionTitle != nil {
-      ViewThatFits {
-        HStack(alignment: .bottom, spacing: clusterSpacing) {
-          toastBubble
-          toastActionButton
-        }
-
-        VStack(alignment: .trailing, spacing: 10) {
-          toastBubble
-          toastActionButton
-        }
-      }
-    } else {
-      toastBubble
     }
   }
 
@@ -107,6 +76,8 @@ struct ToastView: View {
           }
         }
       }
+
+      toastActionButton
     }
     .padding(.horizontal, 18)
     .padding(.vertical, toast.hasSecondaryContent ? 12 : 10)
@@ -168,28 +139,19 @@ struct ToastView: View {
   @ViewBuilder
   private var toastActionButton: some View {
     if let actionTitle = toast.actionTitle {
-      if #available(iOS 26.0, *) {
-        Button(actionTitle) {
-          toast.action?()
-        }
-        .font(.callout.weight(.semibold))
-        .buttonStyle(.glassProminent)
-        .controlSize(.regular)
-        .tint(actionTintColor)
-        .transition(.opacity)
-        .id(actionTitle)
-      } else {
-        Button(actionTitle) {
-          toast.action?()
-        }
-        .font(.callout.weight(.semibold))
-        .buttonStyle(.borderedProminent)
-        .controlSize(.regular)
-        .buttonBorderShape(.capsule)
-        .tint(actionTintColor)
-        .transition(.opacity)
-        .id(actionTitle)
+      Button(actionTitle) {
+        toastManager.hideToast()
+        toast.action?()
       }
+      .font(.footnote.weight(.semibold))
+      .foregroundStyle(.primary)
+      .padding(.horizontal, 10)
+      .padding(.vertical, 5)
+      .background(Color.primary.opacity(0.08), in: Capsule())
+      .buttonStyle(.plain)
+      .fixedSize(horizontal: true, vertical: false)
+      .transition(.opacity)
+      .id(actionTitle)
     }
   }
 
@@ -197,9 +159,6 @@ struct ToastView: View {
     toast.statusAccentColor
   }
 
-  private var actionTintColor: Color {
-    .accentColor
-  }
 }
 
 struct ToastContainerModifier: ViewModifier {

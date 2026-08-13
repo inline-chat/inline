@@ -23,6 +23,8 @@ public struct ChatListPresentation: Equatable, Sendable {
   )
 
   public let inbox: [ChatListItemSnapshot]
+  public let inboxPinned: [ChatListItemSnapshot]
+  public let inboxUnpinned: [ChatListItemSnapshot]
   public let allChatSections: [ChatListDaySection]
   public let archived: [ChatListItemSnapshot]
   public let inboxUnreadCount: Int
@@ -34,6 +36,8 @@ public struct ChatListPresentation: Equatable, Sendable {
     inboxUnreadCount: Int
   ) {
     self.inbox = inbox
+    self.inboxPinned = inbox.filter(\.isPinned)
+    self.inboxUnpinned = inbox.filter { !$0.isPinned }
     self.allChatSections = allChatSections
     self.archived = archived
     self.inboxUnreadCount = inboxUnreadCount
@@ -41,22 +45,24 @@ public struct ChatListPresentation: Equatable, Sendable {
 
   public static func make(
     from snapshots: [ChatListItemSnapshot],
-    sort: ChatListSort,
+    inboxSort: ChatListSort,
+    allChatsFilter: ChatListFilter = .all,
     calendar: Calendar = .autoupdatingCurrent
   ) -> Self {
     let visible = snapshots.filter(\.isVisibleInHome)
-    let inbox = visible
-      .filter(\.isOpen)
-      .sorted { inboxOrdered($0, before: $1, sort: sort) }
+    let inbox = snapshots
+      .filter(\.isInboxMember)
+      .sorted { inboxOrdered($0, before: $1, sort: inboxSort) }
     let timeline = visible
-      .sorted { timelineOrdered($0, before: $1, sort: sort) }
+      .filter { allChatsFilter == .all || $0.isUnread }
+      .sorted { timelineOrdered($0, before: $1, sort: .lastUpdated) }
     let archived = snapshots
       .filter { !$0.isChatListHidden && $0.isArchived }
-      .sorted { timelineOrdered($0, before: $1, sort: sort) }
+      .sorted { timelineOrdered($0, before: $1, sort: .lastUpdated) }
 
     return Self(
       inbox: inbox,
-      allChatSections: daySections(from: timeline, sort: sort, calendar: calendar),
+      allChatSections: daySections(from: timeline, calendar: calendar),
       archived: archived,
       inboxUnreadCount: inbox.lazy.filter(\.isUnread).count
     )
@@ -83,13 +89,12 @@ public struct ChatListPresentation: Equatable, Sendable {
 
   private static func daySections(
     from items: [ChatListItemSnapshot],
-    sort: ChatListSort,
     calendar: Calendar
   ) -> [ChatListDaySection] {
     var grouped: [(day: Date, items: [ChatListItemSnapshot])] = []
 
     for item in items {
-      let day = calendar.startOfDay(for: sortDate(for: item, sort: sort))
+      let day = calendar.startOfDay(for: sortDate(for: item, sort: .lastUpdated))
       if grouped.last?.day == day {
         grouped[grouped.count - 1].items.append(item)
       } else {
@@ -152,9 +157,16 @@ public struct ChatListPresentation: Equatable, Sendable {
     }
   }
 
+  private enum OrderedSectionID: Equatable {
+    case inboxPinned
+    case inbox
+    case allChats(Date)
+    case archived
+  }
+
   private struct OrderedPosition: Equatable {
     let predecessor: Peer?
-    let sectionID: Date?
+    let sectionID: OrderedSectionID
   }
 
   private struct Locations: Equatable {
@@ -168,10 +180,19 @@ public struct ChatListPresentation: Equatable, Sendable {
     locations.reserveCapacity(max(inbox.count, allChatCount, archived.count))
 
     var predecessor: Peer?
-    for item in inbox {
+    for item in inboxPinned {
       locations[item.peer, default: Locations()].inbox = OrderedPosition(
         predecessor: predecessor,
-        sectionID: nil
+        sectionID: .inboxPinned
+      )
+      predecessor = item.peer
+    }
+
+    predecessor = nil
+    for item in inboxUnpinned {
+      locations[item.peer, default: Locations()].inbox = OrderedPosition(
+        predecessor: predecessor,
+        sectionID: .inbox
       )
       predecessor = item.peer
     }
@@ -181,7 +202,7 @@ public struct ChatListPresentation: Equatable, Sendable {
       for item in section.items {
         locations[item.peer, default: Locations()].allChats = OrderedPosition(
           predecessor: predecessor,
-          sectionID: section.id
+          sectionID: .allChats(section.id)
         )
         predecessor = item.peer
       }
@@ -191,7 +212,7 @@ public struct ChatListPresentation: Equatable, Sendable {
     for item in archived {
       locations[item.peer, default: Locations()].archived = OrderedPosition(
         predecessor: predecessor,
-        sectionID: nil
+        sectionID: .archived
       )
       predecessor = item.peer
     }

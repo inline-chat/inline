@@ -67,7 +67,7 @@ struct SpacesView: View {
   private var dotsButton: some View {
     Menu {
       Button {
-        router.push(.createSpace)
+        router.presentSheet(.createSpace)
       } label: {
         Label("Create Space", systemImage: "building")
       }
