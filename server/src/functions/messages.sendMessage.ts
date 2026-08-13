@@ -42,6 +42,7 @@ import { processAttachments } from "@in/server/db/models/messages"
 import { and, eq, inArray } from "drizzle-orm"
 import { unarchiveIfNeeded } from "@in/server/modules/message/unarchiveIfNeeded"
 import { desktopPushSuppressionTracker } from "@in/server/modules/notifications/desktopPushSuppression"
+import { messageNotificationBody } from "@in/server/modules/notifications/messagePreview"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
 import { getPreviewRoutesFromMessage, processUrlPreviews } from "@in/server/modules/urlPreview/processUrlPreview"
 import { normalizeAndValidateMessageActions } from "@in/server/modules/message/messageActions"
@@ -1148,7 +1149,12 @@ async function sendNotificationToUser({
   }
 
   let title = "Message"
-  let body = "New message" // default
+  let body = messageNotificationBody({
+    messageText,
+    mediaType: messageInfo.message.mediaType,
+    isSticker: messageInfo.message.isSticker,
+    documentFileName: messageInfo.document?.fileName,
+  })
 
   let includeSenderNameInMessage = false
   const senderName = UserNamesCache.getDisplayName(senderUserName)
@@ -1167,32 +1173,6 @@ async function sendNotificationToUser({
   } else {
     // If no sender name, use default
     title = "Message"
-  }
-
-  if (messageText) {
-    // if has text, use text
-    body = messageText.substring(0, 240)
-
-    // Add media type to the body if it's a media message with text
-    if (messageInfo.message.mediaType === "photo") {
-      body = "🖼️ " + body
-    } else if (messageInfo.message.mediaType === "video") {
-      body = "🎥 " + body
-    } else if (messageInfo.message.mediaType === "document") {
-      body = "📄 " + body
-    } else if (messageInfo.message.mediaType === "voice") {
-      body = "🎤 " + body
-    }
-  } else if (messageInfo.message.isSticker) {
-    body = "🖼️ Sticker"
-  } else if (messageInfo.message.mediaType === "photo") {
-    body = "🖼️ Photo"
-  } else if (messageInfo.message.mediaType === "video") {
-    body = "🎥 Video"
-  } else if (messageInfo.message.mediaType === "document") {
-    body = "📄 File"
-  } else if (messageInfo.message.mediaType === "voice") {
-    body = "🎤 Voice message"
   }
 
   if (includeSenderNameInMessage) {
