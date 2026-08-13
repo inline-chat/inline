@@ -733,7 +733,20 @@ class MessageListAppKit: NSViewController {
     )
   }
 
-  private func updateMessageViewColors() {}
+  private func updateMessageViewColors() {
+    let visibleRange = tableView.rows(in: userVisibleRect())
+    guard visibleRange.location != NSNotFound, visibleRange.length > 0 else { return }
+
+    let upperBound = min(NSMaxRange(visibleRange), tableView.numberOfRows)
+    for row in visibleRange.location ..< upperBound {
+      guard let cell = tableView.view(
+        atColumn: 0,
+        row: row,
+        makeIfNecessary: false
+      ) as? MessageTableCell else { continue }
+      cell.reflectBoundsChange(fraction: 0)
+    }
+  }
 
   private var isToolbarVisible: Bool?
 
@@ -1630,6 +1643,7 @@ class MessageListAppKit: NSViewController {
   private var prevOffset: CGFloat = 0
 
   @objc func scrollViewBoundsChanged(notification: Notification) {
+    updateMessageViewColors()
     scheduleAvatarOverlaySync(force: false)
     refreshMessageHoverAfterGeometryChange()
 

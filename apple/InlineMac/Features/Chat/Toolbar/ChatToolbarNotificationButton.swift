@@ -1,4 +1,5 @@
 import Combine
+import Foundation
 import GRDB
 import InlineKit
 import Logger
@@ -288,6 +289,7 @@ private final class ChatToolbarNotificationModel: ObservableObject {
   private let peer: Peer
   private let db: AppDatabase
   private var dialogCancellable: AnyCancellable?
+  private var mutationGeneration: UInt64 = 0
 
   init(peer: Peer, db: AppDatabase) {
     self.peer = peer
@@ -304,14 +306,22 @@ private final class ChatToolbarNotificationModel: ObservableObject {
 
     let previousSelection = selection
     selection = selected
+    let peer = peer
+    mutationGeneration &+= 1
+    let generation = mutationGeneration
 
-    Task(priority: .userInitiated) {
+    Task(priority: .userInitiated) { [weak self] in
       do {
         _ = try await Api.realtime.send(.updateDialogNotificationSettings(peerId: peer, selection: selected))
+      } catch is CancellationError {
+        return
+      } catch let error as URLError where error.code == .cancelled {
+        return
       } catch {
         Log.shared.error("Failed to update dialog notification settings", error: error)
         await MainActor.run {
-          self.selection = previousSelection
+          guard let self, mutationGeneration == generation, selection == selected else { return }
+          selection = previousSelection
         }
       }
     }

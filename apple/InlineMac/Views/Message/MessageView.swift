@@ -957,15 +957,19 @@ class MessageViewAppKit: NSView {
   }
 
   private func openTextURL(_ url: URL) {
-    if let userId = inlineUserId(from: url) {
-      MessageGestureTrace.debug("MessageView.openTextURL messageId=\(message.messageId) action=openInlineUser userId=\(userId)")
+    if let deepLink = InlineDeepLink(url: url) {
+      if case let .user(userId) = deepLink {
+        MessageGestureTrace.debug("MessageView.openTextURL messageId=\(message.messageId) action=openInlineUser userId=\(userId)")
+      }
       Task { @MainActor in
-        openChat(peer: .user(id: userId))
+        openInlineDeepLink(deepLink)
       }
       return
     }
-    if url.scheme?.lowercased() == "inline", url.host?.lowercased() == "user" {
-      MessageGestureTrace.debug("MessageView.openTextURL messageId=\(message.messageId) action=unresolvedInlineUser")
+    if InlineDeepLink.isSupportedScheme(url.scheme) {
+      if url.host?.lowercased() == "user" {
+        MessageGestureTrace.debug("MessageView.openTextURL messageId=\(message.messageId) action=unresolvedInlineUser")
+      }
       return
     }
 
@@ -974,25 +978,19 @@ class MessageViewAppKit: NSView {
     NSWorkspace.shared.open(url)
   }
 
-  private func inlineUserId(from url: URL) -> Int64? {
-    guard url.scheme?.lowercased() == "inline", url.host?.lowercased() == "user" else {
-      return nil
-    }
-
-    if let components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
-      let queryId = components.queryItems?.first {
-        let name = $0.name.lowercased()
-        return name == "id" || name == "user_id"
-      }?.value
-      if let queryId, let userId = Int64(queryId), userId > 0 {
-        return userId
+  @MainActor private func openInlineDeepLink(_ deepLink: InlineDeepLink) {
+    switch deepLink {
+    case let .user(id):
+      openChat(peer: .user(id: id))
+    case let .chat(id):
+      openChat(peer: .thread(id: id))
+    case let .message(chatId, messageId):
+      if let dependencies {
+        dependencies.requestOpenChat(peer: .thread(id: chatId), targetMessageId: messageId)
+      } else {
+        openChat(peer: .thread(id: chatId))
       }
     }
-
-    guard let userIdString = url.pathComponents.last, let userId = Int64(userIdString), userId > 0 else {
-      return nil
-    }
-    return userId
   }
 
   // MARK: - Initialization
