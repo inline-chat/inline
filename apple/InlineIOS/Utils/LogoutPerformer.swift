@@ -25,8 +25,6 @@ enum LogoutPerformer {
       }
     }
 
-    await Realtime.shared.loggedOut()
-
     if notifyServer {
       await notifyServerLogout()
     }
@@ -38,6 +36,17 @@ enum LogoutPerformer {
     } catch {
       Log.shared.error("Share-extension logout cleanup failed", error: error)
     }
+
+    // Stop every account-owned producer before clearing credentials or the database.
+    await Api.realtime.loggedOut()
+    await Realtime.shared.loggedOut()
+    await FileUploader.shared.cancelAll()
+    await FileCache.shared.cancelAllDownloads()
+    await FileDownloader.shared.resetSession()
+    await MainActor.run {
+      NotionTaskService.shared.resetSession()
+    }
+    await Transactions.shared.clearAllAndWait()
 
     await MainActor.run {
       TabsManager.shared.reset()
@@ -55,8 +64,6 @@ enum LogoutPerformer {
     } catch {
       Log.shared.error("Local database logout cleanup failed: \(error.localizedDescription)")
     }
-
-    Transactions.shared.clearAll()
 
     await MainActor.run {
       mainRouter.setRoute(route: .onboarding)

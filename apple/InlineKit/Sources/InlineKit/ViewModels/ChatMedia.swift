@@ -110,20 +110,21 @@ public final class ChatMediaViewModel: ObservableObject, @unchecked Sendable {
   }
 
   private func fetchMediaMessages() {
+    let excludeStickerMedia = excludeStickerMedia
     db.warnIfInMemoryDatabaseForObservation("ChatMediaViewModel.mediaMessages")
     messagesCancellable = ValueObservation
       .tracking { [chatId] db in
         try MediaMessage
-          .queryRequest(excludingStickers: self.excludeStickerMedia)
+          .queryRequest(excludingStickers: excludeStickerMedia)
           .filter(Column("chatId") == chatId)
           .order(Column("date").desc)
           .fetchAll(db)
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(
-        receiveCompletion: { [chatId] completion in
+        receiveCompletion: { completion in
           if case let .failure(error) = completion {
-            Log.shared.error("Failed to load chat media for chat \(chatId)", error: error)
+            Log.shared.error("Failed to load chat media", error: error)
           }
         },
         receiveValue: { [weak self] messages in
@@ -135,7 +136,7 @@ public final class ChatMediaViewModel: ObservableObject, @unchecked Sendable {
             return insert.inserted ? message : nil
           }
           Log.shared.debug(
-            "Loaded chat media for chat \(self.chatId): raw=\(messages.count) unique=\(unique.count)"
+            "Loaded chat media raw=\(messages.count) unique=\(unique.count)"
           )
           self.mediaMessages = unique
         }
@@ -210,12 +211,12 @@ public final class ChatMediaViewModel: ObservableObject, @unchecked Sendable {
         )
 
         guard case let .searchMessages(response) = result else {
-          Log.shared.error("Unexpected searchMessages response for photos in chat \(chatId)")
+          Log.shared.error("Unexpected searchMessages response for chat photos")
           return
         }
 
         guard !response.messages.isEmpty else {
-          Log.shared.debug("No more photo messages for chat \(chatId)")
+          Log.shared.debug("No more photo messages for chat media")
           hasMorePhotos = false
           return
         }
@@ -246,12 +247,12 @@ public final class ChatMediaViewModel: ObservableObject, @unchecked Sendable {
         )
 
         guard case let .searchMessages(response) = result else {
-          Log.shared.error("Unexpected searchMessages response for videos in chat \(chatId)")
+          Log.shared.error("Unexpected searchMessages response for chat videos")
           return
         }
 
         guard !response.messages.isEmpty else {
-          Log.shared.debug("No more video messages for chat \(chatId)")
+          Log.shared.debug("No more video messages for chat media")
           hasMoreVideos = false
           return
         }

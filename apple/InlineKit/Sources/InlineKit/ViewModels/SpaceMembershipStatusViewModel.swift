@@ -52,7 +52,7 @@ public final class SpaceMembershipStatusViewModel: ObservableObject {
         .sink(
           receiveCompletion: { completion in
             if case let .failure(error) = completion {
-              Log.shared.error("Failed to observe membership for space \(self.spaceId)", error: error)
+              Log.shared.error("Failed to observe space membership", error: error)
             }
           },
           receiveValue: { [weak self] member in
@@ -78,7 +78,7 @@ public final class SpaceMembershipStatusViewModel: ObservableObject {
       // TODO: Create a new RPC call to fetch just our membership or something like getSpace etc.
       try await Api.realtime.send(.getSpaceMembers(spaceId: spaceId))
     } catch {
-      Log.shared.error("Failed to refresh membership for space \(spaceId)", error: error)
+      Log.shared.error("Failed to refresh space membership", error: error)
     }
 
     isRefreshing = false

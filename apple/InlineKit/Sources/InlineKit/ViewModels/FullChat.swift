@@ -484,25 +484,25 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 
   private func fetchPeerUserIfNeeded(peer: Peer) async {
     guard let userId = peer.asUserId() else { return }
-    guard await shouldFetchPeerUser(userId: userId) else { return }
 
     do {
+      guard try await shouldFetchPeerUser(userId: userId) else { return }
+      try Task.checkCancellation()
       try await DataManager.shared.getUser(id: userId)
     } catch {
-      log.error("Failed to refetch user info \(error)")
+      if Self.isCancellation(error) { return }
+      log.error("Failed to refetch user info", error: error)
     }
   }
 
-  private func shouldFetchPeerUser(userId: Int64) async -> Bool {
-    do {
-      return try await db.reader.read { db in
-        guard let user = try User.fetchOne(db, id: userId) else { return true }
-        return user.needsFullFetch
-      }
-    } catch {
-      log.error("Failed to inspect cached user info \(error)")
-      return true
+  private func shouldFetchPeerUser(userId: Int64) async throws -> Bool {
+    try Task.checkCancellation()
+    let shouldFetch = try await db.reader.read { db in
+      guard let user = try User.fetchOne(db, id: userId) else { return true }
+      return user.needsFullFetch
     }
+    try Task.checkCancellation()
+    return shouldFetch
   }
 
   /// Query chat item from database directly.
@@ -567,7 +567,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 
     do {
       try Task.checkCancellation()
-      if let userId = peer_.asUserId(), await shouldFetchPeerUser(userId: userId) {
+      if let userId = peer_.asUserId(), try await shouldFetchPeerUser(userId: userId) {
         try await DataManager.shared.getUser(id: userId)
         try Task.checkCancellation()
 
@@ -593,11 +593,10 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
       }
 
       return cachedChatItem?.chat
-    } catch is CancellationError {
-      throw CancellationError()
     } catch {
+      if Self.isCancellation(error) { throw error }
       if let cachedChatItem, let chat = cachedChatItem.chat {
-        Log.shared.warning("Failed to refresh chat from server, using cached chat for \(peer_)")
+        Log.shared.warning("Failed to refresh chat from server; using cached chat")
         return chat
       }
       log.error("Failed to ensure chat", error: error)
@@ -616,6 +615,11 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 
   deinit {
     dispose()
+  }
+
+  private static func isCancellation(_ error: Error) -> Bool {
+    if error is CancellationError { return true }
+    return (error as? URLError)?.code == .cancelled
   }
 }
 

@@ -18,6 +18,7 @@ public final class ChatParticipantsViewModel: ObservableObject, @unchecked Senda
   }
 
   private func fetchParticipants() {
+    let chatId = chatId
     db.warnIfInMemoryDatabaseForObservation("ChatParticipantsViewModel.participants")
     participantsCancellable = ValueObservation
       .tracking { db in
@@ -26,13 +27,17 @@ public final class ChatParticipantsViewModel: ObservableObject, @unchecked Senda
             required: ChatParticipant.user
               .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
           )
-          .filter(Column("chatId") == self.chatId)
+          .filter(Column("chatId") == chatId)
           .asRequest(of: UserInfo.self)
           .fetchAll(db)
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(
-        receiveCompletion: { Log.shared.error("Failed to get chat participants \($0)") },
+        receiveCompletion: { completion in
+          if case let .failure(error) = completion {
+            Log.shared.error("Failed to get chat participants", error: error)
+          }
+        },
         receiveValue: { [weak self] participants in
           self?.participants = participants
         }

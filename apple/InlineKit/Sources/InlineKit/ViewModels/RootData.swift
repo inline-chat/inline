@@ -40,8 +40,8 @@ public class RootData: ObservableObject {
         )
         .publisher(in: db.reader, scheduling: .immediate)
         .sink(
-          receiveCompletion: { error in
-            self.error = error
+          receiveCompletion: { [weak self] error in
+            self?.error = error
           },
           receiveValue: { [weak self] user in
             guard let self else { return }
@@ -60,7 +60,7 @@ public class RootData: ObservableObject {
     Task { @MainActor in
       do {
         Log.shared.debug("Fetching me")
-        let _ = try await DataManager.shared.fetchMe()
+        _ = try await DataManager.shared.fetchMe()
         // self.currentUser = user
       } catch {
         Log.shared.error("Error fetching user", error: error)

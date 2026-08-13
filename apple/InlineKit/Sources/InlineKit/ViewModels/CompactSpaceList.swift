@@ -19,13 +19,18 @@ public final class CompactSpaceList: ObservableObject, @unchecked Sendable {
 #if DEBUG
     db.warnIfInMemoryDatabaseForObservation("CompactSpaceList.spaces")
 #endif
+    let log = log
     ValueObservation
       .tracking { db in
         try Space.fetchAll(db)
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(
-        receiveCompletion: { error in self.log.error("Failed to get spaces \(error)") },
+        receiveCompletion: { completion in
+          if case let .failure(error) = completion {
+            log.error("Failed to get spaces", error: error)
+          }
+        },
         receiveValue: { [weak self] spaces in
           self?.spaces = spaces
         }
