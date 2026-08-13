@@ -41,7 +41,6 @@ struct SidebarBodyLayoutDrag: Equatable {
   let sourceIDs: Set<SidebarCollectionRow.ID>
   let destinationIndex: Int
   let slotHeight: CGFloat
-  let showsEmptyPinnedTarget: Bool
   let hidesPinnedHeader: Bool
 }
 
@@ -50,18 +49,22 @@ struct SidebarBodyLayoutDrag: Equatable {
 final class SidebarCollectionBodyLayout: NSCollectionViewLayout {
   private(set) var slotFrame: CGRect?
   private(set) var laneBoundaryFrame: CGRect?
+  private(set) var scrollEdgeContentHeight: CGFloat = 0
 
   private var presentation: SidebarBodyPresentation?
   private var drag: SidebarBodyLayoutDrag?
+  private var emptyPinned: SidebarCollectionEmptyPinnedLayoutState?
   private var settlingSourceIDs: Set<SidebarCollectionRow.ID> = []
   private var itemAttributes: [IndexPath: NSCollectionViewLayoutAttributes] = [:]
   private var transitionFromIDs: [SidebarCollectionRow.ID] = []
   private var transitionFromAttributes: [
     SidebarCollectionRow.ID: NSCollectionViewLayoutAttributes
   ] = [:]
+  private var hasTransitionSource = false
   private var contentSize = CGSize.zero
 
   func prepareTransition(from presentation: SidebarBodyPresentation?) {
+    hasTransitionSource = presentation != nil
     transitionFromIDs = presentation?.orderedIDs ?? []
     transitionFromAttributes = Dictionary(
       uniqueKeysWithValues: transitionFromIDs.enumerated().compactMap { index, id in
@@ -76,10 +79,12 @@ final class SidebarCollectionBodyLayout: NSCollectionViewLayout {
   func configure(
     presentation: SidebarBodyPresentation,
     drag: SidebarBodyLayoutDrag?,
+    emptyPinned: SidebarCollectionEmptyPinnedLayoutState?,
     settlingSourceIDs: Set<SidebarCollectionRow.ID>
   ) {
     self.presentation = presentation
     self.drag = drag
+    self.emptyPinned = emptyPinned
     self.settlingSourceIDs = settlingSourceIDs
     invalidateLayout()
   }
@@ -119,14 +124,13 @@ final class SidebarCollectionBodyLayout: NSCollectionViewLayout {
         sourceIDs: drag.sourceIDs,
         destinationIndex: drag.destinationIndex,
         slotHeight: Double(drag.slotHeight),
-        showsEmptyPinnedTarget: drag.showsEmptyPinnedTarget,
-        hidesPinnedHeader: drag.hidesPinnedHeader,
-        emptyPinnedHeaderHeight: Double(SidebarCollectionRow.sectionHeaderHeight)
+        hidesPinnedHeader: drag.hidesPinnedHeader
       )
     }
     let plan = SidebarCollectionDragLayoutPlanner.plan(
       rows: plannedRows,
-      drag: plannedDrag
+      drag: plannedDrag,
+      emptyPinned: emptyPinned
     )
 
     slotFrame = plan.slotFrame.map {
@@ -166,7 +170,8 @@ final class SidebarCollectionBodyLayout: NSCollectionViewLayout {
     // The clip view is the actual viewport and lets the document shrink while
     // still filling a short sidebar.
     let viewportHeight = collectionView.enclosingScrollView?.contentView.bounds.height ?? 0
-    let trailingScrollPadding = rows.last.map { min($0.height, 44) } ?? 0
+    scrollEdgeContentHeight = CGFloat(plan.contentHeight)
+    let trailingScrollPadding: CGFloat = rows.isEmpty ? 0 : 20
     contentSize = CGSize(
       width: collectionView.bounds.width,
       height: max(CGFloat(plan.contentHeight) + trailingScrollPadding, viewportHeight)
@@ -202,6 +207,10 @@ final class SidebarCollectionBodyLayout: NSCollectionViewLayout {
       targetAttributes.alpha = previous.alpha
       return targetAttributes
     }
+    // The initial snapshot has no source scene to animate from. Returning an
+    // invisible appearance attribute here lets a full-height window display
+    // before all visible collection items have reached their final state.
+    guard hasTransitionSource else { return targetAttributes }
     guard NSWorkspace.shared.accessibilityDisplayShouldReduceMotion == false else {
       return targetAttributes
     }
@@ -250,7 +259,7 @@ final class SidebarCollectionBodyLayout: NSCollectionViewLayout {
     horizontalInset: CGFloat,
     insetWidth: CGFloat
   ) -> CGRect {
-    if row.projectedItem != nil || row.isSectionHeader || row.id == .pinDropGuide {
+    if row.usesFullWidthCollectionLayout {
       return CGRect(x: 0, y: y, width: collectionWidth, height: height)
     }
     return CGRect(x: horizontalInset, y: y, width: insetWidth, height: height)

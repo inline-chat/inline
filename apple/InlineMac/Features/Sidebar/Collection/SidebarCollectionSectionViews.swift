@@ -46,6 +46,10 @@ struct SidebarCollectionSectionHeaderView: View {
 }
 
 struct SidebarCollectionPinDropGuideView: View {
+  let dimsInstruction: Bool
+
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
   var body: some View {
     VStack(spacing: 4) {
       Image(systemName: "pin")
@@ -54,6 +58,11 @@ struct SidebarCollectionPinDropGuideView: View {
         .font(.system(size: 11, weight: .medium))
     }
     .foregroundStyle(Color(nsColor: Theme.accentColor))
+    .opacity(dimsInstruction ? 0.28 : 1)
+    .animation(
+      reduceMotion ? nil : .easeOut(duration: 0.1),
+      value: dimsInstruction
+    )
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background {
       RoundedRectangle(cornerRadius: 9, style: .continuous)

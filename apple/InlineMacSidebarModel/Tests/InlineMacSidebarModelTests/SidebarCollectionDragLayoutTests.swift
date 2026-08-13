@@ -66,8 +66,8 @@ struct SidebarCollectionDragLayoutTests {
     #expect(result.contentHeight == 160)
   }
 
-  @Test("empty Pinned is absent until its semantic lane becomes active")
-  func emptyPinnedTargetIsContextualAndIsTheOnlyHole() {
+  @Test("empty Pinned is absent until its conditional presentation is active")
+  func emptyPinnedTargetIsContextualAndOwnsThePinnedHole() {
     let rows = [
       DragRow(id: .pinnedHeader, height: 0, role: .pinnedHeader),
       DragRow(id: .pinGuide, height: 0, role: .emptyPinnedGuide),
@@ -88,20 +88,97 @@ struct SidebarCollectionDragLayoutTests {
     #expect(original.slotFrame == SidebarCollectionVerticalFrame(minY: 28, height: 44))
     #expect(frame(original, .next)?.minY == 72)
 
+    let idle = SidebarCollectionDragLayoutPlanner.plan(rows: rows, drag: nil)
+    #expect(frame(idle, .pinnedHeader)?.height == 0)
+    #expect(frame(idle, .pinGuide)?.height == 0)
+    #expect(idle.visibleRowIDs.contains(.pinnedHeader) == false)
+    #expect(idle.visibleRowIDs.contains(.pinGuide) == false)
+    #expect(frame(idle, .contentHeader)?.minY == 0)
+
     let pinned = SidebarCollectionDragLayoutPlanner.plan(
       rows: rows,
       drag: DragState(
         sourceIDs: [.parent],
         destinationIndex: 1,
-        slotHeight: 44,
-        showsEmptyPinnedTarget: true,
-        emptyPinnedHeaderHeight: 28
+        slotHeight: 44
+      ),
+      emptyPinned: SidebarCollectionEmptyPinnedLayoutState(
+        headerHeight: 28,
+        targetHeight: 56
       )
     )
     #expect(frame(pinned, .pinnedHeader)?.height == 28)
     #expect(frame(pinned, .pinGuide) == pinned.slotFrame)
-    #expect(pinned.slotFrame == SidebarCollectionVerticalFrame(minY: 28, height: 44))
-    #expect(frame(pinned, .contentHeader)?.minY == 72)
+    #expect(pinned.slotFrame == SidebarCollectionVerticalFrame(minY: 28, height: 56))
+    #expect(frame(pinned, .contentHeader)?.minY == 84)
+
+    let idleAfterDrag = SidebarCollectionDragLayoutPlanner.plan(rows: rows, drag: nil)
+    #expect(idleAfterDrag.rowFrames == idle.rowFrames)
+    #expect(idleAfterDrag.visibleRowIDs == idle.visibleRowIDs)
+    #expect(idleAfterDrag.contentHeight == idle.contentHeight)
+  }
+
+  @Test("conditional empty Pinned remains real geometry at a normal destination")
+  func emptyPinnedPersistsOutsidePinnedDestination() {
+    let rows = [
+      DragRow(id: .pinnedHeader, height: 0, role: .pinnedHeader),
+      DragRow(id: .pinGuide, height: 0, role: .emptyPinnedGuide),
+      DragRow(id: .contentHeader, height: 28),
+      DragRow(id: .parent, height: 44),
+      DragRow(id: .next, height: 44),
+    ]
+    let conditionalPinned = SidebarCollectionEmptyPinnedLayoutState(
+      headerHeight: 28,
+      targetHeight: 56
+    )
+    let normalDestination = SidebarCollectionDragLayoutPlanner.plan(
+      rows: rows,
+      drag: DragState(
+        sourceIDs: [.parent],
+        destinationIndex: 3,
+        slotHeight: 44
+      ),
+      emptyPinned: conditionalPinned
+    )
+
+    #expect(frame(normalDestination, .pinnedHeader)?.height == 28)
+    #expect(frame(normalDestination, .pinGuide) == .init(minY: 28, height: 56))
+    #expect(normalDestination.slotFrame == .init(minY: 112, height: 44))
+    #expect(frame(normalDestination, .pinGuide) != normalDestination.slotFrame)
+    #expect(frame(normalDestination, .contentHeader)?.minY == 84)
+    #expect(frame(normalDestination, .next)?.minY == 156)
+
+    let futureTeachingPresentation = SidebarCollectionDragLayoutPlanner.plan(
+      rows: rows,
+      drag: Optional<DragState>.none,
+      emptyPinned: conditionalPinned
+    )
+    #expect(futureTeachingPresentation.slotFrame == nil)
+    #expect(frame(futureTeachingPresentation, .pinnedHeader)?.height == 28)
+    #expect(frame(futureTeachingPresentation, .pinGuide)?.height == 56)
+    #expect(frame(futureTeachingPresentation, .contentHeader)?.minY == 84)
+  }
+
+  @Test("conditional section latches after crossing its entry threshold")
+  func conditionalSectionLatchesForInteraction() {
+    #expect(SidebarConditionalSectionResolver.resolve(
+      position: 101,
+      entryThreshold: 100,
+      isActive: false,
+      hysteresis: 4
+    ) == false)
+    #expect(SidebarConditionalSectionResolver.resolve(
+      position: 96,
+      entryThreshold: 100,
+      isActive: false,
+      hysteresis: 4
+    ))
+    #expect(SidebarConditionalSectionResolver.resolve(
+      position: 1_000,
+      entryThreshold: 100,
+      isActive: true,
+      hysteresis: 4
+    ))
   }
 
   @Test("returning the destination to the original slot restores one exact scene")
@@ -176,11 +253,14 @@ struct SidebarCollectionDragLayoutTests {
     let emptyPinned = SidebarCollectionDragLayoutPlanner.slotPositions(
       rows: rows,
       sourceIDs: [.parent, .reply],
-      showsEmptyPinnedTarget: true,
-      emptyPinnedHeaderHeight: 28
+      emptyPinned: SidebarCollectionEmptyPinnedLayoutState(
+        headerHeight: 28,
+        targetHeight: 56
+      )
     )
     #expect(emptyPinned[1] == 28)
-    #expect(emptyPinned[4] == 100)
+    #expect(emptyPinned[2] == 84)
+    #expect(emptyPinned[4] == 156)
   }
 
   @Test("sorted proposal lookup is stable at ties and crosses hysteresis once")

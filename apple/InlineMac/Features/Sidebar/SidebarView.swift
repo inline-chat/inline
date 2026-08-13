@@ -272,7 +272,6 @@ struct SidebarView: View {
       content: appKitContent,
       dragPreviewContent: appKitDragPreviewContent,
       actions: SidebarCollectionActions(
-        visibleChatStateChanged: setAppKitVisibleChatState,
         move: applyAppKitSidebarMove,
         toggleDisclosure: toggleAppKitThreadParent,
         externalDropTarget: makeAppKitExternalDropTarget,
@@ -281,19 +280,6 @@ struct SidebarView: View {
       )
     )
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .overlay(alignment: .top) {
-      if let unreadAboveViewport {
-        SidebarUnreadBelowButton(
-          count: unreadAboveViewport.count,
-          direction: .above
-        ) {
-          scrollToUnread(unreadAboveViewport)
-        }
-        .padding(.top, 8)
-        .transition(SidebarUnreadBelowButton.transition(for: .above))
-      }
-    }
-    .animation(SidebarUnreadBelowButton.visibilityAnimation, value: unreadAboveViewport)
   }
 
   private var appKitRenderState: SidebarCollectionRenderState {
@@ -327,13 +313,14 @@ struct SidebarView: View {
     tree: SidebarCollectionTree?
   ) -> [SidebarCollectionRow] {
     var rows: [SidebarCollectionRow] = []
-    let rowHeight = settings.sidebarItemSize.rowHeight
+    let chatRowHeight = settings.sidebarItemSize.rowHeight
+    let navigationRowHeight = SidebarItemSize.compact.rowHeight
 
     if settings.sidebarAsInbox {
       rows.append(SidebarCollectionRow(
         id: .allChats,
         kind: .allChats,
-        height: rowHeight
+        height: navigationRowHeight
       ))
     }
 
@@ -341,12 +328,16 @@ struct SidebarView: View {
       rows.append(SidebarCollectionRow(
         id: .grid,
         kind: .grid,
-        height: rowHeight
+        height: navigationRowHeight
       ))
     }
 
     if settings.sidebarAsInbox == false, isArchiveVisible == false {
-      rows.append(SidebarCollectionRow(id: .newThread, kind: .newThread, height: rowHeight))
+      rows.append(SidebarCollectionRow(
+        id: .newThread,
+        kind: .newThread,
+        height: navigationRowHeight
+      ))
     }
 
     let projectedItems = tree?.projectedItems() ?? []
@@ -367,7 +358,7 @@ struct SidebarView: View {
         rows.append(SidebarCollectionRow(
           id: .emptyState,
           kind: .emptyState,
-          height: rowHeight
+          height: chatRowHeight
         ))
       } else {
         appendAppKitChatRows(contentItems, to: &rows)
@@ -375,7 +366,11 @@ struct SidebarView: View {
     }
 
     if settings.sidebarAsInbox {
-      rows.append(SidebarCollectionRow(id: .newThread, kind: .newThread, height: rowHeight))
+      rows.append(SidebarCollectionRow(
+        id: .newThread,
+        kind: .newThread,
+        height: chatRowHeight
+      ))
     }
 
     return rows
@@ -394,12 +389,15 @@ struct SidebarView: View {
     }
   }
 
-  private func appKitContent(for row: SidebarCollectionRow) -> AnyView {
+  private func appKitContent(
+    for row: SidebarCollectionRow,
+    context: SidebarCollectionRowRenderContext
+  ) -> AnyView {
     let content: AnyView = switch row.kind {
     case .allChats:
-      AnyView(allChatsRow)
+      AnyView(allChatsRow(usesFullWidthCollectionLayout: true))
     case .grid:
-      AnyView(gridSidebarRow)
+      AnyView(gridSidebarRow(usesFullWidthCollectionLayout: true))
     case .archiveHeader:
       AnyView(
         Text("Archived")
@@ -412,11 +410,13 @@ struct SidebarView: View {
     case let .sectionHeader(section, isExpanded):
       AnyView(appKitSectionHeader(section, isExpanded: isExpanded))
     case .pinDropGuide:
-      AnyView(SidebarCollectionPinDropGuideView())
+      AnyView(SidebarCollectionPinDropGuideView(
+        dimsInstruction: context.dimsPinDropInstruction
+      ))
     case let .chat(item):
       AnyView(appKitChatRow(item))
     case .newThread:
-      AnyView(newThreadRow)
+      AnyView(newThreadRow(usesFullWidthCollectionLayout: true))
     case .emptyState:
       AnyView(emptyStateRow)
     }
@@ -432,7 +432,7 @@ struct SidebarView: View {
 
   private func appKitDragPreviewContent(for row: SidebarCollectionRow) -> AnyView {
     guard case let .chat(projectedItem) = row.kind else {
-      return appKitContent(for: row)
+      return appKitContent(for: row, context: .idle)
     }
 
     let item = projectedItem.item
@@ -526,14 +526,19 @@ struct SidebarView: View {
   }
 
   private var allChatsRow: some View {
+    allChatsRow(usesFullWidthCollectionLayout: false)
+  }
+
+  private func allChatsRow(usesFullWidthCollectionLayout: Bool) -> some View {
     SidebarInboxActionRow(
       title: "All Chats",
       systemImage: "text.bubble",
       selected: nav.currentRoute == .allChats || nav.currentRoute == .archivedChats,
       titleDimmed: sidebarTitlesDimmed,
-      size: settings.sidebarItemSize,
+      size: .compact,
       prominentUnreadCount: unreadCounts.scopedUnopenedProminentUnreadCount,
       nonProminentUnreadCount: unreadCounts.scopedUnopenedOtherUnreadCount,
+      usesFullWidthCollectionLayout: usesFullWidthCollectionLayout,
       action: openAllChats
     )
     .listRowInsets(.zero)
@@ -553,12 +558,18 @@ struct SidebarView: View {
 
   @ViewBuilder
   private var gridSidebarRow: some View {
+    gridSidebarRow(usesFullWidthCollectionLayout: false)
+  }
+
+  @ViewBuilder
+  private func gridSidebarRow(usesFullWidthCollectionLayout: Bool) -> some View {
     if let spaceID = nav.selectedSpaceId {
       SidebarGridRow(
         avatars: gridStore.recentAvatars(spaceID: spaceID).map { InlineKit.User(from: $0.user) },
         selected: nav.currentRoute == .grid(spaceId: spaceID),
         titleDimmed: sidebarTitlesDimmed,
-        size: settings.sidebarItemSize,
+        size: .compact,
+        usesFullWidthCollectionLayout: usesFullWidthCollectionLayout,
         action: { openGrid(spaceID: spaceID) }
       )
     } else if let home = homeGridSpaces.first {
@@ -566,7 +577,8 @@ struct SidebarView: View {
         avatars: homeGridAvatars,
         selected: isAnyHomeGridSelected,
         titleDimmed: sidebarTitlesDimmed,
-        size: settings.sidebarItemSize,
+        size: .compact,
+        usesFullWidthCollectionLayout: usesFullWidthCollectionLayout,
         action: { openGrid(spaceID: home.spaceID) }
       )
     }
@@ -728,8 +740,14 @@ struct SidebarView: View {
   }
 
   private var newThreadRow: some View {
+    newThreadRow(usesFullWidthCollectionLayout: false)
+  }
+
+  private func newThreadRow(usesFullWidthCollectionLayout: Bool) -> some View {
     SidebarNewThreadRow(
-      size: settings.sidebarItemSize,
+      size: settings.sidebarAsInbox ? settings.sidebarItemSize : .compact,
+      titleDimmed: settings.sidebarAsInbox ? true : sidebarTitlesDimmed,
+      usesFullWidthCollectionLayout: usesFullWidthCollectionLayout,
       action: createNewThread
     )
     .listRowInsets(.zero)
@@ -903,21 +921,11 @@ struct SidebarView: View {
 
       footerBar
     }
-    .overlay(alignment: .top) {
-      if let unreadBelowViewport {
-        SidebarUnreadBelowButton(count: unreadBelowViewport.count, direction: .below) {
-          scrollToUnread(unreadBelowViewport, using: scrollProxy)
-        }
-        .offset(y: SidebarUnreadBelowButton.bottomBarTopOffset)
-        .transition(SidebarUnreadBelowButton.transition(for: .below))
-      }
-    }
     .animation(.smoothSnappy, value: sidebarConnectionState)
     .animation(AudioNowPlayingPill.visibilityAnimation, value: audioPlayer.item)
 #if SPARKLE
     .animation(.smoothSnappy, value: updates.showsSidebarAction)
 #endif
-    .animation(SidebarUnreadBelowButton.visibilityAnimation, value: unreadBelowViewport)
   }
 
   @ViewBuilder
@@ -943,7 +951,11 @@ struct SidebarView: View {
         createNewThread()
       },
       onInvite: {
-        nav.open(.inviteToSpace(spaceId: activeSpaceId))
+        if let activeSpaceId {
+          nav.open(.inviteToSpace(spaceId: activeSpaceId))
+        } else {
+          nav.open(.inviteToInline)
+        }
       },
       onOpenDocs: openDocs,
       onOpenTownHall: openTownHall,
@@ -2176,13 +2188,6 @@ struct SidebarView: View {
     )
   }
 
-  private func setAppKitVisibleChatState(_ state: SidebarCollectionVisibleChatState) {
-    hasMeasuredSidebarViewport = true
-    visibleSidebarItemIDs = state.visibleIDs
-    lastSidebarItemAboveViewportID = state.lastIDAboveViewport
-    firstSidebarItemBelowViewportID = state.firstIDBelowViewport
-  }
-
   private func setSidebarItemVisibility(_ id: ChatListItem.Identifier, isVisible: Bool) {
     hasMeasuredSidebarViewport = true
     lastSidebarItemAboveViewportID = nil
@@ -2369,6 +2374,7 @@ private struct SidebarInboxActionRow: View {
   let size: SidebarItemSize
   let prominentUnreadCount: Int
   let nonProminentUnreadCount: Int
+  var usesFullWidthCollectionLayout = false
   let action: () -> Void
 
   @Environment(\.colorScheme) private var colorScheme
@@ -2411,7 +2417,7 @@ private struct SidebarInboxActionRow: View {
       .padding(.trailing, Theme.sidebarItemOuterSpacing)
       .contentShape(.interaction, .rect(cornerRadius: Theme.sidebarItemRadius))
       .background(background)
-      .padding(.horizontal, -Theme.sidebarNativeDefaultEdgeInsets + 8)
+      .padding(.horizontal, outerHorizontalPadding)
     }
     .buttonStyle(.plain)
     .help(title)
@@ -2424,6 +2430,12 @@ private struct SidebarInboxActionRow: View {
 
   private var icon: some View {
     SidebarActionRowIcon(systemImage: systemImage, size: size)
+  }
+
+  private var outerHorizontalPadding: CGFloat {
+    usesFullWidthCollectionLayout
+      ? 8
+      : -Theme.sidebarNativeDefaultEdgeInsets + 8
   }
 
   private var background: some View {
@@ -2469,6 +2481,7 @@ private struct SidebarGridRow: View {
   let selected: Bool
   let titleDimmed: Bool
   let size: SidebarItemSize
+  var usesFullWidthCollectionLayout = false
   let action: () -> Void
 
   @Environment(\.colorScheme) private var colorScheme
@@ -2480,7 +2493,8 @@ private struct SidebarGridRow: View {
         avatars: avatars,
         titleDimmed: titleDimmed,
         size: size,
-        backgroundColor: backgroundColor
+        backgroundColor: backgroundColor,
+        usesFullWidthCollectionLayout: usesFullWidthCollectionLayout
       )
     }
     .buttonStyle(.plain)
@@ -2508,6 +2522,7 @@ private struct SidebarGridRowContent: View {
   let titleDimmed: Bool
   let size: SidebarItemSize
   let backgroundColor: Color
+  let usesFullWidthCollectionLayout: Bool
 
   var body: some View {
     HStack(spacing: 8) {
@@ -2535,7 +2550,13 @@ private struct SidebarGridRowContent: View {
       RoundedRectangle(cornerRadius: Theme.sidebarItemRadius, style: .continuous)
         .fill(backgroundColor)
     }
-    .padding(.horizontal, -Theme.sidebarNativeDefaultEdgeInsets + 8)
+    .padding(.horizontal, outerHorizontalPadding)
+  }
+
+  private var outerHorizontalPadding: CGFloat {
+    usesFullWidthCollectionLayout
+      ? 8
+      : -Theme.sidebarNativeDefaultEdgeInsets + 8
   }
 }
 
@@ -2767,6 +2788,8 @@ private struct SidebarEmptyStateButton: View {
 
 private struct SidebarNewThreadRow: View {
   let size: SidebarItemSize
+  let titleDimmed: Bool
+  var usesFullWidthCollectionLayout = false
   let action: () -> Void
 
   @Environment(\.colorScheme) private var colorScheme
@@ -2790,27 +2813,33 @@ private struct SidebarNewThreadRow: View {
 
         Text("New thread")
           .font(Self.titleFont)
+          .foregroundStyle(titleDimmed ? Color.secondary : Color.primary)
           .lineLimit(1)
           .frame(maxWidth: .infinity, alignment: .leading)
       }
-      .foregroundStyle(.secondary)
       .frame(height: rowHeight)
       .padding(.leading, Theme.sidebarItemInnerSpacing)
       .padding(.trailing, Theme.sidebarItemOuterSpacing)
       .contentShape(.interaction, .rect(cornerRadius: Theme.sidebarItemRadius))
       .background(background)
-      .padding(.horizontal, -Theme.sidebarNativeDefaultEdgeInsets + 8)
+      .padding(.horizontal, outerHorizontalPadding)
     }
     .buttonStyle(.plain)
     .help("New Thread")
     .accessibilityLabel("New Thread")
     .onHover { isHovered = $0 }
-    .animation(.smoothSnappy, value: size)
   }
 
   private var icon: some View {
     Image(systemName: "square.and.pencil")
       .font(.system(size: 13, weight: .regular))
+      .foregroundStyle(.secondary)
+  }
+
+  private var outerHorizontalPadding: CGFloat {
+    usesFullWidthCollectionLayout
+      ? 8
+      : -Theme.sidebarNativeDefaultEdgeInsets + 8
   }
 
   private var background: some View {

@@ -30,28 +30,52 @@ public struct SidebarCollectionDragLayoutState<RowID: Hashable>: Hashable {
   public let sourceIDs: Set<RowID>
   public let destinationIndex: Int
   public let slotHeight: Double
-  public let showsEmptyPinnedTarget: Bool
   public let hidesPinnedHeader: Bool
-  public let emptyPinnedHeaderHeight: Double
 
   public init(
     sourceIDs: Set<RowID>,
     destinationIndex: Int,
     slotHeight: Double,
-    showsEmptyPinnedTarget: Bool = false,
-    hidesPinnedHeader: Bool = false,
-    emptyPinnedHeaderHeight: Double = 0
+    hidesPinnedHeader: Bool = false
   ) {
     self.sourceIDs = sourceIDs
     self.destinationIndex = destinationIndex
     self.slotHeight = slotHeight
-    self.showsEmptyPinnedTarget = showsEmptyPinnedTarget
     self.hidesPinnedHeader = hidesPinnedHeader
-    self.emptyPinnedHeaderHeight = emptyPinnedHeaderHeight
   }
 }
 
 extension SidebarCollectionDragLayoutState: Sendable where RowID: Sendable {}
+
+/// Conditional empty-Pinned presentation is document geometry controlled by
+/// the caller. When active, the target owns the one slot at a Pinned
+/// destination and remains ordinary instructional geometry elsewhere. This
+/// also supports a future teaching presentation without an active drag.
+public struct SidebarCollectionEmptyPinnedLayoutState: Hashable, Sendable {
+  public let headerHeight: Double
+  public let targetHeight: Double
+
+  public init(headerHeight: Double, targetHeight: Double) {
+    self.headerHeight = headerHeight
+    self.targetHeight = targetHeight
+  }
+}
+
+/// Resolves a conditional section against frozen drag-start geometry. Once
+/// entered, the section remains active until its owning interaction ends so
+/// the destination cannot move away while the user is trying to land a drop.
+public enum SidebarConditionalSectionResolver {
+  public static func resolve(
+    position: Double,
+    entryThreshold: Double,
+    isActive: Bool,
+    hysteresis: Double = 0
+  ) -> Bool {
+    guard isActive == false else { return true }
+    let hysteresis = max(hysteresis, 0)
+    return position <= entryThreshold - hysteresis
+  }
+}
 
 public struct SidebarCollectionVerticalFrame: Hashable, Sendable {
   public let minY: Double
@@ -140,9 +164,8 @@ public enum SidebarCollectionDragLayoutPlanner {
   public static func slotPositions<RowID: Hashable>(
     rows: [SidebarCollectionDragLayoutRow<RowID>],
     sourceIDs: Set<RowID>,
-    showsEmptyPinnedTarget: Bool = false,
-    hidesPinnedHeader: Bool = false,
-    emptyPinnedHeaderHeight: Double = 0
+    emptyPinned: SidebarCollectionEmptyPinnedLayoutState? = nil,
+    hidesPinnedHeader: Bool = false
   ) -> [Int: Double] {
     var positions: [Int: Double] = [:]
     var y = 0.0
@@ -154,15 +177,15 @@ public enum SidebarCollectionDragLayoutPlanner {
 
       switch row.role {
       case .pinnedHeader:
-        if showsEmptyPinnedTarget {
-          y += max(emptyPinnedHeaderHeight, 0)
+        if let emptyPinned {
+          y += max(emptyPinned.headerHeight, 0)
         } else if hidesPinnedHeader == false {
           y += max(row.height, 0)
         }
       case .emptyPinnedGuide:
-        // The guide is the eventual slot, not another row of document
-        // geometry. Its height is added exactly once by `plan(rows:drag:)`.
-        break
+        if let emptyPinned {
+          y += max(emptyPinned.targetHeight, 0)
+        }
       case .ordinary:
         y += max(row.height, 0)
       }
@@ -175,7 +198,8 @@ public enum SidebarCollectionDragLayoutPlanner {
 
   public static func plan<RowID: Hashable>(
     rows: [SidebarCollectionDragLayoutRow<RowID>],
-    drag: SidebarCollectionDragLayoutState<RowID>?
+    drag: SidebarCollectionDragLayoutState<RowID>?,
+    emptyPinned: SidebarCollectionEmptyPinnedLayoutState? = nil
   ) -> SidebarCollectionDragLayoutResult<RowID> {
     var frames: [RowID: SidebarCollectionVerticalFrame] = [:]
     var visibleIDs = Set<RowID>()
@@ -183,20 +207,6 @@ public enum SidebarCollectionDragLayoutPlanner {
     var y = 0.0
     var reducedIndex = 0
     var insertedSlot = false
-
-    let usesEmptyPinnedGuide: Bool = {
-      guard let drag, drag.showsEmptyPinnedTarget else { return false }
-      var cursor = 0
-      for row in rows {
-        if row.role == .emptyPinnedGuide {
-          return cursor == drag.destinationIndex
-        }
-        if drag.sourceIDs.contains(row.id) == false {
-          cursor += 1
-        }
-      }
-      return false
-    }()
 
     func insertSlotIfNeeded() {
       guard insertedSlot == false,
@@ -215,8 +225,8 @@ public enum SidebarCollectionDragLayoutPlanner {
     for row in rows {
       if row.role == .pinnedHeader {
         let height: Double
-        if usesEmptyPinnedGuide, let drag {
-          height = max(drag.emptyPinnedHeaderHeight, 0)
+        if let emptyPinned {
+          height = max(emptyPinned.headerHeight, 0)
         } else if drag?.hidesPinnedHeader == true {
           height = 0
         } else {
@@ -231,16 +241,18 @@ public enum SidebarCollectionDragLayoutPlanner {
         continue
       }
 
-      if row.role == .emptyPinnedGuide, usesEmptyPinnedGuide, let drag {
+      if row.role == .emptyPinnedGuide, let emptyPinned {
         let frame = SidebarCollectionVerticalFrame(
           minY: y,
-          height: max(drag.slotHeight, 0)
+          height: max(emptyPinned.targetHeight, 0)
         )
         frames[row.id] = frame
         visibleIDs.insert(row.id)
-        slotFrame = frame
         y = frame.maxY
-        insertedSlot = true
+        if let drag, reducedIndex == drag.destinationIndex {
+          slotFrame = frame
+          insertedSlot = true
+        }
         reducedIndex += 1
         continue
       }

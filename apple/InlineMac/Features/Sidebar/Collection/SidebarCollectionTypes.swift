@@ -20,6 +20,7 @@ struct SidebarCollectionRow: Equatable, Identifiable {
   }
 
   static let sectionHeaderHeight: CGFloat = 28
+  static let emptyPinnedTargetHeight: CGFloat = 56
 
   enum ID: Hashable {
     case allChats
@@ -55,6 +56,17 @@ struct SidebarCollectionRow: Equatable, Identifiable {
   var isSectionHeader: Bool {
     guard case .sectionHeader = kind else { return false }
     return true
+  }
+
+  /// Interactive paint and hit testing belong to a full-width AppKit item;
+  /// each SwiftUI row applies its own visual inset inside that stable boundary.
+  var usesFullWidthCollectionLayout: Bool {
+    switch id {
+    case .allChats, .grid, .sectionHeader, .pinDropGuide, .chat, .newThread:
+      true
+    case .archiveHeader, .emptyState:
+      false
+    }
   }
 
   var sectionHeader: (section: SectionHeader, isExpanded: Bool)? {
@@ -111,6 +123,15 @@ struct SidebarCollectionRenderState: Equatable {
   let preview: Preview
 }
 
+/// Narrow, collection-owned state needed while rendering one hosted row.
+/// Keeping drag presentation out of the SwiftUI environment makes each reused
+/// row an explicit projection of the controller's current scene.
+struct SidebarCollectionRowRenderContext: Equatable {
+  let dimsPinDropInstruction: Bool
+
+  static let idle = Self(dimsPinDropInstruction: false)
+}
+
 struct SidebarCollectionMove {
   enum HierarchyChange: Equatable {
     case detach(ChatListItem.Identifier)
@@ -137,17 +158,7 @@ struct SidebarCollectionExternalDropTarget: Hashable {
   let generation: UUID
 }
 
-/// Chat visibility at one collection viewport position. Boundary IDs keep
-/// unread navigation meaningful in very short windows where only structural
-/// rows intersect the viewport.
-struct SidebarCollectionVisibleChatState: Equatable {
-  let visibleIDs: Set<ChatListItem.Identifier>
-  let lastIDAboveViewport: ChatListItem.Identifier?
-  let firstIDBelowViewport: ChatListItem.Identifier?
-}
-
 struct SidebarCollectionActions {
-  let visibleChatStateChanged: (SidebarCollectionVisibleChatState) -> Void
   let move: (
     SidebarCollectionMove,
     @escaping @MainActor @Sendable (Bool) -> Void

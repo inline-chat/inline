@@ -57,6 +57,26 @@ struct SidebarFooterView: View {
 
   var body: some View {
     HStack(spacing: 0) {
+      if showsArchive {
+        slot {
+          SidebarFooterButton(
+            symbolName: isArchiveActive ? "archivebox.fill" : "archivebox",
+            accessibilityLabel: "Archive",
+            tint: iconTint,
+            action: onToggleArchive
+          )
+        }
+      }
+
+      slot {
+        SidebarFooterButton(
+          symbolName: "magnifyingglass",
+          accessibilityLabel: "Search",
+          tint: iconTint,
+          action: onSearch
+        )
+      }
+
       slot {
         SidebarFooterMenu(
           symbolName: "questionmark",
@@ -94,26 +114,6 @@ struct SidebarFooterView: View {
             Label("Status", systemImage: "antenna.radiowaves.left.and.right")
           }
         }
-      }
-
-      if showsArchive {
-        slot {
-          SidebarFooterButton(
-            symbolName: isArchiveActive ? "archivebox.fill" : "archivebox",
-            accessibilityLabel: "Archive",
-            tint: iconTint,
-            action: onToggleArchive
-          )
-        }
-      }
-
-      slot {
-        SidebarFooterButton(
-          symbolName: "magnifyingglass",
-          accessibilityLabel: "Search",
-          tint: iconTint,
-          action: onSearch
-        )
       }
 
       slot {
