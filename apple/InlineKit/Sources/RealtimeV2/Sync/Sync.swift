@@ -219,11 +219,18 @@ actor Sync {
   private var operationsInProgress = 0
   private var operationDrainWaiters: [CheckedContinuation<Void, Never>] = []
 
-  init(applyUpdates: ApplyUpdates, syncStorage: SyncStorage, client: ProtocolClientType, config: SyncConfig) {
+  init(
+    applyUpdates: ApplyUpdates,
+    syncStorage: SyncStorage,
+    client: ProtocolClientType,
+    config: SyncConfig,
+    acceptsWork: Bool = true
+  ) {
     self.applyUpdates = applyUpdates
     self.syncStorage = syncStorage
     self.client = client
     self.config = config
+    self.acceptsWork = acceptsWork
     bucketFetchLimiter = FetchLimiter(limit: config.maxConcurrentBucketFetches)
   }
 

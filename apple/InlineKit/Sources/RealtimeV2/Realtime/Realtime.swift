@@ -113,7 +113,13 @@ public actor RealtimeV2 {
     )
     connectionManager = ConnectionManager(session: session, constraints: initialConstraints)
     let syncConfig = RealtimeConfigStore.initialSyncConfig()
-    sync = Sync(applyUpdates: applyUpdates, syncStorage: syncStorage, client: session, config: syncConfig)
+    sync = Sync(
+      applyUpdates: applyUpdates,
+      syncStorage: syncStorage,
+      client: session,
+      config: syncConfig,
+      acceptsWork: false
+    )
     transactions = Transactions(persistenceHandler: persistenceHandler, blockerResolver: blockerResolver)
     stateObject = RealtimeState()
     authAdapter = AuthConnectionAdapter(

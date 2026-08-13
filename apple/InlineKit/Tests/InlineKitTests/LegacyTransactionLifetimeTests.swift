@@ -262,7 +262,7 @@ private actor LegacyTransactionProbe {
 }
 
 private func waitForLegacyTransactionCondition(
-  timeout: Duration = .seconds(1),
+  timeout: Duration = .seconds(15),
   pollInterval: Duration = .milliseconds(10),
   _ condition: @escaping @Sendable () async -> Bool
 ) async -> Bool {

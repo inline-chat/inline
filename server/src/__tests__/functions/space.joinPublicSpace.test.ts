@@ -26,6 +26,7 @@ describe("joinPublicSpace", () => {
     const result = await joinPublicSpace({ handle: "  @TOWNHALL  " }, context(user.id))
 
     expect(result.alreadyMember).toBe(false)
+    if (!result.space || !result.member) throw new Error("Expected joined space and member")
     expect(result.space.id).toBe(BigInt(space.id))
     expect(result.space.handle).toBe("TownHall")
     expect(result.space.isPublic).toBe(true)
@@ -47,6 +48,7 @@ describe("joinPublicSpace", () => {
     const userPayload = UpdatesModel.decrypt(userUpdates[0]!).payload.update
     expect(userPayload.oneofKind).toBe("userJoinSpace")
     if (userPayload.oneofKind !== "userJoinSpace") throw new Error("Expected userJoinSpace")
+    if (!userPayload.userJoinSpace.space) throw new Error("Expected joined space update")
     expect(userPayload.userJoinSpace.space.handle).toBe("TownHall")
 
     const spaceUpdates = await db
@@ -57,6 +59,7 @@ describe("joinPublicSpace", () => {
     const spacePayload = UpdatesModel.decrypt(spaceUpdates[0]!).payload.update
     expect(spacePayload.oneofKind).toBe("spaceMemberAdd")
     if (spacePayload.oneofKind !== "spaceMemberAdd") throw new Error("Expected spaceMemberAdd")
+    if (!spacePayload.spaceMemberAdd.user) throw new Error("Expected added user update")
     expect(spacePayload.spaceMemberAdd.user.min).toBe(true)
     expect(spacePayload.spaceMemberAdd.user.email).toBeUndefined()
     expect(spacePayload.spaceMemberAdd.user.phoneNumber).toBeUndefined()
@@ -75,6 +78,7 @@ describe("joinPublicSpace", () => {
 
     expect(first.alreadyMember).toBe(false)
     expect(second.alreadyMember).toBe(true)
+    if (!first.member || !second.member) throw new Error("Expected existing membership")
     expect(second.member.id).toBe(first.member.id)
     expect(
       await db

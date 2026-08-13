@@ -63,6 +63,7 @@ const child = Bun.spawn({
     process.execPath,
     "test",
     "--timeout=30000",
+    "--max-concurrency=1",
     ...(process.env["CI"] ? ["--only-failures"] : []),
     ...bunFiles,
   ],

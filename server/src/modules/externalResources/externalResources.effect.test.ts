@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test, vi } from "vitest"
 import type { InputPeer } from "@inline-chat/protocol/core"
 import type { IntegrationAuthToken } from "@in/server/modules/integrations/authResolver"
 import { Effect } from "effect"
@@ -10,6 +10,13 @@ import {
   makeExternalResourceSearch,
   type ExternalResourceRecord,
 } from "./externalResources.effect"
+
+vi.mock("@in/server/db/models/chats", () => ({ ChatModel: {} }))
+vi.mock("@in/server/modules/authorization/accessGuards", () => ({ AccessGuards: {} }))
+vi.mock("@in/server/modules/integrations/authResolver", () => ({
+  resolveIntegrationAuthCandidates: async () => [],
+  userThenSpaceIntegrationAuthPolicy: { scopeOrderInSpace: ["user", "space"] },
+}))
 
 const peer: InputPeer = {
   type: {

@@ -32,5 +32,6 @@ export const handler = async (
 export const checkUsernameAvailable = async (username: string, context: { userId?: number }) => {
   const normalizedUsername = normalizeUsername(username).toLowerCase()
   const availability = await getPublicHandleAvailability(db, normalizedUsername, { userId: context.userId })
-  return availability !== "taken" && !isReservedUsername(normalizedUsername)
+  return availability === "current" ||
+    (availability === "available" && !isReservedUsername(normalizedUsername))
 }
