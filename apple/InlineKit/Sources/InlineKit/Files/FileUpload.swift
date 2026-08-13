@@ -28,6 +28,34 @@ private struct UploadTaskInfo {
   var progress: UploadProgressSnapshot
 }
 
+struct BoundedTerminalStateKeys: Sendable {
+  private let limit: Int
+  private(set) var keys: [String] = []
+
+  init(limit: Int) {
+    self.limit = max(0, limit)
+  }
+
+  mutating func record(_ key: String) -> [String] {
+    keys.removeAll { $0 == key }
+    keys.append(key)
+
+    let overflow = max(0, keys.count - limit)
+    guard overflow > 0 else { return [] }
+    let evicted = Array(keys.prefix(overflow))
+    keys.removeFirst(overflow)
+    return evicted
+  }
+
+  mutating func remove(_ key: String) {
+    keys.removeAll { $0 == key }
+  }
+
+  mutating func removeAll() {
+    keys.removeAll(keepingCapacity: true)
+  }
+}
+
 public enum UploadProgressStage: String, Sendable, Equatable {
   case processing
   case uploading
@@ -144,6 +172,8 @@ public enum DocumentPendingUploadDisplayState: Equatable, Sendable {
 
 public actor FileUploader {
   public static let shared = FileUploader()
+  static let terminalStateRetentionLimit = 256
+  static let inactivePublisherRetentionLimit = 256
 
   // Replace simple dictionaries with more structured storage
   private var uploadTasks: [String: UploadTaskInfo] = [:]
@@ -152,6 +182,11 @@ public actor FileUploader {
   private var progressPublishers: [String: CurrentValueSubject<UploadProgressSnapshot, Never>] = [:]
   private var latestProgress: [String: UploadProgressSnapshot] = [:]
   private var cleanupTasks: [String: Task<Void, Never>] = [:]
+  private var terminalStateKeys = BoundedTerminalStateKeys(limit: terminalStateRetentionLimit)
+  private var inactivePublisherKeys = BoundedTerminalStateKeys(limit: inactivePublisherRetentionLimit)
+  private var activeUploadTokens: [String: UUID] = [:]
+  private var uploadResetTask: Task<Void, Never>?
+  private var uploadSessionGeneration: UInt64 = 0
 
   private init() {}
 
@@ -159,6 +194,7 @@ public actor FileUploader {
 
   private func registerTask(
     uploadId: String,
+    token: UUID,
     task: Task<UploadResult, any Error>,
     priority: TaskPriority = .userInitiated
   ) {
@@ -175,14 +211,15 @@ public actor FileUploader {
     cleanupTasks[uploadId] = Task { [weak self] in
       do {
         _ = try await task.value
-        await self?.handleTaskCompletion(uploadId: uploadId)
+        await self?.handleTaskCompletion(uploadId: uploadId, token: token)
       } catch {
-        await self?.handleTaskFailure(uploadId: uploadId, error: error)
+        await self?.handleTaskFailure(uploadId: uploadId, token: token, error: error)
       }
     }
   }
 
-  private func handleTaskCompletion(uploadId: String) {
+  private func handleTaskCompletion(uploadId: String, token: UUID) {
+    guard activeUploadTokens[uploadId] == token else { return }
     Log.shared.debug("[FileUploader] Upload task completed for \(uploadId)")
     if let latest = latestProgress[uploadId], latest.stage != .completed {
       let totalBytes = max(latest.totalBytes, latest.bytesSent)
@@ -191,9 +228,16 @@ public actor FileUploader {
     uploadTasks.removeValue(forKey: uploadId)
     cleanupTasks.removeValue(forKey: uploadId)
     progressHandlers.removeValue(forKey: uploadId)
+    activeUploadTokens.removeValue(forKey: uploadId)
   }
 
-  private func handleTaskFailure(uploadId: String, error: Error) {
+  private func handleTaskFailure(uploadId: String, token: UUID, error: Error) {
+    guard activeUploadTokens[uploadId] == token else { return }
+    if Self.isCancellation(error) {
+      releaseCancelledUploadState(uploadId: uploadId)
+      return
+    }
+
     Log.shared.error(
       "[FileUploader] Upload task failed for \(uploadId)",
       error: error
@@ -202,15 +246,18 @@ public actor FileUploader {
     uploadTasks.removeValue(forKey: uploadId)
     cleanupTasks.removeValue(forKey: uploadId)
     progressHandlers.removeValue(forKey: uploadId)
+    activeUploadTokens.removeValue(forKey: uploadId)
   }
 
   // MARK: - Progress Tracking
 
-  private func updateProgress(uploadId: String, progress: UploadProgressSnapshot) {
+  private func updateProgress(uploadId: String, token: UUID, progress: UploadProgressSnapshot) {
+    guard uploadTasks[uploadId] != nil, activeUploadTokens[uploadId] == token else { return }
     publishProgress(uploadId: uploadId, progress: progress)
   }
 
   private func publishProgress(uploadId: String, progress: UploadProgressSnapshot) {
+    inactivePublisherKeys.remove(uploadId)
     latestProgress[uploadId] = progress
     if var taskInfo = uploadTasks[uploadId] {
       taskInfo.progress = progress
@@ -228,17 +275,55 @@ public actor FileUploader {
     if let publisher = progressPublishers[uploadId] {
       publisher.send(progress)
     }
+
+    if progress.stage == .completed || progress.stage == .failed {
+      finishProgressPublisher(uploadId: uploadId)
+      let evicted = terminalStateKeys.record(uploadId)
+      for evictedID in evicted {
+        latestProgress.removeValue(forKey: evictedID)
+        finishedUploads.removeValue(forKey: evictedID)
+        finishProgressPublisher(uploadId: evictedID)
+      }
+    }
   }
 
-  private func progressPublisher(for uploadId: String) -> CurrentValueSubject<UploadProgressSnapshot, Never> {
-    if let existing = progressPublishers[uploadId] {
-      return existing
+  private func progressPublisher(for uploadId: String) -> AnyPublisher<UploadProgressSnapshot, Never> {
+    if uploadResetTask != nil {
+      return Just(.failed(id: uploadId, error: FileUploadError.uploadCancelled)).eraseToAnyPublisher()
     }
 
-    let initialProgress = latestProgress[uploadId] ?? .processing(id: uploadId)
-    let publisher = CurrentValueSubject<UploadProgressSnapshot, Never>(initialProgress)
-    progressPublishers[uploadId] = publisher
-    return publisher
+    if let latest = latestProgress[uploadId], latest.stage == .completed || latest.stage == .failed {
+      return Just(latest).eraseToAnyPublisher()
+    }
+
+    let publisher: CurrentValueSubject<UploadProgressSnapshot, Never>
+    if let existing = progressPublishers[uploadId] {
+      publisher = existing
+      if uploadTasks[uploadId] == nil {
+        retainInactivePublisher(uploadId: uploadId)
+      }
+    } else {
+      let initialProgress = latestProgress[uploadId] ?? .processing(id: uploadId)
+      publisher = CurrentValueSubject<UploadProgressSnapshot, Never>(initialProgress)
+      progressPublishers[uploadId] = publisher
+      retainInactivePublisher(uploadId: uploadId)
+    }
+
+    return publisher.eraseToAnyPublisher()
+  }
+
+  private func retainInactivePublisher(uploadId: String) {
+    let evicted = inactivePublisherKeys.record(uploadId)
+    for evictedID in evicted {
+      guard uploadTasks[evictedID] == nil else { continue }
+      finishProgressPublisher(uploadId: evictedID)
+    }
+  }
+
+  private func finishProgressPublisher(uploadId: String) {
+    let publisher = progressPublishers.removeValue(forKey: uploadId)
+    inactivePublisherKeys.remove(uploadId)
+    publisher?.send(completion: .finished)
   }
 
   private func currentProgress(for uploadId: String) -> UploadProgressSnapshot? {
@@ -246,7 +331,7 @@ public actor FileUploader {
   }
 
   public func videoProgressPublisher(videoLocalId: Int64) -> AnyPublisher<UploadProgressSnapshot, Never> {
-    progressPublisher(for: getUploadId(videoId: videoLocalId)).eraseToAnyPublisher()
+    progressPublisher(for: getUploadId(videoId: videoLocalId))
   }
 
   public func currentVideoProgress(videoLocalId: Int64) -> UploadProgressSnapshot? {
@@ -254,7 +339,7 @@ public actor FileUploader {
   }
 
   public func documentProgressPublisher(documentLocalId: Int64) -> AnyPublisher<UploadProgressSnapshot, Never> {
-    progressPublisher(for: getUploadId(documentId: documentLocalId)).eraseToAnyPublisher()
+    progressPublisher(for: getUploadId(documentId: documentLocalId))
   }
 
   public func currentDocumentProgress(documentLocalId: Int64) -> UploadProgressSnapshot? {
@@ -262,17 +347,18 @@ public actor FileUploader {
   }
 
   public func photoProgressPublisher(photoLocalId: Int64) -> AnyPublisher<UploadProgressSnapshot, Never> {
-    progressPublisher(for: getUploadId(photoId: photoLocalId)).eraseToAnyPublisher()
+    progressPublisher(for: getUploadId(photoId: photoLocalId))
   }
 
   public func voiceProgressPublisher(voiceLocalId: Int64) -> AnyPublisher<UploadProgressSnapshot, Never> {
-    progressPublisher(for: getUploadId(voiceId: voiceLocalId)).eraseToAnyPublisher()
+    progressPublisher(for: getUploadId(voiceId: voiceLocalId))
   }
 
   public func setUploadProgressHandler(
     for uploadId: String,
     handler: @escaping @Sendable (UploadProgressSnapshot) -> Void
   ) {
+    guard uploadResetTask == nil else { return }
     progressHandlers[uploadId] = handler
 
     let currentProgress = latestProgress[uploadId] ?? uploadTasks[uploadId]?.progress
@@ -312,6 +398,7 @@ public actor FileUploader {
   public func uploadPhoto(
     photoInfo: PhotoInfo
   ) throws -> Int64 {
+    guard uploadResetTask == nil else { throw FileUploadError.uploadCancelled }
     let photoSize = photoInfo.bestPhotoSize()
     guard let photoSize,
           let localPath = photoSize.localPath
@@ -345,6 +432,9 @@ public actor FileUploader {
   public func uploadVideo(
     videoInfo: VideoInfo
   ) async throws -> Int64 {
+    guard uploadResetTask == nil else { throw FileUploadError.uploadCancelled }
+    let startingSessionGeneration = uploadSessionGeneration
+
     // Ensure we have a persisted local video row and id
     var resolvedVideoInfo = videoInfo
     var video = resolvedVideoInfo.video
@@ -365,6 +455,9 @@ public actor FileUploader {
       from: resolvedVideoInfo,
       localUrl: localUrl
     )
+    guard uploadResetTask == nil, uploadSessionGeneration == startingSessionGeneration else {
+      throw FileUploadError.uploadCancelled
+    }
 
     let uploadId = getUploadId(videoId: localVideoId)
     publishProgress(uploadId: uploadId, progress: .processing(id: uploadId))
@@ -394,6 +487,7 @@ public actor FileUploader {
   public func uploadDocument(
     documentInfo: DocumentInfo
   ) async throws -> Int64 {
+    guard uploadResetTask == nil else { throw FileUploadError.uploadCancelled }
     guard let localPath = documentInfo.document.localPath else {
       Log.shared.error("Document did not have a local path")
       throw FileUploadError.invalidDocument
@@ -417,6 +511,7 @@ public actor FileUploader {
   public func uploadVoice(
     voiceContent: Client_MessageVoiceContent
   ) async throws -> Int64 {
+    guard uploadResetTask == nil else { throw FileUploadError.uploadCancelled }
     let localVoiceId = voiceContent.voiceID
     guard localVoiceId != 0 else {
       throw FileUploadError.invalidVoiceId
@@ -460,6 +555,8 @@ public actor FileUploader {
     videoMetadata: ApiClient.VideoUploadMetadata? = nil,
     voiceMetadata: ApiClient.VoiceUploadMetadata? = nil
   ) throws {
+    guard uploadResetTask == nil else { throw FileUploadError.uploadCancelled }
+
     let type: MessageFileType
     let uploadId: String
 
@@ -496,11 +593,16 @@ public actor FileUploader {
       return
     }
 
+    prepareForActiveUpload(uploadId: uploadId)
+
     let metadata = videoMetadata
     let resolvedVoiceMetadata = voiceMetadata
+    let token = UUID()
+    activeUploadTokens[uploadId] = token
     let task = Task<UploadResult, any Error>(priority: priority) {
       try await FileUploader.shared.performUpload(
         uploadId: uploadId,
+        token: token,
         media: media,
         localUrl: localUrl,
         mimeType: mimeType,
@@ -512,11 +614,12 @@ public actor FileUploader {
     }
 
     // Register the task
-    registerTask(uploadId: uploadId, task: task, priority: priority)
+    registerTask(uploadId: uploadId, token: token, task: task, priority: priority)
   }
 
   private func performUpload(
     uploadId: String,
+    token: UUID,
     media: FileMediaItem,
     localUrl: URL,
     mimeType: String,
@@ -525,6 +628,7 @@ public actor FileUploader {
     videoMetadata: ApiClient.VideoUploadMetadata?,
     voiceMetadata: ApiClient.VoiceUploadMetadata?
   ) async throws -> UploadResult {
+    try ensureActiveUpload(uploadId: uploadId, token: token)
     Log.shared.debug("[FileUploader] Starting upload for \(uploadId)")
 
     var uploadUrl = localUrl
@@ -579,10 +683,9 @@ public actor FileUploader {
     }
 
     try Task.checkCancellation()
+    try ensureActiveUpload(uploadId: uploadId, token: token)
 
-    // get data from file
-    let data = try Data(contentsOf: uploadUrl)
-    let uploadSizeBytes = Int64(data.count)
+    let uploadSizeBytes = Int64(FileHelpers.getFileSize(at: uploadUrl))
     publishProgress(
       uploadId: uploadId,
       progress: .uploading(id: uploadId, bytesSent: 0, totalBytes: uploadSizeBytes)
@@ -591,18 +694,31 @@ public actor FileUploader {
     // upload file with progress tracking
     let progressHandler = FileUploader.progressHandler(
       for: uploadId,
+      token: token,
       logicalTotalBytes: uploadSizeBytes
     )
 
-    let result = try await ApiClient.shared.uploadFile(
-      type: type,
-      data: data,
-      filename: uploadFileName,
-      mimeType: MIMEType(text: uploadMimeType),
-      videoMetadata: resolvedVideoMetadata,
-      voiceMetadata: resolvedVoiceMetadata,
-      progress: progressHandler
-    )
+    // Multipart staging copies the source file before the request's first
+    // suspension. Keep that work off this actor so cancel()/cancelAll() can
+    // enter promptly, and explicitly propagate cancellation to the worker.
+    let transferTask = Task.detached(priority: .userInitiated) {
+      try await ApiClient.shared.uploadFile(
+        type: type,
+        fileURL: uploadUrl,
+        filename: uploadFileName,
+        mimeType: MIMEType(text: uploadMimeType),
+        videoMetadata: resolvedVideoMetadata,
+        voiceMetadata: resolvedVoiceMetadata,
+        progress: progressHandler
+      )
+    }
+    let result = try await withTaskCancellationHandler {
+      try await transferTask.value
+    } onCancel: {
+      transferTask.cancel()
+    }
+    try Task.checkCancellation()
+    try ensureActiveUpload(uploadId: uploadId, token: token)
 
     // TODO: Set compressed file in db if it was created
 
@@ -617,12 +733,17 @@ public actor FileUploader {
     // Update database with new ID
     do {
       try await updateDatabaseWithServerIds(media: media, result: result)
+      try Task.checkCancellation()
+      try ensureActiveUpload(uploadId: uploadId, token: token)
       Log.shared.debug("[FileUploader] Successfully updated database for \(uploadId)")
 
       // Store result after successful database update
       storeUploadResult(uploadId: uploadId, result: result_)
       publishProgress(uploadId: uploadId, progress: .completed(id: uploadId, totalBytes: uploadSizeBytes))
     } catch {
+      if Self.isCancellation(error) {
+        throw error
+      }
       Log.shared.error(
         "[FileUploader] Failed to update database with new server ID for \(uploadId)",
         error: error
@@ -637,17 +758,49 @@ public actor FileUploader {
     finishedUploads[uploadId] = result
   }
 
+  private func prepareForActiveUpload(uploadId: String) {
+    terminalStateKeys.remove(uploadId)
+    inactivePublisherKeys.remove(uploadId)
+    latestProgress.removeValue(forKey: uploadId)
+  }
+
+  private func releaseCancelledUploadState(uploadId: String) {
+    activeUploadTokens.removeValue(forKey: uploadId)
+    uploadTasks.removeValue(forKey: uploadId)
+    cleanupTasks.removeValue(forKey: uploadId)
+    progressHandlers.removeValue(forKey: uploadId)
+    finishedUploads.removeValue(forKey: uploadId)
+    latestProgress.removeValue(forKey: uploadId)
+    finishProgressPublisher(uploadId: uploadId)
+    terminalStateKeys.remove(uploadId)
+    inactivePublisherKeys.remove(uploadId)
+  }
+
+  private func ensureActiveUpload(uploadId: String, token: UUID) throws {
+    guard activeUploadTokens[uploadId] == token else {
+      throw CancellationError()
+    }
+  }
+
+  private static func isCancellation(_ error: Error) -> Bool {
+    if error is CancellationError { return true }
+    if let uploadError = error as? FileUploadError, case .uploadCancelled = uploadError { return true }
+    let nsError = error as NSError
+    return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
+  }
+
   // MARK: - Task Control
 
   public func cancel(uploadId: String) {
     Log.shared.debug("[FileUploader] Cancelling upload for \(uploadId)")
 
+    if finishedUploads[uploadId] != nil || latestProgress[uploadId]?.stage == .completed {
+      return
+    }
+
     if let taskInfo = uploadTasks[uploadId] {
       taskInfo.task.cancel()
-      publishProgress(uploadId: uploadId, progress: .failed(id: uploadId, error: FileUploadError.uploadCancelled))
-      uploadTasks.removeValue(forKey: uploadId)
-      cleanupTasks.removeValue(forKey: uploadId)
-      progressHandlers.removeValue(forKey: uploadId)
+      releaseCancelledUploadState(uploadId: uploadId)
     }
   }
 
@@ -663,17 +816,50 @@ public actor FileUploader {
     cancel(uploadId: getUploadId(voiceId: voiceLocalId))
   }
 
-  public func cancelAll() {
+  public func cancelAll() async {
+    if let uploadResetTask {
+      await uploadResetTask.value
+      return
+    }
+    uploadSessionGeneration &+= 1
+
     Log.shared.debug("[FileUploader] Cancelling all uploads")
 
+    let tasks = uploadTasks.values.map(\.task)
+    let cleanupMonitors = Array(cleanupTasks.values)
     for (uploadId, taskInfo) in uploadTasks {
       taskInfo.task.cancel()
-      publishProgress(uploadId: uploadId, progress: .failed(id: uploadId, error: FileUploadError.uploadCancelled))
+      finishProgressPublisher(uploadId: uploadId)
     }
 
+    activeUploadTokens.removeAll()
     uploadTasks.removeAll()
     cleanupTasks.removeAll()
     progressHandlers.removeAll()
+    finishedUploads.removeAll()
+    latestProgress.removeAll()
+    for uploadId in Array(progressPublishers.keys) {
+      finishProgressPublisher(uploadId: uploadId)
+    }
+    progressPublishers.removeAll()
+    terminalStateKeys.removeAll()
+    inactivePublisherKeys.removeAll()
+
+    let reset = Task {
+      for task in tasks {
+        _ = try? await task.value
+      }
+      for monitor in cleanupMonitors {
+        await monitor.value
+      }
+    }
+    uploadResetTask = reset
+    await reset.value
+    uploadResetTask = nil
+  }
+
+  func retainedProgressPublisherCount() -> Int {
+    progressPublishers.count
   }
 
   // MARK: - Status Queries
@@ -872,6 +1058,7 @@ public actor FileUploader {
   // Nonisolated helper so progress closures don't capture actor-isolated state
   nonisolated static func progressHandler(
     for uploadId: String,
+    token: UUID,
     logicalTotalBytes: Int64
   ) -> @Sendable (ApiClient.UploadTransferProgress) -> Void {
     return { transferProgress in
@@ -881,7 +1068,7 @@ public actor FileUploader {
         logicalTotalBytes: logicalTotalBytes
       )
       Task {
-        await FileUploader.shared.updateProgress(uploadId: uploadId, progress: snapshot)
+        await FileUploader.shared.updateProgress(uploadId: uploadId, token: token, progress: snapshot)
       }
     }
   }
