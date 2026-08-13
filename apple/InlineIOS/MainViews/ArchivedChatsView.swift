@@ -175,7 +175,8 @@ struct ArchivedChatsView: View {
             type: .user(userInfo, chat: memberChat.chat),
             dialog: memberChat.dialog,
             lastMessage: memberChat.message,
-            lastMessageSender: memberChat.from
+            lastMessageSender: memberChat.from,
+            embeddedLastMessage: memberChat.embeddedMessage
           )
           .contentShape(Rectangle())
           .onTapGesture {
@@ -189,7 +190,8 @@ struct ArchivedChatsView: View {
             type: .chat(chatInfo, spaceName: chatInfo.spaceId != nil ? fullSpaceViewModel.space?.name : nil),
             dialog: chat.dialog,
             lastMessage: chat.message,
-            lastMessageSender: chat.from
+            lastMessageSender: chat.from,
+            embeddedLastMessage: chat.embeddedMessage
           )
           .contentShape(Rectangle())
           .onTapGesture {

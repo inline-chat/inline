@@ -413,6 +413,15 @@ public struct PhotoInfo: Codable, Equatable, FetchableRecord, Hashable, Persista
     }
   }
 
+  /// Whether this photo has a regular representation that the shared photo view can load.
+  /// Stripped `s` bytes are only a progressive placeholder and must not reserve media layout alone.
+  public var hasDisplayablePreview: Bool {
+    sizes.contains { size in
+      guard size.type != "s" else { return false }
+      return size.localPath?.isEmpty == false || size.cdnUrl?.isEmpty == false
+    }
+  }
+
   private func photoAvailabilityPriority(_ size: PhotoSize) -> Int {
     if size.localPath?.isEmpty == false {
       return 2

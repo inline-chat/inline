@@ -2341,16 +2341,14 @@ class MessageViewAppKit: NSView {
         constant: layout.documentContentViewTop
       )
       documentViewHeightConstraint = documentContainerView.heightAnchor.constraint(equalToConstant: document.size.height)
+      documentViewWidthConstraint = documentContainerView.widthAnchor.constraint(equalToConstant: document.size.width)
 
       constraints.append(
         contentsOf: [
           documentViewTopConstraint!,
           documentViewHeightConstraint!,
+          documentViewWidthConstraint!,
           documentContainerView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: document.spacing.left),
-          documentContainerView.trailingAnchor.constraint(
-            equalTo: contentView.trailingAnchor,
-            constant: -document.spacing.right
-          ),
         ]
       )
     }
@@ -2438,6 +2436,7 @@ class MessageViewAppKit: NSView {
 
   private var documentViewTopConstraint: NSLayoutConstraint?
   private var documentViewHeightConstraint: NSLayoutConstraint?
+  private var documentViewWidthConstraint: NSLayoutConstraint?
 
   private var attachmentsViewTopConstraint: NSLayoutConstraint?
   private var attachmentsViewLeadingConstraint: NSLayoutConstraint?
@@ -2731,7 +2730,8 @@ class MessageViewAppKit: NSView {
 
     if let document = props.layout.document,
        let documentViewTopConstraint,
-       let documentViewHeightConstraint
+       let documentViewHeightConstraint,
+       let documentViewWidthConstraint
     {
       log.trace("Updating document view constraints for message \(document.size)")
       let documentTop = props.layout.documentContentViewTop
@@ -2740,6 +2740,9 @@ class MessageViewAppKit: NSView {
       }
       if documentViewHeightConstraint.constant != document.size.height {
         documentViewHeightConstraint.constant = document.size.height
+      }
+      if documentViewWidthConstraint.constant != document.size.width {
+        documentViewWidthConstraint.constant = document.size.width
       }
     } else if let document = props.layout.document {
       if documentContainerView.superview == nil {
@@ -2751,14 +2754,12 @@ class MessageViewAppKit: NSView {
         constant: props.layout.documentContentViewTop
       )
       documentViewHeightConstraint = documentContainerView.heightAnchor.constraint(equalToConstant: document.size.height)
+      documentViewWidthConstraint = documentContainerView.widthAnchor.constraint(equalToConstant: document.size.width)
       NSLayoutConstraint.activate([
         documentViewTopConstraint!,
         documentViewHeightConstraint!,
+        documentViewWidthConstraint!,
         documentContainerView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: document.spacing.left),
-        documentContainerView.trailingAnchor.constraint(
-          equalTo: contentView.trailingAnchor,
-          constant: -document.spacing.right
-        ),
       ])
     }
 
@@ -3912,6 +3913,7 @@ class MessageViewAppKit: NSView {
       documentContainerView.removeFromSuperview()
       documentViewTopConstraint = nil
       documentViewHeightConstraint = nil
+      documentViewWidthConstraint = nil
     }
 
     // Update related message for reply view
@@ -4884,10 +4886,7 @@ extension MessageViewAppKit: NSMenuDelegate {
 
     // Add document actions
     if hasActualDocument {
-      menu.addItem(NSMenuItem.separator())
-      let saveItem = NSMenuItem(title: "Save Document", action: #selector(saveDocument), keyEquivalent: "s")
-      saveItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save Document")
-      menu.addItem(saveItem)
+      documentView?.appendContextMenuItems(to: menu)
     }
 
     if canSaveLoadedVoice {

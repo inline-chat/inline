@@ -77,6 +77,7 @@ public enum ChatListDatabaseQuery {
         "anchorMessage"."photoId" AS "anchorMessagePhotoID",
         "anchorMessage"."videoId" AS "anchorMessageVideoID",
         "anchorMessage"."documentId" AS "anchorMessageDocumentID",
+        "anchorDocument"."fileName" AS "anchorDocumentFileName",
         "anchorMessage"."contentPayload" AS "anchorMessageContentPayload"
       FROM "dialog"
       JOIN "chat"
@@ -99,6 +100,8 @@ public enum ChatListDatabaseQuery {
       LEFT JOIN "message" AS "anchorMessage"
         ON "anchorMessage"."chatId" = "chat"."parentChatId"
         AND "anchorMessage"."messageId" = "chat"."parentMessageId"
+      LEFT JOIN "document" AS "anchorDocument"
+        ON "anchorDocument"."documentId" = "anchorMessage"."documentId"
       WHERE \(Dialog.chatListVisibilitySQL)
         AND \(scope.sql)
       ORDER BY "dialog"."id"
@@ -192,7 +195,7 @@ public enum ChatListDatabaseQuery {
           photoID: row[.anchorMessagePhotoID],
           videoID: row[.anchorMessageVideoID],
           documentID: row[.anchorMessageDocumentID],
-          documentFileName: nil,
+          documentFileName: row[.anchorDocumentFileName],
           contentPayloadData: row[.anchorMessageContentPayload]
         ))
       )
@@ -327,7 +330,7 @@ public enum ChatListDatabaseQuery {
     if input.photoID != nil { return "Photo" }
     if input.videoID != nil { return "Video" }
     if input.documentID != nil {
-      return singleLineText(input.documentFileName) ?? "Document"
+      return MessagePreviewText.document(fileName: input.documentFileName)
     }
     if payload?.hasVoice == true { return "Voice message" }
     return input.messageID == nil ? nil : "Message"

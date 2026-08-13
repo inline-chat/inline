@@ -390,6 +390,7 @@ private extension EmbedMessageView {
     messageLabel.text = messageContent(
       for: message,
       displayText: displayText,
+      documentFileName: document?.fileName,
       senderName: senderName,
       kind: kind
     )
@@ -421,6 +422,7 @@ private extension EmbedMessageView {
   func messageContent(
     for message: Message,
     displayText: String?,
+    documentFileName: String?,
     senderName: String,
     kind: Kind
   ) -> String {
@@ -438,7 +440,7 @@ private extension EmbedMessageView {
       if message.hasText, let resolvedText {
         resolvedText
       } else {
-        "Document"
+        MessagePreviewText.document(fileName: documentFileName, includesEmoji: false)
       }
     } else if message.hasPhoto {
       if message.hasText, let resolvedText {

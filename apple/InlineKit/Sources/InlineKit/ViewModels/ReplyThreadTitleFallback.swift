@@ -94,12 +94,22 @@ public enum ReplyThreadTitleFallback {
       return nil
     }
 
-    let message = try Message
+    guard let message = try Message
       .filter(Column("chatId") == parentChatId)
       .filter(Column("messageId") == parentMessageId)
       .fetchOne(db)
+    else {
+      return nil
+    }
 
-    return message?.stringRepresentationPlain
+    if let documentID = message.documentId {
+      let document = try Document
+        .filter(Document.Columns.documentId == documentID)
+        .fetchOne(db)
+      return MessagePreviewText.document(fileName: document?.fileName)
+    }
+
+    return message.stringRepresentationPlain
   }
 
   public static func isGenericFallback(_ title: String) -> Bool {

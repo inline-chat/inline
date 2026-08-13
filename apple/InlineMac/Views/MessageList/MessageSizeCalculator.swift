@@ -870,7 +870,13 @@ class MessageSizeCalculator {
     if hasDocument {
       // Documents have minimum width but can expand up to parent available width
       // Start with the minimum document width, but don't exceed parent available width
-      let baseWidth = hasVoice ? Theme.voiceMessageViewWidth : Theme.documentViewWidth
+      let baseWidth = if hasVoice {
+        Theme.voiceMessageViewWidth
+      } else if let documentInfo = message.documentInfo {
+        DocumentPresentationPlan.preferredWidth(for: documentInfo)
+      } else {
+        Theme.documentViewWidth
+      }
       documentWidth = min(parentAvailableWidth, baseWidth)
     }
 
@@ -1154,7 +1160,13 @@ class MessageSizeCalculator {
     if hasDocument, let documentWidth {
       documentPlan = LayoutPlan(size: .zero, spacing: .zero)
       // Use the shared document width calculated above
-      let documentHeight = hasVoice ? Theme.voiceMessageViewHeight : Theme.documentViewHeight
+      let documentHeight = if hasVoice {
+        Theme.voiceMessageViewHeight
+      } else if let documentInfo = message.documentInfo {
+        DocumentPresentationPlan.preferredHeight(for: documentInfo)
+      } else {
+        Theme.documentViewHeight
+      }
       documentPlan!.size = CGSize(width: documentWidth, height: documentHeight)
 
       if hasText {
@@ -1672,9 +1684,13 @@ class MessageSizeCalculator {
     if hasDocument {
       if hasVoice {
         documentWidth = min(parentAvailableWidth, Theme.voiceMessageViewWidth)
+      } else if let documentInfo = message.documentInfo {
+        documentWidth = min(
+          parentAvailableWidth,
+          min(Self.minimalDocumentMaxWidth, DocumentPresentationPlan.preferredWidth(for: documentInfo))
+        )
       } else {
-        let maxDocumentWidth = min(Self.minimalDocumentMaxWidth, parentAvailableWidth)
-        documentWidth = min(parentAvailableWidth, max(Theme.documentViewWidth, maxDocumentWidth))
+        documentWidth = min(parentAvailableWidth, Theme.documentViewWidth)
       }
     }
 
@@ -1831,7 +1847,13 @@ class MessageSizeCalculator {
 
     if hasDocument, let documentWidth {
       documentPlan = LayoutPlan(size: .zero, spacing: .zero)
-      let documentHeight = hasVoice ? Theme.voiceMessageMinimalViewHeight : Theme.documentViewHeight
+      let documentHeight = if hasVoice {
+        Theme.voiceMessageMinimalViewHeight
+      } else if let documentInfo = message.documentInfo {
+        DocumentPresentationPlan.preferredHeight(for: documentInfo)
+      } else {
+        Theme.documentViewHeight
+      }
       documentPlan!.size = CGSize(width: documentWidth, height: documentHeight)
       documentPlan!.spacing = NSEdgeInsets(
         top: 8,

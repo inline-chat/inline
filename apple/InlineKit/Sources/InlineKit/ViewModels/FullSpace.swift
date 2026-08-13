@@ -43,6 +43,17 @@ public struct SpaceChatItem: Codable, FetchableRecord, PersistableRecord, Sendab
     dialog.id
   }
 
+  public var embeddedMessage: EmbeddedMessage? {
+    guard let message else { return nil }
+    return EmbeddedMessage(
+      message: message,
+      senderInfo: from,
+      translations: translations,
+      photoInfo: photoInfo,
+      document: document
+    )
+  }
+
   public init(
     dialog: Dialog,
     chat: Chat? = nil,

@@ -190,13 +190,7 @@ struct SpaceView: View {
   }
 
   private func embeddedMessage(for item: SpaceChatItem) -> EmbeddedMessage? {
-    guard let message = item.message else { return nil }
-    return EmbeddedMessage(
-      message: message,
-      senderInfo: item.from,
-      translations: item.translations,
-      photoInfo: item.photoInfo
-    )
+    item.embeddedMessage
   }
 
   private func sortMembers(_ items: [HomeChatItem]) -> [HomeChatItem] {

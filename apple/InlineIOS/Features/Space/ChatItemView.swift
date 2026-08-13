@@ -189,7 +189,9 @@ struct ChatItemView: View {
           .foregroundColor(.secondary)
 
         Text(
-          (message?.message.hasText == true ? message?.displayText ?? "" : "Document")
+          (message?.message.hasText == true
+            ? message?.displayText ?? ""
+            : MessagePreviewText.document(fileName: message?.document?.fileName, includesEmoji: false))
             .replacingOccurrences(of: "\n", with: " ")
         )
         .font(.callout)

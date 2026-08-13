@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 @testable import InlineKit
 import Testing
 
@@ -16,6 +17,112 @@ struct HomeChatListPresentationTests {
     }
 
     #expect(snapshots.isEmpty)
+  }
+
+  @Test("Reply-thread anchor preview keeps the document file name")
+  func replyThreadDocumentAnchorPreview() throws {
+    let database = AppDatabase.empty()
+    let parentChatID: Int64 = 710
+    let replyChatID: Int64 = 711
+    let anchorMessageID: Int64 = 12
+    let documentID: Int64 = 91
+
+    try database.dbWriter.write { db in
+      try User(id: 1, email: nil, firstName: "Mo").insert(db)
+      try Chat(
+        id: parentChatID,
+        date: date(day: 1),
+        type: .thread,
+        title: "Parent",
+        spaceId: nil
+      ).insert(db)
+      try Document(
+        id: nil,
+        documentId: documentID,
+        date: date(day: 1),
+        fileName: "Anchor Report.pdf",
+        mimeType: "application/pdf",
+        size: 42,
+        cdnUrl: nil,
+        localPath: nil,
+        thumbnailPhotoId: nil
+      ).insert(db)
+      try Message(
+        messageId: anchorMessageID,
+        fromId: 1,
+        date: date(day: 1),
+        text: nil,
+        peerUserId: nil,
+        peerThreadId: parentChatID,
+        chatId: parentChatID,
+        documentId: documentID
+      ).insert(db)
+      try Chat(
+        id: replyChatID,
+        date: date(day: 2),
+        type: .thread,
+        title: nil,
+        spaceId: nil,
+        parentChatId: parentChatID,
+        parentMessageId: anchorMessageID
+      ).insert(db)
+
+      var dialog = Dialog.previewThread
+      dialog.id = Dialog.getDialogId(peerThreadId: replyChatID)
+      dialog.peerThreadId = replyChatID
+      dialog.chatId = replyChatID
+      dialog.open = true
+      try dialog.insert(db)
+    }
+
+    let snapshots = try database.reader.read { db in
+      try ChatListDatabaseQuery.fetchSnapshots(
+        db,
+        spaceID: nil,
+        includeSpaceChatsInHome: true
+      )
+    }
+
+    #expect(snapshots.first?.title == "📄 Anchor Report.pdf")
+    let fallback = try database.reader.read { db in
+      try ReplyThreadTitleFallback.title(
+        for: try #require(try Chat.fetchOne(db, id: replyChatID)),
+        db: db
+      )
+    }
+    #expect(fallback == "📄 Anchor Report.pdf")
+  }
+
+  @Test("Space chat adapter carries its document into embedded previews")
+  func spaceChatItemCarriesDocumentPreview() {
+    let document = Document(
+      id: nil,
+      documentId: 92,
+      date: date(day: 1),
+      fileName: "Space Notes.md",
+      mimeType: "text/markdown",
+      size: 42,
+      cdnUrl: nil,
+      localPath: nil,
+      thumbnailPhotoId: nil
+    )
+    let message = Message(
+      messageId: 13,
+      fromId: 1,
+      date: date(day: 1),
+      text: nil,
+      peerUserId: nil,
+      peerThreadId: 712,
+      chatId: 712,
+      documentId: document.documentId
+    )
+    let item = SpaceChatItem(
+      dialog: .previewThread,
+      message: message,
+      document: document
+    )
+
+    #expect(item.embeddedMessage?.document?.fileName == "Space Notes.md")
   }
 
   @Test("Inbox contains open chats only and keeps pinned chats first")

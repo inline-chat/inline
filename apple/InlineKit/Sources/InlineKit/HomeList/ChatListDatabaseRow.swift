@@ -62,6 +62,7 @@ struct ChatListDatabaseRow {
     case anchorMessagePhotoID
     case anchorMessageVideoID
     case anchorMessageDocumentID
+    case anchorDocumentFileName
     case anchorMessageContentPayload
   }
 

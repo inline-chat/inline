@@ -60,5 +60,27 @@ struct PhotoInfoTests {
     )
 
     #expect(info.bestPhotoSize()?.type == "s")
+    #expect(!info.hasDisplayablePreview)
+  }
+
+  @Test("displayable preview requires a loadable non-stripped representation")
+  func displayablePreviewEligibility() {
+    let photo = Photo(photoId: 46, format: .jpeg)
+    let metadataOnly = PhotoInfo(
+      photo: photo,
+      sizes: [PhotoSize(photoId: 1, type: "f", width: 600, height: 600, size: 12_000)]
+    )
+    let remote = PhotoInfo(
+      photo: photo,
+      sizes: [PhotoSize(photoId: 1, type: "f", width: 600, height: 600, size: 12_000, cdnUrl: "https://example.com/f")]
+    )
+    let local = PhotoInfo(
+      photo: photo,
+      sizes: [PhotoSize(photoId: 1, type: "f", width: 600, height: 600, size: 12_000, localPath: "thumb.jpg")]
+    )
+
+    #expect(!metadataOnly.hasDisplayablePreview)
+    #expect(remote.hasDisplayablePreview)
+    #expect(local.hasDisplayablePreview)
   }
 }
