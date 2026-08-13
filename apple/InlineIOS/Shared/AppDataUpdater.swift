@@ -7,13 +7,16 @@ import InlineKit
 import Logger
 import UIKit
 
-// Class to update shared data when the app launches or before it exits
-class AppDataUpdater {
+actor AppDataUpdater {
   static let shared = AppDataUpdater()
+  private static let log = Log.scoped("AppDataUpdater")
   private static let sharedContainerIdentifier = "group.chat.inline"
-  private static let intentAvatarDirectoryName = "IntentAvatars"
   private static let intentAvatarMaxPixelSize = Int(InlineMessageIntentDonation.preferredAvatarPixelSize)
   private static let intentAvatarJPEGQuality: CGFloat = 0.82
+
+  private var refreshTask: Task<Void, Never>?
+  private var refreshRequestedWhileRunning = false
+  private var areSharedDataUpdatesEnabled = true
 
   private struct IntentAvatarExport {
     let data: Data
@@ -21,53 +24,98 @@ class AppDataUpdater {
     let filenameExtension: String
   }
 
-  private var db: AppDatabase = .shared
+  /// Refreshes the app-group snapshot and coalesces concurrent lifecycle requests.
+  func updateSharedData() async {
+    guard areSharedDataUpdatesEnabled else { return }
 
-  // Update shared data for share extension to use
-  func updateSharedData() {
-    // Get recent chats and users
-    DispatchQueue.global(qos: .background).async {
-      self.fetchChatsAndUsers { chats, users in
-        if let chats, let users {
-          // Save data to shared location
-          BridgeManager.shared.saveSharedData(chats: chats, users: users)
+    // Preserve the last valid share snapshot when protected data is unavailable at launch.
+    // The in-memory fallback is intentionally empty and must never replace account data.
+    guard AppDatabase.shared.isPersistent else {
+      Self.log.warning("Skipped share-extension data refresh while the persistent database is unavailable")
+      return
+    }
+
+    if let refreshTask {
+      refreshRequestedWhileRunning = true
+      await refreshTask.value
+      return
+    }
+
+    repeat {
+      refreshRequestedWhileRunning = false
+      let task = Task.detached(priority: .utility) {
+        do {
+          let data = try await Self.fetchShareExtensionData()
+          try Task.checkCancellation()
+          try BridgeManager.shared.saveSharedData(chats: data.chats, users: data.users)
+          Self.log.info("Refreshed share-extension data for \(data.chats.count) chats")
+        } catch is CancellationError {
+          // Logout owns cache cleanup and intentionally cancels an in-flight refresh.
+        } catch {
+          Self.log.error("Failed to refresh share-extension data", error: error)
         }
       }
+      refreshTask = task
+      await task.value
+      refreshTask = nil
+    } while refreshRequestedWhileRunning
+  }
+
+  func clearSharedData() async throws {
+    areSharedDataUpdatesEnabled = false
+    refreshRequestedWhileRunning = false
+    if let refreshTask {
+      refreshTask.cancel()
+      await refreshTask.value
+      self.refreshTask = nil
     }
+    try BridgeManager.shared.clearSharedData()
+  }
+
+  func resumeSharedDataUpdates() {
+    areSharedDataUpdatesEnabled = true
+  }
+
+  func cancelRefresh() async {
+    refreshRequestedWhileRunning = false
+    guard let refreshTask else { return }
+    refreshTask.cancel()
+    await refreshTask.value
+    self.refreshTask = nil
   }
 
   func outgoingIntentRequest(
     peerId: Peer,
-    chatId: Int64
+    chatId _: Int64
   ) async -> InlineMessageIntentDonation.Request? {
-    if let data = BridgeManager.shared.loadSharedData(),
-       let request = Self.outgoingIntentRequest(
-         peerId: peerId,
-         chatId: chatId,
-         data: data.shareExtensionData
-       ) {
-      return request
-    }
-
-    return await withCheckedContinuation { continuation in
-      fetchChatsAndUsers { chats, users in
-        guard let chats, let users else {
-          continuation.resume(returning: nil)
-          return
-        }
-
-        continuation.resume(returning: Self.outgoingIntentRequest(
-          peerId: peerId,
-          chatId: chatId,
-          data: .init(chats: chats, users: users)
-        ))
+    await Task.detached(priority: .userInitiated) {
+      if let data = BridgeManager.shared.loadSharedData(),
+         let request = Self.outgoingIntentRequest(
+           peerId: peerId,
+           data: data.shareExtensionData
+         ) {
+        return request
       }
-    }
+
+      do {
+        guard let data = try await Self.fetchShareExtensionData(
+          peerId: peerId
+        ) else {
+          return nil
+        }
+        return Self.outgoingIntentRequest(
+          peerId: peerId,
+          data: data
+        )
+      } catch {
+        Self.log.error("Failed to load outgoing intent metadata", error: error)
+        return nil
+      }
+    }.value
   }
 
   private static func outgoingIntentRequest(
     peerId: Peer,
-    chatId: Int64,
     data: ShareExtensionData
   ) -> InlineMessageIntentDonation.Request? {
     let chat = data.chats.first { chat in
@@ -77,88 +125,98 @@ class AppDataUpdater {
       case let .thread(threadId):
         return chat.peerThreadId == threadId
       }
-    } ?? data.chats.first(where: { $0.id == chatId })
+    }
     return chat?.intentDonationRequest(users: data.users, direction: .outgoing)
   }
 
-  // Fetch recent chats and users from app data
-  private func fetchChatsAndUsers(completion: @escaping ([SharedChat]?, [SharedUser]?) -> Void) {
-    Task.detached(priority: .background) {
-      do {
-        let snapshots: [HomeChatListItemSnapshot] = try await AppDatabase.shared.reader.read { db in
-          let items = try HomeChatItem.all().fetchAll(db)
-          return try HomeChatListItemSnapshot.snapshots(from: items, db: db)
-        }
-
-        // Convert from GRDB models to Bridge models
-        var bridgeChats: [SharedChat] = []
-        var bridgeUsers: [SharedUser] = []
-
-        // Process chats
-        for snapshot in snapshots {
-          let item = snapshot.item
-          var peerUserId: Int64?
-          var peerThreadId: Int64?
-
-          switch snapshot.peerId {
-          case let .user(id):
-            peerUserId = id
-          case let .thread(id):
-            peerThreadId = id
-          }
-
-          let bridgeChat = SharedChat(
-            id: snapshot.id,
-            title: snapshot.title,
-            peerUserId: peerUserId,
-            peerThreadId: peerThreadId,
-            lastMessageDate: snapshot.sortDate,
-            pinned: snapshot.pinned,
-            spaceName: snapshot.spaceTitle,
-            emoji: item.chat?.emoji,
-            parentTitle: snapshot.parentTitle,
-            preview: snapshot.preview,
-            searchText: snapshot.searchText,
-            unread: snapshot.unread,
-            archived: snapshot.archived,
-            isReplyThread: item.chat?.isReplyThread
-          )
-
-          bridgeChats.append(bridgeChat)
-
-          // Add user info if we have a user
-          if let userInfo = item.displayUserInfo {
-            let user = userInfo.user
-            let bridgeUser = SharedUser(
-              id: user.id,
-              firstName: user.firstName ?? "",
-              lastName: user.lastName ?? "",
-              displayName: user.displayName,
-              email: user.email,
-              username: user.username,
-              profileCdnUrl: user.profileCdnUrl,
-              profileLocalPath: user.profileLocalPath,
-              profileFileUniqueId: user.profileFileUniqueId,
-              profileSharedLocalPath: Self.intentAvatarLocalPath(for: user)
-            )
-
-            if !bridgeUsers.contains(where: { $0.id == bridgeUser.id }) {
-              bridgeUsers.append(bridgeUser)
-            }
-          }
-        }
-
-        // Return the data on the main thread
-        DispatchQueue.main.async {
-          completion(bridgeChats, bridgeUsers)
-        }
-      } catch {
-        Log.shared.error("👽 Error fetching chats and users: \(error)")
-        DispatchQueue.main.async {
-          completion(nil, nil)
-        }
-      }
+  private static func fetchShareExtensionData() async throws -> ShareExtensionData {
+    let snapshots: [HomeChatListItemSnapshot] = try await AppDatabase.shared.reader.read { db in
+      let items = try HomeChatItem.all().fetchAll(db)
+      return try HomeChatListItemSnapshot.snapshots(from: items, db: db)
     }
+    return try makeShareExtensionData(from: snapshots)
+  }
+
+  private static func fetchShareExtensionData(
+    peerId: Peer
+  ) async throws -> ShareExtensionData? {
+    let snapshot: HomeChatListItemSnapshot? = try await AppDatabase.shared.reader.read { db in
+      let peerItem: HomeChatItem? = switch peerId {
+      case let .user(userId):
+        try HomeChatItem.all()
+          .filter(Dialog.Columns.peerUserId == userId)
+          .fetchOne(db)
+      case let .thread(threadId):
+        try HomeChatItem.all()
+          .filter(Dialog.Columns.peerThreadId == threadId)
+          .fetchOne(db)
+      }
+
+      guard let item = peerItem else { return nil }
+      return try HomeChatListItemSnapshot.snapshots(from: [item], db: db).first
+    }
+
+    return try snapshot.map { try makeShareExtensionData(from: [$0]) }
+  }
+
+  private static func makeShareExtensionData(
+    from snapshots: [HomeChatListItemSnapshot]
+  ) throws -> ShareExtensionData {
+    var chats: [SharedChat] = []
+    var users: [SharedUser] = []
+    var userIds = Set<Int64>()
+
+    for snapshot in snapshots {
+      try Task.checkCancellation()
+      let item = snapshot.item
+      let peerUserId: Int64?
+      let peerThreadId: Int64?
+
+      switch snapshot.peerId {
+      case let .user(id):
+        peerUserId = id
+        peerThreadId = nil
+      case let .thread(id):
+        peerUserId = nil
+        peerThreadId = id
+      }
+
+      chats.append(SharedChat(
+        id: snapshot.id,
+        title: snapshot.title,
+        peerUserId: peerUserId,
+        peerThreadId: peerThreadId,
+        lastMessageDate: snapshot.sortDate,
+        pinned: snapshot.pinned,
+        spaceName: snapshot.spaceTitle,
+        emoji: item.chat?.emoji,
+        parentTitle: snapshot.parentTitle,
+        preview: snapshot.preview,
+        searchText: snapshot.searchText,
+        unread: snapshot.unread,
+        archived: snapshot.archived,
+        isReplyThread: item.chat?.isReplyThread
+      ))
+
+      guard let user = item.displayUserInfo?.user,
+            userIds.insert(user.id).inserted
+      else { continue }
+
+      users.append(SharedUser(
+        id: user.id,
+        firstName: user.firstName ?? "",
+        lastName: user.lastName ?? "",
+        displayName: user.displayName,
+        email: user.email,
+        username: user.username,
+        profileCdnUrl: user.profileCdnUrl,
+        profileLocalPath: user.profileLocalPath,
+        profileFileUniqueId: user.profileFileUniqueId,
+        profileSharedLocalPath: intentAvatarLocalPath(for: user)
+      ))
+    }
+
+    return ShareExtensionData(chats: chats, users: users)
   }
 
   private static func intentAvatarLocalPath(for user: User) -> String? {
@@ -178,7 +236,7 @@ class AppDataUpdater {
       identity: export.identity,
       filenameExtension: export.filenameExtension
     )
-    let relativePath = "\(intentAvatarDirectoryName)/\(fileName)"
+    let relativePath = "\(BridgeManager.shared.intentAvatarDirectoryName)/\(fileName)"
     let destinationURL = containerURL.appendingPathComponent(relativePath)
 
     do {
@@ -286,28 +344,84 @@ class AppDataUpdater {
   }
 }
 
-// App delegate extensions to register for app lifecycle events
 extension UIApplicationDelegate {
   func setupAppDataUpdater() {
-    // Update shared data when app launches
-    AppDataUpdater.shared.updateSharedData()
-
-    // Register for app will terminate notification
     NotificationCenter.default.addObserver(
-      forName: UIApplication.willTerminateNotification,
+      forName: UIApplication.didBecomeActiveNotification,
       object: nil,
       queue: .main
     ) { _ in
-      AppDataUpdater.shared.updateSharedData()
+      Task {
+        _ = await AppDatabase.promoteSharedToPersistentIfPossible()
+        await AppDataUpdater.shared.updateSharedData()
+      }
     }
 
-    // Register for app will enter background notification
+    NotificationCenter.default.addObserver(
+      forName: .authenticationChanged,
+      object: nil,
+      queue: .main
+    ) { notification in
+      guard notification.object as? Bool == true else { return }
+      Task {
+        await AppDataUpdater.shared.resumeSharedDataUpdates()
+        IntentDonationCoordinator.resume()
+        _ = await AppDatabase.promoteSharedToPersistentIfPossible()
+        await AppDataUpdater.shared.updateSharedData()
+      }
+    }
+
     NotificationCenter.default.addObserver(
       forName: UIApplication.didEnterBackgroundNotification,
       object: nil,
       queue: .main
     ) { _ in
-      AppDataUpdater.shared.updateSharedData()
+      MainActor.assumeIsolated {
+        SharedDataBackgroundRefresh(application: UIApplication.shared).start()
+      }
     }
+  }
+}
+
+@MainActor
+private final class SharedDataBackgroundRefresh {
+  private let application: UIApplication
+  private var identifier = UIBackgroundTaskIdentifier.invalid
+  private var task: Task<Void, Never>?
+
+  init(application: UIApplication) {
+    self.application = application
+  }
+
+  func start() {
+    guard task == nil else { return }
+
+    identifier = application.beginBackgroundTask(withName: "Refresh Inline share data") { [weak self] in
+      Task { @MainActor in
+        self?.expire()
+      }
+    }
+    task = Task { @MainActor in
+      _ = await AppDatabase.promoteSharedToPersistentIfPossible()
+      guard !Task.isCancelled else { return }
+      await AppDataUpdater.shared.updateSharedData()
+      finish()
+    }
+  }
+
+  private func expire() {
+    task?.cancel()
+    Task {
+      await AppDataUpdater.shared.cancelRefresh()
+    }
+    finish()
+  }
+
+  private func finish() {
+    let identifierToEnd = identifier
+    identifier = .invalid
+    task = nil
+    guard identifierToEnd != .invalid else { return }
+    application.endBackgroundTask(identifierToEnd)
   }
 }

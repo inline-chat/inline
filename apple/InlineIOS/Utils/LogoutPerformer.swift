@@ -33,6 +33,11 @@ enum LogoutPerformer {
 
     Analytics.logout()
     await IntentDonationCoordinator.deleteAll()
+    do {
+      try await AppDataUpdater.shared.clearSharedData()
+    } catch {
+      Log.shared.error("Share-extension logout cleanup failed", error: error)
+    }
 
     await MainActor.run {
       TabsManager.shared.reset()
