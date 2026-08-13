@@ -40,6 +40,12 @@ private enum RootTab: String, Hashable {
   }
 }
 
+private struct PendingSearchExit {
+  let destinationTab: RootTab
+  let destination: Destination?
+  let createsThread: Bool
+}
+
 struct ExperimentalRootView: View {
   @StateObject private var onboardingNavigation = OnboardingNavigation()
   @StateObject private var api = ApiClient()
@@ -101,13 +107,15 @@ private struct ExperimentalAuthedRootView: View {
   @State private var nav = ExperimentalNavigationModel()
   @State private var homeActions = ExperimentalHomeActionCoordinator()
   @State private var translationCoordinator = ExperimentalHomeTranslationCoordinator()
-  @State private var rootTab: RootTab = .allChats
-  @State private var lastContentRootTab: RootTab = .allChats
   @State private var searchQuery = ""
+  @State private var searchFocusRequested = false
+  @State private var searchInteractionRevision = 0
+  @State private var isSearchFieldFocused = false
+  @State private var isSearchKeyboardVisible = false
+  @State private var lastContentRootTab: RootTab = .allChats
+  @State private var pendingSearchExit: PendingSearchExit?
   @State private var isCreatingThread = false
   @State private var isNotificationSettingsPresented = false
-  @AppStorage("ios.experimental.root.selectedTab")
-  private var persistedRootTabRaw = RootTab.allChats.rawValue
   @AppStorage("ios.experimental.root.didMigrateExplicitTabs")
   private var didMigrateExplicitTabs = false
   @AppStorage(ExperimentalHomePreferenceKeys.chatScope)
@@ -182,6 +190,7 @@ private struct ExperimentalAuthedRootView: View {
         .background(Color(.systemBackground))
         .experimentalRootTitleDisplayMode()
         .navigationTitle("")
+        .toolbarVisibility(isSearchActivePresentation ? .hidden : .visible, for: .navigationBar)
         .toolbar {
           experimentalToolbarContent()
         }
@@ -203,56 +212,58 @@ private struct ExperimentalAuthedRootView: View {
     }
     .onAppear {
       migrateLegacyRootTabsIfNeeded()
-      let restoredRootTab = RootTab(rawValue: persistedRootTabRaw) ?? .allChats
-      let persistedTab = restoredRootTab == .newChat ? .allChats : restoredRootTab
       let routedTab = RootTab(appTab: bindableRouter.selectedTab)
-      let hasPendingRoute = !bindableRouter[bindableRouter.selectedTab].isEmpty
-      let desiredRootTab = hasPendingRoute ? routedTab : persistedTab
+      let desiredRootTab = switch routedTab {
+      case .newChat:
+        RootTab.allChats
+      case .allChats, .inbox, .search:
+        routedTab
+      }
       let desiredTab = desiredRootTab.appTab
       configureHomeList()
       if bindableRouter.selectedTab != desiredTab {
         bindableRouter.selectedTab = desiredTab
       }
-      rootTab = desiredRootTab
-      lastContentRootTab = desiredRootTab
-
+      if desiredRootTab == .search {
+        searchFocusRequested = false
+      } else {
+        lastContentRootTab = desiredRootTab
+      }
       if chatItemRenderModeRaw == ExperimentalHomeChatItemRenderMode.oneLineLastMessage.rawValue {
         chatItemRenderModeRaw = ExperimentalHomeChatItemRenderMode.twoLineLastMessage.rawValue
       }
     }
-    .onChange(of: bindableRouter.selectedTab) { _, newValue in
+    .onChange(of: bindableRouter.selectedTab) { oldValue, newValue in
+      let previousRootTab = RootTab(appTab: oldValue)
       let desiredRootTab = RootTab(appTab: newValue)
+      if previousRootTab == .search, desiredRootTab != .search {
+        // External navigation owns its route immediately. Invalidate any pending
+        // Search-result callback and resign; IOS-06 owns route-level deferral.
+        searchInteractionRevision &+= 1
+        pendingSearchExit = nil
+        searchFocusRequested = false
+        searchQuery = ""
+      }
       let desiredTab = desiredRootTab.appTab
       if bindableRouter.selectedTab != desiredTab {
         bindableRouter.selectedTab = desiredTab
         return
       }
-      if rootTab != desiredRootTab {
-        rootTab = desiredRootTab
+      if desiredRootTab == .search {
+        if previousRootTab != .search, previousRootTab != .newChat {
+          lastContentRootTab = previousRootTab
+        }
+        pendingSearchExit = nil
+        searchFocusRequested = false
+      } else if desiredRootTab != .newChat {
+        lastContentRootTab = desiredRootTab
       }
-      lastContentRootTab = desiredRootTab
-      persistedRootTabRaw = desiredRootTab.rawValue
-    }
-    .onChange(of: rootTab) { _, newValue in
-      if newValue == .newChat {
-        createThreadInstantly(spaceId: nav.activeSpaceId)
-        rootTab = lastContentRootTab
-        return
-      }
-
-      let previousRootTab = lastContentRootTab
+      guard previousRootTab != desiredRootTab else { return }
       ExperimentalHomeNavigationPerformance.measureTabSwitch(
         from: previousRootTab.rawValue,
-        to: newValue.rawValue,
+        to: desiredRootTab.rawValue,
         rows: homeListStore.state.presentation.allChatCount
       )
-      lastContentRootTab = newValue
-      persistedRootTabRaw = newValue.rawValue
-      let desiredTab = newValue.appTab
-      if bindableRouter.selectedTab != desiredTab {
-        bindableRouter.selectedTab = desiredTab
-      }
-      searchQuery = ""
     }
     .onChange(of: bindableRouter.selectedTabPath) { oldPath, newPath in
       guard let previousPeer = oldPath.last?.chatPeer,
@@ -261,6 +272,14 @@ private struct ExperimentalAuthedRootView: View {
       ExperimentalHomeNavigationPerformance.measureBackToHome(
         rows: homeListStore.state.presentation.allChatCount
       )
+    }
+    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+      guard isSearchRootSelected else { return }
+      isSearchKeyboardVisible = true
+    }
+    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
+      isSearchKeyboardVisible = false
+      completePendingSearchExit()
     }
     .onChange(of: nav.activeSpaceId) { _, _ in
       configureHomeList()
@@ -301,22 +320,34 @@ private struct ExperimentalAuthedRootView: View {
   private func rootPage(nav: ExperimentalNavigationModel) -> some View {
     @Bindable var bindableNav = nav
 
-    return TabView(selection: $rootTab) {
+    return rootTabs(nav: bindableNav)
+      .background(Color(.systemBackground))
+  }
+
+  private func rootTabs(nav: ExperimentalNavigationModel) -> some View {
+    TabView(selection: rootTabSelection) {
       Tab("All Chats", systemImage: "bubble.left.and.bubble.right.fill", value: .allChats) {
-        chatsRoot(nav: bindableNav, rootTab: .allChats)
+        chatsRoot(nav: nav, rootTab: .allChats)
       }
 
       // TODO: Decide the badge color before bridging UIKit's global
       // `UITabBarItem.badgeColor`; SwiftUI's native tab badge has no tint API.
       Tab("Inbox", systemImage: "tray.full.fill", value: .inbox) {
-        chatsRoot(nav: bindableNav, rootTab: .inbox)
+        chatsRoot(nav: nav, rootTab: .inbox)
       }
       .badge(homeListStore.state.presentation.inboxUnreadCount)
 
       Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
         ExperimentalSearchView(
           query: $searchQuery,
-          activeSpaceId: bindableNav.activeSpaceId
+          focusRequested: $searchFocusRequested,
+          interactionRevision: $searchInteractionRevision,
+          isActivePresentation: isSearchActivePresentation,
+          activeSpaceId: nav.activeSpaceId,
+          onFocusChanged: searchFocusChanged,
+          onBeginDeferredResult: beginDeferredSearchResult,
+          onClose: closeSearch,
+          onOpenResult: openSearchResult
         )
       }
 
@@ -333,6 +364,120 @@ private struct ExperimentalAuthedRootView: View {
       }
     }
     .background(Color(.systemBackground))
+  }
+
+  private var rootTabSelection: Binding<RootTab> {
+    Binding(
+      get: { RootTab(appTab: router.selectedTab) },
+      set: { newValue in
+        if newValue == .newChat {
+          if RootTab(appTab: router.selectedTab) == .search {
+            requestSearchExit(to: lastContentRootTab, createsThread: true)
+          } else {
+            createThreadInstantly(spaceId: nav.activeSpaceId)
+          }
+          return
+        }
+
+        let currentRootTab = RootTab(appTab: router.selectedTab)
+        if currentRootTab == .search, newValue != .search {
+          requestSearchExit(to: newValue)
+        } else {
+          selectRootTab(newValue, previousRootTab: currentRootTab)
+        }
+      }
+    )
+  }
+
+  private var isSearchRootSelected: Bool {
+    RootTab(appTab: router.selectedTab) == .search && router.selectedTabPath.isEmpty
+  }
+
+  private var isSearchActivePresentation: Bool {
+    isSearchRootSelected
+      && (searchFocusRequested || isSearchFieldFocused || isSearchKeyboardVisible)
+  }
+
+  private func selectRootTab(_ newRootTab: RootTab, previousRootTab: RootTab) {
+    guard newRootTab != .newChat else { return }
+
+    if newRootTab == .search {
+      if previousRootTab != .search, previousRootTab != .newChat {
+        lastContentRootTab = previousRootTab
+      }
+      pendingSearchExit = nil
+      searchFocusRequested = false
+    } else {
+      lastContentRootTab = newRootTab
+      searchQuery = ""
+    }
+
+    if router.selectedTab != newRootTab.appTab {
+      router.selectedTab = newRootTab.appTab
+    }
+  }
+
+  private func requestSearchExit(
+    to destinationTab: RootTab,
+    destination: Destination? = nil,
+    createsThread: Bool = false
+  ) {
+    searchInteractionRevision &+= 1
+    let requiresFocusSettlement = searchFocusRequested || isSearchFieldFocused
+    pendingSearchExit = PendingSearchExit(
+      destinationTab: destinationTab,
+      destination: destination,
+      createsThread: createsThread
+    )
+    searchFocusRequested = false
+
+    if !requiresFocusSettlement {
+      completePendingSearchExit()
+    }
+  }
+
+  private func searchFocusChanged(_ isFocused: Bool) {
+    isSearchFieldFocused = isFocused
+    if !isFocused {
+      completePendingSearchExit()
+    }
+  }
+
+  private func beginDeferredSearchResult() -> Int {
+    searchInteractionRevision &+= 1
+    pendingSearchExit = nil
+    return searchInteractionRevision
+  }
+
+  private func closeSearch() {
+    searchInteractionRevision &+= 1
+    pendingSearchExit = nil
+    searchFocusRequested = false
+    searchQuery = ""
+  }
+
+  private func openSearchResult(_ peer: Peer, _ destination: Destination) {
+    guard isSearchRootSelected else { return }
+    ExperimentalHomeNavigationPerformance.beginChatOpen(peer: peer, source: "search")
+    requestSearchExit(to: .inbox, destination: destination)
+  }
+
+  private func completePendingSearchExit() {
+    guard !isSearchFieldFocused,
+          !isSearchKeyboardVisible,
+          let pendingSearchExit
+    else { return }
+    self.pendingSearchExit = nil
+    searchQuery = ""
+
+    if let destination = pendingSearchExit.destination {
+      router[pendingSearchExit.destinationTab.appTab] = [destination]
+    }
+    selectRootTab(pendingSearchExit.destinationTab, previousRootTab: .search)
+
+    if pendingSearchExit.createsThread {
+      createThreadInstantly(spaceId: nav.activeSpaceId)
+    }
   }
 
   private func configureHomeList() {
