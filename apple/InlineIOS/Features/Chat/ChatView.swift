@@ -219,6 +219,9 @@ struct ChatView: View {
       translationPlacement = TranslationState.shared.isTranslationEnabled(for: newPeer) ? .toolbar : .moreMenu
       updateMessageUpdateActivation()
     }
+    .onChange(of: router.presentationResetRevision) { _, _ in
+      handlePresentationReset()
+    }
     .onChange(of: fullChatViewModel.chat?.id) { _, chatId in
       guard chatId != nil else { return }
       pageState = .loaded
@@ -231,13 +234,7 @@ struct ChatView: View {
       scheduleUntitledThreadCleanupIfNeeded()
     }
     .onChange(of: scenePhase) { _, newPhase in
-      updateMessageUpdateActivation()
-      if !preview,
-         newPhase == .active,
-         fullChatViewModel.chat != nil,
-         case .loaded = pageState {
-        fullChatViewModel.refetchHistoryOnly()
-      }
+      handleScenePhaseChange(newPhase)
     }
     .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NavigationBarHeight"))) { notification in
       guard !preview else { return }
@@ -277,12 +274,7 @@ struct ChatView: View {
       NotificationCenter.default
         .publisher(for: .userGroupMentionTapped)
     ) { notification in
-      guard !preview else { return }
-      guard var target = notification.userInfo?["target"] as? UserGroupMentionTarget else { return }
-      if target.spaceId == nil {
-        target.spaceId = contextSpaceId ?? fullChatViewModel.chat?.spaceId
-      }
-      userGroupMentionTarget = target
+      handleUserGroupMention(notification)
     }
     .sheet(item: $userGroupMentionTarget) { target in
       UserGroupMembersSheet(target: target)
@@ -394,20 +386,50 @@ struct ChatView: View {
       router.push(.chat(peer: targetPeer))
     }
     .onReceive(NotificationCenter.default.publisher(for: .mediaSendFailed)) { notification in
-      guard !preview else { return }
-      guard let chatId = notification.userInfo?["chatId"] as? Int64,
-            chatId == fullChatViewModel.chat?.id
-      else { return }
-
-      let message = notification.userInfo?["message"] as? String ?? "Couldn't send attachment."
-      ToastManager.shared.showToast(
-        message,
-        type: .error,
-        systemImage: "exclamationmark.triangle.fill"
-      )
+      handleMediaSendFailure(notification)
     }
     .environmentObject(fullChatViewModel)
     .environment(router)
+  }
+
+  private func handleScenePhaseChange(_ newPhase: ScenePhase) {
+    updateMessageUpdateActivation()
+    guard !preview,
+          newPhase == .active,
+          fullChatViewModel.chat != nil,
+          case .loaded = pageState
+    else { return }
+    fullChatViewModel.refetchHistoryOnly()
+  }
+
+  private func handlePresentationReset() {
+    guard !preview, router.selectedTabPath.last?.chatPeer == peerId else { return }
+    isBotChatSettingsPresented = false
+    presentedChatInfo = nil
+    userGroupMentionTarget = nil
+  }
+
+  private func handleMediaSendFailure(_ notification: Notification) {
+    guard !preview else { return }
+    guard let chatId = notification.userInfo?["chatId"] as? Int64,
+          chatId == fullChatViewModel.chat?.id
+    else { return }
+
+    let message = notification.userInfo?["message"] as? String ?? "Couldn't send attachment."
+    ToastManager.shared.showToast(
+      message,
+      type: .error,
+      systemImage: "exclamationmark.triangle.fill"
+    )
+  }
+
+  private func handleUserGroupMention(_ notification: Notification) {
+    guard !preview else { return }
+    guard var target = notification.userInfo?["target"] as? UserGroupMentionTarget else { return }
+    if target.spaceId == nil {
+      target.spaceId = contextSpaceId ?? fullChatViewModel.chat?.spaceId
+    }
+    userGroupMentionTarget = target
   }
 
   @MainActor
@@ -588,7 +610,7 @@ struct ChatView: View {
     AppTab.allCases.contains { tab in
       router[tab].contains { destination in
         switch destination {
-        case let .chat(peer), let .chatMessage(peer, _):
+        case let .chat(peer), let .externalChat(peer, _), let .chatMessage(peer, _):
           peer == peerId
         default:
           false
@@ -783,6 +805,24 @@ private struct ChatToolbarMoreMenu: View, RehostSafeToolbarContent {
             showMakePublicAlert = true
           }
         }
+      }
+
+      Menu {
+        DialogNotificationSettingsMenuContent(
+          selection: notificationSelectionBinding,
+          globalMode: notificationSettings.mode
+        )
+      } label: {
+        Label(
+          "Notifications",
+          systemImage: DialogNotificationSettingsPresentation.iconName(
+            for: notificationSelection,
+            globalMode: notificationSettings.mode
+          )
+        )
+      }
+
+      Divider()
 
       Button("Copy Link", systemImage: "link") {
         copyLink()
@@ -794,6 +834,17 @@ private struct ChatToolbarMoreMenu: View, RehostSafeToolbarContent {
           prepareTranscript()
         }
         .disabled(transcriptTask != nil)
+      }
+
+      if let nextPinnedState {
+        Divider()
+
+        Button(
+          nextPinnedState ? "Pin" : "Unpin",
+          systemImage: nextPinnedState ? "pin" : "pin.slash"
+        ) {
+          updatePinned(nextPinnedState)
+        }
       }
     } label: {
       Image(systemName: "ellipsis")
@@ -850,6 +901,14 @@ private struct ChatToolbarMoreMenu: View, RehostSafeToolbarContent {
     .onDisappear {
       transcriptTask?.cancel()
     }
+    .onChange(of: router.presentationResetRevision) { _, _ in
+      guard router.selectedTabPath.last?.chatPeer == peer else { return }
+      showTranslationPopover = false
+      showTranslationOptions = false
+      showMakePrivateSheet = false
+      showMakePublicAlert = false
+      showTranscriptScope = false
+    }
   }
 
   @MainActor
@@ -869,12 +928,57 @@ private struct ChatToolbarMoreMenu: View, RehostSafeToolbarContent {
     ToastManager.shared.showToast("Copied link", type: .success, systemImage: "link")
   }
 
+  private var notificationSelection: DialogNotificationSettingSelection {
+    dialog?.notificationSelection ?? .global
+  }
+
   private var canChangeVisibility: Bool {
     ChatVisibilityPolicy.canChange(
       chat: chat,
       currentUserId: currentUserId,
       membership: visibilityMembership
     )
+  }
+
+  private var notificationSelectionBinding: Binding<DialogNotificationSettingSelection> {
+    Binding(
+      get: { notificationSelection },
+      set: { selection in
+        updateNotificationSettings(selection)
+      }
+    )
+  }
+
+  private var nextPinnedState: Bool? {
+    guard let dialog else { return nil }
+    if dialog.pinned == true { return false }
+
+    let isInboxEligible = dialog.open
+      && dialog.archived != true
+      && dialog.chatListHidden != true
+    return isInboxEligible ? true : nil
+  }
+
+  private func updateNotificationSettings(_ selection: DialogNotificationSettingSelection) {
+    guard selection != notificationSelection else { return }
+
+    Task(priority: .userInitiated) {
+      do {
+        _ = try await realtimeV2.send(.updateDialogNotificationSettings(
+          peerId: peer,
+          selection: selection
+        ))
+      } catch is CancellationError {
+        return
+      } catch {
+        Log.shared.error("Failed to update dialog notification settings", error: error)
+        ToastManager.shared.showToast(
+          "Could not update notifications",
+          type: .error,
+          systemImage: "exclamationmark.triangle"
+        )
+      }
+    }
   }
 
   private func updateVisibility(isPublic: Bool, participantIDs: [Int64]) {
@@ -893,6 +997,26 @@ private struct ChatToolbarMoreMenu: View, RehostSafeToolbarContent {
         Log.shared.error("Failed to update chat visibility", error: error)
         ToastManager.shared.showToast(
           "Could not update chat visibility",
+          type: .error,
+          systemImage: "exclamationmark.triangle"
+        )
+      }
+    }
+  }
+
+  private func updatePinned(_ pinned: Bool) {
+    Task(priority: .userInitiated) {
+      do {
+        _ = try await realtimeV2.send(.updateDialogOrder(
+          peerId: peer,
+          pinned: pinned
+        ))
+      } catch is CancellationError {
+        return
+      } catch {
+        Log.shared.error("Failed to update pin state", error: error)
+        ToastManager.shared.showToast(
+          "Could not update pin",
           type: .error,
           systemImage: "exclamationmark.triangle"
         )
