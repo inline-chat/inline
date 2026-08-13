@@ -64,15 +64,6 @@
       }
     },
     {
-      "identity" : "mcemojipicker",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/izyumkin/MCEmojiPicker",
-      "state" : {
-        "revision" : "e0b4903b75ae1cc418d276d84d1cb946b8a1d73c",
-        "version" : "1.2.3"
-      }
-    },
-    {
       "identity" : "multipartformdatakit",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Kuniwak/MultipartFormDataKit.git",

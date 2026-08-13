@@ -4,6 +4,7 @@ import InlineUI
 import Logger
 import MCEmojiPicker
 import SwiftUI
+import UIKit
 
 extension ChatInfoView {
   func searchUsers(query: String) {
@@ -195,7 +196,7 @@ extension ChatInfoView {
         if isEditingInfo {
           VStack(spacing: 12) {
             Button {
-              isEmojiPickerPresented.toggle()
+              toggleEmojiPicker()
             } label: {
               ThreadIconView(
                 ThreadIconDescriptor(
@@ -209,6 +210,7 @@ extension ChatInfoView {
               )
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Choose chat emoji")
             .emojiPicker(
               isPresented: $isEmojiPickerPresented,
               selectedEmoji: $draftEmoji
@@ -262,19 +264,60 @@ extension ChatInfoView {
 
   func startEditingChatInfo() {
     guard canEditChatInfo else { return }
+    emojiPickerPresentationGeneration &+= 1
+    let generation = emojiPickerPresentationGeneration
+    selectedTab = .info
     draftTitle = chatTitle
     draftEmoji = currentChat?.emoji ?? ""
     isEditingInfo = true
     isEmojiPickerPresented = false
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+    Task { @MainActor in
+      try? await Task.sleep(for: .milliseconds(100))
+      guard emojiPickerPresentationGeneration == generation,
+            isEditingInfo,
+            selectedTab == .info,
+            !isSavingInfo
+      else { return }
       isTitleFocused = true
     }
   }
 
   func cancelEditingChatInfo() {
+    guard !isSavingInfo else { return }
+    emojiPickerPresentationGeneration &+= 1
+    isTitleFocused = false
+    draftTitle = ""
+    draftEmoji = ""
     isEditingInfo = false
     isEmojiPickerPresented = false
-    isSavingInfo = false
+  }
+
+  func toggleEmojiPicker() {
+    emojiPickerPresentationGeneration &+= 1
+    let generation = emojiPickerPresentationGeneration
+
+    if isEmojiPickerPresented {
+      isEmojiPickerPresented = false
+      return
+    }
+
+    isTitleFocused = false
+    UIApplication.shared.sendAction(
+      #selector(UIResponder.resignFirstResponder),
+      to: nil,
+      from: nil,
+      for: nil
+    )
+
+    Task { @MainActor in
+      await Task.yield()
+      guard emojiPickerPresentationGeneration == generation,
+            isEditingInfo,
+            !isSavingInfo,
+            !isTitleFocused
+      else { return }
+      isEmojiPickerPresented = true
+    }
   }
 
   func saveChatInfo() {
@@ -283,6 +326,9 @@ extension ChatInfoView {
     guard currentChatId != 0 else { return }
 
     let normalizedEmoji = draftEmoji.trimmingCharacters(in: .whitespacesAndNewlines)
+    emojiPickerPresentationGeneration &+= 1
+    isTitleFocused = false
+    isEmojiPickerPresented = false
     isSavingInfo = true
 
     Task {
@@ -296,6 +342,8 @@ extension ChatInfoView {
         await MainActor.run {
           isSavingInfo = false
           isEditingInfo = false
+          draftTitle = ""
+          draftEmoji = ""
         }
       } catch {
         Log.shared.error("Failed to update chat info", error: error)

@@ -40,14 +40,17 @@ struct ChatInfoView: View {
   @State  var draftTitle = ""
   @State  var draftEmoji = ""
   @State  var isEmojiPickerPresented = false
+  @State  var emojiPickerPresentationGeneration: UInt64 = 0
   @State  var isSavingInfo = false
   @FocusState  var isTitleFocused: Bool
   @State  var notificationSelection: DialogNotificationSettingSelection
+  @State private var notificationMutationGeneration: UInt64 = 0
+  @State private var canChangeVisibility = false
 
   @Environment(\.appDatabase) var database
 
   var availableTabs: [ChatInfoTab] {
-    isDM ? [.media, .voice, .files, .links] : [.info, .media, .voice, .files, .links]
+    [.info, .media, .voice, .files, .links]
   }
 
   var currentChat: Chat? {
@@ -66,6 +69,15 @@ struct ChatInfoView: View {
     chatItem.peerId.isPrivate
   }
 
+  var directMessageUsername: String? {
+    guard let username = chatItem.userInfo?.user.username?
+      .trimmingCharacters(in: .whitespacesAndNewlines),
+      !username.isEmpty
+    else { return nil }
+
+    return username
+  }
+
   var theme = ThemeManager.shared.selected
 
   var currentMemberRole: MemberRole? {
@@ -78,6 +90,23 @@ struct ChatInfoView: View {
 
   var isOwnerOrAdmin: Bool {
     currentMemberRole == .owner || currentMemberRole == .admin
+  }
+
+  /// Mirrors the update-chat-visibility server contract: only the creator of a
+  /// space thread, or a space owner/admin, may change its visibility.
+  var canChangeChatVisibility: Bool {
+    canChangeVisibility
+  }
+
+  private var visibilityPermissionKey: String {
+    guard let currentChat else { return "none" }
+    return [
+      "\(Auth.shared.getCurrentUserId() ?? 0)",
+      "\(currentChat.id)",
+      "\(currentChat.spaceId ?? 0)",
+      "\(currentChat.createdBy ?? 0)",
+      currentMemberRole?.rawValue ?? "none",
+    ].joined(separator: ":")
   }
 
   var isCurrentUserDirectParticipant: Bool {
@@ -207,13 +236,7 @@ struct ChatInfoView: View {
     ))
     _notificationSelection = State(initialValue: chatItem.dialog.notificationSelection)
 
-    // Default tab based on chat type
-    // DMs have no info tab
-    if chatItem.chat?.type == .thread {
-      selectedTab = .info
-    } else {
-      selectedTab = .files
-    }
+    selectedTab = .info
   }
 
   var body: some View {
@@ -221,8 +244,9 @@ struct ChatInfoView: View {
       ScrollView(.vertical) {
         LazyVStack(spacing: 18) {
           chatInfoHeader
+            .padding(.horizontal, 24)
 
-          ChatInfoTabBar(tabs: availableTabs, selection: $selectedTab)
+          ChatInfoTabBar(tabs: availableTabs, selection: chatInfoTabSelection)
             .padding(.vertical, 8)
             .padding(.bottom, 12)
         }
@@ -231,13 +255,19 @@ struct ChatInfoView: View {
         VStack {
           switch selectedTab {
             case .info:
-              if !isDM {
+              if isDM {
+                DirectMessageInfoTabView(
+                  username: directMessageUsername,
+                  notificationSelection: notificationSelectionBinding
+                )
+              } else {
                 InfoTabView()
                   .environmentObject(ChatInfoViewEnvironment(
                     isSearching: $isSearching,
                     isPrivate: isPrivate,
                     isDM: isDM,
                     isOwnerOrAdmin: isOwnerOrAdmin,
+                    canChangeVisibility: canChangeChatVisibility,
                     participants: participantsWithMembersViewModel.participants,
                     groupParticipants: participantsWithMembersViewModel.groupParticipants,
                     chatId: currentChatId,
@@ -315,21 +345,22 @@ struct ChatInfoView: View {
       subscribeToChatUpdates()
       subscribeToDialogNotificationUpdates()
       Task {
-        if let spaceId = chatItem.chat?.spaceId {
-          await spaceMembersViewModel.refetchMembers()
-          await userGroupsViewModel.loadIfNeeded()
-          // Fetch space information
-          do {
-            space = try await database.reader.read { db in
-              try Space.fetchOne(db, id: spaceId)
+        if !isDM {
+          if let spaceId = chatItem.chat?.spaceId {
+            await spaceMembersViewModel.refetchMembers()
+            await userGroupsViewModel.loadIfNeeded()
+            // Fetch space information
+            do {
+              space = try await database.reader.read { db in
+                try Space.fetchOne(db, id: spaceId)
+              }
+            } catch {
+              Log.shared.error("Failed to fetch space: \(error)")
             }
-          } catch {
-            Log.shared.error("Failed to fetch space: \(error)")
           }
+          await participantsWithMembersViewModel.refetchParticipants()
         }
-        await participantsWithMembersViewModel.refetchParticipants()
 
-        // Set default tab based on chat type
         if !availableTabs.contains(selectedTab) {
           selectedTab = availableTabs.first ?? .files
         }
@@ -340,6 +371,18 @@ struct ChatInfoView: View {
       chatSubscription = nil
       dialogNotificationSubscription?.cancel()
       dialogNotificationSubscription = nil
+      emojiPickerPresentationGeneration &+= 1
+      isTitleFocused = false
+      isEmojiPickerPresented = false
+      if !isSavingInfo {
+        draftTitle = ""
+        draftEmoji = ""
+        isEditingInfo = false
+      }
+    }
+    .interactiveDismissDisabled(isSavingInfo)
+    .task(id: visibilityPermissionKey) {
+      await refreshVisibilityPermission()
     }
     .onReceive(
       NotificationCenter.default
@@ -418,6 +461,7 @@ struct ChatInfoView: View {
             Button("Cancel") {
               cancelEditingChatInfo()
             }
+            .disabled(isSavingInfo)
           }
           ToolbarItem(placement: .confirmationAction) {
             Button(isSavingInfo ? "Saving..." : "Save") {
@@ -438,9 +482,12 @@ struct ChatInfoView: View {
           }
 
           ToolbarItem(placement: .primaryAction) {
-            Button("Edit") {
+            Button {
               startEditingChatInfo()
+            } label: {
+              Image(systemName: "pencil")
             }
+            .accessibilityLabel("Edit chat info")
           }
         }
       } else if isPresentedAsSheet {
@@ -511,20 +558,77 @@ struct ChatInfoView: View {
     guard selection != notificationSelection else { return }
     let previousSelection = notificationSelection
     notificationSelection = selection
+    notificationMutationGeneration &+= 1
+    let generation = notificationMutationGeneration
 
-    Task {
+    Task(priority: .userInitiated) {
       do {
         _ = try await Api.realtime.send(.updateDialogNotificationSettings(
           peerId: chatItem.peerId,
           selection: selection
         ))
+      } catch is CancellationError {
+        return
+      } catch let error as URLError where error.code == .cancelled {
+        return
       } catch {
         Log.shared.error("Failed to update dialog notification settings", error: error)
         await MainActor.run {
+          guard notificationMutationGeneration == generation,
+                notificationSelection == selection
+          else { return }
           notificationSelection = previousSelection
         }
       }
     }
+  }
+
+  @MainActor
+  private func refreshVisibilityPermission() async {
+    guard let currentChat,
+          currentChat.type == .thread,
+          let spaceId = currentChat.spaceId,
+          let currentUserId = Auth.shared.getCurrentUserId()
+    else {
+      canChangeVisibility = false
+      return
+    }
+
+    let membership = try? await database.reader.read { db in
+      try Member
+        .filter(Member.Columns.spaceId == spaceId)
+        .filter(Member.Columns.userId == currentUserId)
+        .fetchOne(db)
+    }
+    guard !Task.isCancelled else { return }
+    canChangeVisibility = ChatVisibilityPolicy.canChange(
+      chat: currentChat,
+      currentUserId: currentUserId,
+      membership: membership
+    )
+  }
+
+  private var notificationSelectionBinding: Binding<DialogNotificationSettingSelection> {
+    Binding(
+      get: { notificationSelection },
+      set: { updateNotificationSelection($0) }
+    )
+  }
+
+  private var chatInfoTabSelection: Binding<ChatInfoTab> {
+    Binding(
+      get: { selectedTab },
+      set: { newTab in
+        guard newTab != selectedTab else { return }
+
+        if isEditingInfo {
+          guard !isSavingInfo else { return }
+          cancelEditingChatInfo()
+        }
+
+        selectedTab = newTab
+      }
+    )
   }
 }
 
@@ -695,6 +799,82 @@ private enum IOSClearChatHistoryRange: Hashable, Identifiable, CaseIterable {
   }
 }
 
+private struct DirectMessageInfoTabView: View {
+  let username: String?
+  @Binding var notificationSelection: DialogNotificationSettingSelection
+
+  var body: some View {
+    VStack(spacing: 0) {
+      if let username {
+        LabeledContent {
+          Text("@\(username)")
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+        } label: {
+          Text("Username")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+
+        Divider()
+          .padding(.horizontal, 16)
+      }
+
+      DialogNotificationSettingsRows(selection: $notificationSelection)
+    }
+    .background(Color(uiColor: .secondarySystemGroupedBackground))
+    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .padding(.horizontal, 16)
+  }
+}
+
+private struct DialogNotificationSettingsRows: View {
+  @Binding var selection: DialogNotificationSettingSelection
+  @EnvironmentObject private var notificationSettings: NotificationSettingsManager
+
+  var body: some View {
+    LabeledContent {
+      Menu {
+        DialogNotificationSettingsMenuContent(
+          selection: $selection,
+          globalMode: notificationSettings.mode
+        )
+      } label: {
+        Label {
+          Text(DialogNotificationSettingsPresentation.title(
+            for: selection,
+            globalMode: notificationSettings.mode
+          ))
+        } icon: {
+          Image(systemName: DialogNotificationSettingsPresentation.iconName(
+            for: selection,
+            globalMode: notificationSettings.mode
+          ))
+        }
+        .foregroundStyle(.secondary)
+        .labelStyle(.titleAndIcon)
+      }
+    } label: {
+      Text("Notifications")
+    }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 12)
+
+    Text(selectionDescription)
+      .font(.footnote)
+      .foregroundStyle(.secondary)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.horizontal, 16)
+      .padding(.bottom, 12)
+  }
+
+  private var selectionDescription: LocalizedStringResource {
+    selection == .global
+      ? DialogNotificationSettingsPresentation.globalDescription
+      : DialogNotificationSettingsPresentation.overrideDescription
+  }
+}
+
 struct InfoTabView: View {
   @EnvironmentObject  var chatInfoView: ChatInfoViewEnvironment
   @State  var participantToRemove: UserInfo?
@@ -713,7 +893,8 @@ struct InfoTabView: View {
 
   var body: some View {
     VStack(spacing: 12) {
-      settingsCard
+      visibilitySection
+      notificationsCard
       participantsSection
     }
     .padding(.horizontal, 16)
@@ -743,77 +924,56 @@ struct InfoTabView: View {
     }
   }
 
-  private var settingsCard: some View {
-    VStack(spacing: 0) {
-      LabeledContent {
-        Label {
-          Text(chatInfoView.isPrivate ? "Private" : "Public")
-            .foregroundStyle(.secondary)
-        } icon: {
-          Image(systemName: chatInfoView.isPrivate ? "lock.fill" : "person.2.fill")
-            .foregroundStyle(.secondary)
-        }
-        .labelStyle(.titleAndIcon)
-      } label: {
-        Text("Type")
-      }
-      .padding(.horizontal, 16)
-      .padding(.vertical, 12)
-
-      rowDivider
-
-      LabeledContent {
-        Picker("Notifications", selection: notificationSelectionBinding) {
-          ForEach(DialogNotificationSettingSelection.allCases, id: \.self) { option in
-            Text(option.title)
-              .tag(option)
-          }
-        }
-        .pickerStyle(.menu)
-        .labelsHidden()
-        .tint(.primary)
-      } label: {
-        Text("Notifications")
-      }
-      .padding(.horizontal, 16)
-      .padding(.vertical, 12)
-
-      Text("Use Global follows your app-wide notification settings.")
-        .font(.footnote)
+  private var visibilitySection: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("Thread Visibility")
+        .font(.footnote.weight(.semibold))
         .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
-        .padding(.bottom, 12)
+        .padding(.horizontal, 4)
 
-      if chatInfoView.isOwnerOrAdmin, !chatInfoView.isDM {
-        rowDivider
-
-        Button {
-          if chatInfoView.isPrivate {
-            chatInfoView.requestMakePublic()
-          } else {
-            chatInfoView.requestMakePrivate()
+      VStack(spacing: 0) {
+        LabeledContent {
+          Label {
+            Text(chatInfoView.isPrivate ? "Private" : "Public")
+          } icon: {
+            Image(systemName: chatInfoView.isPrivate ? "lock.fill" : "person.2.fill")
           }
+          .foregroundStyle(.secondary)
+          .labelStyle(.titleAndIcon)
         } label: {
-          LabeledContent {
-            HStack(spacing: 8) {
-              Image(systemName: chatInfoView.isPrivate ? "person.2.fill" : "lock.fill")
-                .foregroundStyle(.secondary)
-              Text(chatInfoView.isPrivate ? "Make Public" : "Make Private")
-                .foregroundStyle(.primary)
-              Image(systemName: "chevron.right")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.tertiary)
+          Text("Access")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+
+        if chatInfoView.canChangeVisibility {
+          rowDivider
+
+          Button {
+            if chatInfoView.isPrivate {
+              chatInfoView.requestMakePublic()
+            } else {
+              chatInfoView.requestMakePrivate()
             }
           } label: {
-            Text("Visibility")
+            Label(
+              chatInfoView.isPrivate ? "Make Public" : "Make Private",
+              systemImage: chatInfoView.isPrivate ? "person.2.fill" : "lock.fill"
+            )
+            .frame(maxWidth: .infinity, minHeight: 44)
           }
-          .padding(.horizontal, 16)
-          .padding(.vertical, 12)
-          .contentShape(Rectangle())
+          .buttonStyle(.bordered)
+          .padding(12)
         }
-        .buttonStyle(.plain)
       }
+      .background(cardBackgroundColor)
+      .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+  }
+
+  private var notificationsCard: some View {
+    VStack(spacing: 0) {
+      DialogNotificationSettingsRows(selection: notificationSelectionBinding)
     }
     .background(cardBackgroundColor)
     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -1019,6 +1179,7 @@ struct InfoTabView: View {
       set: { chatInfoView.updateNotificationSelection($0) }
     )
   }
+
 }
 
 struct ParticipantAvatarView: UIViewRepresentable {

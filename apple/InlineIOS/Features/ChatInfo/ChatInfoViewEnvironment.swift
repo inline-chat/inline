@@ -6,6 +6,7 @@ class ChatInfoViewEnvironment: ObservableObject {
   let isPrivate: Bool
   let isDM: Bool
   let isOwnerOrAdmin: Bool
+  let canChangeVisibility: Bool
   let participants: [UserInfo]
   let groupParticipants: [UserGroup]
   let chatId: Int64
@@ -25,6 +26,7 @@ class ChatInfoViewEnvironment: ObservableObject {
     isPrivate: Bool,
     isDM: Bool,
     isOwnerOrAdmin: Bool,
+    canChangeVisibility: Bool,
     participants: [UserInfo],
     groupParticipants: [UserGroup],
     chatId: Int64,
@@ -43,6 +45,7 @@ class ChatInfoViewEnvironment: ObservableObject {
     self.isPrivate = isPrivate
     self.isDM = isDM
     self.isOwnerOrAdmin = isOwnerOrAdmin
+    self.canChangeVisibility = canChangeVisibility
     self.participants = participants
     self.groupParticipants = groupParticipants
     self.chatId = chatId
