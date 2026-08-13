@@ -230,6 +230,19 @@ enum Destination: DestinationType, Codable {
   case createSpace
 }
 
+struct LegacySpaceDestinationRedirect: View {
+  let spaceID: Int64
+  let onRedirect: (Int64) -> Void
+
+  var body: some View {
+    Color.clear
+      .accessibilityHidden(true)
+      .task {
+        onRedirect(spaceID)
+      }
+  }
+}
+
 enum Sheet: SheetType, Codable {
   case createSpace
 
@@ -329,6 +342,14 @@ extension Router {
 }
 
 extension Destination {
+  var legacySpaceID: Int64? {
+    if case let .space(id) = self {
+      id
+    } else {
+      nil
+    }
+  }
+
   var chatPeer: Peer? {
     switch self {
     case let .chat(peer), let .externalChat(peer, _), let .chatMessage(peer, _):

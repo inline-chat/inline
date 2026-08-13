@@ -84,17 +84,19 @@ class Navigation: ObservableObject, @unchecked Sendable {
   func destinationView(for destination: Destination) -> some View {
     switch destination {
       case let .chat(peer):
-        ChatView(peer: peer)
+        ChatView(peer: peer, onOpenSpace: { _ in self.popToRoot() })
       case let .space(id):
-        SpaceView(spaceId: id)
+        LegacySpaceDestinationRedirect(spaceID: id) { _ in
+          self.popToRoot()
+        }
       case .settings:
-        SettingsView()
+        SettingsView(onSelectSpace: { _ in self.popToRoot() })
       case .main:
         HomeView()
       case .archivedChats:
         ArchivedChatsView()
       case .createSpace:
-        CreateSpace()
+        CreateSpace(onCreated: { _ in self.popToRoot() })
       case let .createThread(spaceId):
         CreateChatIOSView(spaceId: spaceId)
       case let .chatInfo(chatItem):
@@ -115,7 +117,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
         CreateChatIOSView(spaceId: spaceId)
           .presentationCornerRadius(18)
       case .createSpace:
-        CreateSpace()
+        CreateSpace(onCreated: { _ in self.popToRoot() })
           .presentationCornerRadius(18)
       default:
         EmptyView()

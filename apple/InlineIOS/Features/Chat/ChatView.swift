@@ -11,6 +11,7 @@ import UIKit
 struct ChatView: View {
   var peerId: Peer
   var contextSpaceId: Int64?
+  let onOpenSpace: (Int64) -> Void
   private let preview: Bool
   private let focusMessageID: Int64?
   private let autoCleanupUntitledEmptyThreadOnBack: Bool
@@ -72,12 +73,14 @@ struct ChatView: View {
   init(
     peer: Peer,
     contextSpaceId: Int64? = nil,
+    onOpenSpace: @escaping (Int64) -> Void,
     preview: Bool = false,
     focusMessageID: Int64? = nil,
     autoCleanupUntitledEmptyThreadOnBack: Bool = false
   ) {
     peerId = peer
     self.contextSpaceId = contextSpaceId
+    self.onOpenSpace = onOpenSpace
     self.preview = preview
     self.focusMessageID = focusMessageID
     self.autoCleanupUntitledEmptyThreadOnBack = autoCleanupUntitledEmptyThreadOnBack
@@ -152,6 +155,7 @@ struct ChatView: View {
               router: router,
               fullChatViewModel: fullChatViewModel,
               realtimeState: realtimeState,
+              onOpenSpace: onOpenSpace,
               onOpenChatInfo: { presentedChatInfo = $0 }
             )
             .matchedTransitionSource(id: TransitionID.chatInfo, in: chatInfoTransition)
@@ -165,6 +169,7 @@ struct ChatView: View {
               router: router,
               fullChatViewModel: fullChatViewModel,
               realtimeState: realtimeState,
+              onOpenSpace: onOpenSpace,
               onOpenChatInfo: { presentedChatInfo = $0 }
             )
             .matchedTransitionSource(id: TransitionID.chatInfo, in: chatInfoTransition)

@@ -4,15 +4,14 @@ import Logger
 import SwiftUI
 
 struct CreateSpace: View {
+  let onCreated: (Int64) -> Void
+
   @State private var name = ""
   @State private var emoji = ""
   @FocusState private var focusedField: Field?
   @FormState var formState
-  @AppStorage(ExperimentalHomePreferenceKeys.isEnabled)
-  private var enableExperimentalView = false
 
   @Environment(\.dismiss) private var dismiss
-  @Environment(Router.self) private var router
   @EnvironmentObject private var dataManager: DataManager
 
   var body: some View {
@@ -124,28 +123,13 @@ struct CreateSpace: View {
 
         formState.succeeded()
         if let id {
-          routeToCreatedSpace(id)
+          onCreated(id)
         }
         dismiss()
       } catch {
         Log.shared.error("Failed to create space", error: error)
         formState.failed(error: error.localizedDescription)
       }
-    }
-  }
-
-  private func routeToCreatedSpace(_ id: Int64) {
-    if enableExperimentalView {
-      let targetTab = router.selectedTab.experimentalHomeFallbackTab
-      if router.selectedTab != targetTab {
-        router.selectedTab = targetTab
-      }
-      router.popToRoot(for: targetTab)
-      router.push(.space(id: id), for: targetTab)
-    } else {
-      router.popToRoot(for: .spaces)
-      router.selectedTab = .spaces
-      router.push(.space(id: id), for: .spaces)
     }
   }
 

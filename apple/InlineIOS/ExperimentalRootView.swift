@@ -220,6 +220,8 @@ private struct ExperimentalAuthedRootView: View {
           ExperimentalDestinationView(
             nav: bindableNav,
             destination: destination,
+            onSelectSpace: selectSpaceInHome,
+            onMigrateLegacySpaceDestination: migrateLegacySpaceDestination,
             onRetryHome: retryHomeData
           )
         }
@@ -231,19 +233,20 @@ private struct ExperimentalAuthedRootView: View {
     .sheet(item: $bindableRouter.presentedSheet) { sheet in
       switch sheet {
       case .chatInfo:
-        ExperimentalSheetView(sheet: sheet)
+        ExperimentalSheetView(sheet: sheet, onSelectSpace: selectSpaceInHome)
           .presentationDetents([.medium, .large])
       case .createSpace:
-        ExperimentalSheetView(sheet: sheet)
+        ExperimentalSheetView(sheet: sheet, onSelectSpace: selectSpaceInHome)
           .presentationDetents([.medium, .large])
           .presentationDragIndicator(.visible)
           .presentationContentInteraction(.scrolls)
       default:
-        ExperimentalSheetView(sheet: sheet)
+        ExperimentalSheetView(sheet: sheet, onSelectSpace: selectSpaceInHome)
       }
     }
     .onAppear {
       restoreSceneHomeStateIfNeeded()
+      migrateLegacySpaceDestinationIfNeeded()
       migrateLegacyRootTabsIfNeeded()
       let routedTab = RootTab(appTab: bindableRouter.selectedTab)
       let desiredRootTab = switch routedTab {
@@ -582,6 +585,37 @@ private struct ExperimentalAuthedRootView: View {
 
   private func returnToCurrentTabRootAfterSpaceChange() {
     router.popToRoot(for: router.selectedTab)
+  }
+
+  private func selectSpaceInHome(_ spaceID: Int64) {
+    let targetTab = router.selectedTab.experimentalHomeFallbackTab
+    nav.activeSpaceId = spaceID
+    router.popToRoot(for: targetTab)
+    if router.selectedTab != targetTab {
+      router.selectedTab = targetTab
+    }
+  }
+
+  private func migrateLegacySpaceDestination(_ spaceID: Int64) {
+    migrateLegacySpaceDestinationIfNeeded(expectedSpaceID: spaceID)
+  }
+
+  private func migrateLegacySpaceDestinationIfNeeded(expectedSpaceID: Int64? = nil) {
+    let sourceTab = router.selectedTab
+    let sourcePath = router[sourceTab]
+    let legacySpaceIDs = sourcePath.compactMap(\.legacySpaceID)
+    guard let spaceID = expectedSpaceID ?? legacySpaceIDs.first,
+          legacySpaceIDs.contains(spaceID)
+    else { return }
+
+    let targetTab = sourceTab.experimentalHomeFallbackTab
+    let migratedPath = sourcePath.filter { $0.legacySpaceID == nil }
+    nav.activeSpaceId = spaceID
+    router[targetTab] = migratedPath
+    if sourceTab != targetTab {
+      router[sourceTab] = []
+      router.selectedTab = targetTab
+    }
   }
 
   private func restoreSceneHomeStateIfNeeded() {

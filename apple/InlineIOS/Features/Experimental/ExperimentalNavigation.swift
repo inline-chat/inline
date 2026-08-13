@@ -190,6 +190,8 @@ enum ExperimentalHomeNavigationPerformance {
 struct ExperimentalDestinationView: View {
   @Bindable var nav: ExperimentalNavigationModel
   let destination: Destination
+  let onSelectSpace: (Int64) -> Void
+  let onMigrateLegacySpaceDestination: (Int64) -> Void
   var onRetryHome: () -> Void = {}
 
   var body: some View {
@@ -206,11 +208,15 @@ struct ExperimentalDestinationView: View {
     case .spaces:
       SpacesView()
     case let .space(id):
-      SpaceView(spaceId: id)
+      LegacySpaceDestinationRedirect(
+        spaceID: id,
+        onRedirect: onMigrateLegacySpaceDestination
+      )
     case let .chat(peer):
       ChatView(
         peer: peer,
         contextSpaceId: nav.activeSpaceId,
+        onOpenSpace: onSelectSpace,
         autoCleanupUntitledEmptyThreadOnBack: true
       )
       .onAppear {
@@ -220,6 +226,7 @@ struct ExperimentalDestinationView: View {
       ChatView(
         peer: peer,
         contextSpaceId: contextSpaceID,
+        onOpenSpace: onSelectSpace,
         autoCleanupUntitledEmptyThreadOnBack: true
       )
       .onAppear {
@@ -232,6 +239,7 @@ struct ExperimentalDestinationView: View {
       ChatView(
         peer: peer,
         contextSpaceId: nav.activeSpaceId,
+        onOpenSpace: onSelectSpace,
         focusMessageID: messageID,
         autoCleanupUntitledEmptyThreadOnBack: true
       )
@@ -251,26 +259,27 @@ struct ExperimentalDestinationView: View {
     case let .createThread(spaceId):
       CreateChatView(spaceId: spaceId)
     case .createSpace:
-      CreateSpaceView()
+      CreateSpaceView(onCreated: onSelectSpace)
     }
   }
 }
 
 struct ExperimentalSheetView: View {
   let sheet: Sheet
+  let onSelectSpace: (Int64) -> Void
 
   var body: some View {
     switch sheet {
     case .settings:
       NavigationStack {
-        SettingsView()
+        SettingsView(onSelectSpace: onSelectSpace)
       }
     case let .connectors(callbackURL):
       NavigationStack {
         ConnectorsView(initialOAuthCallbackURL: URL(string: callbackURL))
       }
     case .createSpace:
-      CreateSpace()
+      CreateSpace(onCreated: onSelectSpace)
     case let .addMember(spaceId):
       InviteToSpaceView(spaceId: spaceId)
     case let .members(spaceId):
@@ -569,6 +578,7 @@ private struct ExperimentalChatListView: View {
       ChatView(
         peer: item.peer,
         contextSpaceId: item.spaceID,
+        onOpenSpace: { _ in },
         preview: true
       )
       // SwiftUI presents context-menu previews in a separate hosting tree.

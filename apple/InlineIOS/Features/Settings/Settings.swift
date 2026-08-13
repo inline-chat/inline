@@ -5,6 +5,8 @@ import SwiftUI
 import TextProcessing
 
 struct SettingsView: View {
+  let onSelectSpace: (Int64) -> Void
+
   @Query(CurrentUser()) var currentUser: UserInfo?
   @Environment(Router.self) private var router
   @Environment(\.dismiss) private var dismiss
@@ -93,7 +95,7 @@ struct SettingsView: View {
           title: "Help",
           systemImage: "questionmark.circle.fill",
           color: .blue,
-          destination: HelpSettingsView()
+          destination: HelpSettingsView(onSelectSpace: onSelectSpace)
         )
       } footer: {
         SettingsReleaseSummary()
@@ -227,7 +229,7 @@ struct AutoDownloadSettingsView: View {
 }
 
 #Preview("Settings") {
-  SettingsView()
+  SettingsView(onSelectSpace: { _ in })
     .environmentObject(RootData(db: AppDatabase.empty(), auth: Auth.shared))
     .environmentObject(OnboardingNavigation())
     .environmentObject(MainViewRouter())

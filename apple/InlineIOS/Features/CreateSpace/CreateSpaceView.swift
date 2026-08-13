@@ -4,6 +4,8 @@ import Logger
 import SwiftUI
 
 struct CreateSpaceView: View {
+  let onCreated: (Int64) -> Void
+
   let theme = ThemeManager.shared.selected
 
   @State private var name = ""
@@ -11,11 +13,8 @@ struct CreateSpaceView: View {
   @FocusState private var isFocused: Bool
   @FocusState private var showEmojiPicker: Bool
   @FormState var formState
-  @AppStorage(ExperimentalHomePreferenceKeys.isEnabled)
-  private var enableExperimentalView = false
 
   @Environment(\.appDatabase) var database
-  @Environment(Router.self) private var router
   @EnvironmentObject var dataManager: DataManager
 
   var body: some View {
@@ -111,18 +110,7 @@ struct CreateSpaceView: View {
         formState.succeeded()
 
         if let id {
-          if enableExperimentalView {
-            let targetTab = router.selectedTab.experimentalHomeFallbackTab
-            if router.selectedTab != targetTab {
-              router.selectedTab = targetTab
-            }
-            router.popToRoot(for: targetTab)
-            router.push(.space(id: id), for: targetTab)
-          } else {
-            router.popToRoot(for: .spaces)
-            router.selectedTab = .spaces
-            router.push(.space(id: id), for: .spaces)
-          }
+          onCreated(id)
         }
 
       } catch {
@@ -134,5 +122,5 @@ struct CreateSpaceView: View {
 }
 
 #Preview {
-  CreateSpaceView()
+  CreateSpaceView(onCreated: { _ in })
 }

@@ -146,13 +146,21 @@ private struct AuthedAppRoot: View {
     case .spaces:
       SpacesView()
     case let .space(id):
-      SpaceView(spaceId: id)
+      LegacySpaceDestinationRedirect(spaceID: id, onRedirect: showLegacySpacesRoot)
     case let .chat(peer):
-      ChatView(peer: peer)
+      ChatView(peer: peer, onOpenSpace: showLegacySpacesRoot)
     case let .externalChat(peer, contextSpaceID):
-      ChatView(peer: peer, contextSpaceId: contextSpaceID)
+      ChatView(
+        peer: peer,
+        contextSpaceId: contextSpaceID,
+        onOpenSpace: showLegacySpacesRoot
+      )
     case let .chatMessage(peer, messageID):
-      ChatView(peer: peer, focusMessageID: messageID)
+      ChatView(
+        peer: peer,
+        onOpenSpace: showLegacySpacesRoot,
+        focusMessageID: messageID
+      )
     case let .chatInfo(chatItem):
       ChatInfoView(chatItem: chatItem)
     case let .spaceSettings(spaceId):
@@ -166,7 +174,7 @@ private struct AuthedAppRoot: View {
     case .createSpaceChat:
       CreateChatView(spaceId: nil)
     case .createSpace:
-      CreateSpaceView()
+      CreateSpaceView(onCreated: showLegacySpacesRoot)
     }
   }
 
@@ -174,14 +182,14 @@ private struct AuthedAppRoot: View {
   private func sheetView(for sheet: Sheet) -> some View {
     switch sheet {
     case .createSpace:
-      CreateSpace()
+      CreateSpace(onCreated: showLegacySpacesRoot)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         .presentationContentInteraction(.scrolls)
 
     case .settings:
       NavigationStack {
-        SettingsView()
+        SettingsView(onSelectSpace: showLegacySpacesRoot)
       }
 
     case let .connectors(callbackURL):
@@ -221,6 +229,11 @@ private struct AuthedAppRoot: View {
     } catch {
       Log.shared.error("Failed to reload spaces after clearing local data", error: error)
     }
+  }
+
+  private func showLegacySpacesRoot(_: Int64) {
+    router.popToRoot(for: .spaces)
+    router.selectedTab = .spaces
   }
 
   private func normalizeSelectedTabIfNeeded(selectedTab: AppTab) {

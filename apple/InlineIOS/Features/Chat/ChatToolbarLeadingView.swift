@@ -7,6 +7,7 @@ struct ChatToolbarLeadingView: View {
   let peerId: Peer
   let contextSpaceId: Int64?
   private let router: Router
+  let onOpenSpace: (Int64) -> Void
   let onOpenChatInfo: (SpaceChatItem) -> Void
 
   @ObservedObject private var fullChatViewModel: FullChatViewModel
@@ -20,12 +21,14 @@ struct ChatToolbarLeadingView: View {
     router: Router,
     fullChatViewModel: FullChatViewModel,
     realtimeState: RealtimeState,
+    onOpenSpace: @escaping (Int64) -> Void,
     onOpenChatInfo: @escaping (SpaceChatItem) -> Void
   ) {
     self.peerId = peerId
     self.contextSpaceId = contextSpaceId
     self.router = router
     self.realtimeState = realtimeState
+    self.onOpenSpace = onOpenSpace
     self.onOpenChatInfo = onOpenChatInfo
     _fullChatViewModel = ObservedObject(wrappedValue: fullChatViewModel)
   }
@@ -188,7 +191,7 @@ struct ChatToolbarLeadingView: View {
   }
 
   private func openSpace(_ space: ReplyThreadToolbarContext.SpaceLink) {
-    router.push(.space(id: space.id))
+    onOpenSpace(space.id)
   }
 
   private func openChatInfo() {

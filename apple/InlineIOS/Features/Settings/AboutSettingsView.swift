@@ -3,9 +3,11 @@ import InlineKit
 import SwiftUI
 
 struct HelpSettingsView: View {
+  let onSelectSpace: (Int64) -> Void
+
   var body: some View {
     List {
-      HelpCommunitySection()
+      HelpCommunitySection(onSelectSpace: onSelectSpace)
       HelpResourcesSection()
       HelpAppSection()
       HelpLegalSection()
@@ -23,6 +25,7 @@ private struct HelpCommunitySection: View {
   }
 
   @Environment(Router.self) private var router
+  let onSelectSpace: (Int64) -> Void
   @State private var pendingAction: Action?
   @State private var errorMessage: String?
 
@@ -80,7 +83,8 @@ private struct HelpCommunitySection: View {
         guard case let .joinPublicSpace(response) = result else {
           throw HelpActionError.invalidResponse
         }
-        open(.space(id: response.space.id))
+        router.dismissSheet()
+        onSelectSpace(response.space.id)
 
       case .founderDM:
         let userID = getDenaOrMoUserId(username: "mo")
