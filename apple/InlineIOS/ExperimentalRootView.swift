@@ -959,8 +959,12 @@ private struct ExperimentalAuthedRootView: View {
       onSelectSortMode: { mode in
         sortModeRaw = mode.rawValue
       },
-      onInvite: activeSpace.map { space in
-        { router.presentSheet(.addMember(spaceId: space.id)) }
+      onInvite: {
+        if let activeSpace {
+          router.presentSheet(.addMember(spaceId: activeSpace.id))
+        } else {
+          router.presentSheet(.inviteToInline)
+        }
       },
       onMembers: activeSpace.map { space in
         { router.presentSheet(.members(spaceId: space.id)) }
@@ -1127,7 +1131,7 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
   let onArchive: () -> Void
   let onSelectItemSize: (ExperimentalHomeChatItemRenderMode) -> Void
   let onSelectSortMode: (ExperimentalHomeSortMode) -> Void
-  let onInvite: (() -> Void)?
+  let onInvite: () -> Void
   let onMembers: (() -> Void)?
   let onManage: (() -> Void)?
 
@@ -1162,8 +1166,15 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
     ) { _ in
       onArchive()
     }
+    let invite = UIAction(
+      title: "Invite",
+      image: UIImage(systemName: "person.badge.plus")
+    ) { _ in
+      onInvite()
+    }
     let itemSizeMenu = UIMenu(
       title: "Item Size",
+      subtitle: itemSize.title,
       image: UIImage(systemName: "textformat.size"),
       options: .singleSelection,
       children: ExperimentalHomeChatItemRenderMode.allCases.map { mode in
@@ -1174,6 +1185,7 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
     )
     let sortMenu = UIMenu(
       title: "Sort",
+      subtitle: sortMode.title,
       image: UIImage(systemName: "arrow.up.arrow.down"),
       options: .singleSelection,
       children: ExperimentalHomeSortMode.allCases.map { mode in
@@ -1184,31 +1196,33 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
     )
     let viewOptions = UIMenu(
       title: "View Options",
-      options: .displayInline,
+      image: UIImage(systemName: "slider.horizontal.3"),
       children: [itemSizeMenu, sortMenu]
     )
 
-    let navigationSection = UIMenu(
+    let viewSection = UIMenu(
       options: .displayInline,
-      children: [notifications, archivedChats]
+      children: [notifications, viewOptions]
     )
-    var children: [UIMenuElement] = [navigationSection, viewOptions]
-    if let activeSpaceName,
-       let onInvite,
-       let onMembers,
-       let onManage {
-      children.append(UIMenu(
+
+    let spaceSection: UIMenu
+    if let activeSpaceName, let onMembers, let onManage {
+      spaceSection = UIMenu(
         title: activeSpaceName,
         options: .displayInline,
         children: [
-          UIAction(title: "Invite", image: UIImage(systemName: "person.badge.plus")) { _ in onInvite() },
+          invite,
           UIAction(title: "Members", image: UIImage(systemName: "person.2")) { _ in onMembers() },
           UIAction(title: "Manage", image: UIImage(systemName: "gearshape.2")) { _ in onManage() },
         ]
-      ))
+      )
+    } else {
+      spaceSection = UIMenu(options: .displayInline, children: [invite])
     }
 
-    return UIMenu(children: children)
+    let archiveSection = UIMenu(options: .displayInline, children: [archivedChats])
+
+    return UIMenu(children: [viewSection, spaceSection, archiveSection])
   }
 }
 
