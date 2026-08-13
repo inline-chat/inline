@@ -17,6 +17,7 @@ verbose=0
 stream_logs=${STREAM_LOGS:-1}
 allow_simulator=${ALLOW_SIMULATOR:-0}
 live_log_filter=${LIVE_LOG_FILTER:-}
+requested_device_id=""
 
 usage() {
   cat <<'EOF'
@@ -30,6 +31,7 @@ boot Simulator.
 Options:
   --select        Re-prompt for preferred device and optional simulator fallback
   --list          List available devices and simulators, then exit
+  --device <id>   Use this connected physical device without reading/changing preference
   --no-build      Install/launch the most recent Debug build without rebuilding
   --no-launch     Build and resolve the app path, but do not install or launch
   --logs          Stream app stdout/stderr after launch (default)
@@ -65,6 +67,14 @@ while [[ $# -gt 0 ]]; do
     --list)
       list=1
       shift
+      ;;
+    --device)
+      if [[ $# -lt 2 ]]; then
+        echo "--device requires a device identifier" >&2
+        exit 1
+      fi
+      requested_device_id="$2"
+      shift 2
       ;;
     --no-build)
       build=0
@@ -256,15 +266,19 @@ capture_cmd() {
 
 run_cmd "List physical iOS devices" xcrun devicectl list devices --json-output "${devices_json}"
 
-capture_cmd "List iOS simulators" "${sims_json}" xcrun simctl list devices available -j
+if [[ -n "${requested_device_id}" && "${list}" != "1" ]]; then
+  printf '{"devices":{}}\n' >"${sims_json}"
+else
+  capture_cmd "List iOS simulators" "${sims_json}" xcrun simctl list devices available -j
+fi
 
-python3 - "${devices_json}" "${sims_json}" "${CACHE_PATH}" "${target_json}" "${select}" "${list}" "${verbose}" "${allow_simulator}" <<'PY'
+python3 - "${devices_json}" "${sims_json}" "${CACHE_PATH}" "${target_json}" "${select}" "${list}" "${verbose}" "${allow_simulator}" "${requested_device_id}" <<'PY'
 import json
 import os
 import re
 import sys
 
-devices_path, sims_path, cache_path, target_path, select_arg, list_arg, verbose_arg, allow_simulator_arg = sys.argv[1:]
+devices_path, sims_path, cache_path, target_path, select_arg, list_arg, verbose_arg, allow_simulator_arg, requested_device_id = sys.argv[1:]
 force_select = select_arg == "1"
 list_only = list_arg == "1"
 verbose = verbose_arg == "1"
@@ -424,6 +438,15 @@ fallback = cache.get("fallbackSimulator")
 
 device_by_id = {item["id"]: item for item in devices}
 sim_by_id = {item["id"]: item for item in sims}
+
+if requested_device_id:
+    selected = device_by_id.get(requested_device_id)
+    if not selected:
+        print(f"Requested physical iOS device is not available: {requested_device_id}", file=sys.stderr)
+        sys.exit(1)
+    with open(target_path, "w", encoding="utf-8") as f:
+        json.dump(selected, f)
+    sys.exit(0)
 
 selected = None
 needs_save = False

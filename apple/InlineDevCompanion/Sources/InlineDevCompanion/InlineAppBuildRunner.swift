@@ -15,61 +15,94 @@ struct InlineAppBuildResult: Equatable, Sendable {
 }
 
 enum InlineAppBuildRunner {
-  static func build(_ target: InlineAppBuildTarget) async -> InlineAppBuildResult {
+  static func build(
+    _ target: InlineBuildTarget,
+    logURL: URL
+  ) async -> InlineAppBuildResult {
     let repositoryRoot = repositoryRoot
     return await Task.detached(priority: .userInitiated) {
-      run(target, repositoryRoot: repositoryRoot)
+      run(target, repositoryRoot: repositoryRoot, logURL: logURL)
     }.value
   }
 
   static func command(
-    for target: InlineAppBuildTarget,
+    for target: InlineBuildTarget,
     repositoryRoot: URL
   ) -> InlineAppBuildCommand {
-    let scripts = repositoryRoot.appending(path: "scripts/macos", directoryHint: .isDirectory)
+    let macOSScripts = repositoryRoot.appending(path: "scripts/macos", directoryHint: .isDirectory)
     switch target {
-    case .debug:
+    case .macOS(.debug):
       return InlineAppBuildCommand(
         executableURL: URL(fileURLWithPath: "/bin/bash"),
         arguments: [
-          scripts.appending(path: "open-debug-app.sh").path,
+          macOSScripts.appending(path: "open-debug-app.sh").path,
           "--no-stop",
           "--no-open",
           "--no-logs",
+          "--verbose",
         ],
         currentDirectoryURL: repositoryRoot,
-        displayCommand: "scripts/macos/open-debug-app.sh --no-stop --no-open --no-logs"
+        displayCommand: "scripts/macos/open-debug-app.sh --no-stop --no-open --no-logs --verbose"
       )
-    case .debug2:
+    case .macOS(.debug2):
       return InlineAppBuildCommand(
         executableURL: URL(fileURLWithPath: "/bin/bash"),
         arguments: [
-          scripts.appending(path: "open-debug-app.sh").path,
+          macOSScripts.appending(path: "open-debug-app.sh").path,
           "--second",
           "--no-stop",
           "--no-open",
           "--no-logs",
+          "--verbose",
         ],
         currentDirectoryURL: repositoryRoot,
-        displayCommand: "scripts/macos/open-debug-app.sh --second --no-stop --no-open --no-logs"
+        displayCommand: "scripts/macos/open-debug-app.sh --second --no-stop --no-open --no-logs --verbose"
       )
-    case .dev:
+    case .macOS(.dev):
       return InlineAppBuildCommand(
         executableURL: URL(fileURLWithPath: "/bin/bash"),
         arguments: [
-          scripts.appending(path: "build-local-app.sh").path,
+          macOSScripts.appending(path: "build-local-app.sh").path,
           "--channel",
           "stable",
         ],
         currentDirectoryURL: repositoryRoot,
         displayCommand: "scripts/macos/build-local-app.sh --channel stable"
       )
+    case let .iOS(deviceID, _):
+      let script = repositoryRoot
+        .appending(path: "scripts/ios/open-debug-app.sh", directoryHint: .notDirectory)
+      return InlineAppBuildCommand(
+        executableURL: URL(fileURLWithPath: "/bin/bash"),
+        arguments: [
+          script.path,
+          "--device",
+          deviceID,
+          "--no-logs",
+          "--verbose",
+        ],
+        currentDirectoryURL: repositoryRoot,
+        displayCommand: "scripts/ios/open-debug-app.sh --device \(deviceID) --no-logs --verbose"
+      )
     }
   }
 
+  static func makeLogURL(for target: InlineBuildTarget) throws -> URL {
+    let logs = FileManager.default.homeDirectoryForCurrentUser
+      .appending(path: "Library/Logs/Inline Dev Companion", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+      .replacingOccurrences(of: ":", with: "-")
+    return logs.appending(
+      path: "\(target.logName)-\(timestamp).log",
+      directoryHint: .notDirectory
+    )
+  }
+
   private static func run(
-    _ target: InlineAppBuildTarget,
-    repositoryRoot: URL
+    _ target: InlineBuildTarget,
+    repositoryRoot: URL,
+    logURL: URL
   ) -> InlineAppBuildResult {
     let command = command(for: target, repositoryRoot: repositoryRoot)
     let marker = "Inline Dev Companion [\(getpid())]: \(command.displayCommand)"
@@ -93,17 +126,6 @@ enum InlineAppBuildRunner {
       return InlineAppBuildResult(
         succeeded: false,
         message: "Another xcodebuild process is already running.",
-        logURL: nil
-      )
-    }
-
-    let logURL: URL
-    do {
-      logURL = try makeLogURL(for: target)
-    } catch {
-      return InlineAppBuildResult(
-        succeeded: false,
-        message: "Could not create a build log: \(error.localizedDescription)",
         logURL: nil
       )
     }
@@ -192,15 +214,6 @@ enum InlineAppBuildRunner {
     } catch {
       return false
     }
-  }
-
-  private static func makeLogURL(for target: InlineAppBuildTarget) throws -> URL {
-    let logs = FileManager.default.homeDirectoryForCurrentUser
-      .appending(path: "Library/Logs/Inline Dev Companion", directoryHint: .isDirectory)
-    try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
-    let timestamp = ISO8601DateFormatter().string(from: Date())
-      .replacingOccurrences(of: ":", with: "-")
-    return logs.appending(path: "\(target.rawValue)-\(timestamp).log", directoryHint: .notDirectory)
   }
 
   private static func buildEnvironment() -> [String: String] {

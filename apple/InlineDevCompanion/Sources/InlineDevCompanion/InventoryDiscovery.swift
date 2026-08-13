@@ -16,6 +16,100 @@ enum InventoryDiscovery {
     let version: String?
   }
 
+  private struct DeviceListResponse: Decodable {
+    struct Result: Decodable {
+      let devices: [Device]
+    }
+
+    struct Device: Decodable {
+      struct HardwareProperties: Decodable {
+        let marketingName: String?
+        let platform: String?
+        let productType: String?
+        let reality: String?
+        let udid: String?
+      }
+
+      struct DeviceProperties: Decodable {
+        let name: String?
+        let osVersionNumber: String?
+      }
+
+      struct ConnectionProperties: Decodable {
+        let pairingState: String?
+        let transportType: String?
+      }
+
+      struct SoftwareProperties: Decodable {
+        struct OSVersionNumber: Decodable {
+          let stringValue: String
+
+          private enum CodingKeys: String, CodingKey {
+            case stringValue
+          }
+
+          init(from decoder: Decoder) throws {
+            if let value = try? decoder.singleValueContainer().decode(String.self) {
+              stringValue = value
+              return
+            }
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            stringValue = try container.decode(String.self, forKey: .stringValue)
+          }
+        }
+
+        let osVersionNumber: OSVersionNumber?
+      }
+
+      struct StateProperties: Decodable {
+        let name: String?
+      }
+
+      struct Properties: Decodable {
+        let connection: ConnectionProperties?
+        let hardware: HardwareProperties?
+        let software: SoftwareProperties?
+        let state: StateProperties?
+      }
+
+      let identifier: String?
+      let hardwareProperties: HardwareProperties?
+      let deviceProperties: DeviceProperties?
+      let connectionProperties: ConnectionProperties?
+      let properties: Properties?
+    }
+
+    let result: Result
+  }
+
+  private struct DeviceAppsResponse: Decodable {
+    struct Result: Decodable {
+      let apps: [Application]
+    }
+
+    struct Application: Decodable {
+      let bundleIdentifier: String
+      let bundleVersion: String?
+      let name: String
+      let version: String?
+    }
+
+    let result: Result
+  }
+
+  private struct DeviceProcessesResponse: Decodable {
+    struct Result: Decodable {
+      let runningProcesses: [RunningProcess]
+    }
+
+    struct RunningProcess: Decodable {
+      let executable: String
+      let processIdentifier: Int32
+    }
+
+    let result: Result
+  }
+
   private struct PackageManifest: Decodable {
     let name: String
     let version: String
@@ -23,12 +117,30 @@ enum InventoryDiscovery {
 
   private struct ScannedInventory: Sendable {
     let applications: [InventoryItem]
+    let iOSDevices: [ConnectedIOSDevice]
     let tools: [InventoryItem]
   }
 
   private struct CommandResult: Sendable {
     let status: Int32
     let output: Data
+  }
+
+  private final class CommandOutputBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+
+    func store(_ data: Data) {
+      lock.lock()
+      self.data = data
+      lock.unlock()
+    }
+
+    func load() -> Data {
+      lock.lock()
+      defer { lock.unlock() }
+      return data
+    }
   }
 
   private static let appDefinitions = [
@@ -58,6 +170,8 @@ enum InventoryDiscovery {
     ),
   ]
 
+  static let iOSDebugBundleIdentifier = "chat.inline.InlineIOS.debug"
+
   @MainActor
   static func snapshot() async -> InventorySnapshot {
     let scan = await Task.detached(priority: .utility) {
@@ -85,6 +199,7 @@ enum InventoryDiscovery {
 
     return InventorySnapshot(
       applications: applications,
+      iOSDevices: scan.iOSDevices,
       tools: scan.tools,
       refreshedAt: Date()
     )
@@ -103,6 +218,7 @@ enum InventoryDiscovery {
 
     return ScannedInventory(
       applications: applications,
+      iOSDevices: discoverConnectedIOSDevices(),
       tools: [
         discoverInlineCLI(),
         discoverOpenClawPlugin(),
@@ -196,6 +312,7 @@ enum InventoryDiscovery {
       kind: .application,
       name: definition.name,
       systemImage: "app.dashed",
+      bundleIdentifier: definition.bundleIdentifier,
       location: url,
       version: metadata.version,
       modifiedAt: modificationDate(of: executableURL ?? url),
@@ -209,6 +326,7 @@ enum InventoryDiscovery {
       kind: .application,
       name: definition.name,
       systemImage: "app.dashed",
+      bundleIdentifier: definition.bundleIdentifier,
       location: nil,
       version: nil,
       modifiedAt: nil,
@@ -240,6 +358,158 @@ enum InventoryDiscovery {
     )
   }
 
+  private static func discoverConnectedIOSDevices() -> [ConnectedIOSDevice] {
+    let xcrun = URL(fileURLWithPath: "/usr/bin/xcrun", isDirectory: false)
+    guard let deviceList = runCommand(
+      executable: xcrun,
+      arguments: [
+        "devicectl", "list", "devices",
+        "--json-output", "-",
+        "--quiet",
+        "--omit-deprecated-fields-in-json",
+      ],
+      timeout: 4
+    ), deviceList.status == 0,
+      let response = try? JSONDecoder().decode(DeviceListResponse.self, from: deviceList.output)
+    else {
+      return []
+    }
+
+    return response.result.devices.compactMap { device in
+      let hardware = device.properties?.hardware ?? device.hardwareProperties
+      let connection = device.properties?.connection ?? device.connectionProperties
+      guard hardware?.platform == "iOS",
+            hardware?.reality == "physical",
+            connection?.pairingState == "paired",
+            let id = hardware?.udid ?? device.identifier,
+            let name = device.properties?.state?.name ?? device.deviceProperties?.name else {
+        return nil
+      }
+
+      let appsResult = runCommand(
+        executable: xcrun,
+        arguments: [
+          "devicectl", "device", "info", "apps",
+          "--device", id,
+          "--bundle-id", iOSDebugBundleIdentifier,
+          "--json-output", "-",
+          "--quiet",
+        ],
+        timeout: 5
+      )
+
+      // CoreDevice remembers disconnected devices. A successful device-info query is the
+      // reliable distinction between a remembered phone and one available to developer tools.
+      guard let appsResult, appsResult.status == 0,
+            (try? JSONDecoder().decode(
+              DeviceAppsResponse.self,
+              from: appsResult.output
+            )) != nil else {
+        return nil
+      }
+
+      let installedApplication = parseInstalledIOSApplication(appsResult.output)
+
+      let processesResult = runCommand(
+        executable: xcrun,
+        arguments: [
+          "devicectl", "device", "info", "processes",
+          "--device", id,
+          "--search", "InlineIOS",
+          "--json-output", "-",
+          "--quiet",
+        ],
+        timeout: 4
+      )
+      let runningProcessID = processesResult.flatMap { result in
+        result.status == 0 ? parseRunningIOSProcessID(result.output) : nil
+      }
+
+      return ConnectedIOSDevice(
+        id: id,
+        name: name,
+        model: hardware?.marketingName ?? hardware?.productType,
+        osVersion: device.properties?.software?.osVersionNumber?.stringValue
+          ?? device.deviceProperties?.osVersionNumber,
+        connectionTransport: displayConnectionTransport(
+          connection?.transportType
+        ),
+        installedApplication: installedApplication,
+        runningProcessID: runningProcessID
+      )
+    }
+    .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+  }
+
+  private static func displayConnectionTransport(_ transport: String?) -> String? {
+    switch transport {
+    case "wired":
+      "USB"
+    case "localNetwork":
+      "Wi-Fi"
+    case let value?:
+      value
+    case nil:
+      nil
+    }
+  }
+
+  static func parseInstalledIOSApplication(_ data: Data) -> IOSInstalledApplication? {
+    guard let response = try? JSONDecoder().decode(DeviceAppsResponse.self, from: data),
+          let application = response.result.apps.first else {
+      return nil
+    }
+    return IOSInstalledApplication(
+      name: application.name,
+      bundleIdentifier: application.bundleIdentifier,
+      version: application.version,
+      buildVersion: application.bundleVersion
+    )
+  }
+
+  static func parseRunningIOSProcessID(_ data: Data) -> Int32? {
+    guard let response = try? JSONDecoder().decode(DeviceProcessesResponse.self, from: data) else {
+      return nil
+    }
+    return response.result.runningProcesses.first {
+      URL(fileURLWithPath: $0.executable).lastPathComponent == "InlineIOS"
+    }?.processIdentifier
+  }
+
+  static func parsePhysicalIOSDeviceNames(_ data: Data) -> [String] {
+    guard let response = try? JSONDecoder().decode(DeviceListResponse.self, from: data) else {
+      return []
+    }
+    return response.result.devices.compactMap { device in
+      let hardware = device.properties?.hardware ?? device.hardwareProperties
+      guard hardware?.platform == "iOS", hardware?.reality == "physical" else {
+        return nil
+      }
+      return device.properties?.state?.name ?? device.deviceProperties?.name
+    }
+  }
+
+  static func currentProcessIDs(for kind: InventoryKind) async -> [Int32] {
+    await Task.detached(priority: .userInitiated) {
+      switch kind {
+      case .application:
+        []
+      case .inlineCLI:
+        processIDs(exactName: "inline")
+      case .openClawPlugin:
+        processIDs(matching: [
+          "openclaw/dist/index\\.js gateway",
+          "(^|/)openclaw gateway",
+        ])
+      case .hermesPlugin:
+        processIDs(matching: [
+          "hermes_cli\\.main gateway",
+          "/\\.hermes/plugins/inline/sidecar/index\\.mjs",
+        ])
+      }
+    }.value
+  }
+
   private static func discoverInlineCLI() -> InventoryItem {
     let executable = findExecutable(named: "inline")
     let rawVersion = executable.flatMap {
@@ -257,6 +527,7 @@ enum InventoryDiscovery {
       kind: .inlineCLI,
       name: "Inline CLI",
       systemImage: "terminal",
+      bundleIdentifier: nil,
       location: executable,
       version: version,
       modifiedAt: executable.flatMap(modificationDate),
@@ -301,6 +572,7 @@ enum InventoryDiscovery {
       kind: .openClawPlugin,
       name: "OpenClaw Inline Plugin",
       systemImage: "puzzlepiece.extension",
+      bundleIdentifier: nil,
       location: installation?.url.deletingLastPathComponent(),
       version: installation?.version,
       modifiedAt: installation?.modifiedAt,
@@ -323,6 +595,7 @@ enum InventoryDiscovery {
       kind: .hermesPlugin,
       name: "Hermes Inline Plugin",
       systemImage: "puzzlepiece.extension",
+      bundleIdentifier: nil,
       location: installed ? pluginDirectory : nil,
       version: contents.flatMap(parseHermesVersion),
       modifiedAt: installed ? modificationDate(of: manifest) : nil,
@@ -430,13 +703,21 @@ enum InventoryDiscovery {
     process.arguments = arguments
     process.standardInput = FileHandle.nullDevice
     process.standardOutput = output
-    process.standardError = output
+    process.standardError = FileHandle.nullDevice
     process.terminationHandler = { _ in completion.signal() }
 
     do {
       try process.run()
     } catch {
       return nil
+    }
+
+    let capturedOutput = CommandOutputBuffer()
+    let outputRead = DispatchGroup()
+    outputRead.enter()
+    DispatchQueue.global(qos: .utility).async {
+      capturedOutput.store((try? output.fileHandleForReading.readToEnd()) ?? Data())
+      outputRead.leave()
     }
 
     if completion.wait(timeout: .now() + timeout) == .timedOut {
@@ -448,8 +729,8 @@ enum InventoryDiscovery {
         }
       }
     }
-    let data = (try? output.fileHandleForReading.readToEnd()) ?? Data()
-    return CommandResult(status: process.terminationStatus, output: data)
+    guard outputRead.wait(timeout: .now() + 1) == .success else { return nil }
+    return CommandResult(status: process.terminationStatus, output: capturedOutput.load())
   }
 
   private static func modificationDate(of url: URL) -> Date? {
