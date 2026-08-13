@@ -9,7 +9,6 @@ public class ChatContainerView: UIView {
   let spaceId: Int64?
   private var collapsedMaxId: Int64?
   private let isPreview: Bool
-  private var peerUser: InlineKit.User?
   private var lastAppliedDraftSignature: DraftSignature?
   private var lastRequestedFocusMessageID: Int64?
 
@@ -82,7 +81,6 @@ public class ChatContainerView: UIView {
     view.chatId = chatId
     view.spaceId = spaceId
     view.sendAnimationCoordinator = sendAnimationCoordinator
-    view.setPeerUser(peerUser)
     view.executeInlineCommand = { [weak self] action in
       guard let self else { return false }
       switch action {
@@ -150,14 +148,12 @@ public class ChatContainerView: UIView {
     peerId: InlineKit.Peer,
     chatId: Int64?,
     spaceId: Int64?,
-    peerUser: InlineKit.User?,
     collapsedMaxId: Int64? = nil,
     isPreview: Bool = false
   ) {
     self.peerId = peerId
     self.chatId = chatId
     self.spaceId = spaceId
-    self.peerUser = peerUser
     self.collapsedMaxId = collapsedMaxId
     self.isPreview = isPreview
 
@@ -185,13 +181,6 @@ public class ChatContainerView: UIView {
       attachEdgePanHandlerIfNeeded()
       resetComposeToSafeAreaIfKeyboardClosed()
     }
-  }
-
-  func setPeerUser(_ user: InlineKit.User?) {
-    guard peerUser != user else { return }
-    peerUser = user
-    guard !isPreview else { return }
-    composeView.setPeerUser(user)
   }
 
   func loadDraftIfNeeded(_ draftMessage: DraftMessage?) {
@@ -831,15 +820,12 @@ struct ChatViewUIKit: UIViewRepresentable {
   let focusMessageID: Int64?
   let collapsedMaxId: Int64?
   let isPreview: Bool
-  @EnvironmentObject var data: DataManager
-  @EnvironmentObject var fullChatViewModel: FullChatViewModel
 
   func makeUIView(context _: Context) -> ChatContainerView {
     let view = ChatContainerView(
       peerId: peerId,
       chatId: chatId,
       spaceId: spaceId,
-      peerUser: fullChatViewModel.peerUser,
       collapsedMaxId: collapsedMaxId,
       isPreview: isPreview
     )
@@ -855,7 +841,6 @@ struct ChatViewUIKit: UIViewRepresentable {
   }
 
   func updateUIView(_ view: ChatContainerView, context _: Context) {
-    view.setPeerUser(fullChatViewModel.peerUser)
     view.setCollapsedMaxId(collapsedMaxId)
     if !isPreview {
       view.loadDraftIfNeeded(draftMessage)

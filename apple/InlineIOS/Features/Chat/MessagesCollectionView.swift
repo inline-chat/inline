@@ -3669,6 +3669,15 @@ private extension MessagesCollectionView {
                 MessagesPublisher.shared
                   .messagesDeleted(messageIds: [message.messageId], peer: message.peerId)
               }
+            } else {
+              let randomId = message.randomId
+              Task {
+                Api.realtime.cancelTransaction(where: {
+                  guard $0.transaction.method == .sendMessage else { return false }
+                  guard case let .sendMessage(input) = $0.transaction.input else { return false }
+                  return input.randomID == randomId
+                })
+              }
             }
           }
           actions.append(cancelAction)

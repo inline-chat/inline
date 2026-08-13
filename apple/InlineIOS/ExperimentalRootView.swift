@@ -392,8 +392,8 @@ private struct ExperimentalAuthedRootView: View {
           Color.clear
         }
       } else if #available(iOS 26.0, *) {
-        // Search now owns the semantic `.search` role. iOS 26 has no separate
-        // `.prominent` role, so New Thread remains a standard native tab action.
+        // iOS 26 has no `.prominent` role, so New Thread remains a standard
+        // native tab action until the role is available.
         Tab("New Thread", systemImage: "plus", value: .newChat) {
           Color.clear
         }
