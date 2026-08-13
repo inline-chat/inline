@@ -207,10 +207,22 @@ const comparableLegacyRoutes =
 const intentionalCandidateOnly =
   new Set([
     "GET\t/",
+    "GET\t/admin/email-campaigns",
+    "GET\t/admin/email-provider-status",
+    "GET\t/admin/server-config",
+    "GET\t/email/unsubscribe/{token}",
     "GET\t/health",
     "GET\t/healthz",
     "GET\t/livez",
     "GET\t/readyz",
+    "POST\t/admin/auth/dev-login",
+    "POST\t/admin/email-campaigns",
+    "POST\t/admin/email-campaigns/preview",
+    "POST\t/admin/email-campaigns/{id}/pause",
+    "POST\t/admin/email-campaigns/{id}/send",
+    "POST\t/admin/email-campaigns/{id}/test",
+    "POST\t/email/unsubscribe/{token}",
+    "PUT\t/admin/server-config",
   ])
 
 let coreHandle:

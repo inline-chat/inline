@@ -8,7 +8,7 @@ import { eq } from "drizzle-orm"
 import { users } from "@in/server/db/schema"
 import { prelude } from "@in/server/libs/prelude"
 import parsePhoneNumber from "libphonenumber-js"
-import { isInviteCodeRequired, isLoginUser } from "@in/server/modules/auth/signupInvites"
+import { assertNewSignupAllowed, isInviteCodeRequired, isLoginUser } from "@in/server/modules/auth/signupInvites"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 import { normalizeAuthClientType } from "@in/server/modules/auth/clientType"
 
@@ -48,15 +48,16 @@ export const handler = async (
 
     let formattedPhoneNumber = phoneNumber.number
 
-    // send sms code
-    await prelude.sendCode(formattedPhoneNumber)
-
-    Log.shared.debug("sending sms code to", { phoneNumber: formattedPhoneNumber })
-
     let existingUser = (await db.select().from(users).where(eq(users.phoneNumber, formattedPhoneNumber)).limit(1))[0]
     if (existingUser?.deleted === true) {
       throw new InlineError(InlineError.ApiError.USER_DEACTIVATED)
     }
+    await assertNewSignupAllowed(existingUser)
+
+    // Check the signup gate before spending a provider request on an unknown contact.
+    await prelude.sendCode(formattedPhoneNumber)
+
+    Log.shared.debug("sending sms code to", { phoneNumber: formattedPhoneNumber })
 
     const needsInviteCode = await isInviteCodeRequired(existingUser)
     const isLogin = isLoginUser(existingUser)

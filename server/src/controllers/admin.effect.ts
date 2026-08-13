@@ -57,6 +57,8 @@ import {
   AdminSendEmailCodeBadRequest,
   AdminSendEmailCodeForbidden,
   AdminSendEmailCodeInternal,
+  AdminServerConfigBadRequest,
+  AdminServerConfigConflict,
   AdminSetPasswordBadRequest,
   AdminSetPasswordForbidden,
   AdminStepUpBadRequest,
@@ -101,6 +103,8 @@ import {
   AdminSearchQuery,
   AdminSendEmailCodeInput,
   AdminSendEmailCodeResult,
+  AdminServerConfigResult,
+  AdminServerConfigSettingResult,
   AdminSessionIdParam,
   AdminSetPasswordInput,
   AdminSpacesResult,
@@ -111,6 +115,7 @@ import {
   AdminTotpCodeInput,
   AdminTotpSetupResult,
   AdminUpdateUserInput,
+  AdminUpdateServerConfigInput,
   AdminUserDetailResult,
   AdminUserIdParam,
   AdminUserIdParams,
@@ -506,6 +511,33 @@ const emailCampaignsEndpoint = setupEndpoint(
   ),
 )
 
+const serverConfigEndpoint = setupEndpoint(
+  HttpApiEndpoint.get(
+    "adminServerConfig",
+    "/admin/server-config",
+    {
+      success: AdminServerConfigResult,
+    },
+  ),
+)
+
+const updateServerConfigEndpoint = stepUpEndpoint(
+  HttpApiEndpoint.put(
+    "adminUpdateServerConfig",
+    "/admin/server-config",
+    {
+      payload: AdminUpdateServerConfigInput,
+      success: AdminServerConfigSettingResult,
+      error: [
+        AdminTransportBadRequest,
+        AdminValidationError,
+        AdminServerConfigBadRequest,
+        AdminServerConfigConflict,
+      ],
+    },
+  ),
+)
+
 const emailProviderStatusEndpoint = setupEndpoint(
   HttpApiEndpoint.get(
     "adminEmailProviderStatus",
@@ -730,6 +762,8 @@ export const AdminApiGroup = HttpApiGroup.make(
   activeUsersEndpoint,
   waitlistEndpoint,
   emailCampaignsEndpoint,
+  serverConfigEndpoint,
+  updateServerConfigEndpoint,
   emailProviderStatusEndpoint,
   previewEmailCampaignEndpoint,
   createEmailCampaignEndpoint,
@@ -1059,6 +1093,36 @@ export const makeAdminRouteGroup = () => {
                   AdminEmailCampaignsResult,
                   withSession((session) =>
                     operations.emailCampaigns(session),
+                  ),
+                ),
+              ),
+          )
+          .handleRaw(
+            "adminServerConfig",
+            () =>
+              run(
+                complete(
+                  "admin.server-config.list",
+                  AdminServerConfigResult,
+                  withSession((session) =>
+                    operations.serverConfig(session),
+                  ),
+                ),
+              ),
+          )
+          .handleRaw(
+            "adminUpdateServerConfig",
+            ({ request }) =>
+              run(
+                complete(
+                  "admin.server-config.update",
+                  AdminServerConfigSettingResult,
+                  decodeBody(request, AdminUpdateServerConfigInput).pipe(
+                    Effect.flatMap(({ input, info }) =>
+                      withSession((session) =>
+                        operations.updateServerConfig(input, session, info),
+                      ),
+                    ),
                   ),
                 ),
               ),

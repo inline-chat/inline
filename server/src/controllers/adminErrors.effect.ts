@@ -283,6 +283,18 @@ export const AdminUpdateUserBadRequest = jsonError(
   ["invalid_user", "invalid_email", "no_updates"],
 )
 
+export const AdminServerConfigBadRequest = jsonError(
+  "AdminServerConfigBadRequest",
+  400,
+  ["invalid_config_key", "invalid_config_value", "invalid_config_version"],
+)
+
+export const AdminServerConfigConflict = jsonError(
+  "AdminServerConfigConflict",
+  409,
+  ["config_conflict"],
+)
+
 export const AdminNotFound = jsonError(
   "AdminNotFound",
   404,

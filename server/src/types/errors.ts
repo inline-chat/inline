@@ -23,6 +23,7 @@ export const ApiError = {
   INVITE_CODE_INVALID: ["INVITE_CODE_INVALID", 400, "Access invite code must be 8 letters or numbers."],
   INVITE_CODE_NOT_FOUND: ["INVITE_CODE_NOT_FOUND", 400, "We couldn't find that invite code."],
   INVITE_CODE_TAKEN: ["INVITE_CODE_TAKEN", 400, "This invite code has already been used."],
+  SIGNUPS_DISABLED: ["SIGNUPS_DISABLED", 400, "New account sign-ups are temporarily disabled."],
   USERNAME_TAKEN: ["USERNAME_TAKEN", 400, "The username is already taken"],
   FIRST_NAME_INVALID: ["FIRST_NAME_INVALID", 400, "The first name is invalid"],
   LAST_NAME_INVALID: ["LAST_NAME_INVALID", 400, "The last name is invalid"],

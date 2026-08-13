@@ -9,15 +9,22 @@ import {
   isLoginUser,
   isSignupComplete,
 } from "./signupInvites"
+import { resetServerConfigCacheForTests } from "@in/server/modules/serverConfig"
+import { handler as sendEmailCode } from "@in/server/methods/sendEmailCode"
+import { handler as sendSmsCode } from "@in/server/methods/sendSmsCode"
 
 describe("signup invite user setup state", () => {
   setupTestLifecycle()
 
   let previousInviteCodesRequired: string | undefined
+  let previousSignupMode: string | undefined
 
   beforeEach(() => {
     previousInviteCodesRequired = process.env["INVITE_CODES_REQUIRED"]
+    previousSignupMode = process.env["INLINE_CONFIG_AUTH_SIGNUP_MODE"]
     process.env["INVITE_CODES_REQUIRED"] = "false"
+    delete process.env["INLINE_CONFIG_AUTH_SIGNUP_MODE"]
+    resetServerConfigCacheForTests()
   })
 
   afterEach(() => {
@@ -26,6 +33,12 @@ describe("signup invite user setup state", () => {
     } else {
       process.env["INVITE_CODES_REQUIRED"] = previousInviteCodesRequired
     }
+    if (previousSignupMode === undefined) {
+      delete process.env["INLINE_CONFIG_AUTH_SIGNUP_MODE"]
+    } else {
+      process.env["INLINE_CONFIG_AUTH_SIGNUP_MODE"] = previousSignupMode
+    }
+    resetServerConfigCacheForTests()
   })
 
   it("creates new email and phone users with profile setup pending", async () => {
@@ -67,5 +80,45 @@ describe("signup invite user setup state", () => {
 
     process.env["INVITE_CODES_REQUIRED"] = "true"
     expect(await isInviteCodeRequired(unfinished.user)).toBe(false)
+  })
+
+  it("blocks unknown contacts while sign-ups are disabled", async () => {
+    process.env["INLINE_CONFIG_AUTH_SIGNUP_MODE"] = "disabled"
+    resetServerConfigCacheForTests()
+
+    await expect(
+      sendEmailCode(
+        { email: "disabled-email-code@example.com" },
+        { ip: undefined, source: "/v1/sendEmailCode" },
+      ),
+    ).rejects.toMatchObject({ type: "SIGNUPS_DISABLED", code: 400 })
+    await expect(
+      sendSmsCode(
+        { phoneNumber: "+14155552671" },
+        { ip: undefined, source: "/v1/sendSmsCode" },
+      ),
+    ).rejects.toMatchObject({ type: "SIGNUPS_DISABLED", code: 400 })
+    await expect(
+      getOrCreateUserByEmailForSignup("disabled-email-signup@example.com"),
+    ).rejects.toMatchObject({ type: "SIGNUPS_DISABLED", code: 400 })
+    await expect(
+      getOrCreateUserByPhoneForSignup("+15555550999"),
+    ).rejects.toMatchObject({ type: "SIGNUPS_DISABLED", code: 400 })
+  })
+
+  it("lets an existing pending user continue while new sign-ups are disabled", async () => {
+    process.env["INLINE_CONFIG_AUTH_SIGNUP_MODE"] = "disabled"
+    resetServerConfigCacheForTests()
+    await db.insert(users).values({
+      email: "existing-pending-signup@example.com",
+      pendingSetup: true,
+      emailVerified: false,
+    })
+
+    const result = await getOrCreateUserByEmailForSignup("existing-pending-signup@example.com")
+
+    expect(result.created).toBe(false)
+    expect(result.user.emailVerified).toBe(true)
+    expect(result.user.pendingSetup).toBe(true)
   })
 })

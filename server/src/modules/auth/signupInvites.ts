@@ -3,13 +3,22 @@ import { db } from "@in/server/db"
 import { members, users, type DbUser } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
 import { InviteCodesModel, isDevInviteCode, isValidInviteCode, normalizeInviteCode } from "@in/server/db/models/inviteCodes"
-import { isInviteCodesRequired as isInviteCodesRequiredConfig } from "@in/server/env"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
+import { getServerConfig, type SignupMode } from "@in/server/modules/serverConfig"
 
 type Database = any
 
 export const areInviteCodesRequired = async (): Promise<boolean> => {
-  return isInviteCodesRequiredConfig()
+  return (await getSignupMode()) === "invite_only"
+}
+
+export const getSignupMode = async (): Promise<SignupMode> =>
+  (await getServerConfig("auth.signup_mode")).value
+
+export const assertNewSignupAllowed = async (user: DbUser | undefined): Promise<void> => {
+  if (!user && (await getSignupMode()) === "disabled") {
+    throw new InlineError(InlineError.ApiError.SIGNUPS_DISABLED)
+  }
 }
 
 export const isLoginUser = (user: DbUser | undefined): boolean => {
@@ -38,8 +47,9 @@ export const getOrCreateUserByEmailForSignup = async (
   email: string,
   inviteCode?: string,
 ): Promise<{ user: DbUser; created: boolean }> => {
+  const signupMode = await getSignupMode()
   return await db.transaction(async (tx) => {
-    const codesRequired = await areInviteCodesRequired()
+    const codesRequired = signupMode === "invite_only"
     const user = (await tx.select().from(users).where(eq(users.email, email)).limit(1))[0]
 
     if (user?.deleted === true) {
@@ -47,6 +57,9 @@ export const getOrCreateUserByEmailForSignup = async (
     }
 
     if (!user) {
+      if (signupMode === "disabled") {
+        throw new InlineError(InlineError.ApiError.SIGNUPS_DISABLED)
+      }
       const code = codesRequired ? getInviteCode(inviteCode) : undefined
 
       const created = (
@@ -94,8 +107,9 @@ export const getOrCreateUserByPhoneForSignup = async (
   phoneNumber: string,
   inviteCode?: string,
 ): Promise<{ user: DbUser; created: boolean }> => {
+  const signupMode = await getSignupMode()
   return await db.transaction(async (tx) => {
-    const codesRequired = await areInviteCodesRequired()
+    const codesRequired = signupMode === "invite_only"
     const user = (await tx.select().from(users).where(eq(users.phoneNumber, phoneNumber)).limit(1))[0]
 
     if (user?.deleted === true) {
@@ -103,6 +117,9 @@ export const getOrCreateUserByPhoneForSignup = async (
     }
 
     if (!user) {
+      if (signupMode === "disabled") {
+        throw new InlineError(InlineError.ApiError.SIGNUPS_DISABLED)
+      }
       const code = codesRequired ? getInviteCode(inviteCode) : undefined
 
       const created = (

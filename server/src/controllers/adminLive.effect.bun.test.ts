@@ -1,5 +1,6 @@
 import {
   afterAll,
+  afterEach,
   describe,
   expect,
   it,
@@ -28,6 +29,9 @@ import {
   generateToken,
   hashToken,
 } from "@in/server/utils/auth"
+import {
+  resetServerConfigCacheForTests,
+} from "@in/server/modules/serverConfig"
 import {
   setupTestLifecycle,
   testUtils,
@@ -104,6 +108,7 @@ const handle = (request: Request) =>
 
 describe("AdminSessionStoreLive", () => {
   setupTestLifecycle()
+  afterEach(resetServerConfigCacheForTests)
 
   it("loads and refreshes a database-backed admin session", async () => {
     const user = await testUtils.createUser(
@@ -247,6 +252,7 @@ describe("AdminSessionStoreLive", () => {
       userId: user.id,
       tokenHash,
       lastSeenAt: now,
+      stepUpAt: now,
       expiresAt: new Date(
         now.getTime() + 24 * 60 * 60 * 1_000,
       ),
@@ -258,14 +264,16 @@ describe("AdminSessionStoreLive", () => {
       ),
     })
 
-    const request = (path: string) =>
+    const request = (path: string, init?: RequestInit) =>
       new Request(`http://inline.test${path}`, {
+        ...init,
         headers: {
           cookie:
             `inline_admin_session=${token}`,
           origin:
             "https://admin.inline.chat",
           "user-agent": "admin-live-routes",
+          ...init?.headers,
         },
       })
 
@@ -298,6 +306,45 @@ describe("AdminSessionStoreLive", () => {
         server: {
           uptimeSeconds: expect.any(Number),
         },
+      },
+    })
+
+    const initialConfig = await handle(
+      request("/admin/server-config"),
+    )
+    expect(initialConfig.status).toBe(200)
+    expect(await initialConfig.json()).toMatchObject({
+      ok: true,
+      settings: expect.arrayContaining([
+        expect.objectContaining({
+          key: "auth.signup_mode",
+          databaseVersion: null,
+        }),
+      ]),
+    })
+
+    const updatedConfig = await handle(
+      request("/admin/server-config", {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          key: "auth.signup_mode",
+          value: "disabled",
+          expectedVersion: null,
+        }),
+      }),
+    )
+    expect(updatedConfig.status).toBe(200)
+    expect(await updatedConfig.json()).toMatchObject({
+      ok: true,
+      setting: {
+        key: "auth.signup_mode",
+        value: "disabled",
+        source: "database",
+        databaseValue: "disabled",
+        databaseVersion: 1,
       },
     })
   })

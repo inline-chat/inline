@@ -52,6 +52,13 @@ import { getEmailProviderStatus } from "@in/server/modules/emailCampaigns/provid
 import { syncProviderSuppressions } from "@in/server/modules/emailCampaigns/providerSuppressions"
 import type { EmailCampaignAudience } from "@in/server/modules/emailCampaigns/types"
 import {
+  listServerConfig,
+  parseServerConfigValue,
+  SERVER_CONFIG_KEYS,
+  updateServerConfig,
+  type ServerConfigKey,
+} from "@in/server/modules/serverConfig"
+import {
   ADMIN_PUBLIC_API_ORIGIN,
   EMAIL_PROVIDER,
 } from "@in/server/env"
@@ -100,6 +107,8 @@ import {
 type ManagementOperationName =
   | "waitlist"
   | "emailCampaigns"
+  | "serverConfig"
+  | "updateServerConfig"
   | "emailProviderStatus"
   | "previewEmailCampaign"
   | "createEmailCampaign"
@@ -270,6 +279,48 @@ const emailCampaignsOperation: AdminOperationsShape["emailCampaigns"] =
     attempt("admin.email-campaigns.list", async () =>
       jsonResult({ ok: true as const, campaigns: await campaignSummary() }),
     )
+
+const serverConfigOperation: AdminOperationsShape["serverConfig"] =
+  () =>
+    attempt("admin.server-config.list", async () =>
+      jsonResult({ ok: true as const, settings: await listServerConfig() }),
+    )
+
+const updateServerConfigOperation: AdminOperationsShape["updateServerConfig"] =
+  (input, session, request) =>
+    Effect.gen(function* () {
+      if (!SERVER_CONFIG_KEYS.includes(input.key as ServerConfigKey)) {
+        return yield* reject(400, "invalid_config_key")
+      }
+      const key = input.key as ServerConfigKey
+      const value = parseServerConfigValue(key, input.value)
+      if (!value) return yield* reject(400, "invalid_config_value")
+      if (
+        input.expectedVersion !== null &&
+        (!Number.isSafeInteger(input.expectedVersion) || input.expectedVersion < 1)
+      ) {
+        return yield* reject(400, "invalid_config_version")
+      }
+
+      const result = yield* attempt("admin.server-config.update", () =>
+        updateServerConfig({
+          key,
+          value,
+          expectedVersion: input.expectedVersion,
+          updatedByUserId: session.userId,
+        }),
+      )
+      if (!result.updated) return yield* reject(409, "config_conflict")
+
+      yield* attempt("admin.server-config.update.notify", () =>
+        notifyAdminAction({
+          actionTaken: `Set ${key} to ${value}`,
+          actorEmail: session.email,
+          request,
+        }),
+      )
+      return jsonResult({ ok: true as const, setting: result.setting })
+    })
 
 const emailProviderStatusOperation: AdminOperationsShape["emailProviderStatus"] =
   (input) =>
@@ -1331,6 +1382,8 @@ export const makeAdminManagementOperations =
   (): AdminManagementOperations => ({
     waitlist: waitlistOperation,
     emailCampaigns: emailCampaignsOperation,
+    serverConfig: serverConfigOperation,
+    updateServerConfig: updateServerConfigOperation,
     emailProviderStatus: emailProviderStatusOperation,
     previewEmailCampaign: previewEmailCampaignOperation,
     createEmailCampaign: createEmailCampaignOperation,

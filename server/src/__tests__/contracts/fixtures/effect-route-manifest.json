@@ -1,12 +1,13 @@
 {
   "version": 1,
-  "count": 219,
+  "count": 231,
   "methodCounts": {
-    "GET": 130,
-    "POST": 88,
+    "GET": 134,
+    "POST": 95,
+    "PUT": 1,
     "WS": 1
   },
-  "sha256": "526158681678ce328dd4f74fa8079aded2d1fe4c30595aa030ac9ec7ab16b662",
+  "sha256": "ff759ccaf3d117a2f232afb808109333150f93a8fe0fbb9cf083c3d894500853",
   "routes": [
     {
       "method": "GET",
@@ -23,6 +24,14 @@
     {
       "method": "GET",
       "path": "/admin/auth/totp/setup"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/email-campaigns"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/email-provider-status"
     },
     {
       "method": "GET",
@@ -47,6 +56,10 @@
     {
       "method": "GET",
       "path": "/admin/metrics/technical"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/server-config"
     },
     {
       "method": "GET",
@@ -119,6 +132,10 @@
     {
       "method": "GET",
       "path": "/bot{token}/getMyCommands"
+    },
+    {
+      "method": "GET",
+      "path": "/email/unsubscribe/{token}"
     },
     {
       "method": "GET",
@@ -530,6 +547,10 @@
     },
     {
       "method": "POST",
+      "path": "/admin/auth/dev-login"
+    },
+    {
+      "method": "POST",
       "path": "/admin/auth/login"
     },
     {
@@ -555,6 +576,26 @@
     {
       "method": "POST",
       "path": "/admin/auth/verify-email-code"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/email-campaigns"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/email-campaigns/preview"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/email-campaigns/{id}/pause"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/email-campaigns/{id}/send"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/email-campaigns/{id}/test"
     },
     {
       "method": "POST",
@@ -639,6 +680,10 @@
     {
       "method": "POST",
       "path": "/bot{token}/setMyCommands"
+    },
+    {
+      "method": "POST",
+      "path": "/email/unsubscribe/{token}"
     },
     {
       "method": "POST",
@@ -879,6 +924,10 @@
     {
       "method": "POST",
       "path": "/waitlist/verify"
+    },
+    {
+      "method": "PUT",
+      "path": "/admin/server-config"
     },
     {
       "method": "WS",

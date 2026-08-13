@@ -1,12 +1,13 @@
 import { sendEmail as sendEmailViaSES } from "@in/server/libs/ses"
 import { sendEmail as sendEmailViaResend } from "@in/server/libs/resend"
 import { CodeEmail } from "@inline-chat/email-templates"
-import { EMAIL_PROVIDER, SEND_EMAIL, isProd } from "@in/server/env"
+import { SEND_EMAIL, isProd } from "@in/server/env"
 import { styleText } from "node:util"
 import { Log } from "@in/server/utils/log"
 import type { UserName } from "@in/server/modules/cache/userNames"
 import { render } from "@react-email/render"
 import * as React from "react"
+import { getServerConfig } from "@in/server/modules/serverConfig"
 type SendEmailInput = {
   to: string
   content: SendEmailContent
@@ -41,7 +42,8 @@ ${styleText("cyan", "[Preview email. Force sending via SEND_EMAIL=1]")}
     return
   }
 
-  if (EMAIL_PROVIDER === "SES") {
+  const provider = await getServerConfig("email.default_provider")
+  if (provider.value === "ses") {
     await sendEmailViaSES({
       to: input.to,
       from: "team@inline.chat",

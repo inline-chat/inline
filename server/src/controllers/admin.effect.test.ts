@@ -158,6 +158,50 @@ const makeOperations = (
         body: { ok: true, campaigns: [] },
       })
     },
+    serverConfig: () => {
+      probe.calls.push("serverConfig")
+      return Effect.succeed({
+        kind: "json",
+        body: {
+          ok: true,
+          settings: [{
+            key: "email.default_provider",
+            label: "Default email provider",
+            description: "Provider description",
+            environmentName: "INLINE_CONFIG_EMAIL_DEFAULT_PROVIDER",
+            allowedValues: ["ses", "resend"],
+            value: "ses",
+            source: "database",
+            databaseValue: "ses",
+            databaseVersion: 1,
+            databaseUpdatedAt: "2026-08-13T00:00:00.000Z",
+            databaseUpdatedByUserId: 42,
+          }],
+        },
+      })
+    },
+    updateServerConfig: () => {
+      probe.calls.push("updateServerConfig")
+      return Effect.succeed({
+        kind: "json",
+        body: {
+          ok: true,
+          setting: {
+            key: "email.default_provider",
+            label: "Default email provider",
+            description: "Provider description",
+            environmentName: "INLINE_CONFIG_EMAIL_DEFAULT_PROVIDER",
+            allowedValues: ["ses", "resend"],
+            value: "resend",
+            source: "database",
+            databaseValue: "resend",
+            databaseVersion: 2,
+            databaseUpdatedAt: "2026-08-13T00:01:00.000Z",
+            databaseUpdatedByUserId: 42,
+          },
+        },
+      })
+    },
     emailProviderStatus: () => called("emailProviderStatus"),
     previewEmailCampaign: () => called("previewEmailCampaign"),
     createEmailCampaign: () => called("createEmailCampaign"),
@@ -365,6 +409,7 @@ describe("AdminRouteGroup", () => {
         "GET /admin/metrics/app",
         "GET /admin/metrics/overview",
         "GET /admin/metrics/technical",
+        "GET /admin/server-config",
         "GET /admin/spaces",
         "GET /admin/users",
         "GET /admin/users/{id}",
@@ -387,6 +432,7 @@ describe("AdminRouteGroup", () => {
         "POST /admin/users/{id}/invites",
         "POST /admin/users/{id}/sessions/{sessionId}/revoke",
         "POST /admin/users/{id}/update",
+        "PUT /admin/server-config",
       ].sort(),
     )
 
@@ -745,6 +791,34 @@ describe("AdminRouteGroup", () => {
           campaigns: [],
         })
 
+        const config = await handler(
+          adminRequest("/admin/server-config"),
+        )
+        expect(config.status).toBe(200)
+        expect(await config.json()).toMatchObject({
+          ok: true,
+          settings: [{
+            key: "email.default_provider",
+            value: "ses",
+            source: "database",
+          }],
+        })
+
+        const updatedConfig = await handler(
+          adminRequest("/admin/server-config", {
+            method: "PUT",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              key: "email.default_provider",
+              value: "resend",
+              expectedVersion: 1,
+            }),
+          }),
+        )
+        expect(updatedConfig.status).toBe(200)
+
         const generated = await handler(
           adminRequest("/admin/invites/generate", {
             method: "POST",
@@ -763,6 +837,8 @@ describe("AdminRouteGroup", () => {
           "me",
           "waitlist",
           "emailCampaigns",
+          "serverConfig",
+          "updateServerConfig",
           "generateInvites",
         ])
       },

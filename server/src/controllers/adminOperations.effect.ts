@@ -18,6 +18,7 @@ import type {
   AdminSendEmailCodeInput,
   AdminSetPasswordInput,
   AdminStepUpInput,
+  AdminUpdateServerConfigInput,
   AdminTotpCodeInput,
   AdminUpdateUserInput,
   AdminVerifyEmailCodeInput,
@@ -150,6 +151,14 @@ export interface AdminOperationsShape {
   ) => AdminOperation
   readonly emailCampaigns: (
     session: AdminSessionValue,
+  ) => AdminOperation
+  readonly serverConfig: (
+    session: AdminSessionValue,
+  ) => AdminOperation
+  readonly updateServerConfig: (
+    input: BodyOf<typeof AdminUpdateServerConfigInput>,
+    session: AdminSessionValue,
+    request: AdminRequestInfo,
   ) => AdminOperation
   readonly emailProviderStatus: (
     input: BodyOf<typeof AdminEmailProviderStatusQuery>,

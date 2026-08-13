@@ -328,6 +328,61 @@ export const AdminWaitlistResult = Schema.Struct({
   identifier: "AdminWaitlistResult",
 })
 
+export const AdminServerConfigKey = Schema.Literals([
+  "auth.signup_mode",
+  "email.default_provider",
+])
+export const AdminServerConfigValue = Schema.Literals([
+  "open",
+  "invite_only",
+  "disabled",
+  "ses",
+  "resend",
+])
+export const AdminServerConfigSource = Schema.Literals([
+  "server_override",
+  "environment",
+  "database",
+  "legacy_environment",
+  "default",
+])
+
+export const AdminServerConfigSetting = Schema.Struct({
+  key: AdminServerConfigKey,
+  label: Schema.String,
+  description: Schema.String,
+  environmentName: Schema.String,
+  allowedValues: Schema.Array(Schema.String),
+  value: AdminServerConfigValue,
+  source: AdminServerConfigSource,
+  databaseValue: Schema.NullOr(AdminServerConfigValue),
+  databaseVersion: NullableInteger,
+  databaseUpdatedAt: NullableString,
+  databaseUpdatedByUserId: NullableInteger,
+})
+
+export const AdminServerConfigResult = Schema.Struct({
+  ok: Schema.Literal(true),
+  settings: Schema.Array(AdminServerConfigSetting),
+}).annotate({
+  identifier: "AdminServerConfigResult",
+})
+
+export const AdminUpdateServerConfigInput = Schema.Struct({
+  key: AdminServerConfigKey,
+  value: AdminServerConfigValue,
+  expectedVersion: Schema.NullOr(Schema.Number),
+}).annotate({
+  identifier: "AdminUpdateServerConfigInput",
+})
+
+export const AdminServerConfigSettingResult = Schema.Struct({
+  ok: Schema.Literal(true),
+  setting: AdminServerConfigSetting,
+}).annotate({
+  identifier: "AdminServerConfigSettingResult",
+})
+
 export const AdminEmailCampaignAudience = Schema.Struct({
   sources: Schema.Array(Schema.Literals(["inline", "waitlist"])),
   verifiedOnly: Schema.Boolean,
