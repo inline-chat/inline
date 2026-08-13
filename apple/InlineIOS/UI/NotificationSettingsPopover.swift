@@ -2,7 +2,7 @@ import InlineKit
 import SwiftUI
 
 /// A button that opens the notification settings popover for iOS.
-struct NotificationSettingsButton: View, RehostSafeToolbarContent {
+struct NotificationSettingsButton: View {
   @ObservedObject private var notificationSettings: NotificationSettingsManager
 
   private let iconColor: Color
@@ -89,7 +89,7 @@ extension NotificationMode {
   }
 }
 
-struct NotificationSettingsPopoverContent: View, RehostSafeToolbarContent {
+struct NotificationSettingsPopoverContent: View {
   let notificationSettings: NotificationSettingsManager
   let onSelection: () -> Void
 
@@ -108,7 +108,7 @@ struct NotificationSettingsPopoverContent: View, RehostSafeToolbarContent {
   }
 }
 
-private struct NotificationSettingsList: View, RehostSafeToolbarContent {
+private struct NotificationSettingsList: View {
   @ObservedObject private var notificationSettings: NotificationSettingsManager
 
   let onSelection: () -> Void

@@ -4,7 +4,7 @@ import RealtimeV2
 
 import SwiftUI
 
-struct HomeToolbarContent: ToolbarContent, RehostSafeToolbarContent {
+struct HomeToolbarContent: ToolbarContent {
   private let router: Router
   @ObservedObject private var realtimeState: RealtimeState
   @ObservedObject private var notificationSettings: NotificationSettingsManager

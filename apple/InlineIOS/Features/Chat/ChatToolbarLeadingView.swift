@@ -3,7 +3,7 @@ import InlineUI
 import RealtimeV2
 import SwiftUI
 
-struct ChatToolbarLeadingView: View, RehostSafeToolbarContent {
+struct ChatToolbarLeadingView: View {
   let peerId: Peer
   let contextSpaceId: Int64?
   private let router: Router
@@ -238,7 +238,7 @@ enum ChatSubtitle: Equatable {
   }
 }
 
-private struct ChatToolbarTitleStack: View, RehostSafeToolbarContent {
+private struct ChatToolbarTitleStack: View {
   let title: String
   let minimumHeight: CGFloat
   let peerId: Peer
@@ -332,7 +332,7 @@ private struct ChatToolbarTitleStack: View, RehostSafeToolbarContent {
   }
 }
 
-private struct ChatToolbarSubtitleContent: View, RehostSafeToolbarContent {
+private struct ChatToolbarSubtitleContent: View {
   let subtitle: ChatSubtitle
   let onOpenSpace: (ReplyThreadToolbarContext.SpaceLink) -> Void
   let onOpenParentThread: (ReplyThreadToolbarContext.ParentLink) -> Void
@@ -358,7 +358,7 @@ private struct ChatToolbarSubtitleContent: View, RehostSafeToolbarContent {
   }
 }
 
-private struct ChatToolbarConnectionSubtitle: View, RehostSafeToolbarContent {
+private struct ChatToolbarConnectionSubtitle: View {
   let text: String
 
   var body: some View {
@@ -366,7 +366,7 @@ private struct ChatToolbarConnectionSubtitle: View, RehostSafeToolbarContent {
   }
 }
 
-private struct ChatToolbarTimezoneSubtitle: View, RehostSafeToolbarContent {
+private struct ChatToolbarTimezoneSubtitle: View {
   let text: String
 
   var body: some View {
@@ -374,7 +374,7 @@ private struct ChatToolbarTimezoneSubtitle: View, RehostSafeToolbarContent {
   }
 }
 
-private struct ChatToolbarSubtitleText: View, RehostSafeToolbarContent {
+private struct ChatToolbarSubtitleText: View {
   let text: String
   let color: Color
 
@@ -388,7 +388,7 @@ private struct ChatToolbarSubtitleText: View, RehostSafeToolbarContent {
   }
 }
 
-private struct ChatToolbarComposeActionSubtitle: View, RehostSafeToolbarContent {
+private struct ChatToolbarComposeActionSubtitle: View {
   let presentation: ComposeActionPresentation
 
   private var usesAccentColor: Bool {
@@ -408,7 +408,7 @@ private struct ChatToolbarComposeActionSubtitle: View, RehostSafeToolbarContent 
   }
 }
 
-private struct ChatToolbarComposeActionIndicator: View, RehostSafeToolbarContent {
+private struct ChatToolbarComposeActionIndicator: View {
   let action: ApiComposeAction
 
   @ViewBuilder
@@ -434,7 +434,7 @@ private struct ChatToolbarComposeActionIndicator: View, RehostSafeToolbarContent
   }
 }
 
-private struct ChatToolbarBreadcrumbSubtitle: View, RehostSafeToolbarContent {
+private struct ChatToolbarBreadcrumbSubtitle: View {
   let context: ReplyThreadToolbarContext
   let onOpenSpace: (ReplyThreadToolbarContext.SpaceLink) -> Void
   let onOpenParentThread: (ReplyThreadToolbarContext.ParentLink) -> Void
@@ -478,21 +478,21 @@ private struct ChatToolbarBreadcrumbSubtitle: View, RehostSafeToolbarContent {
 
 // MARK: - Animated Indicators
 
-private struct AnimatedPhotoUpload: View, RehostSafeToolbarContent {
+private struct AnimatedPhotoUpload: View {
   var body: some View {
     UploadProgressIndicator(color: .secondary)
       .frame(width: 14)
   }
 }
 
-private struct AnimatedDocumentUpload: View, RehostSafeToolbarContent {
+private struct AnimatedDocumentUpload: View {
   var body: some View {
     UploadProgressIndicator(color: .secondary)
       .frame(width: 14)
   }
 }
 
-private struct AnimatedVideoUpload: View, RehostSafeToolbarContent {
+private struct AnimatedVideoUpload: View {
   var body: some View {
     UploadProgressIndicator(color: .secondary)
       .frame(width: 14)

@@ -2,7 +2,7 @@ import InlineKit
 import RealtimeV2
 import SwiftUI
 
-struct SpacePickerMenu: View, RehostSafeToolbarContent {
+struct SpacePickerMenu: View {
   private enum PresentedSheet: String, Identifiable {
     case picker
 

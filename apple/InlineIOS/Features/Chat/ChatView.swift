@@ -639,7 +639,7 @@ struct ChatView: View {
   }
 }
 
-private struct ChatToolbarMoreMenuHost: View, RehostSafeToolbarContent {
+private struct ChatToolbarMoreMenuHost: View {
   let peer: Peer
   let chat: Chat?
   let dialog: Dialog?
@@ -686,7 +686,7 @@ private struct ChatToolbarMoreMenuHost: View, RehostSafeToolbarContent {
   }
 }
 
-private struct ChatToolbarObservedVisibilityMenu: View, RehostSafeToolbarContent {
+private struct ChatToolbarObservedVisibilityMenu: View {
   let peer: Peer
   let chat: Chat
   let dialog: Dialog?
@@ -749,7 +749,7 @@ private struct ChatToolbarObservedVisibilityMenu: View, RehostSafeToolbarContent
   }
 }
 
-private struct ChatToolbarMoreMenu: View, RehostSafeToolbarContent {
+private struct ChatToolbarMoreMenu: View {
   let peer: Peer
   let chat: Chat?
   let dialog: Dialog?
@@ -1090,7 +1090,7 @@ private struct ChatToolbarMoreMenu: View, RehostSafeToolbarContent {
   }
 }
 
-private struct ChatToolbarVisibilityParticipantsSheet: View, RehostSafeToolbarContent {
+private struct ChatToolbarVisibilityParticipantsSheet: View {
   let chatId: Int64
   let realtimeV2: RealtimeV2
   let currentUserId: Int64?
