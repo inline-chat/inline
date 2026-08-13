@@ -33,6 +33,9 @@ final class ImageViewerController: UIViewController {
   private var didRestoreAudioSession = false
   private var didRegisterImageObserver = false
   private var didApplySourceImage = false
+  private weak var suppressedSourceView: UIView?
+  private var suppressedSourceAlpha: CGFloat?
+  private var suppressedSourceItemID: Int64?
 
   private struct AudioSessionSnapshot {
     let category: AVAudioSession.Category
@@ -274,6 +277,7 @@ final class ImageViewerController: UIViewController {
     super.viewDidDisappear(animated)
 
     if isBeingDismissed || navigationController?.isBeingDismissed == true {
+      restoreSuppressedSource(animated: false)
       stopVideoPlaybackIfNeeded()
       notifyDidDismiss()
     }
@@ -443,11 +447,14 @@ final class ImageViewerController: UIViewController {
 
   private func updateSourceViewForCurrentItem() {
     guard let sourceViewProvider, !imageItems.isEmpty else { return }
+    restoreSuppressedSource(animated: false)
+
     let itemId = imageItems[currentIndex].id
     sourceView = sourceViewProvider(itemId)
     if let sourceView {
       sourceFrame = sourceView.convert(sourceView.bounds, to: nil)
     }
+    suppressCurrentSourceView(itemID: itemId, animated: false)
   }
 
   private func showImage(at index: Int, direction: UISwipeGestureRecognizer.Direction) {
@@ -596,6 +603,7 @@ final class ImageViewerController: UIViewController {
       view.addSubview(tempImageView)
     }
     transitionImageView = tempImageView
+    suppressCurrentSourceView(itemID: currentImageItemID, animated: true)
         
     // Calculate the final frame
     let finalFrame: CGRect
@@ -642,10 +650,13 @@ final class ImageViewerController: UIViewController {
   }
     
   private func animateImageOut(completion: @escaping () -> Void) {
-    guard let sourceView = sourceView else {
+    refreshCurrentSourceView()
+
+    guard let sourceView, sourceView.window != nil else {
       UIView.animate(withDuration: 0.2, animations: {
         self.view.alpha = 0
       }, completion: { _ in
+        self.restoreSuppressedSource(animated: false)
         completion()
       })
       return
@@ -697,8 +708,7 @@ final class ImageViewerController: UIViewController {
       tempImageView.layer.cornerRadius = self.sourceCornerRadius
       self.view.backgroundColor = .clear
     }, completion: { _ in
-      tempImageView.removeFromSuperview()
-      completion()
+      self.restoreSuppressedSource(crossfading: tempImageView, animated: true, completion: completion)
     })
   }
 
@@ -748,13 +758,16 @@ final class ImageViewerController: UIViewController {
     let velocity = gesture.velocity(in: view)
         
     switch gesture.state {
+    case .began:
+      refreshCurrentSourceView()
+
     case .changed:
       mediaContentView.transform = CGAffineTransform(translationX: 0, y: translation.y)
       let progress = min(1.0, abs(translation.y) / 200)
       view.backgroundColor = UIColor.black.withAlphaComponent(1.0 - progress * 0.8)
       controlsContainerView.alpha = isControlsVisible ? (1.0 - progress) : 0.0
             
-    case .ended, .cancelled:
+    case .ended:
       if abs(translation.y) > 100 || abs(velocity.y) > 500 {
         let currentFrame = mediaContentView.convert(mediaContentView.bounds, to: view)
         
@@ -768,9 +781,15 @@ final class ImageViewerController: UIViewController {
         tempImageView.layer.cornerRadius = destinationCornerRadius
         
         view.insertSubview(tempImageView, at: 0)
+
+        refreshCurrentSourceView()
         
-        guard let sourceView = sourceView else {
-          dismiss(animated: false)
+        guard let sourceView, sourceView.window != nil else {
+          restoreSuppressedSource(animated: false)
+          stopVideoPlaybackIfNeeded()
+          dismiss(animated: false) {
+            self.notifyDidDismiss()
+          }
           return
         }
         
@@ -782,22 +801,30 @@ final class ImageViewerController: UIViewController {
           self.view.backgroundColor = .clear
           self.mediaContentView.alpha = 0
         }, completion: { _ in
-          tempImageView.removeFromSuperview()
-          self.stopVideoPlaybackIfNeeded()
-          self.dismiss(animated: false) {
-            self.notifyDidDismiss()
+          self.restoreSuppressedSource(crossfading: tempImageView, animated: true) {
+            self.stopVideoPlaybackIfNeeded()
+            self.dismiss(animated: false) {
+              self.notifyDidDismiss()
+            }
           }
         })
       } else {
-        UIView.animate(withDuration: 0.3) {
-          self.mediaContentView.transform = .identity
-          self.view.backgroundColor = .black
-          self.controlsContainerView.alpha = self.isControlsVisible ? 1.0 : 0.0
-        }
+        restoreAfterIncompletePan()
       }
+
+    case .cancelled:
+      restoreAfterIncompletePan()
             
     default:
       break
+    }
+  }
+
+  private func restoreAfterIncompletePan() {
+    UIView.animate(withDuration: 0.3) {
+      self.mediaContentView.transform = .identity
+      self.view.backgroundColor = .black
+      self.controlsContainerView.alpha = self.isControlsVisible ? 1.0 : 0.0
     }
   }
 
@@ -893,7 +920,8 @@ final class ImageViewerController: UIViewController {
     }
   }
     
-  deinit {
+  isolated deinit {
+    restoreSuppressedSource(animated: false)
     NotificationCenter.default.removeObserver(self)
   }
 
@@ -901,6 +929,110 @@ final class ImageViewerController: UIViewController {
 
   private var mediaContentView: UIView {
     mediaContainerView
+  }
+
+  private var currentImageItemID: Int64? {
+    guard !imageItems.isEmpty, imageItems.indices.contains(currentIndex) else { return nil }
+    return imageItems[currentIndex].id
+  }
+
+  private func suppressCurrentSourceView(itemID: Int64?, animated: Bool) {
+    guard let sourceView else { return }
+    let visibilityTarget = sourceVisibilityTarget(for: sourceView)
+    guard suppressedSourceView !== visibilityTarget || suppressedSourceItemID != itemID else { return }
+
+    restoreSuppressedSource(animated: false)
+    suppressedSourceView = visibilityTarget
+    suppressedSourceAlpha = visibilityTarget.alpha
+    suppressedSourceItemID = itemID
+    guard animated, visibilityTarget.window != nil, visibilityTarget.alpha > 0 else {
+      UIView.performWithoutAnimation {
+        visibilityTarget.alpha = 0
+      }
+      return
+    }
+
+    UIView.animate(
+      withDuration: 0.12,
+      delay: 0,
+      options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut]
+    ) {
+      visibilityTarget.alpha = 0
+    }
+  }
+
+  private func sourceVisibilityTarget(for sourceView: UIView) -> UIView {
+    if sourceView is NewPhotoView || sourceView is NewVideoView {
+      return sourceView
+    }
+
+    if let mediaView = sourceView.superview,
+       mediaView is NewPhotoView || mediaView is NewVideoView {
+      return mediaView
+    }
+
+    return sourceView
+  }
+
+  private func refreshCurrentSourceView() {
+    guard let sourceViewProvider, let itemID = currentImageItemID else { return }
+    let currentSourceView = sourceViewProvider(itemID)
+    let currentVisibilityTarget = currentSourceView.map(sourceVisibilityTarget(for:))
+    guard currentSourceView !== sourceView ||
+      currentVisibilityTarget !== suppressedSourceView ||
+      suppressedSourceItemID != itemID
+    else {
+      return
+    }
+
+    restoreSuppressedSource(animated: false)
+    sourceView = currentSourceView
+    if let currentSourceView {
+      sourceFrame = currentSourceView.convert(currentSourceView.bounds, to: nil)
+    }
+    suppressCurrentSourceView(itemID: itemID, animated: false)
+  }
+
+  private func restoreSuppressedSource(
+    crossfading transitionView: UIView? = nil,
+    animated: Bool,
+    completion: (() -> Void)? = nil
+  ) {
+    guard let sourceView = suppressedSourceView else {
+      suppressedSourceAlpha = nil
+      suppressedSourceItemID = nil
+      transitionView?.removeFromSuperview()
+      completion?()
+      return
+    }
+
+    let targetAlpha = suppressedSourceAlpha ?? 1
+    suppressedSourceView = nil
+    suppressedSourceAlpha = nil
+    suppressedSourceItemID = nil
+
+    let finish = {
+      sourceView.alpha = targetAlpha
+      transitionView?.removeFromSuperview()
+      completion?()
+    }
+
+    guard animated, sourceView.window != nil, targetAlpha > 0 else {
+      finish()
+      return
+    }
+
+    sourceView.alpha = 0
+    UIView.animate(
+      withDuration: 0.12,
+      delay: 0,
+      options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut]
+    ) {
+      sourceView.alpha = targetAlpha
+      transitionView?.alpha = 0
+    } completion: { _ in
+      finish()
+    }
   }
 
   private func notifyDidDismiss() {

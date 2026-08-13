@@ -64,6 +64,8 @@ class ReactionsFlowView: UIView {
     let newReactions = groupedReactions.reduce(into: [String: GroupedReaction]()) {
       $0[$1.emoji] = $1
     }
+    let previousFrames = reactionViews.mapValues(\.frame)
+    let shouldAnimate = animatedEmoji != nil && !UIAccessibility.isReduceMotionEnabled
 
     // Find reactions to remove and add
     let currentEmojis = Set(reactionViews.keys)
@@ -72,7 +74,7 @@ class ReactionsFlowView: UIView {
     let addedEmojis = newEmojis.subtracting(currentEmojis)
 
     // Store views that need animation
-    var viewsToRemove: [(view: UIView, originalFrame: CGRect)] = []
+    var viewsToRemove: [(snapshot: UIView, originalFrame: CGRect)] = []
     var viewsToAdd: [MessageReactionView] = []
 
     // Process removals - collect views to animate later
@@ -82,9 +84,10 @@ class ReactionsFlowView: UIView {
       // Store original position for animation
       let originalFrame = view.frame
 
-      // Only animate if this is the specific emoji being removed
-      if emoji == animatedEmoji {
-        viewsToRemove.append((view: view, originalFrame: originalFrame))
+      // Snapshot before detaching the stable reaction control from the flow.
+      if shouldAnimate, emoji == animatedEmoji,
+         let snapshot = view.snapshotView(afterScreenUpdates: false) {
+        viewsToRemove.append((snapshot: snapshot, originalFrame: originalFrame))
       }
 
       // Remove from dictionary
@@ -92,55 +95,44 @@ class ReactionsFlowView: UIView {
     }
 
     // Create new views but don't add to layout yet
-    for groupedReaction in groupedReactions {
-      if addedEmojis.contains(groupedReaction.emoji) {
-        let userIds = groupedReaction.reactions.map(\.reaction.userId)
-        let byCurrentUser = userIds.contains(Auth.shared.getCurrentUserId() ?? 0)
+    for groupedReaction in groupedReactions where addedEmojis.contains(groupedReaction.emoji) {
+      let userIds = groupedReaction.reactions.map(\.reaction.userId)
+      let byCurrentUser = userIds.contains(Auth.shared.getCurrentUserId() ?? 0)
 
-        // Create ReactionUser objects from FullReaction
-        let reactionUsers = groupedReaction.reactions.map { fullReaction in
-          ReactionUser(
-            userId: fullReaction.reaction.userId,
-            userInfo: fullReaction.userInfo,
-            reactedAt: fullReaction.reaction.date
-          )
-        }
-
-        let view = MessageReactionView(
-          emoji: groupedReaction.emoji,
-          count: groupedReaction.reactions.count,
-          byCurrentUser: byCurrentUser,
-          outgoing: outgoing,
-          reactionUsers: reactionUsers,
-          backgroundPrimaryOverride: reactionBackgroundPrimaryOverride,
-          backgroundSecondaryOverride: reactionBackgroundSecondaryOverride
+      // Create ReactionUser objects from FullReaction
+      let reactionUsers = groupedReaction.reactions.map { fullReaction in
+        ReactionUser(
+          userId: fullReaction.reaction.userId,
+          userInfo: fullReaction.userInfo,
+          reactedAt: fullReaction.reaction.date
         )
+      }
 
-        view.onTap = { [weak self] emoji in
-          self?.onReactionTap?(emoji)
-        }
+      let view = MessageReactionView(
+        emoji: groupedReaction.emoji,
+        count: groupedReaction.reactions.count,
+        byCurrentUser: byCurrentUser,
+        outgoing: outgoing,
+        reactionUsers: reactionUsers,
+        backgroundPrimaryOverride: reactionBackgroundPrimaryOverride,
+        backgroundSecondaryOverride: reactionBackgroundSecondaryOverride
+      )
 
-        reactionViews[groupedReaction.emoji] = view
+      view.onTap = { [weak self] emoji in
+        self?.onReactionTap?(emoji)
+      }
 
-        // Only animate if this is the specific emoji being added
-        if groupedReaction.emoji == animatedEmoji {
-          viewsToAdd.append(view)
-        }
+      reactionViews[groupedReaction.emoji] = view
+
+      // Only animate if this is the specific emoji being added
+      if shouldAnimate, groupedReaction.emoji == animatedEmoji {
+        viewsToAdd.append(view)
       }
     }
 
     // Update existing reactions
     for (emoji, view) in reactionViews {
       if let groupedReaction = newReactions[emoji] {
-        let newCount = groupedReaction.reactions.count
-        let userIds = groupedReaction.reactions.map(\.reaction.userId)
-
-        // Update count if changed
-        if newCount != view.count {
-          view.updateCount(newCount, animated: emoji == animatedEmoji)
-        }
-
-        // Update user information
         let reactionUsers = groupedReaction.reactions.map { fullReaction in
           ReactionUser(
             userId: fullReaction.reaction.userId,
@@ -148,30 +140,36 @@ class ReactionsFlowView: UIView {
             reactedAt: fullReaction.reaction.date
           )
         }
-        view.updateReactionUsers(reactionUsers)
+        let currentUserID = Auth.shared.getCurrentUserId() ?? 0
+        let byCurrentUser = reactionUsers.contains { $0.userId == currentUserID }
+        view.update(
+          count: groupedReaction.reactions.count,
+          byCurrentUser: byCurrentUser,
+          reactionUsers: reactionUsers,
+          animated: shouldAnimate && emoji == animatedEmoji
+        )
+        cachedViewSizes.removeValue(forKey: emoji)
       }
     }
 
     // Disable animations temporarily for layout rebuild
     UIView.performWithoutAnimation {
-      // Clear and rebuild the entire layout only if there are structural changes
-      if !removedEmojis.isEmpty || !addedEmojis.isEmpty {
-        rebuildLayout(with: Array(reactionViews.values))
-      }
+      rebuildLayout(with: Array(reactionViews.values))
     }
 
     // Now animate removals using snapshots
-    for (view, originalFrame) in viewsToRemove {
-      let snapshot = view.snapshotView(afterScreenUpdates: true) ?? UIView()
+    for (snapshot, originalFrame) in viewsToRemove {
       snapshot.frame = originalFrame
       addSubview(snapshot)
 
-      UIView.animate(withDuration: 0.2, animations: {
-        snapshot.alpha = 0
-        snapshot.transform = CGAffineTransform(scaleX: 0.1, y: 0.1)
-      }) { _ in
-        snapshot.removeFromSuperview()
-      }
+      UIView.animate(
+        withDuration: 0.2,
+        animations: {
+          snapshot.alpha = 0
+          snapshot.transform = CGAffineTransform(scaleX: 0.1, y: 0.1)
+        },
+        completion: { _ in snapshot.removeFromSuperview() }
+      )
     }
 
     // Animate additions with proper positioning
@@ -189,31 +187,37 @@ class ReactionsFlowView: UIView {
     }
     
     // Animate existing views to their new positions if layout changed
-    animateExistingViewsToNewPositions(excludingAnimated: animatedEmoji)
+    animateExistingViewsToNewPositions(
+      from: previousFrames,
+      animated: shouldAnimate
+    )
   }
 
   // MARK: - Private Methods
   
-  private func animateExistingViewsToNewPositions(excludingAnimated animatedEmoji: String?) {
-    // Store current positions before layout
-    var currentFrames: [String: CGRect] = [:]
-    for (emoji, view) in reactionViews {
-      if emoji != animatedEmoji {
-        currentFrames[emoji] = view.frame
-      }
-    }
-    
+  private func animateExistingViewsToNewPositions(
+    from previousFrames: [String: CGRect],
+    animated: Bool
+  ) {
     // Animate views that changed position
     for (emoji, view) in reactionViews {
-      guard emoji != animatedEmoji,
-            let currentFrame = currentFrames[emoji],
+      guard let currentFrame = previousFrames[emoji],
             let newFrame = reactionFrames[emoji],
             !currentFrame.equalTo(newFrame) else { continue }
-      
-      // Animate from current position to new position
-      UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseInOut], animations: {
+
+      guard animated else {
         view.frame = newFrame
-      })
+        continue
+      }
+
+      view.frame = currentFrame
+      UIView.animate(
+        withDuration: 0.22,
+        delay: 0,
+        options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut]
+      ) {
+        view.frame = newFrame
+      }
     }
   }
 

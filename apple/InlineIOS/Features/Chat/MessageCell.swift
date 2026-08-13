@@ -120,14 +120,35 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     animateTail: Bool = true
   ) {
     let newOutgoing = message.message.out == true
+    var animatedReactionEmoji: String?
 
-    if self.message != nil {
+    if let currentMessage = self.message {
       if prevText == message.displayText, self.message == message,
          self.firstInGroup == firstInGroup, self.lastInGroup == lastInGroup,
          self.spaceId == spaceId, outgoing == newOutgoing, self.displayMode == displayMode,
          abs(self.collectionWidth - collectionWidth) <= 0.5 {
         // skip only if everything is exact match including outgoing state and layout width
         return
+      }
+
+      if isReactionOnlyUpdate(from: currentMessage, to: message) {
+        animatedReactionEmoji = changedReactionEmoji(from: currentMessage, to: message)
+        if abs(self.collectionWidth - collectionWidth) <= 0.5,
+           firstInGroup == self.firstInGroup,
+           lastInGroup == self.lastInGroup,
+           spaceId == self.spaceId,
+           outgoing == newOutgoing,
+           displayMode == self.displayMode,
+           let messageView,
+           messageView.canUpdateReactionsInPlace(to: message) {
+          prevText = message.displayText
+          self.message = message
+          canReply = message.canReply && displayMode != .threadAnchor
+          resetSelfSizingState()
+          messageView.updateReactions(to: message, animatedEmoji: animatedReactionEmoji)
+          setNeedsLayout()
+          return
+        }
       }
 
       if abs(self.collectionWidth - collectionWidth) <= 0.5,
@@ -166,7 +187,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     nameLabel.text = message.from?.firstName ?? "USER"
 
     setupThreadHeaderViewsIfNeeded()
-    setupBaseMessageConstraints()
+    setupBaseMessageConstraints(animatedReactionEmoji: animatedReactionEmoji)
 
     contentView.transform = Self.contentTransform
 
@@ -944,6 +965,29 @@ extension MessageCollectionViewCell {
     return oldShowsAvatar == newShowsAvatar
   }
 
+  private func isReactionOnlyUpdate(from currentMessage: FullMessage, to newMessage: FullMessage) -> Bool {
+    guard currentMessage.reactions != newMessage.reactions else { return false }
+
+    var currentWithoutReactions = currentMessage
+    currentWithoutReactions.reactions = []
+    var newWithoutReactions = newMessage
+    newWithoutReactions.reactions = []
+    return currentWithoutReactions == newWithoutReactions
+  }
+
+  private func changedReactionEmoji(from currentMessage: FullMessage, to newMessage: FullMessage) -> String? {
+    let currentByEmoji = Dictionary(grouping: currentMessage.reactions) { $0.reaction.emoji }
+    let newByEmoji = Dictionary(grouping: newMessage.reactions) { $0.reaction.emoji }
+    var candidates: [String] = []
+
+    for emoji in newMessage.groupedReactions.map(\.emoji) + currentMessage.groupedReactions.map(\.emoji)
+      where !candidates.contains(emoji) {
+      candidates.append(emoji)
+    }
+
+    return candidates.first { currentByEmoji[$0] != newByEmoji[$0] }
+  }
+
   func avatarOverlayFrame(in view: UIView) -> CGRect? {
     guard canShowAvatarOverlay, contentView.bounds.width > 0, contentView.bounds.height > 0 else {
       return nil
@@ -976,13 +1020,14 @@ extension MessageCollectionViewCell {
     return contentView.convert(localFrame, to: view)
   }
 
-  func setupBaseMessageConstraints() {
+  func setupBaseMessageConstraints(animatedReactionEmoji: String? = nil) {
     let newMessageView = UIMessageView(
       fullMessage: message,
       spaceId: spaceId,
       displayMode: displayMode,
       bubbleTailSide: bubbleTailSide,
-      maximumBubbleContentWidth: maximumBubbleContentWidth
+      maximumBubbleContentWidth: maximumBubbleContentWidth,
+      animatedReactionEmoji: animatedReactionEmoji
     )
     newMessageView.translatesAutoresizingMaskIntoConstraints = false
     newMessageView.onPhotoTap = { [weak self] message, sourceView, sourceImage, url in

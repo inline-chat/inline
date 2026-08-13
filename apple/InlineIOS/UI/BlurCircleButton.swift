@@ -1,32 +1,73 @@
 import UIKit
 
-class BlurCircleButton: UIButton {
-  lazy var blurView: UIVisualEffectView = {
+private final class ScrollGlassButton: UIButton {
+  override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+    bounds.insetBy(dx: -5, dy: -5).contains(point)
+  }
+}
+
+final class BlurCircleButton: UIView {
+  private enum Metrics {
+    static let hitTargetSize: CGFloat = 44
+    static let visualSize: CGFloat = 34
+    static let iconPointSize: CGFloat = 16
+    static let hiddenTranslationY: CGFloat = 12
+    static let hiddenScale: CGFloat = 0.9
+    static let visibilityDuration: TimeInterval = 0.22
+    static let reduceMotionDuration: TimeInterval = 0.14
+  }
+
+  private lazy var button: UIButton = {
+    let button = ScrollGlassButton(type: .custom)
+    button.translatesAutoresizingMaskIntoConstraints = false
+
+    let image = UIImage(systemName: "chevron.down")?.withConfiguration(
+      UIImage.SymbolConfiguration(pointSize: Metrics.iconPointSize, weight: .semibold)
+    )
+
     if #available(iOS 26.0, *) {
-      let glassEffect = UIGlassEffect(style: .regular)
-      glassEffect.isInteractive = true
-      let view = UIVisualEffectView(effect: glassEffect)
-      view.translatesAutoresizingMaskIntoConstraints = false
-
-      return view
+      var configuration = UIButton.Configuration.glass()
+      configuration.image = image
+      configuration.baseForegroundColor = .label
+      configuration.contentInsets = .zero
+      configuration.cornerStyle = .capsule
+      button.configuration = configuration
     } else {
-      let effect = UIBlurEffect(style: .regular)
-      let view = UIVisualEffectView(effect: effect)
-      view.backgroundColor = ThemeManager.shared.selected.backgroundColor.withAlphaComponent(0.6)
-      view.translatesAutoresizingMaskIntoConstraints = false
-
-      view.layer.shadowColor = UIColor.black.cgColor
-      view.layer.shadowOpacity = 0.1
-      view.layer.shadowOffset = CGSize(width: 0, height: 2)
-      view.layer.shadowRadius = 4
-
-      return view
+      var configuration = UIButton.Configuration.plain()
+      configuration.image = image
+      configuration.baseForegroundColor = .label
+      configuration.contentInsets = .zero
+      button.configuration = configuration
     }
+
+    button.addTarget(self, action: #selector(buttonTapped), for: .touchUpInside)
+    button.accessibilityLabel = "Scroll to Bottom"
+    button.isPointerInteractionEnabled = true
+    return button
   }()
 
-  private let iconImageView = UIImageView()
-  private let backgroundView = UIView()
+  private lazy var fallbackBlurView: UIVisualEffectView = {
+    let view = UIVisualEffectView(effect: UIBlurEffect(style: .regular))
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.isUserInteractionEnabled = false
+    view.backgroundColor = ThemeManager.shared.selected.backgroundColor.withAlphaComponent(0.6)
+    view.layer.cornerRadius = Metrics.visualSize / 2
+    view.layer.cornerCurve = .continuous
+    view.clipsToBounds = true
+    return view
+  }()
+
   private let unreadBadgeView = UIView()
+  private var desiredVisibility = false
+  private var visibilityAnimationGeneration = 0
+  private var visibilityAnimator: UIViewPropertyAnimator?
+
+  var onTap: (() -> Void)?
+
+  private static let hiddenTransform = CGAffineTransform(
+    translationX: 0,
+    y: Metrics.hiddenTranslationY
+  ).scaledBy(x: Metrics.hiddenScale, y: Metrics.hiddenScale)
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -38,73 +79,184 @@ class BlurCircleButton: UIButton {
     setup()
   }
 
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+    visibilityAnimationGeneration += 1
+    let generation = visibilityAnimationGeneration
+    stopVisibilityAnimationAtCurrentState()
+
+    guard window != nil else {
+      applyVisibility(false, includesMotion: true)
+      return
+    }
+
+    guard desiredVisibility else {
+      applyVisibility(false, includesMotion: true)
+      return
+    }
+
+    // Visibility is commonly resolved while the chat hierarchy is still offscreen.
+    // Keep the hidden presentation through the first commit, then animate it in.
+    applyVisibility(false, includesMotion: true)
+    DispatchQueue.main.async { [weak self] in
+      guard let self,
+            self.window != nil,
+            self.desiredVisibility,
+            self.visibilityAnimationGeneration == generation
+      else { return }
+      self.startVisibilityAnimation(true, generation: generation)
+    }
+  }
+
+  override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+    guard !isHidden,
+          alpha > 0.01,
+          isUserInteractionEnabled,
+          bounds.contains(point)
+    else { return nil }
+    return button.hitTest(convert(point, to: button), with: event)
+  }
+
   private func setup() {
     translatesAutoresizingMaskIntoConstraints = false
     NSLayoutConstraint.activate([
-      widthAnchor.constraint(equalToConstant: 42),
-      heightAnchor.constraint(equalToConstant: 42),
+      widthAnchor.constraint(equalToConstant: Metrics.hitTargetSize),
+      heightAnchor.constraint(equalToConstant: Metrics.hitTargetSize),
     ])
 
-    backgroundView.backgroundColor = .systemBackground.withAlphaComponent(0.3)
-    backgroundView.translatesAutoresizingMaskIntoConstraints = false
-    backgroundView.layer.cornerRadius = 22
-    backgroundView.isUserInteractionEnabled = false
-    blurView.isUserInteractionEnabled = false
-    iconImageView.isUserInteractionEnabled = false
-    iconImageView.tintColor = ThemeManager.shared.selected.accent
-    isUserInteractionEnabled = true
-    addSubview(backgroundView)
+    if #unavailable(iOS 26.0) {
+      addSubview(fallbackBlurView)
+      NSLayoutConstraint.activate([
+        fallbackBlurView.centerXAnchor.constraint(equalTo: centerXAnchor),
+        fallbackBlurView.centerYAnchor.constraint(equalTo: centerYAnchor),
+        fallbackBlurView.widthAnchor.constraint(equalToConstant: Metrics.visualSize),
+        fallbackBlurView.heightAnchor.constraint(equalToConstant: Metrics.visualSize),
+      ])
+    }
 
-    blurView.layer.cornerRadius = 22
-    blurView.clipsToBounds = true
-    blurView.translatesAutoresizingMaskIntoConstraints = false
-    addSubview(blurView)
-
-    let chevronImage = UIImage(systemName: "chevron.down")?
-      .withConfiguration(UIImage.SymbolConfiguration(pointSize: 20, weight: .medium))
-    iconImageView.image = chevronImage
-
-    iconImageView.translatesAutoresizingMaskIntoConstraints = false
-    addSubview(iconImageView)
+    addSubview(button)
+    NSLayoutConstraint.activate([
+      button.centerXAnchor.constraint(equalTo: centerXAnchor),
+      button.centerYAnchor.constraint(equalTo: centerYAnchor),
+      button.widthAnchor.constraint(equalToConstant: Metrics.visualSize),
+      button.heightAnchor.constraint(equalToConstant: Metrics.visualSize),
+    ])
 
     unreadBadgeView.translatesAutoresizingMaskIntoConstraints = false
     unreadBadgeView.backgroundColor = ThemeManager.shared.selected.accent
-    unreadBadgeView.layer.cornerRadius = 4
+    unreadBadgeView.layer.cornerRadius = 3
+    unreadBadgeView.isUserInteractionEnabled = false
     unreadBadgeView.isHidden = true
     addSubview(unreadBadgeView)
 
     NSLayoutConstraint.activate([
-      backgroundView.topAnchor.constraint(equalTo: topAnchor),
-      backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
-
-      blurView.topAnchor.constraint(equalTo: topAnchor),
-      blurView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      blurView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      blurView.bottomAnchor.constraint(equalTo: bottomAnchor),
-
-      iconImageView.centerXAnchor.constraint(equalTo: centerXAnchor),
-      iconImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
-
-      unreadBadgeView.widthAnchor.constraint(equalToConstant: 8),
-      unreadBadgeView.heightAnchor.constraint(equalToConstant: 8),
-      unreadBadgeView.topAnchor.constraint(equalTo: topAnchor, constant: 2),
-      unreadBadgeView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
+      unreadBadgeView.widthAnchor.constraint(equalToConstant: 6),
+      unreadBadgeView.heightAnchor.constraint(equalToConstant: 6),
+      unreadBadgeView.topAnchor.constraint(equalTo: button.topAnchor),
+      unreadBadgeView.trailingAnchor.constraint(equalTo: button.trailingAnchor),
     ])
 
-    addTarget(self, action: #selector(buttonTapped), for: .touchUpInside)
+    isHidden = false
+    alpha = 0
+    transform = Self.hiddenTransform
+    isUserInteractionEnabled = false
+    accessibilityElementsHidden = true
   }
 
   @objc private func buttonTapped() {
-    NotificationCenter.default.post(name: .scrollToBottom, object: nil)
+    onTap?()
+  }
+
+  func setVisible(_ visible: Bool, animated: Bool = true) {
+    guard desiredVisibility != visible else { return }
+
+    desiredVisibility = visible
+    visibilityAnimationGeneration += 1
+    let generation = visibilityAnimationGeneration
+    stopVisibilityAnimationAtCurrentState()
+    isUserInteractionEnabled = visible
+    accessibilityElementsHidden = !visible
+
+    // Preserve the hidden presentation until didMoveToWindow can start an
+    // observable transition. Applying the target here made first appearance snap.
+    guard window != nil else {
+      applyVisibility(false, includesMotion: true)
+      return
+    }
+
+    guard animated else {
+      UIView.performWithoutAnimation {
+        applyVisibility(visible, includesMotion: true)
+      }
+      return
+    }
+
+    startVisibilityAnimation(visible, generation: generation)
+  }
+
+  private func startVisibilityAnimation(_ visible: Bool, generation: Int) {
+    stopVisibilityAnimationAtCurrentState()
+
+    let reduceMotion = UIAccessibility.isReduceMotionEnabled
+    let animator: UIViewPropertyAnimator
+    if reduceMotion {
+      transform = .identity
+      animator = UIViewPropertyAnimator(duration: Metrics.reduceMotionDuration, curve: .easeInOut)
+    } else {
+      let timing = UISpringTimingParameters(
+        dampingRatio: 0.84,
+        initialVelocity: .zero
+      )
+      animator = UIViewPropertyAnimator(duration: Metrics.visibilityDuration, timingParameters: timing)
+    }
+
+    visibilityAnimator = animator
+    animator.addAnimations { [weak self] in
+      guard let self else { return }
+      if reduceMotion {
+        self.alpha = visible ? 1 : 0
+      } else {
+        self.applyVisibility(visible, includesMotion: true)
+      }
+    }
+    animator.addCompletion { [weak self, weak animator] _ in
+      guard let self,
+            let animator,
+            self.visibilityAnimator === animator,
+            self.visibilityAnimationGeneration == generation
+      else { return }
+      self.visibilityAnimator = nil
+    }
+    animator.startAnimation()
+  }
+
+  private func stopVisibilityAnimationAtCurrentState() {
+    guard let animator = visibilityAnimator else { return }
+    visibilityAnimator = nil
+    guard animator.state == .active else { return }
+
+    let presentationAlpha = layer.presentation()?.opacity
+    let presentationTransform = layer.presentation()?.affineTransform()
+    animator.stopAnimation(true)
+
+    if let presentationAlpha {
+      alpha = CGFloat(presentationAlpha)
+    }
+    if let presentationTransform {
+      transform = presentationTransform
+    }
+  }
+
+  private func applyVisibility(_ visible: Bool, includesMotion: Bool) {
+    alpha = visible ? 1 : 0
+    if includesMotion {
+      transform = visible ? .identity : Self.hiddenTransform
+    } else {
+      transform = .identity
+    }
   }
 
   func setHasUnread(_ hasUnread: Bool) {
     unreadBadgeView.isHidden = !hasUnread
   }
-}
-
-extension Notification.Name {
-  static let scrollToBottom = Notification.Name("scrollToBottom")
 }

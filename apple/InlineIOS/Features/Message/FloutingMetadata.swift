@@ -20,9 +20,6 @@ class FloatingMetadataView: UIView {
 
   private func setupViews() {
     materialBackgroundView.backgroundColor = UIColor.black.withAlphaComponent(0.6)
-    UIView.performWithoutAnimation {
-      materialBackgroundView.layer.cornerRadius = 10
-    }
     materialBackgroundView.clipsToBounds = true
     materialBackgroundView.translatesAutoresizingMaskIntoConstraints = false
 
@@ -31,7 +28,7 @@ class FloatingMetadataView: UIView {
 
     metadataView.translatesAutoresizingMaskIntoConstraints = false
 
-    let contentVerticalPadding: CGFloat = 10
+    let contentVerticalPadding: CGFloat = 3
     let contentHorizontalPadding: CGFloat = 6
 
     NSLayoutConstraint.activate([
@@ -45,6 +42,13 @@ class FloatingMetadataView: UIView {
       metadataView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -contentHorizontalPadding),
       metadataView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -contentVerticalPadding),
     ])
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    UIView.performWithoutAnimation {
+      materialBackgroundView.layer.cornerRadius = materialBackgroundView.bounds.height / 2
+    }
   }
 
   private func forceWhiteText() {

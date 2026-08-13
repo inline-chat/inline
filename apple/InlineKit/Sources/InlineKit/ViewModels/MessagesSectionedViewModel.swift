@@ -126,6 +126,21 @@ public class MessagesSectionedViewModel {
     return true
   }
 
+  /// Replaces the current progressive window with the existing local window
+  /// centered on an exact message, then publishes one coherent snapshot reload.
+  /// Callers can fetch a missing target first and retry this same path.
+  @discardableResult
+  public func loadLocalWindowAroundMessage(messageId: Int64) -> Bool {
+    guard progressiveViewModel.loadLocalWindowAroundMessage(
+      messageId: messageId,
+      publish: false
+    ) else { return false }
+
+    rebuildSections()
+    callback?(.reload(animated: false))
+    return true
+  }
+
   public func setAtBottom(_ atBottom: Bool) {
     progressiveViewModel.setAtBottom(atBottom)
   }

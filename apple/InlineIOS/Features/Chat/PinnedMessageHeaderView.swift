@@ -2,22 +2,26 @@ import Combine
 import GRDB
 import InlineKit
 import Logger
-import SwiftUI
 import UIKit
 
-final class PinnedMessageHeaderView: UIView, UIGestureRecognizerDelegate {
+final class PinnedMessageHeaderView: UIView {
   private enum Constants {
     static let horizontalPadding: CGFloat = 8
-    static let verticalPadding: CGFloat = 16
+    static let contentVerticalPadding: CGFloat = 4
+    static let backgroundTopInset: CGFloat = 8
+    static let backgroundBottomInset: CGFloat = 8
     static let contentSpacing: CGFloat = 8
-    static let closeButtonSize: CGFloat = EmbedMessageView.height
+    static let closeButtonSize: CGFloat = max(44, EmbedMessageView.height)
     static let fadeDuration: TimeInterval = 0.2
   }
 
-  static let preferredHeight: CGFloat = EmbedMessageView.height + (Constants.verticalPadding * 2)
-  private static let backgroundCornerRadius: CGFloat = 14
+  static let preferredHeight: CGFloat = max(EmbedMessageView.height, Constants.closeButtonSize)
+    + (Constants.contentVerticalPadding * 2)
+    + Constants.backgroundTopInset
+    + Constants.backgroundBottomInset
 
   var onHeightChange: ((CGFloat) -> Void)?
+  var onOpenMessage: ((Int64) -> Void)?
 
   private let peerId: Peer
   private let chatId: Int64
@@ -28,8 +32,41 @@ final class PinnedMessageHeaderView: UIView, UIGestureRecognizerDelegate {
   private var currentMessageId: Int64?
   private var isVisible = false
 
-  private let backgroundView: UIView
-  private let backgroundContentView: UIView
+  private let backgroundView: UIView = {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+
+  private lazy var primaryButton: UIButton = {
+    let button = UIButton(type: .system)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.accessibilityLabel = "Open pinned message"
+    button.accessibilityHint = "Jumps to the pinned message in this chat"
+    button.addTarget(self, action: #selector(primaryTapped), for: .touchUpInside)
+
+    if #available(iOS 26.0, *) {
+      var configuration = UIButton.Configuration.glass()
+      configuration.contentInsets = .zero
+      configuration.cornerStyle = .capsule
+      button.configuration = configuration
+    } else {
+      var configuration = UIButton.Configuration.plain()
+      configuration.contentInsets = .zero
+      button.configuration = configuration
+    }
+    return button
+  }()
+
+  private lazy var fallbackMaterialView: UIVisualEffectView = {
+    let view = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.isUserInteractionEnabled = false
+    view.layer.cornerCurve = .continuous
+    view.layer.masksToBounds = true
+    return view
+  }()
+
   private var didStartObservation = false
   private var backgroundViewTopConstraint: NSLayoutConstraint?
   private var backgroundViewBottomConstraint: NSLayoutConstraint?
@@ -38,6 +75,8 @@ final class PinnedMessageHeaderView: UIView, UIGestureRecognizerDelegate {
   private lazy var embedView: EmbedMessageView = {
     let view = EmbedMessageView()
     view.translatesAutoresizingMaskIntoConstraints = false
+    view.isUserInteractionEnabled = false
+    view.accessibilityElementsHidden = true
     view.showsBackground = false
     view.showsLeadingBar = false
     view.textLeadingPadding = Constants.horizontalPadding
@@ -50,6 +89,8 @@ final class PinnedMessageHeaderView: UIView, UIGestureRecognizerDelegate {
     let config = UIImage.SymbolConfiguration(pointSize: 13, weight: .regular)
     button.setImage(UIImage(systemName: "xmark", withConfiguration: config), for: .normal)
     button.tintColor = .secondaryLabel
+    button.accessibilityLabel = "Unpin message"
+    button.accessibilityHint = "Removes this message from the pinned header"
     button.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
     button.translatesAutoresizingMaskIntoConstraints = false
     return button
@@ -58,17 +99,6 @@ final class PinnedMessageHeaderView: UIView, UIGestureRecognizerDelegate {
   init(peerId: Peer, chatId: Int64) {
     self.peerId = peerId
     self.chatId = chatId
-    if #available(iOS 26.0, *) {
-      let glassView = PinnedMessageGlassBackgroundView(cornerRadius: Self.backgroundCornerRadius)
-      backgroundView = glassView
-      backgroundContentView = glassView
-    } else {
-      let blurView = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
-      blurView.layer.cornerRadius = Self.backgroundCornerRadius
-      blurView.layer.masksToBounds = true
-      backgroundView = blurView
-      backgroundContentView = blurView.contentView
-    }
     super.init(frame: .zero)
     setupViews()
     setupConstraints()
@@ -88,17 +118,35 @@ final class PinnedMessageHeaderView: UIView, UIGestureRecognizerDelegate {
 
     backgroundView.translatesAutoresizingMaskIntoConstraints = false
     addSubview(backgroundView)
-    backgroundContentView.addSubview(embedView)
-    backgroundContentView.addSubview(closeButton)
 
-    let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))
-    tapGesture.delegate = self
-    addGestureRecognizer(tapGesture)
+    if #unavailable(iOS 26.0) {
+      backgroundView.addSubview(fallbackMaterialView)
+      NSLayoutConstraint.activate([
+        fallbackMaterialView.leadingAnchor.constraint(equalTo: backgroundView.leadingAnchor),
+        fallbackMaterialView.trailingAnchor.constraint(equalTo: backgroundView.trailingAnchor),
+        fallbackMaterialView.topAnchor.constraint(equalTo: backgroundView.topAnchor),
+        fallbackMaterialView.bottomAnchor.constraint(equalTo: backgroundView.bottomAnchor),
+      ])
+    }
+
+    backgroundView.addSubview(primaryButton)
+    primaryButton.addSubview(embedView)
+    backgroundView.addSubview(closeButton)
+
+    primaryButton.configurationUpdateHandler = { [weak self] button in
+      self?.updatePrimaryPressAppearance(isHighlighted: button.isHighlighted)
+    }
   }
 
   private func setupConstraints() {
-    backgroundViewTopConstraint = backgroundView.topAnchor.constraint(equalTo: topAnchor, constant: Constants.verticalPadding)
-    backgroundViewBottomConstraint = backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Constants.verticalPadding)
+    backgroundViewTopConstraint = backgroundView.topAnchor.constraint(
+      equalTo: topAnchor,
+      constant: Constants.backgroundTopInset
+    )
+    backgroundViewBottomConstraint = backgroundView.bottomAnchor.constraint(
+      equalTo: bottomAnchor,
+      constant: -Constants.backgroundBottomInset
+    )
     closeButtonHeightConstraint = closeButton.heightAnchor.constraint(equalToConstant: Constants.closeButtonSize)
 
     NSLayoutConstraint.activate([
@@ -107,21 +155,58 @@ final class PinnedMessageHeaderView: UIView, UIGestureRecognizerDelegate {
       backgroundViewTopConstraint!,
       backgroundViewBottomConstraint!,
 
-      embedView.leadingAnchor.constraint(equalTo: backgroundContentView.leadingAnchor, constant: Constants.horizontalPadding),
-      embedView.centerYAnchor.constraint(equalTo: backgroundContentView.centerYAnchor),
+      primaryButton.leadingAnchor.constraint(equalTo: backgroundView.leadingAnchor),
+      primaryButton.trailingAnchor.constraint(equalTo: backgroundView.trailingAnchor),
+      primaryButton.topAnchor.constraint(equalTo: backgroundView.topAnchor),
+      primaryButton.bottomAnchor.constraint(equalTo: backgroundView.bottomAnchor),
+
+      embedView.leadingAnchor.constraint(equalTo: primaryButton.leadingAnchor, constant: Constants.horizontalPadding),
+      embedView.centerYAnchor.constraint(equalTo: primaryButton.centerYAnchor),
       embedView.heightAnchor.constraint(equalToConstant: EmbedMessageView.height),
 
       closeButton.leadingAnchor.constraint(equalTo: embedView.trailingAnchor, constant: Constants.contentSpacing),
-      closeButton.trailingAnchor.constraint(equalTo: backgroundContentView.trailingAnchor, constant: -Constants.horizontalPadding),
+      closeButton.trailingAnchor.constraint(equalTo: backgroundView.trailingAnchor, constant: -Constants.horizontalPadding),
       closeButton.centerYAnchor.constraint(equalTo: embedView.centerYAnchor),
       closeButton.widthAnchor.constraint(equalToConstant: Constants.closeButtonSize),
       closeButtonHeightConstraint!,
     ])
   }
 
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    if #unavailable(iOS 26.0) {
+      fallbackMaterialView.layer.cornerRadius = fallbackMaterialView.bounds.height / 2
+    }
+  }
+
   override func didMoveToWindow() {
     super.didMoveToWindow()
     startObservingIfNeeded()
+  }
+
+  private func updatePrimaryPressAppearance(isHighlighted: Bool) {
+    let animations = { [self] in
+      embedView.alpha = isHighlighted ? 0.72 : 1
+      embedView.transform = UIAccessibility.isReduceMotionEnabled || !isHighlighted
+        ? .identity
+        : CGAffineTransform(scaleX: 0.985, y: 0.985)
+
+      if #unavailable(iOS 26.0) {
+        fallbackMaterialView.alpha = isHighlighted ? 0.72 : 1
+      }
+    }
+
+    guard window != nil, !UIAccessibility.isReduceMotionEnabled else {
+      animations()
+      return
+    }
+
+    UIView.animate(
+      withDuration: 0.12,
+      delay: 0,
+      options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut],
+      animations: animations
+    )
   }
 
   private func startObservingIfNeeded() {
@@ -262,8 +347,8 @@ final class PinnedMessageHeaderView: UIView, UIGestureRecognizerDelegate {
     if visible {
       isHidden = false
       alpha = canAnimate ? 0 : 1
-      backgroundViewTopConstraint?.constant = Constants.verticalPadding
-      backgroundViewBottomConstraint?.constant = -Constants.verticalPadding
+      backgroundViewTopConstraint?.constant = Constants.backgroundTopInset
+      backgroundViewBottomConstraint?.constant = -Constants.backgroundBottomInset
       closeButtonHeightConstraint?.constant = Constants.closeButtonSize
       onHeightChange?(Self.preferredHeight)
       superview?.layoutIfNeeded()
@@ -305,16 +390,9 @@ final class PinnedMessageHeaderView: UIView, UIGestureRecognizerDelegate {
     onHeightChange?(0)
   }
 
-  @objc private func handleTap() {
+  @objc private func primaryTapped() {
     guard let messageId = currentMessageId else { return }
-    NotificationCenter.default.post(
-      name: Notification.Name("ScrollToRepliedMessage"),
-      object: nil,
-      userInfo: [
-        "repliedToMessageId": messageId,
-        "chatId": chatId,
-      ]
-    )
+    onOpenMessage?(messageId)
   }
 
   @objc private func closeTapped() {
@@ -328,49 +406,4 @@ final class PinnedMessageHeaderView: UIView, UIGestureRecognizerDelegate {
     }
   }
 
-  func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-    if let touchedView = touch.view, touchedView.isDescendant(of: closeButton) {
-      return false
-    }
-    return true
-  }
-}
-
-@available(iOS 26.0, *)
-private final class PinnedMessageGlassBackgroundView: UIView {
-  private let hostingController: UIHostingController<PinnedMessageGlassView>
-
-  init(cornerRadius: CGFloat) {
-    hostingController = UIHostingController(rootView: PinnedMessageGlassView(cornerRadius: cornerRadius))
-    super.init(frame: .zero)
-
-    hostingController.view.translatesAutoresizingMaskIntoConstraints = false
-    hostingController.view.backgroundColor = .clear
-    hostingController.view.isUserInteractionEnabled = false
-
-    addSubview(hostingController.view)
-    NSLayoutConstraint.activate([
-      hostingController.view.leadingAnchor.constraint(equalTo: leadingAnchor),
-      hostingController.view.trailingAnchor.constraint(equalTo: trailingAnchor),
-      hostingController.view.topAnchor.constraint(equalTo: topAnchor),
-      hostingController.view.bottomAnchor.constraint(equalTo: bottomAnchor),
-    ])
-  }
-
-  @available(*, unavailable)
-  required init?(coder: NSCoder) {
-    fatalError("init(coder:) has not been implemented")
-  }
-}
-
-@available(iOS 26.0, *)
-private struct PinnedMessageGlassView: View {
-  let cornerRadius: CGFloat
-
-  var body: some View {
-    Color.clear
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .glassEffect(.regular.interactive(), in: .rect(cornerRadius: cornerRadius))
-      .allowsHitTesting(false)
-  }
 }

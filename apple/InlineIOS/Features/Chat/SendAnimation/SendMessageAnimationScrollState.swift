@@ -9,7 +9,9 @@ struct SendMessageAnimationScrollPlan {
 @MainActor
 final class SendMessageAnimationScrollState {
   private var composeInsetAnimator: UIViewPropertyAnimator?
+  private var composeInsetCompletion: (() -> Void)?
   private var scrollAnimator: UIViewPropertyAnimator?
+  private var scrollCompletion: (() -> Void)?
   private var scrollTargetOffset: CGPoint?
 
   var isScrollInFlight: Bool {
@@ -20,8 +22,13 @@ final class SendMessageAnimationScrollState {
     to targetOffset: CGPoint,
     duration: TimeInterval = SendMessageAnimationTiming.duration,
     timingParameters: UITimingCurveProvider? = SendMessageAnimationTiming.verticalTimingParameters,
-    in collectionView: UICollectionView
+    in collectionView: UICollectionView,
+    completion: (() -> Void)? = nil
   ) {
+    if composeInsetAnimator != nil {
+      stopComposeInsetAnimationAtPresentation(in: collectionView)
+    }
+
     let animator: UIViewPropertyAnimator
     if let timingParameters {
       animator = UIViewPropertyAnimator(duration: duration, timingParameters: timingParameters)
@@ -29,6 +36,7 @@ final class SendMessageAnimationScrollState {
       animator = UIViewPropertyAnimator(duration: duration, curve: .easeInOut)
     }
     composeInsetAnimator = animator
+    composeInsetCompletion = completion
     animator.addAnimations { [weak collectionView] in
       guard let collectionView else { return }
       collectionView.setContentOffset(targetOffset, animated: false)
@@ -37,6 +45,9 @@ final class SendMessageAnimationScrollState {
     animator.addCompletion { [weak self] _ in
       guard let self, self.composeInsetAnimator === animator else { return }
       self.composeInsetAnimator = nil
+      let completion = self.composeInsetCompletion
+      self.composeInsetCompletion = nil
+      completion?()
     }
     animator.startAnimation()
   }
@@ -50,13 +61,17 @@ final class SendMessageAnimationScrollState {
     let presentationOffsetY = collectionView.layer.presentation()?.bounds.origin.y
     composeInsetAnimator?.stopAnimation(true)
     composeInsetAnimator = nil
+    let completion = composeInsetCompletion
+    composeInsetCompletion = nil
 
-    guard let presentationOffsetY, presentationOffsetY.isFinite else { return true }
-    collectionView.setContentOffset(
-      CGPoint(x: collectionView.contentOffset.x, y: presentationOffsetY),
-      animated: false
-    )
-    collectionView.layoutIfNeeded()
+    if let presentationOffsetY, presentationOffsetY.isFinite {
+      collectionView.setContentOffset(
+        CGPoint(x: collectionView.contentOffset.x, y: presentationOffsetY),
+        animated: false
+      )
+      collectionView.layoutIfNeeded()
+    }
+    completion?()
     return true
   }
 
@@ -113,25 +128,19 @@ final class SendMessageAnimationScrollState {
   func animateScroll(
     to targetOffset: CGPoint,
     duration: TimeInterval,
-    in collectionView: UICollectionView
+    in collectionView: UICollectionView,
+    completion: (() -> Void)? = nil
   ) {
     stopComposeInsetAnimationAtPresentation(in: collectionView)
 
-    let hadScrollAnimator = scrollAnimator != nil
-    if hadScrollAnimator,
-       let presentationBounds = collectionView.layer.presentation()?.bounds,
-       presentationBounds.origin.y.isFinite {
-      collectionView.layer.removeAnimation(forKey: "bounds")
-      collectionView.setContentOffset(
-        CGPoint(x: collectionView.contentOffset.x, y: presentationBounds.origin.y),
-        animated: false
-      )
+    if scrollAnimator != nil {
+      stopScrollAtPresentation(in: collectionView)
     }
 
-    scrollAnimator?.stopAnimation(true)
     let startedAt = CACurrentMediaTime()
     let animator = SendMessageAnimationTiming.makeVerticalAnimator(duration: duration)
     scrollAnimator = animator
+    scrollCompletion = completion
     let clampedTargetOffset = clampedContentOffset(targetOffset, in: collectionView)
     scrollTargetOffset = clampedTargetOffset
     SendMessageAnimationDiagnostics.event(
@@ -146,10 +155,13 @@ final class SendMessageAnimationScrollState {
       guard let self, self.scrollAnimator === animator else { return }
       self.scrollAnimator = nil
       self.scrollTargetOffset = nil
+      let completion = self.scrollCompletion
+      self.scrollCompletion = nil
       let elapsedMs = (CACurrentMediaTime() - startedAt) * 1_000
       SendMessageAnimationDiagnostics.event(
         "list scroll-finish elapsedMs=\(String(format: "%.1f", elapsedMs)) position=\(Self.description(for: position)) finalY=\(String(format: "%.1f", collectionView?.contentOffset.y ?? 0))"
       )
+      completion?()
     }
     animator.startAnimation()
   }
@@ -157,6 +169,9 @@ final class SendMessageAnimationScrollState {
   private func stopScrollAtPresentation(in collectionView: UICollectionView) {
     guard scrollAnimator != nil else {
       scrollTargetOffset = nil
+      let completion = scrollCompletion
+      scrollCompletion = nil
+      completion?()
       return
     }
 
@@ -164,13 +179,18 @@ final class SendMessageAnimationScrollState {
     scrollAnimator?.stopAnimation(true)
     scrollAnimator = nil
     scrollTargetOffset = nil
+    let completion = scrollCompletion
+    scrollCompletion = nil
 
-    guard let presentationOffsetY, presentationOffsetY.isFinite else { return }
-    collectionView.setContentOffset(
-      CGPoint(x: collectionView.contentOffset.x, y: presentationOffsetY),
-      animated: false
-    )
-    collectionView.layoutIfNeeded()
+    if let presentationOffsetY, presentationOffsetY.isFinite {
+      collectionView.layer.removeAnimation(forKey: "bounds")
+      collectionView.setContentOffset(
+        CGPoint(x: collectionView.contentOffset.x, y: presentationOffsetY),
+        animated: false
+      )
+      collectionView.layoutIfNeeded()
+    }
+    completion?()
   }
 
   private static func description(for position: UIViewAnimatingPosition) -> String {

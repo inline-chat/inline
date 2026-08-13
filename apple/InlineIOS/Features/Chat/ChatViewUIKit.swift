@@ -49,6 +49,12 @@ public class ChatContainerView: UIView {
       isPreview: isPreview,
       sendAnimationCoordinator: sendAnimationCoordinator
     )
+    if !isPreview {
+      collectionView.onScrollAffordanceChanged = { [weak self] state in
+        self?.scrollButton.setVisible(state.isVisible)
+        self?.scrollButton.setHasUnread(state.hasUnread)
+      }
+    }
     collectionView.translatesAutoresizingMaskIntoConstraints = false
     return collectionView
   }()
@@ -59,6 +65,9 @@ public class ChatContainerView: UIView {
     view.onHeightChange = { [weak self] height in
       self?.pinnedHeaderHeightConstraint?.constant = height
       self?.messagesCollectionView.updatePinnedHeaderHeight(height)
+    }
+    view.onOpenMessage = { [weak self] messageID in
+      self?.messagesCollectionView.scrollToMessageWhenAvailable(messageID)
     }
     return view
   }()
@@ -245,6 +254,9 @@ public class ChatContainerView: UIView {
     addSubview(mentionCompletionViewWrapper)
     addSubview(composeView)
     addSubview(scrollButton)
+    scrollButton.onTap = { [weak self] in
+      self?.messagesCollectionView.scrollToBottom()
+    }
 
     if usesIOS27KeyboardWorkaround {
       composeView.textView.setKeyboardTrackingAccessoryView(keyboardTrackingAccessoryView)
@@ -252,7 +264,6 @@ public class ChatContainerView: UIView {
       keyboardLayoutGuide.followsUndockedKeyboard = true
     }
 
-    scrollButton.isHidden = true
     composeContainerViewBottomConstraint = composeContainerView.bottomAnchor
       .constraint(equalTo: safeAreaLayoutGuide.bottomAnchor)
 
@@ -291,8 +302,10 @@ public class ChatContainerView: UIView {
         borderView.topAnchor.constraint(equalTo: composeContainerView.topAnchor),
         borderView.heightAnchor.constraint(equalToConstant: 0.5),
 
-        scrollButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-        scrollButton.bottomAnchor.constraint(equalTo: composeContainerView.topAnchor, constant: -10),
+        // The hit target is 44pt while the visible glass is 34pt. Insets preserve
+        // the existing 10pt visual spacing from the trailing and compose edges.
+        scrollButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -5),
+        scrollButton.bottomAnchor.constraint(equalTo: composeContainerView.topAnchor, constant: -5),
       ]
     )
   }
@@ -328,53 +341,10 @@ public class ChatContainerView: UIView {
 
     NotificationCenter.default.addObserver(
       self,
-      selector: #selector(handleScrollToBottomChanged),
-      name: .scrollToBottomChanged,
-      object: nil
-    )
-    NotificationCenter.default.addObserver(
-      self,
-      selector: #selector(handleScrollToBottomUnreadChanged),
-      name: .scrollToBottomUnreadChanged,
-      object: nil
-    )
-    NotificationCenter.default.addObserver(
-      self,
       selector: #selector(applicationDidBecomeActive),
       name: UIApplication.didBecomeActiveNotification,
       object: nil
     )
-  }
-
-  @objc private func handleScrollToBottomChanged(_ notification: Notification) {
-    guard let isAtBottom = notification.userInfo?["isAtBottom"] as? Bool else { return }
-
-    scrollButton.layer.removeAllAnimations()
-    scrollButton.isHidden = false
-
-    let targetTransform: CGAffineTransform = isAtBottom ? .identity : CGAffineTransform(scaleX: 0.5, y: 0.5)
-    let targetAlpha: CGFloat = isAtBottom ? 1.0 : 0.0
-
-    UIView.animate(
-      withDuration: 0.25,
-      delay: 0,
-      usingSpringWithDamping: 0.8,
-      initialSpringVelocity: 0.5,
-      options: [.beginFromCurrentState, .allowUserInteraction],
-      animations: {
-        self.scrollButton.transform = targetTransform
-        self.scrollButton.alpha = targetAlpha
-      }
-    )
-
-    if !isAtBottom {
-      scrollButton.isHidden = true
-    }
-  }
-
-  @objc private func handleScrollToBottomUnreadChanged(_ notification: Notification) {
-    guard let hasUnread = notification.userInfo?["hasUnread"] as? Bool else { return }
-    scrollButton.setHasUnread(hasUnread)
   }
 
   @objc private func keyboardWillShow(_ notification: Notification) {

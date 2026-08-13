@@ -27,7 +27,7 @@ enum MessageDisplayMode: Equatable {
 class UIMessageView: UIView {
   // MARK: - Properties
 
-  let fullMessage: FullMessage
+  private(set) var fullMessage: FullMessage
   let spaceId: Int64?
   let displayMode: MessageDisplayMode
   private let maximumBubbleContentWidth: CGFloat
@@ -73,6 +73,7 @@ class UIMessageView: UIView {
   }()
   private static let maxInlineReactionUsers = 3
   private lazy var reactionGroups: [GroupedReaction] = fullMessage.groupedReactions
+  private var pendingAnimatedReactionEmoji: String?
 
   var outgoing: Bool {
     fullMessage.message.out == true
@@ -212,7 +213,13 @@ class UIMessageView: UIView {
   }
 
   private var shouldShowReactionsOutsideBubble: Bool {
-    (hasMedia || isSticker) && !message.hasText && !fullMessage.reactions.isEmpty
+    shouldShowReactionsOutsideBubble(for: fullMessage)
+  }
+
+  private func shouldShowReactionsOutsideBubble(for fullMessage: FullMessage) -> Bool {
+    let message = fullMessage.message
+    let hasMedia = message.hasPhoto || message.hasVideo
+    return (hasMedia || message.isSticker == true) && !message.hasText && !fullMessage.reactions.isEmpty
   }
 
   private var shouldShowReactionsInsideBubble: Bool {
@@ -220,9 +227,13 @@ class UIMessageView: UIView {
   }
 
   private var shouldShareReactionRowWithMetadata: Bool {
+    shouldShareReactionRowWithMetadata(for: reactionGroups)
+  }
+
+  private func shouldShareReactionRowWithMetadata(for groups: [GroupedReaction]) -> Bool {
     guard shouldShowReactionsInsideBubble,
-          reactionGroups.count == 1,
-          let reactionGroup = reactionGroups.first,
+          groups.count == 1,
+          let reactionGroup = groups.first,
           reactionGroup.reactions.count <= Self.maxInlineReactionUsers
     else { return false }
 
@@ -434,13 +445,15 @@ class UIMessageView: UIView {
     spaceId: Int64?,
     displayMode: MessageDisplayMode = .normal,
     bubbleTailSide: MessageBubbleTailSide = .none,
-    maximumBubbleContentWidth: CGFloat
+    maximumBubbleContentWidth: CGFloat,
+    animatedReactionEmoji: String? = nil
   ) {
     self.fullMessage = fullMessage
     self.spaceId = spaceId
     self.displayMode = displayMode
     self.bubbleTailSide = bubbleTailSide
     self.maximumBubbleContentWidth = maximumBubbleContentWidth
+    self.pendingAnimatedReactionEmoji = animatedReactionEmoji
 
     super.init(frame: .zero)
 
@@ -800,11 +813,32 @@ class UIMessageView: UIView {
   func setupReactionsIfNeeded(animatedEmoji: String? = nil) {
     guard !fullMessage.reactions.isEmpty else { return }
 
+    let emojiToAnimate = animatedEmoji ?? pendingAnimatedReactionEmoji
+    pendingAnimatedReactionEmoji = nil
+
     // Configure reactions using groupedReactions from FullMessage
     reactionsFlowView.configure(
       with: reactionGroups,
-      animatedEmoji: animatedEmoji
+      animatedEmoji: emojiToAnimate
     )
+  }
+
+  func canUpdateReactionsInPlace(to updatedMessage: FullMessage) -> Bool {
+    guard !fullMessage.reactions.isEmpty, !updatedMessage.reactions.isEmpty else { return false }
+
+    let currentIsOutside = shouldShowReactionsOutsideBubble
+    let updatedIsOutside = shouldShowReactionsOutsideBubble(for: updatedMessage)
+    guard currentIsOutside == updatedIsOutside else { return false }
+
+    return shouldShareReactionRowWithMetadata
+      == shouldShareReactionRowWithMetadata(for: updatedMessage.groupedReactions)
+  }
+
+  func updateReactions(to updatedMessage: FullMessage, animatedEmoji: String?) {
+    fullMessage = updatedMessage
+    reactionGroups = updatedMessage.groupedReactions
+    reactionsFlowView.configure(with: reactionGroups, animatedEmoji: animatedEmoji)
+    setNeedsLayout()
   }
 
   private func setupExternalReactionsIfNeeded() {

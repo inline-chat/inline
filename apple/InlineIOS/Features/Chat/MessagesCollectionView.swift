@@ -14,16 +14,37 @@ import Translation
 import UIKit
 
 final class MessagesCollectionView: UICollectionView {
+  struct ScrollAffordanceState: Equatable {
+    var isVisible = false
+    var hasUnread = false
+  }
+
+  private enum ScrollAffordanceMetrics {
+    static let showDistance: CGFloat = 44
+    static let hideDistance: CGFloat = 12
+    static let unreadBottomDistance: CGFloat = 12
+    static let scrollabilityTolerance: CGFloat = 1
+  }
+
   private let peerId: Peer
   private var chatId: Int64
   private var spaceId: Int64?
   private let isPreview: Bool
   private var coordinator: Coordinator
-  static var contextMenuOpen: Bool = false
+  private var isContextMenuOpen = false
   private var lastKnownNavBarHeight: CGFloat = 0
   private var needsContentInsetUpdateAfterContextMenu = false
   private var pendingScrollMessageID: Int64?
+  private var pendingScrollLoadTask: Task<Void, Never>?
   private let sendAnimationScrollState = SendMessageAnimationScrollState()
+  private var scrollAffordanceState = ScrollAffordanceState()
+  private var scrollAffordanceUpdateDepth = 0
+
+  var onScrollAffordanceChanged: ((ScrollAffordanceState) -> Void)? {
+    didSet {
+      onScrollAffordanceChanged?(scrollAffordanceState)
+    }
+  }
 
   init(
     peerId: Peer,
@@ -114,11 +135,14 @@ final class MessagesCollectionView: UICollectionView {
   }
 
   override func didMoveToWindow() {
-    updateContentInsets()
+    super.didMoveToWindow()
     if window == nil {
+      isKeyboardVisible = false
+      keyboardHeight = 0
       cancelSendAnimationScrollAnimations()
       coordinator.detachAvatarOverlay()
     } else {
+      updateContentInsets()
       coordinator.attachAvatarOverlay(over: self, parent: findViewController())
       coordinator.syncAvatarOverlay(animate: false)
     }
@@ -127,11 +151,13 @@ final class MessagesCollectionView: UICollectionView {
   override func layoutSubviews() {
     super.layoutSubviews()
     coordinator.syncAvatarOverlay(animate: false)
+    reconcileScrollAffordance()
   }
 
   deinit {
     NotificationCenter.default.removeObserver(self)
 
+    pendingScrollLoadTask?.cancel()
     cancelSendAnimationScrollAnimations()
     coordinator.dispose()
 
@@ -143,17 +169,77 @@ final class MessagesCollectionView: UICollectionView {
   }
 
   func scrollToBottom() {
-    if !itemsEmpty, shouldScrollToBottom {
+    guard !itemsEmpty else { return }
+
+    let visibleHeight = bounds.height
+    let targetOffsetY = -contentInset.top
+    let currentOffsetY = contentOffset.y
+    let distanceToScroll = abs(currentOffsetY - targetOffsetY)
+
+    if distanceToScroll > visibleHeight * 3 {
+      let intermediateOffsetY = targetOffsetY + (3 * visibleHeight)
+
+      if currentOffsetY > intermediateOffsetY {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        setContentOffset(CGPoint(x: 0, y: intermediateOffsetY), animated: false)
+        layoutIfNeeded()
+        CATransaction.commit()
+      }
+
+      animateScrollToBottom(duration: 0.14)
+    } else {
       safeScrollToTop(animated: true)
     }
   }
 
   func scrollToMessageWhenAvailable(_ messageID: Int64) {
     pendingScrollMessageID = messageID
-    resolvePendingMessageScroll()
+    pendingScrollLoadTask?.cancel()
+
+    guard !resolvePendingMessageScroll() else { return }
+
+    pendingScrollLoadTask = Task { @MainActor [weak self] in
+      guard let self, !Task.isCancelled else { return }
+
+      if coordinator.loadLocalWindowAroundMessage(messageID) {
+        return
+      }
+
+      do {
+        _ = try await Api.realtime.send(.getMessages(
+          peer: peerId,
+          messageIds: [messageID]
+        ))
+      } catch is CancellationError {
+        return
+      } catch {
+        guard pendingScrollMessageID == messageID else { return }
+        pendingScrollMessageID = nil
+        Log.shared.error("Failed to load focused message", error: error)
+        ToastManager.shared.showToast(
+          "Could not load that message",
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
+        )
+        return
+      }
+
+      guard !Task.isCancelled, pendingScrollMessageID == messageID else { return }
+      guard coordinator.loadLocalWindowAroundMessage(messageID) else {
+        pendingScrollMessageID = nil
+        ToastManager.shared.showToast(
+          "Could not load that message",
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
+        )
+        return
+      }
+    }
   }
 
-  fileprivate func resolvePendingMessageScroll() {
+  @discardableResult
+  fileprivate func resolvePendingMessageScroll() -> Bool {
     guard let messageID = pendingScrollMessageID,
           let indexPath = findIndexPath(
             forMessageId: messageID,
@@ -161,9 +247,11 @@ final class MessagesCollectionView: UICollectionView {
             includeThreadAnchor: false
           ),
           isValidIndexPath(indexPath)
-    else { return }
+    else { return false }
 
     pendingScrollMessageID = nil
+    pendingScrollLoadTask?.cancel()
+    pendingScrollLoadTask = nil
     scrollToItem(at: indexPath, at: .centeredVertically, animated: true)
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
       guard let self else { return }
@@ -175,6 +263,7 @@ final class MessagesCollectionView: UICollectionView {
         cell.highlightBubble()
       }
     }
+    return true
   }
 
   private struct PendingSendAnimationComposeInset {
@@ -186,6 +275,70 @@ final class MessagesCollectionView: UICollectionView {
   private var pendingSendAnimationComposeInset: PendingSendAnimationComposeInset?
   private var pendingSendAnimationComposeInsetToken = 0
   private var pinnedHeaderHeight: CGFloat = 0
+
+  private var visualBottomDistance: CGFloat {
+    max(0, contentOffset.y + contentInset.top)
+  }
+
+  private var hasScrollableContent: Bool {
+    contentSize.height + contentInset.top + contentInset.bottom
+      > bounds.height + ScrollAffordanceMetrics.scrollabilityTolerance
+  }
+
+  fileprivate var isAtVisualBottomForUnread: Bool {
+    visualBottomDistance <= ScrollAffordanceMetrics.unreadBottomDistance
+  }
+
+  private func beginScrollAffordanceUpdate() {
+    scrollAffordanceUpdateDepth += 1
+  }
+
+  private func endScrollAffordanceUpdate() {
+    scrollAffordanceUpdateDepth = max(0, scrollAffordanceUpdateDepth - 1)
+    guard scrollAffordanceUpdateDepth == 0 else { return }
+    reconcileScrollAffordance()
+  }
+
+  private func animateWhileSuppressingScrollAffordance(
+    duration: TimeInterval,
+    animations: @escaping () -> Void
+  ) {
+    beginScrollAffordanceUpdate()
+    UIView.animate(
+      withDuration: duration,
+      delay: 0,
+      options: [.allowUserInteraction, .beginFromCurrentState],
+      animations: animations
+    ) { [weak self] _ in
+      self?.endScrollAffordanceUpdate()
+    }
+  }
+
+  fileprivate func reconcileScrollAffordance() {
+    guard !isPreview else { return }
+    guard scrollAffordanceUpdateDepth == 0 else {
+      return
+    }
+
+    let shouldShow: Bool
+    if !hasScrollableContent {
+      shouldShow = false
+    } else if scrollAffordanceState.isVisible {
+      shouldShow = visualBottomDistance > ScrollAffordanceMetrics.hideDistance
+    } else {
+      shouldShow = visualBottomDistance > ScrollAffordanceMetrics.showDistance
+    }
+
+    guard shouldShow != scrollAffordanceState.isVisible else { return }
+    scrollAffordanceState.isVisible = shouldShow
+    onScrollAffordanceChanged?(scrollAffordanceState)
+  }
+
+  fileprivate func setScrollAffordanceHasUnread(_ hasUnread: Bool) {
+    guard hasUnread != scrollAffordanceState.hasUnread else { return }
+    scrollAffordanceState.hasUnread = hasUnread
+    onScrollAffordanceChanged?(scrollAffordanceState)
+  }
 
   var hasDeferredSendComposeInset: Bool {
     pendingSendAnimationComposeInset != nil
@@ -272,12 +425,16 @@ final class MessagesCollectionView: UICollectionView {
     animation: ComposeHeightChangeAnimation,
     scrollToBottomIfNeeded: Bool = true
   ) {
+    let wasAtBottom = !itemsEmpty && shouldScrollToBottom
+    beginScrollAffordanceUpdate()
+    defer { endScrollAffordanceUpdate() }
+
     guard animation.isAnimated else {
       stopComposeInsetAnimationAtPresentation()
       self.composeHeight = composeHeight
       UIView.performWithoutAnimation {
         updateContentInsets()
-        if scrollToBottomIfNeeded, !itemsEmpty, shouldScrollToBottom {
+        if scrollToBottomIfNeeded, wasAtBottom {
           safeScrollToTop(animated: false)
         }
         layoutIfNeeded()
@@ -286,7 +443,6 @@ final class MessagesCollectionView: UICollectionView {
     }
 
     stopComposeInsetAnimationAtPresentation()
-    let wasAtBottom = !itemsEmpty && shouldScrollToBottom
     let previousTopInset = contentInset.top
     let previousOffset = contentOffset
     self.composeHeight = composeHeight
@@ -306,12 +462,18 @@ final class MessagesCollectionView: UICollectionView {
       y: previousOffset.y - insetDelta
     )
 
+    // Keep visibility frozen for the full property-animation lifetime. The outer
+    // suppression below covers model/inset updates; this nested scope is released
+    // by both normal completion and presentation-preserving cancellation.
+    beginScrollAffordanceUpdate()
     sendAnimationScrollState.startComposeInsetAnimation(
       to: targetOffset,
       duration: animation.duration,
       timingParameters: animation.timingParameters,
       in: self
-    )
+    ) { [weak self] in
+      self?.endScrollAffordanceUpdate()
+    }
   }
 
   @discardableResult
@@ -329,7 +491,7 @@ final class MessagesCollectionView: UICollectionView {
 
   static let messagesBottomPadding = 12.0
   func updateContentInsets() {
-    guard !MessagesCollectionView.contextMenuOpen else {
+    guard !isContextMenuOpen else {
       needsContentInsetUpdateAfterContextMenu = true
       return
     }
@@ -382,26 +544,39 @@ final class MessagesCollectionView: UICollectionView {
     contentInset = UIEdgeInsets(top: bottomInset, left: 0, bottom: totalTopInset + topContentPadding, right: 0)
     layoutIfNeeded()
     coordinator.syncAvatarOverlay(animate: false)
+    reconcileScrollAffordance()
   }
 
   private func updateContentInsetsAfterContextMenuIfNeeded(animated: Bool) {
     guard needsContentInsetUpdateAfterContextMenu else { return }
 
     let wasAtBottom = shouldScrollToBottom
-    updateContentInsets()
+    guard animated, wasAtBottom, !itemsEmpty else {
+      beginScrollAffordanceUpdate()
+      defer { endScrollAffordanceUpdate() }
+      updateContentInsets()
+      if wasAtBottom, !itemsEmpty {
+        safeScrollToTop(animated: false)
+      }
+      return
+    }
 
-    if wasAtBottom, !itemsEmpty {
-      safeScrollToTop(animated: animated)
+    beginScrollAffordanceUpdate()
+    updateContentInsets()
+    UIView.animate(
+      withDuration: 0.2,
+      delay: 0,
+      options: [.allowUserInteraction, .beginFromCurrentState]
+    ) {
+      self.safeScrollToTop(animated: false)
+    } completion: { [weak self] _ in
+      self?.endScrollAffordanceUpdate()
     }
   }
 
-  var calculatedThreshold: CGFloat {
-    let baseThreshold = ComposeView
-      .minHeight - ((ComposeView.textViewVerticalMargin * 2) + (MessagesCollectionView.messagesBottomPadding * 2))
-    return isKeyboardVisible ? baseThreshold + keyboardHeight : baseThreshold
+  var shouldScrollToBottom: Bool {
+    visualBottomDistance <= ScrollAffordanceMetrics.showDistance
   }
-
-  var shouldScrollToBottom: Bool { contentOffset.y < calculatedThreshold }
   var itemsEmpty: Bool { coordinator.items.isEmpty }
 
   private func findIndexPath(
@@ -542,25 +717,31 @@ final class MessagesCollectionView: UICollectionView {
     targetOffset: CGPoint,
     duration: TimeInterval
   ) {
+    beginScrollAffordanceUpdate()
     sendAnimationScrollState.animateScroll(
       to: targetOffset,
       duration: duration,
       in: self
-    )
+    ) { [weak self] in
+      self?.endScrollAffordanceUpdate()
+    }
   }
 
   @objc func orientationDidChange(_ notification: Notification) {
     coordinator.clearSizeCache()
 //    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
     DispatchQueue.main.async {
+      guard self.window != nil else { return }
       self.layoutIfNeeded()
       self.coordinator.reconfigureVisibleItemsForCurrentWidth()
       guard !self.isKeyboardVisible else { return }
 
-      UIView.animate(withDuration: 0.3) {
+      let wasAtBottom = self.shouldScrollToBottom
+
+      self.animateWhileSuppressingScrollAffordance(duration: 0.3) {
         self.updateContentInsets()
-        if self.shouldScrollToBottom, !self.itemsEmpty {
-          self.safeScrollToTop(animated: true)
+        if wasAtBottom, !self.itemsEmpty {
+          self.safeScrollToTop(animated: false)
         }
       }
     }
@@ -617,12 +798,6 @@ final class MessagesCollectionView: UICollectionView {
     )
     NotificationCenter.default.addObserver(
       self,
-      selector: #selector(handleScrollToBottom),
-      name: .scrollToBottom,
-      object: nil
-    )
-    NotificationCenter.default.addObserver(
-      self,
       selector: #selector(handleScrollToRepliedMessage(_:)),
       name: Notification.Name("ScrollToRepliedMessage"),
       object: nil
@@ -633,6 +808,9 @@ final class MessagesCollectionView: UICollectionView {
   var keyboardHeight: CGFloat = 0
 
   @objc private func keyboardWillShow(_ notification: Notification) {
+    guard window != nil else { return }
+    let wasAtBottom = shouldScrollToBottom
+
     isKeyboardVisible = true
     guard let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
           let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double
@@ -642,69 +820,55 @@ final class MessagesCollectionView: UICollectionView {
     let keyboardFrameHeight = keyboardFrame.height
     keyboardHeight = keyboardFrameHeight
 
+    beginScrollAffordanceUpdate()
     updateContentInsets()
-    UIView.animate(withDuration: duration) {
-      if self.shouldScrollToBottom, !self.itemsEmpty {
+    UIView.animate(
+      withDuration: duration,
+      delay: 0,
+      options: [.allowUserInteraction, .beginFromCurrentState]
+    ) {
+      if wasAtBottom, !self.itemsEmpty {
         self.safeScrollToTop(animated: false)
       }
+    } completion: { [weak self] _ in
+      self?.endScrollAffordanceUpdate()
     }
   }
 
   @objc private func keyboardWillHide(_ notification: Notification) {
+    guard window != nil else { return }
+    let wasAtBottom = shouldScrollToBottom
+
     isKeyboardVisible = false
     keyboardHeight = 0
     guard let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double else {
       return
     }
 
+    beginScrollAffordanceUpdate()
     updateContentInsets()
-    UIView.animate(withDuration: duration) {
-      if self.shouldScrollToBottom, !self.itemsEmpty {
-        self.safeScrollToTop(animated: true)
+    UIView.animate(
+      withDuration: duration,
+      delay: 0,
+      options: [.allowUserInteraction, .beginFromCurrentState]
+    ) {
+      if wasAtBottom, !self.itemsEmpty {
+        self.safeScrollToTop(animated: false)
       }
+    } completion: { [weak self] _ in
+      self?.endScrollAffordanceUpdate()
     }
   }
 
   @objc private func replyStateChanged(_ notification: Notification) {
     DispatchQueue.main.async {
-      UIView.animate(withDuration: 0.2, delay: 0) {
+      let wasAtBottom = self.shouldScrollToBottom
+      self.animateWhileSuppressingScrollAffordance(duration: 0.2) {
         self.updateContentInsets()
-        if self.shouldScrollToBottom, !self.itemsEmpty {
-          self.safeScrollToTop(animated: true)
+        if wasAtBottom, !self.itemsEmpty {
+          self.safeScrollToTop(animated: false)
         }
       }
-    }
-  }
-
-  @objc private func handleScrollToBottom(_ notification: Notification) {
-    if itemsEmpty {
-      return
-    }
-    let visibleHeight = bounds.height
-
-    let targetOffsetY = -contentInset.top
-
-    let currentOffsetY = contentOffset.y
-    let distanceToScroll = abs(currentOffsetY - targetOffsetY)
-
-    if distanceToScroll > visibleHeight * 3 {
-      let intermediateOffsetY = targetOffsetY + (3 * visibleHeight)
-
-      if currentOffsetY > intermediateOffsetY {
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        setContentOffset(CGPoint(x: 0, y: intermediateOffsetY), animated: false)
-
-        layoutIfNeeded()
-        CATransaction.commit()
-
-        animateScrollToBottom(duration: 0.14)
-
-      } else {
-        animateScrollToBottom(duration: 0.14)
-      }
-    } else {
-      safeScrollToTop(animated: true)
     }
   }
 
@@ -1017,7 +1181,7 @@ private extension MessagesCollectionView {
       willDisplayContextMenu configuration: UIContextMenuConfiguration,
       animator: UIContextMenuInteractionAnimating?
     ) {
-      MessagesCollectionView.contextMenuOpen = true
+      (collectionView as? MessagesCollectionView)?.isContextMenuOpen = true
 
       if collectionContextMenu == nil,
          let int = collectionView.interactions
@@ -1032,7 +1196,7 @@ private extension MessagesCollectionView {
       willEndContextMenuInteraction configuration: UIContextMenuConfiguration,
       animator: UIContextMenuInteractionAnimating?
     ) {
-      MessagesCollectionView.contextMenuOpen = false
+      (collectionView as? MessagesCollectionView)?.isContextMenuOpen = false
 
       if let identifierView = configuration.identifier as? ContextMenuIdentifierUIView {
         identifierView.removeFromSuperview()
@@ -1152,6 +1316,33 @@ private extension MessagesCollectionView {
       return sections[index]
     }
 
+    private func scrollToFirstMessage(in sectionID: MessageListSectionID) {
+      let snapshot = dataSource.snapshot()
+      guard let collectionView = currentCollectionView,
+            snapshot.sectionIdentifiers.contains(sectionID),
+            let firstChronologicalItem = snapshot.itemIdentifiers(inSection: sectionID).last,
+            let indexPath = dataSource.indexPath(for: firstChronologicalItem),
+            indexPath.section < collectionView.numberOfSections,
+            indexPath.item < collectionView.numberOfItems(inSection: indexPath.section)
+      else {
+        return
+      }
+
+      // Both the collection and its messages are inverted. The oldest message is
+      // the section's last item, and physical `.bottom` is the visual top edge.
+      dateSeparatorHideWorkItem?.cancel()
+      setDateSeparators(hidden: false, animated: false)
+      let animated = !UIAccessibility.isReduceMotionEnabled
+      collectionView.scrollToItem(
+        at: indexPath,
+        at: .bottom,
+        animated: animated
+      )
+      if !animated {
+        scheduleHideDateSeparators()
+      }
+    }
+
     private func item(at indexPath: IndexPath) -> MessageListItem? {
       guard let section = listSection(at: indexPath.section),
             indexPath.item >= 0,
@@ -1199,6 +1390,10 @@ private extension MessagesCollectionView {
 
     func setCollapsedMaxId(_ collapsedMaxId: Int64?) {
       viewModel.setCollapsedMaxId(collapsedMaxId)
+    }
+
+    func loadLocalWindowAroundMessage(_ messageID: Int64) -> Bool {
+      viewModel.loadLocalWindowAroundMessage(messageId: messageID)
     }
 
     private static func cell(
@@ -2183,7 +2378,10 @@ private extension MessagesCollectionView {
 
           // Safely get section with bounds checking
           if let section = listSection(at: indexPath.section) {
-            footerView.configure(with: section.dayString ?? "")
+            let sectionID = section.id
+            footerView.configure(with: section.dayString ?? "") { [weak self] in
+              self?.scrollToFirstMessage(in: sectionID)
+            }
           } else {
             // Fallback for invalid section
             footerView.configure(with: "")
@@ -2915,11 +3113,8 @@ private extension MessagesCollectionView {
     }
 
     private func notifyUnreadChanged() {
-      NotificationCenter.default.post(
-        name: .scrollToBottomUnreadChanged,
-        object: nil,
-        userInfo: ["hasUnread": hasUnreadSinceScroll]
-      )
+      (currentCollectionView as? MessagesCollectionView)?
+        .setScrollAffordanceHasUnread(hasUnreadSinceScroll)
     }
     private func presentPhotoGallery(
       for message: FullMessage,
@@ -3006,7 +3201,7 @@ private extension MessagesCollectionView {
     private var sizeCache: [MessageListItem: CGSize] = [:]
     private let maxCacheSize = 1_000
 
-    func createReactionPickerView(for message: Message, at indexPath: IndexPath) -> UIView {
+    func createReactionPickerView(for fullMessage: FullMessage) -> UIView {
       let preferredSkinTone = EmojiSkinTonePreferenceStore.current()
       var seenReactions = Set<String>()
       let reactions = ReactionPickerEmojiUsageStore.suggestedEmojis().compactMap { emoji -> String? in
@@ -3063,8 +3258,14 @@ private extension MessagesCollectionView {
       stackView.translatesAutoresizingMaskIntoConstraints = false
       scrollView.addSubview(stackView)
 
-      for (index, reaction) in reactions.enumerated() {
-        let button = createReactionButton(reaction: reaction, messageId: message.messageId, reactionIndex: index)
+      for reaction in reactions {
+        let button = createReactionButton(
+          reaction: reaction,
+          messageStableId: fullMessage.id,
+          messageId: fullMessage.message.messageId,
+          chatId: fullMessage.message.chatId,
+          randomId: fullMessage.message.randomId
+        )
         stackView.addArrangedSubview(button)
       }
 
@@ -3094,7 +3295,13 @@ private extension MessagesCollectionView {
       return containerView
     }
 
-    private func createReactionButton(reaction: String, messageId: Int64, reactionIndex: Int) -> UIButton {
+    private func createReactionButton(
+      reaction: String,
+      messageStableId: Int64,
+      messageId: Int64,
+      chatId: Int64,
+      randomId: Int64?
+    ) -> UIButton {
       let button = UIButton(type: .system)
       button.translatesAutoresizingMaskIntoConstraints = false
 
@@ -3117,10 +3324,6 @@ private extension MessagesCollectionView {
 
       button.configuration = configuration
 
-      // Use message ID for reliable lookup across sectioned data
-      // Format: (messageId % safe_range) * 1000 + reactionIndex
-      let baseTag = Int(messageId % Int64(Int.max / 10_000)) // Ensure we don't overflow
-      button.tag = baseTag * 1_000 + reactionIndex
       button.accessibilityLabel = reaction
 
       button.layer.cornerRadius = 19
@@ -3130,9 +3333,23 @@ private extension MessagesCollectionView {
         button.heightAnchor.constraint(equalToConstant: 38),
       ])
 
-      button.addTarget(self, action: #selector(handleReactionButtonTap(_:)), for: .touchUpInside)
+      button.addAction(UIAction { [weak self, weak button] _ in
+        guard let self, let button else { return }
+        self.handleReactionButtonTap(
+          button,
+          reaction: reaction,
+          messageStableId: messageStableId,
+          messageId: messageId,
+          chatId: chatId,
+          randomId: randomId
+        )
+      }, for: .touchUpInside)
       button.addTarget(self, action: #selector(buttonTouchDown(_:)), for: .touchDown)
-      button.addTarget(self, action: #selector(buttonTouchUp(_:)), for: [.touchUpOutside, .touchCancel])
+      button.addTarget(
+        self,
+        action: #selector(buttonTouchUp(_:)),
+        for: [.touchUpInside, .touchUpOutside, .touchCancel, .touchDragExit]
+      )
 
       return button
     }
@@ -3142,49 +3359,57 @@ private extension MessagesCollectionView {
       generator.prepare()
       generator.impactOccurred()
 
-      UIView.animate(withDuration: 0.15) {
-        sender.transform = CGAffineTransform(scaleX: 1.3, y: 1.3)
-        sender.backgroundColor = ColorManager.shared.reactionItemColor.withAlphaComponent(0.5)
+      let updates = {
+        sender.transform = CGAffineTransform(scaleX: 0.95, y: 0.95)
+        sender.backgroundColor = ColorManager.shared.reactionItemColor.withAlphaComponent(0.3)
+      }
+      guard !UIAccessibility.isReduceMotionEnabled else {
+        UIView.performWithoutAnimation(updates)
+        return
+      }
+      UIView.animate(withDuration: 0.1, delay: 0, options: [.allowUserInteraction, .beginFromCurrentState]) {
+        updates()
       }
     }
 
     @objc private func buttonTouchUp(_ sender: UIButton) {
-      UIView.animate(withDuration: 0.22) {
+      let updates = {
         sender.transform = .identity
         sender.backgroundColor = .clear
       }
-    }
-
-    @objc private func handleReactionButtonTap(_ sender: UIButton) {
-      // Extract message ID from tag (format: (messageId % safe_range) * 1000 + reactionIndex)
-      guard sender.tag >= 1_000 else { return }
-
-      let baseTag = sender.tag / 1_000 // Get the base message ID part
-
-      // Find the message by searching through all sections
-      var targetMessage: FullMessage?
-      for section in viewModel.sections {
-        for message in section.messages {
-          let messageBaseTag = Int(message.message.messageId % Int64(Int.max / 10_000))
-          if messageBaseTag == baseTag {
-            targetMessage = message
-            break
-          }
-        }
-        if targetMessage != nil { break }
-      }
-
-      guard let fullMessage = targetMessage else {
-        print("Could not find message for tag: \(sender.tag), baseTag: \(baseTag)")
+      guard !UIAccessibility.isReduceMotionEnabled else {
+        UIView.performWithoutAnimation(updates)
         return
       }
+      UIView.animate(
+        withDuration: 0.16,
+        delay: 0,
+        usingSpringWithDamping: 0.82,
+        initialSpringVelocity: 0.4,
+        options: [.allowUserInteraction, .beginFromCurrentState],
+        animations: updates
+      )
+    }
+
+    private func handleReactionButtonTap(
+      _ sender: UIButton,
+      reaction emoji: String,
+      messageStableId: Int64,
+      messageId: Int64,
+      chatId: Int64,
+      randomId: Int64?
+    ) {
+      buttonTouchUp(sender)
+      (currentCollectionView as? MessagesCollectionView)?.isContextMenuOpen = false
+      dismissContextMenuIfNeeded()
+      guard let fullMessage = currentFullMessage(
+        stableId: messageStableId,
+        messageId: messageId,
+        chatId: chatId,
+        randomId: randomId
+      ) else { return }
       let message = fullMessage.message
 
-      guard let emoji = sender.configuration?.title ?? sender.accessibilityLabel else { return }
-
-      buttonTouchUp(sender)
-      MessagesCollectionView.contextMenuOpen = false
-      dismissContextMenuIfNeeded()
       if fullMessage.reactions
         .filter({ $0.reaction.emoji == emoji && $0.reaction.userId == Auth.shared.getCurrentUserId() ?? 0 })
         .first != nil
@@ -3204,6 +3429,24 @@ private extension MessagesCollectionView {
         )))
         ReactionPickerEmojiUsageStore.recordPick(emoji)
       }
+    }
+
+    private func currentFullMessage(
+      stableId: Int64,
+      messageId: Int64,
+      chatId: Int64,
+      randomId: Int64?
+    ) -> FullMessage? {
+      for section in viewModel.sections {
+        if let message = section.messages.first(where: {
+          $0.id == stableId ||
+            ($0.message.messageId == messageId && $0.message.chatId == chatId) ||
+            (randomId != nil && $0.message.randomId == randomId && $0.message.chatId == chatId)
+        }) {
+          return message
+        }
+      }
+      return nil
     }
 
     func collectionView(
@@ -3359,7 +3602,7 @@ private extension MessagesCollectionView {
         }
       }
 
-      let reactionPickerView = createReactionPickerView(for: message, at: indexPath)
+      let reactionPickerView = createReactionPickerView(for: fullMessage)
 
       let isOutgoing = message.out == true
       let alignment: ContextMenuAccessoryAlignment = isOutgoing ? .trailing : .leading
@@ -3413,7 +3656,7 @@ private extension MessagesCollectionView {
             actions.append(copyPhotoAction)
           }
 
-          let cancelAction = UIAction(title: "Cancel", attributes: .destructive) { [weak self] _ in
+          let cancelAction = UIAction(title: "Cancel", attributes: .destructive) { _ in
             if let transactionId = message.transactionId, !transactionId.isEmpty {
               Log.shared.debug("Canceling message with transaction ID: \(transactionId)")
 
@@ -3570,7 +3813,11 @@ private extension MessagesCollectionView {
 
         let integrationActions = [willDoAction, linearIssueAction].compactMap { $0 }
         if !integrationActions.isEmpty {
-          let integrationsMenu = UIMenu(title: "", options: .displayInline, children: integrationActions)
+          let integrationsMenu = UIMenu(
+            title: "Actions",
+            image: UIImage(systemName: "ellipsis.circle"),
+            children: integrationActions
+          )
           menuChildren.append(integrationsMenu)
         }
 
@@ -3867,7 +4114,6 @@ private extension MessagesCollectionView {
 
     private var isUserDragging = false
     private var isUserScrollInEffect = false
-    private var wasPreviouslyAtBottom = false
     private var isAtBottomForUnread = true
     private var lastSeenMessageId: Int64 = 0
     private var hasUnreadSinceScroll = false
@@ -3894,6 +4140,11 @@ private extension MessagesCollectionView {
       scheduleMediaWarmupForVisibleAndNearby(reason: "scroll_deceleration_end")
     }
 
+    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+      scheduleHideDateSeparators()
+      scheduleMediaWarmupForVisibleAndNearby(reason: "scroll_animation_end")
+    }
+
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
       let isUserInteractingWithScrollView = scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating
 
@@ -3909,21 +4160,12 @@ private extension MessagesCollectionView {
 
       guard let messagesCollectionView = currentCollectionView as? MessagesCollectionView else { return }
 
-      let threshold = messagesCollectionView.calculatedThreshold
-      let isAtBottom = scrollView.contentOffset.y > -threshold
+      messagesCollectionView.reconcileScrollAffordance()
+      let isAtBottom = messagesCollectionView.isAtVisualBottomForUnread
       isAtBottomForUnread = isAtBottom
 
       if isAtBottom {
         markMessagesSeen()
-      }
-
-      if isAtBottom != wasPreviouslyAtBottom, messages.count > 12 {
-        NotificationCenter.default.post(
-          name: .scrollToBottomChanged,
-          object: nil,
-          userInfo: ["isAtBottom": isAtBottom]
-        )
-        wasPreviouslyAtBottom = isAtBottom
       }
 
       if isUserScrollInEffect {
@@ -4263,11 +4505,6 @@ private extension MessagesCollectionView {
       }
     }
   }
-}
-
-extension Notification.Name {
-  static let scrollToBottomChanged = Notification.Name("scrollToBottomChanged")
-  static let scrollToBottomUnreadChanged = Notification.Name("scrollToBottomUnreadChanged")
 }
 
 // MARK: - NotionTaskManagerDelegate Extension

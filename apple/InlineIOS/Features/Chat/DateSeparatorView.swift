@@ -6,12 +6,14 @@ final class DateSeparatorView: UICollectionReusableView {
 
   // Performance optimization: Cache the current date string to avoid unnecessary updates
   private var currentDateString: String = ""
+  private var onTap: (() -> Void)?
 
   private let label: UILabel = {
     let label = UILabel()
     label.font = UIFont.systemFont(ofSize: 12, weight: .regular)
     label.textColor = UIColor.label
     label.textAlignment = .center
+    label.isAccessibilityElement = false
     label.translatesAutoresizingMaskIntoConstraints = false
     return label
   }()
@@ -21,6 +23,14 @@ final class DateSeparatorView: UICollectionReusableView {
     let effectView = UIVisualEffectView(effect: blurEffect)
     effectView.translatesAutoresizingMaskIntoConstraints = false
     return effectView
+  }()
+
+  private lazy var button: UIButton = {
+    let button = UIButton(type: .custom)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.accessibilityTraits = .button
+    button.addTarget(self, action: #selector(didTap), for: .touchUpInside)
+    return button
   }()
 
   override init(frame: CGRect) {
@@ -36,6 +46,7 @@ final class DateSeparatorView: UICollectionReusableView {
   private func setupViews() {
     addSubview(blurEffectView)
     blurEffectView.contentView.addSubview(label)
+    addSubview(button)
 
     // Counter the collection view's inversion to appear right-side up
     blurEffectView.transform = CGAffineTransform(scaleX: 1, y: -1)
@@ -51,6 +62,11 @@ final class DateSeparatorView: UICollectionReusableView {
       label.leadingAnchor.constraint(equalTo: blurEffectView.contentView.leadingAnchor, constant: 8),
       label.trailingAnchor.constraint(equalTo: blurEffectView.contentView.trailingAnchor, constant: -8),
       label.centerYAnchor.constraint(equalTo: blurEffectView.contentView.centerYAnchor),
+
+      button.leadingAnchor.constraint(equalTo: blurEffectView.leadingAnchor),
+      button.trailingAnchor.constraint(equalTo: blurEffectView.trailingAnchor),
+      button.topAnchor.constraint(equalTo: topAnchor),
+      button.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
   }
 
@@ -62,7 +78,11 @@ final class DateSeparatorView: UICollectionReusableView {
     blurEffectView.clipsToBounds = true
   }
 
-  func configure(with dateString: String) {
+  func configure(with dateString: String, onTap: (() -> Void)? = nil) {
+    self.onTap = onTap
+    button.isEnabled = onTap != nil
+    button.accessibilityLabel = onTap == nil ? nil : "Show first message from \(dateString)"
+
     // Performance optimization: Only update if the date string actually changed
     guard currentDateString != dateString else { return }
 
@@ -81,9 +101,16 @@ final class DateSeparatorView: UICollectionReusableView {
     }
   }
 
+  @objc private func didTap() {
+    onTap?()
+  }
+
   override func prepareForReuse() {
     super.prepareForReuse()
     currentDateString = ""
+    onTap = nil
+    button.isEnabled = false
+    button.accessibilityLabel = nil
     label.text = ""
     alpha = 1
   }
