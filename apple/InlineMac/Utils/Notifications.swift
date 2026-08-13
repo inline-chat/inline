@@ -39,6 +39,14 @@ extension NotificationsManager: UNUserNotificationCenterDelegate {
   ) {
     log.debug("willPresent called for \(notification)")
 
+#if DEBUG || DEBUG_BUILD
+    if notification.request.content.userInfo["playgroundNotification"] as? Bool == true {
+      let playsSound = notification.request.content.userInfo["playgroundSoundEnabled"] as? Bool == true
+      completionHandler(playsSound ? [.banner, .sound] : [.banner])
+      return
+    }
+#endif
+
     // Don't alert the user for other types.
     completionHandler([])
   }

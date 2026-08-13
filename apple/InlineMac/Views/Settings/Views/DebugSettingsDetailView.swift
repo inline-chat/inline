@@ -56,6 +56,19 @@ struct DebugSettingsDetailView: View {
             description: "Open the internal macOS developer tools window."
           )
         }
+
+#if DEBUG || DEBUG_BUILD
+        LabeledContent {
+          Button("Open") {
+            DeveloperPlaygroundWindowController.show()
+          }
+        } label: {
+          SettingsRowLabel(
+            "Playground",
+            description: "Inspect UI components and fixture combinations in a standalone window."
+          )
+        }
+#endif
       } header: {
         SettingsSectionHeader("Tools")
       }

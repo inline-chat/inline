@@ -623,6 +623,18 @@ final class AppMenu: NSObject {
     macDevtoolsItem.image = NSImage(systemSymbolName: "ladybug", accessibilityDescription: nil)
     windowMenu.addItem(macDevtoolsItem)
 
+#if DEBUG || DEBUG_BUILD
+    let playgroundItem = NSMenuItem(
+      title: "Open Playground",
+      action: #selector(openDeveloperPlayground(_:)),
+      keyEquivalent: "p"
+    )
+    playgroundItem.keyEquivalentModifierMask = [.command, .option]
+    playgroundItem.target = self
+    playgroundItem.image = NSImage(systemSymbolName: "square.grid.2x2", accessibilityDescription: nil)
+    windowMenu.addItem(playgroundItem)
+#endif
+
     windowMenu.addItem(NSMenuItem.separator())
 
     windowMenu.addItem(
@@ -867,6 +879,10 @@ final class AppMenu: NSObject {
   }
 
 #if DEBUG || DEBUG_BUILD
+  @objc private func openDeveloperPlayground(_ sender: Any?) {
+    DeveloperPlaygroundWindowController.show(sender: sender)
+  }
+
   @objc private func openOnboardingForDebug(_ sender: Any?) {
     guard let dependencies, dependencies.auth.currentUserId != nil else { return }
     dependencies.viewModel.openOnboardingForDebug()
