@@ -180,7 +180,8 @@ struct HomeView: View {
           model: searchModel,
           openChat: openSearchChat,
           openMessage: openSearchMessage,
-          openGlobalUser: openSearchGlobalUser
+          openGlobalUser: openSearchGlobalUser,
+          addToInbox: addSearchResultToInbox
         )
       } else {
         ProgressView()
@@ -204,6 +205,23 @@ struct HomeView: View {
         router.push(.chat(peer: .user(id: apiUser.id)))
       } catch {
         Log.shared.error("Failed to open a private chat with \(apiUser.anyName)", error: error)
+      }
+    }
+  }
+
+  private func addSearchResultToInbox(_ peer: Peer) {
+    Task(priority: .userInitiated) {
+      do {
+        _ = try await InboxMembershipService.shared.open(peer: peer)
+      } catch is CancellationError {
+        return
+      } catch {
+        Log.shared.error("Failed to add Search result to Inbox", error: error)
+        ToastManager.shared.showToast(
+          "Could not add to Inbox",
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
+        )
       }
     }
   }
