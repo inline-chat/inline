@@ -40,12 +40,16 @@ struct MainWindowRootView: View {
     self.nav3 = nav3
     self.keyMonitor = keyMonitor
     self.windowID = windowID
-    let sidebarMode: SidebarViewModel.ContentMode = AppSettings.shared.sidebarAsInbox ? .inbox : .chatList
+    let settings = AppSettings.shared
+    settings.resolveSidebarModeForCurrentAccount()
+    let sidebarMode: SidebarViewModel.ContentMode = settings.sidebarAsInbox ? .inbox : .chatList
+    let sidebarSort: SidebarSortMode = settings.sidebarAsInbox ? settings.sidebarSort : .recentActivity
     _sidebarViewModel = State(initialValue: SidebarViewModel(
       db: AppDatabase.shared,
       startsObserving: initialTopLevelRoute == .main,
       selectedSpaceId: nav3.selectedSpaceId,
-      mode: sidebarMode
+      mode: sidebarMode,
+      sortMode: sidebarSort
     ))
     _topLevelRoute = State(initialValue: initialTopLevelRoute)
   }
@@ -153,8 +157,13 @@ struct MainWindowRootView: View {
 
   private func syncTopLevelRoute(_ route: TopLevelRoute) {
     if route == .main {
+      AppSettings.shared.resolveSidebarModeForCurrentAccount()
       MacPermissions.ensureNotificationAuthorizationIfNeeded()
-      sidebarViewModel.start(selectedSpaceId: nav3.selectedSpaceId, mode: sidebarMode)
+      sidebarViewModel.start(
+        selectedSpaceId: nav3.selectedSpaceId,
+        mode: sidebarMode,
+        sortMode: sidebarSort
+      )
       if let dependencies {
         dependencies.session.fetchInitialDataIfNeeded(dependencies: dependencies)
       }
@@ -195,6 +204,10 @@ struct MainWindowRootView: View {
 
   private var sidebarMode: SidebarViewModel.ContentMode {
     AppSettings.shared.sidebarAsInbox ? .inbox : .chatList
+  }
+
+  private var sidebarSort: SidebarSortMode {
+    AppSettings.shared.sidebarAsInbox ? AppSettings.shared.sidebarSort : .recentActivity
   }
 }
 

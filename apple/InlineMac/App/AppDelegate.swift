@@ -157,10 +157,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
       "showSidebarMessagePreview": true,
       "includeSpaceChatsInHomeSidebar": true,
+      AppSettings.sidebarItemSizeKey: SidebarItemSize.standard.rawValue,
+      AppSettings.sidebarModeKey: SidebarMode.inbox.rawValue,
+      AppSettings.sidebarSortKey: SidebarSortMode.openedOrder.rawValue,
       AppSettings.sidebarCleanupIntervalKey: SidebarCleanupInterval.defaultValue.rawValue,
       AppSettings.messageDoubleClickActionKey: MessageGestureAction.defaultDoubleClick.rawValue,
       AppSettings.messageHoldActionKey: MessageGestureAction.defaultHold.rawValue,
-      ExperimentalFeatureFlags.sidebarAsInboxKey: true,
     ])
   }
 
@@ -726,8 +728,7 @@ extension AppDelegate {
   func resolvePeerFromNotification(_ userInfo: [String: Any], threadIdentifier: String) -> Peer? {
     let coercedThreadId = coerceThreadId(userInfo["threadId"]) ?? coerceThreadId(threadIdentifier)
     if let isThread = userInfo["isThread"] as? Bool,
-       isThread
-    {
+       isThread {
       if let threadId = coercedThreadId {
         return .thread(id: threadId)
       }

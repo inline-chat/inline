@@ -291,6 +291,7 @@ final class MainWindowSessionRefresher {
 
       do {
         try await realtime.send(.getMe())
+        AppSettings.shared.resolveSidebarModeForCurrentAccount()
       } catch is CancellationError {
         return
       } catch {

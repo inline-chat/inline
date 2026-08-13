@@ -158,28 +158,31 @@ struct SidebarView: View {
         Task { await gridStore.loadHome() }
       }
     }
-    .onChange(of: settings.sidebarAsInbox, initial: true) { _, isEnabled in
-      if isEnabled {
+    .onChange(of: settings.sidebarMode, initial: true) { _, mode in
+      resetSidebarVisibility()
+      if mode == .inbox {
         isArchiveVisible = false
-      } else {
-        resetInboxVisibility()
       }
       sidebarDrag.cancel()
       syncSource(spaceId: nav.selectedSpaceId)
-      refreshEphemeralChatScope(selectedPeer)
+      refreshEphemeralChatScope(preferredTemporarySidebarPeer)
       refreshSidebarCleanup()
+    }
     .onChange(of: auth.currentUserId, initial: true) { oldUserID, userID in
       if oldUserID != userID {
         cancelSidebarDropImports()
       }
+      settings.resolveSidebarModeForCurrentAccount()
       appKitExternalDropGeneration = UUID()
       syncAppKitPresentationState(userID: userID)
-    }
     }
     .onChange(of: settings.includeSpaceChatsInHomeSidebar, initial: true) { _, includeSpaceChats in
       syncUnreadCountsScope(spaceId: nav.selectedSpaceId, includeSpaceChatsInHome: includeSpaceChats)
       viewModel.setIncludeSpaceChatsInHome(includeSpaceChats)
-      refreshEphemeralChatScope(selectedPeer)
+      refreshEphemeralChatScope(preferredTemporarySidebarPeer)
+    }
+    .onChange(of: effectiveSidebarSort, initial: true) { _, sortMode in
+      viewModel.setSortMode(sortMode)
     }
     .onChange(of: settings.sidebarCleanupInterval, initial: true) { _, _ in
       refreshSidebarCleanup()
@@ -922,9 +925,10 @@ struct SidebarView: View {
     SidebarFooterView(
       isArchiveActive: isArchiveVisible,
       showsArchive: settings.sidebarAsInbox == false,
-      showPreview: $settings.showSidebarMessagePreview,
-      includeSpaceChatsInHome: $settings.includeSpaceChatsInHomeSidebar,
-      sidebarAsInbox: $settings.sidebarAsInbox,
+      itemSize: $settings.sidebarItemSize,
+      sortMode: $settings.sidebarSort,
+      cleanupInterval: $settings.sidebarCleanupInterval,
+      sidebarMode: $settings.sidebarMode,
       onToggleArchive: {
         guard settings.sidebarAsInbox == false else { return }
         isArchiveVisible.toggle()
@@ -1067,8 +1071,9 @@ struct SidebarView: View {
     }
   }
 
-    let items = inboxOrderedItems
-    guard items.isEmpty == false else { return nil }
+  private var effectiveSidebarSort: SidebarSortMode {
+    settings.sidebarMode == .allChats ? .recentActivity : settings.sidebarSort
+  }
 
   private func toggleAppKitThreadParent(_ id: ChatListItem.Identifier) {
     let visibleRowsBefore = appKitRows.count
@@ -2234,6 +2239,9 @@ struct SidebarView: View {
   }
 
   private func syncSource(spaceId: Int64?) {
+    // Establish ordering before a new observation can synchronously publish so
+    // a mode change never presents one frame in the previous sort policy.
+    viewModel.setSortMode(effectiveSidebarSort)
     let mode = settings.sidebarAsInbox ? SidebarViewModel.ContentMode.inbox : .chatList
 
     if let spaceId {
@@ -2425,12 +2433,14 @@ private struct SidebarInboxActionRow: View {
 
   private var backgroundColor: Color {
     if selected {
-      colorScheme == .dark ? .white.opacity(0.1) : .black.opacity(0.07)
-    } else if isHovered {
-      colorScheme == .dark ? .white.opacity(0.06) : .black.opacity(0.05)
-    } else {
-      .clear
+      if colorScheme == .dark { return .white.opacity(0.1) }
+      return .black.opacity(0.07)
     }
+    if isHovered {
+      if colorScheme == .dark { return .white.opacity(0.06) }
+      return .black.opacity(0.05)
+    }
+    return .clear
   }
 
   private var unreadAccessibilityValue: Text {
@@ -2482,12 +2492,14 @@ private struct SidebarGridRow: View {
 
   private var backgroundColor: Color {
     if selected {
-      colorScheme == .dark ? .white.opacity(0.1) : .black.opacity(0.07)
-    } else if isHovered {
-      colorScheme == .dark ? .white.opacity(0.06) : .black.opacity(0.05)
-    } else {
-      .clear
+      if colorScheme == .dark { return .white.opacity(0.1) }
+      return .black.opacity(0.07)
     }
+    if isHovered {
+      if colorScheme == .dark { return .white.opacity(0.06) }
+      return .black.opacity(0.05)
+    }
+    return .clear
   }
 }
 
@@ -2536,12 +2548,6 @@ private struct SidebarActionRowIcon: View {
       .font(.system(size: 13, weight: .medium))
       .foregroundStyle(.secondary)
       .frame(width: size.iconSize, height: size.iconSize)
-      .background {
-        if size == .large {
-          Circle()
-            .fill(.quinary)
-        }
-      }
   }
 }
 
@@ -2579,7 +2585,7 @@ private struct SidebarProminentUnreadBadge: View, Equatable {
   }
 }
 
-private struct SidebarSeparatorRow: View {
+struct SidebarSeparatorRow: View {
   static let verticalSpacing: CGFloat = 6
   static let lineHeight: CGFloat = 1
   static let totalHeight = verticalSpacing * 2 + lineHeight
@@ -2802,20 +2808,9 @@ private struct SidebarNewThreadRow: View {
     .animation(.smoothSnappy, value: size)
   }
 
-  @ViewBuilder
   private var icon: some View {
-    if size == .large {
-      Circle()
-        .fill(.quinary)
-        .overlay {
-          Image(systemName: "square.and.pencil")
-            .font(.system(size: iconSize * 0.42, weight: .regular))
-            .foregroundStyle(.secondary)
-        }
-    } else {
-      Image(systemName: "square.and.pencil")
-        .font(.system(size: 13, weight: .regular))
-    }
+    Image(systemName: "square.and.pencil")
+      .font(.system(size: 13, weight: .regular))
   }
 
   private var background: some View {

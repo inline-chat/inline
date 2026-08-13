@@ -83,6 +83,7 @@ final class SidebarViewModel {
   @ObservationIgnored private var contactsCancellable: AnyCancellable?
   @ObservationIgnored private var spacesCancellable: AnyCancellable?
   @ObservationIgnored private var includeSpaceChatsInHome = true
+  @ObservationIgnored private var sortMode = SidebarSortMode.openedOrder
   @ObservationIgnored private var started = false
 
   private enum Source: Equatable {
@@ -106,21 +107,31 @@ final class SidebarViewModel {
         spaceId
       }
     }
+
   }
 
   init(
     db: AppDatabase,
     startsObserving: Bool = true,
     selectedSpaceId: Int64? = nil,
-    mode: ContentMode = .chatList
+    mode: ContentMode = .chatList,
+    sortMode: SidebarSortMode = .openedOrder
   ) {
     self.db = db
+    self.sortMode = sortMode
     if startsObserving {
-      start(selectedSpaceId: selectedSpaceId, mode: mode)
+      start(selectedSpaceId: selectedSpaceId, mode: mode, sortMode: sortMode)
     }
   }
 
-  func start(selectedSpaceId: Int64?, mode: ContentMode = .chatList) {
+  func start(
+    selectedSpaceId: Int64?,
+    mode: ContentMode = .chatList,
+    sortMode: SidebarSortMode? = nil
+  ) {
+    if let sortMode {
+      self.sortMode = sortMode
+    }
     if started == false {
       started = true
       observeSpaces()
@@ -156,6 +167,12 @@ final class SidebarViewModel {
     refreshItems()
   }
 
+  func setSortMode(_ sortMode: SidebarSortMode) {
+    guard self.sortMode != sortMode else { return }
+    self.sortMode = sortMode
+    refreshItems()
+  }
+
   private func bindSource(_ source: Source) {
     guard self.source != source else { return }
     self.source = source
@@ -171,15 +188,15 @@ final class SidebarViewModel {
     errorText = nil
 
     switch source {
-      case .home(.chatList):
-        bindHomeChats()
-      case let .space(spaceId, .chatList):
-        bindSpaceChats(spaceId)
-        bindSpaceContacts(spaceId)
-      case .home(.inbox):
-        bindInboxItems(spaceId: nil)
-      case let .space(spaceId, .inbox):
-        bindInboxItems(spaceId: spaceId)
+    case .home(.chatList):
+      bindHomeChats()
+    case let .space(spaceId, .chatList):
+      bindSpaceChats(spaceId)
+      bindSpaceContacts(spaceId)
+    case .home(.inbox):
+      bindInboxItems(spaceId: nil)
+    case let .space(spaceId, .inbox):
+      bindInboxItems(spaceId: spaceId)
     }
   }
 
@@ -227,11 +244,11 @@ final class SidebarViewModel {
           guard let self else { return }
 
           switch completion {
-            case .finished:
-              break
-            case let .failure(error):
-              errorText = error.localizedDescription
-              log.error("Sidebar observation failed: \(error.localizedDescription)")
+          case .finished:
+            break
+          case let .failure(error):
+            errorText = error.localizedDescription
+            log.error("Sidebar observation failed: \(error.localizedDescription)")
           }
         },
         receiveValue: { [weak self] chats in
@@ -349,10 +366,10 @@ final class SidebarViewModel {
           guard let self else { return }
 
           switch completion {
-            case .finished:
-              break
-            case let .failure(error):
-              log.error("Sidebar spaces observation failed: \(error.localizedDescription)")
+          case .finished:
+            break
+          case let .failure(error):
+            log.error("Sidebar spaces observation failed: \(error.localizedDescription)")
           }
         },
         receiveValue: { [weak self] spaces in
@@ -423,9 +440,11 @@ final class SidebarViewModel {
       let pinned1 = lhs.dialog?.pinned ?? false
       let pinned2 = rhs.dialog?.pinned ?? false
       if pinned1 != pinned2 { return pinned1 }
-      if pinned1, pinned2 {
+
+      if sortMode == .openedOrder, pinned1, pinned2 {
         return stableOrder(lhs, rhs)
       }
+
       let date1 = sortDate(for: lhs)
       let date2 = sortDate(for: rhs)
       if date1 == date2 {
@@ -437,19 +456,19 @@ final class SidebarViewModel {
 
   private var isInboxMode: Bool {
     switch source {
-      case .home(.inbox), .space(_, .inbox):
-        true
-      case .home(.chatList), .space(_, .chatList), nil:
-        false
+    case .home(.inbox), .space(_, .inbox):
+      true
+    case .home(.chatList), .space(_, .chatList), nil:
+      false
     }
   }
 
   private var isHomeSource: Bool {
     switch source {
-      case .home:
-        true
-      case .space, nil:
-        false
+    case .home:
+      true
+    case .space, nil:
+      false
     }
   }
 
@@ -458,11 +477,21 @@ final class SidebarViewModel {
       let pinned1 = lhs.dialog?.pinned ?? false
       let pinned2 = rhs.dialog?.pinned ?? false
       if pinned1 != pinned2 { return pinned1 }
-      if pinned1, pinned2 {
-        return ordered(lhs.dialog?.pinnedOrder, before: rhs.dialog?.pinnedOrder, lhs: lhs, rhs: rhs)
-      }
 
-      return ordered(lhs.dialog?.order, before: rhs.dialog?.order, lhs: lhs, rhs: rhs)
+      switch sortMode {
+      case .openedOrder:
+        if pinned1, pinned2 {
+          return ordered(lhs.dialog?.pinnedOrder, before: rhs.dialog?.pinnedOrder, lhs: lhs, rhs: rhs)
+        }
+        return ordered(lhs.dialog?.order, before: rhs.dialog?.order, lhs: lhs, rhs: rhs)
+      case .recentActivity:
+        let lhsActivity = sortDate(for: lhs)
+        let rhsActivity = sortDate(for: rhs)
+        if lhsActivity != rhsActivity {
+          return lhsActivity > rhsActivity
+        }
+        return stableOrder(lhs, rhs)
+      }
     }
   }
 
@@ -473,19 +502,24 @@ final class SidebarViewModel {
     return lhs.id.kind.rawValue > rhs.id.kind.rawValue
   }
 
-  private func ordered(_ lhsOrder: String?, before rhsOrder: String?, lhs: ChatListItem, rhs: ChatListItem) -> Bool {
+  private func ordered(
+    _ lhsOrder: String?,
+    before rhsOrder: String?,
+    lhs: ChatListItem,
+    rhs: ChatListItem
+  ) -> Bool {
     switch (lhsOrder, rhsOrder) {
-      case let (lhsOrder?, rhsOrder?):
-        if lhsOrder != rhsOrder {
-          return lhsOrder < rhsOrder
-        }
-        return stableOrder(lhs, rhs)
-      case (_?, nil):
-        return true
-      case (nil, _?):
-        return false
-      case (nil, nil):
-        return stableOrder(lhs, rhs)
+    case let (lhsOrder?, rhsOrder?):
+      if lhsOrder != rhsOrder {
+        return lhsOrder < rhsOrder
+      }
+      return stableOrder(lhs, rhs)
+    case (_?, nil):
+      return true
+    case (nil, _?):
+      return false
+    case (nil, nil):
+      return stableOrder(lhs, rhs)
     }
   }
 

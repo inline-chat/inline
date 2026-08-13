@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-enum SidebarOrderLane: String {
+enum SidebarOrderLane: String, Sendable {
   case normal
   case pinned
 

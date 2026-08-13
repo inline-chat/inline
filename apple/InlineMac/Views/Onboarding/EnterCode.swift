@@ -143,6 +143,12 @@ struct OnboardingEnterCode: View {
           Log.shared.error("Failed to save user", error: error)
         }
 
+        await MainActor.run {
+          AppSettings.shared.resolveSidebarModeForAccount(
+            createdAt: Date(timeIntervalSince1970: TimeInterval(result.user.date))
+          )
+        }
+
         DispatchQueue.main.async {
           onboardingViewModel.navigateAfterLogin(pendingSetup: result.user.pendingSetup == true)
         }

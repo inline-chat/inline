@@ -32,9 +32,10 @@ enum SidebarFooterMetrics {
 struct SidebarFooterView: View {
   let isArchiveActive: Bool
   let showsArchive: Bool
-  @Binding var showPreview: Bool
-  @Binding var includeSpaceChatsInHome: Bool
-  @Binding var sidebarAsInbox: Bool
+  @Binding var itemSize: SidebarItemSize
+  @Binding var sortMode: SidebarSortMode
+  @Binding var cleanupInterval: SidebarCleanupInterval
+  @Binding var sidebarMode: SidebarMode
 
   let onToggleArchive: () -> Void
   let onSearch: () -> Void
@@ -116,20 +117,16 @@ struct SidebarFooterView: View {
       }
 
       slot {
-        SidebarFooterMenu(
-          symbolName: "line.3.horizontal.decrease",
-          accessibilityLabel: "View options",
-          tint: iconTint
-        ) {
-          Button {
-            showPreview.toggle()
-          } label: {
-            Text(showPreview ? "Hide Message Previews" : "Show Message Previews")
-          }
-
-          Toggle("Include Space Chats in Home", isOn: $includeSpaceChatsInHome)
-          Toggle("Sidebar as Inbox", isOn: $sidebarAsInbox)
-        }
+        SidebarViewOptionsMenuButton(
+          itemSize: $itemSize,
+          sortMode: $sortMode,
+          cleanupInterval: $cleanupInterval,
+          sidebarMode: $sidebarMode
+        )
+        .frame(
+          width: SidebarFooterMetrics.buttonSize,
+          height: SidebarFooterMetrics.buttonSize
+        )
       }
 
       slot {

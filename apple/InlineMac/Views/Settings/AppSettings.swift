@@ -1,6 +1,8 @@
 import AppKit
+import Auth
 import Combine
 import Foundation
+import GRDB
 import InlineKit
 import InlineMacUI
 import MacTheme
@@ -71,7 +73,7 @@ enum SidebarCleanupInterval: String, CaseIterable, Identifiable {
   case fiveDays = "5d"
   case never
 
-  static let defaultValue: Self = .twentyFourHours
+  static let defaultValue: Self = .never
 
   var id: String { rawValue }
 
@@ -167,6 +169,9 @@ enum MessageGestureAction: String, CaseIterable, Identifiable {
 final class AppSettings: ObservableObject {
   static let shared = AppSettings()
   static let sidebarCleanupIntervalKey = "sidebarCleanupInterval"
+  static let sidebarItemSizeKey = "sidebarItemSize"
+  static let sidebarModeKey = "sidebarMode"
+  static let sidebarSortKey = "sidebarSort"
   static let messageDoubleClickActionKey = "messageDoubleClickAction"
   static let messageHoldActionKey = "messageHoldAction"
   static let openReplyThreadsInSidePaneKey = "openReplyThreadsInSidePane"
@@ -293,20 +298,24 @@ final class AppSettings: ObservableObject {
 
   // MARK: - Sidebar
 
-  @Published var showSidebarMessagePreview: Bool {
+  @Published var sidebarItemSize: SidebarItemSize {
     didSet {
-      UserDefaults.standard.set(showSidebarMessagePreview, forKey: "showSidebarMessagePreview")
+      UserDefaults.standard.set(sidebarItemSize.rawValue, forKey: Self.sidebarItemSizeKey)
     }
   }
 
-  var sidebarItemSize: SidebarItemSize {
-    get { showSidebarMessagePreview ? .large : .compact }
-    set { showSidebarMessagePreview = newValue == .large }
+  var showSidebarMessagePreview: Bool {
+    get { sidebarItemSize != .compact }
+    set { sidebarItemSize = newValue ? .standard : .compact }
   }
 
-  @Published var includeSpaceChatsInHomeSidebar: Bool {
+  /// Kept as an app-level scope flag so existing consumers retain one source
+  /// of truth. Product no longer exposes a narrower Home scope.
+  @Published private(set) var includeSpaceChatsInHomeSidebar = true
+
+  @Published var sidebarSort: SidebarSortMode {
     didSet {
-      UserDefaults.standard.set(includeSpaceChatsInHomeSidebar, forKey: "includeSpaceChatsInHomeSidebar")
+      UserDefaults.standard.set(sidebarSort.rawValue, forKey: Self.sidebarSortKey)
     }
   }
 
@@ -314,6 +323,38 @@ final class AppSettings: ObservableObject {
     didSet {
       UserDefaults.standard.set(sidebarCleanupInterval.rawValue, forKey: Self.sidebarCleanupIntervalKey)
     }
+  }
+
+  @Published var sidebarMode: SidebarMode {
+    didSet {
+      sidebarModeNeedsAccountMigration = false
+      UserDefaults.standard.set(sidebarMode.rawValue, forKey: Self.sidebarModeKey)
+      UserDefaults.standard.set(sidebarMode == .inbox, forKey: ExperimentalFeatureFlags.sidebarAsInboxKey)
+    }
+  }
+
+  /// Compatibility boundary for call sites that only care about Inbox
+  /// behavior and for the one-time legacy preference migration.
+  var sidebarAsInbox: Bool {
+    get { sidebarMode == .inbox }
+    set { sidebarMode = newValue ? .inbox : .allChats }
+  }
+
+  private var sidebarModeNeedsAccountMigration = false
+
+  func resolveSidebarModeForAccount(createdAt: Date) {
+    guard sidebarModeNeedsAccountMigration else { return }
+    sidebarMode = SidebarPreferenceMigration.inboxEnabled(
+      storedModeIsInbox: nil,
+      legacyInboxEnabled: nil,
+      accountCreatedAt: createdAt
+    ) ? .inbox : .allChats
+  }
+
+  func resolveSidebarModeForCurrentAccount() {
+    guard sidebarModeNeedsAccountMigration,
+          let createdAt = Self.currentAccountCreatedAt() else { return }
+    resolveSidebarModeForAccount(createdAt: createdAt)
   }
 
   // MARK: - Notification Settings
@@ -343,13 +384,11 @@ final class AppSettings: ObservableObject {
     }
   }
 
-  @Published var sidebarAsInbox: Bool {
-    didSet {
-      UserDefaults.standard.set(sidebarAsInbox, forKey: ExperimentalFeatureFlags.sidebarAsInboxKey)
-    }
-  }
-
   private init() {
+    let persistentDefaults = Bundle.main.bundleIdentifier.flatMap {
+      UserDefaults.standard.persistentDomain(forName: $0)
+    }
+
     sendsWithCmdEnter = UserDefaults.standard.bool(forKey: "sendsWithCmdEnter")
     automaticSpellCorrection = UserDefaults.standard.object(forKey: "automaticSpellCorrection") as? Bool ?? true
     checkSpellingWhileTyping = UserDefaults.standard.object(forKey: "checkSpellingWhileTyping") as? Bool ?? true
@@ -398,14 +437,26 @@ final class AppSettings: ObservableObject {
     openReplyThreadsInSidePane =
       UserDefaults.standard.object(forKey: Self.openReplyThreadsInSidePaneKey) as? Bool ?? false
 
-    if let storedShowPreview = UserDefaults.standard.object(forKey: "showSidebarMessagePreview") as? Bool {
-      showSidebarMessagePreview = storedShowPreview
+    if let storedItemSize = persistentDefaults?[Self.sidebarItemSizeKey] as? String,
+       let itemSize = SidebarItemSize(rawValue: storedItemSize) {
+      sidebarItemSize = itemSize
+      UserDefaults.standard.set(itemSize.rawValue, forKey: Self.sidebarItemSizeKey)
     } else {
-      showSidebarMessagePreview = true
+      let storedShowPreview = persistentDefaults?["showSidebarMessagePreview"] as? Bool ?? true
+      let itemSize: SidebarItemSize = storedShowPreview ? .standard : .compact
+      sidebarItemSize = itemSize
+      UserDefaults.standard.set(itemSize.rawValue, forKey: Self.sidebarItemSizeKey)
     }
-    includeSpaceChatsInHomeSidebar =
-      UserDefaults.standard.object(forKey: "includeSpaceChatsInHomeSidebar") as? Bool ?? true
-    if let storedCleanupInterval = UserDefaults.standard.string(forKey: Self.sidebarCleanupIntervalKey),
+    // Migrate earlier opt-outs back to the product-wide scope while retaining
+    // the flag for the sidebar, unread-count, and temporary-chat pipelines.
+    UserDefaults.standard.set(true, forKey: "includeSpaceChatsInHomeSidebar")
+    if let storedSidebarSort = UserDefaults.standard.string(forKey: Self.sidebarSortKey),
+       let sort = SidebarSortMode(rawValue: storedSidebarSort) {
+      sidebarSort = sort
+    } else {
+      sidebarSort = .openedOrder
+    }
+    if let storedCleanupInterval = persistentDefaults?[Self.sidebarCleanupIntervalKey] as? String,
        let cleanupInterval = SidebarCleanupInterval(rawValue: storedCleanupInterval) {
       sidebarCleanupInterval = cleanupInterval
     } else {
@@ -420,7 +471,36 @@ final class AppSettings: ObservableObject {
       unreadBadgeStyle = .defaultValue
     }
     showMainTabStrip = UserDefaults.standard.object(forKey: "showMainTabStrip") as? Bool ?? false
-    sidebarAsInbox = UserDefaults.standard.bool(forKey: ExperimentalFeatureFlags.sidebarAsInboxKey)
+    let storedMode = (persistentDefaults?[Self.sidebarModeKey] as? String)
+      .flatMap(SidebarMode.init(rawValue:))
+    let legacyInbox = persistentDefaults?[ExperimentalFeatureFlags.sidebarAsInboxKey] as? Bool
+    let accountCreatedAt = Self.currentAccountCreatedAt()
+    sidebarModeNeedsAccountMigration = storedMode == nil
+      && legacyInbox == nil
+      && accountCreatedAt == nil
+    let inboxEnabled = SidebarPreferenceMigration.inboxEnabled(
+      storedModeIsInbox: storedMode.map { $0 == .inbox },
+      legacyInboxEnabled: legacyInbox,
+      accountCreatedAt: accountCreatedAt
+    )
+    sidebarMode = inboxEnabled ? .inbox : .allChats
+    if sidebarModeNeedsAccountMigration == false {
+      UserDefaults.standard.set(sidebarMode.rawValue, forKey: Self.sidebarModeKey)
+      UserDefaults.standard.set(sidebarMode == .inbox, forKey: ExperimentalFeatureFlags.sidebarAsInboxKey)
+    }
+  }
+
+  private static func currentAccountCreatedAt() -> Date? {
+    guard let userID = Auth.getCurrentUserId(), AppDatabase.shared.isPersistent else {
+      return nil
+    }
+    do {
+      return try AppDatabase.shared.reader.read { db in
+        try User.fetchOne(db, id: userID)?.date
+      }
+    } catch {
+      return nil
+    }
   }
 }
 

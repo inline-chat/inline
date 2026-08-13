@@ -93,9 +93,9 @@ private struct OnboardingAppearanceControls: View {
             action: { sidebarSize = .compact }
           )
           OnboardingTextChoiceButton(
-            title: "Preview",
-            isSelected: sidebarSize == .large,
-            action: { sidebarSize = .large }
+            title: "Standard",
+            isSelected: sidebarSize == .standard,
+            action: { sidebarSize = .standard }
           )
         }
       }
@@ -302,7 +302,7 @@ private struct OnboardingSidebarRow: View {
 
       VStack(alignment: .leading, spacing: 2) {
         RoundedRectangle(cornerRadius: 2).fill(.primary.opacity(0.42)).frame(width: 30, height: 3)
-        if size == .large {
+        if size == .standard {
           RoundedRectangle(cornerRadius: 2).fill(.secondary.opacity(0.2)).frame(width: 39, height: 3)
         }
       }
