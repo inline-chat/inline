@@ -817,9 +817,21 @@ extension AppDelegate {
 
     Analytics.logout()
 
+    // Stop every account-owned producer before clearing credentials or the database.
+    await Api.realtime.loggedOut()
+    await dependencies.realtime.loggedOut()
+    await FileUploader.shared.cancelAll()
+    await FileCache.shared.cancelAllDownloads()
+    await FileDownloader.shared.resetSession()
+    NotionTaskService.shared.resetSession()
     await Drafts2.shared.resetForAccountChange()
+
     await QuickSearchUsageStore.shared.clearCurrentAccount()
     await dependencies.commandBarCatalog.reset()
+
+    await Transactions.shared.clearAllAndWait()
+    ObjectCache.shared.clear()
+    dependencies.session.reset()
 
     // Clear database
     try? AppDatabase.loggedOut()
@@ -827,13 +839,6 @@ extension AppDelegate {
     // Clear creds
     await Auth.shared.logOut()
 
-    // Clear transactions
-    Transactions.shared.clearAll()
-    ObjectCache.shared.clear()
-    dependencies.session.reset()
-
-    // Stop WebSocket
-    await dependencies.realtime.loggedOut()
   }
 }
 

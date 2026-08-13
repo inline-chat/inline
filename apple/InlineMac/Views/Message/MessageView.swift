@@ -4661,7 +4661,7 @@ extension MessageViewAppKit: NSMenuDelegate {
     // Integrations section (separator above + below)
     var integrationItems: [NSMenuItem] = []
 
-    if regularMessage, !isAnchorMessage, NotionTaskService.shared.hasAccess {
+    if regularMessage, !isAnchorMessage, NotionTaskService.shared.hasAccess(peerId: message.peerId) {
       let willDoItem = NSMenuItem(title: "Create Notion Task", action: #selector(handleWillDo), keyEquivalent: "")
       willDoItem.image = NSImage(
         systemSymbolName: "circle.badge.plus",

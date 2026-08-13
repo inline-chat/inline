@@ -319,9 +319,11 @@ private final class ChatToolbarNotificationModel: ObservableObject {
 
   private func bindDialog() {
     db.warnIfInMemoryDatabaseForObservation("ChatToolbarNotificationModel.dialog")
+    // The stored observation pipeline must not capture its owner through the fetch closure.
+    let peer = peer
     dialogCancellable = ValueObservation
       .tracking { db in
-        try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: self.peer))
+        try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peer))
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .receive(on: DispatchQueue.main)
