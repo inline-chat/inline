@@ -42,7 +42,7 @@ struct ChatViewHeader: View {
 }
 
 @available(iOS 27.0, *)
-struct ChatToolbarBackgroundExperimentView: View {
+struct ChatToolbarHardBackgroundView: View {
   @Binding private var navBarHeight: CGFloat
 
   init(navBarHeight: Binding<CGFloat>) {
@@ -50,7 +50,7 @@ struct ChatToolbarBackgroundExperimentView: View {
   }
 
   var body: some View {
-    ChatToolbarBackgroundMaterial()
+    ChatToolbarHardBackgroundMaterial()
       .frame(height: navBarHeight)
       .contentShape(Rectangle())
       .ignoresSafeArea(.all)
@@ -59,21 +59,23 @@ struct ChatToolbarBackgroundExperimentView: View {
 }
 
 @available(iOS 27.0, *)
-private struct ChatToolbarBackgroundMaterial: UIViewRepresentable {
-  func makeUIView(context _: Context) -> ChatToolbarBackgroundMaterialView {
-    ChatToolbarBackgroundMaterialView()
+private struct ChatToolbarHardBackgroundMaterial: UIViewRepresentable {
+  func makeUIView(context _: Context) -> ChatToolbarHardBackgroundMaterialView {
+    ChatToolbarHardBackgroundMaterialView()
   }
 
-  func updateUIView(_ uiView: ChatToolbarBackgroundMaterialView, context _: Context) {
+  func updateUIView(_ uiView: ChatToolbarHardBackgroundMaterialView, context _: Context) {
     uiView.updateAppearance()
   }
 }
 
 @available(iOS 27.0, *)
-private final class ChatToolbarBackgroundMaterialView: UIView {
+private final class ChatToolbarHardBackgroundMaterialView: UIView {
   private enum Material {
-    static let blurRadius: CGFloat = 5
-    static let tintAlpha: CGFloat = 0.85
+    // CAFilter radius is not visually portable across backdrop-layer sampling scales.
+    // Tune Hard against iOS 27 Home's rendered clarity, not its raw radius value.
+    static let blurRadius: CGFloat = 3.5
+    static let tintAlpha: CGFloat = 0.78
     static let separatorAlpha: CGFloat = 0.05
   }
 
@@ -156,7 +158,7 @@ private final class ChatToolbarBackgroundMaterialView: UIView {
   }
 
   private func configureBackdropFilter() {
-    guard let filter = ChatToolbarBackgroundPrivateFilter.gaussianBlur(radius: Material.blurRadius) else {
+    guard let filter = ChatToolbarHardBackgroundPrivateFilter.gaussianBlur(radius: Material.blurRadius) else {
       return
     }
 
@@ -177,7 +179,7 @@ private final class ChatToolbarBackgroundMaterialView: UIView {
 }
 
 @available(iOS 27.0, *)
-private enum ChatToolbarBackgroundPrivateFilter {
+private enum ChatToolbarHardBackgroundPrivateFilter {
   static func gaussianBlur(radius: CGFloat) -> NSObject? {
     guard let filterClass = NSClassFromString(String("retliFAC".reversed())) as? NSObject.Type else {
       return nil

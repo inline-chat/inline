@@ -86,6 +86,10 @@ struct AppearanceSettingsView: View {
         }
       }
 
+      if #available(iOS 27.0, *) {
+        ChatToolbarBackgroundModeSection()
+      }
+
       Section("Emoji") {
         SettingsItem(icon: "hand.raised.fill", iconColor: .orange, title: "Preferred Skin Tone") {
           Picker("Preferred Skin Tone", selection: $preferredEmojiSkinToneRawValue) {
@@ -102,6 +106,35 @@ struct AppearanceSettingsView: View {
     .listStyle(.insetGrouped)
     .navigationTitle("Appearance")
     .navigationBarTitleDisplayMode(.inline)
+  }
+}
+
+@available(iOS 27.0, *)
+private struct ChatToolbarBackgroundModeSection: View {
+  @AppStorage(ChatToolbarBackgroundMode.key)
+  private var mode = ChatToolbarBackgroundMode.initialValue
+
+  var body: some View {
+    Section {
+      SettingsItem(
+        icon: "rectangle.topthird.inset.filled",
+        iconColor: .blue,
+        title: "Toolbar Background"
+      ) {
+        Picker("Toolbar Background", selection: $mode) {
+          Text("Soft")
+            .tag(ChatToolbarBackgroundMode.soft)
+          Text("Hard")
+            .tag(ChatToolbarBackgroundMode.hard)
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+      }
+    } header: {
+      Text("Chat")
+    } footer: {
+      Text("Soft fades gradually into the chat. Hard uses a clearer, separated toolbar background.")
+    }
   }
 }
 
