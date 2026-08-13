@@ -1122,16 +1122,16 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
       onNotifications()
     }
 
-    let notificationSection = UIMenu(options: .displayInline, children: [notifications])
-    let archive = UIAction(
-      title: "Archive",
+    let archivedChats = UIAction(
+      title: "Archived Chats",
       image: UIImage(systemName: "archivebox")
     ) { _ in
       onArchive()
     }
     let itemSizeMenu = UIMenu(
       title: "Item Size",
-      options: [.displayInline, .singleSelection],
+      image: UIImage(systemName: "textformat.size"),
+      options: .singleSelection,
       children: ExperimentalHomeChatItemRenderMode.allCases.map { mode in
         UIAction(title: mode.title, state: mode == itemSize ? .on : .off) { _ in
           onSelectItemSize(mode)
@@ -1139,8 +1139,9 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
       }
     )
     let sortMenu = UIMenu(
-      title: "Inbox Sort",
-      options: [.displayInline, .singleSelection],
+      title: "Sort",
+      image: UIImage(systemName: "arrow.up.arrow.down"),
+      options: .singleSelection,
       children: ExperimentalHomeSortMode.allCases.map { mode in
         UIAction(title: mode.title, state: mode == sortMode ? .on : .off) { _ in
           onSelectSortMode(mode)
@@ -1149,11 +1150,15 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
     )
     let viewOptions = UIMenu(
       title: "View Options",
-      image: UIImage(systemName: "line.3.horizontal.decrease"),
+      options: .displayInline,
       children: [itemSizeMenu, sortMenu]
     )
 
-    var children: [UIMenuElement] = [notificationSection, archive, viewOptions]
+    let navigationSection = UIMenu(
+      options: .displayInline,
+      children: [notifications, archivedChats]
+    )
+    var children: [UIMenuElement] = [navigationSection, viewOptions]
     if let activeSpaceName,
        let onInvite,
        let onMembers,
