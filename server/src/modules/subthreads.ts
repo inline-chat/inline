@@ -28,6 +28,11 @@ export const isLinkedSubthread = (chat: Pick<DbChat, "parentChatId">): boolean =
 export const isReplyThread = (chat: Pick<DbChat, "parentMessageId">): boolean => chat.parentMessageId != null
 
 const RECENT_REPLIER_LIMIT = 3
+const REPLY_THREAD_TITLE_EXCERPT_LENGTH = 60
+const LEGACY_REPLY_THREAD_TITLE_EXCERPT_LENGTH = 72
+const GENERIC_REPLY_THREAD_TITLE = "Message"
+
+type ReplyThreadTitleAnchor = Pick<DbFullMessage, "text">
 
 export async function getChatById(chatId: number): Promise<DbChat | undefined> {
   return db.select().from(chats).where(eq(chats.id, chatId)).limit(1).then((rows) => rows[0])
@@ -42,13 +47,37 @@ export async function getAnchorMessageForChat(chat: Pick<DbChat, "parentChatId" 
   return anchorMessages[0]
 }
 
-export function buildDefaultReplyThreadTitle(anchorMessage: DbFullMessage | undefined): string {
-  const excerpt = anchorMessage?.text?.trim().replace(/\s+/g, " ").slice(0, 72)
+export function buildDefaultReplyThreadTitle(anchorMessage: ReplyThreadTitleAnchor | undefined): string {
+  const normalizedText = anchorMessage?.text?.trim().replace(/\s+/g, " ")
+  const excerpt = normalizedText
+    ? Array.from(normalizedText).slice(0, REPLY_THREAD_TITLE_EXCERPT_LENGTH).join("")
+    : undefined
   if (excerpt && excerpt.length > 0) {
-    return `Re: ${excerpt}`
+    return excerpt.trim()
   }
 
-  return "Re: Message"
+  return GENERIC_REPLY_THREAD_TITLE
+}
+
+export function isDefaultReplyThreadTitle(
+  title: string | null,
+  anchorMessage: ReplyThreadTitleAnchor | undefined,
+): boolean {
+  const normalizedTitle = title?.trim()
+  if (!normalizedTitle) {
+    return true
+  }
+
+  return normalizedTitle === buildDefaultReplyThreadTitle(anchorMessage).trim()
+    || normalizedTitle === buildLegacyDefaultReplyThreadTitle(anchorMessage).trim()
+}
+
+function buildLegacyDefaultReplyThreadTitle(anchorMessage: ReplyThreadTitleAnchor | undefined): string {
+  const excerpt = anchorMessage?.text
+    ?.trim()
+    .replace(/\s+/g, " ")
+    .slice(0, LEGACY_REPLY_THREAD_TITLE_EXCERPT_LENGTH)
+  return `Re: ${excerpt || GENERIC_REPLY_THREAD_TITLE}`
 }
 
 export async function getReplyThreadAnchorSenderId(

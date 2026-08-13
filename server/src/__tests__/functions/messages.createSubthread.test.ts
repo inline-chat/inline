@@ -55,10 +55,10 @@ describe("messages.createSubthread", () => {
       .limit(1)
       .then((rows) => rows[0])
 
-    expect(result.chat.title).toBe("Re: anchor")
+    expect(result.chat.title).toBe("anchor")
     expect(result.chat.untitled).toBe(true)
     expect(result.chat.number).toBeUndefined()
-    expect(childChat?.title).toBe("Re: anchor")
+    expect(childChat?.title).toBe("anchor")
     expect(childChat?.isUntitled).toBe(true)
     expect(childChat?.threadNumber).toBeNull()
 
@@ -308,8 +308,31 @@ describe("messages.createSubthread", () => {
       testUtils.functionContext({ userId: creator.id }),
     )
 
-    expect(result.chat.title).toBe("Re: Message")
+    expect(result.chat.title).toBe("Message")
     expect(result.chat.untitled).toBe(true)
+  })
+
+  test("creates a prefix-free 60-character reply-thread excerpt", async () => {
+    const creator = await testUtils.createUser("subthread-compact-title@example.com")
+    const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, creator.id)
+    if (!parentChat) throw new Error("Parent chat not created")
+
+    const anchor = "This parent message is long enough to verify the compact reply-thread sidebar excerpt limit exactly."
+    await testUtils.addParticipant(parentChat.id, creator.id)
+    await db.insert(schema.messages).values({
+      chatId: parentChat.id,
+      messageId: 1,
+      fromId: creator.id,
+      text: anchor,
+    })
+
+    const result = await createSubthread(
+      { parentChatId: BigInt(parentChat.id), parentMessageId: 1n },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+
+    expect(result.chat.title).toBe(Array.from(anchor).slice(0, 60).join(""))
+    expect(result.chat.title?.startsWith("Re:")).toBe(false)
   })
 
   test("creates untitled non-reply subthread without generated display title", async () => {

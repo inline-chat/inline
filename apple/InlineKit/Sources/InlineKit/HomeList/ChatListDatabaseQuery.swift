@@ -338,12 +338,13 @@ public enum ChatListDatabaseQuery {
     isReplyThread: Bool,
     anchorPreview: String?
   ) -> String {
-    if let title = singleLineText(rawTitle) {
-      return title
+    if isReplyThread {
+      return ReplyThreadTitleFallback.replyTitle(
+        rawTitle: rawTitle,
+        anchorText: anchorPreview
+      )
     }
-    guard isReplyThread else { return "New thread" }
-    guard let anchorPreview = singleLineText(anchorPreview) else { return "Re: Message" }
-    return "Re: \(String(anchorPreview.prefix(72)))"
+    return singleLineText(rawTitle) ?? "New thread"
   }
 
   private static func userDisplayName(

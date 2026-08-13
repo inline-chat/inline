@@ -24,8 +24,6 @@ struct ReplyThreadToolbarContext: Equatable {
 }
 
 enum ReplyThreadToolbarContextLoader {
-  private static let maxExcerptLength = 72
-  private static let genericFallbackTitle = "Re: Message"
   private static let log = Log.scoped("ReplyThreadToolbarContext")
 
   static func load(
@@ -48,8 +46,8 @@ enum ReplyThreadToolbarContextLoader {
   }
 
   static func fallbackTitle(for chat: Chat?) -> String {
-    guard let chat else { return genericFallbackTitle }
-    return title(for: chat, anchorText: nil)
+    guard let chat else { return ReplyThreadTitleFallback.genericFallbackTitle }
+    return ReplyThreadTitleFallback.title(for: chat, anchorText: nil)
   }
 
   private static func context(
@@ -120,21 +118,7 @@ enum ReplyThreadToolbarContextLoader {
   }
 
   private static func title(for chat: Chat, db: Database) throws -> String {
-    try title(for: chat, anchorText: anchorText(for: chat, db: db))
-  }
-
-  private static func title(for chat: Chat, anchorText: String?) -> String {
-    if let title = chat.title?.trimmingCharacters(in: .whitespacesAndNewlines),
-       title.isEmpty == false
-    {
-      return title
-    }
-
-    guard needsFallback(chat) else {
-      return chat.humanReadableTitle ?? "Chat"
-    }
-
-    return fallback(anchorText: anchorText)
+    try ReplyThreadTitleFallback.title(for: chat, db: db)
   }
 
   private static func parentTitle(for chat: Chat, userInfo: UserInfo?, db: Database) throws -> String {
@@ -160,39 +144,4 @@ enum ReplyThreadToolbarContextLoader {
     return .thread(id: chat.id)
   }
 
-  private static func anchorText(for chat: Chat, db: Database) throws -> String? {
-    guard needsFallback(chat),
-          let parentChatId = chat.parentChatId,
-          let parentMessageId = chat.parentMessageId
-    else {
-      return nil
-    }
-
-    let message = try Message
-      .filter(Column("chatId") == parentChatId)
-      .filter(Column("messageId") == parentMessageId)
-      .fetchOne(db)
-
-    return message?.stringRepresentationPlain
-  }
-
-  private static func needsFallback(_ chat: Chat) -> Bool {
-    guard chat.isReplyThread else { return false }
-    let title = chat.title?.trimmingCharacters(in: .whitespacesAndNewlines)
-    return title == nil || title?.isEmpty == true
-  }
-
-  private static func fallback(anchorText: String?) -> String {
-    let excerpt = anchorText?
-      .components(separatedBy: .whitespacesAndNewlines)
-      .filter { $0.isEmpty == false }
-      .joined(separator: " ")
-      .trimmingCharacters(in: .whitespacesAndNewlines)
-
-    guard let excerpt, excerpt.isEmpty == false else {
-      return genericFallbackTitle
-    }
-
-    return "Re: \(String(excerpt.prefix(maxExcerptLength)))"
-  }
 }

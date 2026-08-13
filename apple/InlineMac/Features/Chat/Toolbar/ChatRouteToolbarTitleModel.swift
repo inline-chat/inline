@@ -292,12 +292,7 @@ final class ChatRouteToolbarTitleModel {
 
   private func shouldApplyResolvedTitle(_ nextTitle: String) -> Bool {
     guard ReplyThreadTitleFallback.isGenericFallback(nextTitle) else { return true }
-    guard ReplyThreadTitleFallback.isReplyFallback(title),
-          !ReplyThreadTitleFallback.isGenericFallback(title)
-    else {
-      return true
-    }
-    return false
+    return title == "Chat" || ReplyThreadTitleFallback.isGenericFallback(title)
   }
 
   private func resolvedIconPeer() -> ChatIcon.PeerType? {

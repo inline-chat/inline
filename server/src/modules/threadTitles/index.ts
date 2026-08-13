@@ -4,10 +4,11 @@ import { zodResponseFormat } from "openai/helpers/zod"
 import { z } from "zod/v4"
 import { db } from "@in/server/db"
 import type { DbFullDocument } from "@in/server/db/models/files"
-import { MessageModel, type ProcessedMessageAttachment } from "@in/server/db/models/messages"
-import { messageAttachments, users, type DbChat, type DbMessage } from "@in/server/db/schema"
+import { MessageModel, type DbFullMessage, type ProcessedMessageAttachment } from "@in/server/db/models/messages"
+import { chats, messageAttachments, users, type DbChat, type DbMessage } from "@in/server/db/schema"
 import { updateThreadInfo } from "@in/server/functions/messages.updateChatInfo"
 import { openaiClient } from "@in/server/libs/openAI"
+import { getAnchorMessageForChat, isDefaultReplyThreadTitle } from "@in/server/modules/subthreads"
 import { Log } from "@in/server/utils/log"
 import { validateIanaTimezone } from "@in/server/utils/validate"
 import { eq } from "drizzle-orm"
@@ -17,8 +18,9 @@ const log = new Log("modules.threadTitles")
 const MIN_SOURCE_CHARS = 12
 const MIN_SOURCE_WORDS = 3
 const MAX_SOURCE_CHARS = 1600
+const MAX_REPLY_SOURCE_CHARS = 2200
 const MAX_TITLE_CHARS = 100
-const MODEL: ChatModel = "gpt-5.4-mini" as ChatModel
+const MODEL: ChatModel = "gpt-5.6-luna" as ChatModel
 
 const excludedEntityTypes = new Set<MessageEntity_Type>([
   MessageEntity_Type.MENTION,
@@ -37,7 +39,18 @@ const titleSchema = z.object({
   emoji: z.string().nullable().optional(),
 })
 
-type ThreadTitleChat = Pick<DbChat, "id" | "type" | "title" | "parentChatId">
+type ThreadTitleChat = Pick<
+  DbChat,
+  | "id"
+  | "type"
+  | "title"
+  | "description"
+  | "isUntitled"
+  | "parentChatId"
+  | "parentMessageId"
+  | "minUserId"
+  | "maxUserId"
+>
 type ThreadTitleMessage = Pick<
   DbMessage,
   | "messageId"
@@ -90,6 +103,16 @@ type GeneratedThreadTitle = {
   emoji?: string
 }
 
+type ThreadTitleKind = "topLevel" | "reply"
+
+type PreparedGeneration = {
+  kind: ThreadTitleKind
+  sourceText: string
+  titleGuard:
+    | { kind: "empty" }
+    | { kind: "untitledExact"; currentTitle: string | null }
+}
+
 type SourceLine = {
   label: string
   text: string
@@ -103,12 +126,12 @@ export function maybeScheduleThreadTitleGeneration(input: MaybeScheduleInput) {
     return
   }
 
-  cancelPendingThreadTitleGeneration(input.chat.id)
-
   const sourceText = getThreadTitleSourceText(input)
   if (!sourceText) {
     return
   }
+
+  cancelPendingThreadTitleGeneration(input.chat.id)
 
   const jobId = ++nextJobId
   pendingJobs.set(input.chat.id, jobId)
@@ -138,7 +161,12 @@ export async function generateAndApplyThreadTitle(input: GenerateInput): Promise
       return { didUpdate: false }
     }
 
-    const generated = await generateThreadTitle(input.text, input.currentUserId)
+    const prepared = await prepareGeneration(input)
+    if (!prepared) {
+      return { didUpdate: false }
+    }
+
+    const generated = await generateThreadTitle(prepared.sourceText, input.currentUserId, prepared.kind)
     if (!generated) {
       return { didUpdate: false }
     }
@@ -150,9 +178,9 @@ export async function generateAndApplyThreadTitle(input: GenerateInput): Promise
     const result = await updateThreadInfo({
       chatId: input.chatId,
       title: generated.title,
-      emoji: generated.emoji,
+      emoji: prepared.kind === "topLevel" ? generated.emoji : undefined,
       currentUserId: input.currentUserId,
-      onlyIfTitleEmpty: true,
+      titleGuard: prepared.titleGuard,
       isUntitled: true,
     })
 
@@ -172,7 +200,15 @@ export async function generateAndApplyThreadTitle(input: GenerateInput): Promise
 }
 
 export function canAutoTitleThread(chat: ThreadTitleChat): boolean {
-  return chat.type === "thread" && chat.parentChatId == null && !isNonEmpty(chat.title)
+  if (chat.type !== "thread") {
+    return false
+  }
+
+  if (chat.parentChatId == null) {
+    return !isNonEmpty(chat.title)
+  }
+
+  return chat.parentMessageId != null && chat.isUntitled === true
 }
 
 export async function getMessageAttachmentTitleContext(messageGlobalId: bigint): Promise<ThreadTitleAttachmentContext[]> {
@@ -243,7 +279,102 @@ export function getThreadTitleSourceText(input: MaybeScheduleInput): string | un
   return Array.from(sourceText).slice(0, MAX_SOURCE_CHARS).join("")
 }
 
-async function generateThreadTitle(text: string, currentUserId: number): Promise<GeneratedThreadTitle | undefined> {
+async function prepareGeneration(input: GenerateInput): Promise<PreparedGeneration | undefined> {
+  const chat = await db.select().from(chats).where(eq(chats.id, input.chatId)).limit(1).then((rows) => rows[0])
+  if (!chat || !canAutoTitleThread(chat)) {
+    return undefined
+  }
+
+  if (chat.parentMessageId == null) {
+    return {
+      kind: "topLevel",
+      sourceText: input.text,
+      titleGuard: { kind: "empty" },
+    }
+  }
+
+  const anchorMessage = await getAnchorMessageForChat(chat)
+  if (!isDefaultReplyThreadTitle(chat.title, anchorMessage)) {
+    return undefined
+  }
+
+  return {
+    kind: "reply",
+    sourceText: await buildReplyThreadSource(chat, anchorMessage, input.text, input.currentUserId),
+    titleGuard: { kind: "untitledExact", currentTitle: chat.title },
+  }
+}
+
+async function buildReplyThreadSource(
+  chat: ThreadTitleChat,
+  anchorMessage: DbFullMessage | undefined,
+  firstReplySource: string,
+  currentUserId: number,
+): Promise<string> {
+  const parentChat = chat.parentChatId == null
+    ? undefined
+    : await db.select().from(chats).where(eq(chats.id, chat.parentChatId)).limit(1).then((rows) => rows[0])
+  const parentTitle = parentChat ? await displayParentChatTitle(parentChat, currentUserId) : undefined
+  const parentMessageSource = anchorMessage ? messageContextSource(anchorMessage) : undefined
+  const lines = [
+    "Context type: Reply thread",
+    parentTitle ? `Parent chat title: ${contextValue(parentTitle, 200)}` : undefined,
+    parentChat?.description ? `Parent chat description: ${contextValue(parentChat.description, 300)}` : undefined,
+    anchorMessage ? `Parent message by: ${displayName(anchorMessage.from)}` : undefined,
+    parentMessageSource ? `Parent message: ${contextValue(parentMessageSource, 700)}` : undefined,
+    `First eligible reply: ${contextValue(firstReplySource, 800)}`,
+  ].filter((line): line is string => line !== undefined)
+
+  return Array.from(lines.join("\n")).slice(0, MAX_REPLY_SOURCE_CHARS).join("")
+}
+
+async function displayParentChatTitle(chat: DbChat, currentUserId: number): Promise<string> {
+  const title = chat.title?.trim()
+  if (title) {
+    return title
+  }
+
+  if (chat.type === "private") {
+    const peerUserId = chat.minUserId === currentUserId ? chat.maxUserId : chat.minUserId
+    if (peerUserId != null) {
+      const peer = await db._query.users.findFirst({ where: eq(users.id, peerUserId) })
+      const peerName = peer ? displayName(peer) : undefined
+      if (peerName) {
+        return `Direct message with ${peerName}`
+      }
+    }
+    return "Direct message"
+  }
+
+  return "Untitled thread"
+}
+
+function messageContextSource(message: DbFullMessage): string | undefined {
+  const text = message.text?.trim()
+  const messageText = text ? normalizedTitleSource(textWithoutExcludedEntities(text, message.entities ?? undefined)) : ""
+  const attachments = [
+    ...documentTitleContext(message.document),
+    ...(message.messageAttachments ?? []).flatMap(threadTitleContextFromAttachment),
+  ]
+  const attachmentLines = attachmentSourceLines(attachments)
+  const source = formatTitleSource(messageText, attachmentLines)
+  if (source) {
+    return source
+  }
+
+  if (message.mediaType === "photo") return "Photo"
+  if (message.mediaType === "video") return "Video"
+  if (message.mediaType === "document") return "Document"
+  if (message.mediaType === "voice") return "Voice message"
+  if (message.mediaType === "nudge") return "Nudge"
+  return undefined
+}
+
+async function generateThreadTitle(
+  text: string,
+  currentUserId: number,
+  kind: ThreadTitleKind,
+): Promise<GeneratedThreadTitle | undefined> {
   if (!openaiClient) {
     log.debug("Skipping thread title generation because OpenAI client is not initialized")
     return undefined
@@ -254,12 +385,11 @@ async function generateThreadTitle(text: string, currentUserId: number): Promise
   const completion = await openaiClient.chat.completions.parse({
     model: MODEL,
     verbosity: "low",
-    reasoning_effort: "low",
+    reasoning_effort: "none",
     messages: [
       {
         role: "system",
-        content:
-          `Generate a concise, plain chat thread title from the first substantial message and attachment context. Default to sentence casing, not title case. If the messages themselves are all lowercase, return the title in lowercase. Prefer 3-10 title words, but allow a longer title when that is clearer. Today's date is ${today}. For recurring or common things that benefit from date disambiguation, such as meetings, diaries, journals, standups, check-ins, or daily notes, append today's date at the end in parentheses, for example: (${today}). Keep emoji out of the title. Optionally return one emoji only when it strongly matches the topic or intent; omit it for ordinary or ambiguous cases, roughly half of the time. No quotes.`,
+        content: threadTitleSystemPrompt(kind, today),
       },
       {
         role: "user",
@@ -277,8 +407,18 @@ async function generateThreadTitle(text: string, currentUserId: number): Promise
 
   return {
     title,
-    emoji: sanitizeEmoji(parsed?.emoji),
+    emoji: kind === "topLevel" ? sanitizeEmoji(parsed?.emoji) : undefined,
   }
+}
+
+function threadTitleSystemPrompt(kind: ThreadTitleKind, today: string): string {
+  const shared = `Generate a concise, natural chat thread title from the provided message and attachment context. Default to sentence casing, not title case. If the messages themselves are all lowercase, return the title in lowercase. Prefer 3-6 words. One or two words are good when sufficient, and seven or more are allowed when they materially improve clarity; around six words or fewer is the gold standard, not a hard cap. Today's date is ${today}. For recurring or common things that benefit from date disambiguation, such as meetings, diaries, journals, standups, check-ins, or daily notes, append today's date at the end in parentheses, for example: (${today}). Keep emoji out of the title itself. No quotes.`
+
+  if (kind === "reply") {
+    return `${shared} This is a reply thread to the labeled parent message in the labeled parent chat. Name the focused topic of the reply conversation using the parent context and first eligible reply. Do not prefix the title with Re: or Reply. Do not choose an emoji for reply threads; return emoji as null.`
+  }
+
+  return `${shared} Optionally return one broadly safe, relevant emoji when it genuinely helps recognition. Keep it tasteful and understated, not formal, cheesy, suggestive, insulting, graphic, political, or religious. Omit it for sensitive, serious, ordinary, or ambiguous topics.`
 }
 
 function sanitizeTitle(value: string | undefined): string | undefined {
@@ -334,6 +474,15 @@ function isSingleEmoji(value: string): boolean {
   return /^(?:\p{Extended_Pictographic}(?:\p{Emoji_Modifier})?(?:\uFE0F|\uFE0E)?(?:\u200D\p{Extended_Pictographic}(?:\p{Emoji_Modifier})?(?:\uFE0F|\uFE0E)?)*|\p{Regional_Indicator}{2}|[#*0-9]\uFE0F?\u20E3)$/u.test(
     value,
   )
+}
+
+function displayName(user: Pick<DbFullMessage["from"], "firstName" | "lastName" | "username">): string {
+  const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim()
+  return fullName || user.username || "Inline member"
+}
+
+function contextValue(value: string, maxLength: number): string {
+  return Array.from(normalizedTitleSource(value)).slice(0, maxLength).join("")
 }
 
 function textWithoutExcludedEntities(text: string, entities: MessageEntities | undefined): string {

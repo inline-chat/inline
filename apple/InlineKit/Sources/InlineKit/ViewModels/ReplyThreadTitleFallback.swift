@@ -2,22 +2,31 @@ import Foundation
 import GRDB
 
 public enum ReplyThreadTitleFallback {
-  private static let maxExcerptLength = 72
-  public static let genericFallbackTitle = "Re: Message"
+  private static let maxExcerptLength = 60
+  public static let genericFallbackTitle = "Message"
 
   public static func title(for chat: Chat, db: Database) throws -> String {
     try title(for: chat, anchorText: anchorText(for: chat, db: db))
   }
 
   public static func title(for chat: Chat, anchorText: String?) -> String {
+    if chat.isReplyThread {
+      return replyTitle(
+        rawTitle: chat.title,
+        anchorText: anchorText
+      )
+    }
+
     if let title = chat.title?.trimmingCharacters(in: .whitespacesAndNewlines), title.isEmpty == false {
       return title
     }
+    return chat.humanReadableTitle ?? "Chat"
+  }
 
-    guard needsFallback(chat) else {
-      return chat.humanReadableTitle ?? "Chat"
+  public static func replyTitle(rawTitle: String?, anchorText: String?) -> String {
+    if let title = rawTitle?.trimmingCharacters(in: .whitespacesAndNewlines), title.isEmpty == false {
+      return title
     }
-
     return fallback(anchorText: anchorText)
   }
 
@@ -98,7 +107,7 @@ public enum ReplyThreadTitleFallback {
   }
 
   public static func isReplyFallback(_ title: String) -> Bool {
-    title == genericFallbackTitle || title.hasPrefix("Re: ")
+    isGenericFallback(title)
   }
 
   private static func needsFallback(_ chat: Chat) -> Bool {
@@ -164,6 +173,6 @@ public enum ReplyThreadTitleFallback {
       return genericFallbackTitle
     }
 
-    return "Re: \(String(excerpt.prefix(maxExcerptLength)))"
+    return String(excerpt.prefix(maxExcerptLength))
   }
 }

@@ -32,7 +32,12 @@ const emptyThread = {
   id: 1,
   type: "thread" as const,
   title: null,
+  description: null,
+  isUntitled: true,
   parentChatId: null,
+  parentMessageId: null,
+  minUserId: null,
+  maxUserId: null,
 }
 
 const textMessage = {
@@ -147,6 +152,23 @@ describe("thread title generation", () => {
     )
   })
 
+  test("recognizes only current and exact legacy reply-thread placeholders", async () => {
+    const { buildDefaultReplyThreadTitle, isDefaultReplyThreadTitle } = await import(
+      "@in/server/modules/subthreads"
+    )
+    const anchor = {
+      text: "This parent message is deliberately long enough to exercise both current and historical title lengths.",
+    }
+    const currentPlaceholder = buildDefaultReplyThreadTitle(anchor)
+    const legacyPlaceholder = `Re: ${anchor.text.slice(0, 72)}`
+
+    expect(isDefaultReplyThreadTitle(currentPlaceholder, anchor)).toBe(true)
+    expect(isDefaultReplyThreadTitle(legacyPlaceholder, anchor)).toBe(true)
+    expect(isDefaultReplyThreadTitle("Re: An unrelated stored title", anchor)).toBe(false)
+    expect(isDefaultReplyThreadTitle("Message", undefined)).toBe(true)
+    expect(isDefaultReplyThreadTitle("Re: Message", undefined)).toBe(true)
+  })
+
   test("uses URL preview attachment text when the message body is only a link", async () => {
     parseCompletion.mockResolvedValue(completion("Roadmap Review"))
 
@@ -242,14 +264,22 @@ describe("thread title generation", () => {
     expect(updated?.isUntitled).toBe(true)
 
     const request = parseCompletion.mock.calls[0]?.[0] as
-      | { messages?: { role?: string; content?: string }[] }
+      | {
+          model?: string
+          reasoning_effort?: string
+          messages?: { role?: string; content?: string }[]
+        }
       | undefined
     const systemMessage = request?.messages?.find((message) => message.role === "system")?.content
-    expect(systemMessage).toContain("roughly half of the time")
+    expect(request?.model).toBe("gpt-5.6-luna")
+    expect(request?.reasoning_effort).toBe("none")
     expect(systemMessage).toContain("Default to sentence casing")
     expect(systemMessage).toContain("If the messages themselves are all lowercase")
-    expect(systemMessage).toContain("Prefer 3-10 title words")
-    expect(systemMessage).toContain("allow a longer title")
+    expect(systemMessage).toContain("Prefer 3-6 words")
+    expect(systemMessage).toContain("One or two words are good")
+    expect(systemMessage).toContain("gold standard, not a hard cap")
+    expect(systemMessage).toContain("tasteful and understated")
+    expect(systemMessage).toContain("not formal, cheesy")
     expect(systemMessage).toContain("append today's date at the end in parentheses")
     expect(systemMessage).toContain(`Today's date is ${expectedToday}`)
     expect(systemMessage).toContain(`for example: (${expectedToday})`)
@@ -334,6 +364,166 @@ describe("thread title generation", () => {
 
     expect(updated?.title).toBe("Launch Checklist")
     expect(updated?.emoji).toBeNull()
+  })
+
+  test("generates one reply-thread title from parent context and the first eligible reply", async () => {
+    parseCompletion.mockResolvedValue(completion("Beta notification timing", "🚀"))
+
+    const user = await testUtils.createUser("reply-title-user@example.com")
+    const anchorAuthor = await testUtils.createUser("reply-title-anchor-author@example.com")
+    await db.update(schema.users).set({ firstName: "Mina", lastName: "Park" }).where(eq(schema.users.id, anchorAuthor.id))
+
+    const [parentChat] = await db
+      .insert(schema.chats)
+      .values({
+        type: "thread",
+        title: "Launch planning",
+        description: "Mobile beta release coordination",
+        publicThread: false,
+        createdBy: user.id,
+      })
+      .returning()
+
+    if (!parentChat) {
+      throw new Error("Parent chat not created")
+    }
+
+    const anchorText = "Should we move the beta to Thursday after the notification fixes land?"
+    await db.insert(schema.messages).values({
+      chatId: parentChat.id,
+      messageId: 1,
+      fromId: anchorAuthor.id,
+      text: anchorText,
+    })
+
+    const [replyThread] = await db
+      .insert(schema.chats)
+      .values({
+        type: "thread",
+        title: Array.from(anchorText).slice(0, 60).join(""),
+        isUntitled: true,
+        publicThread: false,
+        createdBy: user.id,
+        parentChatId: parentChat.id,
+        parentMessageId: 1,
+      })
+      .returning()
+
+    if (!replyThread) {
+      throw new Error("Reply thread not created")
+    }
+
+    const { generateAndApplyThreadTitle, maybeScheduleThreadTitleGeneration } = await import(
+      "@in/server/modules/threadTitles"
+    )
+    maybeScheduleThreadTitleGeneration({
+      chat: replyThread,
+      message: textMessage,
+      text: "Yes, after QA signs off on notification delivery and badge counts.",
+      entities: undefined,
+      currentUserId: user.id,
+    })
+    await waitForChatTitle(replyThread.id, "Beta notification timing")
+
+    const updated = await db
+      .select({ title: schema.chats.title, emoji: schema.chats.emoji, isUntitled: schema.chats.isUntitled })
+      .from(schema.chats)
+      .where(eq(schema.chats.id, replyThread.id))
+      .then((rows) => rows[0])
+
+    expect(updated).toEqual({
+      title: "Beta notification timing",
+      emoji: null,
+      isUntitled: true,
+    })
+
+    const request = parseCompletion.mock.calls[0]?.[0] as
+      | {
+          model?: string
+          reasoning_effort?: string
+          messages?: { role?: string; content?: string }[]
+        }
+      | undefined
+    const systemMessage = request?.messages?.find((message) => message.role === "system")?.content
+    const userMessage = request?.messages?.find((message) => message.role === "user")?.content
+
+    expect(request?.model).toBe("gpt-5.6-luna")
+    expect(request?.reasoning_effort).toBe("none")
+    expect(systemMessage).toContain("This is a reply thread")
+    expect(systemMessage).toContain("Do not prefix the title with Re: or Reply")
+    expect(systemMessage).toContain("Do not choose an emoji for reply threads")
+    expect(userMessage).toContain("Context type: Reply thread")
+    expect(userMessage).toContain("Parent chat title: Launch planning")
+    expect(userMessage).toContain("Parent chat description: Mobile beta release coordination")
+    expect(userMessage).toContain("Parent message by: Mina Park")
+    expect(userMessage).toContain(`Parent message: ${anchorText}`)
+    expect(userMessage).toContain(
+      "First eligible reply: Yes, after QA signs off on notification delivery and badge counts.",
+    )
+
+    const secondResult = await generateAndApplyThreadTitle({
+      chatId: replyThread.id,
+      messageId: 2,
+      text: "A later reply should not regenerate the title even while untitled remains true.",
+      currentUserId: user.id,
+    })
+    expect(secondResult.didUpdate).toBe(false)
+    expect(parseCompletion).toHaveBeenCalledTimes(1)
+  })
+
+  test("does not apply a reply title after the placeholder is renamed during generation", async () => {
+    let resolveCompletion: (value: ReturnType<typeof completion>) => void = () => {}
+    parseCompletion.mockImplementation(
+      () => new Promise<ReturnType<typeof completion>>((resolve) => { resolveCompletion = resolve }),
+    )
+
+    const user = await testUtils.createUser("reply-title-race-user@example.com")
+    const parentChat = await testUtils.createChat(null, "Parent", "thread", false, user.id)
+    if (!parentChat) throw new Error("Parent chat not created")
+
+    const anchorText = "Review the new reply title behavior before launch"
+    await db.insert(schema.messages).values({
+      chatId: parentChat.id,
+      messageId: 1,
+      fromId: user.id,
+      text: anchorText,
+    })
+    const [replyThread] = await db
+      .insert(schema.chats)
+      .values({
+        type: "thread",
+        title: anchorText,
+        isUntitled: true,
+        publicThread: false,
+        createdBy: user.id,
+        parentChatId: parentChat.id,
+        parentMessageId: 1,
+      })
+      .returning()
+    if (!replyThread) throw new Error("Reply thread not created")
+
+    const { generateAndApplyThreadTitle } = await import("@in/server/modules/threadTitles")
+    const generation = generateAndApplyThreadTitle({
+      chatId: replyThread.id,
+      messageId: 1,
+      text: "This is the first eligible reply with enough useful context.",
+      currentUserId: user.id,
+    })
+    await waitForParseCallCount(1)
+
+    await db
+      .update(schema.chats)
+      .set({ title: "Manual reply title", isUntitled: null })
+      .where(eq(schema.chats.id, replyThread.id))
+    resolveCompletion(completion("Generated reply title"))
+
+    await expect(generation).resolves.toEqual({ didUpdate: false })
+    const savedTitle = await db
+      .select({ title: schema.chats.title })
+      .from(schema.chats)
+      .where(eq(schema.chats.id, replyThread.id))
+      .then((rows) => rows[0]?.title)
+    expect(savedTitle).toBe("Manual reply title")
   })
 
   test("does not overwrite a manually titled thread", async () => {
@@ -432,6 +622,48 @@ describe("thread title generation", () => {
       .then((rows) => rows[0])
 
     expect(updated?.title).toBe("Second Message Title")
+  })
+
+  test("ineligible messages do not cancel a pending title job", async () => {
+    let resolveCompletion: (value: ReturnType<typeof completion>) => void = () => {}
+    parseCompletion.mockImplementation(
+      () => new Promise<ReturnType<typeof completion>>((resolve) => { resolveCompletion = resolve }),
+    )
+
+    const user = await testUtils.createUser("stable-pending-thread-title-user@example.com")
+    const [chat] = await db
+      .insert(schema.chats)
+      .values({
+        type: "thread",
+        title: null,
+        publicThread: false,
+        createdBy: user.id,
+      })
+      .returning()
+    if (!chat) throw new Error("Chat not created")
+    await testUtils.addParticipant(chat.id, user.id)
+
+    const { maybeScheduleThreadTitleGeneration } = await import("@in/server/modules/threadTitles")
+    maybeScheduleThreadTitleGeneration({
+      chat,
+      message: textMessage,
+      text: "Please keep this first eligible title generation job running to completion.",
+      entities: undefined,
+      currentUserId: user.id,
+    })
+    await waitForParseCallCount(1)
+
+    maybeScheduleThreadTitleGeneration({
+      chat,
+      message: { ...textMessage, messageId: 2 },
+      text: "ok",
+      entities: undefined,
+      currentUserId: user.id,
+    })
+
+    resolveCompletion(completion("Stable pending title"))
+    await waitForChatTitle(chat.id, "Stable pending title")
+    expect(parseCompletion).toHaveBeenCalledTimes(1)
   })
 })
 

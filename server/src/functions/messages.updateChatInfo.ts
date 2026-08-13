@@ -33,7 +33,9 @@ type UpdateThreadInfoInput = {
   emoji?: string | null
   currentUserId: number
   requireAccess?: boolean
-  onlyIfTitleEmpty?: boolean
+  titleGuard?:
+    | { kind: "empty" }
+    | { kind: "untitledExact"; currentTitle: string | null }
   isUntitled?: boolean
 }
 
@@ -112,8 +114,14 @@ export async function updateThreadInfo(input: UpdateThreadInfoInput): Promise<Up
       await AccessGuards.ensureChatInfoEditAccess(chat, input.currentUserId, tx)
     }
 
-    if (input.onlyIfTitleEmpty && isNonEmpty(chat.title)) {
-      return { chat, didUpdate: false }
+    if (input.titleGuard) {
+      const titleGuardMatches = input.titleGuard.kind === "empty"
+        ? !isNonEmpty(chat.title)
+        : chat.isUntitled === true && chat.title === input.titleGuard.currentTitle
+
+      if (!titleGuardMatches) {
+        return { chat, didUpdate: false }
+      }
     }
 
     const normalizedEmoji = emojiProvided ? (nextEmoji && nextEmoji.length > 0 ? nextEmoji : null) : undefined
@@ -155,7 +163,7 @@ export async function updateThreadInfo(input: UpdateThreadInfoInput): Promise<Up
       updateFields.emoji = normalizedEmoji
     }
 
-    const where = input.onlyIfTitleEmpty
+    const where = input.titleGuard?.kind === "empty"
       ? and(eq(chats.id, chat.id), sql`(trim(coalesce(${chats.title}, '')) = '')`)
       : eq(chats.id, chat.id)
 
