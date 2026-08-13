@@ -69,6 +69,11 @@ private final class ComposeGlassGroupView: UIView {
 }
 
 private final class ComposePlusGlassButton: UIVisualEffectView {
+  private enum Constants {
+    static let hitTargetExpansion: CGFloat = 4
+    static let cornerRadius: CGFloat = 18
+  }
+
   var onTouchDown: (() -> Void)?
   var onTap: (() -> Void)?
 
@@ -104,6 +109,13 @@ private final class ComposePlusGlassButton: UIVisualEffectView {
     fatalError("init(coder:) has not been implemented")
   }
 
+  override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+    bounds.insetBy(
+      dx: -Constants.hitTargetExpansion,
+      dy: -Constants.hitTargetExpansion
+    ).contains(point)
+  }
+
   override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
     guard !isHidden, alpha > 0.01, isUserInteractionEnabled, self.point(inside: point, with: event) else {
       return nil
@@ -120,7 +132,7 @@ private final class ComposePlusGlassButton: UIVisualEffectView {
 
   override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
     let shouldTap = touches.contains { touch in
-      bounds.contains(touch.location(in: self))
+      point(inside: touch.location(in: self), with: event)
     }
     isPressed = false
     if shouldTap {
@@ -137,7 +149,7 @@ private final class ComposePlusGlassButton: UIVisualEffectView {
   private func setup() {
     translatesAutoresizingMaskIntoConstraints = false
     isUserInteractionEnabled = true
-    layer.cornerRadius = 21
+    layer.cornerRadius = Constants.cornerRadius
     layer.cornerCurve = .continuous
     layer.masksToBounds = true
     isAccessibilityElement = true
@@ -146,7 +158,7 @@ private final class ComposePlusGlassButton: UIVisualEffectView {
 
     imageView.translatesAutoresizingMaskIntoConstraints = false
     imageView.image = UIImage(systemName: "plus")?.withConfiguration(
-      UIImage.SymbolConfiguration(pointSize: 20.5, weight: .medium)
+      UIImage.SymbolConfiguration(pointSize: 16, weight: .medium)
     )
     imageView.tintColor = .secondaryLabel
     imageView.contentMode = .center
@@ -156,6 +168,12 @@ private final class ComposePlusGlassButton: UIVisualEffectView {
       imageView.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
       imageView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
     ])
+  }
+
+  override func accessibilityActivate() -> Bool {
+    onTouchDown?()
+    onTap?()
+    return true
   }
 }
 
@@ -287,9 +305,7 @@ extension ComposeView {
       let view = UIVisualEffectView(effect: glassEffect)
       view.translatesAutoresizingMaskIntoConstraints = false
       view.isUserInteractionEnabled = true
-      view.layer.cornerRadius = 20
-      view.layer.cornerCurve = .continuous
-      view.layer.masksToBounds = true
+      view.cornerConfiguration = .capsule(maximumRadius: 20)
       return view
     }
 

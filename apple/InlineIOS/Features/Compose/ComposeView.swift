@@ -52,6 +52,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   let buttonLeadingPadding: CGFloat = 10.0
   private let composeEdgeInset: CGFloat = 7.0
   private let composePlusSpacing: CGFloat = 9.5
+  private let composePlusButtonVisualSize: CGFloat = 36.0
+  private let composePlusButtonBottomInset: CGFloat = 7.0
   private let composeHorizontalInset: CGFloat = 10.0
   private let composeControlTrailingInset: CGFloat = 6.0
 
@@ -453,10 +455,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       plusButton.leadingAnchor.constraint(equalTo: glassContent.leadingAnchor, constant: composeEdgeInset),
       plusButton.bottomAnchor.constraint(
         equalTo: glassContent.bottomAnchor,
-        constant: buttonBottomPadding
+        constant: -composePlusButtonBottomInset
       ),
-      plusButton.widthAnchor.constraint(equalToConstant: buttonSize.width + 10),
-      plusButton.heightAnchor.constraint(equalToConstant: buttonSize.height + 10),
+      plusButton.widthAnchor.constraint(equalToConstant: composePlusButtonVisualSize),
+      plusButton.heightAnchor.constraint(equalToConstant: composePlusButtonVisualSize),
 
       // Container constraints
       composeLeadingToPlusConstraint,
