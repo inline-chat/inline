@@ -419,12 +419,12 @@ private extension AppDelegate {
     if let number = value as? NSNumber { return number.boolValue }
     if let string = value as? String {
       switch string.lowercased() {
-        case "true", "1", "yes":
-          return true
-        case "false", "0", "no":
-          return false
-        default:
-          return nil
+      case "true", "1", "yes":
+        return true
+      case "false", "0", "no":
+        return false
+      default:
+        return nil
       }
     }
     return nil

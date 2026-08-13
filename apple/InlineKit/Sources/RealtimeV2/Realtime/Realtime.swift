@@ -422,6 +422,7 @@ public actor RealtimeV2 {
 
     guard completingOwner == transactionOwner else {
       await transaction.cancelled()
+      await transactions.finishExecution(for: transactionWrapper)
       return
     }
 
@@ -431,16 +432,20 @@ public actor RealtimeV2 {
       try await transaction.apply(rpcResult)
       guard completingOwner == transactionOwner else {
         await transaction.cancelled()
+        await transactions.finishExecution(for: transactionWrapper)
         return
       }
+      await transactions.finishExecution(for: transactionWrapper)
       await transactions.satisfy(blockers: transaction.satisfiedBlockersOnSuccess)
       resumeTransactionContinuation(for: transactionId, returning: rpcResult)
     } catch {
       guard completingOwner == transactionOwner else {
         await transaction.cancelled()
+        await transactions.finishExecution(for: transactionWrapper)
         return
       }
       await transaction.failed(error: TransactionError.invalid)
+      await transactions.finishExecution(for: transactionWrapper)
       await transactions.signalQueue()
       resumeTransactionContinuation(for: transactionId, throwing: TransactionError.invalid)
     }
@@ -465,6 +470,7 @@ public actor RealtimeV2 {
 
     guard completingOwner == transactionOwner else {
       await transaction.cancelled()
+      await transactions.finishExecution(for: transactionWrapper)
       return
     }
 
@@ -477,6 +483,7 @@ public actor RealtimeV2 {
       guard completingOwner == transactionOwner else {
         if !requeued {
           await transaction.cancelled()
+          await transactions.finishExecution(for: transactionWrapper)
         }
         return
       }
@@ -492,9 +499,11 @@ public actor RealtimeV2 {
 
     guard completingOwner == transactionOwner else {
       await transaction.cancelled()
+      await transactions.finishExecution(for: transactionWrapper)
       return
     }
     await transaction.failed(error: error)
+    await transactions.finishExecution(for: transactionWrapper)
     guard completingOwner == transactionOwner else { return }
     resumeTransactionContinuation(for: transactionId, throwing: error)
     await transactions.signalQueue()
@@ -538,6 +547,7 @@ public actor RealtimeV2 {
       )
       beginTransactionOperation()
       await transaction.failed(error: .ackedButNoResultAfterReconnect)
+      await transactions.finishExecution(for: wrapper)
       endTransactionOperation()
       guard restartingOwner == transactionOwner else { return }
       resumeTransactionContinuation(for: transactionId, throwing: TransactionError.ackedButNoResultAfterReconnect)
@@ -920,6 +930,12 @@ public actor RealtimeV2 {
 
   public func applyUpdates(_ updates: [InlineProtocol.Update]) {
     Task { await sync.process(updates: updates) }
+  }
+
+  /// Applies transaction-result updates before returning when subsequent
+  /// reconciliation depends on their database state.
+  public func applyUpdatesAndWait(_ updates: [InlineProtocol.Update]) async {
+    await sync.process(updates: updates)
   }
 
   public func satisfyTransactionBlockers(_ blockers: [TransactionBlocker]) async {

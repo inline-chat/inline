@@ -55,7 +55,7 @@ final class ComposeAutocompleteMenuItem: NSTableCellView {
       } else {
         showSymbolIcon(item.symbol ?? "bubble.left")
       }
-    case .mention, .command:
+    case .mention, .command, .inlineCommand:
       showSymbolIcon(item.symbol ?? "bubble.left")
     }
   }

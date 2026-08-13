@@ -63,6 +63,7 @@ private struct InlineSceneRoot: View {
           isActive: scenePhase == .active,
           accountUserID: auth.currentUserId
         )
+        synchronizeUserSettings()
       }
       .onDisappear {
         appDelegate.sceneRouterRegistry.unregister(sceneID)
@@ -70,6 +71,7 @@ private struct InlineSceneRoot: View {
       .onChange(of: scenePhase) { _, newValue in
         if newValue == .active {
           appDelegate.sceneRouterRegistry.activate(sceneID)
+          synchronizeUserSettings()
         } else {
           appDelegate.sceneRouterRegistry.deactivate(sceneID)
         }
@@ -93,4 +95,11 @@ private struct InlineSceneRoot: View {
     UserDefaults.standard.set(true, forKey: Self.sceneMigrationKey)
   }
 
+  private func synchronizeUserSettings() {
+    guard scenePhase == .active else { return }
+
+    Task {
+      await INUserSettings.current.refresh(reason: .authenticatedScene)
+    }
+  }
 }

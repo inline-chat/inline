@@ -42,7 +42,14 @@ public extension FullMessage {
   }
 
   var displayTextForLastMessage: String? {
-    displayText?.replacingOccurrences(of: "\n", with: " ")
+    if let displayText {
+      let preview = displayText.replacingOccurrences(of: "\n", with: " ")
+      if !preview.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        return preview
+      }
+    }
+    guard message.documentId != nil else { return nil }
+    return MessagePreviewText.document(fileName: documentInfo?.document.fileName)
   }
 }
 
@@ -82,6 +89,13 @@ public extension EmbeddedMessage {
   }
 
   var displayTextForLastMessage: String? {
-    displayText?.replacingOccurrences(of: "\n", with: " ")
+    if let displayText {
+      let preview = displayText.replacingOccurrences(of: "\n", with: " ")
+      if !preview.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        return preview
+      }
+    }
+    guard message.documentId != nil else { return nil }
+    return MessagePreviewText.document(fileName: document?.fileName)
   }
 }
