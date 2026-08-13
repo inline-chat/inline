@@ -848,7 +848,9 @@ private struct ExperimentalChatListView: View {
     } else if mode == .archived {
       unarchiveButton(for: item)
     }
-    followButton(for: item)
+    if item.peer.asUserId() == nil {
+      followButton(for: item)
+    }
   }
 
   private func closeButton(for item: ChatListItemSnapshot) -> some View {
