@@ -55,6 +55,7 @@ final class ComposeAttachments: NSView {
   private var mediaBottomConstraint: NSLayoutConstraint!
   private var documentsLeadingConstraint: NSLayoutConstraint!
   private var verticalPadding: CGFloat = Theme.composeAttachmentsVPadding
+  private var isExternallyCollapsed = false
 
   init(frame: NSRect, compose: any ComposeAttachmentOwner) {
     self.compose = compose
@@ -110,6 +111,7 @@ final class ComposeAttachments: NSView {
   // MARK: - Layout / Height
 
   func getHeight() -> CGFloat {
+    guard !isExternallyCollapsed else { return 0 }
     if attachments.isEmpty, documentModels.isEmpty, videoAttachments.isEmpty {
       return 0
     }
@@ -133,14 +135,14 @@ final class ComposeAttachments: NSView {
 
   public func updateHeight(animated: Bool = false) {
     let newHeight = getHeight()
-    let mediaHeight = (attachments.isEmpty && videoAttachments.isEmpty)
+    let mediaHeight = (isExternallyCollapsed || (attachments.isEmpty && videoAttachments.isEmpty))
       ? 0
       : (Theme.composeAttachmentImageHeight + 2 * verticalPadding)
-    let collectionHeight = (attachments.isEmpty && videoAttachments.isEmpty)
+    let collectionHeight = (isExternallyCollapsed || (attachments.isEmpty && videoAttachments.isEmpty))
       ? 0
       : Theme.composeAttachmentImageHeight
     let padding = collectionHeight == 0 ? 0 : verticalPadding
-    let documentContentHeight = documentContentHeight(hasMedia: collectionHeight > 0)
+    let documentContentHeight = isExternallyCollapsed ? 0 : documentContentHeight(hasMedia: collectionHeight > 0)
     let documentViewportHeight = min(documentContentHeight, maxDocumentViewportHeight)
 
     let applyChanges = {
@@ -152,8 +154,8 @@ final class ComposeAttachments: NSView {
       self.mediaTopConstraint.constant = padding
       self.mediaBottomConstraint.constant = -padding
       self.mediaScrollView.isHidden = mediaHeight == 0
-      self.documentScrollView.isHidden = self.documentModels.isEmpty
-      self.documentLayout.sectionInset = (mediaHeight == 0 && !self.documentModels.isEmpty)
+      self.documentScrollView.isHidden = self.isExternallyCollapsed || self.documentModels.isEmpty
+      self.documentLayout.sectionInset = (!self.isExternallyCollapsed && mediaHeight == 0 && !self.documentModels.isEmpty)
         ? NSEdgeInsets(top: self.verticalPadding, left: 0, bottom: self.verticalPadding, right: 0)
         : .zero
       self.documentLayout.invalidateLayout()
@@ -175,6 +177,15 @@ final class ComposeAttachments: NSView {
     } else {
       applyChanges()
     }
+  }
+
+  /// Hidden AppKit views keep their active constraints. Collapse the attachment
+  /// chain explicitly while voice chrome owns the compose row, then restore the
+  /// existing measured height without rebuilding attachment views.
+  func setExternallyCollapsed(_ collapsed: Bool) {
+    guard isExternallyCollapsed != collapsed else { return }
+    isExternallyCollapsed = collapsed
+    updateHeight(animated: false)
   }
 
   private func setupView() {

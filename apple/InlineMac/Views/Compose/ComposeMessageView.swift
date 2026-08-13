@@ -133,11 +133,14 @@ class ComposeMessageView: NSView {
     guard alphaValue == hiddenAlpha else { return }
 
     if animated {
+      // The parent compose view animates its own height from the same state
+      // transition. Resolve this required child constraint first so AppKit never
+      // has to satisfy two independently animated vertical equations.
+      heightConstraint.constant = defaultHeight
       NSAnimationContext.runAnimationGroup { context in
         context.duration = 0.2
         context.timingFunction = CAMediaTimingFunction(name: .easeOut)
 
-        heightConstraint.animator().constant = defaultHeight
         animator().alphaValue = visibleAlpha
       }
     } else {
@@ -146,21 +149,19 @@ class ComposeMessageView: NSView {
     }
   }
 
-  func close(animated: Bool = false, completion: (() -> Void)? = nil, callOnClose: Bool = true) {
+  func close(animated: Bool = false, completion: (() -> Void)? = nil) {
     guard alphaValue == visibleAlpha else { return }
 
     if animated {
+      // Keep geometry owned by the parent transition; animate presentation only.
+      heightConstraint.constant = 0
       NSAnimationContext.runAnimationGroup { context in
         context.duration = 0.2
         context.timingFunction = CAMediaTimingFunction(name: .easeOut)
         context.completionHandler = {
-          if callOnClose {
-            self.onClose()
-          }
           completion?()
         }
 
-        heightConstraint.animator().constant = 0
         animator().alphaValue = hiddenAlpha
       }
     } else {
@@ -170,9 +171,6 @@ class ComposeMessageView: NSView {
 
         heightConstraint.constant = 0
         alphaValue = hiddenAlpha
-        if callOnClose {
-          onClose()
-        }
         completion?()
       }
     }

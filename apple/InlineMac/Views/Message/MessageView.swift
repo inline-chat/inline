@@ -1009,10 +1009,6 @@ class MessageViewAppKit: NSView {
     scrollState = isScrolling ? .scrolling : .idle
     super.init(frame: .zero)
     setupView()
-
-    DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
-      self?.setupScrollStateObserver()
-    }
   }
 
   @available(*, unavailable)
@@ -1030,6 +1026,7 @@ class MessageViewAppKit: NSView {
   override func viewDidMoveToSuperview() {
     super.viewDidMoveToSuperview()
     setupBoundsChangeObserver()
+    setupScrollStateObserver()
   }
 
   override func hitTest(_ point: NSPoint) -> NSView? {
@@ -2189,51 +2186,7 @@ class MessageViewAppKit: NSView {
       // TODO: Handle RTL
     }
 
-    // Reactions
-    if let reactionsPlan = layout.reactions, let reactionsView {
-      reactionViewHeightConstraint = reactionsView.heightAnchor.constraint(
-        equalToConstant: reactionsPlan.size.height
-      )
-      reactionViewWidthConstraint = reactionsView.widthAnchor.constraint(
-        equalToConstant: reactionsPlan.size.width
-      )
-      if layout.reactionsOutsideBubble {
-        reactionViewTopConstraint = reactionsView.topAnchor.constraint(
-          equalTo: (messageActionRowsView?.bottomAnchor ?? bubbleView.bottomAnchor),
-          constant: layout.reactionsOutsideBubbleTopInset
-        )
-        if outgoing {
-          reactionViewTrailingConstraint = reactionsView.trailingAnchor.constraint(
-            equalTo: bubbleView.trailingAnchor,
-            constant: -reactionsPlan.spacing.right
-          )
-        } else {
-          reactionViewLeadingConstraint = reactionsView.leadingAnchor.constraint(
-            equalTo: bubbleView.leadingAnchor,
-            constant: reactionsPlan.spacing.left
-          )
-        }
-      } else {
-        reactionViewTopConstraint = reactionsView.topAnchor.constraint(
-          equalTo: contentView.topAnchor,
-          constant: layout.reactionsViewTop
-        )
-        reactionViewLeadingConstraint = reactionsView.leadingAnchor.constraint(
-          equalTo: contentView.leadingAnchor,
-          constant: reactionsPlan.spacing.left
-        )
-      }
-
-      constraints.append(
-        contentsOf: [
-          reactionViewHeightConstraint,
-          reactionViewWidthConstraint,
-          reactionViewTopConstraint,
-          reactionViewLeadingConstraint,
-          reactionViewTrailingConstraint,
-        ].compactMap(\.self)
-      )
-    }
+    // setupReactions owns and activates reaction constraints.
 
     // Time
     if let time = layout.time {
@@ -2846,47 +2799,6 @@ class MessageViewAppKit: NSView {
           reactionViewLeadingConstraint.constant = reactionsPlan.spacing.left
         }
       }
-    } else if let reactionsView, let reactionsPlan = props.layout.reactions {
-      // setup
-      reactionViewHeightConstraint = reactionsView.heightAnchor.constraint(
-        equalToConstant: reactionsPlan.size.height
-      )
-      reactionViewWidthConstraint = reactionsView.widthAnchor.constraint(
-        equalToConstant: reactionsPlan.size.width
-      )
-      if props.layout.reactionsOutsideBubble {
-        reactionViewTopConstraint = reactionsView.topAnchor.constraint(
-          equalTo: (messageActionRowsView?.bottomAnchor ?? bubbleView.bottomAnchor),
-          constant: props.layout.reactionsOutsideBubbleTopInset
-        )
-        if outgoing {
-          reactionViewTrailingConstraint = reactionsView.trailingAnchor.constraint(
-            equalTo: bubbleView.trailingAnchor,
-            constant: -reactionsPlan.spacing.right
-          )
-        } else {
-          reactionViewLeadingConstraint = reactionsView.leadingAnchor.constraint(
-            equalTo: bubbleView.leadingAnchor,
-            constant: reactionsPlan.spacing.left
-          )
-        }
-      } else {
-        reactionViewTopConstraint = reactionsView.topAnchor.constraint(
-          equalTo: contentView.topAnchor,
-          constant: props.layout.reactionsViewTop
-        )
-        reactionViewLeadingConstraint = reactionsView.leadingAnchor.constraint(
-          equalTo: contentView.leadingAnchor,
-          constant: reactionsPlan.spacing.left
-        )
-      }
-      NSLayoutConstraint.activate([
-        reactionViewHeightConstraint,
-        reactionViewWidthConstraint,
-        reactionViewTopConstraint,
-        reactionViewLeadingConstraint,
-        reactionViewTrailingConstraint,
-      ].compactMap(\.self))
     }
 
     if let time = props.layout.time {
@@ -3021,6 +2933,7 @@ class MessageViewAppKit: NSView {
     super.viewDidMoveToWindow()
 
     setupBoundsChangeObserver()
+    setupScrollStateObserver()
     syncContinuousBubbleGradient()
   }
 
@@ -4030,9 +3943,15 @@ class MessageViewAppKit: NSView {
 
   private var hoverTrackingArea: NSTrackingArea?
   private func setupScrollStateObserver() {
+    if let observer = notificationObserver {
+      NotificationCenter.default.removeObserver(observer)
+      notificationObserver = nil
+    }
+
+    guard superview != nil, window != nil, let scrollView = enclosingScrollView else { return }
     notificationObserver = NotificationCenter.default.addObserver(
       forName: .messageListScrollStateDidChange,
-      object: nil,
+      object: scrollView,
       queue: .main
     ) { [weak self] notification in
       guard let state = notification.userInfo?["state"] as? MessageListScrollState else { return }
@@ -4519,7 +4438,7 @@ extension MessageViewAppKit: NSGestureRecognizerDelegate {
       }
     }
 
-    if photoView.superview != nil, !photoView.isHidden {
+    if hasPhoto, photoView.superview != nil, !photoView.isHidden {
       let pointInPhoto = photoView.convert(point, from: self)
       if let hit = photoView.hitTest(pointInPhoto) {
         MessageGestureTrace.trace(
@@ -4529,7 +4448,7 @@ extension MessageViewAppKit: NSGestureRecognizerDelegate {
       }
     }
 
-    if videoView.superview != nil, !videoView.isHidden {
+    if hasVideo, videoView.superview != nil, !videoView.isHidden {
       let pointInVideo = videoView.convert(point, from: self)
       if let hit = videoView.hitTest(pointInVideo) {
         MessageGestureTrace.trace(
@@ -4539,7 +4458,7 @@ extension MessageViewAppKit: NSGestureRecognizerDelegate {
       }
     }
 
-    if documentContainerView.superview != nil, !documentContainerView.isHidden {
+    if hasDocument, documentContainerView.superview != nil, !documentContainerView.isHidden {
       let pointInDocument = documentContainerView.convert(point, from: self)
       if let hit = documentContainerView.hitTest(pointInDocument) {
         MessageGestureTrace.trace(
@@ -4549,7 +4468,7 @@ extension MessageViewAppKit: NSGestureRecognizerDelegate {
       }
     }
 
-    if replyView.superview != nil, !replyView.isHidden {
+    if hasReply, replyView.superview != nil, !replyView.isHidden {
       let pointInReply = replyView.convert(point, from: self)
       if let hit = replyView.hitTest(pointInReply) {
         MessageGestureTrace.trace(
@@ -4559,7 +4478,9 @@ extension MessageViewAppKit: NSGestureRecognizerDelegate {
       }
     }
 
-    if replyThreadSummaryView.superview != nil, !replyThreadSummaryView.isHidden {
+    if shouldShowReplyThreadSummary(for: props),
+       replyThreadSummaryView.superview != nil,
+       !replyThreadSummaryView.isHidden {
       let pointInSummary = replyThreadSummaryView.convert(point, from: self)
       if let hit = replyThreadSummaryView.hitTest(pointInSummary) {
         MessageGestureTrace.trace(

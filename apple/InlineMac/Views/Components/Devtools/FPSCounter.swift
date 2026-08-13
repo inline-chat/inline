@@ -186,6 +186,7 @@ struct ChartView: View {
 struct FPSView: View {
   @StateObject private var counter = FPSCounter()
   @State private var isStressing = false
+  @State private var stressTimer: Timer?
   @State private var heavyWorkItems: [Int] = []
   @State private var paused = false
   @State private var hasChart = true
@@ -253,6 +254,7 @@ struct FPSView: View {
     .padding(.horizontal, 4.0)
     .onDisappear {
       counter.stopTracking()
+      stopStressTest()
     }
     .contextMenu {
       Button(!isStressing ? "Enable Stress Test" : "Disable Stress Test") {
@@ -281,16 +283,11 @@ struct FPSView: View {
   }
 
   private func toggleStressTest() {
-    let nextIsStressing = !isStressing
-    isStressing.toggle()
-
-    if nextIsStressing {
-      Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { timer in
-        if !isStressing {
-          timer.invalidate()
-          return
-        }
-
+    if isStressing {
+      stopStressTest()
+    } else {
+      isStressing = true
+      stressTimer = Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { _ in
         for _ in 0 ... 10_000 {
           heavyWorkItems.append(Int.random(in: 0 ... 1_000))
           _ = sqrt(Double.random(in: 0 ... 10_000))
@@ -298,6 +295,13 @@ struct FPSView: View {
         heavyWorkItems.removeAll()
       }
     }
+  }
+
+  private func stopStressTest() {
+    isStressing = false
+    stressTimer?.invalidate()
+    stressTimer = nil
+    heavyWorkItems.removeAll(keepingCapacity: false)
   }
 }
 

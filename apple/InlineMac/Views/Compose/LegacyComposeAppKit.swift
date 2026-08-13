@@ -336,6 +336,7 @@ class LegacyComposeAppKit: NSView {
     super.viewDidMoveToWindow()
 
     guard window != nil else { return }
+    hydrateInitialDraftIfNeeded()
 
     DispatchQueue.main.async { [weak self] in
       self?.focus()
@@ -438,21 +439,20 @@ class LegacyComposeAppKit: NSView {
     setupTextEditor()
   }
 
-  /// This method is called from ChatViewAppKit's viewDidLayout
-  /// Load draft, set initial height, etc here.
+  /// This method is called from ChatViewAppKit's viewDidLayout.
+  /// Draft hydration happens on window attachment so layout stays measurement-only.
   func didLayout() {
-    if !initializedDraft {
-      let loaded = loadDraft()
-      if !loaded {
-        updateHeight(animate: false)
-
-        // If no draft is loaded, show placeholder
-        textEditor.showPlaceholder(true)
-      }
-      initializedDraft = true
-    }
-
     updateHeightForTextLayoutWidthChange()
+  }
+
+  private func hydrateInitialDraftIfNeeded() {
+    guard !initializedDraft else { return }
+    let loaded = loadDraft()
+    if !loaded {
+      updateHeight(animate: false)
+      textEditor.showPlaceholder(true)
+    }
+    initializedDraft = true
   }
 
   private func setUpConstraints() {
@@ -664,6 +664,7 @@ class LegacyComposeAppKit: NSView {
     menuButton.isHidden = isVoiceActive
     emojiButton.isHidden = isVoiceActive
     attachments.isHidden = isVoiceActive
+    attachments.setExternallyCollapsed(isVoiceActive)
     voiceButton.isHidden = isVoiceActive || !shouldShowVoiceButton
     sendButton.isHidden = isVoiceActive || shouldShowVoiceButton
 

@@ -950,10 +950,6 @@ class MinimalMessageViewAppKit: NSView {
     scrollState = isScrolling ? .scrolling : .idle
     super.init(frame: .zero)
     setupView()
-
-    DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
-      self?.setupScrollStateObserver()
-    }
   }
 
   @available(*, unavailable)
@@ -969,6 +965,9 @@ class MinimalMessageViewAppKit: NSView {
     if superview == nil {
       updateHoverState(false)
     }
+
+    setupBoundsChangeObserver()
+    setupScrollStateObserver()
   }
 
   override func hitTest(_ point: NSPoint) -> NSView? {
@@ -991,6 +990,9 @@ class MinimalMessageViewAppKit: NSView {
   deinit {
     NotificationCenter.default.removeObserver(self)
     if let observer = notificationObserver {
+      NotificationCenter.default.removeObserver(observer)
+    }
+    if let observer = boundsChangeObserver {
       NotificationCenter.default.removeObserver(observer)
     }
     translationStateCancellable?.cancel()
@@ -2125,38 +2127,7 @@ class MinimalMessageViewAppKit: NSView {
       ].compactMap(\.self))
     }
 
-    // Reactions
-    if let reactionsPlan = layout.reactions, let reactionsView {
-      reactionViewHeightConstraint = reactionsView.heightAnchor.constraint(
-        equalToConstant: reactionsPlan.size.height
-      )
-      reactionViewWidthConstraint = reactionsView.widthAnchor.constraint(
-        equalToConstant: reactionsPlan.size.width
-      )
-      if layout.reactionsOutsideBubble {
-        reactionViewTopConstraint = reactionsView.topAnchor.constraint(
-          equalTo: (messageActionRowsView?.bottomAnchor ?? bubbleView.bottomAnchor),
-          constant: layout.reactionsOutsideBubbleTopInset
-        )
-        reactionViewLeadingConstraint = sideConstraint(for: reactionsView, in: bubbleView, spacing: reactionsPlan.spacing)
-      } else {
-        reactionViewTopConstraint = reactionsView.topAnchor.constraint(
-          equalTo: contentView.topAnchor,
-          constant: layout.reactionsViewTop
-        )
-        reactionViewLeadingConstraint = sideConstraint(for: reactionsView, in: contentView, spacing: reactionsPlan.spacing)
-      }
-
-      constraints.append(
-        contentsOf: [
-          reactionViewHeightConstraint,
-          reactionViewWidthConstraint,
-          reactionViewTopConstraint,
-          reactionViewLeadingConstraint,
-          reactionViewTrailingConstraint,
-        ].compactMap(\.self)
-      )
-    }
+    // setupReactions owns and activates reaction constraints.
 
     // Time
     if let time = layout.time {
@@ -2802,34 +2773,6 @@ class MinimalMessageViewAppKit: NSView {
       {
         reactionViewLeadingConstraint.constant = reactionSideConstant
       }
-    } else if let reactionsView, let reactionsPlan = props.layout.reactions {
-      // setup
-      reactionViewHeightConstraint = reactionsView.heightAnchor.constraint(
-        equalToConstant: reactionsPlan.size.height
-      )
-      reactionViewWidthConstraint = reactionsView.widthAnchor.constraint(
-        equalToConstant: reactionsPlan.size.width
-      )
-      if props.layout.reactionsOutsideBubble {
-        reactionViewTopConstraint = reactionsView.topAnchor.constraint(
-          equalTo: (messageActionRowsView?.bottomAnchor ?? bubbleView.bottomAnchor),
-          constant: props.layout.reactionsOutsideBubbleTopInset
-        )
-        reactionViewLeadingConstraint = sideConstraint(for: reactionsView, in: bubbleView, spacing: reactionsPlan.spacing)
-      } else {
-        reactionViewTopConstraint = reactionsView.topAnchor.constraint(
-          equalTo: contentView.topAnchor,
-          constant: props.layout.reactionsViewTop
-        )
-        reactionViewLeadingConstraint = sideConstraint(for: reactionsView, in: contentView, spacing: reactionsPlan.spacing)
-      }
-      NSLayoutConstraint.activate([
-        reactionViewHeightConstraint,
-        reactionViewWidthConstraint,
-        reactionViewTopConstraint,
-        reactionViewLeadingConstraint,
-        reactionViewTrailingConstraint,
-      ].compactMap(\.self))
     }
 
     if let time = props.layout.time {
@@ -2962,9 +2905,21 @@ class MinimalMessageViewAppKit: NSView {
       updateHoverState(false)
     }
 
+    setupBoundsChangeObserver()
+    setupScrollStateObserver()
+  }
+
+  private var boundsChangeObserver: NSObjectProtocol?
+
+  private func setupBoundsChangeObserver() {
+    if let observer = boundsChangeObserver {
+      NotificationCenter.default.removeObserver(observer)
+      boundsChangeObserver = nil
+    }
+
     // Experimental in build 66
     // Adjust viewport instead of layouting
-    if window != nil {
+    if superview != nil, window != nil, let clipView = enclosingScrollView?.contentView {
       // Register for both frame and bounds changes
 //      NotificationCenter.default.addObserver(
 //        self,
@@ -2974,12 +2929,13 @@ class MinimalMessageViewAppKit: NSView {
 //      )
 
       ////      // Also observe bounds changes
-      NotificationCenter.default.addObserver(
-        self,
-        selector: #selector(handleBoundsChange),
-        name: NSView.boundsDidChangeNotification,
-        object: enclosingScrollView?.contentView
-      )
+      boundsChangeObserver = NotificationCenter.default.addObserver(
+        forName: NSView.boundsDidChangeNotification,
+        object: clipView,
+        queue: .main
+      ) { [weak self] notification in
+        self?.handleBoundsChange(notification)
+      }
 
 //      // Observe window resize notifications
 //      NotificationCenter.default.addObserver(
@@ -3922,9 +3878,15 @@ class MinimalMessageViewAppKit: NSView {
   }
 
   private func setupScrollStateObserver() {
+    if let observer = notificationObserver {
+      NotificationCenter.default.removeObserver(observer)
+      notificationObserver = nil
+    }
+
+    guard superview != nil, window != nil, let scrollView = enclosingScrollView else { return }
     notificationObserver = NotificationCenter.default.addObserver(
       forName: .messageListScrollStateDidChange,
-      object: nil,
+      object: scrollView,
       queue: .main
     ) { [weak self] notification in
       guard let state = notification.userInfo?["state"] as? MessageListScrollState else { return }
@@ -4241,7 +4203,7 @@ extension MinimalMessageViewAppKit {
       }
     }
 
-    if photoView.superview != nil, !photoView.isHidden {
+    if hasPhoto, photoView.superview != nil, !photoView.isHidden {
       let pointInPhoto = photoView.convert(point, from: self)
       if let hit = photoView.hitTest(pointInPhoto) {
         MessageGestureTrace.trace(
@@ -4251,7 +4213,7 @@ extension MinimalMessageViewAppKit {
       }
     }
 
-    if videoView.superview != nil, !videoView.isHidden {
+    if hasVideo, videoView.superview != nil, !videoView.isHidden {
       let pointInVideo = videoView.convert(point, from: self)
       if let hit = videoView.hitTest(pointInVideo) {
         MessageGestureTrace.trace(
@@ -4261,7 +4223,7 @@ extension MinimalMessageViewAppKit {
       }
     }
 
-    if documentContainerView.superview != nil, !documentContainerView.isHidden {
+    if hasDocument, documentContainerView.superview != nil, !documentContainerView.isHidden {
       let pointInDocument = documentContainerView.convert(point, from: self)
       if let hit = documentContainerView.hitTest(pointInDocument) {
         MessageGestureTrace.trace(
@@ -4271,7 +4233,7 @@ extension MinimalMessageViewAppKit {
       }
     }
 
-    if replyView.superview != nil, !replyView.isHidden {
+    if hasReply, replyView.superview != nil, !replyView.isHidden {
       let pointInReply = replyView.convert(point, from: self)
       if let hit = replyView.hitTest(pointInReply) {
         MessageGestureTrace.trace(
@@ -4281,7 +4243,9 @@ extension MinimalMessageViewAppKit {
       }
     }
 
-    if replyThreadSummaryView.superview != nil, !replyThreadSummaryView.isHidden {
+    if shouldShowReplyThreadSummary(for: props),
+       replyThreadSummaryView.superview != nil,
+       !replyThreadSummaryView.isHidden {
       let pointInSummary = replyThreadSummaryView.convert(point, from: self)
       if let hit = replyThreadSummaryView.hitTest(pointInSummary) {
         MessageGestureTrace.trace(

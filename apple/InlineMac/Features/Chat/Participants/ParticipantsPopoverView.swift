@@ -213,6 +213,10 @@ public struct ParticipantsPopoverView: View {
       subscribeToChatUpdates()
       await loadChat()
     }
+    .onDisappear {
+      chatSubscription?.cancel()
+      chatSubscription = nil
+    }
     .confirmationDialog(
       "Remove participant?",
       isPresented: $showRemoveConfirmation,

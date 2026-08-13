@@ -1399,13 +1399,27 @@ class MessageListAppKit: NSViewController {
       name: NSScrollView.didEndLiveScrollNotification,
       object: scrollView
     )
+  }
 
-    NotificationCenter.default.addObserver(
-      self,
-      selector: #selector(liveResizeEnded),
-      name: NSWindow.didEndLiveResizeNotification,
-      object: scrollView.window
-    )
+  private var liveResizeObserver: NSObjectProtocol?
+
+  private func setupLiveResizeObserver() {
+    removeLiveResizeObserver()
+    guard let window = view.window else { return }
+
+    liveResizeObserver = NotificationCenter.default.addObserver(
+      forName: NSWindow.didEndLiveResizeNotification,
+      object: window,
+      queue: .main
+    ) { [weak self] _ in
+      self?.liveResizeEnded()
+    }
+  }
+
+  private func removeLiveResizeObserver() {
+    guard let observer = liveResizeObserver else { return }
+    NotificationCenter.default.removeObserver(observer)
+    liveResizeObserver = nil
   }
 
   private func setupMessageHoverTracking() {
@@ -1543,7 +1557,7 @@ class MessageListAppKit: NSViewController {
     didSet {
       NotificationCenter.default.post(
         name: .messageListScrollStateDidChange,
-        object: self,
+        object: scrollView,
         userInfo: ["state": scrollState]
       )
     }
@@ -1898,6 +1912,7 @@ class MessageListAppKit: NSViewController {
   override func viewDidAppear() {
     super.viewDidAppear()
     log.trace("viewDidAppear() called")
+    setupLiveResizeObserver()
     observeToolbarDisplayModeIfNeeded()
     updateScrollViewInsets()
     updateToolbar()
@@ -1912,6 +1927,7 @@ class MessageListAppKit: NSViewController {
   override func viewDidDisappear() {
     super.viewDidDisappear()
     log.trace("viewDidDisappear() called")
+    removeLiveResizeObserver()
     clearHoveredMessage()
   }
 
@@ -3876,6 +3892,7 @@ extension MessageListAppKit {
     }
 
     // Remove all observers
+    removeLiveResizeObserver()
     NotificationCenter.default.removeObserver(self)
     if let appActivityObserverId {
       AppActivityMonitor.shared.removeObserver(appActivityObserverId)

@@ -498,7 +498,7 @@ class ChatViewAppKit: NSViewController {
           default:
             return false
         }
-      case .invalid:
+      case .invalid, .persistenceFailed:
         return true
       case .timeout, .ackedButNoResultAfterReconnect, .dependencyFailed:
         return false
