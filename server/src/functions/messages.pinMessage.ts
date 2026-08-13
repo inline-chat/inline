@@ -31,17 +31,7 @@ const log = new Log("functions.pinMessage")
 export const pinMessage = async (input: Input, context: FunctionContext): Promise<Output> => {
   const chat = await ChatModel.getChatFromInputPeer(input.peer, context)
 
-  try {
-    await AccessGuards.ensureChatAccess(chat, context.currentUserId)
-  } catch (error) {
-    log.error("pinMessage blocked: chat access denied", {
-      chatId: chat.id,
-      currentUserId: context.currentUserId,
-      peer: input.peer,
-      error,
-    })
-    throw error
-  }
+  await AccessGuards.ensureChatAccess(chat, context.currentUserId)
 
   const messageId = Number(input.messageId)
   if (!Number.isSafeInteger(messageId) || messageId <= 0) {

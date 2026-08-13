@@ -14,6 +14,7 @@ import {
 import {
   buildServerSentryDist,
   buildServerSentryRelease,
+  shouldEnableServerSentry,
 } from "@in/server/utils/sentryRelease"
 import {
   beforeSendLog,
@@ -51,7 +52,7 @@ Sentry.init({
   dist: sentryDist,
   environment: NODE_ENV,
   tracesSampleRate: 1,
-  enabled: NODE_ENV !== "development",
+  enabled: shouldEnableServerSentry(NODE_ENV),
   enableLogs: true,
   beforeSendLog,
 })

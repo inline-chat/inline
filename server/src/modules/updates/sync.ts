@@ -36,8 +36,26 @@ import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { Log, LogLevel } from "@in/server/utils/log"
 import { and, asc, eq, inArray } from "drizzle-orm"
 import { getMessageRepliesMap } from "@in/server/modules/subthreads"
+import { BoundedLogAggregator } from "@in/server/utils/logging/boundedLogAggregator"
 
 const log = new Log("Sync", LogLevel.DEBUG)
+const missingMessageLogs = new BoundedLogAggregator(15 * 60 * 1000, 1_024)
+
+const logMissingMessage = (
+  updateKind: "newMessage" | "editMessage",
+  details: { chatId: number; msgId: bigint; seq: number },
+) => {
+  const decision = missingMessageLogs.record(`${updateKind}:${details.chatId}`)
+  if (!decision.emit) return
+
+  log.warn("Skipping updates whose messages are no longer available", {
+    updateKind,
+    chatId: details.chatId,
+    sampleMsgId: String(details.msgId),
+    sampleSeq: details.seq,
+    suppressedCount: decision.suppressedCount,
+  })
+}
 
 export const Sync = {
   getUpdates: getUpdates,
@@ -300,9 +318,9 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
       case "newMessage": {
         const message = msgs.get(serverUpdate.update.newMessage.msgId)
         if (!message) {
-          log.warn("Skipping newMessage update due to missing message", {
+          logMissingMessage("newMessage", {
             chatId,
-            msgId: String(serverUpdate.update.newMessage.msgId),
+            msgId: serverUpdate.update.newMessage.msgId,
             seq: update.seq,
           })
           inflatedUpdates.push(chatSkipPts(update, chatId))
@@ -325,9 +343,9 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
       case "editMessage": {
         const message = msgs.get(serverUpdate.update.editMessage.msgId)
         if (!message) {
-          log.warn("Skipping editMessage update due to missing message", {
+          logMissingMessage("editMessage", {
             chatId,
-            msgId: String(serverUpdate.update.editMessage.msgId),
+            msgId: serverUpdate.update.editMessage.msgId,
             seq: update.seq,
           })
           inflatedUpdates.push(chatSkipPts(update, chatId))

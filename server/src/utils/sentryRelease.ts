@@ -9,3 +9,7 @@ export function buildServerSentryRelease(version: string, gitCommitSha: string):
 export function buildServerSentryDist(gitCommitSha: string): string | undefined {
   return gitCommitSha !== "N/A" ? gitCommitSha : undefined
 }
+
+export function shouldEnableServerSentry(nodeEnv: string): boolean {
+  return nodeEnv === "production"
+}

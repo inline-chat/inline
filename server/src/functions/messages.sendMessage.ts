@@ -118,12 +118,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   const inputPeer = input.peerId
   const currentUserId = context.currentUserId
   const chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
-  try {
-    await AccessGuards.ensureChatAccess(chat, currentUserId)
-  } catch (error) {
-    log.error("sendMessage blocked: chat access denied", { chatId: chat.id, currentUserId, inputPeer, error })
-    throw error
-  }
+  await AccessGuards.ensureChatAccess(chat, currentUserId)
   await ensurePrivatePeerCanReceiveMessages(chat, currentUserId)
   const chatId = chat.id
   const replyToMsgIdNumber = input.replyToMessageId ? Number(input.replyToMessageId) : null
@@ -273,7 +268,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     }))
   } catch (error) {
     if (error instanceof Error && error.message.includes("random_id_per_sender_unique") && input.randomId) {
-      log.error(error, "duplicate random id, fetching message from database to recover")
+      log.debug("duplicate random id recovered from existing message", { currentUserId })
 
       // Just fetch the message from the database
       return { updates: await selfUpdatesFromExistingMessage(input.randomId, currentUserId) }

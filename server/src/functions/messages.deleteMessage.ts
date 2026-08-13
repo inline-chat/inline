@@ -9,7 +9,6 @@ import { RealtimeUpdates } from "../realtime/message"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
-import { Log } from "@in/server/utils/log"
 import { Notifications } from "@in/server/modules/notifications/notifications"
 import { emitReplyThreadParentRepliesUpdateIfNeeded } from "@in/server/modules/subthreads"
 import { pushChatMetadataUpdates } from "@in/server/modules/chatMetadataUpdatePush"
@@ -28,21 +27,9 @@ type Output = {
   updates: Update[]
 }
 
-const log = new Log("functions.deleteMessage")
-
 export const deleteMessage = async (input: Input, context: FunctionContext): Promise<Output> => {
   const chat = await ChatModel.getChatFromInputPeer(input.peer, context)
-  try {
-    await AccessGuards.ensureChatAccess(chat, context.currentUserId)
-  } catch (error) {
-    log.error("deleteMessage blocked: chat access denied", {
-      chatId: chat.id,
-      currentUserId: context.currentUserId,
-      peer: input.peer,
-      error,
-    })
-    throw error
-  }
+  await AccessGuards.ensureChatAccess(chat, context.currentUserId)
 
   await ensureDeleteAllowed({
     chat,
@@ -118,7 +105,7 @@ async function ensureDeleteAllowed(input: {
     .from(messages)
     .where(and(eq(messages.chatId, input.chat.id), inArray(messages.messageId, messageIds)))
 
-  if (rows.length === 0 || rows.every((message) => message.fromId === input.currentUserId)) {
+  if (rows.every((message) => message.fromId === input.currentUserId)) {
     return
   }
 
@@ -132,12 +119,6 @@ async function ensureDeleteAllowed(input: {
     return
   }
 
-  log.warn("deleteMessage blocked: space thread requires author or admin", {
-    chatId: input.chat.id,
-    spaceId: input.chat.spaceId,
-    currentUserId: input.currentUserId,
-    messageIds,
-  })
   throw RealtimeRpcError.SpaceAdminRequired()
 }
 

@@ -290,6 +290,8 @@ describe("realtime protocol safety", () => {
   })
 
   it("returns sessionRevoked connectionError when connectionInit token is revoked", async () => {
+    const warnSpy = spyOn(Log.prototype, "warn")
+    const debugSpy = spyOn(Log.prototype, "debug")
     const ws = await openRealtimeSocket()
     const user = await testUtils.createUser("realtime-revoked-auth@test.com")
     const { token, session } = await testUtils.createSessionForUser(user.id, { clientType: "ios" })
@@ -312,6 +314,18 @@ describe("realtime protocol safety", () => {
     if (message.body.oneofKind === "connectionError") {
       expect(message.body.connectionError.reason).toBe(ConnectionError_Reason.SESSION_REVOKED)
     }
+    expect(
+      warnSpy.mock.calls.filter(
+        ([message]) => message === "realtime connectionInit rejected",
+      ),
+    ).toHaveLength(0)
+    expect(
+      debugSpy.mock.calls.filter(
+        ([message]) => message === "realtime connectionInit rejected",
+      ),
+    ).toHaveLength(1)
+    warnSpy.mockRestore()
+    debugSpy.mockRestore()
     await wsClosed(ws)
   })
 
@@ -428,7 +442,11 @@ describe("realtime protocol safety", () => {
   })
 
   it("maps rpc method/input mismatch into rpcError instead of crashing", async () => {
+    const errorSpy = spyOn(Log.prototype, "error")
+    const debugSpy = spyOn(Log.prototype, "debug")
     const { ws } = await authenticateSocket()
+    const errorCallCount = errorSpy.mock.calls.length
+    const debugCallCount = debugSpy.mock.calls.length
 
     wsSendClientProtocolMessage(ws, {
       id: 99n,
@@ -450,6 +468,18 @@ describe("realtime protocol safety", () => {
     if (response.body.oneofKind === "rpcError") {
       expect(response.body.rpcError.reqMsgId).toBe(99n)
     }
+    expect(
+      errorSpy.mock.calls
+        .slice(errorCallCount)
+        .some(([message]) => message === "error handling message"),
+    ).toBe(false)
+    expect(
+      debugSpy.mock.calls
+        .slice(debugCallCount)
+        .some(([message]) => message === "realtime RPC rejected"),
+    ).toBe(true)
+    errorSpy.mockRestore()
+    debugSpy.mockRestore()
     await wsClosed(ws)
   })
 

@@ -2,7 +2,6 @@ import { db } from "@in/server/db"
 import { eq, and, isNull } from "drizzle-orm"
 import { members, spaces } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
-import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
 import { encodeMemberInfo, encodeSpaceInfo, TMemberInfo, TSpaceInfo } from "@in/server/api-types"
 import { TInputId } from "@in/server/types/methods"
@@ -28,26 +27,25 @@ export const Response = Type.Object({
 type Response = Static<typeof Response>
 
 export const handler = async (input: Input, context: Context): Promise<Response> => {
-  try {
-    const spaceId = Number(input.id)
-    if (isNaN(spaceId)) {
-      throw new InlineError(InlineError.ApiError.BAD_REQUEST)
-    }
+  const spaceId = Number(input.id)
+  if (isNaN(spaceId)) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
 
-    // Check if current user is a member of the space
-    await Authorize.spaceMember(spaceId, context.currentUserId)
+  // Check if current user is a member of the space
+  await Authorize.spaceMember(spaceId, context.currentUserId)
 
-    const spaceResult = await db
-      .select()
-      .from(spaces)
-      .where(and(eq(spaces.id, spaceId), isNull(spaces.deleted)))
-      .limit(1)
+  const spaceResult = await db
+    .select()
+    .from(spaces)
+    .where(and(eq(spaces.id, spaceId), isNull(spaces.deleted)))
+    .limit(1)
 
-    if (!spaceResult[0]) {
-      throw new InlineError(InlineError.ApiError.INTERNAL)
-    }
+  if (!spaceResult[0]) {
+    throw new InlineError(InlineError.ApiError.INTERNAL)
+  }
 
-    const membersResult = await db.select().from(members).where(eq(members.spaceId, spaceId))
+  const membersResult = await db.select().from(members).where(eq(members.spaceId, spaceId))
 
     //const chatsResult = await db.select().from(chats).where(eq(chats.spaceId, spaceId))
 
@@ -115,14 +113,10 @@ export const handler = async (input: Input, context: Context): Promise<Response>
     //   return encodeDialogInfo({ ...dialog, unreadCount })
     // })
 
-    return {
-      space: encodeSpaceInfo(spaceResult[0], { currentUserId: context.currentUserId }),
-      members: membersResult.map((member) => encodeMemberInfo(member)),
-      // chats: chatsResult.map((chat) => encodeChatInfo(chat, { currentUserId: context.currentUserId })),
-      // dialogs: dialogsEncoded,
-    }
-  } catch (error) {
-    Log.shared.error("Failed to get space", error)
-    throw new InlineError(InlineError.ApiError.INTERNAL)
+  return {
+    space: encodeSpaceInfo(spaceResult[0], { currentUserId: context.currentUserId }),
+    members: membersResult.map((member) => encodeMemberInfo(member)),
+    // chats: chatsResult.map((chat) => encodeChatInfo(chat, { currentUserId: context.currentUserId })),
+    // dialogs: dialogsEncoded,
   }
 }

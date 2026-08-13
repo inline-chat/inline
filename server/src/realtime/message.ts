@@ -3,7 +3,6 @@ import {
   ClientMessage,
   ConnectionError_Reason,
   Method,
-  RpcError_Code,
   RpcResult,
   ServerMessage,
   ServerProtocolMessage,
@@ -15,10 +14,10 @@ import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { InlineError } from "@in/server/types/errors"
 import {
-  type AuthTokenErrorDetails,
   getAuthTokenErrorDetails,
   getConnectionReasonFromAuthError,
 } from "@in/server/modules/auth/sessionAuthentication"
+import { BoundedLogAggregator } from "@in/server/utils/logging/boundedLogAggregator"
 
 const log = new Log("realtime")
 
@@ -42,61 +41,8 @@ const getMethodName = (method: number): string => {
   return Method[method] ?? `UNKNOWN_METHOD_${method}`
 }
 
-const unsupportedRpcMethodLogKeys = new Set<string>()
-const MAX_UNSUPPORTED_RPC_METHOD_LOG_KEYS = 512
 const AUTH_REJECTION_WARNING_WINDOW_MS = 15 * 60 * 1000
-const MAX_AUTH_REJECTION_WARNING_KEYS = 1_024
-const authRejectionWarnings = new Map<
-  string,
-  { lastWarnedAt: number; suppressedCount: number }
->()
-
-const isUnsupportedRpcMethodError = (error: unknown): error is RealtimeRpcError => {
-  return (
-    error instanceof RealtimeRpcError &&
-    error.code === RpcError_Code.BAD_REQUEST &&
-    error.message.startsWith("Unsupported RPC method:")
-  )
-}
-
-const shouldLogUnsupportedRpcMethodWarning = (key: string): boolean => {
-  if (unsupportedRpcMethodLogKeys.has(key)) return false
-  if (unsupportedRpcMethodLogKeys.size >= MAX_UNSUPPORTED_RPC_METHOD_LOG_KEYS) {
-    unsupportedRpcMethodLogKeys.clear()
-  }
-  unsupportedRpcMethodLogKeys.add(key)
-  return true
-}
-
-const authRejectionLogDecision = (
-  details: AuthTokenErrorDetails,
-  now = Date.now(),
-): { warn: boolean; suppressedCount: number } => {
-  const key = `${details.failure}:${details.credentialFingerprint ?? "unknown"}`
-  const existing = authRejectionWarnings.get(key)
-
-  if (
-    existing &&
-    now - existing.lastWarnedAt < AUTH_REJECTION_WARNING_WINDOW_MS
-  ) {
-    existing.suppressedCount += 1
-    return { warn: false, suppressedCount: existing.suppressedCount }
-  }
-
-  if (
-    !existing &&
-    authRejectionWarnings.size >= MAX_AUTH_REJECTION_WARNING_KEYS
-  ) {
-    authRejectionWarnings.clear()
-  }
-
-  const suppressedCount = existing?.suppressedCount ?? 0
-  authRejectionWarnings.set(key, {
-    lastWarnedAt: now,
-    suppressedCount: 0,
-  })
-  return { warn: true, suppressedCount }
-}
+const authRejectionLogs = new BoundedLogAggregator(AUTH_REJECTION_WARNING_WINDOW_MS, 1_024)
 
 const connectionReasonName = (reason: ConnectionError_Reason): string => {
   return ConnectionError_Reason[reason] ?? `UNKNOWN_CONNECTION_REASON_${reason}`
@@ -210,13 +156,18 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
           const authDetails = getAuthTokenErrorDetails(e)
           const metadata = connectionInitRejectionMetadata(message, rootContext, e, reason)
           if (authDetails) {
-            const decision = authDetails.failure === "user_deactivated"
-              ? { warn: false, suppressedCount: 0 }
-              : authRejectionLogDecision(authDetails)
+            const isExpectedLifecycleFailure =
+              authDetails.failure === "user_deactivated" ||
+              authDetails.failure === "session_revoked"
+            const decision = isExpectedLifecycleFailure
+              ? { emit: false, suppressedCount: 0 }
+              : authRejectionLogs.record(
+                `${authDetails.failure}:${authDetails.credentialFingerprint ?? "unknown"}`,
+              )
             const rejectionMetadata = decision.suppressedCount > 0
               ? { ...metadata, suppressedCount: decision.suppressedCount }
               : metadata
-            if (decision.warn) {
+            if (decision.emit) {
               log.warn("realtime connectionInit rejected", rejectionMetadata)
             } else {
               log.debug("realtime connectionInit rejected", rejectionMetadata)
@@ -285,37 +236,29 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
       errorMeta["errorCodeNumber"] = e.code
     }
 
-    const logMessage =
-      message.body.oneofKind === "connectionInit"
-        ? "error handling message in connectionInit"
-        : "error handling message"
-    const unsupportedRpcMethodKey =
-      message.body.oneofKind === "rpcCall"
-        ? `${handlerContext.userId}:${handlerContext.sessionId}:${message.body.rpcCall.method}`
-        : null
-    if (isUnsupportedRpcMethodError(e) && unsupportedRpcMethodKey) {
-      const errorPayload = { ...errorMeta, errorMessage: e.message }
-      if (shouldLogUnsupportedRpcMethodWarning(unsupportedRpcMethodKey)) {
-        log.warn(logMessage, errorPayload)
-      } else {
-        log.debug(logMessage, errorPayload)
-      }
+    const rpcError =
+      e instanceof RealtimeRpcError
+        ? e
+        : e instanceof InlineError
+          ? RealtimeRpcError.fromInlineError(e)
+          : RealtimeRpcError.InternalError()
+
+    if (message.body.oneofKind === "rpcCall" && rpcError.codeNumber < 500) {
+      log.debug("realtime RPC rejected", {
+        ...errorMeta,
+        errorMessage: rpcError.message,
+      })
     } else {
+      const logMessage =
+        message.body.oneofKind === "connectionInit"
+          ? "error handling message in connectionInit"
+          : "error handling message"
       log.error(logMessage, e, errorMeta)
     }
     if (message.body.oneofKind === "connectionInit") {
       // TODO: handle this better
       ws.close()
     } else {
-      let rpcError: RealtimeRpcError
-      if (e instanceof RealtimeRpcError) {
-        rpcError = e
-      } else if (e instanceof InlineError) {
-        rpcError = RealtimeRpcError.fromInlineError(e)
-      } else {
-        rpcError = RealtimeRpcError.InternalError()
-      }
-
       sendRaw({
         id: message.id,
         body: {

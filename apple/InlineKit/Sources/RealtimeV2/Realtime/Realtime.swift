@@ -9,7 +9,7 @@ public enum RealtimeDirectRpcError: Error {
   case notAuthorized
   case notConnected
   case timeout
-  case rpcError(message: String?, code: Int)
+  case rpcError(errorCode: InlineProtocol.RpcError.Code, message: String?, code: Int)
   case unknown(Error)
 }
 
@@ -959,8 +959,8 @@ public actor RealtimeV2 {
           throw RealtimeDirectRpcError.notConnected
         case .timeout:
           throw RealtimeDirectRpcError.timeout
-        case let .rpcError(_, message, code):
-          throw RealtimeDirectRpcError.rpcError(message: message, code: code)
+        case let .rpcError(errorCode, message, code):
+          throw RealtimeDirectRpcError.rpcError(errorCode: errorCode, message: message, code: code)
         case .stopped:
           throw RealtimeDirectRpcError.notConnected
       }
@@ -978,7 +978,7 @@ public actor RealtimeV2 {
     )
 
     guard case let .revokeSession(revokeResult)? = result else {
-      throw RealtimeDirectRpcError.rpcError(message: "Unexpected revokeSession response", code: 500)
+      throw RealtimeDirectRpcError.rpcError(errorCode: .internalError, message: nil, code: 500)
     }
 
     return revokeResult
@@ -991,7 +991,7 @@ public actor RealtimeV2 {
     )
 
     guard case let .getSessions(sessionsResult)? = result else {
-      throw RealtimeDirectRpcError.rpcError(message: "Unexpected getSessions response", code: 500)
+      throw RealtimeDirectRpcError.rpcError(errorCode: .internalError, message: nil, code: 500)
     }
 
     return sessionsResult
@@ -1014,7 +1014,7 @@ public actor RealtimeV2 {
     )
 
     guard case let .createCliSession(createResult)? = result else {
-      throw RealtimeDirectRpcError.rpcError(message: "Unexpected createCliSession response", code: 500)
+      throw RealtimeDirectRpcError.rpcError(errorCode: .internalError, message: nil, code: 500)
     }
 
     return createResult
@@ -1029,7 +1029,7 @@ public actor RealtimeV2 {
     )
 
     guard case let .checkUsername(usernameResult)? = result else {
-      throw RealtimeDirectRpcError.rpcError(message: "Unexpected checkUsername response", code: 500)
+      throw RealtimeDirectRpcError.rpcError(errorCode: .internalError, message: nil, code: 500)
     }
 
     return usernameResult
@@ -1044,7 +1044,7 @@ public actor RealtimeV2 {
     )
 
     guard case let .changeUsername(usernameResult)? = result else {
-      throw RealtimeDirectRpcError.rpcError(message: "Unexpected changeUsername response", code: 500)
+      throw RealtimeDirectRpcError.rpcError(errorCode: .internalError, message: nil, code: 500)
     }
 
     return usernameResult
@@ -1071,7 +1071,7 @@ public actor RealtimeV2 {
     )
 
     guard case let .updateProfile(profileResult)? = result else {
-      throw RealtimeDirectRpcError.rpcError(message: "Unexpected updateProfile response", code: 500)
+      throw RealtimeDirectRpcError.rpcError(errorCode: .internalError, message: nil, code: 500)
     }
 
     return profileResult
@@ -1086,7 +1086,7 @@ public actor RealtimeV2 {
     )
 
     guard case let .setProfilePhoto(profileResult)? = result else {
-      throw RealtimeDirectRpcError.rpcError(message: "Unexpected setProfilePhoto response", code: 500)
+      throw RealtimeDirectRpcError.rpcError(errorCode: .internalError, message: nil, code: 500)
     }
 
     return profileResult
@@ -1105,7 +1105,7 @@ public actor RealtimeV2 {
     )
 
     guard case let .getExternalProfilePhoto(profilePhotoResult)? = result else {
-      throw RealtimeDirectRpcError.rpcError(message: "Unexpected getExternalProfilePhoto response", code: 500)
+      throw RealtimeDirectRpcError.rpcError(errorCode: .internalError, message: nil, code: 500)
     }
 
     return profilePhotoResult
@@ -1126,13 +1126,13 @@ public actor RealtimeV2 {
     )
 
     guard case let .collapseHistory(collapseResult)? = result else {
-      throw RealtimeDirectRpcError.rpcError(message: "Unexpected collapseHistory response", code: 500)
+      throw RealtimeDirectRpcError.rpcError(errorCode: .internalError, message: nil, code: 500)
     }
     guard let boundaryUpdate = collapseResult.updates.first(where: {
       if case .dialogCollapsedMaxID = $0.update { return true }
       return false
     }), case let .dialogCollapsedMaxID(boundary) = boundaryUpdate.update else {
-      throw RealtimeDirectRpcError.rpcError(message: "Missing collapseHistory boundary update", code: 500)
+      throw RealtimeDirectRpcError.rpcError(errorCode: .internalError, message: nil, code: 500)
     }
 
     await sync.process(updates: collapseResult.updates)

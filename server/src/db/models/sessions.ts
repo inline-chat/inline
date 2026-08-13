@@ -176,16 +176,23 @@ export class SessionsModel {
       throw new Error("Invalid session ID")
     }
 
+    if (!(await this.setActiveIfPresent(id, active))) {
+      throw new Error(`Failed to update session last active: Session not found: ${id}`)
+    }
+  }
+
+  static async setActiveIfPresent(id: number, active: boolean): Promise<boolean> {
+    if (!id || id <= 0) {
+      throw new Error("Invalid session ID")
+    }
+
     try {
       const result = await db
         .update(sessions)
         .set({ active, lastActive: new Date() })
         .where(eq(sessions.id, id))
         .returning({ id: sessions.id })
-
-      if (!result.length) {
-        throw new Error(`Session not found: ${id}`)
-      }
+      return result.length > 0
     } catch (error) {
       throw new Error(
         `Failed to update session last active: ${error instanceof Error ? error.message : "Unknown error"}`,

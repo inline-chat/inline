@@ -154,17 +154,7 @@ async function getChatWithAccess(inputPeer: InputPeer, currentUserId: number): P
     }
   }
 
-  try {
-    await AccessGuards.ensureChatAccess(chat, currentUserId)
-  } catch (error) {
-    log.error("searchMessages blocked: chat access denied", {
-      chatId: chat.id,
-      currentUserId,
-      inputPeer,
-      error,
-    })
-    throw error
-  }
+  await AccessGuards.ensureChatAccess(chat, currentUserId)
 
   return chat
 }

@@ -66,7 +66,7 @@ type DeleteBacklinkMessagesOptions = {
   currentUserId?: number
 }
 
-export function graphScopeFromChat(chat: SourceChat): GraphScope {
+export function graphScopeFromChat(chat: SourceChat): GraphScope | null {
   if (chat.spaceId !== null) {
     return { type: "space", id: chat.spaceId }
   }
@@ -75,7 +75,9 @@ export function graphScopeFromChat(chat: SourceChat): GraphScope {
     return { type: "user", id: chat.createdBy }
   }
 
-  throw new Error(`Cannot resolve graph scope for chat ${chat.id}`)
+  // Legacy chats can predate both scope columns. Graph projection is optional;
+  // leave those rows untouched until a deliberate backfill exists.
+  return null
 }
 
 export async function replaceMessageThreadLinks(input: ReplaceMessageThreadLinksInput): Promise<DbThreadGraphLink[]> {
@@ -275,6 +277,9 @@ export async function materializeReplyThreadLink(
     }))
 
   const scope = graphScopeFromChat(parentChat)
+  if (!scope) {
+    return null
+  }
   const now = new Date()
 
   const [row] = await db
@@ -324,6 +329,9 @@ export async function materializeThreadLink(input: MaterializeThreadLinkInput): 
   }
 
   const scope = graphScopeFromChat(input.sourceChat)
+  if (!scope) {
+    return null
+  }
   const now = new Date()
   const dedupeKey = threadLinkDedupeKey(input.sourceMessageGlobalId, input.entityIndex, input.targetChatId)
 

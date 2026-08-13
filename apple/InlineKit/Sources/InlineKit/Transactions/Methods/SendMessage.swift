@@ -416,7 +416,7 @@ public struct TransactionSendMessage: Transaction {
 
     if let error = error as? RealtimeDirectRpcError {
       switch error {
-      case let .rpcError(_, code):
+      case let .rpcError(_, _, code):
         return code != 400 && code != 401
       case .notAuthorized:
         return false

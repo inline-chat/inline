@@ -87,7 +87,9 @@ class PresenceManager {
   /** Called when a connection is closed */
   async handleConnectionClose(session: SessionInput) {
     try {
-      await SessionsModel.setActive(session.sessionId, false)
+      // Revocation can delete the session before an overlapping socket closes.
+      // In that normal race there is no row left to mark inactive.
+      await SessionsModel.setActiveIfPresent(session.sessionId, false)
     } catch (e) {
       this.log.error("Failed to set session active to false", { sessionId: session.sessionId, error: e })
     }

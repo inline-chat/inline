@@ -87,17 +87,7 @@ async function getMessagesWithChatCreation(
     }
   }
 
-  try {
-    await AccessGuards.ensureChatAccess(chat, options.currentUserId)
-  } catch (error) {
-    log.error("getChatHistory blocked: chat access denied", {
-      chatId: chat.id,
-      currentUserId: options.currentUserId,
-      inputPeer,
-      error,
-    })
-    throw error
-  }
+  await AccessGuards.ensureChatAccess(chat, options.currentUserId)
 
   const messages = await MessageModel.getMessages(inputPeer, options)
   return { chat, messages }

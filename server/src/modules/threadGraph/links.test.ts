@@ -16,7 +16,7 @@ describe("graphScopeFromChat", () => {
     })
   })
 
-  it("requires a scope source", () => {
-    expect(() => graphScopeFromChat({ id: 1, title: "Source", spaceId: null, createdBy: null })).toThrow()
+  it("skips legacy chats without a scope source", () => {
+    expect(graphScopeFromChat({ id: 1, title: "Source", spaceId: null, createdBy: null })).toBeNull()
   })
 })

@@ -81,7 +81,7 @@ struct SendMessageRetryPolicyTests {
     #expect(transaction.shouldRetryOnFail(error: RealtimeDirectRpcError.notAuthorized) == false)
     #expect(
       transaction.shouldRetryOnFail(
-        error: RealtimeDirectRpcError.rpcError(message: "bad request", code: 400)
+        error: RealtimeDirectRpcError.rpcError(errorCode: .badRequest, message: "bad request", code: 400)
       ) == false
     )
   }

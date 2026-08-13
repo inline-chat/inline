@@ -256,7 +256,7 @@ actor ProtocolSession: ProtocolSessionType {
 enum ProtocolSessionError: Error {
   case notAuthorized
   case notConnected
-  case rpcError(errorCode: String, message: String, code: Int)
+  case rpcError(errorCode: InlineProtocol.RpcError.Code, message: String, code: Int)
   case stopped
   case timeout
 }
@@ -364,8 +364,11 @@ extension ProtocolSession {
   }
 
   private func completeRpcError(msgId: UInt64, rpcError: InlineProtocol.RpcError) {
-    let codeString = String(describing: rpcError.errorCode)
-    let error = ProtocolSessionError.rpcError(errorCode: codeString, message: rpcError.message, code: Int(rpcError.code))
+    let error = ProtocolSessionError.rpcError(
+      errorCode: rpcError.errorCode,
+      message: rpcError.message,
+      code: Int(rpcError.code)
+    )
     getAndRemoveRpcContinuation(for: msgId)?.resume(throwing: error)
   }
 

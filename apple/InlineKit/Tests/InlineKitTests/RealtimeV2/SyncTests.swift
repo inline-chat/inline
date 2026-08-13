@@ -1221,7 +1221,7 @@ final class SyncTests {
       methodErrors: [
         .getUpdates: [
           ProtocolSessionError.rpcError(
-            errorCode: "PEER_ID_INVALID",
+            errorCode: .peerIDInvalid,
             message: "Peer ID is invalid",
             code: 400
           ),
@@ -1276,7 +1276,7 @@ final class SyncTests {
 
     let peer = makeChatPeer(chatId: 1)
     let invalidPeer = ProtocolSessionError.rpcError(
-      errorCode: "peerIDInvalid",
+      errorCode: .peerIDInvalid,
       message: "Peer ID is invalid",
       code: 400
     )
@@ -1317,7 +1317,7 @@ final class SyncTests {
     let apply = RecordingApplyUpdates()
 
     let invalidPeer = ProtocolSessionError.rpcError(
-      errorCode: "peerIDInvalid",
+      errorCode: .peerIDInvalid,
       message: "Peer ID is invalid",
       code: 400
     )

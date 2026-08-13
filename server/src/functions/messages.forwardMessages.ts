@@ -119,18 +119,8 @@ export const forwardMessages = async (input: Input, context: FunctionContext): P
   const sourceChat = await ChatModel.getChatFromInputPeer(input.fromPeerId, context)
   const destinationChat = await ChatModel.getChatFromInputPeer(input.toPeerId, context)
 
-  try {
-    await AccessGuards.ensureChatAccess(sourceChat, currentUserId)
-    await AccessGuards.ensureChatAccess(destinationChat, currentUserId)
-  } catch (error) {
-    log.error("forwardMessages blocked: chat access denied", {
-      sourceChatId: sourceChat.id,
-      destinationChatId: destinationChat.id,
-      currentUserId,
-      error,
-    })
-    throw error
-  }
+  await AccessGuards.ensureChatAccess(sourceChat, currentUserId)
+  await AccessGuards.ensureChatAccess(destinationChat, currentUserId)
 
   const normalizedFromPeer = normalizeForwardPeer(input.fromPeerId, currentUserId)
   const updates: Update[] = []

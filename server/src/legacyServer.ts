@@ -2,7 +2,11 @@ import "dotenv/config"
 import * as Sentry from "@sentry/bun"
 import { API_BASE_URL, NODE_ENV, PORT, SENTRY_DSN } from "@in/server/env"
 import { gitCommitHash, gitCommitSha, version } from "@in/server/buildEnv"
-import { buildServerSentryDist, buildServerSentryRelease } from "@in/server/utils/sentryRelease"
+import {
+  buildServerSentryDist,
+  buildServerSentryRelease,
+  shouldEnableServerSentry,
+} from "@in/server/utils/sentryRelease"
 import { beforeSendLog } from "@in/server/utils/log"
 
 const sentryRelease = buildServerSentryRelease(version, gitCommitSha)
@@ -14,7 +18,7 @@ Sentry.init({
   dist: sentryDist,
   environment: NODE_ENV,
   tracesSampleRate: 1.0,
-  enabled: NODE_ENV !== "development",
+  enabled: shouldEnableServerSentry(NODE_ENV),
   enableLogs: true,
   beforeSendLog,
 })

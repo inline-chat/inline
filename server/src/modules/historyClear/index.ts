@@ -470,17 +470,7 @@ async function persistRemovedChatAccessUpdates(
 
 async function ensureCanClearHistory(chat: DbChat, currentUserId: number): Promise<void> {
   if (chat.type === "private") {
-    try {
-      await AccessGuards.ensureChatAccess(chat, currentUserId)
-    } catch (error) {
-      log.error("clearChatHistory blocked: chat access denied", {
-        chatId: chat.id,
-        currentUserId,
-        error,
-      })
-      throw error
-    }
-
+    await AccessGuards.ensureChatAccess(chat, currentUserId)
     return
   }
 

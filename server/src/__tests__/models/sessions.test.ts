@@ -99,6 +99,10 @@ describe("SessionsModel push sessions", () => {
     expect(row?.applePushTokenEncrypted).toBeNull()
   })
 
+  test("treats a missing session as a normal conditional active update", async () => {
+    await expect(SessionsModel.setActiveIfPresent(2_000_000_000, false)).resolves.toBe(false)
+  })
+
   test("revoke clears push notification details", async () => {
     const user = await testUtils.createUser("revoke-clears-push@test.com")
     const session = await testUtils.createSessionForUser(user.id, { clientType: "ios" })

@@ -2120,13 +2120,12 @@ actor BucketActor {
       return false
     }
 
-    let normalized = errorCode
-      .replacingOccurrences(of: "_", with: "")
-      .lowercased()
-
-    return normalized == "peeridinvalid"
-      || normalized == "chatidinvalid"
-      || normalized == "spaceidinvalid"
+    return switch errorCode {
+    case .peerIDInvalid, .chatIDInvalid, .spaceIDInvalid:
+      true
+    default:
+      false
+    }
   }
 
   private func resetRetryState() {

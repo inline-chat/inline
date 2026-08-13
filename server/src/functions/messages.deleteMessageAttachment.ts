@@ -10,10 +10,7 @@ import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { encodeMessageAttachmentUpdate } from "@in/server/realtime/encoders/encodeMessageAttachment"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { RealtimeUpdates } from "@in/server/realtime/message"
-import { Log } from "@in/server/utils/log"
 import { and, eq } from "drizzle-orm"
-
-const log = new Log("functions.deleteMessageAttachment")
 
 export const deleteMessageAttachment = async (
   input: DeleteMessageAttachmentInput,
@@ -45,13 +42,6 @@ export const deleteMessageAttachment = async (
     }
 
     if (message.fromId !== context.currentUserId) {
-      log.warn("deleteMessageAttachment blocked: message author mismatch", {
-        chatId: chat.id,
-        messageId,
-        attachmentId,
-        fromId: message.fromId,
-        currentUserId: context.currentUserId,
-      })
       throw RealtimeRpcError.BadRequest()
     }
 
