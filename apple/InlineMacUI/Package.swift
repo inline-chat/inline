@@ -6,6 +6,7 @@ import PackageDescription
 let baseDependencies: [PackageDescription.Target.Dependency] = [
   "InlineKit",
   .product(name: "InlineRTC", package: "InlineKit"),
+  .product(name: "InlineMacSidebarModel", package: "InlineMacSidebarModel"),
   "InlineUI",
 ]
 
@@ -32,6 +33,7 @@ let package = Package(
 
   dependencies: [
     .package(name: "InlineKit", path: "../InlineKit"),
+    .package(name: "InlineMacSidebarModel", path: "../InlineMacSidebarModel"),
     .package(name: "InlineUI", path: "../InlineUI"),
     // .package(url: "https://github.com/kean/Nuke", from: "12.8.0"),
   ],
