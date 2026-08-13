@@ -83,6 +83,7 @@ type MonitorHarness = {
     answerBotChatSettings: ReturnType<typeof vi.fn>
     setMyBotCapabilities: ReturnType<typeof vi.fn>
     closeClient: ReturnType<typeof vi.fn>
+    triggerAuthenticationError: ReturnType<typeof vi.fn>
     upsertPairingRequest: ReturnType<typeof vi.fn>
     buildPairingReply: ReturnType<typeof vi.fn>
     readAllowFromStore: ReturnType<typeof vi.fn>
@@ -275,6 +276,7 @@ type MonitorSetup = {
   createSubthreadError?: string
   followModeError?: string
   getMeError?: Error
+  connectAuthenticationError?: "UNAUTHORIZED" | "INVALID_AUTH" | "SESSION_REVOKED"
   openKeyedStore?: ReturnType<typeof vi.fn>
 }
 
@@ -452,6 +454,12 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
   const answerBotChatSettingsMock = vi.fn(async () => {})
   const setMyBotCapabilitiesMock = vi.fn(async () => ({}))
   const closeClient = vi.fn(async () => {})
+  let onAuthenticationError: ((error: Error) => void) | undefined
+  const triggerAuthenticationError = vi.fn((code: "UNAUTHORIZED" | "INVALID_AUTH" | "SESSION_REVOKED") => {
+    const error = new Error(`Inline authentication failed: ${code}`)
+    error.name = "InlineSdkAuthenticationError"
+    onAuthenticationError?.(error)
+  })
   const fetchRemoteMedia = vi.fn(async ({ url }: { url: string }) => {
     const media = setup.mediaByUrl?.[url]
     return {
@@ -721,6 +729,15 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
   })
 
   vi.doMock("@inline-chat/realtime-sdk", () => {
+    class InlineSdkAuthenticationError extends Error {
+      readonly terminal = true as const
+
+      constructor(readonly code: "UNAUTHORIZED" | "INVALID_AUTH" | "SESSION_REVOKED") {
+        super(`Inline authentication failed: ${code}`)
+        this.name = "InlineSdkAuthenticationError"
+      }
+    }
+
     async function* eventsGenerator() {
       for (const event of setup.events) {
         if (event.kind === "message.new") {
@@ -867,11 +884,17 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         RUNNING: BOT_PRESENCE_RUNNING,
         REVIEW: BOT_PRESENCE_REVIEW,
       },
+      InlineSdkAuthenticationError,
       InlineSdkClient: class {
         constructor(opts: any) {
           setup.captureSdkLogger?.(opts.logger)
+          onAuthenticationError = opts.onAuthenticationError
         }
-        connect = vi.fn(async () => {})
+        connect = vi.fn(async () => {
+          if (setup.connectAuthenticationError) {
+            throw new InlineSdkAuthenticationError(setup.connectAuthenticationError)
+          }
+        })
         getMe = vi.fn(async () => ({ userId: setup.me?.userId ?? 777n }))
         getChat = vi.fn(async ({ chatId }: { chatId: bigint }) => {
           const key = String(chatId)
@@ -1118,6 +1141,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       answerBotChatSettings: answerBotChatSettingsMock,
       setMyBotCapabilities: setMyBotCapabilitiesMock,
       closeClient,
+      triggerAuthenticationError,
       upsertPairingRequest,
       buildPairingReply,
       readAllowFromStore,
@@ -1343,6 +1367,34 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("publishes terminal authentication failures after startup", async () => {
+    const statusPatches: Array<Record<string, unknown>> = []
+    const harness = await setupMonitorHarness({
+      events: [],
+      chats: {},
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      statusSink: (patch: Record<string, unknown>) => {
+        statusPatches.push(patch)
+      },
+    })
+
+    harness.calls.triggerAuthenticationError("UNAUTHORIZED")
+
+    expect(statusPatches.at(-1)).toEqual(expect.objectContaining({
+      connected: false,
+      lastError: "inline authentication failed: InlineSdkAuthenticationError: Inline authentication failed: UNAUTHORIZED",
+    }))
+
+    await handle.stop()
+  })
+
   it("surfaces startup getMe failures with operation context and closes the client", async () => {
     const statusPatches: Array<Record<string, unknown>> = []
     const getMeError = new Error("Internal server error")
@@ -1373,6 +1425,42 @@ describe("inline/monitor", () => {
         expect.objectContaining({
           connected: false,
           lastError: "inline startup getMe failed: ProtocolClientError:rpc-error: Internal server error",
+        }),
+      ]),
+    )
+    expect(harness.calls.closeClient).toHaveBeenCalledTimes(1)
+  })
+
+  it("preserves terminal SDK authentication errors during startup", async () => {
+    const statusPatches: Array<Record<string, unknown>> = []
+    const harness = await setupMonitorHarness({
+      events: [],
+      chats: {},
+      connectAuthenticationError: "SESSION_REVOKED",
+    })
+
+    await expect(
+      harness.monitorInlineProvider({
+        cfg: {} as any,
+        account: buildAccount({ dmPolicy: "open" }),
+        runtime: { log: vi.fn(), error: vi.fn() } as any,
+        abortSignal: new AbortController().signal,
+        log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+        statusSink: (patch: Record<string, unknown>) => {
+          statusPatches.push(patch)
+        },
+      }),
+    ).rejects.toMatchObject({
+      name: "InlineSdkAuthenticationError",
+      code: "SESSION_REVOKED",
+      terminal: true,
+    })
+
+    expect(statusPatches).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          connected: false,
+          lastError: "inline startup connect failed: InlineSdkAuthenticationError: Inline authentication failed: SESSION_REVOKED",
         }),
       ]),
     )

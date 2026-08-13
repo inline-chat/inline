@@ -75,6 +75,7 @@ import {
   BotChatSettingsProblem_Code,
   BotPresenceState_Kind,
   DialogFollowMode,
+  InlineSdkAuthenticationError,
   InlineSdkClient,
   JsonFileStateStore,
   Method,
@@ -3106,6 +3107,13 @@ export async function monitorInlineProvider(params: {
     logger: sdkLog,
     state: new JsonFileStateStore(statePath),
     catchUpUserFromStart: hasExistingState,
+    onAuthenticationError: (error) => {
+      recoverableConnectionError = null
+      pushDiagnostics({
+        connected: false,
+        lastError: formatInlineOperationError("inline authentication", error),
+      })
+    },
   })
 
   let meUser: User | null = null
@@ -3128,6 +3136,7 @@ export async function monitorInlineProvider(params: {
     await client.close().catch((closeErr) => {
       log?.warn(`inline startup cleanup failed: ${formatInlineOperationError("client close", closeErr)}`)
     })
+    if (err instanceof InlineSdkAuthenticationError) throw err
     throw new Error(message)
   }
   if (!meUser) {
