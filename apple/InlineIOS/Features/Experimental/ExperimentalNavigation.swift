@@ -442,6 +442,7 @@ private struct ExperimentalChatListView: View {
   @Environment(\.appDatabase) private var appDatabase
   @Environment(\.realtimeV2) private var realtimeV2
   @Environment(ExperimentalHomeActionCoordinator.self) private var homeActions
+  @State private var pendingArchiveItem: ChatListItemSnapshot?
 
   var body: some View {
     Group {
@@ -487,6 +488,7 @@ private struct ExperimentalChatListView: View {
         }
         .listStyle(.plain)
         .contentMargins(.top, listTopContentMargin, for: .scrollContent)
+        .contentMargins(.bottom, 32, for: .scrollContent)
         .listSectionSpacing(.custom(listSectionSpacing))
         .environment(\.defaultMinListRowHeight, defaultMinimumListRowHeight)
         .animation(
@@ -494,6 +496,25 @@ private struct ExperimentalChatListView: View {
           value: animatedInboxRows
         )
       }
+    }
+    .confirmationDialog(
+      "Archive Chat?",
+      isPresented: Binding(
+        get: { pendingArchiveItem != nil },
+        set: { if !$0 { pendingArchiveItem = nil } }
+      ),
+      titleVisibility: .visible,
+      presenting: pendingArchiveItem
+    ) { item in
+      Button("Archive", role: .destructive) {
+        pendingArchiveItem = nil
+        performArchive(item)
+      }
+      Button("Cancel", role: .cancel) {
+        pendingArchiveItem = nil
+      }
+    } message: { _ in
+      Text("This chat will move to Archived Chats.")
     }
   }
 
@@ -700,7 +721,7 @@ private struct ExperimentalChatListView: View {
     Button {
       performClose(peer: item.peer)
     } label: {
-      Label("Close", systemImage: "xmark.circle")
+      Label("Close", systemImage: "xmark")
     }
   }
 
@@ -740,8 +761,8 @@ private struct ExperimentalChatListView: View {
   }
 
   private func contextMenuArchiveButton(for item: ChatListItemSnapshot) -> some View {
-    Button {
-      performArchive(item)
+    Button(role: .destructive) {
+      requestArchive(item)
     } label: {
       Label("Archive", systemImage: "archivebox")
     }
@@ -775,53 +796,68 @@ private struct ExperimentalChatListView: View {
   @ViewBuilder
   private func swipeEnabledRow(for item: ChatListItemSnapshot) -> some View {
     let row = baseRow(for: item)
-      .swipeActions(edge: .leading, allowsFullSwipe: mode == .allChats) {
-        leadingSwipeActions(for: item)
-      }
 
     if #available(iOS 27.0, *) {
-      row.swipeActions(
-        edge: .trailing,
-        allowsFullSwipe: true,
-        content: {
-          trailingSwipeActions(for: item)
-        },
-        onPresentationChanged: { isPresented in
-          trailingSwipePresentationChanged(isPresented, peer: item.peer)
-        }
-      )
+      row
+        .swipeActions(
+          edge: .leading,
+          allowsFullSwipe: mode == .allChats,
+          content: {
+            leadingSwipeActions(for: item)
+          },
+          onPresentationChanged: { isPresented in
+            swipePresentationChanged(isPresented, peer: item.peer)
+          }
+        )
+        .swipeActions(
+          edge: .trailing,
+          allowsFullSwipe: true,
+          content: {
+            trailingSwipeActions(for: item)
+          },
+          onPresentationChanged: { isPresented in
+            swipePresentationChanged(isPresented, peer: item.peer)
+          }
+        )
     } else {
-      row.swipeActions(edge: .trailing, allowsFullSwipe: true) {
-        trailingSwipeActions(for: item)
-      }
+      row
+        .swipeActions(edge: .leading, allowsFullSwipe: mode == .allChats) {
+          leadingSwipeActions(for: item)
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+          trailingSwipeActions(for: item)
+        }
     }
   }
 
   @ViewBuilder
   private func leadingSwipeActions(for item: ChatListItemSnapshot) -> some View {
     readUnreadButton(for: item)
+    if mode == .inbox {
+      pinButton(for: item)
+    }
   }
 
   @ViewBuilder
   private func trailingSwipeActions(for item: ChatListItemSnapshot) -> some View {
     if mode == .inbox {
       closeButton(for: item)
-      pinButton(for: item)
     } else if mode == .allChats {
       archiveButton(for: item)
       openButton(for: item)
     } else if mode == .archived {
       unarchiveButton(for: item)
     }
+    followButton(for: item)
   }
 
   private func closeButton(for item: ChatListItemSnapshot) -> some View {
-    Button(role: .destructive) {
+    Button {
       performClose(peer: item.peer)
     } label: {
-      Label("Close", systemImage: "xmark.circle.fill")
+      Label("Close", systemImage: "xmark")
     }
-    .tint(.gray)
+    .tint(Color(uiColor: .systemGray3))
   }
 
   private func performClose(peer: Peer) {
@@ -889,7 +925,7 @@ private struct ExperimentalChatListView: View {
           type: .success,
           systemImage: "archivebox.fill",
           action: {
-            performUnarchive(item)
+            performUnarchive(item, showsSuccessToast: false)
           },
           actionTitle: "Undo"
         )
@@ -906,11 +942,15 @@ private struct ExperimentalChatListView: View {
 
   private func archiveButton(for item: ChatListItemSnapshot) -> some View {
     Button {
-      performArchive(item)
+      requestArchive(item)
     } label: {
       Label("Archive", systemImage: "archivebox.fill")
     }
-    .tint(.orange)
+    .tint(.red)
+  }
+
+  private func requestArchive(_ item: ChatListItemSnapshot) {
+    pendingArchiveItem = item
   }
 
   private func pinButton(for item: ChatListItemSnapshot) -> some View {
@@ -942,7 +982,7 @@ private struct ExperimentalChatListView: View {
     }
   }
 
-  private func trailingSwipePresentationChanged(_ isPresented: Bool, peer: Peer) {
+  private func swipePresentationChanged(_ isPresented: Bool, peer: Peer) {
     guard !isPresented,
           let pinned = homeActions.takeDeferredPinUpdate(peer: peer)
     else { return }
@@ -986,6 +1026,44 @@ private struct ExperimentalChatListView: View {
     .tint(.blue)
   }
 
+  private func followButton(for item: ChatListItemSnapshot) -> some View {
+    Button {
+      performFollowUpdate(peer: item.peer, isFollowed: item.isFollowed)
+    } label: {
+      Label(
+        item.isFollowed ? "Unfollow" : "Follow",
+        systemImage: item.isFollowed ? "eye.slash.fill" : "eye.fill"
+      )
+    }
+    .tint(.purple)
+  }
+
+  private func performFollowUpdate(peer: Peer, isFollowed: Bool) {
+    Task {
+      do {
+        _ = try await realtimeV2.send(.updateDialogFollowMode(
+          peerId: peer,
+          selection: isFollowed ? .unfollowed : .following
+        ))
+        ToastManager.shared.showToast(
+          isFollowed ? "Unfollowed" : "Following",
+          description: isFollowed
+            ? "Only mentions and replies can bring this chat back."
+            : "New messages will appear in Inbox.",
+          type: .success,
+          systemImage: isFollowed ? "eye.slash.fill" : "eye.fill"
+        )
+      } catch {
+        Log.shared.error("Failed to update follow state", error: error)
+        ToastManager.shared.showToast(
+          "Could not update follow state",
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
+        )
+      }
+    }
+  }
+
   private func performReadUnreadUpdate(peer: Peer, isUnread: Bool) {
     Task {
       do {
@@ -1016,7 +1094,10 @@ private struct ExperimentalChatListView: View {
     .tint(.blue)
   }
 
-  private func performUnarchive(_ item: ChatListItemSnapshot) {
+  private func performUnarchive(
+    _ item: ChatListItemSnapshot,
+    showsSuccessToast: Bool = true
+  ) {
     Task {
       do {
         let didPerform = try await homeActions.perform(peer: item.peer) {
@@ -1028,11 +1109,13 @@ private struct ExperimentalChatListView: View {
           )
         }
         guard didPerform else { return }
-        ToastManager.shared.showToast(
-          "Restored to All Chats",
-          type: .success,
-          systemImage: "arrow.uturn.backward.circle.fill"
-        )
+        if showsSuccessToast {
+          ToastManager.shared.showToast(
+            "Restored to All Chats",
+            type: .success,
+            systemImage: "arrow.uturn.backward.circle.fill"
+          )
+        }
       } catch {
         Log.shared.error("Failed to unarchive chat", error: error)
         ToastManager.shared.showToast(

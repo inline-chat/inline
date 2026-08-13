@@ -145,6 +145,20 @@ private struct ExperimentalAuthedRootView: View {
   @EnvironmentObject private var realtimeState: RealtimeState
 
   init() {
+    let defaults = UserDefaults.standard
+    let homeScope = ExperimentalHomeChatScope(
+      rawValue: defaults.string(forKey: ExperimentalHomePreferenceKeys.chatScope) ?? ""
+    ) ?? .all
+    let sortMode = ExperimentalHomeSortMode(
+      rawValue: defaults.string(forKey: ExperimentalHomePreferenceKeys.sortMode) ?? ""
+    ) ?? .recentActivity
+    let initialHomeConfiguration = ExperimentalHomeListConfiguration(
+      spaceID: nil,
+      includeSpaceChatsInHome: homeScope == .all,
+      inboxSort: sortMode.chatListSort,
+      allChatsFilter: .all
+    )
+
     _data = EnvironmentStateObject { env in
       DataManager(database: env.appDatabase)
     }
@@ -153,7 +167,10 @@ private struct ExperimentalAuthedRootView: View {
       CompactSpaceList(db: env.appDatabase)
     }
     _homeListStore = EnvironmentStateObject { env in
-      ExperimentalHomeListStore(database: env.appDatabase)
+      ExperimentalHomeListStore(
+        database: env.appDatabase,
+        initialConfiguration: initialHomeConfiguration
+      )
     }
   }
 
@@ -278,7 +295,6 @@ private struct ExperimentalAuthedRootView: View {
         searchInteractionRevision &+= 1
         pendingSearchExit = nil
         searchFocusRequested = false
-        searchQuery = ""
       }
       let desiredTab = desiredRootTab.appTab
       if bindableRouter.selectedTab != desiredTab {
@@ -458,7 +474,6 @@ private struct ExperimentalAuthedRootView: View {
       searchFocusRequested = false
     } else {
       lastContentRootTab = newRootTab
-      searchQuery = ""
     }
 
     if router.selectedTab != newRootTab.appTab {
@@ -502,7 +517,6 @@ private struct ExperimentalAuthedRootView: View {
     searchInteractionRevision &+= 1
     pendingSearchExit = nil
     searchFocusRequested = false
-    searchQuery = ""
   }
 
   private func openSearchResult(_ peer: Peer, _ destination: Destination) {
@@ -518,7 +532,6 @@ private struct ExperimentalAuthedRootView: View {
           let pendingSearchExit
     else { return }
     self.pendingSearchExit = nil
-    searchQuery = ""
 
     if let destination = pendingSearchExit.destination {
       router[pendingSearchExit.destinationTab.appTab] = [destination]
@@ -832,7 +845,7 @@ private struct ExperimentalAuthedRootView: View {
   private func experimentalToolbarContent() -> some ToolbarContent {
     if #available(iOS 26.0, *) {
       ToolbarItem(placement: .topBarLeading) {
-        activeSpacePicker(selectedSpaceId: $nav.activeSpaceId)
+        rootToolbarTitle
       }
       .sharedBackgroundVisibility(.hidden)
 
@@ -850,21 +863,13 @@ private struct ExperimentalAuthedRootView: View {
 
       ToolbarSpacer(.fixed, placement: .topBarTrailing)
 
-      if showsAllChatsFilter {
-        ToolbarItem(placement: .topBarTrailing) {
-          allChatsFilterMenu()
-        }
-
-        ToolbarSpacer(.fixed, placement: .topBarTrailing)
-      }
-
       ToolbarItem(placement: .topBarTrailing) {
         accountButton()
       }
       .sharedBackgroundVisibility(.hidden)
     } else {
       ToolbarItem(placement: .topBarLeading) {
-        activeSpacePicker(selectedSpaceId: $nav.activeSpaceId)
+        rootToolbarTitle
       }
 
       ToolbarItemGroup(placement: .topBarTrailing) {
@@ -873,9 +878,6 @@ private struct ExperimentalAuthedRootView: View {
           connectionProgressIndicator(connectionState)
         }
         overflowMenu()
-        if showsAllChatsFilter {
-          allChatsFilterMenu()
-        }
       }
 
       ToolbarItem(placement: .topBarTrailing) {
@@ -894,26 +896,21 @@ private struct ExperimentalAuthedRootView: View {
     .accessibilityLabel("New Thread")
   }
 
-  private func allChatsFilterMenu() -> some View {
-    let unreadOnly = Binding(
-      get: { allChatsFilterRaw == ChatListFilter.unread.rawValue },
-      set: { allChatsFilterRaw = $0 ? ChatListFilter.unread.rawValue : ChatListFilter.all.rawValue }
-    )
-
-    return Menu {
-      Toggle(isOn: unreadOnly) {
-        Label("Unread", systemImage: "envelope.badge")
+  @ViewBuilder
+  private var rootToolbarTitle: some View {
+    if isSearchRootSelected {
+      HStack(spacing: 4) {
+        Text("Search")
+          .font(.title.weight(.bold))
+          .foregroundStyle(.primary)
+          .lineLimit(1)
+          .fixedSize(horizontal: true, vertical: false)
       }
-    } label: {
-      Image(
-        systemName: unreadOnly.wrappedValue
-          ? "line.3.horizontal.decrease.circle.fill"
-          : "line.3.horizontal.decrease"
-      )
-      .foregroundStyle(unreadOnly.wrappedValue ? Color.accentColor : Color.primary)
+      .contentShape(Rectangle())
+      .accessibilityAddTraits(.isHeader)
+    } else {
+      activeSpacePicker(selectedSpaceId: $nav.activeSpaceId)
     }
-    .accessibilityLabel("Filter All Chats")
-    .accessibilityValue(unreadOnly.wrappedValue ? "Unread" : "All Chats")
   }
 
   private var showsAllChatsFilter: Bool {
@@ -946,6 +943,9 @@ private struct ExperimentalAuthedRootView: View {
       notificationSystemImage: notificationSettings.mode.systemImage,
       itemSize: selectedChatItemRenderMode,
       sortMode: ExperimentalHomeSortMode(rawValue: sortModeRaw) ?? .recentActivity,
+      allChatsFilter: showsAllChatsFilter
+        ? (ChatListFilter(rawValue: allChatsFilterRaw) ?? .all)
+        : nil,
       activeSpaceName: activeSpace?.displayName,
       onNotifications: {
         isNotificationSettingsPresented = true
@@ -958,6 +958,9 @@ private struct ExperimentalAuthedRootView: View {
       },
       onSelectSortMode: { mode in
         sortModeRaw = mode.rawValue
+      },
+      onSelectAllChatsFilter: { filter in
+        allChatsFilterRaw = filter.rawValue
       },
       onInvite: {
         if let activeSpace {
@@ -1126,11 +1129,13 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
   let notificationSystemImage: String
   let itemSize: ExperimentalHomeChatItemRenderMode
   let sortMode: ExperimentalHomeSortMode
+  let allChatsFilter: ChatListFilter?
   let activeSpaceName: String?
   let onNotifications: () -> Void
   let onArchive: () -> Void
   let onSelectItemSize: (ExperimentalHomeChatItemRenderMode) -> Void
   let onSelectSortMode: (ExperimentalHomeSortMode) -> Void
+  let onSelectAllChatsFilter: (ChatListFilter) -> Void
   let onInvite: () -> Void
   let onMembers: (() -> Void)?
   let onManage: (() -> Void)?
@@ -1194,6 +1199,22 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
         }
       }
     )
+    let filterMenu = allChatsFilter.map { currentFilter in
+      UIMenu(
+        title: "Filter",
+        subtitle: currentFilter == .unread ? "Unread" : "All Chats",
+        image: UIImage(systemName: "line.3.horizontal.decrease"),
+        options: .singleSelection,
+        children: ChatListFilter.allCases.map { filter in
+          UIAction(
+            title: filter == .unread ? "Unread" : "All Chats",
+            state: filter == currentFilter ? .on : .off
+          ) { _ in
+            onSelectAllChatsFilter(filter)
+          }
+        }
+      )
+    }
     let viewOptions = UIMenu(
       title: "View Options",
       image: UIImage(systemName: "slider.horizontal.3"),
@@ -1202,7 +1223,7 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
 
     let viewSection = UIMenu(
       options: .displayInline,
-      children: [notifications, viewOptions]
+      children: [notifications] + (filterMenu.map { [$0] } ?? []) + [viewOptions, archivedChats]
     )
 
     let spaceSection: UIMenu
@@ -1220,9 +1241,7 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
       spaceSection = UIMenu(options: .displayInline, children: [invite])
     }
 
-    let archiveSection = UIMenu(options: .displayInline, children: [archivedChats])
-
-    return UIMenu(children: [viewSection, spaceSection, archiveSection])
+    return UIMenu(children: [viewSection, spaceSection])
   }
 }
 

@@ -53,7 +53,8 @@ struct ExperimentalSearchView: View {
           model: searchModel,
           openChat: openSearchChat,
           openMessage: openSearchMessage,
-          openGlobalUser: openSearchGlobalUser
+          openGlobalUser: openSearchGlobalUser,
+          addToInbox: addSearchResultToInbox
         )
         .safeAreaInset(edge: .top, spacing: 0) {
           if let errorText = searchModel.errorText, searchModel.hasResults {
@@ -261,6 +262,29 @@ struct ExperimentalSearchView: View {
     onOpenResult(peer, destination ?? .chat(peer: peer))
   }
 
+  private func addSearchResultToInbox(_ peer: Peer) {
+    Task(priority: .userInitiated) {
+      do {
+        let didPerform = try await InboxMembershipService.shared.open(peer: peer)
+        guard didPerform else { return }
+        ToastManager.shared.showToast(
+          "Added to Inbox",
+          type: .success,
+          systemImage: "tray.full.fill"
+        )
+      } catch is CancellationError {
+        return
+      } catch {
+        Log.shared.error("Failed to add Search result to Inbox", error: error)
+        ToastManager.shared.showToast(
+          "Could not add to Inbox",
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
+        )
+      }
+    }
+  }
+
   private func showGlobalUserOpenError() {
     ToastManager.shared.showToast(
       "Couldn’t Start Conversation",
@@ -332,12 +356,20 @@ private struct ExperimentalSearchStatusOverlay: View {
 
 private struct ExperimentalSearchEmptyPlaceholder: View {
   var body: some View {
-    Text("Search messages and chats, or find Inline users by @username to start a conversation.")
-      .font(.subheadline)
-      .foregroundStyle(.secondary)
-      .multilineTextAlignment(.center)
-      .frame(maxWidth: 340)
-      .padding(.horizontal, Theme.Layout.screenEdgeOpticalInset)
+    VStack(spacing: 14) {
+      Image(systemName: "magnifyingglass")
+        .font(.system(size: 34, weight: .regular))
+        .foregroundStyle(.tertiary)
+        .accessibilityHidden(true)
+
+      Text("Search messages and chats, or find Inline users by @username to start a conversation.")
+        .font(.body)
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: 340)
+    }
+    .padding(.horizontal, Theme.Layout.screenEdgeOpticalInset)
+    .accessibilityElement(children: .combine)
   }
 }
 

@@ -43,8 +43,16 @@ final class ExperimentalHomeListStore: ObservableObject {
   private var configuration: ExperimentalHomeListConfiguration?
   private var generation = 0
 
-  init(database: AppDatabase) {
+  init(
+    database: AppDatabase,
+    initialConfiguration: ExperimentalHomeListConfiguration? = nil
+  ) {
     self.database = database
+    if let initialConfiguration {
+      configuration = initialConfiguration
+      state = loadLocalState(configuration: initialConfiguration)
+      startObservation(configuration: initialConfiguration)
+    }
   }
 
   func setConfiguration(_ newConfiguration: ExperimentalHomeListConfiguration) {
@@ -56,12 +64,7 @@ final class ExperimentalHomeListStore: ObservableObject {
     } ?? true
     configuration = newConfiguration
     if scopeChanged {
-      state = ExperimentalHomeListState(
-        presentation: .empty,
-        isLoading: true,
-        errorDescription: nil,
-        revision: state.revision + 1
-      )
+      state = loadLocalState(configuration: newConfiguration)
     }
     startObservation(configuration: newConfiguration)
   }
@@ -126,6 +129,41 @@ final class ExperimentalHomeListStore: ObservableObject {
         ),
         receiveValue: Self.makeValueHandler(pipeline: pipeline)
       )
+  }
+
+  /// Home is a local-first surface. Read the persisted snapshot synchronously before
+  /// constructing its first rows; the observation below then owns incremental updates.
+  private func loadLocalState(
+    configuration: ExperimentalHomeListConfiguration
+  ) -> ExperimentalHomeListState {
+    do {
+      let snapshots = try database.reader.read { db in
+        try ChatListDatabaseQuery.fetchSnapshots(
+          db,
+          spaceID: configuration.spaceID,
+          includeSpaceChatsInHome: configuration.includeSpaceChatsInHome,
+          translationLanguage: UserLocale.getCurrentLanguage()
+        )
+      }
+      return ExperimentalHomeListState(
+        presentation: ChatListPresentation.make(
+          from: snapshots,
+          inboxSort: configuration.inboxSort,
+          allChatsFilter: configuration.allChatsFilter
+        ),
+        isLoading: false,
+        errorDescription: nil,
+        revision: state.revision + 1
+      )
+    } catch {
+      log.error("Home-list initial database read failed", error: error)
+      return ExperimentalHomeListState(
+        presentation: .empty,
+        isLoading: false,
+        errorDescription: String(describing: error),
+        revision: state.revision + 1
+      )
+    }
   }
 
   /// Construct worker callbacks outside the main-actor context. Swift otherwise

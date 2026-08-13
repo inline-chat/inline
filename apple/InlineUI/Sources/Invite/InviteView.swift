@@ -466,7 +466,9 @@ struct InviteTarget: Identifiable, Hashable, Sendable {
     kind = .phone
     title = contactName ?? value
     if contactName != nil {
-      detail = isActionable ? value : "Enter 8–15 digits"
+      // CNPhoneNumber preserves the user's native Contacts formatting. Keep that
+      // for display while sending the normalized digits-only value to the API.
+      detail = isActionable ? trimmed : "Enter 8–15 digits"
     } else {
       detail = isActionable ? nil : "Enter 8–15 digits"
     }
@@ -535,7 +537,6 @@ private struct InviteContact: Identifiable, Hashable, Sendable {
 
 private actor InviteContactLoader {
   static let shared = InviteContactLoader()
-  private static let retainedValueLimit = 250
 
   func load(requestPermission: Bool) async -> Result<[InviteContact], any Error> {
     do {
@@ -554,21 +555,13 @@ private actor InviteContactLoader {
       ] as [CNKeyDescriptor]
       let request = CNContactFetchRequest(keysToFetch: keys)
       var contacts: [InviteContact] = []
-      try store.enumerateContacts(with: request) { contact, stop in
+      try store.enumerateContacts(with: request) { contact, _ in
         let name = [contact.givenName, contact.familyName].filter { !$0.isEmpty }.joined(separator: " ")
         let displayName = name.isEmpty ? "Contact" : name
         for email in contact.emailAddresses {
-          guard contacts.count < Self.retainedValueLimit else {
-            stop.pointee = true
-            return
-          }
           contacts.append(.init(id: "\(contact.identifier):\(email.identifier)", name: displayName, value: email.value as String, kind: .email))
         }
         for phone in contact.phoneNumbers {
-          guard contacts.count < Self.retainedValueLimit else {
-            stop.pointee = true
-            return
-          }
           contacts.append(.init(id: "\(contact.identifier):\(phone.identifier)", name: displayName, value: phone.value.stringValue, kind: .phone))
         }
       }

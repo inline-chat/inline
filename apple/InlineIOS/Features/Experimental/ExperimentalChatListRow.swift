@@ -14,8 +14,8 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
   @Environment(\.layoutDirection) private var layoutDirection
   @ScaledMetric(relativeTo: .footnote) private var timestampWidth: CGFloat = 54
   @ScaledMetric(relativeTo: .footnote) private var timestampBaselineLift: CGFloat = 2
-  @ScaledMetric(relativeTo: .caption) private var unreadBadgeWidth: CGFloat = 24
   @ScaledMetric(relativeTo: .caption) private var unreadBadgeHeight: CGFloat = 19
+  @ScaledMetric(relativeTo: .caption) private var unreadBadgeHorizontalPadding: CGFloat = 6
   @State private var showsTranslatedPreview: Bool
 
   init(
@@ -191,7 +191,7 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
       if showsDotUnread {
         Circle()
           .fill(item.isProminent ? Color.accentColor : Color.secondary)
-          .frame(width: 8, height: 8)
+          .frame(width: 7, height: 7)
           .offset(x: dotUnreadOffset)
           .transition(unreadTransition)
           .accessibilityHidden(true)
@@ -205,13 +205,14 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
       .font(.caption.weight(.semibold).monospacedDigit())
       .foregroundStyle(item.isProminent ? Color.white : Color(.systemBackground))
       .lineLimit(1)
-      .minimumScaleFactor(0.76)
-      .frame(width: unreadBadgeWidth, height: unreadBadgeHeight)
+      .fixedSize(horizontal: true, vertical: false)
+      .padding(.horizontal, unreadBadgeHorizontalPadding)
+      .frame(minWidth: unreadBadgeHeight, minHeight: unreadBadgeHeight)
       .background(
         item.isProminent ? Color.accentColor : Color(.systemGray2),
         in: Capsule()
       )
-      .contentTransition(.numericText(value: Double(min(displayedUnreadCount, 99))))
+      .contentTransition(.numericText(value: Double(displayedUnreadCount)))
       .animation(unreadAnimation, value: displayedUnreadCount)
       .accessibilityLabel(
         item.unreadCount > 0 ? "\(item.unreadCount) unread messages" : "Marked unread"
@@ -231,11 +232,11 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
   }
 
   private var displayedUnreadText: String {
-    displayedUnreadCount > 99 ? "99+" : "\(displayedUnreadCount)"
+    "\(displayedUnreadCount)"
   }
 
   private var dotUnreadOffset: CGFloat {
-    let magnitude = min(10, leadingInset / 2)
+    let magnitude = min(12, max(0, leadingInset - 4))
     return layoutDirection == .leftToRight ? -magnitude : magnitude
   }
 

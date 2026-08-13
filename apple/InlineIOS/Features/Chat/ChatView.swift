@@ -773,6 +773,7 @@ private struct ChatToolbarMoreMenu: View {
   @State private var showTranslationOptions = false
   @State private var showMakePublicAlert = false
   @State private var showMakePrivateSheet = false
+  @State private var isAddingToInbox = false
 
   var body: some View {
     Menu {
@@ -795,6 +796,13 @@ private struct ChatToolbarMoreMenu: View {
       }
 
       Button("Chat Info", systemImage: "info.circle", action: openChatInfo)
+
+      if shouldOfferAddToInbox {
+        Button("Add to Inbox", systemImage: "tray.and.arrow.down") {
+          addToInbox()
+        }
+        .disabled(isAddingToInbox)
+      }
 
       if canChangeVisibility, let chat {
         Button(
@@ -959,6 +967,33 @@ private struct ChatToolbarMoreMenu: View {
       && dialog.archived != true
       && dialog.chatListHidden != true
     return isInboxEligible ? true : nil
+  }
+
+  private var shouldOfferAddToInbox: Bool {
+    dialog?.open != true
+      || dialog?.archived == true
+      || dialog?.chatListHidden == true
+  }
+
+  private func addToInbox() {
+    guard !isAddingToInbox else { return }
+    isAddingToInbox = true
+    Task(priority: .userInitiated) {
+      do {
+        _ = try await InboxMembershipService.shared.open(peer: peer)
+        isAddingToInbox = false
+      } catch is CancellationError {
+        isAddingToInbox = false
+      } catch {
+        isAddingToInbox = false
+        Log.shared.error("Failed to add chat to Inbox", error: error)
+        ToastManager.shared.showToast(
+          "Could not add chat to Inbox",
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
+        )
+      }
+    }
   }
 
   private func updateNotificationSettings(_ selection: DialogNotificationSettingSelection) {

@@ -1,13 +1,13 @@
 import SwiftUI
 
 struct ExperimentalView: View {
-  @AppStorage(ExperimentalHomePreferenceKeys.isEnabled)
-  private var isNewHomeEnabled = true
-
   var body: some View {
     List {
       Section {
-        Toggle(isOn: $isNewHomeEnabled) {
+        LabeledContent {
+          Text("Enabled")
+            .foregroundStyle(.secondary)
+        } label: {
           VStack(alignment: .leading, spacing: 3) {
             Text("New Home")
             Text("Use the new Inbox, All Chats, and Search tabs.")
@@ -16,7 +16,7 @@ struct ExperimentalView: View {
           }
         }
       } footer: {
-        Text("The app switches Home experiences immediately. You can return here to switch back.")
+        Text("New Home is now the standard experience for everyone.")
       }
     }
     .listStyle(.insetGrouped)

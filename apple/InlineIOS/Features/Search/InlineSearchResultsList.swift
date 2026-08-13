@@ -8,6 +8,7 @@ struct InlineSearchResultsList: View {
   let openChat: (InlineSearchChatResult) -> Void
   let openMessage: (LocalMessageSearchResult) -> Void
   let openGlobalUser: (InlineSearchGlobalUserResult) -> Void
+  let addToInbox: (Peer) -> Void
 
   var body: some View {
     List {
@@ -18,6 +19,11 @@ struct InlineSearchResultsList: View {
           InlineSearchChatRow(result: result) {
             openChat(result)
           }
+          .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            if result.snapshot.item.dialog.open != true || result.archived {
+              addToInboxButton(peer: result.peer)
+            }
+          }
         }
       }
 
@@ -27,6 +33,9 @@ struct InlineSearchResultsList: View {
         ForEach(model.messages) { result in
           InlineSearchMessageRow(result: result) {
             openMessage(result)
+          }
+          .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            addToInboxButton(peer: result.peer)
           }
           .onAppear {
             if result.id == model.messages.last?.id {
@@ -55,6 +64,16 @@ struct InlineSearchResultsList: View {
       }
     }
     .listStyle(.plain)
+    .contentMargins(.bottom, 32, for: .scrollContent)
+  }
+
+  private func addToInboxButton(peer: Peer) -> some View {
+    Button {
+      addToInbox(peer)
+    } label: {
+      Label("Add to Inbox", systemImage: "tray.and.arrow.down.fill")
+    }
+    .tint(.green)
   }
 }
 
