@@ -8,7 +8,7 @@ public struct UpdateUserSettingsTransaction: Transaction2 {
   // Properties
   public var method: InlineProtocol.Method = .updateUserSettings
   public var context: Context
-  public var type: TransactionKindType = .mutation()
+  public var type: TransactionKindType = .mutation(MutationConfig(retryAfterAck: true))
 
   public struct Context: Sendable, Codable {
     public var notificationSettings: NotificationSettingsManager
@@ -51,6 +51,12 @@ public struct UpdateUserSettingsTransaction: Transaction2 {
     })
   }
 
+  /// Global settings edits must not overtake an already dispatched edit. The
+  /// transaction owner scopes this fixed lane to the authenticated account.
+  public var executionKey: TransactionExecutionKey? {
+    TransactionExecutionKey(namespace: "user-settings", value: "global")
+  }
+
   // MARK: - Transaction Methods
 
   public func apply(_ rpcResult: RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {
@@ -62,7 +68,7 @@ public struct UpdateUserSettingsTransaction: Transaction2 {
 
     // Note(@mo): Should we keep this? Legacy calls to this method used plain invoke not invokeWithHandler
     // Apply to database/UI
-    await Api.realtime.applyUpdates(result.updates)
+    await Api.realtime.applyUpdatesAndWait(result.updates)
   }
 }
 

@@ -196,6 +196,7 @@ public actor UpdatesEngine: Sendable {
     source: UpdateApplySource,
     sidecars: InlineProtocol.UpdateSidecars? = nil
   ) async -> UpdateApplyResult {
+    let receivingUserID = Auth.shared.getCurrentUserId()
     let batchStartedAt = Date()
     let batchSpan = PerformanceTrace.begin(
       "UpdateApplyBatch",
@@ -247,7 +248,11 @@ public actor UpdatesEngine: Sendable {
           var writeApplied = 0
           var writeFailed = 0
           for update in chunk {
-            if self.apply(update: update, db: db, source: source, reloadPeers: &chunkReloadPeers) {
+            if case .updateUserSettings = update.update {
+              // This projection is MainActor-owned. Count it here, then apply
+              // it after the database transaction so applyBatch can await it.
+              writeApplied += 1
+            } else if self.apply(update: update, db: db, source: source, reloadPeers: &chunkReloadPeers) {
               writeApplied += 1
             } else {
               writeFailed += 1
@@ -263,6 +268,11 @@ public actor UpdatesEngine: Sendable {
         chunkFailed = chunkResult.2
         appliedCount += chunkApplied
         failedCount += chunkFailed
+        for update in chunk {
+          if case let .updateUserSettings(userSettings) = update.update {
+            await userSettings.apply(receivingUserID: receivingUserID)
+          }
+        }
       } catch {
         log.error("Failed to apply updates chunk", error: error)
         chunkFailed = chunk.count
@@ -1352,11 +1362,17 @@ extension InlineProtocol.UpdatePinnedMessages {
 
 extension InlineProtocol.UpdateUserSettings {
   func apply() {
-    guard hasSettings else { return }
+    let receivingUserID = Auth.shared.getCurrentUserId()
 
     Task { @MainActor in
-      INUserSettings.current.updateFromServer(settings)
+      apply(receivingUserID: receivingUserID)
     }
+  }
+
+  @MainActor
+  func apply(receivingUserID: Int64?) {
+    guard hasSettings, let receivingUserID else { return }
+    INUserSettings.current.updateFromServer(settings, receivingUserID: receivingUserID)
   }
 }
 

@@ -1,7 +1,7 @@
 import InlineKit
 import SwiftUI
 
-/// A button that opens the notification settings sheet for iOS.
+/// A button that opens the notification settings popover for iOS.
 struct NotificationSettingsButton: View, RehostSafeToolbarContent {
   @ObservedObject private var notificationSettings: NotificationSettingsManager
 
@@ -21,14 +21,13 @@ struct NotificationSettingsButton: View, RehostSafeToolbarContent {
 
   var body: some View {
     button
-      .sheet(isPresented: $presented) {
+      .popover(isPresented: $presented) {
         NotificationSettingsPopoverContent(
           notificationSettings: notificationSettings,
           onSelection: close
         )
-          .presentationDragIndicator(.visible)
-          .presentationDetents([.medium, .large])
-          .presentationContentInteraction(.scrolls)
+        .frame(idealWidth: 360, idealHeight: 480)
+        .presentationCompactAdaptation(.popover)
       }
   }
 
@@ -103,6 +102,9 @@ struct NotificationSettingsPopoverContent: View, RehostSafeToolbarContent {
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.inline)
     }
+    .task {
+      await INUserSettings.current.refresh(reason: .notificationPresentation)
+    }
   }
 }
 
@@ -175,7 +177,9 @@ private struct NotificationSettingsList: View, RehostSafeToolbarContent {
         )
       }
     }
-    .listStyle(.insetGrouped)
+    .listStyle(.plain)
+    .contentMargins(.top, 8, for: .scrollContent)
+    .contentMargins(.bottom, 8, for: .scrollContent)
   }
 
   private func close() {
@@ -185,8 +189,8 @@ private struct NotificationSettingsList: View, RehostSafeToolbarContent {
 
 private struct NotificationSettingsItem<Value: Equatable>: View {
   var systemImage: String
-  var title: String
-  var description: String
+  var title: LocalizedStringResource
+  var description: LocalizedStringResource
   var selected: Bool
   var value: Value
   var onChange: (Value) -> Void

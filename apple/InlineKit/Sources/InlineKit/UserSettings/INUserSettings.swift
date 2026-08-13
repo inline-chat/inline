@@ -1,3 +1,4 @@
+import Auth
 import Combine
 import Foundation
 import InlineProtocol
@@ -5,8 +6,74 @@ import Logger
 
 private let log = Log.scoped("UserSettings")
 
+struct NotificationSettingsValues: Equatable, Sendable {
+  var mode: NotificationMode
+  var silent: Bool
+  var disableDmNotifications: Bool
+
+  static let defaults = NotificationSettingsValues(
+    mode: .all,
+    silent: false,
+    disableDmNotifications: false
+  )
+
+  init(
+    mode: NotificationMode,
+    silent: Bool,
+    disableDmNotifications: Bool
+  ) {
+    self.mode = mode
+    self.silent = silent
+    self.disableDmNotifications = disableDmNotifications
+  }
+
+  init(_ settings: NotificationSettingsManager) {
+    mode = settings.mode
+    silent = settings.silent
+    disableDmNotifications = settings.disableDmNotifications
+  }
+
+  init(_ settings: InlineProtocol.NotificationSettings) {
+    let manager = NotificationSettingsManager(from: settings)
+    self.init(manager)
+  }
+
+  func apply(to settings: NotificationSettingsManager) {
+    if settings.mode != mode {
+      settings.mode = mode
+    }
+    if settings.silent != silent {
+      settings.silent = silent
+    }
+    if settings.disableDmNotifications != disableDmNotifications {
+      settings.disableDmNotifications = disableDmNotifications
+    }
+  }
+
+  func makeManager() -> NotificationSettingsManager {
+    let manager = NotificationSettingsManager()
+    apply(to: manager)
+    return manager
+  }
+}
+
+private enum UserSettingsRefreshError: Error {
+  case invalidResponse
+}
+
 @MainActor
 public class INUserSettings {
+  public enum RefreshReason: String, Sendable {
+    case initialization
+    case authenticationChange
+    case authenticatedScene
+    case notificationPresentation
+  }
+
+  typealias CurrentUserIDProvider = @MainActor @Sendable () -> Int64?
+  typealias FetchNotificationSettings = @Sendable () async throws -> NotificationSettingsValues?
+  typealias SaveNotificationSettings = @Sendable (NotificationSettingsValues) async throws -> Void
+
   public static var current = INUserSettings()
 
   // MARK: - Public data
@@ -18,21 +85,128 @@ public class INUserSettings {
 
   private var cancellables = Set<AnyCancellable>()
   private static let notificationSettingsKey = "notificationSettings"
+  private static let notificationSettingsAccountKeyPrefix = "notificationSettings.account"
+  private static let pendingNotificationAccountKeyPrefix = "notificationSettings.pending.account"
+  private static let legacyNotificationSettingsOwnerKey = "notificationSettings.legacyOwner.v1"
   private static let autoDownloadSettingsKey = "autoDownloadSettings"
+  private let userDefaults: UserDefaults
+  private let currentUserIDProvider: CurrentUserIDProvider
+  private let fetchNotificationSettings: FetchNotificationSettings
+  private let saveNotificationSettings: SaveNotificationSettings
   private var isApplyingServerUpdate = false
+  private var notificationRevision: UInt64 = 0
+  private var localNotificationRevision: UInt64 = 0
+  private var activeUserID: Int64?
+  private var pendingLocalRevision: UInt64?
+  private var pendingLocalUserID: Int64?
+  private var pendingLocalValues: NotificationSettingsValues?
   private var pendingServerUpdateTask: Task<Void, Never>?
+  private var pendingServerUpdateTaskID: UUID?
+  private var refreshRequest: RefreshRequest?
+
+  private enum RefreshOutcome: Sendable {
+    case success(NotificationSettingsValues?)
+    case cancelled
+    case failure
+  }
+
+  private struct RefreshRequest {
+    let id: UUID
+    let userID: Int64
+    let notificationRevision: UInt64
+    let localRevision: UInt64
+    let task: Task<RefreshOutcome, Never>
+  }
 
   // MARK: - Initialization
 
-  public init() {
+  public convenience init() {
+    self.init(
+      userDefaults: .shared,
+      currentUserID: { Auth.shared.getCurrentUserId() },
+      fetchNotificationSettings: Self.fetchNotificationSettingsFromRealtime,
+      saveNotificationSettings: Self.saveNotificationSettingsToRealtime
+    )
+
+    observeAuthenticationChanges()
+    Task { @MainActor [weak self] in
+      await self?.refresh(reason: .initialization)
+    }
+  }
+
+  init(
+    userDefaults: UserDefaults,
+    currentUserID: @escaping CurrentUserIDProvider,
+    fetchNotificationSettings: @escaping FetchNotificationSettings,
+    saveNotificationSettings: @escaping SaveNotificationSettings
+  ) {
+    self.userDefaults = userDefaults
+    currentUserIDProvider = currentUserID
+    self.fetchNotificationSettings = fetchNotificationSettings
+    self.saveNotificationSettings = saveNotificationSettings
+    activeUserID = currentUserIDProvider()
+
     // Load data from UserDefaults first
     loadFromUserDefaults()
 
     // Set up observation for changes
     setupObservation()
+  }
 
-    // Fetch from server
-    fetch()
+  deinit {
+    pendingServerUpdateTask?.cancel()
+    refreshRequest?.task.cancel()
+  }
+
+  // MARK: - Refresh
+
+  public func refresh(reason: RefreshReason) async {
+    guard let userID = currentUserIDProvider() else {
+      switchActiveUser(to: nil)
+      return
+    }
+
+    switchActiveUser(to: userID)
+
+    guard await flushPendingLocalChange(for: userID) else {
+      log.debug("Skipping user settings refresh while a local change is pending")
+      return
+    }
+
+    if let request = refreshRequest {
+      if request.userID == userID {
+        let outcome = await request.task.value
+        finishRefresh(request, outcome: outcome, reason: reason)
+        return
+      }
+
+      request.task.cancel()
+      refreshRequest = nil
+    }
+
+    let requestID = UUID()
+    let fetch = fetchNotificationSettings
+    let task = Task { () -> RefreshOutcome in
+      do {
+        return .success(try await fetch())
+      } catch is CancellationError {
+        return .cancelled
+      } catch {
+        log.error("Failed to refresh user settings", error: error)
+        return .failure
+      }
+    }
+    let request = RefreshRequest(
+      id: requestID,
+      userID: userID,
+      notificationRevision: notificationRevision,
+      localRevision: localNotificationRevision,
+      task: task
+    )
+    refreshRequest = request
+
+    let outcome = await task.value
+    finishRefresh(request, outcome: outcome, reason: reason)
   }
 
   // MARK: - Private methods
@@ -41,54 +215,151 @@ public class INUserSettings {
     // Save to UserDefaults whenever notification settings change
     notification.objectWillChange
       .sink { [weak self] _ in
-        self?.settingsWillChange(syncToRealtime: true)
+        self?.notificationSettingsWillChange()
       }
       .store(in: &cancellables)
 
     autoDownload.objectWillChange
       .sink { [weak self] _ in
-        self?.settingsWillChange(syncToRealtime: false)
+        self?.autoDownloadSettingsWillChange()
       }
       .store(in: &cancellables)
   }
 
-  private func settingsWillChange(syncToRealtime: Bool) {
-    let wasTriggeredBecauseOfServerUpdate = isApplyingServerUpdate
-    Task { @MainActor in
-      // Save after the published value has updated.
-      await Task.yield()
-      self.saveToUserDefaults()
-      // Only sync to server if this is not a server update
-      if syncToRealtime && !wasTriggeredBecauseOfServerUpdate {
-        self.debouncedSaveToRealtime()
+  private func observeAuthenticationChanges() {
+    Auth.shared.$currentUserId
+      .removeDuplicates()
+      .sink { [weak self] _ in
+        Task { @MainActor in
+          await self?.refresh(reason: .authenticationChange)
+        }
       }
+      .store(in: &cancellables)
+  }
+
+  private func notificationSettingsWillChange() {
+    notificationRevision &+= 1
+    guard !isApplyingServerUpdate else { return }
+
+    localNotificationRevision &+= 1
+    let revision = localNotificationRevision
+    let userID = currentUserIDProvider()
+    pendingLocalRevision = revision
+    pendingLocalUserID = userID
+    pendingLocalValues = nil
+
+    Task { @MainActor [weak self] in
+      await Task.yield()
+      guard let self, revision == self.localNotificationRevision else { return }
+      guard let userID,
+            self.activeUserID == userID,
+            self.currentUserIDProvider() == userID
+      else {
+        if self.pendingLocalRevision == revision {
+          self.clearPendingLocalChange()
+        }
+        return
+      }
+
+      let values = NotificationSettingsValues(self.notification)
+      self.pendingLocalValues = values
+      self.savePendingNotificationSettingsToUserDefaults(values, for: userID)
+      self.saveNotificationSettingsToUserDefaults(values, for: userID)
+      self.debouncedSaveToRealtime(
+        revision: revision,
+        userID: userID,
+        values: values
+      )
+    }
+  }
+
+  private func autoDownloadSettingsWillChange() {
+    Task { @MainActor [weak self] in
+      await Task.yield()
+      self?.saveAutoDownloadSettingsToUserDefaults()
     }
   }
 
   private func loadFromUserDefaults() {
-    guard let notificationData = UserDefaults.shared.data(forKey: Self.notificationSettingsKey) else {
-      log.info("No cached notification settings found")
-      loadAutoDownloadSettingsFromUserDefaults()
-      return
-    }
-
-    do {
-      let cachedSettings = try JSONDecoder().decode(NotificationSettingsManager.self, from: notificationData)
-      log.info("Loaded cached notification settings")
-
-      // Update current settings with cached values
-      notification.mode = cachedSettings.mode
-      notification.silent = cachedSettings.silent
-      notification.disableDmNotifications = cachedSettings.disableDmNotifications
-    } catch {
-      log.error("Failed to decode cached notification settings: \(error)")
+    if let activeUserID {
+      let values = restorePendingLocalChange(for: activeUserID)
+        ?? loadNotificationSettingsFromUserDefaults(for: activeUserID)
+        ?? .defaults
+      values.apply(to: notification)
     }
 
     loadAutoDownloadSettingsFromUserDefaults()
   }
 
+  private func loadNotificationSettingsFromUserDefaults(for userID: Int64) -> NotificationSettingsValues? {
+    let accountKey = notificationSettingsKey(for: userID)
+    let notificationData: Data?
+
+    if let accountData = userDefaults.data(forKey: accountKey) {
+      notificationData = accountData
+    } else if let legacyData = legacyNotificationSettingsData(for: userID) {
+      userDefaults.set(legacyData, forKey: accountKey)
+      notificationData = legacyData
+    } else {
+      notificationData = nil
+    }
+
+    guard let notificationData else {
+      log.info("No cached notification settings found for current account")
+      return nil
+    }
+
+    do {
+      let cachedSettings = try JSONDecoder().decode(NotificationSettingsManager.self, from: notificationData)
+      log.info("Loaded cached notification settings for current account")
+      return NotificationSettingsValues(cachedSettings)
+    } catch {
+      log.error("Failed to decode cached notification settings: \(error)")
+      return nil
+    }
+  }
+
+  private func legacyNotificationSettingsData(for userID: Int64) -> Data? {
+    let owner = userDefaults.string(forKey: Self.legacyNotificationSettingsOwnerKey)
+    guard owner == nil || owner == String(userID) else { return nil }
+    guard let data = userDefaults.data(forKey: Self.notificationSettingsKey) else { return nil }
+
+    if owner == nil {
+      userDefaults.set(String(userID), forKey: Self.legacyNotificationSettingsOwnerKey)
+    }
+    return data
+  }
+
+  private func notificationSettingsKey(for userID: Int64) -> String {
+    "\(Self.notificationSettingsAccountKeyPrefix).\(userID)"
+  }
+
+  private func pendingNotificationSettingsKey(for userID: Int64) -> String {
+    "\(Self.pendingNotificationAccountKeyPrefix).\(userID)"
+  }
+
+  private func restorePendingLocalChange(for userID: Int64) -> NotificationSettingsValues? {
+    let key = pendingNotificationSettingsKey(for: userID)
+    guard let data = userDefaults.data(forKey: key) else { return nil }
+
+    do {
+      let manager = try JSONDecoder().decode(NotificationSettingsManager.self, from: data)
+      let values = NotificationSettingsValues(manager)
+      localNotificationRevision &+= 1
+      pendingLocalRevision = localNotificationRevision
+      pendingLocalUserID = userID
+      pendingLocalValues = values
+      log.info("Restored pending notification settings for current account")
+      return values
+    } catch {
+      log.error("Failed to decode pending notification settings", error: error)
+      userDefaults.removeObject(forKey: key)
+      return nil
+    }
+  }
+
   private func loadAutoDownloadSettingsFromUserDefaults() {
-    guard let data = UserDefaults.shared.data(forKey: Self.autoDownloadSettingsKey) else {
+    guard let data = userDefaults.data(forKey: Self.autoDownloadSettingsKey) else {
       log.info("No cached auto-download settings found")
       return
     }
@@ -105,103 +376,243 @@ public class INUserSettings {
     }
   }
 
-  private func saveToUserDefaults() {
+  private func saveNotificationSettingsToUserDefaults(
+    _ values: NotificationSettingsValues,
+    for userID: Int64
+  ) {
     do {
-      let notificationData = try JSONEncoder().encode(notification)
-      UserDefaults.shared.set(notificationData, forKey: Self.notificationSettingsKey)
-
-      let autoDownloadData = try JSONEncoder().encode(autoDownload)
-      UserDefaults.shared.set(autoDownloadData, forKey: Self.autoDownloadSettingsKey)
-      log.trace("Saved user settings to UserDefaults")
+      let notificationData = try JSONEncoder().encode(values.makeManager())
+      userDefaults.set(notificationData, forKey: notificationSettingsKey(for: userID))
+      log.trace("Saved notification settings to UserDefaults")
     } catch {
-      log.error("Failed to encode user settings: \(error)")
+      log.error("Failed to encode notification settings: \(error)")
     }
   }
 
-  private func debouncedSaveToRealtime() {
+  private func savePendingNotificationSettingsToUserDefaults(
+    _ values: NotificationSettingsValues,
+    for userID: Int64
+  ) {
+    do {
+      let data = try JSONEncoder().encode(values.makeManager())
+      userDefaults.set(data, forKey: pendingNotificationSettingsKey(for: userID))
+      log.trace("Saved pending notification settings to UserDefaults")
+    } catch {
+      log.error("Failed to encode pending notification settings", error: error)
+    }
+  }
+
+  private func saveAutoDownloadSettingsToUserDefaults() {
+    do {
+      let data = try JSONEncoder().encode(autoDownload)
+      userDefaults.set(data, forKey: Self.autoDownloadSettingsKey)
+      log.trace("Saved auto-download settings to UserDefaults")
+    } catch {
+      log.error("Failed to encode auto-download settings: \(error)")
+    }
+  }
+
+  private func debouncedSaveToRealtime(
+    revision: UInt64,
+    userID: Int64?,
+    values: NotificationSettingsValues,
+    delay: Bool = true
+  ) {
     // Cancel any pending server update task
     pendingServerUpdateTask?.cancel()
+    let taskID = UUID()
+    pendingServerUpdateTaskID = taskID
 
     // Schedule a new debounced task
-    pendingServerUpdateTask = Task { @MainActor in
+    pendingServerUpdateTask = Task { @MainActor [weak self] in
+      guard let self else { return }
       do {
-        // Wait for debounce period
-        try await Task.sleep(nanoseconds: 300_000_000) // 300ms
+        if delay {
+          try await Task.sleep(for: .milliseconds(300))
+        }
 
-        // Check if task was cancelled
-        try Task.checkCancellation()
+        guard !Task.isCancelled,
+              self.pendingServerUpdateTaskID == taskID,
+              self.localNotificationRevision == revision,
+              self.currentUserIDProvider() == userID,
+              userID != nil
+        else { return }
 
         // Execute the actual save
-        await saveToRealtime()
+        let didSave = await self.saveToRealtime(values)
 
-        // Clear the pending task reference
-        pendingServerUpdateTask = nil
+        guard self.pendingServerUpdateTaskID == taskID else { return }
+        self.pendingServerUpdateTask = nil
+        self.pendingServerUpdateTaskID = nil
+        if didSave, self.pendingLocalRevision == revision {
+          self.clearPendingLocalChange(persistedFor: userID)
+        }
       } catch is CancellationError {
         // Task was cancelled, which is expected behavior
         log.trace("Server update task was cancelled (superseded by newer change)")
       } catch {
         log.error("Error in debounced server update", error: error)
-        pendingServerUpdateTask = nil
+        guard self.pendingServerUpdateTaskID == taskID else { return }
+        self.pendingServerUpdateTask = nil
+        self.pendingServerUpdateTaskID = nil
       }
     }
   }
 
-  private func saveToRealtime() async {
+  private func saveToRealtime(_ values: NotificationSettingsValues) async -> Bool {
     log.trace("Saving user settings to Realtime")
     do {
-      try await Api.realtime.send(.updateUserSettings(
-        notificationSettings: notification
-      ))
+      try await saveNotificationSettings(values)
+      return true
+    } catch is CancellationError {
+      return false
     } catch {
       log.error("Failed to save user settings to server", error: error)
+      return false
     }
   }
 
-  private func fetch() {
-    // Load data from app groups data continaer
-    Task.detached {
-      log.info("Loading user settings")
-      let data = try await Realtime.shared.invoke(
-        .getUserSettings,
-        input: .getUserSettings(.with { _ in })
-      )
-
-      if case let .getUserSettings(result) = data {
-        log.info("User settings loaded")
-
-        Task { @MainActor [weak self] in
-          self?.update(from: result)
-        }
-      } else {
-        log.error("Failed to load user settings: \(data.debugDescription)")
-      }
+  private func flushPendingLocalChange(for userID: Int64) async -> Bool {
+    guard pendingLocalRevision != nil else { return true }
+    guard pendingLocalUserID == userID else {
+      clearPendingLocalChange()
+      return true
     }
+
+    // A setting mutation is observed before its @Published value changes. Give
+    // the capture task one turn to record the new value and start its save.
+    if pendingLocalValues == nil {
+      await Task.yield()
+    }
+
+    if let pendingServerUpdateTask {
+      await pendingServerUpdateTask.value
+    }
+    guard let revision = pendingLocalRevision else { return true }
+    guard pendingLocalUserID == userID, let pendingLocalValues else { return false }
+
+    debouncedSaveToRealtime(
+      revision: revision,
+      userID: userID,
+      values: pendingLocalValues,
+      delay: false
+    )
+    log.info("Retrying pending user settings save before refresh")
+
+    if let pendingServerUpdateTask {
+      await pendingServerUpdateTask.value
+    }
+    return pendingLocalRevision == nil
   }
 
-  private func update(from data: InlineProtocol.GetUserSettingsResult) {
-    // Save data to app groups data container
-    log.trace("Updating from user settings")
+  private func finishRefresh(
+    _ request: RefreshRequest,
+    outcome: RefreshOutcome,
+    reason: RefreshReason
+  ) {
+    guard refreshRequest?.id == request.id else { return }
+    refreshRequest = nil
 
-    guard data.userSettings.hasNotificationSettings else { return }
+    guard currentUserIDProvider() == request.userID,
+          activeUserID == request.userID,
+          notificationRevision == request.notificationRevision,
+          localNotificationRevision == request.localRevision,
+          pendingLocalRevision == nil
+    else {
+      log.debug("Discarded stale user settings refresh reason=\(reason.rawValue)")
+      return
+    }
 
+    guard case let .success(values) = outcome else { return }
+    applyServerNotificationSettings(values ?? .defaults, for: request.userID)
+    log.info("User settings refreshed reason=\(reason.rawValue)")
+  }
+
+  private func applyServerNotificationSettings(
+    _ values: NotificationSettingsValues,
+    for userID: Int64
+  ) {
+    guard activeUserID == userID else { return }
+
+    if NotificationSettingsValues(notification) != values {
+      isApplyingServerUpdate = true
+      values.apply(to: notification)
+      isApplyingServerUpdate = false
+    }
+    saveNotificationSettingsToUserDefaults(values, for: userID)
+  }
+
+  private func switchActiveUser(to userID: Int64?) {
+    guard activeUserID != userID else { return }
+
+    refreshRequest?.task.cancel()
+    refreshRequest = nil
+    pendingServerUpdateTask?.cancel()
+    pendingServerUpdateTask = nil
+    pendingServerUpdateTaskID = nil
+    clearPendingLocalChange()
+
+    activeUserID = userID
+    notificationRevision &+= 1
+    localNotificationRevision &+= 1
+
+    let values: NotificationSettingsValues
+    if let userID {
+      values = restorePendingLocalChange(for: userID)
+        ?? loadNotificationSettingsFromUserDefaults(for: userID)
+        ?? .defaults
+    } else {
+      values = .defaults
+    }
     isApplyingServerUpdate = true
-    notification.update(from: data.userSettings.notificationSettings)
-    DispatchQueue.main.async {
-      self.isApplyingServerUpdate = false
-    }
-    // Save updated settings to UserDefaults
-    saveToUserDefaults()
+    values.apply(to: notification)
+    isApplyingServerUpdate = false
   }
 
-  // Add a public method for server updates
+  private func clearPendingLocalChange(persistedFor userID: Int64? = nil) {
+    if let userID {
+      userDefaults.removeObject(forKey: pendingNotificationSettingsKey(for: userID))
+    }
+    pendingLocalRevision = nil
+    pendingLocalUserID = nil
+    pendingLocalValues = nil
+  }
+
+  private static func fetchNotificationSettingsFromRealtime() async throws -> NotificationSettingsValues? {
+    let response = try await Api.realtime.send(.getUserSettings())
+    guard case let .getUserSettings(result) = response else {
+      throw UserSettingsRefreshError.invalidResponse
+    }
+
+    guard result.userSettings.hasNotificationSettings else { return nil }
+    return NotificationSettingsValues(result.userSettings.notificationSettings)
+  }
+
+  private static func saveNotificationSettingsToRealtime(_ values: NotificationSettingsValues) async throws {
+    _ = try await Api.realtime.send(.updateUserSettings(
+      notificationSettings: values.makeManager()
+    ))
+  }
+
   public func updateFromServer(_ settings: InlineProtocol.UserSettings) {
-    guard settings.hasNotificationSettings else { return }
+    guard let receivingUserID = currentUserIDProvider() else { return }
+    updateFromServer(settings, receivingUserID: receivingUserID)
+  }
 
-    isApplyingServerUpdate = true
-    notification.update(from: settings.notificationSettings)
-    DispatchQueue.main.async {
-      self.isApplyingServerUpdate = false
+  func updateFromServer(_ settings: InlineProtocol.UserSettings, receivingUserID: Int64) {
+    guard settings.hasNotificationSettings else { return }
+    guard currentUserIDProvider() == receivingUserID else {
+      log.debug("Ignored a user settings update received for a previous account")
+      return
     }
-    saveToUserDefaults()
+    switchActiveUser(to: receivingUserID)
+    guard pendingLocalRevision == nil else {
+      log.debug("Ignored a live user settings update while a local change is pending")
+      return
+    }
+    applyServerNotificationSettings(
+      NotificationSettingsValues(settings.notificationSettings),
+      for: receivingUserID
+    )
   }
 }

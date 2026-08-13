@@ -16,6 +16,22 @@ public enum TransactionBlockerState: Sendable {
   case failed
 }
 
+/// A persisted, client-local serialization lane.
+///
+/// Transactions with the same key execute one at a time while unrelated keys
+/// continue to drain. Ownership lasts until the transaction reaches a terminal
+/// result, including across dispatch retries and in-process reconnects. This is
+/// not a server ordering/version guarantee across process death.
+public struct TransactionExecutionKey: Hashable, Codable, Sendable {
+  public let namespace: String
+  public let value: String
+
+  public init(namespace: String, value: String) {
+    self.namespace = namespace
+    self.value = value
+  }
+}
+
 public protocol TransactionBlockerResolver: Sendable {
   func state(for blocker: TransactionBlocker) async -> TransactionBlockerState
 }
@@ -70,6 +86,9 @@ public protocol Transaction: Sendable, Codable {
 
   /// Dependencies that become satisfied after a successful apply.
   var satisfiedBlockersOnSuccess: [TransactionBlocker] { get }
+
+  /// Transactions sharing this key execute serially until terminal completion.
+  var executionKey: TransactionExecutionKey? { get }
 }
 
 public extension Transaction {
@@ -90,6 +109,7 @@ public extension Transaction {
   }
   var blockers: [TransactionBlocker] { [] }
   var satisfiedBlockersOnSuccess: [TransactionBlocker] { [] }
+  var executionKey: TransactionExecutionKey? { nil }
 
   var input: InlineProtocol.RpcCall.OneOf_Input? {
     input(from: context)

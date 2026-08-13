@@ -46,6 +46,7 @@ actor Transactions {
   private let persistenceHandler: TransactionPersistenceHandler?
   private let blockerResolver: (any TransactionBlockerResolver)?
   private var satisfiedBlockers: Set<TransactionBlocker> = []
+  private var executionOwners: [TransactionExecutionKey: TransactionId] = [:]
   private var owner: TransactionOwner?
   private var acceptsTransactions = false
   private var activationWaiters: [CheckedContinuation<Bool, Never>] = []
@@ -106,6 +107,7 @@ actor Transactions {
     for wrapper in wrappers {
       await wrapper.transaction.cancelled()
     }
+    executionOwners.removeAll()
 
     if deletePersisted {
       scheduleDeleteAll(owner: expectedOwner)
@@ -190,6 +192,7 @@ actor Transactions {
 
       switch await blockerState(for: wrapper) {
         case .ready:
+          guard acquireExecutionKey(for: wrapper) else { continue }
           _queue.removeValue(forKey: transactionId)
           inFlight[transactionId] = wrapper
           return .ready(wrapper)
@@ -218,6 +221,7 @@ actor Transactions {
 
       switch state {
         case .ready:
+          guard acquireExecutionKey(for: wrapper) else { continue }
           _queue.removeValue(forKey: transactionId)
           inFlight[transactionId] = wrapper
           return .ready(wrapper)
@@ -267,7 +271,7 @@ actor Transactions {
 
   /// Acknowledge a transaction that has been completed, it moves it to sent queue waiting for the result.
   func ack(transactionId: TransactionId) {
-    log.trace("Acknowledging transaction \(transactionId) - moving to sent queue and deleting from disk")
+    log.trace("Acknowledging transaction \(transactionId) - moving to sent queue")
 
     // move to sent
     sent[transactionId] = inFlight[transactionId]
@@ -275,7 +279,11 @@ actor Transactions {
     // remove from in-flight
     _ = inFlight.removeValue(forKey: transactionId)
 
-    deleteFromDisk(transactionId: transactionId)
+    // Transactions that retry after ACK are retained for replay until their
+    // RPC result arrives.
+    if let transaction = sent[transactionId], !shouldRetryAfterAck(transaction: transaction) {
+      deleteFromDisk(transactionId: transactionId)
+    }
   }
 
   /// Complete a transaction by the rpc message ID. Called when a response or error is received.
@@ -421,11 +429,26 @@ actor Transactions {
     queueContinuation.yield(())
   }
 
+  /// Release a serialization lane after its transaction reaches a terminal
+  /// result. Dispatch retries and reconnect requeues intentionally do not call
+  /// this method.
+  func finishExecution(for wrapper: TransactionWrapper) {
+    guard let key = wrapper.transaction.executionKey,
+          executionOwners[key] == wrapper.id
+    else { return }
+    executionOwners[key] = nil
+    queueContinuation.yield(())
+  }
+
   /// Cancel all transactions that match the predicate from the queue.
   func cancel(where predicate: @Sendable (TransactionWrapper) -> Bool) async {
     let matches = uniqueTransactions().filter(predicate)
     for wrapper in matches {
       let transactionId = wrapper.id
+      if ownsExecutionKey(wrapper) {
+        log.trace("Keeping active serialized transaction \(transactionId) after cancellation request")
+        continue
+      }
       log.trace("Cancelling transaction \(transactionId) method=\(wrapper.transaction.method)")
       _queue.removeValue(forKey: transactionId)
       inFlight.removeValue(forKey: transactionId)
@@ -433,6 +456,7 @@ actor Transactions {
       removeRpcMappings(for: [transactionId])
       deleteFromDisk(transactionId: transactionId)
       await wrapper.transaction.cancelled()
+      finishExecution(for: wrapper)
     }
   }
 
@@ -446,6 +470,10 @@ actor Transactions {
     for wrapper in matches {
       guard acceptsTransactions, owner == expectedOwner else { return }
       let transactionId = wrapper.id
+      if ownsExecutionKey(wrapper) {
+        log.trace("Keeping active serialized transaction \(transactionId) after cancellation request")
+        continue
+      }
       _queue.removeValue(forKey: transactionId)
       inFlight.removeValue(forKey: transactionId)
       sent.removeValue(forKey: transactionId)
@@ -453,10 +481,17 @@ actor Transactions {
       deleteFromDisk(transactionId: transactionId)
       await wrapper.transaction.cancelled()
       guard owner == expectedOwner else { return }
+      finishExecution(for: wrapper)
     }
   }
 
   func cancel(transactionId: TransactionId) async {
+    let candidate = _queue[transactionId] ?? inFlight[transactionId] ?? sent[transactionId]
+    if let candidate, ownsExecutionKey(candidate) {
+      log.trace("Detaching caller from active serialized transaction \(transactionId)")
+      return
+    }
+
     let wrapper = _queue.removeValue(forKey: transactionId)
       ?? inFlight.removeValue(forKey: transactionId)
       ?? sent.removeValue(forKey: transactionId)
@@ -465,6 +500,7 @@ actor Transactions {
     removeRpcMappings(for: [transactionId])
     deleteFromDisk(transactionId: transactionId)
     await wrapper.transaction.cancelled()
+    finishExecution(for: wrapper)
   }
 
   func waitForPersistence() async {
@@ -548,6 +584,20 @@ actor Transactions {
     }
 
     return .ready
+  }
+
+  private func acquireExecutionKey(for wrapper: TransactionWrapper) -> Bool {
+    guard let key = wrapper.transaction.executionKey else { return true }
+    if let currentOwner = executionOwners[key] {
+      return currentOwner == wrapper.id
+    }
+    executionOwners[key] = wrapper.id
+    return true
+  }
+
+  private func ownsExecutionKey(_ wrapper: TransactionWrapper) -> Bool {
+    guard let key = wrapper.transaction.executionKey else { return false }
+    return executionOwners[key] == wrapper.id
   }
 
   private func removeRpcMappings(for transactionIds: Set<TransactionId>) {
