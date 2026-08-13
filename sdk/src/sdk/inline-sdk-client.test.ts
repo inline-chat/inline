@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest"
-import { BotCapability_Kind, DialogFollowMode, GetUpdatesResult_ResultType, Method, ServerProtocolMessage, Update } from "@inline-chat/protocol/core"
+import { BotCapability_Kind, ConnectionError_Reason, DialogFollowMode, GetUpdatesResult_ResultType, Method, ServerProtocolMessage, Update } from "@inline-chat/protocol/core"
 import { InlineSdkClient } from "./inline-sdk-client.js"
 import { MockTransport } from "../realtime/mock-transport.js"
 import type { InlineSdkState, InlineSdkStateStore } from "./types.js"
+import { InlineSdkAuthenticationError } from "./errors.js"
 
 const waitFor = async (predicate: () => boolean, timeoutMs = 300) => {
   const start = Date.now()
@@ -160,6 +161,73 @@ describe("InlineSdkClient", () => {
     await expect(connectPromise).resolves.toBeUndefined()
 
     await client.close()
+  })
+
+  it("rejects and latches a terminal authentication failure", async () => {
+    const transport = new MockTransport()
+    const onAuthenticationError = vi.fn()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "deleted-user-token",
+      transport,
+      onAuthenticationError,
+    })
+
+    const connectPromise = client.connect()
+    await transport.connect()
+    await waitFor(() => transport.sent.some((m) => m.body.oneofKind === "connectionInit"))
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 1n,
+        body: {
+          oneofKind: "connectionError",
+          connectionError: { reason: ConnectionError_Reason.UNAUTHORIZED },
+        },
+      }),
+    )
+
+    const error = await connectPromise.catch((cause) => cause)
+    expect(error).toBeInstanceOf(InlineSdkAuthenticationError)
+    expect(error).toMatchObject({
+      code: "UNAUTHORIZED",
+      reason: ConnectionError_Reason.UNAUTHORIZED,
+      terminal: true,
+    })
+    expect(onAuthenticationError).toHaveBeenCalledOnce()
+    expect(transport.state).toBe("idle")
+    await expect(client.connect()).rejects.toBe(error)
+  })
+
+  it("stops an established client when its session is revoked", async () => {
+    const transport = new MockTransport()
+    const onAuthenticationError = vi.fn()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "revoked-session-token",
+      transport,
+      onAuthenticationError,
+    })
+
+    await connectAndOpen(client, transport)
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 2n,
+        body: {
+          oneofKind: "connectionError",
+          connectionError: { reason: ConnectionError_Reason.SESSION_REVOKED },
+        },
+      }),
+    )
+    await waitFor(() => onAuthenticationError.mock.calls.length === 1)
+
+    expect(transport.state).toBe("idle")
+    expect(client.getDiagnostics()).toMatchObject({
+      started: false,
+      authenticationErrorCode: "SESSION_REVOKED",
+    })
+    await expect(client.connect()).rejects.toMatchObject({
+      code: "SESSION_REVOKED",
+    })
   })
 
   it("connect() authenticates and getMe() works", async () => {

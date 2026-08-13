@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { ConnectionError_Reason, Method, ServerProtocolMessage, Update } from "@inline-chat/protocol/core"
 import { ProtocolClient, ProtocolClientError } from "./protocol-client.js"
+import { InlineSdkAuthenticationError } from "../sdk/errors.js"
 import { MockTransport } from "./mock-transport.js"
 import { AsyncChannel } from "../utils/async-channel.js"
 import type { Transport } from "./transport.js"
@@ -476,7 +477,88 @@ describe("ProtocolClient", () => {
     await waitFor(() => transport.sent.some((m) => m.body.oneofKind === "ping"))
   })
 
-  it("schedules a reconnect when a connectionError is received (and does not reconnect after open)", async () => {
+  it.each([
+    ConnectionError_Reason.UNAUTHORIZED,
+    ConnectionError_Reason.INVALID_AUTH,
+    ConnectionError_Reason.SESSION_REVOKED,
+  ])("stops reconnecting after terminal authentication reason %s", async (reason) => {
+    vi.useFakeTimers()
+
+    class SpyTransport implements Transport {
+      readonly events = new AsyncChannel<TransportEvent>()
+      reconnectCalls = 0
+      stopCalls = 0
+      async start() {
+        await this.events.send({ type: "connecting" })
+      }
+      async stop() {
+        this.stopCalls++
+      }
+      async stopConnection() {}
+      async reconnect() {
+        this.reconnectCalls++
+      }
+      async send(_message: ClientMessage) {}
+    }
+
+    const transport = new SpyTransport()
+    const client = new ProtocolClient({
+      transport,
+      getConnectionInit: () => ({ token: "t" }),
+    })
+
+    await client.startTransport()
+    await transport.events.send({ type: "connected" })
+    const pendingRpc = client
+      .callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} })
+      .catch((error) => error)
+
+    // A terminal failure must also cancel a reconnect that was already queued
+    // for an earlier transient failure.
+    await transport.events.send({
+      type: "message",
+      message: ServerProtocolMessage.create({
+        id: 1n,
+        body: {
+          oneofKind: "connectionError",
+          connectionError: { reason: ConnectionError_Reason.REASON_UNSPECIFIED },
+        },
+      }),
+    })
+    await flushMicrotasks()
+
+    await transport.events.send({
+      type: "message",
+      message: ServerProtocolMessage.create({
+        id: 2n,
+        body: {
+          oneofKind: "connectionError",
+          connectionError: { reason },
+        },
+      }),
+    })
+    await flushMicrotasks()
+
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(transport.stopCalls).toBe(1)
+    expect(transport.reconnectCalls).toBe(0)
+    expect(client.getDiagnostics().terminalAuthenticationErrorCode).toBe(
+      ConnectionError_Reason[reason],
+    )
+    const authenticationError = await pendingRpc
+    expect(authenticationError).toBeInstanceOf(InlineSdkAuthenticationError)
+    await expect(client.startTransport()).rejects.toBe(authenticationError)
+    await expect(
+      client.sendRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} }),
+    ).rejects.toBe(authenticationError)
+    await expect(
+      client.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} }),
+    ).rejects.toBe(authenticationError)
+
+    vi.useRealTimers()
+  })
+
+  it("keeps unspecified connection failures retryable", async () => {
     vi.useFakeTimers()
 
     class SpyTransport implements Transport {
@@ -501,33 +583,68 @@ describe("ProtocolClient", () => {
 
     await client.startTransport()
     await transport.events.send({ type: "connected" })
-
-    // Trigger failure handling.
     await transport.events.send({
       type: "message",
       message: ServerProtocolMessage.create({
         id: 1n,
         body: {
           oneofKind: "connectionError",
-          connectionError: { reason: ConnectionError_Reason.INVALID_AUTH },
+          connectionError: { reason: ConnectionError_Reason.REASON_UNSPECIFIED },
         },
       }),
     })
     await flushMicrotasks()
-    expect(client.getDiagnostics().lastFailureReason).toBe("server connection error (INVALID_AUTH): INVALID_AUTH")
 
-    // attemptNo=1 => delay ~0.6s
     await vi.advanceTimersByTimeAsync(600)
     expect(transport.reconnectCalls).toBe(1)
+    expect(client.getDiagnostics().terminalAuthenticationErrorCode).toBeNull()
 
-    // If the connection opens, scheduled reconnect should no-op.
-    await transport.events.send({
-      type: "message",
-      message: ServerProtocolMessage.create({ id: 2n, body: { oneofKind: "connectionOpen", connectionOpen: {} } }),
+    vi.useRealTimers()
+  })
+
+  it("cancels a queued protocol reconnect when the transport stops", async () => {
+    vi.useFakeTimers()
+
+    class SpyTransport implements Transport {
+      readonly events = new AsyncChannel<TransportEvent>()
+      reconnectCalls = 0
+      async start() {
+        await this.events.send({ type: "connecting" })
+      }
+      async stop() {
+        await this.events.send({ type: "stopping" })
+      }
+      async stopConnection() {}
+      async reconnect() {
+        this.reconnectCalls++
+      }
+      async send(_message: ClientMessage) {}
+    }
+
+    const transport = new SpyTransport()
+    const client = new ProtocolClient({
+      transport,
+      getConnectionInit: () => ({ token: "t" }),
     })
 
+    await client.startTransport()
+    await transport.events.send({
+      type: "message",
+      message: ServerProtocolMessage.create({
+        id: 1n,
+        body: {
+          oneofKind: "connectionError",
+          connectionError: { reason: ConnectionError_Reason.REASON_UNSPECIFIED },
+        },
+      }),
+    })
+    await flushMicrotasks()
+
+    await client.stopTransport()
+    await flushMicrotasks()
     await vi.advanceTimersByTimeAsync(20_000)
-    expect(transport.reconnectCalls).toBe(1)
+
+    expect(transport.reconnectCalls).toBe(0)
 
     vi.useRealTimers()
   })

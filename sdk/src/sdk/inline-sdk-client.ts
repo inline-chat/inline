@@ -51,6 +51,7 @@ import type {
 import { rpcInputKindByMethod, rpcResultKindByMethod } from "./types.js"
 import { noopLogger, type InlineSdkLogger } from "./logger.js"
 import { getSdkVersion } from "./sdk-version.js"
+import type { InlineSdkAuthenticationError } from "./errors.js"
 
 const nowSeconds = () => BigInt(Math.floor(Date.now() / 1000))
 const sdkLayer = 1
@@ -108,6 +109,7 @@ export class InlineSdkClient {
   private openPromise: Promise<void> | null = null
   private openResolver: (() => void) | null = null
   private openRejecter: ((error: Error) => void) | null = null
+  private authenticationError: InlineSdkAuthenticationError | null = null
 
   private state: InlineSdkState = { version: 1 }
   private saveTimer: ReturnType<typeof setTimeout> | null = null
@@ -148,6 +150,7 @@ export class InlineSdkClient {
   }
 
   async connect(signal?: AbortSignal): Promise<void> {
+    if (this.authenticationError) throw this.authenticationError
     if (this.started) {
       // If a connection attempt is already in-flight, callers should still
       // await readiness.
@@ -219,6 +222,7 @@ export class InlineSdkClient {
     return {
       started: this.started,
       baseUrl: this.httpBaseUrl,
+      authenticationErrorCode: this.authenticationError?.code ?? null,
       protocol: this.protocol.getDiagnostics(),
     }
   }
@@ -703,6 +707,9 @@ export class InlineSdkClient {
           case "open":
             await this.onOpen()
             break
+          case "authenticationError":
+            this.onAuthenticationError(event.error)
+            break
           case "updates":
             await this.onUpdates(event.updates.updates)
             break
@@ -720,6 +727,20 @@ export class InlineSdkClient {
       this.log.error?.("SDK listener crashed", error)
       this.rejectOpen(error instanceof Error ? error : new Error("listener-crashed"))
     })
+  }
+
+  private onAuthenticationError(error: InlineSdkAuthenticationError) {
+    if (this.authenticationError) return
+    this.authenticationError = error
+    this.started = false
+    this.rejectOpen(error)
+    this.eventStream.close()
+
+    try {
+      this.options.onAuthenticationError?.(error)
+    } catch (callbackError) {
+      this.log.error?.("Authentication error callback failed", callbackError)
+    }
   }
 
   private async onOpen() {

@@ -1,4 +1,8 @@
 export { InlineSdkClient } from "./sdk/inline-sdk-client.js"
+export {
+  InlineSdkAuthenticationError,
+  type InlineSdkAuthenticationErrorCode,
+} from "./sdk/errors.js"
 export { registerBotCapabilitiesWithRetry } from "./sdk/bot-capabilities.js"
 export type {
   InlineSdkClientOptions,

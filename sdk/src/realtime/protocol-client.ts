@@ -5,6 +5,10 @@ import { PingPongService } from "./ping-pong.js"
 import type { Transport } from "./transport.js"
 import type { ClientEvent, ClientState } from "./types.js"
 import type { InlineSdkLogger } from "../sdk/logger.js"
+import {
+  authenticationErrorFromConnectionReason,
+  type InlineSdkAuthenticationError,
+} from "../sdk/errors.js"
 
 export type ProtocolClientOptions = {
   transport: Transport
@@ -58,6 +62,7 @@ export class ProtocolClient {
   private lastTransportMessageAt: number | null = null
   private lastFailureAt: number | null = null
   private lastFailureReason: string | null = null
+  private terminalAuthenticationError: InlineSdkAuthenticationError | null = null
 
   constructor(options: ProtocolClientOptions) {
     this.transport = options.transport
@@ -72,6 +77,7 @@ export class ProtocolClient {
   }
 
   async startTransport() {
+    if (this.terminalAuthenticationError) throw this.terminalAuthenticationError
     await this.transport.start()
   }
 
@@ -93,6 +99,7 @@ export class ProtocolClient {
   }
 
   async reconnect(options?: { skipDelay?: boolean; cause?: string }) {
+    if (this.terminalAuthenticationError) throw this.terminalAuthenticationError
     await this.transport.reconnect({
       skipDelay: options?.skipDelay,
       cause: options?.cause ?? this.lastFailureReason ?? "protocol-reconnect",
@@ -100,6 +107,7 @@ export class ProtocolClient {
   }
 
   async sendRpc(method: Method, input: RpcCall["input"] = emptyRpcInput): Promise<bigint> {
+    if (this.terminalAuthenticationError) throw this.terminalAuthenticationError
     this.ensureOpenForRpc()
     assertValidRpcMethod(method)
     const message = this.wrapMessage({
@@ -116,6 +124,7 @@ export class ProtocolClient {
     input: RpcCall["input"] = emptyRpcInput,
     options?: { timeoutMs?: number | null },
   ): Promise<RpcResult["result"]> {
+    if (this.terminalAuthenticationError) throw this.terminalAuthenticationError
     assertValidRpcMethod(method)
     const message = this.wrapMessage({
       oneofKind: "rpcCall",
@@ -205,7 +214,14 @@ export class ProtocolClient {
         this.pingPong.pong(message.body.pong.nonce)
         break
       case "connectionError":
-        this.handleClientFailure(describeConnectionError(message.body.connectionError))
+        const authenticationError = authenticationErrorFromConnectionReason(
+          message.body.connectionError.reason,
+        )
+        if (authenticationError) {
+          await this.handleTerminalAuthenticationFailure(authenticationError)
+        } else {
+          this.handleClientFailure(describeConnectionError(message.body.connectionError))
+        }
         break
       default:
         break
@@ -225,6 +241,7 @@ export class ProtocolClient {
   }
 
   private async authenticate() {
+    if (this.terminalAuthenticationError) return
     try {
       await this.sendConnectionInit()
       this.startAuthenticationTimeout()
@@ -235,6 +252,7 @@ export class ProtocolClient {
   }
 
   private async connectionOpen() {
+    if (this.terminalAuthenticationError) return
     this.state = "open"
     this.lastOpenAt = Date.now()
     await this.events.send({ type: "open" })
@@ -249,6 +267,7 @@ export class ProtocolClient {
   }
 
   private async connecting() {
+    if (this.terminalAuthenticationError) return
     this.pingPong.stop()
     this.state = "connecting"
     this.lastConnectingAt = Date.now()
@@ -258,6 +277,10 @@ export class ProtocolClient {
   private async reset() {
     this.pingPong.stop()
     this.stopAuthenticationTimeout()
+    if (this.reconnectionTimer) {
+      clearTimeout(this.reconnectionTimer)
+      this.reconnectionTimer = null
+    }
     this.cancelAllPendingRpcRequests(new ProtocolClientError("stopped"))
     this.state = "connecting"
   }
@@ -265,7 +288,7 @@ export class ProtocolClient {
   private startAuthenticationTimeout() {
     this.stopAuthenticationTimeout()
     this.authenticationTimeout = setTimeout(() => {
-      if (this.state === "open") return
+      if (this.state === "open" || this.terminalAuthenticationError) return
       this.handleClientFailure("authentication timeout after 10000ms")
     }, 10_000)
   }
@@ -277,6 +300,7 @@ export class ProtocolClient {
   }
 
   private handleClientFailure(reason = "connection failure") {
+    if (this.terminalAuthenticationError) return
     this.pingPong.stop()
     this.stopAuthenticationTimeout()
     this.state = "connecting"
@@ -293,9 +317,31 @@ export class ProtocolClient {
       `Protocol reconnect scheduled (attempt=${this.connectionAttemptNo}, delayMs=${delayMs}, reason=${reason})`,
     )
     this.reconnectionTimer = setTimeout(() => {
-      if (this.state === "open") return
+      if (this.state === "open" || this.terminalAuthenticationError) return
       void this.reconnect({ skipDelay: true })
     }, delayMs)
+  }
+
+  private async handleTerminalAuthenticationFailure(
+    error: InlineSdkAuthenticationError,
+  ) {
+    if (this.terminalAuthenticationError) return
+    this.terminalAuthenticationError = error
+    this.pingPong.stop()
+    this.stopAuthenticationTimeout()
+    this.state = "connecting"
+    this.lastFailureAt = Date.now()
+    this.lastFailureReason = error.message
+
+    if (this.reconnectionTimer) {
+      clearTimeout(this.reconnectionTimer)
+      this.reconnectionTimer = null
+    }
+
+    this.cancelAllPendingRpcRequests(error)
+    this.log.warn?.(`Terminal authentication failure; reconnect disabled (${error.code})`)
+    await this.events.send({ type: "authenticationError", error })
+    await this.transport.stop()
   }
 
   private getReconnectionDelay() {
@@ -408,6 +454,7 @@ export class ProtocolClient {
       lastTransportMessageAt: this.lastTransportMessageAt,
       lastFailureAt: this.lastFailureAt,
       lastFailureReason: this.lastFailureReason,
+      terminalAuthenticationErrorCode: this.terminalAuthenticationError?.code ?? null,
       ping: this.pingPong.getDiagnostics(),
       transport:
         typeof this.transport.getDiagnostics === "function" ? this.transport.getDiagnostics() : null,

@@ -20,6 +20,7 @@ import type { InlineId, InlineIdLike } from "../ids.js"
 import type { InlineUnixSeconds } from "../time.js"
 import type { InlineSdkLogger } from "./logger.js"
 import type { Transport } from "../realtime/transport.js"
+import type { InlineSdkAuthenticationError } from "./errors.js"
 
 export type InlineSdkClientOptions = {
   baseUrl?: string // e.g. https://api.inline.chat
@@ -32,6 +33,7 @@ export type InlineSdkClientOptions = {
   catchUpUserFromStart?: boolean
   transport?: Transport
   fetch?: typeof fetch
+  onAuthenticationError?: (error: InlineSdkAuthenticationError) => void
 }
 
 export type InlineSdkChatInfo = {
