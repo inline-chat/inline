@@ -58,7 +58,7 @@ struct OnboardingAppearance: View {
       AppSettings.shared.appTheme = appTheme
     }
 
-    onboarding.finishSetup(firstName: profile.name)
+    onboarding.finishSetup()
   }
 }
 

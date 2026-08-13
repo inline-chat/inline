@@ -1,6 +1,7 @@
 import InlineKit
 import SwiftUI
 
+@available(*, unavailable, message: "The alpha welcome sheet is retired.")
 struct AlphaSheet: View {
   @AppStorage("alphaText") private var text: String = ""
 

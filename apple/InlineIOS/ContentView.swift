@@ -179,9 +179,6 @@ private struct AuthedAppRoot: View {
         .presentationDragIndicator(.visible)
         .presentationContentInteraction(.scrolls)
 
-    case .alphaSheet:
-      AlphaSheet()
-
     case .settings:
       NavigationStack {
         SettingsView()

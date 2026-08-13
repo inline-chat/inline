@@ -22,7 +22,6 @@ class Navigation: ObservableObject, @unchecked Sendable {
     case createSpace
     case createThread(spaceId: Int64)
     case archivedChats
-    case alphaSheet
     // FIXME: this shouldn't use the whole chat item bc all of it will be persisted
     case chatInfo(chatItem: SpaceChatItem)
     case spaceSettings(spaceId: Int64)
@@ -40,7 +39,6 @@ class Navigation: ObservableObject, @unchecked Sendable {
         case .createSpace: "createSpace"
         case let .createThread(spaceId): "createThread-\(spaceId)"
         case .archivedChats: "archivedChats"
-        case .alphaSheet: "alphaSheet"
         case let .chatInfo(chatItem): "chatInfo-\(chatItem.id)"
         case let .spaceSettings(spaceId): "spaceSettings-\(spaceId)"
         case let .spaceIntegrations(spaceId): "spaceIntegrations-\(spaceId)"
@@ -99,8 +97,6 @@ class Navigation: ObservableObject, @unchecked Sendable {
         CreateSpace()
       case let .createThread(spaceId):
         CreateChatIOSView(spaceId: spaceId)
-      case .alphaSheet:
-        AlphaSheet()
       case let .chatInfo(chatItem):
         ChatInfoView(chatItem: chatItem)
       case let .spaceSettings(spaceId):
@@ -121,8 +117,6 @@ class Navigation: ObservableObject, @unchecked Sendable {
       case .createSpace:
         CreateSpace()
           .presentationCornerRadius(18)
-      case .alphaSheet:
-        AlphaSheet()
       default:
         EmptyView()
     }
@@ -154,7 +148,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
   func push(_ destination: Destination) {
     // TODO: Handle sheets in aother func
     switch destination {
-      case .createSpace, .createThread, .alphaSheet:
+      case .createSpace, .createThread:
         activeSheet = destination
       default:
         if pathComponents.last == destination {

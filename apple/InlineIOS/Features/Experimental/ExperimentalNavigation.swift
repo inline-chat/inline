@@ -271,8 +271,6 @@ struct ExperimentalSheetView: View {
       }
     case .createSpace:
       CreateSpace()
-    case .alphaSheet:
-      AlphaSheet()
     case let .addMember(spaceId):
       InviteToSpaceView(spaceId: spaceId)
     case let .members(spaceId):

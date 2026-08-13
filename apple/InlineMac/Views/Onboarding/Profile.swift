@@ -394,7 +394,7 @@ struct OnboardingUsername: View {
   private func finishOnboarding() {
     Task {
       if await model.saveUsername(currentUsername: model.currentUsername, realtimeV2: realtimeV2) {
-        onboarding.finishSetup(firstName: model.name)
+        onboarding.finishSetup()
       }
     }
   }

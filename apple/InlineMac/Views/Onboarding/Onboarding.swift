@@ -165,13 +165,9 @@ final class OnboardingViewModel: ObservableObject {
     }
   }
 
-  func finishSetup(firstName: String?) {
+  func finishSetup() {
     navigatingToMainView = true
-    if existingUser == false {
-      mainWindowViewModel?.navigateAfterSignup(firstName: firstName)
-    } else {
-      mainWindowViewModel?.navigate(.main)
-    }
+    mainWindowViewModel?.navigate(.main)
   }
 
   func goBack() {

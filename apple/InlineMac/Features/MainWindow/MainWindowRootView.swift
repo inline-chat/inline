@@ -107,9 +107,6 @@ struct MainWindowRootView: View {
       removeNativeTabShortcuts()
       MainWindowOpenCoordinator.shared.unregisterWindow(id: windowID)
     }
-    .sheet(isPresented: $viewModel.showsAlphaWelcome) {
-      AlphaWelcomeSheet(firstName: viewModel.alphaWelcomeFirstName)
-    }
   }
 
   private func installNativeTabShortcuts() {

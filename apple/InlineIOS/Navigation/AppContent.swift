@@ -233,8 +233,6 @@ enum Destination: DestinationType, Codable {
 enum Sheet: SheetType, Codable {
   case createSpace
 
-  case alphaSheet
-
   case settings
   case connectors(callbackURL: String)
 
@@ -245,9 +243,6 @@ enum Sheet: SheetType, Codable {
     switch self {
     case .createSpace:
       "createSpace"
-
-    case .alphaSheet:
-      "alphaSheet"
 
     case .settings:
       "settings"
