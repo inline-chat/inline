@@ -1,6 +1,5 @@
 import SwiftUI
 
-@available(*, unavailable, message: "The alpha welcome sheet is retired.")
 struct AlphaWelcomeSheet: View {
   @Environment(\.dismiss) private var dismiss
 
