@@ -36,17 +36,12 @@ struct ChatToolbarMenuButton: View {
         openChatInfo()
       }
 
-      Divider()
+      if !peer.isThread {
+        Divider()
 
-      Button("Copy Link", systemImage: "link") {
-        copyChatLink()
-      }
-
-      if peer.isThread {
-        Button("Copy as Markdown", systemImage: "doc.on.doc") {
-          prepareTranscript()
+        Button("Copy Link", systemImage: "link") {
+          copyChatLink()
         }
-        .disabled(transcriptTask != nil)
       }
 
       Divider()

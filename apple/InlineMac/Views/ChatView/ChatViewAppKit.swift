@@ -80,7 +80,7 @@ class ChatViewAppKit: NSViewController {
   private var messageListVC: MessageListAppKit?
   private var compose: ComposeAppKit?
   private var spinnerVC: NSHostingController<SpinnerView>?
-  private var errorVC: NSHostingController<ErrorView>?
+  private var errorVC: NSHostingController<ChatLoadErrorView>?
   private var appDidBecomeActiveObserver: NSObjectProtocol?
   private var mediaSendFailedObserver: NSObjectProtocol?
   private var chatItemCancellable: AnyCancellable?
@@ -275,10 +275,8 @@ class ChatViewAppKit: NSViewController {
     spinnerVC = hostingController
   }
 
-  private func showError(error: Error) {
-    // Create SwiftUI error view with retry action
-    let errorView = ErrorView(
-      errorMessage: error.localizedDescription,
+  private func showError(error _: Error) {
+    let errorView = ChatLoadErrorView(
       retryAction: { [weak self] in
         self?.state = .loading
         self?.fetchChat()
@@ -493,7 +491,7 @@ class ChatViewAppKit: NSViewController {
     switch error {
       case let .rpcError(rpcError):
         switch rpcError.errorCode {
-          case .peerIDInvalid, .chatIDInvalid, .userIDInvalid:
+          case .peerIDInvalid, .chatIDInvalid, .userIDInvalid, .spaceIDInvalid:
             return true
           default:
             return false

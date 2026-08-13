@@ -24,6 +24,18 @@ struct InlineDeepLinkTests {
     #expect(InlineDeepLink.appSchemes(configuredScheme: "unknown") == ["in", "inline"])
   }
 
+  @Test("builds private web shortcut URLs for chats")
+  func buildsPrivateWebShortcutURLs() {
+    #expect(InlineDeepLink.chat(id: 34).webURL?.absoluteString == "https://inline.chat/c/34")
+    #expect(
+      InlineDeepLink.chat(id: Int64.max).webURL?.absoluteString ==
+        "https://inline.chat/c/9223372036854775807"
+    )
+    #expect(InlineDeepLink.chat(id: 0).webURL == nil)
+    #expect(InlineDeepLink.user(id: 12).webURL == nil)
+    #expect(InlineDeepLink.message(chatId: 34, messageId: 56).webURL == nil)
+  }
+
   @Test("parses user and chat deep links")
   func parsesUserAndChatLinks() {
     #expect(InlineDeepLink(url: URL(string: "inline://user/12")!) == .user(id: 12))

@@ -1,3 +1,4 @@
+import Auth
 import Combine
 import InlineKit
 import InlineUI
@@ -31,6 +32,7 @@ struct ChatView: View {
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
 
   @EnvironmentObject var data: DataManager
+  @EnvironmentObject private var notificationSettings: NotificationSettingsManager
   @EnvironmentObject private var realtimeState: RealtimeState
 
   @Environment(Router.self) var router
@@ -54,15 +56,8 @@ struct ChatView: View {
     case error(Error)
   }
 
-  private enum ChatLoadError: LocalizedError {
+  private enum ChatLoadError: Error {
     case unavailable
-
-    var errorDescription: String? {
-      switch self {
-        case .unavailable:
-          "Chat is not available."
-      }
-    }
   }
 
   private enum ChatTranslationPlacement {
@@ -124,14 +119,21 @@ struct ChatView: View {
         }
 
         ToolbarItem(placement: .primaryAction) {
-          ChatToolbarMoreMenu(
+          ChatToolbarMoreMenuHost(
             peer: peerId,
-            chatId: fullChatViewModel.chat?.id,
-            includesTranslationAction: translationPlacement == .moreMenu
+            chat: fullChatViewModel.chat,
+            dialog: fullChatViewModel.chatItem?.dialog,
+            includesTranslationAction: translationPlacement == .moreMenu,
+            router: router,
+            realtimeV2: realtimeV2,
+            notificationSettings: notificationSettings,
+            database: appDatabase,
+            currentUserId: Auth.shared.getCurrentUserId(),
           ) {
             guard let chatItem = fullChatViewModel.chatItem else { return }
             presentedChatInfo = chatItem
           }
+          .id("\(fullChatViewModel.chat?.id ?? 0):\(fullChatViewModel.chat?.spaceId ?? 0)")
         }
 
         if botChatSettingsCoordinator.isToolbarVisible {
@@ -536,7 +538,7 @@ struct ChatView: View {
     }
   }
 
-  private func errorOverlay(error: Error) -> some View {
+  private func errorOverlay(error _: Error) -> some View {
     ZStack {
       Color.black.opacity(0.1)
         .ignoresSafeArea()
@@ -546,16 +548,16 @@ struct ChatView: View {
           .font(.system(size: 48))
           .foregroundColor(.secondary)
 
-        Text("Failed to load chat")
+        Text("Chat unavailable")
           .font(.headline)
 
-        Text(error.localizedDescription)
+        Text("You may not have access to this chat, or it may no longer exist.")
           .font(.subheadline)
           .foregroundColor(.secondary)
           .multilineTextAlignment(.center)
           .padding(.horizontal)
 
-        Button("Retry") {
+        Button("Try Again") {
           Task { await fetchChatIfNeeded() }
         }
         .buttonStyle(.borderedProminent)
@@ -615,18 +617,138 @@ struct ChatView: View {
   }
 }
 
-private struct ChatToolbarMoreMenu: View {
+private struct ChatToolbarMoreMenuHost: View, RehostSafeToolbarContent {
   let peer: Peer
-  let chatId: Int64?
+  let chat: Chat?
+  let dialog: Dialog?
   let includesTranslationAction: Bool
+  let router: Router
+  let realtimeV2: RealtimeV2
+  let notificationSettings: NotificationSettingsManager
+  let database: AppDatabase
+  let currentUserId: Int64?
   let openChatInfo: () -> Void
 
-  @Environment(\.realtimeV2) private var realtimeV2
+  @ViewBuilder
+  var body: some View {
+    if let chat, chat.type == .thread, let spaceID = chat.spaceId {
+      ChatToolbarObservedVisibilityMenu(
+        peer: peer,
+        chat: chat,
+        dialog: dialog,
+        includesTranslationAction: includesTranslationAction,
+        router: router,
+        realtimeV2: realtimeV2,
+        notificationSettings: notificationSettings,
+        database: database,
+        currentUserId: currentUserId,
+        openChatInfo: openChatInfo,
+        spaceID: spaceID
+      )
+      .id("\(chat.id):\(spaceID)")
+    } else {
+      ChatToolbarMoreMenu(
+        peer: peer,
+        chat: chat,
+        dialog: dialog,
+        includesTranslationAction: includesTranslationAction,
+        router: router,
+        realtimeV2: realtimeV2,
+        notificationSettings: notificationSettings,
+        database: database,
+        currentUserId: currentUserId,
+        openChatInfo: openChatInfo,
+        visibilityMembership: nil
+      )
+    }
+  }
+}
+
+private struct ChatToolbarObservedVisibilityMenu: View, RehostSafeToolbarContent {
+  let peer: Peer
+  let chat: Chat
+  let dialog: Dialog?
+  let includesTranslationAction: Bool
+  let router: Router
+  let realtimeV2: RealtimeV2
+  let notificationSettings: NotificationSettingsManager
+  let database: AppDatabase
+  let currentUserId: Int64?
+  let openChatInfo: () -> Void
+
+  @StateObject private var membershipStatus: SpaceMembershipStatusViewModel
+
+  init(
+    peer: Peer,
+    chat: Chat,
+    dialog: Dialog?,
+    includesTranslationAction: Bool,
+    router: Router,
+    realtimeV2: RealtimeV2,
+    notificationSettings: NotificationSettingsManager,
+    database: AppDatabase,
+    currentUserId: Int64?,
+    openChatInfo: @escaping () -> Void,
+    spaceID: Int64
+  ) {
+    self.peer = peer
+    self.chat = chat
+    self.dialog = dialog
+    self.includesTranslationAction = includesTranslationAction
+    self.router = router
+    self.realtimeV2 = realtimeV2
+    self.notificationSettings = notificationSettings
+    self.database = database
+    self.currentUserId = currentUserId
+    self.openChatInfo = openChatInfo
+    _membershipStatus = StateObject(wrappedValue: SpaceMembershipStatusViewModel(
+      db: database,
+      spaceId: spaceID
+    ))
+  }
+
+  var body: some View {
+    ChatToolbarMoreMenu(
+      peer: peer,
+      chat: chat,
+      dialog: dialog,
+      includesTranslationAction: includesTranslationAction,
+      router: router,
+      realtimeV2: realtimeV2,
+      notificationSettings: notificationSettings,
+      database: database,
+      currentUserId: currentUserId,
+      openChatInfo: openChatInfo,
+      visibilityMembership: membershipStatus.membership
+    )
+    .task {
+      await membershipStatus.refreshIfNeeded()
+    }
+  }
+}
+
+private struct ChatToolbarMoreMenu: View, RehostSafeToolbarContent {
+  let peer: Peer
+  let chat: Chat?
+  let dialog: Dialog?
+  let includesTranslationAction: Bool
+  // Resolve this above the UIKit toolbar host. A required typed-environment lookup here can
+  // transiently lose its value while the navigation bar reattaches during foregrounding.
+  let router: Router
+  let realtimeV2: RealtimeV2
+  @ObservedObject var notificationSettings: NotificationSettingsManager
+  let database: AppDatabase
+  let currentUserId: Int64?
+  let openChatInfo: () -> Void
+  let visibilityMembership: Member?
+
   @State private var transcriptTask: Task<Void, Never>?
   @State private var pendingTranscript: ChatTranscriptExport?
   @State private var showTranscriptScope = false
   @State private var showTranslationPopover = false
   @State private var showTranslationOptions = false
+  @State private var showMakePublicAlert = false
+  @State private var showMakePrivateSheet = false
 
   var body: some View {
     Menu {
@@ -639,7 +761,7 @@ private struct ChatToolbarMoreMenu: View {
       if peer.isPrivate {
         NudgeButton(
           peer: peer,
-          chatId: chatId,
+          chatId: chat?.id,
           presentation: .menu
         )
       }
@@ -650,13 +772,24 @@ private struct ChatToolbarMoreMenu: View {
 
       Button("Chat Info", systemImage: "info.circle", action: openChatInfo)
 
-      if peer.isThread {
-        Divider()
-
-        Button("Copy Link", systemImage: "link") {
-          copyLink()
+      if canChangeVisibility, let chat {
+        Button(
+          chat.isPublic == true ? "Make Private" : "Make Public",
+          systemImage: chat.isPublic == true ? "lock.fill" : "person.2.fill"
+        ) {
+          if chat.isPublic == true {
+            showMakePrivateSheet = true
+          } else {
+            showMakePublicAlert = true
+          }
         }
 
+      Button("Copy Link", systemImage: "link") {
+        copyLink()
+      }
+      .disabled(chat?.id == nil)
+
+      if peer.isThread {
         Button("Copy as Markdown", systemImage: "doc.on.doc") {
           prepareTranscript()
         }
@@ -675,6 +808,25 @@ private struct ChatToolbarMoreMenu: View {
     }
     .sheet(isPresented: $showTranslationOptions) {
       TranslationOptions(peer: peer)
+    }
+    .sheet(isPresented: $showMakePrivateSheet) {
+      if let chat, let spaceId = chat.spaceId {
+        ChatToolbarVisibilityParticipantsSheet(
+          chatId: chat.id,
+          spaceId: spaceId,
+          database: database,
+          realtimeV2: realtimeV2,
+          currentUserId: currentUserId
+        )
+      }
+    }
+    .alert("Make Chat Public", isPresented: $showMakePublicAlert) {
+      Button("Cancel", role: .cancel) {}
+      Button("Make Public", role: .destructive) {
+        updateVisibility(isPublic: true, participantIDs: [])
+      }
+    } message: {
+      Text("Everyone in this space will be able to access this chat. If the space is public, its members and content may be internet-accessible.")
     }
     .confirmationDialog(
       "How much should be copied?",
@@ -702,8 +854,8 @@ private struct ChatToolbarMoreMenu: View {
 
   @MainActor
   private func copyLink() {
-    guard case let .thread(id) = peer,
-          let url = InlineDeepLink.chat(id: id).url
+    guard let chatId = chat?.id,
+          let url = InlineDeepLink.chat(id: chatId).webURL
     else {
       ToastManager.shared.showToast(
         "Failed to copy link",
@@ -715,6 +867,37 @@ private struct ChatToolbarMoreMenu: View {
 
     UIPasteboard.general.string = url.absoluteString
     ToastManager.shared.showToast("Copied link", type: .success, systemImage: "link")
+  }
+
+  private var canChangeVisibility: Bool {
+    ChatVisibilityPolicy.canChange(
+      chat: chat,
+      currentUserId: currentUserId,
+      membership: visibilityMembership
+    )
+  }
+
+  private func updateVisibility(isPublic: Bool, participantIDs: [Int64]) {
+    guard let chat else { return }
+
+    Task(priority: .userInitiated) {
+      do {
+        _ = try await realtimeV2.send(.updateChatVisibility(
+          chatID: chat.id,
+          isPublic: isPublic,
+          participantIDs: participantIDs
+        ))
+      } catch is CancellationError {
+        return
+      } catch {
+        Log.shared.error("Failed to update chat visibility", error: error)
+        ToastManager.shared.showToast(
+          "Could not update chat visibility",
+          type: .error,
+          systemImage: "exclamationmark.triangle"
+        )
+      }
+    }
   }
 
   @MainActor
@@ -780,5 +963,77 @@ private struct ChatToolbarMoreMenu: View {
     UIPasteboard.general.string = transcript.markdown
     pendingTranscript = nil
     ToastManager.shared.showToast("Copied as Markdown", type: .success, systemImage: "doc.on.doc")
+  }
+}
+
+private struct ChatToolbarVisibilityParticipantsSheet: View, RehostSafeToolbarContent {
+  let chatId: Int64
+  let realtimeV2: RealtimeV2
+  let currentUserId: Int64?
+
+  @StateObject private var spaceViewModel: SpaceFullMembersViewModel
+  @State private var selectedParticipants: Set<Int64>
+  @State private var isUpdating = false
+
+  @Environment(\.dismiss) private var dismiss
+
+  init(
+    chatId: Int64,
+    spaceId: Int64,
+    database: AppDatabase,
+    realtimeV2: RealtimeV2,
+    currentUserId: Int64?
+  ) {
+    self.chatId = chatId
+    self.realtimeV2 = realtimeV2
+    self.currentUserId = currentUserId
+    _spaceViewModel = StateObject(wrappedValue: SpaceFullMembersViewModel(
+      db: database,
+      spaceId: spaceId
+    ))
+    _selectedParticipants = State(initialValue: Set(
+      currentUserId.map { [$0] } ?? []
+    ))
+  }
+
+  var body: some View {
+    ChatVisibilityParticipantsSheet(
+      spaceViewModel: spaceViewModel,
+      selectedParticipants: $selectedParticipants,
+      currentUserId: currentUserId,
+      onConfirm: makePrivate,
+      onCancel: { dismiss() }
+    )
+  }
+
+  private func makePrivate() {
+    guard !isUpdating else { return }
+    isUpdating = true
+
+    var participantIDs = selectedParticipants
+    if let currentUserId {
+      participantIDs.insert(currentUserId)
+    }
+
+    Task(priority: .userInitiated) {
+      do {
+        _ = try await realtimeV2.send(.updateChatVisibility(
+          chatID: chatId,
+          isPublic: false,
+          participantIDs: Array(participantIDs)
+        ))
+        dismiss()
+      } catch is CancellationError {
+        return
+      } catch {
+        isUpdating = false
+        Log.shared.error("Failed to make chat private", error: error)
+        ToastManager.shared.showToast(
+          "Could not make chat private",
+          type: .error,
+          systemImage: "exclamationmark.triangle"
+        )
+      }
+    }
   }
 }
