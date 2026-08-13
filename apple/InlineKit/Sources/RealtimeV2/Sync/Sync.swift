@@ -59,6 +59,7 @@ public struct SyncStats: Sendable {
   public var bucketFetchFailures: Int64
   public var bucketFetchTooLong: Int64
   public var bucketFetchFollowups: Int64
+  public var realtimeBufferRecoveries: Int64
   public var bucketsTracked: Int
   public var lastDirectApplyAt: Int64
   public var lastBucketFetchAt: Int64
@@ -75,6 +76,7 @@ public struct SyncStats: Sendable {
     bucketFetchFailures: Int64,
     bucketFetchTooLong: Int64,
     bucketFetchFollowups: Int64,
+    realtimeBufferRecoveries: Int64 = 0,
     bucketsTracked: Int,
     lastDirectApplyAt: Int64,
     lastBucketFetchAt: Int64,
@@ -90,6 +92,7 @@ public struct SyncStats: Sendable {
     self.bucketFetchFailures = bucketFetchFailures
     self.bucketFetchTooLong = bucketFetchTooLong
     self.bucketFetchFollowups = bucketFetchFollowups
+    self.realtimeBufferRecoveries = realtimeBufferRecoveries
     self.bucketsTracked = bucketsTracked
     self.lastDirectApplyAt = lastDirectApplyAt
     self.lastBucketFetchAt = lastBucketFetchAt
@@ -107,6 +110,7 @@ public struct SyncStats: Sendable {
     bucketFetchFailures: 0,
     bucketFetchTooLong: 0,
     bucketFetchFollowups: 0,
+    realtimeBufferRecoveries: 0,
     bucketsTracked: 0,
     lastDirectApplyAt: 0,
     lastBucketFetchAt: 0,
@@ -208,6 +212,12 @@ actor Sync {
 
   private var buckets: [BucketKey: BucketActor] = [:]
   private let bucketFetchLimiter: FetchLimiter
+  private var generation: UInt64 = 0
+  private var acceptsWork = false
+  private var isResetting = false
+  private var rootTasks: [UUID: Task<Void, Never>] = [:]
+  private var operationsInProgress = 0
+  private var operationDrainWaiters: [CheckedContinuation<Void, Never>] = []
 
   init(applyUpdates: ApplyUpdates, syncStorage: SyncStorage, client: ProtocolClientType, config: SyncConfig) {
     self.applyUpdates = applyUpdates
@@ -221,6 +231,9 @@ actor Sync {
 
   /// Process incoming updates (pushed from server)
   func process(updates: [InlineProtocol.Update]) async {
+    guard let expectedGeneration = beginOperation() else { return }
+    defer { endOperation() }
+
     let span = PerformanceTrace.begin(
       "SyncProcessRealtimePush",
       category: .sync,
@@ -266,12 +279,18 @@ actor Sync {
     // Apply the direct updates
     if !applyingUpdates.isEmpty {
       let result = await applyUpdates.apply(updates: applyingUpdates, source: .realtime)
+      guard isCurrent(expectedGeneration) else { return }
       recordDirectApply(count: result.appliedCount)
       if result.succeeded {
         let maxAppliedDate = maxUpdateDate(in: applyingUpdates)
-        await updateLastSyncDate(maxAppliedDate: maxAppliedDate, source: "direct")
+        await updateLastSyncDate(
+          maxAppliedDate: maxAppliedDate,
+          source: "direct",
+          generation: expectedGeneration
+        )
+        guard isCurrent(expectedGeneration) else { return }
         // Update bucket states based on applied updates
-        await updateBucketStates(for: applyingUpdates)
+        await updateBucketStates(for: applyingUpdates, generation: expectedGeneration)
       } else {
         log.error(
           "failed to apply \(result.failedCount) direct updates; skipping direct sync cursor advancement"
@@ -286,8 +305,9 @@ actor Sync {
     // Apply bucketed updates (sequenced) via BucketActor ordering/buffering.
     if !bucketedUpdates.isEmpty {
       for (key, updates) in bucketedUpdates {
-        let actor = await getBucketActor(key: key)
+        guard let actor = await getBucketActor(key: key, generation: expectedGeneration) else { return }
         await actor.processRealtimeUpdates(updates)
+        guard isCurrent(expectedGeneration) else { return }
       }
     }
   }
@@ -406,13 +426,32 @@ actor Sync {
     await publishSyncActivityIfNeeded()
   }
 
-  func clearSyncState() async {
+  func activateGeneration() {
+    generation &+= 1
+    acceptsWork = true
+  }
+
+  func clearSyncState(acceptNewWork: Bool = true) async {
     log.debug("clearing sync state and bucket cache")
+    generation &+= 1
+    acceptsWork = false
+    isResetting = true
+    let tasks = Array(rootTasks.values)
+    rootTasks.removeAll()
+    for task in tasks {
+      task.cancel()
+    }
     stats = .empty
-    buckets.removeAll()
+    await invalidateAllBuckets()
+    for task in tasks {
+      await task.value
+    }
+    await waitForOperationsToFinish()
     await syncStorage.clearSyncState()
     activeBucketFetches = 0
     await publishSyncActivityIfNeeded()
+    isResetting = false
+    acceptsWork = acceptNewWork
   }
 
   func getStats() async -> SyncStats {
@@ -438,7 +477,7 @@ actor Sync {
 
       case .clearStateAndFetch:
         stats = .empty
-        buckets.removeAll()
+        await invalidateAllBuckets()
         activeBucketFetches = 0
         let saved = await syncStorage.clearSyncState()
         await publishSyncActivityIfNeeded()
@@ -539,33 +578,44 @@ actor Sync {
 
   private func chatHasNewUpdates(_ payload: InlineProtocol.UpdateChatHasNewUpdates) {
     log.trace("chat has new updates: \(payload)")
-    Task {
-      let bucketActor = await getBucketActor(key: .chat(peer: payload.peerID))
+    launchRootTask { sync, generation in
+      guard let bucketActor = await sync.getBucketActor(
+        key: .chat(peer: payload.peerID),
+        generation: generation
+      ) else { return }
       await bucketActor.noteHasNewUpdatesAndMaybeFetch(upToSeq: Int64(payload.updateSeq))
     }
   }
 
   private func spaceHasNewUpdates(_ payload: InlineProtocol.UpdateSpaceHasNewUpdates) {
     log.trace("space has new updates: \(payload)")
-    Task {
-      let bucketActor = await getBucketActor(key: .space(id: payload.spaceID))
+    launchRootTask { sync, generation in
+      guard let bucketActor = await sync.getBucketActor(
+        key: .space(id: payload.spaceID),
+        generation: generation
+      ) else { return }
       await bucketActor.noteHasNewUpdatesAndMaybeFetch(upToSeq: Int64(payload.updateSeq))
     }
   }
 
   private func fetchUserBucket() {
     log.trace("fetching user bucket updates")
-    Task {
-      let bucketActor = await getBucketActor(key: .user)
+    launchRootTask { sync, generation in
+      guard let bucketActor = await sync.getBucketActor(key: .user, generation: generation) else { return }
       await bucketActor.fetchNewUpdates()
     }
   }
 
-  private func getBucketActor(key: BucketKey) async -> BucketActor {
+  private func getBucketActor(key: BucketKey, generation expectedGeneration: UInt64) async -> BucketActor? {
+    guard isCurrent(expectedGeneration) else { return nil }
     if let bucketActor = buckets[key] {
       return bucketActor
     }
     let bucketState = await syncStorage.getBucketState(for: key)
+    guard isCurrent(expectedGeneration) else { return nil }
+    if let bucketActor = buckets[key] {
+      return bucketActor
+    }
     let bucketActor = BucketActor(
       key: key,
       seq: bucketState.seq,
@@ -578,18 +628,34 @@ actor Sync {
     return bucketActor
   }
 
-  /// Get the state from the server
-  private func getStateFromServer() {
-    Task { await fetchStateFromServerWithRetry() }
+  private func invalidateAllBuckets() async {
+    let existingBuckets = Array(buckets.values)
+    buckets.removeAll()
+
+    for bucket in existingBuckets {
+      await bucket.invalidate()
+    }
+    await bucketFetchLimiter.cancelAllWaiters()
+    for bucket in existingBuckets {
+      await bucket.waitUntilIdle()
+    }
   }
 
-  private func fetchStateFromServerWithRetry() async {
+  /// Get the state from the server
+  private func getStateFromServer() {
+    launchRootTask { sync, generation in
+      await sync.fetchStateFromServerWithRetry(generation: generation)
+    }
+  }
+
+  private func fetchStateFromServerWithRetry(generation expectedGeneration: UInt64) async {
+    guard isCurrent(expectedGeneration) else { return }
     guard let client else {
       log.error("client is nil")
       return
     }
 
-    let state = await preparedSyncState()
+    guard let state = await preparedSyncState(generation: expectedGeneration) else { return }
     let maxAttempts = Self.getUpdatesStateRetryDelays.count + 1
     let totalStartedAt = Date()
     PerformanceTrace.breadcrumb(
@@ -609,12 +675,14 @@ actor Sync {
         "attempt=\(attempt) last_sync_age_sec=\(max(0, nowSeconds() - state.lastSyncDate))"
       )
       do {
+        guard isCurrent(expectedGeneration), !Task.isCancelled else { return }
         // Note: We use callRpc to ensure we wait for the server's acknowledgement,
         // but the primary mechanism for sync is the server pushing 'hasNewUpdates'
         // events in response to this call (or as part of the result).
         let result = try await client.callRpc(method: .getUpdatesState, input: .getUpdatesState(.with {
           $0.date = state.lastSyncDate
         }), timeout: Self.getUpdatesStateTimeout)
+        guard isCurrent(expectedGeneration), !Task.isCancelled else { return }
         span.end(
           "attempt=\(attempt) success=true duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: attemptStartedAt))"
         )
@@ -624,7 +692,11 @@ actor Sync {
             "received get updates state date: \(payload.date), updatesFound=\(payload.hasUpdatesFound ? String(payload.updatesFound) : "unknown")"
           )
           if payload.hasUpdatesFound, !payload.updatesFound {
-            await updateLastSyncDate(maxAppliedDate: payload.date, source: "getUpdatesState:empty")
+            await updateLastSyncDate(
+              maxAppliedDate: payload.date,
+              source: "getUpdatesState:empty",
+              generation: expectedGeneration
+            )
           }
         }
         PerformanceTrace.breadcrumb(
@@ -663,8 +735,10 @@ actor Sync {
     }
   }
 
-  private func preparedSyncState() async -> SyncState {
+  private func preparedSyncState(generation expectedGeneration: UInt64) async -> SyncState? {
+    guard isCurrent(expectedGeneration) else { return nil }
     var state = await syncStorage.getState()
+    guard isCurrent(expectedGeneration) else { return nil }
 
     // Handle uninitialized or too old state
     let now = Int64(Date().timeIntervalSince1970)
@@ -679,6 +753,7 @@ actor Sync {
       if await syncStorage.setState(state) == false {
         log.error("failed to persist initialized sync lookback state: \(seedDate)")
       }
+      guard isCurrent(expectedGeneration) else { return nil }
     } else if now - state.lastSyncDate > Self.staleSyncStateMaxAgeSeconds {
       let seedDate = max(0, now - Self.initialSyncStateLookbackSeconds)
       log.warning("Sync state too old (> 14 days). Seeding bounded lookback to \(seedDate) (5 days ago)")
@@ -686,12 +761,17 @@ actor Sync {
       if await syncStorage.setState(state) == false {
         log.error("failed to persist stale sync lookback state: \(seedDate)")
       }
+      guard isCurrent(expectedGeneration) else { return nil }
     }
 
     return state
   }
 
-  private func updateBucketStates(for updates: [InlineProtocol.Update]) async {
+  private func updateBucketStates(
+    for updates: [InlineProtocol.Update],
+    generation expectedGeneration: UInt64
+  ) async {
+    guard isCurrent(expectedGeneration) else { return }
     // We need to group by bucket because we want the MAX seq/date for each bucket.
     var maxStates: [BucketKey: (seq: Int64, date: Int64)] = [:]
 
@@ -716,6 +796,7 @@ actor Sync {
     if !statesToSave.isEmpty {
       log.trace("saving batch bucket states: \(statesToSave.count)")
       let saved = await syncStorage.setBucketStates(states: statesToSave)
+      guard isCurrent(expectedGeneration) else { return }
       guard saved else {
         log.error("failed to save batch bucket states: \(statesToSave.count)")
         return
@@ -785,6 +866,10 @@ actor Sync {
     stats.bucketFetchFollowups += 1
   }
 
+  func recordRealtimeBufferRecovery() {
+    stats.realtimeBufferRecoveries += 1
+  }
+
   func bucketFetchActivityStarted() async {
     activeBucketFetches += 1
     await publishSyncActivityIfNeeded()
@@ -801,12 +886,18 @@ actor Sync {
     stats.bucketUpdatesDuplicateSkipped += Int64(duplicates)
   }
 
-  func updateLastSyncDate(maxAppliedDate: Int64, source: String) async {
+  func updateLastSyncDate(
+    maxAppliedDate: Int64,
+    source: String,
+    generation expectedGeneration: UInt64? = nil
+  ) async {
+    if let expectedGeneration, !isCurrent(expectedGeneration) { return }
     guard maxAppliedDate > 0 else { return }
 
     let gap = config.lastSyncSafetyGapSeconds
     let proposed = max(0, maxAppliedDate - gap)
     let currentState = await syncStorage.getState()
+    if let expectedGeneration, !isCurrent(expectedGeneration) { return }
 
     guard proposed > currentState.lastSyncDate else {
       log.trace(
@@ -817,6 +908,7 @@ actor Sync {
 
     let newState = SyncState(lastSyncDate: proposed)
     let saved = await syncStorage.setState(newState)
+    if let expectedGeneration, !isCurrent(expectedGeneration) { return }
     guard saved else {
       log.error(
         "failed to update lastSyncDate from \(currentState.lastSyncDate) to \(proposed) (source=\(source))"
@@ -827,6 +919,51 @@ actor Sync {
     log.debug(
       "updated lastSyncDate from \(currentState.lastSyncDate) to \(proposed) (maxAppliedDate=\(maxAppliedDate), gap=\(gap)s, source=\(source))"
     )
+  }
+
+  private func launchRootTask(
+    _ operation: @escaping @Sendable (Sync, UInt64) async -> Void
+  ) {
+    guard acceptsWork, !isResetting else { return }
+    let id = UUID()
+    let expectedGeneration = generation
+    let task = Task { [weak self] in
+      guard let self else { return }
+      await operation(self, expectedGeneration)
+      await self.finishRootTask(id)
+    }
+    rootTasks[id] = task
+  }
+
+  private func finishRootTask(_ id: UUID) {
+    rootTasks.removeValue(forKey: id)
+  }
+
+  private func isCurrent(_ expectedGeneration: UInt64) -> Bool {
+    acceptsWork && !isResetting && generation == expectedGeneration
+  }
+
+  private func beginOperation() -> UInt64? {
+    guard acceptsWork, !isResetting else { return nil }
+    operationsInProgress += 1
+    return generation
+  }
+
+  private func endOperation() {
+    operationsInProgress = max(0, operationsInProgress - 1)
+    guard operationsInProgress == 0 else { return }
+    let waiters = operationDrainWaiters
+    operationDrainWaiters.removeAll()
+    for waiter in waiters {
+      waiter.resume()
+    }
+  }
+
+  private func waitForOperationsToFinish() async {
+    guard operationsInProgress > 0 else { return }
+    await withCheckedContinuation { continuation in
+      operationDrainWaiters.append(continuation)
+    }
   }
 
   private func getBucketKey(for update: InlineProtocol.Update) -> BucketKey? {
@@ -909,9 +1046,14 @@ actor Sync {
 
 /// A simple global concurrency limiter for async bucket fetch operations.
 actor FetchLimiter {
+  private struct Waiter {
+    let id: UUID
+    let continuation: CheckedContinuation<Bool, Never>
+  }
+
   private var limit: Int
   private var inFlight: Int = 0
-  private var waiters: [CheckedContinuation<Void, Never>] = []
+  private var waiters: [Waiter] = []
 
   init(limit: Int) {
     self.limit = max(1, limit)
@@ -922,16 +1064,24 @@ actor FetchLimiter {
     resumeWaitersIfPossible()
   }
 
-  func acquire() async {
+  func acquire() async -> Bool {
     if inFlight < limit {
       inFlight += 1
-      return
+      return true
     }
 
-    await withCheckedContinuation { continuation in
-      waiters.append(continuation)
+    let id = UUID()
+    return await withTaskCancellationHandler {
+      await withCheckedContinuation { continuation in
+        if Task.isCancelled {
+          continuation.resume(returning: false)
+          return
+        }
+        waiters.append(Waiter(id: id, continuation: continuation))
+      }
+    } onCancel: {
+      Task { await self.cancelWaiter(id: id) }
     }
-    // Note: `release()` increments `inFlight` before resuming this continuation.
   }
 
   func release() {
@@ -941,11 +1091,25 @@ actor FetchLimiter {
     resumeWaitersIfPossible()
   }
 
+  func cancelAllWaiters() {
+    let pending = waiters
+    waiters.removeAll()
+    for waiter in pending {
+      waiter.continuation.resume(returning: false)
+    }
+  }
+
+  private func cancelWaiter(id: UUID) {
+    guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+    let waiter = waiters.remove(at: index)
+    waiter.continuation.resume(returning: false)
+  }
+
   private func resumeWaitersIfPossible() {
     while inFlight < limit, !waiters.isEmpty {
       inFlight += 1
-      let continuation = waiters.removeFirst()
-      continuation.resume()
+      let waiter = waiters.removeFirst()
+      waiter.continuation.resume(returning: true)
     }
   }
 }
@@ -958,6 +1122,7 @@ actor BucketActor {
 
   private static let updatesPageLimit: Int32 = 200
   private static let maxTotalUpdates: Int64 = 1000
+  private static let maxBufferedRealtimeUpdates = 4_096
   private static let getUpdatesTimeout: Duration = .seconds(30)
 
   // Strong ref for the same reason as Sync.client.
@@ -977,6 +1142,8 @@ actor BucketActor {
   private var retryTask: Task<Void, Never>?
   private var retryAttempt: Int = 0
   private var isInvalidated: Bool = false
+  private var activeOperations = 0
+  private var idleWaiters: [CheckedContinuation<Void, Never>] = []
   private var lastNonProgressRepairTargetSeq: Int64?
 
   /// Buffer to accumulate updates during fetch loop before applying them all at once
@@ -1076,6 +1243,8 @@ actor BucketActor {
   /// - Trigger a catch-up fetch to fill gaps.
   func processRealtimeUpdates(_ updates: [InlineProtocol.Update]) async {
     guard !isInvalidated else { return }
+    beginOperation()
+    defer { endOperation() }
 
     // Buffer incoming updates
     for update in updates {
@@ -1086,10 +1255,46 @@ actor BucketActor {
       bufferedRealtimeUpdates[incomingSeq] = update
     }
 
+    let exceededRealtimeBufferLimit = bufferedRealtimeUpdates.count > Self.maxBufferedRealtimeUpdates
+    if exceededRealtimeBufferLimit {
+      let recoveryTarget = bufferedRealtimeUpdates.keys.max() ?? seq
+      fetchSeqEnd = max(fetchSeqEnd ?? 0, recoveryTarget)
+      let bufferedCount = bufferedRealtimeUpdates.count
+      bufferedRealtimeUpdates.removeAll(keepingCapacity: false)
+      needsFetch = true
+      log.warning(
+        "realtime update buffer limit exceeded for bucket type=\(key.traceKind); recovering through bounded catch-up"
+      )
+      PerformanceTrace.breadcrumb(
+        "sync realtime buffer limit exceeded",
+        category: "sync.realtime",
+        level: .warning,
+        data: [
+          "bucket": key.traceKind,
+          "buffered": bufferedCount,
+          "target_seq": recoveryTarget,
+        ]
+      )
+      if let sync {
+        await sync.recordRealtimeBufferRecovery()
+      }
+    }
+
     // If catch-up has already fetched a pending batch, defer realtime draining until
     // that batch is committed to preserve monotonic per-bucket apply order.
     if isFetching, !pendingUpdates.isEmpty {
       log.trace("deferring realtime drain for bucket \(key) while catch-up batch is pending")
+      return
+    }
+
+    if exceededRealtimeBufferLimit {
+      if isFetching {
+        if let sync {
+          await sync.recordBucketFetchFollowup()
+        }
+        return
+      }
+      await fetchNewUpdates()
       return
     }
 
@@ -1244,6 +1449,9 @@ actor BucketActor {
 
     seq = nextSeq
     date = nextDate
+    if let fetchSeqEnd, nextSeq >= fetchSeqEnd {
+      self.fetchSeqEnd = nil
+    }
     let maxAppliedDate = maxUpdateDate(in: contiguous)
     await sync.updateLastSyncDate(maxAppliedDate: maxAppliedDate, source: "realtime:\(key)")
     return true
@@ -1273,6 +1481,9 @@ actor BucketActor {
       }
       return
     }
+
+    beginOperation()
+    defer { endOperation() }
 
     isFetching = true
     defer {
@@ -1326,6 +1537,7 @@ actor BucketActor {
     while true {
       needsFetch = false
       let ok = await fetchNewUpdatesOnce()
+      guard !isInvalidated else { break }
       if ok {
         resetRetryState()
       } else {
@@ -1337,7 +1549,8 @@ actor BucketActor {
       // If we have buffered realtime updates, keep fetching until we've filled the gap.
       _ = await drainBufferedRealtimeUpdates()
 
-      guard needsFetch || bufferedRealtimeUpdates.isEmpty == false else { break }
+      let hasOutstandingFetchTarget = fetchSeqEnd.map { $0 > seq } ?? false
+      guard needsFetch || bufferedRealtimeUpdates.isEmpty == false || hasOutstandingFetchTarget else { break }
       log.trace("follow-up fetch requested for bucket \(key)")
     }
 
@@ -1406,9 +1619,13 @@ actor BucketActor {
     }
 
     // Snapshot an optional upper bound so a live connection doesn't keep chasing a moving target.
-    var hardEndSeq: Int64? = fetchSeqEnd
+    var requestedEndSeq: Int64? = fetchSeqEnd
     if let maxBuffered = bufferedRealtimeUpdates.keys.max() {
-      hardEndSeq = max(hardEndSeq ?? 0, maxBuffered)
+      requestedEndSeq = max(requestedEndSeq ?? 0, maxBuffered)
+    }
+    var hardEndSeq = requestedEndSeq.map { min($0, currentSeq + Self.maxTotalUpdates) }
+    if let requestedEndSeq, let hardEndSeq, requestedEndSeq > hardEndSeq {
+      fetchSeqEnd = max(fetchSeqEnd ?? 0, requestedEndSeq)
     }
     if let bound = hardEndSeq, bound <= currentSeq {
       // Avoid invalid requests (server requires seqEnd >= startSeq).
@@ -1440,7 +1657,10 @@ actor BucketActor {
           category: .sync,
           "bucket=\(key.traceKind)"
         )
-        await fetchLimiter.acquire()
+        guard await fetchLimiter.acquire() else {
+          resultLabel = "cancelled"
+          return true
+        }
         queueSpan.end(
           "bucket=\(key.traceKind) duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: queueStartedAt))"
         )
@@ -1477,6 +1697,10 @@ actor BucketActor {
           throw error
         }
         await fetchLimiter.release()
+        guard !isInvalidated, !Task.isCancelled else {
+          resultLabel = "cancelled"
+          return true
+        }
         pageCount += 1
 
         guard case let .getUpdates(payload) = result else {
@@ -1504,6 +1728,20 @@ actor BucketActor {
             }
             resultLabel = "repaired_server_classified_gap"
             return true
+          }
+
+          // A final empty page is authoritative even when an earlier push hint
+          // advertised a higher sequence. Retaining that stale target would make
+          // the outer fetch loop immediately issue the same request forever.
+          if payload.resultType == .empty,
+             payload.final,
+             payload.seq == currentSeq {
+            if let requestedEndSeq,
+               fetchSeqEnd.map({ $0 <= requestedEndSeq }) == true {
+              fetchSeqEnd = nil
+            }
+            hardEndSeq = nil
+            sliceEndSeq = nil
           }
         }
 
@@ -1560,8 +1798,7 @@ actor BucketActor {
               return true
             }
           }
-          // Slice within max total updates.
-          // Note: keep `hardEndSeq` intact so we can continue slicing until we reach it.
+          // Slice within max total updates and commit each slice before fetching the next one.
           //
           // Server behaviors:
           // - New: returns a slice boundary seq (<= currentSeq + maxTotalUpdates)
@@ -1574,9 +1811,10 @@ actor BucketActor {
           }
           let seqGap = serverSeq - currentSeq
           if seqGap > Self.maxTotalUpdates {
-            // Legacy server semantics: treat `payload.seq` as latestSeq and slice locally.
-            hardEndSeq = max(hardEndSeq ?? 0, serverSeq)
-            sliceEndSeq = min(serverSeq, currentSeq + Self.maxTotalUpdates)
+            // Legacy server semantics: remember latestSeq, but commit one bounded slice at a time.
+            fetchSeqEnd = max(fetchSeqEnd ?? 0, serverSeq)
+            hardEndSeq = min(serverSeq, currentSeq + Self.maxTotalUpdates)
+            sliceEndSeq = hardEndSeq
           } else {
             // New server semantics: `payload.seq` is already the slice boundary.
             sliceEndSeq = serverSeq
@@ -1899,7 +2137,7 @@ actor BucketActor {
 
   private func scheduleRetry() {
     // Avoid scheduling multiple concurrent retries.
-    guard retryTask == nil else { return }
+    guard retryTask == nil, !isInvalidated else { return }
 
     // 1s, 2s, 4s, ... up to 30s
     let delaySeconds = min(30, 1 << min(retryAttempt, 5))
@@ -1920,6 +2158,41 @@ actor BucketActor {
 
   private func clearRetryTask() {
     retryTask = nil
+  }
+
+  func invalidate() async {
+    guard !isInvalidated else { return }
+    isInvalidated = true
+    let scheduledRetry = retryTask
+    retryTask = nil
+    scheduledRetry?.cancel()
+    await scheduledRetry?.value
+    needsFetch = false
+    fetchSeqEnd = nil
+    bufferedRealtimeUpdates.removeAll()
+    clearPendingCatchupBatch()
+    client = nil
+  }
+
+  func waitUntilIdle() async {
+    guard activeOperations > 0 else { return }
+    await withCheckedContinuation { continuation in
+      idleWaiters.append(continuation)
+    }
+  }
+
+  private func beginOperation() {
+    activeOperations += 1
+  }
+
+  private func endOperation() {
+    activeOperations = max(0, activeOperations - 1)
+    guard activeOperations == 0 else { return }
+    let waiters = idleWaiters
+    idleWaiters.removeAll()
+    for waiter in waiters {
+      waiter.resume()
+    }
   }
 
   private var shouldRepairColdChatTooLong: Bool {

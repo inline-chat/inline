@@ -5,6 +5,7 @@ public enum TransactionError: Error {
   case rpcError(InlineProtocol.RpcError)
   case timeout
   case invalid
+  case persistenceFailed
   case ackedButNoResultAfterReconnect
   case dependencyFailed
 }

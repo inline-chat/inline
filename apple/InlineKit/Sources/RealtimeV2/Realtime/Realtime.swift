@@ -13,6 +13,33 @@ public enum RealtimeDirectRpcError: Error {
   case unknown(Error)
 }
 
+private final class TransactionSendCancellationState: @unchecked Sendable {
+  private let lock = NSLock()
+  private var cancelled = false
+  private var completed = false
+
+  func requestCancellation() -> Bool {
+    lock.withLock {
+      guard !completed else { return false }
+      cancelled = true
+      return true
+    }
+  }
+
+  func isCancellationRequested() -> Bool {
+    lock.withLock { cancelled }
+  }
+
+  func finish() {
+    lock.withLock { completed = true }
+  }
+}
+
+private struct PendingTransactionContinuation {
+  let continuation: CheckedContinuation<InlineProtocol.RpcResult.OneOf_Result?, any Error>
+  let cancellationState: TransactionSendCancellationState
+}
+
 /// This root actor manages the connection, sync, transactions, queries, etc.
 ///
 /// later we will rename the main module to `Realtime`
@@ -51,13 +78,17 @@ public actor RealtimeV2 {
   private let authObservationProbe = AuthObservationProbe()
   private var authRecoverySequence: UInt64 = 0
   private var authRecoveryTask: Task<Void, Never>?
+  private var transactionOwner: TransactionOwner?
+  private var transactionGeneration: UInt64 = 0
+  private var transactionOwnerTransitionTask: Task<Void, Never>?
+  private var transactionOwnerTransitionID: UUID?
+  private var acceptsTransactions: Bool
+  private var transactionRetryTask: Task<Void, Never>?
+  private var transactionOperationsInProgress = 0
+  private var transactionDrainWaiters: [CheckedContinuation<Void, Never>] = []
 
   // Transaction execution
-  private var transactionContinuations: [TransactionId: CheckedContinuation<
-    InlineProtocol.RpcResult.OneOf_Result?,
-    // TransactionError
-    any Error
-  >] = [:]
+  private var transactionContinuations: [TransactionId: PendingTransactionContinuation] = [:]
 
   // MARK: - Initialization
 
@@ -70,6 +101,7 @@ public actor RealtimeV2 {
     blockerResolver: (any TransactionBlockerResolver)? = nil,
   ) {
     self.auth = auth
+    acceptsTransactions = auth.userId() != nil
     authDiagnosticSnapshots = auth.snapshots
     session = ProtocolSession(transport: transport, auth: auth)
     let initialConstraints = ConnectionConstraints(
@@ -118,6 +150,7 @@ public actor RealtimeV2 {
 
   /// Start core components, register listeners and start run loops.
   private func start() async {
+    _ = await ensureTransactionOwnerIfNeeded()
     await sync.setSyncActivityListener { [weak self] isActive in
       await self?.syncActivityChanged(isActive)
     }
@@ -136,8 +169,32 @@ public actor RealtimeV2 {
   /// Called when log out happens
   /// Reset all state to their initial values.
   /// Stop transport. But do not kill the listeners and tasks. This is state is recoverable via a transport start.
-  private func stopAndReset() async {
+  public func loggedOut() async {
+    log.info("Stopping realtime account generation")
+    acceptsTransactions = false
+    authRecoveryTask?.cancel()
+    authRecoveryTask = nil
+    transactionRetryTask?.cancel()
+    let retryTask = transactionRetryTask
+    transactionRetryTask = nil
+
+    let ownerTransitionTask = transactionOwnerTransitionTask
+    await ownerTransitionTask?.value
+
+    let endingOwner = transactionOwner
+    transactionOwner = nil
+    resumeAllTransactionContinuations(throwing: CancellationError())
+
     await connectionManager.stop()
+    await retryTask?.value
+    await waitForTransactionOperationsToFinish()
+
+    if let endingOwner {
+      await transactions.reset(owner: endingOwner, deletePersisted: true)
+    }
+    await sync.clearSyncState(acceptNewWork: false)
+    await updateTransportConnectionState(.connecting)
+    log.info("Stopped realtime account generation")
   }
 
   /// Listen for auth events, transport events, sync events, etc.
@@ -146,7 +203,7 @@ public actor RealtimeV2 {
     Task {
       for await snapshot in authDiagnosticSnapshots {
         guard !Task.isCancelled else { return }
-        self.authDiagnosticSnapshotReceived(snapshot)
+        await self.authDiagnosticSnapshotReceived(snapshot)
       }
     }.store(in: &tasks)
 
@@ -212,19 +269,21 @@ public actor RealtimeV2 {
     }.store(in: &tasks)
 
     // Transactions
-    Task.detached {
+    Task { [weak self] in
+      guard let self else { return }
       self.log.trace("Starting transactions listener")
       for await _ in await self.transactions.queueStream {
-        guard await self.canExecuteTransactions() else {
-          self.log.trace("Skipping transaction queue stream as connection is not ready for transactions")
+        guard await self.canExecuteTransactions(), let owner = await self.activeTransactionOwner() else {
+          self.log.trace("Skipping transaction queue stream because its connection or account owner is unavailable")
           continue
         }
 
-        while let dequeueResult = await self.transactions.dequeue() {
+        while let dequeueResult = await self.transactions.dequeue(owner: owner) {
+          guard await self.isCurrentTransactionOwner(owner) else { break }
           switch dequeueResult {
             case let .ready(transaction):
               self.log.trace("Dequeued transaction \(transaction.id)")
-              await self.runTransaction(transaction)
+              await self.runTransaction(transaction, owner: owner)
             case let .failed(transaction):
               self.log.trace("Dropping blocked transaction \(transaction.id) after dependency failure")
               await self.failQueuedTransaction(transaction, error: .dependencyFailed)
@@ -234,7 +293,7 @@ public actor RealtimeV2 {
     }.store(in: &tasks)
   }
 
-  private func authDiagnosticSnapshotReceived(_ snapshot: AuthSnapshot) {
+  private func authDiagnosticSnapshotReceived(_ snapshot: AuthSnapshot) async {
     authRecoverySequence = authRecoverySequence &+ 1
     let sequence = authRecoverySequence
     authRecoveryDiagnostics.recordSnapshot(sequence: sequence, snapshot: snapshot)
@@ -242,7 +301,13 @@ public actor RealtimeV2 {
     authRecoveryTask?.cancel()
     authRecoveryTask = nil
 
-    guard snapshot.isLoggedIn else { return }
+    guard snapshot.isLoggedIn else {
+      acceptsTransactions = false
+      return
+    }
+
+    acceptsTransactions = true
+    _ = await ensureTransactionOwnerIfNeeded()
 
     authRecoveryTask = Task { [weak self] in
       do {
@@ -313,23 +378,28 @@ public actor RealtimeV2 {
     }
   }
 
-  private func runTransaction(_ transactionWrapper: TransactionWrapper) async {
+  private func runTransaction(_ transactionWrapper: TransactionWrapper, owner expectedOwner: TransactionOwner) async {
+    guard isCurrentTransactionOwner(expectedOwner) else { return }
     log.trace("Running transaction \(transactionWrapper.id) with method \(transactionWrapper.transaction.method)")
     let transaction = transactionWrapper.transaction
-    // send as RPC
-    // mark as running
-    Task {
-      do {
-        // send as RPC message
-        let msgId = try await session.sendRpc(method: transaction.method, input: transaction.input)
-        // mark as running
-        await transactions.running(transactionId: transactionWrapper.id, rpcMsgId: msgId)
-        // the rest of the work (ack, etc) is handled later
-      } catch {
-        log.error("Failed to send transaction \(transactionWrapper.id) with method \(transaction.method)", error: error)
-        await transactions.requeue(transactionId: transactionWrapper.id)
-        // FIXME: What to do with the error? Restart the connection?
-      }
+    beginTransactionOperation()
+    defer { endTransactionOperation() }
+
+    do {
+      guard isCurrentTransactionOwner(expectedOwner) else { return }
+      let msgId = try await session.sendRpc(method: transaction.method, input: transaction.input)
+      guard isCurrentTransactionOwner(expectedOwner) else { return }
+      await transactions.running(
+        transactionId: transactionWrapper.id,
+        rpcMsgId: msgId,
+        owner: expectedOwner
+      )
+    } catch is CancellationError {
+      await transactions.requeue(transactionId: transactionWrapper.id, signal: false)
+    } catch {
+      log.warning("Transaction dispatch deferred method=\(transaction.method) reason=transport_unavailable")
+      await transactions.requeue(transactionId: transactionWrapper.id, signal: false)
+      scheduleTransactionQueueRetry()
     }
   }
 
@@ -339,47 +409,77 @@ public actor RealtimeV2 {
   }
 
   private func completeTransaction(msgId: UInt64, rpcResult: InlineProtocol.RpcResult.OneOf_Result?) async {
-    guard let transactionWrapper = await transactions.complete(rpcMsgId: msgId) else {
+    guard let completingOwner = transactionOwner else { return }
+    beginTransactionOperation()
+    defer { endTransactionOperation() }
+
+    guard let transactionWrapper = await transactions.complete(rpcMsgId: msgId, owner: completingOwner) else {
       return
     }
 
     let transaction = transactionWrapper.transaction
     let transactionId = transactionWrapper.id
 
+    guard completingOwner == transactionOwner else {
+      await transaction.cancelled()
+      return
+    }
+
     log.trace("Transaction \(transactionId) completed with result")
 
-    // FIXME: Task, Task.detached, or...?
-    Task.detached {
-      do {
-        try await transaction.apply(rpcResult)
-        await self.transactions.satisfy(blockers: transaction.satisfiedBlockersOnSuccess)
-        Task {
-          await self.getAndRemoveContinuation(for: transactionId)?.resume(returning: rpcResult)
-        }
-      } catch {
-        // This for some reason did not work
-        // let error = TransactionError.executionError(error)
-        await transaction.failed(error: TransactionError.invalid)
-        await self.transactions.signalQueue()
-        Task {
-          await self.getAndRemoveContinuation(for: transactionId)?
-            .resume(throwing: TransactionError.invalid)
-        }
+    do {
+      try await transaction.apply(rpcResult)
+      guard completingOwner == transactionOwner else {
+        await transaction.cancelled()
+        return
       }
+      await transactions.satisfy(blockers: transaction.satisfiedBlockersOnSuccess)
+      resumeTransactionContinuation(for: transactionId, returning: rpcResult)
+    } catch {
+      guard completingOwner == transactionOwner else {
+        await transaction.cancelled()
+        return
+      }
+      await transaction.failed(error: TransactionError.invalid)
+      await transactions.signalQueue()
+      resumeTransactionContinuation(for: transactionId, throwing: TransactionError.invalid)
     }
   }
 
   private func completeTransaction(msgId: UInt64, error: TransactionError) async {
+    guard let completingOwner = transactionOwner else { return }
+    beginTransactionOperation()
+    defer { endTransactionOperation() }
+
     let shouldRetry = isLimitedRetryRpcError(error)
-    guard let transactionWrapper = await transactions.complete(rpcMsgId: msgId, deletePersisted: !shouldRetry) else {
+    guard let transactionWrapper = await transactions.complete(
+      rpcMsgId: msgId,
+      owner: completingOwner,
+      deletePersisted: !shouldRetry
+    ) else {
       return
     }
 
     let transaction = transactionWrapper.transaction
     let transactionId = transactionWrapper.id
 
+    guard completingOwner == transactionOwner else {
+      await transaction.cancelled()
+      return
+    }
+
     if shouldRetry {
-      let requeued = await transactions.retryAfterRpcError(transactionWrapper, maxRetries: maxLimitedRpcErrorRetries)
+      let requeued = await transactions.retryAfterRpcError(
+        transactionWrapper,
+        owner: completingOwner,
+        maxRetries: maxLimitedRpcErrorRetries
+      )
+      guard completingOwner == transactionOwner else {
+        if !requeued {
+          await transaction.cancelled()
+        }
+        return
+      }
       if requeued {
         log.warning(
           "Retrying transaction \(transactionId) after RPC error \(transactionWrapper.rpcErrorRetryCount + 1)/\(maxLimitedRpcErrorRetries): \(error)"
@@ -390,32 +490,38 @@ public actor RealtimeV2 {
 
     log.error("Transaction \(transactionId) failed with error", error: error)
 
+    guard completingOwner == transactionOwner else {
+      await transaction.cancelled()
+      return
+    }
     await transaction.failed(error: error)
-    transactionContinuations[transactionId]?.resume(throwing: error)
-    transactionContinuations.removeValue(forKey: transactionId)
+    guard completingOwner == transactionOwner else { return }
+    resumeTransactionContinuation(for: transactionId, throwing: error)
     await transactions.signalQueue()
   }
 
   private func failQueuedTransaction(_ transactionWrapper: TransactionWrapper, error: TransactionError) async {
+    guard let completingOwner = transactionOwner else { return }
     let transaction = transactionWrapper.transaction
     let transactionId = transactionWrapper.id
 
+    beginTransactionOperation()
+    defer { endTransactionOperation() }
     await transaction.failed(error: error)
-    getAndRemoveContinuation(for: transactionId)?.resume(throwing: error)
+    guard completingOwner == transactionOwner else { return }
+    resumeTransactionContinuation(for: transactionId, throwing: error)
   }
 
-  private func getAndRemoveContinuation(for transactionId: TransactionId) -> CheckedContinuation<
-    RpcResult.OneOf_Result?,
-    any Error
-  >? {
-    let continuation = transactionContinuations[transactionId]
+  private func getAndRemoveContinuation(for transactionId: TransactionId) -> PendingTransactionContinuation? {
     transactionContinuations.removeValue(forKey: transactionId)
-    return continuation
   }
 
   private func restartTransactions() async {
+    guard let restartingOwner = transactionOwner else { return }
     // FIXME: probably wait a little before requeuing the inflight list as ack may come soon after a quick intermittent connection loss
-    let dropped = await transactions.requeueAll()
+    guard let dropped = await transactions.requeueAll(owner: restartingOwner),
+          restartingOwner == transactionOwner
+    else { return }
 
     // Queue signals emitted while disconnected are consumed and skipped. On reconnect,
     // wake the transaction loop so previously queued work (e.g. chat history refetches)
@@ -428,10 +534,13 @@ public actor RealtimeV2 {
       let transaction = wrapper.transaction
       let transactionId = wrapper.id
       log.warning(
-        "Failing acked transaction without retryAfterAck after reconnect: \(transactionId) \(transaction.debugDescription)"
+        "Failing acked transaction without retryAfterAck after reconnect method=\(transaction.method)"
       )
+      beginTransactionOperation()
       await transaction.failed(error: .ackedButNoResultAfterReconnect)
-      getAndRemoveContinuation(for: transactionId)?.resume(throwing: TransactionError.ackedButNoResultAfterReconnect)
+      endTransactionOperation()
+      guard restartingOwner == transactionOwner else { return }
+      resumeTransactionContinuation(for: transactionId, throwing: TransactionError.ackedButNoResultAfterReconnect)
     }
 
     await transactions.signalQueue()
@@ -441,8 +550,250 @@ public actor RealtimeV2 {
   private func storeContinuation(for transactionId: TransactionId, continuation: CheckedContinuation<
     RpcResult.OneOf_Result?,
     any Error
-  >) {
-    transactionContinuations[transactionId] = continuation
+  >, cancellationState: TransactionSendCancellationState) {
+    transactionContinuations[transactionId] = PendingTransactionContinuation(
+      continuation: continuation,
+      cancellationState: cancellationState
+    )
+  }
+
+  private func registerAndEnqueue(
+    _ transaction: any Transaction2,
+    transactionId: TransactionId,
+    owner: TransactionOwner,
+    continuation: CheckedContinuation<RpcResult.OneOf_Result?, any Error>,
+    cancellationState: TransactionSendCancellationState
+  ) async {
+    defer { endTransactionOperation() }
+
+    if cancellationState.isCancellationRequested() {
+      cancellationState.finish()
+      await transaction.cancelled()
+      continuation.resume(throwing: CancellationError())
+      return
+    }
+
+    guard isCurrentTransactionOwner(owner) else {
+      cancellationState.finish()
+      await transaction.cancelled()
+      continuation.resume(throwing: CancellationError())
+      return
+    }
+
+    if cancellationState.isCancellationRequested() {
+      cancellationState.finish()
+      await transaction.cancelled()
+      continuation.resume(throwing: CancellationError())
+      return
+    }
+
+    storeContinuation(
+      for: transactionId,
+      continuation: continuation,
+      cancellationState: cancellationState
+    )
+
+    let admission = await transactions.enqueue(
+      transaction: transaction,
+      transactionId: transactionId,
+      owner: owner
+    )
+    switch admission {
+      case .accepted:
+        break
+      case .ownerUnavailable:
+        resumeTransactionContinuation(for: transactionId, throwing: CancellationError())
+        await transaction.cancelled()
+        return
+      case .persistenceFailed:
+        resumeTransactionContinuation(for: transactionId, throwing: TransactionError.persistenceFailed)
+        await transaction.cancelled()
+        return
+    }
+
+    guard isCurrentTransactionOwner(owner) else {
+      resumeTransactionContinuation(for: transactionId, throwing: CancellationError())
+      await transactions.cancel(transactionId: transactionId)
+      return
+    }
+
+    guard transactionContinuations[transactionId] != nil else {
+      await transactions.cancel(transactionId: transactionId)
+      return
+    }
+
+    if cancellationState.isCancellationRequested() {
+      await cancelTransaction(transactionId: transactionId)
+      return
+    }
+
+    log.trace("Queued transaction method=\(transaction.method)")
+    await transactions.signalQueue()
+  }
+
+  private func cancelTransaction(transactionId: TransactionId) async {
+    resumeTransactionContinuation(for: transactionId, throwing: CancellationError())
+    await transactions.cancel(transactionId: transactionId)
+  }
+
+  private func resumeTransactionContinuation(
+    for transactionId: TransactionId,
+    returning result: RpcResult.OneOf_Result?
+  ) {
+    guard let pending = getAndRemoveContinuation(for: transactionId) else { return }
+    pending.cancellationState.finish()
+    pending.continuation.resume(returning: result)
+  }
+
+  private func resumeTransactionContinuation(for transactionId: TransactionId, throwing error: any Error) {
+    guard let pending = getAndRemoveContinuation(for: transactionId) else { return }
+    pending.cancellationState.finish()
+    pending.continuation.resume(throwing: error)
+  }
+
+  private func resumeAllTransactionContinuations(throwing error: any Error) {
+    let pending = Array(transactionContinuations.values)
+    transactionContinuations.removeAll()
+    for item in pending {
+      item.cancellationState.finish()
+      item.continuation.resume(throwing: error)
+    }
+  }
+
+  private func ensureTransactionOwnerIfNeeded() async -> TransactionOwner? {
+    guard acceptsTransactions, let accountID = auth.userId() else { return nil }
+
+    if let transactionOwner, transactionOwner.accountID == accountID {
+      return transactionOwner
+    }
+
+    if let transactionOwnerTransitionTask {
+      await transactionOwnerTransitionTask.value
+      guard acceptsTransactions,
+            auth.userId() == accountID,
+            let transactionOwner,
+            transactionOwner.accountID == accountID
+      else { return nil }
+      return transactionOwner
+    }
+
+    let transitionID = UUID()
+    transactionOwnerTransitionID = transitionID
+    let transitionTask = Task<Void, Never> { [weak self] in
+      guard let self else { return }
+      await self.transitionTransactionOwner(to: accountID)
+    }
+    transactionOwnerTransitionTask = transitionTask
+    await transitionTask.value
+    if transactionOwnerTransitionID == transitionID {
+      transactionOwnerTransitionID = nil
+      transactionOwnerTransitionTask = nil
+    }
+
+    guard acceptsTransactions,
+          auth.userId() == accountID,
+          let transactionOwner,
+          transactionOwner.accountID == accountID
+    else { return nil }
+    return transactionOwner
+  }
+
+  private func transitionTransactionOwner(to accountID: Int64) async {
+    guard acceptsTransactions, auth.userId() == accountID else { return }
+
+    if let previousOwner = transactionOwner {
+      transactionOwner = nil
+      resumeAllTransactionContinuations(throwing: CancellationError())
+      let endingRetryTask = transactionRetryTask
+      transactionRetryTask = nil
+      endingRetryTask?.cancel()
+      await endingRetryTask?.value
+      await waitForTransactionOperationsToFinish()
+      await transactions.reset(owner: previousOwner, deletePersisted: true)
+      await sync.clearSyncState(acceptNewWork: false)
+    }
+
+    guard acceptsTransactions, auth.userId() == accountID, transactionOwner == nil else { return }
+
+    transactionGeneration = transactionGeneration &+ 1
+    let newOwner = TransactionOwner(accountID: accountID, generation: transactionGeneration)
+    transactionOwner = newOwner
+    await transactions.activate(owner: newOwner)
+    await sync.activateGeneration()
+
+    guard acceptsTransactions, auth.userId() == accountID, transactionOwner == newOwner else {
+      if transactionOwner == newOwner {
+        transactionOwner = nil
+      }
+      await transactions.reset(owner: newOwner, deletePersisted: true)
+      await sync.clearSyncState(acceptNewWork: false)
+      return
+    }
+  }
+
+  private func beginTransactionSubmission() async -> TransactionOwner? {
+    guard let owner = await ensureTransactionOwnerIfNeeded(), isCurrentTransactionOwner(owner) else {
+      return nil
+    }
+    beginTransactionOperation()
+    return owner
+  }
+
+  private func isCurrentTransactionOwner(_ owner: TransactionOwner) -> Bool {
+    acceptsTransactions && transactionOwner == owner && auth.userId() == owner.accountID
+  }
+
+  private func hasActiveTransactionOwner() -> Bool {
+    guard let transactionOwner else { return false }
+    return isCurrentTransactionOwner(transactionOwner)
+  }
+
+  private func activeTransactionOwner() -> TransactionOwner? {
+    guard let transactionOwner, isCurrentTransactionOwner(transactionOwner) else { return nil }
+    return transactionOwner
+  }
+
+  private func beginTransactionOperation() {
+    transactionOperationsInProgress += 1
+  }
+
+  private func endTransactionOperation() {
+    transactionOperationsInProgress = max(0, transactionOperationsInProgress - 1)
+    guard transactionOperationsInProgress == 0 else { return }
+    let waiters = transactionDrainWaiters
+    transactionDrainWaiters.removeAll()
+    for waiter in waiters {
+      waiter.resume()
+    }
+  }
+
+  private func waitForTransactionOperationsToFinish() async {
+    guard transactionOperationsInProgress > 0 else { return }
+    await withCheckedContinuation { continuation in
+      transactionDrainWaiters.append(continuation)
+    }
+  }
+
+  private func scheduleTransactionQueueRetry() {
+    guard transactionRetryTask == nil,
+          acceptsTransactions,
+          let expectedOwner = transactionOwner
+    else { return }
+    transactionRetryTask = Task { [weak self] in
+      do {
+        try await Task.sleep(for: .seconds(1))
+      } catch {
+        return
+      }
+      guard !Task.isCancelled else { return }
+      await self?.retryTransactionQueueIfCurrent(owner: expectedOwner)
+    }
+  }
+
+  private func retryTransactionQueueIfCurrent(owner expectedOwner: TransactionOwner) async {
+    transactionRetryTask = nil
+    guard acceptsTransactions, transactionOwner == expectedOwner, canExecuteTransactions() else { return }
+    await transactions.signalQueue()
   }
 
   // MARK: - Public API
@@ -451,18 +802,42 @@ public actor RealtimeV2 {
   /// Uses nonisolated func to allow use from MainActor for faster optimistic updates
   @discardableResult
   public nonisolated func send(_ transaction: any Transaction2) async throws -> InlineProtocol.RpcResult.OneOf_Result? {
-    // run optimistic immediately
-    // Note(@mo): Do not put this in a task or it may run after the execution of the transaction
-    await transaction.optimistic()
+    let transactionId = TransactionId.generate()
+    let cancellationState = TransactionSendCancellationState()
 
-    // Register continuation before we signal execution, so fast responses cannot race ahead.
-    return try await withCheckedThrowingContinuation { continuation in
+    return try await withTaskCancellationHandler {
+      guard let owner = await beginTransactionSubmission() else {
+        cancellationState.finish()
+        await transaction.cancelled()
+        throw CancellationError()
+      }
+
+      guard !Task.isCancelled, !cancellationState.isCancellationRequested() else {
+        cancellationState.finish()
+        await transaction.cancelled()
+        await endTransactionOperation()
+        throw CancellationError()
+      }
+
+      // Keep optimistic work on the caller's executor and await it directly so
+      // remote execution can never overtake the local projection.
+      await transaction.optimistic()
+
+      return try await withCheckedThrowingContinuation { continuation in
+        Task {
+          await registerAndEnqueue(
+            transaction,
+            transactionId: transactionId,
+            owner: owner,
+            continuation: continuation,
+            cancellationState: cancellationState
+          )
+        }
+      }
+    } onCancel: {
+      guard cancellationState.requestCancellation() else { return }
       Task {
-        let transactionId = TransactionId.generate()
-        await storeContinuation(for: transactionId, continuation: continuation)
-        await transactions.enqueue(transaction: transaction, transactionId: transactionId)
-        log.trace("Queued transaction \(transaction.debugDescription)")
-        await transactions.signalQueue()
+        await self.cancelTransaction(transactionId: transactionId)
       }
     }
   }
@@ -471,12 +846,46 @@ public actor RealtimeV2 {
   /// Optimistic updates still run immediately, and the transaction is queued in order.
   @discardableResult
   public nonisolated func sendQueued(_ transaction: any Transaction2) async -> TransactionId {
-    // run optimistic immediately
+    let transactionId = TransactionId.generate()
+    guard !Task.isCancelled, let owner = await beginTransactionSubmission() else {
+      await transaction.cancelled()
+      return transactionId
+    }
+
+    guard !Task.isCancelled else {
+      await transaction.cancelled()
+      await endTransactionOperation()
+      return transactionId
+    }
+
     await transaction.optimistic()
 
-    // add to execution queue
-    let transactionId = await transactions.queue(transaction: transaction)
-    log.trace("Queued transaction \(transaction.debugDescription)")
+    guard !Task.isCancelled, await isCurrentTransactionOwner(owner) else {
+      await transaction.cancelled()
+      await endTransactionOperation()
+      return transactionId
+    }
+
+    let admission = await transactions.enqueue(
+      transaction: transaction,
+      transactionId: transactionId,
+      owner: owner
+    )
+    guard admission == .accepted else {
+      await transaction.cancelled()
+      await endTransactionOperation()
+      return transactionId
+    }
+
+    guard await isCurrentTransactionOwner(owner) else {
+      await transactions.cancel(transactionId: transactionId)
+      await endTransactionOperation()
+      return transactionId
+    }
+
+    await endTransactionOperation()
+    log.trace("Queued transaction method=\(transaction.method)")
+    await transactions.signalQueue()
     return transactionId
   }
 
@@ -715,8 +1124,11 @@ public actor RealtimeV2 {
   }
 
   public func cancelTransaction(where predicate: @escaping @Sendable (TransactionWrapper) -> Bool) {
+    guard let owner = activeTransactionOwner() else { return }
+    beginTransactionOperation()
     Task { [predicate] in
-      await transactions.cancel(where: predicate)
+      await transactions.cancel(where: predicate, owner: owner)
+      endTransactionOperation()
     }
   }
 

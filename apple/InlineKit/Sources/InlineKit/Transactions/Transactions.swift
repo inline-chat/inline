@@ -21,57 +21,177 @@
 import Foundation
 import Logger
 
+protocol TransactionsCaching: Sendable {
+  var transactions: [PersistedTransaction] { get }
+  func add(transaction: TransactionType) throws
+  func remove(transactionId: String)
+  func clearAll()
+}
+
+extension TransactionsCache: @unchecked Sendable, TransactionsCaching {}
+
 // TODO: fix @unchecked sendable
 public class Transactions: @unchecked Sendable {
   public static let shared = Transactions()
 
-  let actor = TransactionsActor()
-  let cache = TransactionsCache()
+  private struct OwnedSubmission {
+    let task: Task<Void, Never>
+  }
+
+  let actor: TransactionsActor
+  let cache: any TransactionsCaching
 
   private var log = Log.scoped("Transactions")
+  private let lifecycleLock = NSLock()
+  private var generation: UInt64 = 0
+  private var submissions: [UUID: OwnedSubmission] = [:]
+  private var initializationTask: Task<Void, Never>?
+  private var clearTask: Task<Void, Never>?
+  private let beforeActorSubmission: (@Sendable () async throws -> Void)?
 
-  init() {
+  init(
+    actor: TransactionsActor = TransactionsActor(),
+    cache: any TransactionsCaching = TransactionsCache(),
+    beforeActorSubmission: (@Sendable () async throws -> Void)? = nil
+  ) {
+    self.actor = actor
+    self.cache = cache
+    self.beforeActorSubmission = beforeActorSubmission
+
     // TODO: Fill out actor with persisted transactions from cache
     // TODO: Hook actor to cache via clousure so when a task is finished, we remove it from cache as well
+    scheduleInitialization()
+  }
 
-    // Restore persisted transactions to actor
-    Task {
-      await actor.setCompletionHandler { [weak self] transaction in
+  private func scheduleInitialization() {
+    lifecycleLock.withLock {
+      let submissionId = UUID()
+      let expectedGeneration = generation
+      let persistedTransactions = cache.transactions
+      let actor = self.actor
+      let cache = self.cache
+      let beforeActorSubmission = self.beforeActorSubmission
+
+      let task = Task { [weak self] in
         guard let self else { return }
-        cache.remove(transactionId: transaction.id)
+        defer { self.submissionFinished(submissionId) }
+
+        await actor.setCompletionHandler { transaction in
+          cache.remove(transactionId: transaction.id)
+        }
+
+        for (index, persistedTransaction) in persistedTransactions.enumerated() {
+          guard !Task.isCancelled, self.isCurrentGeneration(expectedGeneration) else {
+            await self.rollbackPersistedTransactions(persistedTransactions[index...])
+            return
+          }
+
+          do {
+            try await beforeActorSubmission?()
+          } catch {
+            await self.rollbackPersistedTransactions(persistedTransactions[index...])
+            return
+          }
+
+          guard !Task.isCancelled, self.isCurrentGeneration(expectedGeneration) else {
+            await self.rollbackPersistedTransactions(persistedTransactions[index...])
+            return
+          }
+
+          log.debug("loading transaction \(persistedTransaction.transaction.id) into queue")
+          await actor.queue(transaction: persistedTransaction.transaction.transaction)
+        }
       }
 
-      for persistedTransaction in cache.transactions {
-        log.debug("loading transaction \(persistedTransaction.transaction.id) into queue")
+      submissions[submissionId] = OwnedSubmission(task: task)
+      initializationTask = task
+    }
+  }
 
-        // Queue for execution
-        await actor.queue(transaction: persistedTransaction.transaction.transaction)
+  private func rollbackPersistedTransactions(_ transactions: ArraySlice<PersistedTransaction>) async {
+    for persistedTransaction in transactions {
+      await persistedTransaction.transaction.transaction.rollback()
+    }
+  }
+
+  private func isCurrentGeneration(_ expectedGeneration: UInt64) -> Bool {
+    lifecycleLock.withLock {
+      clearTask == nil && generation == expectedGeneration
+    }
+  }
+
+  private func submissionFinished(_ submissionId: UUID) {
+    _ = lifecycleLock.withLock {
+      submissions.removeValue(forKey: submissionId)
+    }
+  }
+
+  private func trackTask(
+    operation: @escaping @Sendable (_ expectedGeneration: UInt64) async -> Void
+  ) {
+    lifecycleLock.withLock {
+      guard clearTask == nil else { return }
+      let submissionId = UUID()
+      let expectedGeneration = generation
+      let task = Task { [weak self] in
+        guard let self else { return }
+        defer { self.submissionFinished(submissionId) }
+        await operation(expectedGeneration)
       }
+      submissions[submissionId] = OwnedSubmission(task: task)
     }
   }
 
   /// Start a transaction
   public func mutate(transaction transaction_: TransactionType) {
-    // TODO: Wait for initialization first
-
     let transaction = transaction_
-    let transactionCopy = transaction.transaction
+    lifecycleLock.withLock {
+      guard clearTask == nil else { return }
 
-    log.debug("Mutating transaction: \(transaction.id)")
-    // Immediately run optimistic
-    transactionCopy.optimistic()
+      log.debug("Mutating transaction: \(transaction.id)")
+      transaction.transaction.optimistic()
 
-    // First persist to cache
-    do {
-      try cache.add(transaction: transaction)
-    } catch {
-      // TODO: Handle error
-      return
-    }
+      do {
+        try cache.add(transaction: transaction)
+      } catch {
+        let submissionId = UUID()
+        let task = Task { [weak self] in
+          await transaction.transaction.rollback()
+          self?.submissionFinished(submissionId)
+        }
+        submissions[submissionId] = OwnedSubmission(task: task)
+        return
+      }
 
-    Task(priority: .userInitiated) {
-      // Then queue for execution
-      await actor.queue(transaction: transactionCopy)
+      let submissionId = UUID()
+      let expectedGeneration = generation
+      let initializationTask = self.initializationTask
+      let actor = self.actor
+      let beforeActorSubmission = self.beforeActorSubmission
+      let task = Task(priority: .userInitiated) { [weak self] in
+        guard let self else { return }
+        defer { self.submissionFinished(submissionId) }
+
+        await initializationTask?.value
+        guard !Task.isCancelled, self.isCurrentGeneration(expectedGeneration) else {
+          await transaction.transaction.rollback()
+          return
+        }
+
+        do {
+          try await beforeActorSubmission?()
+        } catch {
+          await transaction.transaction.rollback()
+          return
+        }
+
+        guard !Task.isCancelled, self.isCurrentGeneration(expectedGeneration) else {
+          await transaction.transaction.rollback()
+          return
+        }
+        await actor.queue(transaction: transaction.transaction)
+      }
+      submissions[submissionId] = OwnedSubmission(task: task)
     }
   }
 
@@ -79,22 +199,53 @@ public class Transactions: @unchecked Sendable {
   public func cancel(transactionId: String) {
     // Remove from cache
     cache.remove(transactionId: transactionId)
-    // Cancel in actor and trigger rollback
-    Task.detached(priority: .userInitiated) { [weak self] in
-      guard let self else { return }
+    let actor = self.actor
+    trackTask { _ in
       await actor.cancel(transactionId: transactionId)
     }
   }
 
   public func clearAll() {
-    Task {
-      await actor.clearAll()
-      cache.clearAll()
+    _ = beginClear()
+  }
+
+  public func clearAllAndWait() async {
+    await beginClear().value
+  }
+
+  private func beginClear() -> Task<Void, Never> {
+    lifecycleLock.withLock {
+      if let clearTask { return clearTask }
+
+      generation = generation &+ 1
+      let endingSubmissions = submissions.values.map(\.task)
+      submissions.removeAll()
+      let task = Task { [weak self] in
+        guard let self else { return }
+        for submission in endingSubmissions {
+          submission.cancel()
+        }
+        for submission in endingSubmissions {
+          await submission.value
+        }
+        await self.actor.clearAll()
+        self.cache.clearAll()
+        self.finishClear()
+      }
+      clearTask = task
+      return task
+    }
+  }
+
+  private func finishClear() {
+    lifecycleLock.withLock {
+      initializationTask = nil
+      clearTask = nil
     }
   }
 }
 
-public enum TransactionType: Codable {
+public enum TransactionType: Codable, Sendable {
   case sendMessage(TransactionSendMessage)
   case mockMessage(MockMessageTransaction)
   case deleteMessage(TransactionDeleteMessage)

@@ -114,6 +114,25 @@ final class ConnectionManagerTests {
     #expect(policy.pingTimeoutConstrained == .seconds(12))
   }
 
+  @Test("stop is an ordered transport barrier")
+  func testStopWaitsForTransportShutdown() async {
+    let session = FakeProtocolSession()
+    let manager = ConnectionManager(session: session, constraints: .initial)
+
+    await manager.start()
+    await manager.setAuthAvailable(true)
+    let stopCountBeforeBarrier = await session.stopTransportCount
+
+    await manager.stop()
+
+    let snapshot = await manager.currentSnapshot()
+    #expect(snapshot.state == .stopped)
+    #expect(snapshot.constraints.userWantsConnection == false)
+    #expect(await session.stopTransportCount == stopCountBeforeBarrier + 1)
+
+    await manager.shutdownForTesting()
+  }
+
   @Test("missing pong transitions to backoff with ping timeout reason")
   func testPingTimeoutTransitionsToBackoff() async throws {
     let session = FakeProtocolSession()

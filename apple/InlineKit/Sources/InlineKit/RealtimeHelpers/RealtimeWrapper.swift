@@ -21,6 +21,7 @@ public final actor Realtime: Sendable {
   private let log = Log.scoped("RealtimeWrapper")
   private var api: RealtimeAPI
   private var eventsTask: Task<Void, Never>?
+  private var connectionTask: Task<Void, Never>?
   private var started = false
   private var automaticStartsSuspended = false
 
@@ -48,7 +49,7 @@ public final actor Realtime: Sendable {
           DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             Task {
               self?.log.info("User logged in, starting realtime")
-              await self?.ensureStarted()
+              await self?.resumeForAuthenticatedSession()
             }
           }
         }
@@ -77,6 +78,11 @@ public final actor Realtime: Sendable {
     ensureStarted()
   }
 
+  private func resumeForAuthenticatedSession() {
+    automaticStartsSuspended = false
+    ensureStarted()
+  }
+
   private func startConnection() {
     guard started, !automaticStartsSuspended else { return }
     log.info("Starting realtime connection")
@@ -89,20 +95,7 @@ public final actor Realtime: Sendable {
 //      return
 //    }
 
-    // Setup listener
-    eventsTask = Task { [weak self] in
-      guard let self else { return }
-      for await event in await api.eventsChannel {
-        guard !Task.isCancelled else { break }
-        log.trace("Received api event: \(event)")
-        switch event {
-          case let .stateUpdate(state):
-            Task { @MainActor in
-              apiStatePublisher.send(state)
-            }
-        }
-      }
-    }
+    startEventListenerIfNeeded()
 
     // Reset state first
     Task { @MainActor in
@@ -110,10 +103,12 @@ public final actor Realtime: Sendable {
     }
 
     // Start the connection
-    Task {
+    connectionTask = Task {
       do {
         try await api.start()
         log.info("Realtime API started successfully")
+      } catch is CancellationError {
+        return
       } catch {
         log.error("Error starting realtime", error: error)
 
@@ -133,6 +128,31 @@ public final actor Realtime: Sendable {
     }
   }
 
+  private func startEventListenerIfNeeded() {
+    guard eventsTask == nil else { return }
+
+    eventsTask = Task { [weak self] in
+      guard let self else { return }
+      for await event in await api.eventsChannel {
+        guard !Task.isCancelled else { break }
+        log.trace("Received api event: \(event)")
+        switch event {
+          case let .stateUpdate(state):
+            await MainActor.run {
+              apiStatePublisher.send(state)
+            }
+        }
+      }
+    }
+  }
+
+  private func stopEventListener() async {
+    let endingEventsTask = eventsTask
+    eventsTask = nil
+    endingEventsTask?.cancel()
+    await endingEventsTask?.value
+  }
+
   /// Stops realtime work and suppresses automatic auth-driven starts until the next explicit start.
   /// Share-extension processes can be reused, so a later session may resume via `start()`.
   public func suspendForSessionEnd() async {
@@ -140,8 +160,11 @@ public final actor Realtime: Sendable {
     automaticStartsSuspended = true
     started = false
 
-    eventsTask?.cancel()
-    eventsTask = nil
+    await stopEventListener()
+    let endingConnectionTask = connectionTask
+    connectionTask = nil
+    endingConnectionTask?.cancel()
+    await endingConnectionTask?.value
     await api.stopAndReset()
 
     await MainActor.run {
@@ -160,23 +183,25 @@ public final actor Realtime: Sendable {
     try await api.invoke(method, input: input, discardIfNotConnected: discardIfNotConnected)
   }
 
-  public func loggedOut() {
+  public func loggedOut() async {
     log.info("User logged out, stopping realtime")
+    automaticStartsSuspended = true
 
     // Reset state on main actor first
-    Task { @MainActor in
+    await MainActor.run {
       apiStatePublisher.send(.waitingForNetwork)
     }
 
     started = false
 
     // Then stop the API completely
-    eventsTask?.cancel()
-    eventsTask = nil
+    await stopEventListener()
+    let endingConnectionTask = connectionTask
+    connectionTask = nil
+    endingConnectionTask?.cancel()
+    await endingConnectionTask?.value
 
-    Task {
-      await api.stopAndReset()
-    }
+    await api.stopAndReset()
     log.info("Realtime API stopped after logout")
   }
 }

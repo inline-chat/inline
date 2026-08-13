@@ -5,22 +5,35 @@ import RealtimeV2
 /// Simple file-based persistence for transactions
 public struct DefaultTransactionPersistenceHandler: TransactionPersistenceHandler {
   private let log = Log.scoped("TransactionPersistence")
+  private let baseDirectory: URL?
 
-  public init() {}
-
-  public func saveTransaction(_ transaction: TransactionWrapper) async throws {
-    let data = try encodeTransaction(transaction)
-    let url = fileURL(for: transaction.id)
-    try data.write(to: url)
+  public init() {
+    baseDirectory = nil
   }
 
-  public func deleteTransaction(_ transactionId: TransactionId) async throws {
-    let url = fileURL(for: transactionId)
+  init(baseDirectory: URL) {
+    self.baseDirectory = baseDirectory
+  }
+
+  public func saveTransaction(_ transaction: TransactionWrapper, for owner: TransactionOwner) async throws {
+    let data = try encodeTransaction(transaction)
+    let url = fileURL(for: transaction.id, owner: owner)
+    try data.write(to: url, options: .atomic)
+  }
+
+  public func deleteTransaction(_ transactionId: TransactionId, for owner: TransactionOwner) async throws {
+    let url = fileURL(for: transactionId, owner: owner)
+    guard FileManager.default.fileExists(atPath: url.path) else { return }
     try FileManager.default.removeItem(at: url)
   }
 
-  public func loadTransactions() async throws -> [TransactionWrapper] {
-    let files = try getTransactionFiles()
+  public func loadTransactions(for owner: TransactionOwner) async throws -> [TransactionWrapper] {
+    let unscopedLegacyCount = try unscopedLegacyTransactionCount()
+    if unscopedLegacyCount > 0 {
+      log.warning("Ignoring \(unscopedLegacyCount) unscoped legacy transaction file(s)")
+    }
+
+    let files = try getTransactionFiles(owner: owner)
     var transactions: [TransactionWrapper] = []
 
     for file in files {
@@ -29,6 +42,12 @@ public struct DefaultTransactionPersistenceHandler: TransactionPersistenceHandle
     }
 
     return transactions
+  }
+
+  public func deleteAllTransactions(for owner: TransactionOwner) async throws {
+    let directory = transactionDirectory(owner: owner, createIfNeeded: false)
+    guard FileManager.default.fileExists(atPath: directory.path) else { return }
+    try FileManager.default.removeItem(at: directory)
   }
 }
 
@@ -46,8 +65,8 @@ private extension DefaultTransactionPersistenceHandler {
     return try JSONEncoder().encode(persistedData)
   }
 
-  func getTransactionFiles() throws -> [URL] {
-    let directory = transactionDirectory()
+  func getTransactionFiles(owner: TransactionOwner) throws -> [URL] {
+    let directory = transactionDirectory(owner: owner, createIfNeeded: true)
     return try FileManager.default
       .contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
       .filter { $0.pathExtension == "json" }
@@ -75,22 +94,38 @@ private extension DefaultTransactionPersistenceHandler {
     return try TransactionTypeRegistry.decodeTransaction(type: type, data: data)
   }
 
-  func transactionDirectory() -> URL {
-    let directory = FileHelpers.getApplicationSupportDirectory()
-      .appendingPathComponent("TransactionQueue", isDirectory: true)
+  func transactionDirectory(owner: TransactionOwner, createIfNeeded: Bool) -> URL {
+    let directory = transactionRootDirectory()
+      .appendingPathComponent("account-\(owner.accountID)", isDirectory: true)
 
-    // Create directory if needed
-    try? FileManager.default.createDirectory(
-      at: directory,
-      withIntermediateDirectories: true,
-      attributes: nil
-    )
+    if createIfNeeded {
+      try? FileManager.default.createDirectory(
+        at: directory,
+        withIntermediateDirectories: true,
+        attributes: nil
+      )
+    }
 
     return directory
   }
 
-  func fileURL(for transactionId: TransactionId) -> URL {
-    transactionDirectory().appendingPathComponent("\(transactionId.toString()).json")
+  func transactionRootDirectory() -> URL {
+    baseDirectory ?? FileHelpers.getApplicationSupportDirectory()
+      .appendingPathComponent("TransactionQueue", isDirectory: true)
+  }
+
+  func unscopedLegacyTransactionCount() throws -> Int {
+    let rootDirectory = transactionRootDirectory()
+    guard FileManager.default.fileExists(atPath: rootDirectory.path) else { return 0 }
+
+    return try FileManager.default
+      .contentsOfDirectory(at: rootDirectory, includingPropertiesForKeys: nil)
+      .count { $0.pathExtension == "json" }
+  }
+
+  func fileURL(for transactionId: TransactionId, owner: TransactionOwner) -> URL {
+    transactionDirectory(owner: owner, createIfNeeded: true)
+      .appendingPathComponent("\(transactionId.toString()).json")
   }
 
   func deleteFile(_ url: URL) {

@@ -6,51 +6,81 @@ actor TransactionsActor {
 
   typealias CompletionHandler = @Sendable (any Transaction) -> Void
 
+  private struct ActiveTransaction {
+    let transactionId: String
+    let task: Task<Void, Never>
+  }
+
+  private struct CancelMarker {
+    let transactionId: String
+    let sequence: UInt64
+  }
+
   // MARK: - Private Properties
 
-  private var isRunning = false
+  private var isRunning = true
+  private var isClearing = false
   private var queue: [any Transaction] = []
   private var currentTask: Task<Void, Never>?
+  private var activeTransactions: [UUID: ActiveTransaction] = [:]
+  private let maxConcurrentTransactions = 4
+  private let maxCancelMarkers = 4_096
 
-  // Use a continuation to signal when new items are added
-  private var waitingContinuation: CheckedContinuation<Void, Never>?
+  private let workSignals: AsyncStream<Void>
+  private let workContinuation: AsyncStream<Void>.Continuation
 
   // Return when done
   private var completionHandler: CompletionHandler?
 
-  var canceledTransactionIds: [String] = []
+  private var cancelMarkers: [String: UInt64] = [:]
+  private var cancelMarkerOrder: [CancelMarker] = []
+  private var cancelMarkerHead = 0
+  private var nextCancelMarkerSequence: UInt64 = 0
+
+  var cancelMarkerCount: Int { cancelMarkers.count }
 
   // MARK: - Lifecycle
 
   init() {
-    Task { await start() }
+    let stream = AsyncStream.makeStream(of: Void.self, bufferingPolicy: .bufferingNewest(1))
+    workSignals = stream.stream
+    workContinuation = stream.continuation
   }
 
   deinit {
     isRunning = false
     currentTask?.cancel()
-
-    // Resume any waiting continuation
-    waitingContinuation?.resume()
-    waitingContinuation = nil
+    for activeTransaction in activeTransactions.values {
+      activeTransaction.task.cancel()
+    }
+    workContinuation.finish()
 
     // Clear the queue
     queue.removeAll()
   }
 
-  private func start() {
-    guard !isRunning else { return }
-    isRunning = true
-
-    currentTask = Task { [self] in
-      await processQueue()
-    }
-  }
-
   // MARK: - Public Methods
 
-  public func clearAll() {
+  public func clearAll() async {
+    isClearing = true
+    let queued = queue
     queue.removeAll()
+    for transaction in queued {
+      await transaction.rollback()
+      completionHandler?(transaction)
+    }
+
+    let activeTasks = activeTransactions.values.map(\.task)
+    for task in activeTasks {
+      task.cancel()
+    }
+    for task in activeTasks {
+      await task.value
+    }
+    activeTransactions.removeAll()
+    clearCancelMarkers()
+    isClearing = false
+    signalWorkAvailable()
   }
 
   func setCompletionHandler(_ handler: @escaping CompletionHandler) {
@@ -58,50 +88,65 @@ actor TransactionsActor {
   }
 
   func cancel(transactionId: String) async {
-    if !canceledTransactionIds.contains(transactionId) {
-      canceledTransactionIds.append(transactionId)
-    }
-    guard let transaction = queue.first(where: { $0.id == transactionId }) else { return }
-
-    // Remove from queue if not yet started
-    queue.removeAll { $0.id == transactionId }
-
-    // Rollback
-    Task.detached(priority: .userInitiated) { [self] in
-      await transaction.rollback()
-      Task {
-        await completionHandler?(transaction)
+    let queuedTransactions = queue.filter { $0.id == transactionId }
+    if !queuedTransactions.isEmpty {
+      queue.removeAll { $0.id == transactionId }
+      insertCancelMarker(transactionId)
+      for transaction in queuedTransactions {
+        await transaction.rollback()
+        completionHandler?(transaction)
       }
+      return
+    }
+
+    let matchingTasks = activeTransactions.values
+      .filter { $0.transactionId == transactionId }
+      .map(\.task)
+    guard !matchingTasks.isEmpty else {
+      insertCancelMarker(transactionId)
+      return
+    }
+    insertCancelMarker(transactionId)
+    for task in matchingTasks {
+      task.cancel()
     }
   }
 
-  public func queue(transaction: consuming any Transaction) {
-    queue.append(transaction)
-
-    // Signal that new work is available
-    if let continuation = waitingContinuation {
-      waitingContinuation = nil
-      continuation.resume()
+  public func queue(transaction: consuming any Transaction) async {
+    if consumeCancelMarker(transaction.id) {
+      let rejectedTransaction = consume transaction
+      await rejectedTransaction.rollback()
+      completionHandler?(rejectedTransaction)
+      return
     }
+
+    if isClearing {
+      let rejectedTransaction = consume transaction
+      await rejectedTransaction.rollback()
+      completionHandler?(rejectedTransaction)
+      return
+    }
+
+    queue.append(consume transaction)
+    signalWorkAvailable()
   }
 
   public func run(transaction: some Transaction) async {
-    Task.detached { [self] in // capture strongly; actor instance lives for app lifetime
-      do {
-        let result = try await executeWithRetry(transaction)
+    defer { removeCancelMarker(transaction.id) }
+    do {
+      let result = try await executeWithRetry(transaction)
 
-        await transaction.didSucceed(result: result)
-        await completionHandler?(transaction)
-        // Cleanup any cancel markers
-        await self.removeCancelMarker(transaction.id)
-      } catch TransactionError.canceled {
-        await transaction.rollback()
-        await completionHandler?(transaction)
-        return
-      } catch {
-        await transaction.didFail(error: error)
-        await completionHandler?(transaction)
-      }
+      await transaction.didSucceed(result: result)
+      completionHandler?(transaction)
+    } catch TransactionError.canceled {
+      await transaction.rollback()
+      completionHandler?(transaction)
+    } catch is CancellationError {
+      await transaction.rollback()
+      completionHandler?(transaction)
+    } catch {
+      await transaction.didFail(error: error)
+      completionHandler?(transaction)
     }
   }
 
@@ -112,7 +157,7 @@ actor TransactionsActor {
 
     while attempts < maxAttempts {
       // Early-exit if user canceled
-      if canceledTransactionIds.contains(transaction.id) {
+      if cancelMarkers[transaction.id] != nil || Task.isCancelled {
         throw TransactionError.canceled
       }
 
@@ -173,38 +218,92 @@ actor TransactionsActor {
     return queue.removeFirst()
   }
 
-  private func processQueue() async {
-    while isRunning, !Task.isCancelled {
-      try? Task.checkCancellation()
-
-      if let transaction = dequeue() {
-        // TODO: make it batches of 20 or sth
-        // This task paralellizes the transactions
-        await run(transaction: transaction)
-        continue
-      }
-
-      // No work available, wait for new items
-      await waitForWork()
-
-      // Check if we were stopped while waiting
-      guard isRunning else { break }
+  private func fillAvailableSlots() {
+    guard isRunning, !isClearing else { return }
+    while activeTransactions.count < maxConcurrentTransactions,
+          let transaction = dequeue() {
+      startTransaction(transaction)
     }
   }
 
-  private func waitForWork() async {
-    await withCheckedContinuation { continuation in
-      // If work arrived between the dequeue check and setting the continuation, resume immediately.
-      if !queue.isEmpty {
-        continuation.resume()
-        return
-      }
+  private func startTransaction(_ transaction: consuming any Transaction) {
+    let token = UUID()
+    let transactionId = transaction.id
+    let transactionForTask = consume transaction
+    let task = Task { [weak self] in
+      guard let self else { return }
+      await self.run(transaction: transactionForTask)
+      await self.transactionDidFinish(token: token)
+    }
+    activeTransactions[token] = ActiveTransaction(transactionId: transactionId, task: task)
+  }
 
-      waitingContinuation = continuation
+  private func transactionDidFinish(token: UUID) {
+    activeTransactions.removeValue(forKey: token)
+    signalWorkAvailable()
+  }
+
+  private func signalWorkAvailable() {
+    ensureWorkerStarted()
+    workContinuation.yield(())
+  }
+
+  private func ensureWorkerStarted() {
+    guard currentTask == nil else { return }
+    let signals = workSignals
+    currentTask = Task { [weak self] in
+      for await _ in signals {
+        guard !Task.isCancelled, let self else { return }
+        await self.fillAvailableSlots()
+      }
     }
   }
 
   private func removeCancelMarker(_ id: String) {
-    canceledTransactionIds.removeAll { $0 == id }
+    _ = consumeCancelMarker(id)
+  }
+
+  @discardableResult
+  private func consumeCancelMarker(_ id: String) -> Bool {
+    guard cancelMarkers.removeValue(forKey: id) != nil else { return false }
+    compactCancelMarkerOrderIfNeeded()
+    return true
+  }
+
+  private func insertCancelMarker(_ id: String) {
+    guard cancelMarkers[id] == nil else { return }
+
+    nextCancelMarkerSequence &+= 1
+    let marker = CancelMarker(transactionId: id, sequence: nextCancelMarkerSequence)
+    cancelMarkers[id] = marker.sequence
+    cancelMarkerOrder.append(marker)
+
+    while cancelMarkers.count > maxCancelMarkers,
+          cancelMarkerHead < cancelMarkerOrder.count {
+      let expired = cancelMarkerOrder[cancelMarkerHead]
+      cancelMarkerHead += 1
+      if cancelMarkers[expired.transactionId] == expired.sequence {
+        cancelMarkers.removeValue(forKey: expired.transactionId)
+      }
+    }
+
+    compactCancelMarkerOrderIfNeeded()
+  }
+
+  private func compactCancelMarkerOrderIfNeeded() {
+    guard cancelMarkerHead >= maxCancelMarkers || cancelMarkerOrder.count > maxCancelMarkers * 2 else {
+      return
+    }
+
+    cancelMarkerOrder = cancelMarkerOrder[cancelMarkerHead...].filter { marker in
+      cancelMarkers[marker.transactionId] == marker.sequence
+    }
+    cancelMarkerHead = 0
+  }
+
+  private func clearCancelMarkers() {
+    cancelMarkers.removeAll()
+    cancelMarkerOrder.removeAll()
+    cancelMarkerHead = 0
   }
 }

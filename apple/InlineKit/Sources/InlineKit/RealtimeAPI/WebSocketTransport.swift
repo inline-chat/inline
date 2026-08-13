@@ -84,7 +84,7 @@ actor WebSocketTransport: NSObject, Sendable {
 
   private var session: URLSession?
 
-  typealias StateObserverFn = (_ state: TransportConnectionState, _ networkAvailable: Bool) -> Void
+  typealias StateObserverFn = @Sendable (_ state: TransportConnectionState, _ networkAvailable: Bool) -> Void
 
   // Internals
   private var stateObservers: [StateObserverFn] = []
@@ -372,6 +372,13 @@ actor WebSocketTransport: NSObject, Sendable {
     // Stop network monitoring
     stopNetworkMonitoring()
 
+    // URLSession retains its delegate until invalidation. RealtimeAPI replaces
+    // this transport after logout, so canceling tasks alone would retain the old
+    // transport, delegate queue, and completed websocket task generations.
+    let sessionToInvalidate = session
+    session = nil
+    sessionToInvalidate?.invalidateAndCancel()
+
     // Clear state
     connectionState = .disconnected
     stateObservers = []
@@ -392,7 +399,7 @@ actor WebSocketTransport: NSObject, Sendable {
   // MARK: - State Management
 
   func addStateObserver(
-    _ observer: @escaping @Sendable StateObserverFn
+    _ observer: @escaping StateObserverFn
   ) {
     stateObservers.append(observer)
     // Immediately notify of current state
@@ -686,9 +693,8 @@ actor WebSocketTransport: NSObject, Sendable {
     )
 
     if let error {
-      // Capture details for diagnostics. Avoid including secrets; URLs are ok.
-      let nsError = error as NSError
-      var details = "domain=\(nsError.domain) code=\(nsError.code)"
+      let descriptor = errorDescriptor(error)
+      var details = "kind=\(descriptor?.kind ?? "unknown") code=\(descriptor?.code ?? "unknown")"
       details += " priorState=\(priorState) running=\(running) net=\(networkAvailable) bg=\(isInBackground)"
       if let priorTaskState {
         details += " wsTaskState=\(priorTaskState.rawValue)"
@@ -698,28 +704,6 @@ actor WebSocketTransport: NSObject, Sendable {
       }
       if let reason {
         details += " reasonBytes=\(reason.count)"
-      }
-      if let failingURL = nsError.userInfo[NSURLErrorFailingURLErrorKey] as? URL {
-        details += " failingURL=\(failingURL.absoluteString)"
-      } else if let failingURLString = nsError.userInfo[NSURLErrorFailingURLStringErrorKey] as? String {
-        details += " failingURL=\(failingURLString)"
-      }
-      if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
-        details += " underlying=\(underlying.domain):\(underlying.code)"
-      }
-      // These keys are commonly present for URLSession / CFNetwork failures and
-      // are crucial for decoding opaque NSURLErrorDomain codes.
-      if let streamDomain = nsError.userInfo["_kCFStreamErrorDomainKey"] {
-        details += " streamDomain=\(streamDomain)"
-      }
-      if let streamCode = nsError.userInfo["_kCFStreamErrorCodeKey"] {
-        details += " streamCode=\(streamCode)"
-      }
-      if let failureReason = nsError.userInfo[NSLocalizedFailureReasonErrorKey] as? String {
-        details += " failureReason=\(failureReason)"
-      }
-      if let recoverySuggestion = nsError.userInfo[NSLocalizedRecoverySuggestionErrorKey] as? String {
-        details += " recoverySuggestion=\(recoverySuggestion)"
       }
       log.warning("Disconnected with error (\(details))")
       if shouldCaptureIssue(
@@ -1038,21 +1022,11 @@ private extension WebSocketTransport {
     let tags = sentryTags(origin: origin, error: error, closeCode: closeCode)
     let fingerprint = sentryFingerprint(origin: origin, error: error, closeCode: closeCode, httpStatus: httpStatus)
 
-    if let error {
-      _ = SentrySDK.capture(error: error) { scope in
-        scope.setLevel(.error)
-        scope.setFingerprint(fingerprint)
-        tags.forEach { scope.setTag(value: $1, key: $0) }
-        sentryData.forEach { scope.setExtra(value: $1, key: $0) }
-        scope.setExtra(value: message, key: "message")
-      }
-    } else {
-      _ = SentrySDK.capture(message: message) { scope in
-        scope.setLevel(.warning)
-        scope.setFingerprint(fingerprint)
-        tags.forEach { scope.setTag(value: $1, key: $0) }
-        sentryData.forEach { scope.setExtra(value: $1, key: $0) }
-      }
+    _ = SentrySDK.capture(message: message) { scope in
+      scope.setLevel(error == nil ? .warning : .error)
+      scope.setFingerprint(fingerprint)
+      tags.forEach { scope.setTag(value: $1, key: $0) }
+      sentryData.forEach { scope.setExtra(value: $1, key: $0) }
     }
   }
 
@@ -1188,7 +1162,6 @@ private extension WebSocketTransport {
       "reconnect_attempt": reconnectionAttempts,
       "ping_in_flight": pingInFlight.load(ordering: .relaxed),
       "request_timeout_s": 30,
-      "url": urlString,
     ]
 
     if let scheduledReconnectDelay {
@@ -1257,15 +1230,21 @@ private extension WebSocketTransport {
         case .invalidData:
           return ("transport", "TransportError", "invalidData")
         case let .connectionError(inner):
-          let nsError = inner as NSError
-          return ("transport_wrapped", nsError.domain, String(nsError.code))
+          let descriptor = errorDescriptor(inner)
+          return ("transport_wrapped", descriptor?.domain ?? "other", descriptor?.code ?? "unknown")
         case .unknown:
           return ("transport", "TransportError", "unknown")
       }
     }
 
     let nsError = error as NSError
-    return ("nserror", nsError.domain, String(nsError.code))
+    if nsError.domain == NSURLErrorDomain {
+      return ("url", "NSURLErrorDomain", String(nsError.code))
+    }
+    if nsError.domain == NSPOSIXErrorDomain {
+      return ("posix", "NSPOSIXErrorDomain", String(nsError.code))
+    }
+    return ("other", "other", String(nsError.code))
   }
 
   func transportEvent(

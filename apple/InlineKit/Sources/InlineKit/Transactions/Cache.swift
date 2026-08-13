@@ -1,7 +1,7 @@
 import Foundation
 import Logger
 
-struct PersistedTransaction: Codable {
+struct PersistedTransaction: Codable, Sendable {
   var transaction: TransactionType
 
   /// Maintain order of transactions
@@ -11,7 +11,11 @@ struct PersistedTransaction: Codable {
   var date: Date
 }
 
-/// Stores transactions and persists them to disk
+/// Stores legacy transactions for the current authenticated runtime.
+///
+/// The historical `transactions.json` format has no account identity, so it is
+/// intentionally quarantined in place and never loaded or overwritten. Durable
+/// transactions use the account-scoped RealtimeV2 persistence path instead.
 class TransactionsCache {
   private var log = Log.scoped("TransactionsCache")
   private let queue = DispatchQueue(label: "com.app.TransactionsCache", attributes: [])
@@ -19,8 +23,12 @@ class TransactionsCache {
   private(set) var transactions: [PersistedTransaction] = []
   private(set) var maxOrder: Int = 0
 
-  public init() {
-    stateFileURL = FileHelpers.getApplicationStateFileURL(named: "transactions.json")
+  public convenience init() {
+    self.init(stateFileURL: FileHelpers.getApplicationStateFileURL(named: "transactions.json"))
+  }
+
+  init(stateFileURL: URL) {
+    self.stateFileURL = stateFileURL
     transactions = loadAll()
     maxOrder = transactions.map(\.order).max() ?? 0
   }
@@ -63,35 +71,15 @@ class TransactionsCache {
   private nonisolated let stateFileURL: URL
 
   private func persistAll() {
-    do {
-      let encoder = JSONEncoder()
-      encoder.dateEncodingStrategy = .iso8601
-
-      let data = try encoder.encode(transactions)
-      try data.write(to: stateFileURL, options: .atomic)
-    } catch {
-      log.error("Failed to persist transactions: \(error)")
-      // In a production app, you might want to use proper error handling
-    }
+    // Fail closed until the legacy transaction format carries an account owner.
+    // Keep the pre-upgrade file untouched so pending work remains recoverable by
+    // an explicit future migration instead of being silently assigned to a user.
   }
 
   private nonisolated func loadAll() -> [PersistedTransaction] {
-    do {
-      guard fileManager.fileExists(atPath: stateFileURL.path) else {
-        return []
-      }
-
-      let data = try Data(contentsOf: stateFileURL)
-      let decoder = JSONDecoder()
-      decoder.dateDecodingStrategy = .iso8601
-
-      let loadedTransactions = try decoder.decode([PersistedTransaction].self, from: data)
-      log.info("Loaded \(loadedTransactions.count) transactions")
-      return loadedTransactions.sorted { $0.order < $1.order }
-    } catch {
-      log.error("Failed to load transactions", error: error)
-      return []
-    }
+    guard fileManager.fileExists(atPath: stateFileURL.path) else { return [] }
+    log.warning("Ignoring unscoped legacy transaction cache")
+    return []
   }
 
   func clearAll() {

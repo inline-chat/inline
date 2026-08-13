@@ -8,11 +8,11 @@ import Testing
 
 @Suite("RealtimeV2.Send", .serialized)
 final class RealtimeSendTests {
-  @Test("sendQueued runs optimistic immediately")
-  func testSendQueuedRunsOptimisticImmediately() async throws {
+  @Test("authenticated sendQueued runs optimistic immediately")
+  func testAuthenticatedSendQueuedRunsOptimisticImmediately() async throws {
     await SendTestRecorder.shared.reset()
 
-    let auth = Auth.mocked(authenticated: false)
+    let auth = Auth.mocked(authenticated: true)
     let transport = MockTransport()
     let storage = SendTestSyncStorage()
     let apply = SendTestApplyUpdates()
@@ -30,6 +30,136 @@ final class RealtimeSendTests {
     #expect(optimisticRan)
 
     withExtendedLifetime(realtime) {}
+  }
+
+  @Test("unauthenticated sendQueued rejects before optimistic work")
+  func testUnauthenticatedSendQueuedRejectsBeforeOptimisticWork() async throws {
+    await SendTestRecorder.shared.reset()
+
+    let auth = Auth.mocked(authenticated: false)
+    let realtime = RealtimeV2(
+      transport: MockTransport(),
+      auth: auth.handle,
+      applyUpdates: SendTestApplyUpdates(),
+      syncStorage: SendTestSyncStorage()
+    )
+
+    let id = UUID()
+    _ = await realtime.sendQueued(SendTestTransaction(id: id))
+
+    #expect(await SendTestRecorder.shared.didRunOptimistic(id) == false)
+    withExtendedLifetime(realtime) {}
+  }
+
+  @Test("send rejects an account switch during optimistic work")
+  func testSendRejectsAccountSwitchDuringOptimisticWork() async throws {
+    let auth = Auth.mocked(authenticated: true)
+    await AccountSwitchSendRecorder.shared.reset {
+      await auth.saveCredentials(token: "2:replacementToken", userId: 2)
+    }
+    let transport = AccountSwitchSendTransport()
+    let persistence = AccountSwitchSendPersistence()
+    let realtime = RealtimeV2(
+      transport: transport,
+      auth: auth.handle,
+      applyUpdates: SendTestApplyUpdates(),
+      syncStorage: SendTestSyncStorage(),
+      persistenceHandler: persistence
+    )
+
+    let id = UUID()
+    do {
+      try await withThrowingTaskGroup(of: Void.self) { group in
+        group.addTask {
+          _ = try await realtime.send(AccountSwitchSendTransaction(id: id))
+        }
+        group.addTask {
+          try await Task.sleep(for: .seconds(2))
+          throw SendTestTimeoutError.timedOut
+        }
+        _ = try await group.next()
+        group.cancelAll()
+      }
+      Issue.record("Expected account-switch cancellation")
+    } catch is CancellationError {
+      // Expected.
+    } catch SendTestTimeoutError.timedOut {
+      Issue.record("Timed out waiting for account-switch cancellation")
+    } catch {
+      Issue.record("Unexpected error: \(error)")
+    }
+
+    #expect(await AccountSwitchSendRecorder.shared.optimisticCount(id) == 1)
+    #expect(await AccountSwitchSendRecorder.shared.cancelledCount(id) == 1)
+    #expect(await AccountSwitchSendRecorder.shared.applyCount(id) == 0)
+    #expect(await AccountSwitchSendRecorder.shared.failedCount(id) == 0)
+    #expect(await transport.didDispatchAccountSwitchMutation() == false)
+
+    await realtime.loggedOut()
+    #expect(await persistence.savedOwners().isEmpty)
+  }
+
+  @Test("sendQueued rejects an account switch during optimistic work")
+  func testSendQueuedRejectsAccountSwitchDuringOptimisticWork() async throws {
+    let auth = Auth.mocked(authenticated: true)
+    await AccountSwitchSendRecorder.shared.reset {
+      await auth.saveCredentials(token: "2:replacementToken", userId: 2)
+    }
+    let transport = AccountSwitchSendTransport()
+    let persistence = AccountSwitchSendPersistence()
+    let realtime = RealtimeV2(
+      transport: transport,
+      auth: auth.handle,
+      applyUpdates: SendTestApplyUpdates(),
+      syncStorage: SendTestSyncStorage(),
+      persistenceHandler: persistence
+    )
+
+    let id = UUID()
+    _ = await realtime.sendQueued(AccountSwitchSendTransaction(id: id))
+
+    #expect(await AccountSwitchSendRecorder.shared.optimisticCount(id) == 1)
+    #expect(await AccountSwitchSendRecorder.shared.cancelledCount(id) == 1)
+    #expect(await AccountSwitchSendRecorder.shared.applyCount(id) == 0)
+    #expect(await AccountSwitchSendRecorder.shared.failedCount(id) == 0)
+    #expect(await transport.didDispatchAccountSwitchMutation() == false)
+
+    await realtime.loggedOut()
+    #expect(await persistence.savedOwners().isEmpty)
+  }
+
+  @Test("send rejects a durable mutation when persistence fails")
+  func testSendRejectsDurableMutationWhenPersistenceFails() async throws {
+    await AccountSwitchSendRecorder.shared.reset()
+    let auth = Auth.mocked(authenticated: true)
+    let transport = AccountSwitchSendTransport()
+    let realtime = RealtimeV2(
+      transport: transport,
+      auth: auth.handle,
+      applyUpdates: SendTestApplyUpdates(),
+      syncStorage: SendTestSyncStorage(),
+      persistenceHandler: FailingAccountSwitchSendPersistence()
+    )
+
+    let id = UUID()
+    do {
+      _ = try await realtime.send(AccountSwitchSendTransaction(id: id))
+      Issue.record("Expected persistence admission failure")
+    } catch let error as TransactionError {
+      guard case .persistenceFailed = error else {
+        Issue.record("Unexpected transaction error: \(error)")
+        return
+      }
+    } catch {
+      Issue.record("Unexpected error: \(error)")
+    }
+
+    #expect(await AccountSwitchSendRecorder.shared.optimisticCount(id) == 1)
+    #expect(await AccountSwitchSendRecorder.shared.cancelledCount(id) == 1)
+    #expect(await AccountSwitchSendRecorder.shared.applyCount(id) == 0)
+    #expect(await AccountSwitchSendRecorder.shared.failedCount(id) == 0)
+    #expect(await transport.didDispatchAccountSwitchMutation() == false)
+    await realtime.loggedOut()
   }
 
   @Test("send completes with immediate rpc response")
@@ -239,6 +369,48 @@ final class RealtimeSendTests {
     withExtendedLifetime(realtime) {}
   }
 
+  @Test("cancelling send resumes promptly and invokes transaction cancellation")
+  func testSendCancellationIsPreserved() async throws {
+    await SendCancellationRecorder.shared.reset()
+
+    let auth = Auth.mocked(authenticated: true)
+    let transport = HangingRpcTransport()
+    let realtime = RealtimeV2(
+      transport: transport,
+      auth: auth.handle,
+      applyUpdates: SendTestApplyUpdates(),
+      syncStorage: SendTestSyncStorage()
+    )
+
+    let connected = await waitForCondition(timeout: .seconds(2)) {
+      let stateObject = realtime.stateObject
+      return await MainActor.run {
+        stateObject.connectionState == .connected || stateObject.connectionState == .updating
+      }
+    }
+    #expect(connected)
+
+    let id = UUID()
+    let sendTask = Task {
+      try await realtime.send(CancellableSendTransaction(id: id))
+    }
+
+    #expect(await waitForCondition { await transport.didDispatchRpc() })
+    sendTask.cancel()
+
+    do {
+      _ = try await sendTask.value
+      Issue.record("Expected CancellationError")
+    } catch is CancellationError {
+      // Expected.
+    } catch {
+      Issue.record("Expected CancellationError, got \(error)")
+    }
+
+    #expect(await SendCancellationRecorder.shared.wasCancelled(id))
+    await realtime.loggedOut()
+  }
+
   @Test("failed dependency wakes blocked send and fails it")
   func testFailedDependencyFailsBlockedSend() async throws {
     await FailingDependencyResolver.shared.reset()
@@ -445,6 +617,159 @@ final class RealtimeSendTests {
   }
 }
 
+private actor AccountSwitchSendRecorder {
+  static let shared = AccountSwitchSendRecorder()
+
+  private var optimistic: [UUID: Int] = [:]
+  private var cancelled: [UUID: Int] = [:]
+  private var applied: [UUID: Int] = [:]
+  private var failed: [UUID: Int] = [:]
+  private var optimisticAction: (@Sendable () async -> Void)?
+
+  func reset(optimisticAction: (@Sendable () async -> Void)? = nil) {
+    optimistic.removeAll()
+    cancelled.removeAll()
+    applied.removeAll()
+    failed.removeAll()
+    self.optimisticAction = optimisticAction
+  }
+
+  func runOptimistic(_ id: UUID) async {
+    optimistic[id, default: 0] += 1
+    await optimisticAction?()
+  }
+
+  func markCancelled(_ id: UUID) {
+    cancelled[id, default: 0] += 1
+  }
+
+  func markApplied(_ id: UUID) {
+    applied[id, default: 0] += 1
+  }
+
+  func markFailed(_ id: UUID) {
+    failed[id, default: 0] += 1
+  }
+
+  func optimisticCount(_ id: UUID) -> Int { optimistic[id, default: 0] }
+  func cancelledCount(_ id: UUID) -> Int { cancelled[id, default: 0] }
+  func applyCount(_ id: UUID) -> Int { applied[id, default: 0] }
+  func failedCount(_ id: UUID) -> Int { failed[id, default: 0] }
+}
+
+private struct AccountSwitchSendTransaction: Transaction, Codable {
+  struct Context: Sendable, Codable {
+    let id: UUID
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case context
+  }
+
+  var method: InlineProtocol.Method = accountSwitchSendMethod
+  var type: TransactionKindType = .mutation()
+  var context: Context
+
+  init(id: UUID) {
+    context = Context(id: id)
+  }
+
+  func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? { nil }
+
+  func optimistic() async {
+    await AccountSwitchSendRecorder.shared.runOptimistic(context.id)
+  }
+
+  func apply(_ rpcResult: InlineProtocol.RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {
+    await AccountSwitchSendRecorder.shared.markApplied(context.id)
+  }
+
+  func failed(error: TransactionError) async {
+    await AccountSwitchSendRecorder.shared.markFailed(context.id)
+  }
+
+  func cancelled() async {
+    await AccountSwitchSendRecorder.shared.markCancelled(context.id)
+  }
+}
+
+private actor AccountSwitchSendPersistence: TransactionPersistenceHandler {
+  private var owners: [TransactionOwner] = []
+
+  func saveTransaction(_ transaction: TransactionWrapper, for owner: TransactionOwner) async throws {
+    owners.append(owner)
+  }
+
+  func deleteTransaction(_ transactionId: TransactionId, for owner: TransactionOwner) async throws {}
+  func loadTransactions(for owner: TransactionOwner) async throws -> [TransactionWrapper] { [] }
+  func deleteAllTransactions(for owner: TransactionOwner) async throws {}
+
+  func savedOwners() -> [TransactionOwner] {
+    owners
+  }
+}
+
+private actor FailingAccountSwitchSendPersistence: TransactionPersistenceHandler {
+  struct SaveFailure: Error {}
+
+  func saveTransaction(_ transaction: TransactionWrapper, for owner: TransactionOwner) async throws {
+    throw SaveFailure()
+  }
+
+  func deleteTransaction(_ transactionId: TransactionId, for owner: TransactionOwner) async throws {}
+  func loadTransactions(for owner: TransactionOwner) async throws -> [TransactionWrapper] { [] }
+  func deleteAllTransactions(for owner: TransactionOwner) async throws {}
+}
+
+private actor AccountSwitchSendTransport: Transport {
+  nonisolated var events: AsyncChannel<TransportEvent> { channel }
+
+  private let channel = AsyncChannel<TransportEvent>()
+  private var started = false
+  private var dispatchedAccountSwitchMutation = false
+
+  func start() async {
+    guard !started else { return }
+    started = true
+    await channel.send(.connecting)
+    await channel.send(.connected)
+  }
+
+  func stop() async {
+    guard started else { return }
+    started = false
+    await channel.send(.disconnected(errorDescription: "stopped"))
+  }
+
+  func send(_ message: ClientMessage) async throws {
+    switch message.body {
+    case .connectionInit:
+      var open = ServerProtocolMessage()
+      open.id = message.id
+      open.body = .connectionOpen(.init())
+      await channel.send(.message(open))
+
+    case let .rpcCall(call):
+      guard call.method == accountSwitchSendMethod else { return }
+      dispatchedAccountSwitchMutation = true
+
+      var result = InlineProtocol.RpcResult()
+      result.reqMsgID = message.id
+      var response = ServerProtocolMessage()
+      response.id = message.id
+      response.body = .rpcResult(result)
+      await channel.send(.message(response))
+
+    default:
+      break
+    }
+  }
+
+  func didDispatchAccountSwitchMutation() -> Bool {
+    dispatchedAccountSwitchMutation
+  }
+}
+
 private struct SendTestTransaction: Transaction, Codable {
   struct Context: Sendable, Codable {
     let id: UUID
@@ -512,6 +837,87 @@ private actor SendTestFlag {
 
   func get() -> Bool {
     value
+  }
+}
+
+private actor SendCancellationRecorder {
+  static let shared = SendCancellationRecorder()
+  private var cancelled: Set<UUID> = []
+
+  func reset() {
+    cancelled.removeAll()
+  }
+
+  func markCancelled(_ id: UUID) {
+    cancelled.insert(id)
+  }
+
+  func wasCancelled(_ id: UUID) -> Bool {
+    cancelled.contains(id)
+  }
+}
+
+private struct CancellableSendTransaction: Transaction, Codable {
+  struct Context: Sendable, Codable {
+    let id: UUID
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case context
+  }
+
+  var method: InlineProtocol.Method = .UNRECOGNIZED(9_999_979)
+  var type: TransactionKindType = .query()
+  var context: Context
+
+  init(id: UUID) {
+    context = Context(id: id)
+  }
+
+  func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? { nil }
+  func apply(_ rpcResult: InlineProtocol.RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {}
+
+  func cancelled() async {
+    await SendCancellationRecorder.shared.markCancelled(context.id)
+  }
+}
+
+private actor HangingRpcTransport: Transport {
+  nonisolated var events: AsyncChannel<TransportEvent> { channel }
+
+  private let channel = AsyncChannel<TransportEvent>()
+  private var started = false
+  private var dispatchedRpc = false
+
+  func start() async {
+    guard !started else { return }
+    started = true
+    await channel.send(.connecting)
+    await channel.send(.connected)
+  }
+
+  func stop() async {
+    guard started else { return }
+    started = false
+    await channel.send(.disconnected(errorDescription: "stopped"))
+  }
+
+  func send(_ message: ClientMessage) async throws {
+    switch message.body {
+      case .connectionInit:
+        var open = ServerProtocolMessage()
+        open.id = message.id
+        open.body = .connectionOpen(.init())
+        await channel.send(.message(open))
+      case .rpcCall:
+        dispatchedRpc = true
+      default:
+        break
+    }
+  }
+
+  func didDispatchRpc() -> Bool {
+    dispatchedRpc
   }
 }
 
@@ -687,6 +1093,7 @@ private let sendOrderingMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_991)
 private let blockedSendMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_992)
 private let failingCreatorMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_993)
 private let limitedRpcRetryMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_994)
+private let accountSwitchSendMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_995)
 
 private struct BlockedSendTransaction: Transaction, Codable {
   struct Context: Sendable, Codable {

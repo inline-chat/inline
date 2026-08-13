@@ -1409,6 +1409,48 @@ final class SyncTests {
     #expect(bucketState.seq == 2)
   }
 
+  @Test("oversized realtime buffer falls back to authoritative repair")
+  func testRealtimeBufferLimitUsesAuthoritativeRepair() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    let tooLong = makeGetUpdatesResult(
+      seq: 4_098,
+      date: 200,
+      updates: [],
+      final: false,
+      resultType: .tooLong
+    )
+    let client = FakeProtocolClient(
+      responses: [],
+      methodResponses: [
+        .getUpdates: [tooLong],
+        .getChat: [makeGetChatResult(chatId: 1)],
+        .getChatHistory: [makeGetChatHistoryResult(messages: [])],
+      ]
+    )
+    let sync = Sync(
+      applyUpdates: apply,
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15)
+    )
+
+    let oversizedGap = (2 ... 4_098).map {
+      makeNewMessageUpdate(seq: Int64($0), date: 100)
+    }
+    await sync.process(updates: oversizedGap)
+
+    let repaired = await waitForCondition {
+      await apply.repairedChats.count == 1
+    }
+    #expect(repaired)
+    #expect(await sync.getStats().realtimeBufferRecoveries == 1)
+
+    let peer = makeChatPeer(chatId: 1)
+    let bucketState = await storage.getBucketState(for: .chat(peer: peer))
+    #expect(bucketState.seq == 4_098)
+  }
+
   @Test("catch-up forwards sidecars with fetched updates")
   func testCatchupForwardsSidecarsWithFetchedUpdates() async throws {
     let storage = InMemorySyncStorage()

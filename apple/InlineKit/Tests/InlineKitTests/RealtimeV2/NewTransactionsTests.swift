@@ -197,10 +197,13 @@ class NewTransactionsTests {
   @Test("completes transaction and removes it completely")
   func testComplete() async throws {
     let transactions = Transactions()
-    let id = await transactions.queue(transaction: MockTransaction())
+    let owner = TransactionOwner(accountID: 1, generation: 1)
+    await transactions.activate(owner: owner)
+    let queuedID = await transactions.queue(transaction: MockTransaction(), owner: owner)
+    let id = try #require(queuedID)
     _ = await transactions.dequeue()
     await transactions.running(transactionId: id, rpcMsgId: 42)
-    _ = await transactions.complete(rpcMsgId: 42)
+    _ = await transactions.complete(rpcMsgId: 42, owner: owner)
 
     let inQueue = await transactions.isInQueue(transactionId: id)
     let inFlight = await transactions.isInFlight(transactionId: id)

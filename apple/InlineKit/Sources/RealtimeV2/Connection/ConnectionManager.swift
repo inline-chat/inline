@@ -1,5 +1,30 @@
+import AsyncAlgorithms
 import Foundation
 import Logger
+
+private struct ConnectionCommand: Sendable {
+  let event: ConnectionEvent
+  let receipt: ConnectionCommandReceipt
+}
+
+private actor ConnectionCommandReceipt {
+  private var finished = false
+  private var waiter: CheckedContinuation<Void, Never>?
+
+  func wait() async {
+    guard !finished else { return }
+    await withCheckedContinuation { continuation in
+      waiter = continuation
+    }
+  }
+
+  func finish() {
+    guard !finished else { return }
+    finished = true
+    waiter?.resume()
+    waiter = nil
+  }
+}
 
 actor ConnectionManager {
   private let log = Log.scoped("RealtimeV2.ConnectionManager", level: .debug)
@@ -8,12 +33,11 @@ actor ConnectionManager {
   private let policy: ConnectionPolicy
   private let timeProvider: ConnectionTimeProvider
 
-  private let eventStream: AsyncStream<ConnectionEvent>
-  private let eventContinuation: AsyncStream<ConnectionEvent>.Continuation
   private let snapshotStream: AsyncStream<ConnectionSnapshot>
   private let snapshotContinuation: AsyncStream<ConnectionSnapshot>.Continuation
   private let sessionEventStream: AsyncStream<ProtocolSessionEvent>
   private let sessionEventContinuation: AsyncStream<ProtocolSessionEvent>.Continuation
+  private let commandStream = AsyncChannel<ConnectionCommand>()
 
   private var state: ConnectionState = .stopped
   private var reason: ConnectionReason = .none
@@ -24,7 +48,7 @@ actor ConnectionManager {
   private var networkQuality: ConnectionNetworkQuality = .good
   private var lastErrorDescription: String?
 
-  private var eventTask: Task<Void, Never>?
+  private var commandTask: Task<Void, Never>?
   private var sessionTask: Task<Void, Never>?
   private var loopsStarted = false
 
@@ -51,38 +75,41 @@ actor ConnectionManager {
     self.timeProvider = timeProvider
     self.constraints = constraints
     stateSince = timeProvider.now()
-    (eventStream, eventContinuation) = AsyncStream.create(ConnectionEvent.self, bufferingPolicy: .unbounded)
-    (snapshotStream, snapshotContinuation) = AsyncStream.create(ConnectionSnapshot.self, bufferingPolicy: .unbounded)
-    (sessionEventStream, sessionEventContinuation) = AsyncStream.create(ProtocolSessionEvent.self, bufferingPolicy: .unbounded)
-
+    (snapshotStream, snapshotContinuation) = AsyncStream.create(
+      ConnectionSnapshot.self,
+      bufferingPolicy: .bufferingNewest(1)
+    )
+    (sessionEventStream, sessionEventContinuation) = AsyncStream.create(
+      ProtocolSessionEvent.self,
+      bufferingPolicy: .unbounded
+    )
   }
 
   deinit {
-    eventTask?.cancel()
+    commandTask?.cancel()
     sessionTask?.cancel()
   }
 
   // MARK: - Public API
 
   func start() async {
-    startLoopsIfNeeded()
-    eventContinuation.yield(.start)
+    await enqueue(.start)
   }
 
   func stop() async {
-    eventContinuation.yield(.stop)
+    await enqueue(.stop)
   }
 
   func connectNow() async {
-    eventContinuation.yield(.connectNow)
+    await enqueue(.connectNow)
   }
 
   func setAuthAvailable(_ available: Bool) async {
-    eventContinuation.yield(available ? .authAvailable : .authLost)
+    await enqueue(available ? .authAvailable : .authLost)
   }
 
   func setNetworkAvailable(_ available: Bool) async {
-    eventContinuation.yield(available ? .networkAvailable : .networkUnavailable)
+    await enqueue(available ? .networkAvailable : .networkUnavailable)
   }
 
   func setNetworkQuality(_ quality: ConnectionNetworkQuality) async {
@@ -90,16 +117,15 @@ actor ConnectionManager {
   }
 
   func setAppActive(_ active: Bool) async {
-    eventContinuation.yield(active ? .appForeground : .appBackground)
+    await enqueue(active ? .appForeground : .appBackground)
   }
 
   func systemDidWake() async {
-    eventContinuation.yield(.systemWake)
+    await enqueue(.systemWake)
   }
 
   func setUserWantsConnection(_ wants: Bool) async {
-    constraints.userWantsConnection = wants
-    eventContinuation.yield(wants ? .connectNow : .stop)
+    await enqueue(wants ? .connectNow : .stop)
   }
 
   func snapshots() -> AsyncStream<ConnectionSnapshot> {
@@ -126,13 +152,13 @@ actor ConnectionManager {
     cancelAllTimers()
     backgroundGraceActive = false
     pendingPingNonce = nil
-    eventTask?.cancel()
+    commandTask?.cancel()
     sessionTask?.cancel()
-    eventContinuation.finish()
+    commandStream.finish()
     snapshotContinuation.finish()
     sessionEventContinuation.finish()
     session.events.finish()
-    eventTask = nil
+    commandTask = nil
     sessionTask = nil
   }
 
@@ -241,6 +267,11 @@ actor ConnectionManager {
       await session.stopTransport()
       await handleTransportDisconnect(reason: .authFailed)
 
+    case .connectTimeout:
+      lastErrorDescription = "connect_timeout"
+      await session.stopTransport()
+      await handleTransportDisconnect(reason: .transportDisconnected)
+
     case .pingTimeout:
       lastErrorDescription = "ping_timeout"
       await session.stopTransport()
@@ -260,11 +291,15 @@ actor ConnectionManager {
     guard !loopsStarted else { return }
     loopsStarted = true
 
-    let eventStream = self.eventStream
-    eventTask = Task { [weak self] in
-      guard let self else { return }
-      for await event in eventStream {
-        await self.handle(event)
+    let commandStream = self.commandStream
+    commandTask = Task { [weak self] in
+      for await command in commandStream {
+        guard let self else {
+          await command.receipt.finish()
+          return
+        }
+        await self.handle(command.event)
+        await command.receipt.finish()
       }
     }
 
@@ -276,34 +311,41 @@ actor ConnectionManager {
     }
   }
 
+  private func enqueue(_ event: ConnectionEvent) async {
+    startLoopsIfNeeded()
+    let receipt = ConnectionCommandReceipt()
+    await commandStream.send(ConnectionCommand(event: event, receipt: receipt))
+    await receipt.wait()
+  }
+
   private func handleSessionEvent(_ event: ProtocolSessionEvent) async {
     switch event {
     case .transportConnecting:
-      eventContinuation.yield(.transportConnecting)
+      await enqueue(.transportConnecting)
 
     case .transportConnected:
-      eventContinuation.yield(.transportConnected)
+      await enqueue(.transportConnected)
 
     case let .transportDisconnected(errorDescription):
-      eventContinuation.yield(.transportDisconnected(errorDescription: errorDescription))
+      await enqueue(.transportDisconnected(errorDescription: errorDescription))
 
     case .protocolOpen:
-      eventContinuation.yield(.protocolOpen)
+      await enqueue(.protocolOpen)
 
     case .authFailed:
-      eventContinuation.yield(.authLost)
-      await forwardSessionEvent(event)
+      await enqueue(.authLost)
+      forwardSessionEvent(event)
 
     case let .pong(nonce):
       handlePong(nonce: nonce)
-      await forwardSessionEvent(event)
+      forwardSessionEvent(event)
 
     default:
-      await forwardSessionEvent(event)
+      forwardSessionEvent(event)
     }
   }
 
-  private func forwardSessionEvent(_ event: ProtocolSessionEvent) async {
+  private func forwardSessionEvent(_ event: ProtocolSessionEvent) {
     sessionEventContinuation.yield(event)
   }
 
@@ -401,7 +443,7 @@ actor ConnectionManager {
       await self.timeProvider.sleep(for: delay)
       guard !Task.isCancelled else { return }
       guard await self.sessionID == sessionID else { return }
-      self.eventContinuation.yield(.backoffFired)
+      await self.enqueue(.backoffFired)
     }
   }
 
@@ -418,7 +460,7 @@ actor ConnectionManager {
       guard !Task.isCancelled else { return }
       guard await self.sessionID == sessionID else { return }
       guard await self.state == .authenticating else { return }
-      self.eventContinuation.yield(.protocolAuthFailed)
+      await self.enqueue(.protocolAuthFailed)
     }
   }
 
@@ -435,14 +477,8 @@ actor ConnectionManager {
       guard !Task.isCancelled else { return }
       guard await self.sessionID == sessionID else { return }
       guard await self.state == .connectingTransport else { return }
-      await self.session.stopTransport()
-      await self.handleConnectTimeout()
+      await self.enqueue(.connectTimeout)
     }
-  }
-
-  private func handleConnectTimeout() async {
-    lastErrorDescription = "connect_timeout"
-    await handleTransportDisconnect(reason: .transportDisconnected)
   }
 
   private func cancelConnectTimeout() {
@@ -457,7 +493,7 @@ actor ConnectionManager {
       guard let self else { return }
       await self.timeProvider.sleep(for: self.policy.backgroundGrace)
       guard !Task.isCancelled else { return }
-      self.eventContinuation.yield(.backgroundGraceExpired)
+      await self.enqueue(.backgroundGraceExpired)
     }
   }
 
@@ -494,7 +530,7 @@ actor ConnectionManager {
       guard !Task.isCancelled else { return }
       guard await self.sessionID == sessionID else { return }
       guard await self.pendingPingNonce == nonce else { return }
-      self.eventContinuation.yield(.pingTimeout)
+      await self.enqueue(.pingTimeout)
     }
   }
 

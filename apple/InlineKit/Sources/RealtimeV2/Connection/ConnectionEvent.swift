@@ -19,6 +19,7 @@ public enum ConnectionEvent: Sendable {
 
   case protocolOpen
   case protocolAuthFailed
+  case connectTimeout
 
   case pingTimeout
   case backoffFired
