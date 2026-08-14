@@ -4,6 +4,52 @@ Release notes for Inline apps, developer tools, and integrations.
 
 > [Download the latest Inline apps](/download).
 
+## August 15, 2026
+
+[macOS 0.2 tip, build 4947](https://public-assets.inline.chat/mac/tip/4947/Inline.dmg) · [iOS TestFlight build 1193](https://testflight.apple.com/join/FkC3f7fz)
+
+### New
+
+- 🏠 iOS has an all-new Home with **Open**, **All Chats**, and **Search**, plus faster navigation and more control over how chats are shown.
+- 🧵 The macOS sidebar now shows reply threads under their parent. You can pin or collapse them together, rename a reply thread, or open one beside the main conversation.
+- 🎧 Added **Grid** on macOS: lightweight voice rooms for spaces, with presence, screen sharing, and controls for microphones, room names, and access.
+- 🎨 Added themes on macOS, with new color presets across the sidebar, chats, composer, Grid, and settings.
+- 🤖 Added one-click agent setup on macOS and in Inline CLI 0.7.3. Connect OpenClaw, Hermes, Codex, Claude, OpenCode, or Amp, create or reuse a bot, then start it and verify it is ready.
+- Added a local agent bridge so coding agents can run as private Inline bots, keep workspace context, and continue work in reply threads.
+
+### Quality of life improvements
+
+- Improved bot setup and management, including profiles, chat controls, and commands such as `/command@bot`.
+- Added **Copy as Markdown** for threads, with clean text and media links ready to paste as reference.
+- Drop files or media onto a macOS sidebar chat to open it with the attachments ready as a draft.
+- Press and hold a chat on iOS Home to preview it and see its actions.
+- Command-K on macOS is faster, with immediate local results and better ranking over time.
+- Added Privacy settings for **Appear in Global Search** and **Share Time Zone**. Both are on by default.
+- Improved document, X, and Figma previews. Notifications now show document names and more reliable avatars.
+- Choosing **All Notifications** now follows the chat, so it stays visible in your sidebar.
+- Clear a conversation only for yourself, or privately share a thread with another Inline user.
+- Improved profile setup, including Memoji profile photos on macOS and new Account settings on iOS.
+- Improved macOS Settings, software updates, menus, emoji options, and email-code autofill.
+- The iOS share menu now suggests the Inline chats you share with most often.
+- Made reactions more compact and unread badges more consistent.
+- Improved OpenClaw and Hermes setup and thread support. MCP now supports ChatGPT apps.
+- Added **Connectors** on macOS and iOS. Connect Notion or Linear, reference pages with `[[`, and create tasks from Inline.
+
+### Fixes
+
+- Fixed sign-in, account switching, and fresh-account sync issues.
+- Fixed incorrect unread counts.
+- Fixed iOS chat opening, navigation, and share routing.
+- Fixed iOS attachment sizing, message layout, and toolbar state.
+- Improved macOS message performance and chat switching.
+- Fixed macOS compose autocomplete, send-button state, and file drops.
+- Fixed duplicate or misrouted bot and agent replies.
+- Fixed notification settings, sender avatars, and invalid push tokens.
+- Fixed media sends that could stall and URL previews that could disappear.
+- Fixed message ordering and permission checks for chat actions.
+
+---
+
 ## July 8, 2026
 
 [macOS 0.2, build 4495](https://public-assets.inline.chat/mac/beta/4495/Inline.dmg) · [iOS on TestFlight](https://testflight.apple.com/join/FkC3f7fz)
