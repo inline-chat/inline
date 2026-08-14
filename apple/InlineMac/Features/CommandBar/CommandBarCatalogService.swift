@@ -10,6 +10,7 @@ actor CommandBarCatalogService {
     let query: String
     let usage: [Peer: InlineSearchUsageSignal]
     let currentPeer: Peer?
+    let currentUserID: Int64?
     let contextSpaceId: Int64?
     let scope: InlineSearchScope
     let suggestionLimit: Int
@@ -121,7 +122,7 @@ actor CommandBarCatalogService {
 
       switch result {
       case let .success(snapshot):
-        await catalog.replace(snapshot.chats)
+        await catalog.replace(snapshot.chats, knownUsers: snapshot.knownUsers)
         spaces = snapshot.spaces
         loadedRevision = currentRefresh.targetRevision
         os_signpost(
@@ -131,7 +132,7 @@ actor CommandBarCatalogService {
           signpostID: currentRefresh.signpostID,
           "revision=%{public}llu entries=%{public}ld",
           loadedRevision,
-          snapshot.chats.count
+          snapshot.chats.count + snapshot.knownUsers.count
         )
 
       case let .failure(description):
@@ -172,6 +173,7 @@ actor CommandBarCatalogService {
       query: request.query,
       usage: request.usage,
       currentPeer: request.currentPeer,
+      currentUserID: request.currentUserID,
       contextSpaceId: request.contextSpaceId,
       scope: request.scope,
       suggestionLimit: request.suggestionLimit,

@@ -3,10 +3,12 @@ import GRDB
 
 public struct CommandBarCatalogSnapshot: Sendable {
   public let chats: [HomeChatListItemSnapshot]
+  public let knownUsers: [User]
   public let spaces: [Space]
 
-  public init(chats: [HomeChatListItemSnapshot], spaces: [Space]) {
+  public init(chats: [HomeChatListItemSnapshot], knownUsers: [User] = [], spaces: [Space]) {
     self.chats = chats
+    self.knownUsers = knownUsers
     self.spaces = spaces
   }
 }
@@ -17,6 +19,7 @@ public extension AppDatabase {
     try await reader.read { db in
       CommandBarCatalogSnapshot(
         chats: try CommandBarChatCatalogSnapshotQuery.fetchAll(db),
+        knownUsers: try User.fetchAll(db),
         spaces: try Space.fetchAll(db)
       )
     }

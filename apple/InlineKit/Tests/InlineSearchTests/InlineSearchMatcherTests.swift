@@ -24,6 +24,23 @@ struct InlineSearchMatcherTests {
     #expect(match.tier == .compact)
   }
 
+  @Test("two-character identities match exactly and through punctuation")
+  func twoCharacterIdentityMatching() throws {
+    let query = try #require(InlineSearchMatcher.prepare("mo"))
+    let exact = try #require(InlineSearchMatcher.match(
+      query: query,
+      fields: [InlineSearchField("mo", priority: 500)]
+    ))
+    let punctuated = try #require(InlineSearchMatcher.match(
+      query: query,
+      fields: [InlineSearchField("m-o", priority: 500)]
+    ))
+
+    #expect(query.compact.count == 2)
+    #expect(exact.tier == .exact)
+    #expect(punctuated.tier == .compact)
+  }
+
   @Test("whitespace-only input has no prepared query")
   func whitespaceOnlyInputIsEmpty() {
     #expect(InlineSearchMatcher.prepare(" \t\n ") == nil)

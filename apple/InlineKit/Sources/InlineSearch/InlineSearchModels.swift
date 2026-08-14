@@ -96,6 +96,18 @@ public struct InlineSearchGlobalUserResult: Identifiable, Sendable, Hashable {
   }
 }
 
+public struct InlineSearchLocalUserResult: Identifiable, Sendable, Hashable {
+  public let user: User
+  public let score: Int
+
+  public var id: Int64 { user.id }
+
+  init(user: User, score: Int) {
+    self.user = user
+    self.score = score
+  }
+}
+
 public struct InlineSearchLocalPayload: Sendable, Equatable {
   public let chats: [InlineSearchChatResult]
   public let messages: [LocalMessageSearchResult]

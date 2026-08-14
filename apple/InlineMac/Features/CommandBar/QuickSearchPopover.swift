@@ -34,8 +34,18 @@ enum QuickSearchLayout {
   static let itemTextSpacing: CGFloat = 6
 }
 
+private func quickSearchUserTitle(_ user: ApiUser) -> String {
+  let name = [user.firstName, user.lastName]
+    .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+    .filter { $0.isEmpty == false }
+    .joined(separator: " ")
+  return name.isEmpty ? user.anyName : name
+}
+
 fileprivate enum QuickSearchLocalItem: Identifiable, Hashable {
   case chat(InlineSearchChatResult)
+  case knownUser(User)
+  case remoteUser(ApiUser)
   case space(Space)
   case command(QuickSearchCommand)
   case registeredCommand(CommandBarItem)
@@ -45,7 +55,15 @@ fileprivate enum QuickSearchLocalItem: Identifiable, Hashable {
   var id: String {
     switch self {
       case let .chat(result):
-        result.id
+        if case let .user(id) = result.peer {
+          "user-\(id)"
+        } else {
+          result.id
+        }
+      case let .knownUser(user):
+        "user-\(user.id)"
+      case let .remoteUser(user):
+        "user-\(user.id)"
       case let .space(space):
         "space-\(space.id)"
       case let .command(command):
@@ -331,7 +349,7 @@ final class QuickSearchViewModel {
   @ObservationIgnored private var catalogRefreshTask: Task<Void, Never>?
   @ObservationIgnored private var appliedCatalogRevision: UInt64 = 0
   @ObservationIgnored private var isPresented = false
-  @ObservationIgnored private var rawGlobalResults: [GlobalSearchResult] = []
+  @ObservationIgnored private var rawGlobalResults: [RankedGlobalUser] = []
   @ObservationIgnored private let performanceLog = OSLog(subsystem: "InlineMac", category: "PointsOfInterest")
   @ObservationIgnored private var activeLocalProjectionSignpost: OSSignpostID?
   private var isLocalSearchPending = false
@@ -514,6 +532,10 @@ final class QuickSearchViewModel {
           }
           openInSidebar(peer: chatResult.peer)
         }
+      case let .knownUser(user):
+        openKnownUser(user)
+      case let .remoteUser(user):
+        openRemoteUser(user)
       case let .space(space):
         if let nav2 = dependencies.nav2 {
           nav2.openSpace(space)
@@ -539,6 +561,11 @@ final class QuickSearchViewModel {
           renderSnapshot.globalResults.contains(where: { $0.id == user.id })
     else { return false }
 
+    openRemoteUser(user)
+    return true
+  }
+
+  private func openRemoteUser(_ user: ApiUser) {
     recordSelection(peer: .user(id: user.id))
     Task { @MainActor in
       do {
@@ -557,7 +584,27 @@ final class QuickSearchViewModel {
         dependencies.overlay.showError(message: "Failed to open a private chat with \(user.anyName)")
       }
     }
-    return true
+  }
+
+  private func openKnownUser(_ user: User) {
+    recordSelection(peer: .user(id: user.id))
+    Task { @MainActor in
+      do {
+        let hasDialog = await hasExistingDialog(userId: user.id)
+        if hasDialog == false {
+          _ = try await dependencies.data.createPrivateChat(userId: user.id)
+        }
+        if let nav2 = dependencies.nav2 {
+          await nav2.openChat(peer: .user(id: user.id))
+        } else {
+          dependencies.requestOpenChat(peer: .user(id: user.id))
+        }
+        openInSidebar(peer: .user(id: user.id))
+      } catch {
+        Log.shared.error("Failed to open a private chat", error: error)
+        dependencies.overlay.showError(message: "Failed to open a private chat with \(user.displayName)")
+      }
+    }
   }
 
   private func hasExistingDialog(userId: Int64) async -> Bool {
@@ -704,6 +751,8 @@ final class QuickSearchViewModel {
 
   private var hasAnySearchResults: Bool {
     if catalogProjection.chats.isEmpty == false { return true }
+    if catalogProjection.knownUsers.isEmpty == false { return true }
+    if promotedGlobalUsers.isEmpty == false { return true }
     if messageResults.isEmpty == false { return true }
     if spaceResults.isEmpty == false { return true }
     if renderedGlobalResults.isEmpty == false { return true }
@@ -796,7 +845,7 @@ final class QuickSearchViewModel {
           Self.rankGlobalUsers(users, query: preparedQuery)
         }.value
         guard Task.isCancelled == false, let self, self.searchGeneration == generation else { return }
-        self.rawGlobalResults = rankedUsers.map { .users($0) }
+        self.rawGlobalResults = rankedUsers
         self.isGlobalSearching = false
         self.rebuildLocalResults()
       } catch {
@@ -834,6 +883,7 @@ final class QuickSearchViewModel {
         query: query,
         usage: usage,
         currentPeer: commandContext.activePeer,
+        currentUserID: dependencies.auth.currentUserId,
         contextSpaceId: commandContext.selectedSpaceId,
         scope: InlineSearchScope(includeArchived: true),
         suggestionLimit: 5,
@@ -880,7 +930,25 @@ final class QuickSearchViewModel {
 
     var sections: [QuickSearchLocalSection] = []
     let suggestions = catalogProjection.suggestions.map(QuickSearchLocalItem.chat)
-    let chats = catalogProjection.chats.map(QuickSearchLocalItem.chat)
+    var rankedChats: [RankedPrimaryItem] = []
+    rankedChats.reserveCapacity(
+      catalogProjection.chats.count + catalogProjection.knownUsers.count + promotedGlobalUsers.count
+    )
+    for result in catalogProjection.chats {
+      rankedChats.append(RankedPrimaryItem(item: .chat(result), score: result.score, order: rankedChats.count))
+    }
+    for result in catalogProjection.knownUsers {
+      rankedChats.append(RankedPrimaryItem(item: .knownUser(result.user), score: result.score, order: rankedChats.count))
+    }
+    for result in promotedGlobalUsers {
+      rankedChats.append(RankedPrimaryItem(item: .remoteUser(result.user), score: result.score, order: rankedChats.count))
+    }
+    let chats = rankedChats
+      .sorted { lhs, rhs in
+        lhs.score == rhs.score ? lhs.order < rhs.order : lhs.score > rhs.score
+      }
+      .prefix(20)
+      .map(\.item)
     if suggestions.isEmpty == false {
       sections.append(QuickSearchLocalSection(kind: .suggestions, items: suggestions))
     }
@@ -911,6 +979,7 @@ final class QuickSearchViewModel {
 
   private func publishRenderSnapshot() {
     let shouldResetSelection = renderSnapshot.query != activeSearchQuery
+    let selectionWasAtFirstResult = selectedResultID == renderSnapshot.resultIDs.first
     renderSnapshot = QuickSearchRenderSnapshot(
       query: activeSearchQuery,
       localSections: localSections,
@@ -920,7 +989,7 @@ final class QuickSearchViewModel {
       isLoading: isLoading,
       errorDescription: searchError?.localizedDescription
     )
-    if shouldResetSelection {
+    if shouldResetSelection || selectionWasAtFirstResult {
       selectedResultID = renderSnapshot.resultIDs.first
     } else {
       clampSelection()
@@ -928,18 +997,39 @@ final class QuickSearchViewModel {
   }
 
   private func updateRenderedGlobalResults() {
-    let localUserIDs = Set(
+    renderedGlobalResults = rawGlobalResults.compactMap { result in
+      guard result.match.tier != .exact,
+            excludedGlobalUserIDs.contains(result.user.id) == false
+      else { return nil }
+      return .users(result.user)
+    }
+  }
+
+  private var promotedGlobalUsers: [RankedGlobalUser] {
+    rawGlobalResults.filter {
+      $0.match.tier == .exact && excludedGlobalUserIDs.contains($0.user.id) == false
+    }
+  }
+
+  private var excludedGlobalUserIDs: Set<Int64> {
+    var userIDs = representedLocalUserIDs
+    if let currentUserID = dependencies.auth.currentUserId {
+      userIDs.insert(currentUserID)
+    }
+    if case let .user(id)? = commandContext.activePeer {
+      userIDs.insert(id)
+    }
+    return userIDs
+  }
+
+  private var representedLocalUserIDs: Set<Int64> {
+    let chatUserIDs = Set(
       (catalogProjection.suggestions + catalogProjection.chats).compactMap { result -> Int64? in
         guard case let .user(id) = result.peer else { return nil }
         return id
       }
     )
-    renderedGlobalResults = rawGlobalResults.filter { result in
-      switch result {
-        case let .users(user):
-          return localUserIDs.contains(user.id) == false
-      }
-    }
+    return chatUserIDs.union(catalogProjection.knownUsers.map(\.id))
   }
 
   private func recordSelection(peer: Peer) {
@@ -964,13 +1054,10 @@ final class QuickSearchViewModel {
   private nonisolated static func rankGlobalUsers(
     _ users: [ApiUser],
     query: InlineSearchPreparedQuery
-  ) -> [ApiUser] {
+  ) -> [RankedGlobalUser] {
     users
       .compactMap { user -> RankedGlobalUser? in
-        let fullName = [user.firstName, user.lastName]
-          .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-          .filter { $0.isEmpty == false }
-          .joined(separator: " ")
+        let fullName = quickSearchUserTitle(user)
         guard let match = InlineSearchMatcher.match(
           query: query,
           fields: [
@@ -994,7 +1081,7 @@ final class QuickSearchViewModel {
         return lhs.user.id < rhs.user.id
       }
       .prefix(20)
-      .map(\.user)
+      .map { $0 }
   }
 
   private func runCommand(_ command: QuickSearchCommand) {
@@ -1104,9 +1191,19 @@ final class QuickSearchViewModel {
     let match: InlineSearchMatch
   }
 
-  private struct RankedGlobalUser {
+  private struct RankedPrimaryItem {
+    let item: QuickSearchLocalItem
+    let score: Int
+    let order: Int
+  }
+
+  private struct RankedGlobalUser: Sendable {
     let user: ApiUser
     let match: InlineSearchMatch
+
+    var score: Int {
+      match.tier.rawValue * 100_000 + match.fieldPriority
+    }
   }
 }
 
@@ -1644,6 +1741,12 @@ private struct QuickSearchRow: View {
                   .lineLimit(1)
               }
 
+            case let .knownUser(user):
+              knownUserContent(user)
+
+            case let .remoteUser(user):
+              remoteUserContent(user)
+
             case let .space(space):
               SpaceAvatar(space: space, size: QuickSearchLayout.iconSize)
                 .frame(
@@ -1735,25 +1838,7 @@ private struct QuickSearchRow: View {
               }
           }
         } else if let user {
-          UserAvatar(apiUser: user, size: QuickSearchLayout.iconSize)
-            .frame(
-              width: QuickSearchLayout.iconContainerSize,
-              height: QuickSearchLayout.iconContainerSize,
-              alignment: .center
-            )
-          HStack(spacing: QuickSearchLayout.itemTextSpacing) {
-            Text(user.firstName ?? user.username ?? "")
-              .lineLimit(1)
-            if let username = user.username {
-              Text("@\(username)")
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            }
-            Spacer(minLength: 0)
-            Text(user.bot == true ? "Bot" : "User")
-              .foregroundStyle(.secondary)
-              .lineLimit(1)
-          }
+          remoteUserContent(user)
         }
 
         Spacer(minLength: 0)
@@ -1788,6 +1873,52 @@ private struct QuickSearchRow: View {
     }
 #endif
     return command.title
+  }
+
+  @ViewBuilder
+  private func knownUserContent(_ user: User) -> some View {
+    UserAvatar(user: user, size: QuickSearchLayout.iconSize)
+      .frame(
+        width: QuickSearchLayout.iconContainerSize,
+        height: QuickSearchLayout.iconContainerSize,
+        alignment: .center
+      )
+    HStack(spacing: QuickSearchLayout.itemTextSpacing) {
+      Text(user.displayName)
+        .lineLimit(1)
+      if let username = user.username {
+        Text("@\(username)")
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+      }
+      Spacer(minLength: 0)
+      Text(user.bot ? "Bot" : "User")
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+    }
+  }
+
+  @ViewBuilder
+  private func remoteUserContent(_ user: ApiUser) -> some View {
+    UserAvatar(apiUser: user, size: QuickSearchLayout.iconSize)
+      .frame(
+        width: QuickSearchLayout.iconContainerSize,
+        height: QuickSearchLayout.iconContainerSize,
+        alignment: .center
+      )
+    HStack(spacing: QuickSearchLayout.itemTextSpacing) {
+      Text(quickSearchUserTitle(user))
+        .lineLimit(1)
+      if let username = user.username {
+        Text("@\(username)")
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+      }
+      Spacer(minLength: 0)
+      Text(user.bot == true ? "Bot" : "User")
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+    }
   }
 
   @ViewBuilder

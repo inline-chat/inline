@@ -20,16 +20,18 @@ public struct InlineSearchUsageSignal: Sendable, Hashable {
 public struct InlineSearchChatProjection: Sendable, Equatable {
   public let suggestions: [InlineSearchChatResult]
   public let chats: [InlineSearchChatResult]
+  public let knownUsers: [InlineSearchLocalUserResult]
 
-  public static let empty = Self(suggestions: [], chats: [])
+  public static let empty = Self(suggestions: [], chats: [], knownUsers: [])
 }
 
 public actor InlineSearchChatCatalog {
   private var entries: [Entry] = []
+  private var knownUserEntries: [KnownUserEntry] = []
 
   public init() {}
 
-  public func replace(_ snapshots: [HomeChatListItemSnapshot]) {
+  public func replace(_ snapshots: [HomeChatListItemSnapshot], knownUsers: [User] = []) {
     var previousByPeer: [Peer: Entry] = [:]
     previousByPeer.reserveCapacity(entries.count)
     for entry in entries {
@@ -43,12 +45,26 @@ public actor InlineSearchChatCatalog {
         reusing: previousByPeer[snapshot.peerId]
       )
     }
+
+    let dialogUserIDs = Set(snapshots.compactMap { snapshot -> Int64? in
+      guard case let .user(id) = snapshot.peerId else { return nil }
+      return id
+    })
+    knownUserEntries = knownUsers.compactMap { user in
+      guard user.id > 0,
+            user.pendingSetup != true,
+            dialogUserIDs.contains(user.id) == false,
+            user.needsDisplayNameFetch == false
+      else { return nil }
+      return KnownUserEntry(user: user)
+    }
   }
 
   public func project(
     query: String,
     usage: [Peer: InlineSearchUsageSignal],
     currentPeer: Peer?,
+    currentUserID: Int64? = nil,
     contextSpaceId: Int64? = nil,
     scope: InlineSearchScope,
     suggestionLimit: Int = 5,
@@ -77,13 +93,14 @@ public actor InlineSearchChatCatalog {
         suggestions: suggestions.map {
           Self.result(from: $0.entry, score: Self.suggestionScore($0.signal))
         },
-        chats: chats
+        chats: chats,
+        knownUsers: []
       )
     }
 
     let resultLimit = max(0, chatLimit)
     guard resultLimit > 0 else {
-      return InlineSearchChatProjection(suggestions: [], chats: [])
+      return InlineSearchChatProjection(suggestions: [], chats: [], knownUsers: [])
     }
 
     var bestMatches: [RankedSearchResult] = []
@@ -111,7 +128,29 @@ public actor InlineSearchChatCatalog {
       Self.result(from: ranked.entry, score: Self.searchScore(ranked))
     }
 
-    return InlineSearchChatProjection(suggestions: [], chats: ranked)
+    var bestKnownUsers: [RankedKnownUser] = []
+    if scope.spaceId == nil {
+      bestKnownUsers.reserveCapacity(resultLimit)
+      for entry in knownUserEntries {
+        guard entry.user.id != currentUserID,
+              currentPeer != .user(id: entry.user.id),
+              let match = InlineSearchMatcher.match(query: preparedQuery, preparedFields: entry.fields)
+        else { continue }
+        Self.insert(
+          RankedKnownUser(entry: entry, match: match),
+          into: &bestKnownUsers,
+          limit: resultLimit
+        )
+      }
+    }
+    let knownUsers = bestKnownUsers.map {
+      InlineSearchLocalUserResult(
+        user: $0.entry.user,
+        score: Self.knownUserSearchScore($0)
+      )
+    }
+
+    return InlineSearchChatProjection(suggestions: [], chats: ranked, knownUsers: knownUsers)
   }
 
   private static func result(from entry: Entry, score: Int) -> InlineSearchChatResult {
@@ -179,6 +218,17 @@ public actor InlineSearchChatCatalog {
     return lhsPeer.isPrivate && rhsPeer.isThread
   }
 
+  private static func knownUserResultPrecedes(_ lhs: RankedKnownUser, _ rhs: RankedKnownUser) -> Bool {
+    if lhs.match != rhs.match {
+      return InlineSearchMatch.isBetter(lhs.match, than: rhs.match)
+    }
+    let nameOrder = lhs.entry.user.displayName.localizedCaseInsensitiveCompare(rhs.entry.user.displayName)
+    if nameOrder != .orderedSame {
+      return nameOrder == .orderedAscending
+    }
+    return lhs.entry.user.id < rhs.entry.user.id
+  }
+
   private static func insert(
     _ candidate: RankedSearchResult,
     into results: inout [RankedSearchResult],
@@ -207,6 +257,34 @@ public actor InlineSearchChatCatalog {
     }
   }
 
+  private static func insert(
+    _ candidate: RankedKnownUser,
+    into results: inout [RankedKnownUser],
+    limit: Int
+  ) {
+    if results.count == limit,
+       let last = results.last,
+       knownUserResultPrecedes(candidate, last) == false {
+      return
+    }
+
+    var lowerBound = 0
+    var upperBound = results.count
+    while lowerBound < upperBound {
+      let midpoint = lowerBound + ((upperBound - lowerBound) / 2)
+      if knownUserResultPrecedes(results[midpoint], candidate) {
+        lowerBound = midpoint + 1
+      } else {
+        upperBound = midpoint
+      }
+    }
+
+    results.insert(candidate, at: lowerBound)
+    if results.count > limit {
+      results.removeLast()
+    }
+  }
+
   private static func suggestionScore(_ signal: InlineSearchUsageSignal) -> Int {
     Int(min(signal.switchFrecency * 100, 1_000_000))
   }
@@ -216,6 +294,10 @@ public actor InlineSearchChatCatalog {
     let query = Int(min(result.usage.queryAffinity * 1_000, 90_000))
     let usage = Int(min(result.usage.switchFrecency * 100, 9_000))
     return tier + query + usage + result.match.fieldPriority
+  }
+
+  private static func knownUserSearchScore(_ result: RankedKnownUser) -> Int {
+    result.match.tier.rawValue * 100_000 + result.match.fieldPriority
   }
 
   private struct Entry: Sendable {
@@ -260,6 +342,20 @@ public actor InlineSearchChatCatalog {
     }
   }
 
+  private struct KnownUserEntry: Sendable {
+    let user: User
+    let fields: [InlineSearchPreparedField]
+
+    init(user: User) {
+      self.user = user
+      fields = [
+        InlineSearchField(user.displayName, priority: 500),
+        InlineSearchField(user.username, priority: 600),
+        InlineSearchField(user.email, priority: 200),
+      ].compactMap(InlineSearchMatcher.prepareField)
+    }
+  }
+
   private struct RankedSuggestion: Sendable {
     let entry: Entry
     let signal: InlineSearchUsageSignal
@@ -270,5 +366,10 @@ public actor InlineSearchChatCatalog {
     let match: InlineSearchMatch
     let usage: InlineSearchUsageSignal
     let currentSpace: Bool
+  }
+
+  private struct RankedKnownUser: Sendable {
+    let entry: KnownUserEntry
+    let match: InlineSearchMatch
   }
 }

@@ -74,12 +74,14 @@ struct InlineSearchViewModelTests {
   func commandBarCatalogUsesCompactSnapshots() async throws {
     let (queue, appDatabase) = try makeInMemoryDB()
     let directUserId: Int64 = 31
+    let cachedUserId: Int64 = 32
     let directChatId: Int64 = 5031
     let roomId: Int64 = 6031
     let unreferencedSpaceId: Int64 = 78
 
     try await queue.write { db in
       try seedUser(db, id: directUserId, firstName: "Alexander", lastName: nil, username: "alexander")
+      try seedUser(db, id: cachedUserId, firstName: "Mo", lastName: nil, username: "mo")
       try seedPrivateChat(db, chatId: directChatId, userId: directUserId)
       try seedSpace(db, id: spaceId)
       try seedSpace(db, id: unreferencedSpaceId)
@@ -105,7 +107,37 @@ struct InlineSearchViewModelTests {
     #expect(compact.allSatisfy { $0.item.lastMessage == nil })
     #expect(compact.allSatisfy { $0.preview.isEmpty })
     #expect(compact.first { $0.peerId == .user(id: directUserId) }?.item.user?.user.username == "alexander")
+    #expect(Set(commandBarSnapshot.knownUsers.map(\.id)).isSuperset(of: [directUserId, cachedUserId]))
     #expect(Set(commandBarSnapshot.spaces.map(\.id)) == [spaceId, unreferencedSpaceId])
+  }
+
+  @Test("command bar catalog includes cached people without duplicating dialogs or self")
+  func commandBarCatalogIncludesCachedPeople() async throws {
+    let (queue, appDatabase) = try makeInMemoryDB()
+    let cachedUserId: Int64 = 41
+    let dialogUserId: Int64 = 42
+    let currentUserId: Int64 = 43
+
+    try await queue.write { db in
+      try seedUser(db, id: cachedUserId, firstName: "Mo", lastName: "Cached", username: "mo")
+      try seedUser(db, id: dialogUserId, firstName: "Mo", lastName: "Dialog", username: "modialog")
+      try seedPrivateChat(db, chatId: 5_042, userId: dialogUserId)
+      try seedUser(db, id: currentUserId, firstName: "Mo", lastName: "Self", username: "moself")
+    }
+
+    let snapshot = try await appDatabase.fetchCommandBarCatalogSnapshot()
+    let catalog = InlineSearchChatCatalog()
+    await catalog.replace(snapshot.chats, knownUsers: snapshot.knownUsers)
+    let projection = await catalog.project(
+      query: "mo",
+      usage: [:],
+      currentPeer: nil,
+      currentUserID: currentUserId,
+      scope: InlineSearchScope(includeArchived: true)
+    )
+
+    #expect(projection.knownUsers.map(\.id) == [cachedUserId])
+    #expect(projection.chats.map(\.peer) == [.user(id: dialogUserId)])
   }
 
   @Test("chat search does not match reply thread parent title")
