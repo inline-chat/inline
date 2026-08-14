@@ -12,7 +12,7 @@ import type { DbFullDocument, DbFullVoice } from "@in/server/db/models/files"
 import { MessageModel } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
 import { db } from "@in/server/db"
-import { dialogs, messageAttachments, type DbChat, type DbMessage } from "@in/server/db/schema"
+import { dialogs, messageAttachments, messages, type DbChat, type DbMessage } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { getCachedUserName, UserNamesCache, type UserName } from "@in/server/modules/cache/userNames"
 import { encryptMessage } from "@in/server/modules/encryption/encryptMessage"
@@ -110,6 +110,7 @@ type Output = {
 }
 
 const log = new Log("functions.sendMessage")
+const URGENT_NUDGE_TEXT = "🚨"
 
 export const sendMessage = async (input: Input, context: FunctionContext): Promise<Output> => {
   // input data
@@ -154,6 +155,12 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     }
     throw RealtimeRpcError.InternalError()
   }
+
+  await ensureUrgentNudgeHasPriorTwoWayChat({
+    chat,
+    currentUserId,
+    isUrgentNudge: input.nudge === true && text?.trim() === URGENT_NUDGE_TEXT,
+  })
 
   const groupMentionedUserIds = await resolveMentionedGroupUserIds({
     chat,
@@ -511,6 +518,40 @@ async function ensurePrivatePeerCanReceiveMessages(chat: DbChat, currentUserId: 
   const peerUser = await UsersModel.getUserById(peerUserId)
   if (!peerUser || UsersModel.isDeleted(peerUser)) {
     throw RealtimeRpcError.PeerIdInvalid()
+  }
+}
+
+async function ensureUrgentNudgeHasPriorTwoWayChat({
+  chat,
+  currentUserId,
+  isUrgentNudge,
+}: {
+  chat: DbChat
+  currentUserId: number
+  isUrgentNudge: boolean
+}): Promise<void> {
+  if (!isUrgentNudge) {
+    return
+  }
+
+  if (chat.type !== "private" || chat.minUserId == null || chat.maxUserId == null) {
+    throw RealtimeRpcError.BadRequest()
+  }
+
+  const peerUserId = chat.minUserId === currentUserId ? chat.maxUserId : chat.minUserId
+  if (peerUserId === currentUserId) {
+    return
+  }
+
+  const priorAuthors = await db
+    .selectDistinct({ fromId: messages.fromId })
+    .from(messages)
+    .where(and(eq(messages.chatId, chat.id), inArray(messages.fromId, [currentUserId, peerUserId])))
+    .limit(2)
+
+  const priorAuthorIds = new Set(priorAuthors.map(({ fromId }) => fromId))
+  if (!priorAuthorIds.has(currentUserId) || !priorAuthorIds.has(peerUserId)) {
+    throw RealtimeRpcError.BadRequest()
   }
 }
 
@@ -988,7 +1029,7 @@ async function sendNotifications(input: SendPushForMsgInput) {
   const { updateGroup, messageInfo, currentUserId, chat, unencryptedText, inputPeer, mentionedUserIds } = input
   const isNudge = isNudgeMessage({ messageInfo })
   const trimmedText = unencryptedText?.trim()
-  const isUrgentNudge = isNudge && trimmedText === "🚨"
+  const isUrgentNudge = isNudge && trimmedText === URGENT_NUDGE_TEXT
 
   // A direct reply (replyToMsgId) targets a concrete message in this chat.
   const repliedToSenderId = messageInfo.message.replyToMsgId

@@ -327,6 +327,38 @@ describe("sendMessage", () => {
     ).rejects.toMatchObject({ code: RealtimeRpcError.Code.PEER_ID_INVALID })
   })
 
+  test("requires prior messages from both DM participants before sending an urgent Nudge", async () => {
+    const sender = await testUtils.createUser(nextEmail("urgent-nudge-sender"))
+    const recipient = await testUtils.createUser(nextEmail("urgent-nudge-recipient"))
+    const chat = await testUtils.createPrivateChat(sender, recipient)
+    if (!chat) throw new Error("Chat not created")
+
+    const peerId: InputPeer = {
+      type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } },
+    }
+    const senderContext = testUtils.functionContext({ userId: sender.id, sessionId: 1 })
+    const recipientContext = testUtils.functionContext({ userId: recipient.id, sessionId: 2 })
+
+    await expect(
+      sendMessage({ peerId, message: "🚨", nudge: true }, senderContext),
+    ).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+
+    await sendMessage({ peerId, message: "👋", nudge: true }, senderContext)
+
+    await expect(
+      sendMessage({ peerId, message: "🚨", nudge: true }, senderContext),
+    ).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+
+    await sendMessage({ peerId, message: "hello", nudge: false }, recipientContext)
+    await sendMessage({ peerId, message: "🚨", nudge: true }, senderContext)
+
+    const storedMessages = await db.query.messages.findMany({
+      where: { chatId: chat.id },
+    })
+    expect(storedMessages).toHaveLength(3)
+    expect(storedMessages.filter(({ mediaType }) => mediaType === "nudge")).toHaveLength(2)
+  })
+
   test("does not duplicate mention node when client already provides mention entity", async () => {
     const mentionedUser = await testUtils.createUser(nextEmail("provided-mentioned-user"))
     await db.update(users).set({ username: "providedmention" }).where(eq(users.id, mentionedUser.id)).execute()

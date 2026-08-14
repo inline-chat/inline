@@ -9,435 +9,48 @@ import UIKit
 import AppKit
 #endif
 
-public enum NudgeButtonPresentation {
-  case toolbar
-  case menu
-}
-
-/// Nudge control used in chat toolbars and native menus for DMs.
+/// Native toolbar control that sends a regular Nudge on tap and reveals Urgent Nudge on hold.
 public struct NudgeButton: View {
   private let log = Log.scoped("NudgeButton")
 
   public let peer: Peer
   public let chatId: Int64?
-  private let presentation: NudgeButtonPresentation
-
-  @AppStorage("nudgeGuideSeen", store: UserDefaults.shared) private var hasSeenGuide = false
-  @Binding private var isPopoverPresented: Bool
-  @State private var activePopover: NudgePopover?
-  @State private var didLongPress = false
-  @State private var showUrgent = false
-  @State private var isHolding = false
-  @State private var holdProgress: Double = 0
-  @State private var holdProgressTask: Task<Void, Never>?
-  @State private var holdHapticTask: Task<Void, Never>?
-  @State private var holdRevealTask: Task<Void, Never>?
-  @State private var longPressTask: Task<Void, Never>?
-  @State private var pressStartedAt: Date?
-  @State private var shouldSuppressTap = false
   @State private var isSending = false
-  @State private var peerDisplayName: String?
-
-  private let syncPopoverPresentation: Bool
-  private let longPressDuration: TimeInterval = 1.5
-  private let holdProgressRevealDelay: TimeInterval = 0.2
-  private let holdProgressUpdateInterval: TimeInterval = 1.0 / 60.0
 
   public init(
     peer: Peer,
-    chatId: Int64? = nil,
-    presentation: NudgeButtonPresentation = .toolbar,
-    isPopoverPresented: Binding<Bool>? = nil
+    chatId: Int64? = nil
   ) {
     self.peer = peer
     self.chatId = chatId
-    self.presentation = presentation
-    _isPopoverPresented = isPopoverPresented ?? .constant(false)
-    syncPopoverPresentation = isPopoverPresented != nil
-  }
-
-  public var body: some View {
-    if let userId = peerUserId {
-      content
-        .onAppear {
-          refreshPeerName(userId: userId)
-        }
-        .onReceive(ObjectCache.shared.getUserPublisher(id: userId)) { userInfo in
-          peerDisplayName = userInfo?.user.displayName
-        }
-    } else {
-      content
-    }
   }
 
   @ViewBuilder
-  private var content: some View {
-    switch presentation {
-    case .toolbar:
+  public var body: some View {
 #if os(iOS)
-      let button = nudgeButton
-      button
-        .alert(
-          alertTitle,
-          isPresented: Binding(
-            get: { activePopover != nil },
-            set: { isPresented in
-              if !isPresented { activePopover = nil }
-            }
-          ),
-          actions: {
-            switch activePopover {
-            case .guide:
-              Button("Got it") {
-                activePopover = nil
-              }
-            case .confirm:
-              Button("Send \(NudgeButtonState.urgentNudgeText)") {
-                activePopover = nil
-                triggerUrgentHaptic()
-                sendNudge(nudgeText: NudgeButtonState.urgentNudgeText)
-              }
-            case .none:
-              EmptyView()
-            }
-          },
-          message: {
-            Text(alertMessage)
-          }
-        )
-#else
-      macToolbarNudgeMenu
-#endif
-    case .menu:
-      Button {
+    IOSNudgeToolbarButton(
+      isSending: isSending,
+      onNudge: {
         triggerHaptic()
         sendNudge()
-      } label: {
-        Label("Nudge", systemImage: NudgeButtonState.nudgeIconName)
-      }
-      .disabled(isSending)
-      // TODO: Add a separate confirmed urgent-nudge action to the menu.
-    }
-  }
-
-#if os(macOS)
-  private var macToolbarNudgeMenu: some View {
-    Menu {
-      Button {
-        triggerUrgentHaptic()
-        sendNudge(nudgeText: NudgeButtonState.urgentNudgeText)
-      } label: {
-        Label {
-          Text("Urgent Nudge", comment: "Menu action that sends an urgent Nudge.")
-        } icon: {
-          Image(systemName: "bell.badge.fill")
-        }
-        Text(
-          "Bypasses Inline notification and silent settings, requesting time-sensitive delivery with sound.",
-          comment: "Description for the Urgent Nudge menu action."
-        )
-      }
-    } label: {
-      Label {
-        Text("Nudge", comment: "Toolbar button that sends a Nudge.")
-      } icon: {
-        Image(systemName: NudgeButtonState.nudgeIconName)
-      }
-      .labelStyle(.iconOnly)
-    } primaryAction: {
-      triggerHaptic()
-      sendNudge()
-    }
-    .menuIndicator(.hidden)
-    .accessibilityLabel("Send nudge")
-    .help("Send nudge")
-    .disabled(isSending)
-  }
-#endif
-
-  private var nudgeButton: some View {
-    Button {
-      handleTap()
-    } label: {
-#if os(macOS)
-      nudgeButtonGlyph
-        .font(.system(size: 16, weight: .regular))
-        .imageScale(.medium)
-        .frame(width: 24, height: 24)
-        .overlay {
-          holdProgressRing(size: 26, lineWidth: 2)
-        }
-        .animation(.easeOut(duration: 0.15), value: isHolding)
-#else
-      ZStack {
-        holdProgressRing(size: 32, lineWidth: 3.5)
-        nudgeButtonGlyph
-      }
-      .animation(.easeOut(duration: 0.15), value: isHolding)
-#endif
-    }
-#if os(iOS)
-    .onLongPressGesture(minimumDuration: 0, pressing: { pressing in
-      if pressing {
-        scheduleLongPress()
-      } else {
-        cancelLongPress()
-      }
-    }, perform: {})
-#else
-    .onLongPressGesture(minimumDuration: 0, pressing: { pressing in
-      if pressing {
-        scheduleLongPress()
-      } else {
-        cancelLongPress()
-      }
-    }, perform: {})
-#endif
-#if os(iOS)
-    .frame(minWidth: 44, minHeight: 44)
-    .contentShape(Rectangle())
-#else
-    .controlSize(.regular)
-#endif
-    .accessibilityLabel("Send nudge")
-    .disabled(isSending)
-    .onChange(of: activePopover) { _, newValue in
-      if syncPopoverPresentation {
-        isPopoverPresented = newValue != nil
-      }
-      if newValue == nil {
-        showUrgent = false
-        holdProgress = 0
-        cancelHoldProgress()
-        cancelHoldHaptics()
-      }
-    }
-    .onChange(of: isPopoverPresented) { _, newValue in
-      guard syncPopoverPresentation, !newValue else { return }
-      activePopover = nil
-    }
-  }
-
-  @ViewBuilder
-  private var nudgeButtonGlyph: some View {
-    if showUrgent {
-      Text(NudgeButtonState.urgentNudgeText)
-#if os(iOS)
-        .font(.title3.weight(.bold))
-#endif
-        .scaleEffect(isHolding ? 0.92 : 1)
-    } else {
-      Image(systemName: NudgeButtonState.nudgeIconName)
-#if os(iOS)
-        .font(.body.weight(.regular))
-#endif
-        .imageScale(.medium)
-        .scaleEffect(isHolding ? 0.92 : 1)
-    }
-  }
-
-  @ViewBuilder
-  private func holdProgressRing(size: CGFloat, lineWidth: CGFloat) -> some View {
-    if holdProgress > 0 && !showUrgent {
-      Circle()
-        .trim(from: 0, to: holdProgress)
-        .stroke(Color.red, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-        .frame(width: size, height: size)
-        .rotationEffect(.degrees(-90))
-        .animation(.linear(duration: holdProgressUpdateInterval), value: holdProgress)
-    }
-  }
-
-  @ViewBuilder
-  private func popoverContent(_ popover: NudgePopover) -> some View {
-    switch popover {
-    case .guide:
-      NudgeGuideView(attentionTarget: attentionTarget) {
-        activePopover = nil
-      }
-    case .confirm:
-      NudgeConfirmView(attentionTarget: attentionTarget, isSending: isSending) {
-        activePopover = nil
-        triggerUrgentHaptic()
+      },
+      onHoldCompleted: triggerUrgentHaptic,
+      onSendUrgentNudge: {
         sendNudge(nudgeText: NudgeButtonState.urgentNudgeText)
       }
-    }
-  }
-
-#if os(iOS)
-  private var alertTitle: String {
-    switch activePopover {
-    case .guide:
-      return "Nudge"
-    case .confirm:
-      return "🚨 Send an urgent nudge?"
-    case .none:
-      return ""
-    }
-  }
-
-  private var alertMessage: String {
-    switch activePopover {
-    case .guide:
-      return "Send a \(NudgeButtonState.nudgeText) to get \(attentionTarget) attention."
-    case .confirm:
-      return "An urgent nudge bypasses Inline notification and silent settings, requesting time-sensitive delivery with sound."
-    case .none:
-      return ""
-    }
-  }
-#endif
-
-  private var peerUserId: Int64? {
-    if case let .user(id) = peer {
-      return id
-    }
-    return nil
-  }
-
-  private var attentionTarget: String {
-    NudgeButtonState.attentionTarget(displayName: peerDisplayName)
-  }
-
-  private func refreshPeerName(userId: Int64) {
-    peerDisplayName = ObjectCache.shared.getUser(id: userId)?.user.displayName
-  }
-
-  private func handleTap() {
-    if didLongPress {
-      didLongPress = false
-      return
-    }
-    if shouldSuppressTap {
-      shouldSuppressTap = false
-      return
-    }
-    triggerHaptic()
-    if !hasSeenGuide {
-      hasSeenGuide = true
-      activePopover = .guide
-      return
-    }
-
-    activePopover = nil
-    sendNudge()
-  }
-
-  private func handleLongPress() {
-    guard !isSending else { return }
-    didLongPress = true
-    cancelHoldProgress()
-    showUrgent = true
-    cancelHoldHaptics()
-    triggerHaptic()
-    activePopover = .confirm
-  }
-
-  private func scheduleLongPress() {
-    guard longPressTask == nil else { return }
-    isHolding = true
-    holdProgress = 0
-    pressStartedAt = Date()
-    shouldSuppressTap = false
-    scheduleHoldProgressReveal()
-    longPressTask = Task {
-      try? await Task.sleep(nanoseconds: UInt64(longPressDuration * 1_000_000_000))
-      if Task.isCancelled { return }
-      await MainActor.run {
-        longPressTask = nil
-        handleLongPress()
+    )
+#elseif os(macOS)
+    MacNudgeToolbarButton(
+      isSending: isSending,
+      onNudge: {
+        triggerHaptic()
+        sendNudge()
+      },
+      onHoldCompleted: triggerUrgentHaptic,
+      onSendUrgentNudge: {
+        sendNudge(nudgeText: NudgeButtonState.urgentNudgeText)
       }
-    }
-  }
-
-  private func cancelLongPress() {
-    longPressTask?.cancel()
-    longPressTask = nil
-    isHolding = false
-    if let pressStartedAt {
-      let pressDuration = Date().timeIntervalSince(pressStartedAt)
-      if !didLongPress && pressDuration >= holdProgressRevealDelay {
-        shouldSuppressTap = true
-      }
-    }
-    pressStartedAt = nil
-    cancelHoldProgress()
-    cancelHoldHaptics()
-    holdProgress = 0
-    if activePopover == nil {
-      showUrgent = false
-    }
-  }
-
-  private func scheduleHoldProgressReveal() {
-    holdRevealTask?.cancel()
-    holdRevealTask = Task {
-      try? await Task.sleep(nanoseconds: UInt64(holdProgressRevealDelay * 1_000_000_000))
-      if Task.isCancelled { return }
-      await MainActor.run {
-        holdRevealTask = nil
-        startHoldHaptics()
-        startHoldProgress(duration: max(0.1, longPressDuration - holdProgressRevealDelay))
-      }
-    }
-  }
-
-  private func startHoldProgress(duration: TimeInterval) {
-    holdProgressTask?.cancel()
-    holdProgressTask = Task { @MainActor in
-      if duration <= 0 {
-        holdProgress = 1
-        holdProgressTask = nil
-        return
-      }
-
-      let start = Date()
-      while !Task.isCancelled {
-        let elapsed = Date().timeIntervalSince(start)
-        let progress = min(1, max(0, elapsed / duration))
-        holdProgress = progress
-        if progress >= 1 {
-          break
-        }
-        try? await Task.sleep(nanoseconds: UInt64(holdProgressUpdateInterval * 1_000_000_000))
-      }
-      holdProgressTask = nil
-    }
-  }
-
-  private func cancelHoldProgress() {
-    holdRevealTask?.cancel()
-    holdRevealTask = nil
-    holdProgressTask?.cancel()
-    holdProgressTask = nil
-  }
-
-  private func startHoldHaptics() {
-#if os(iOS)
-    guard holdHapticTask == nil else { return }
-    holdHapticTask = Task { @MainActor in
-      let generator = UIImpactFeedbackGenerator(style: .soft)
-      generator.prepare()
-      let total: Double = 1.5
-      let step: Double = 0.3
-      var elapsed: Double = 0
-      while elapsed < total {
-        try? await Task.sleep(nanoseconds: UInt64(step * 1_000_000_000))
-        if Task.isCancelled { return }
-        elapsed += step
-        let intensity = CGFloat(min(1.0, max(0.2, elapsed / total)))
-        generator.impactOccurred(intensity: intensity)
-        generator.prepare()
-      }
-      holdHapticTask = nil
-    }
-#endif
-  }
-
-  private func cancelHoldHaptics() {
-#if os(iOS)
-    holdHapticTask?.cancel()
-    holdHapticTask = nil
+    )
 #endif
   }
 
@@ -513,144 +126,254 @@ public struct NudgeButton: View {
   }
 }
 
+#if os(iOS)
+private struct IOSNudgeToolbarButton: View {
+  let isSending: Bool
+  let onNudge: () -> Void
+  let onHoldCompleted: () -> Void
+  let onSendUrgentNudge: () -> Void
+
+  @State private var holdProgress: CGFloat = 0
+  @State private var suppressNextTap = false
+  @State private var isUrgentConfirmationPresented = false
+
+  var body: some View {
+    Button {
+      if suppressNextTap {
+        suppressNextTap = false
+      } else {
+        onNudge()
+      }
+    } label: {
+      Image(systemName: NudgeButtonState.nudgeIconName)
+        .font(.body.weight(.regular))
+        .imageScale(.medium)
+        .frame(width: 24, height: 24)
+    }
+    .overlay {
+      NudgeHoldProgressRing(progress: holdProgress, size: 32, lineWidth: 3)
+        .allowsHitTesting(false)
+    }
+    .modifier(
+      NudgeHoldGestureModifier(
+        progress: $holdProgress,
+        suppressNextTap: $suppressNextTap,
+        isConfirmationPresented: $isUrgentConfirmationPresented,
+        isDisabled: isSending,
+        onCompleted: onHoldCompleted
+      )
+    )
+    .popover(isPresented: $isUrgentConfirmationPresented, arrowEdge: .top) {
+      UrgentNudgeConfirmationView(
+        isSending: isSending,
+        onSend: {
+          isUrgentConfirmationPresented = false
+          onSendUrgentNudge()
+        }
+      )
+      .presentationCompactAdaptation(.popover)
+    }
+    .accessibilityLabel("Send Nudge")
+    .accessibilityHint("Double-tap to send a Nudge. Press and hold for Urgent Nudge.")
+    .accessibilityAction(named: "Urgent Nudge") {
+      onHoldCompleted()
+      isUrgentConfirmationPresented = true
+    }
+    .help("Send Nudge. Hold for Urgent Nudge.")
+    .disabled(isSending)
+  }
+}
+#elseif os(macOS)
+private struct MacNudgeToolbarButton: View {
+  let isSending: Bool
+  let onNudge: () -> Void
+  let onHoldCompleted: () -> Void
+  let onSendUrgentNudge: () -> Void
+
+  @State private var holdProgress: CGFloat = 0
+  @State private var suppressNextTap = false
+  @State private var isUrgentConfirmationPresented = false
+
+  var body: some View {
+    Button {
+      if suppressNextTap {
+        suppressNextTap = false
+      } else {
+        onNudge()
+      }
+    } label: {
+      Image(systemName: NudgeButtonState.nudgeIconName)
+        .font(.system(size: 16, weight: .regular))
+        .imageScale(.medium)
+        .frame(width: 24, height: 24)
+        .frame(minWidth: 32)
+    }
+    .overlay {
+      NudgeHoldProgressRing(progress: holdProgress, size: 26, lineWidth: 2)
+        .allowsHitTesting(false)
+    }
+    .modifier(
+      NudgeHoldGestureModifier(
+        progress: $holdProgress,
+        suppressNextTap: $suppressNextTap,
+        isConfirmationPresented: $isUrgentConfirmationPresented,
+        isDisabled: isSending,
+        onCompleted: onHoldCompleted
+      )
+    )
+    .popover(isPresented: $isUrgentConfirmationPresented, arrowEdge: .top) {
+      UrgentNudgeConfirmationView(
+        isSending: isSending,
+        onSend: {
+          isUrgentConfirmationPresented = false
+          onSendUrgentNudge()
+        }
+      )
+      .presentationCompactAdaptation(.popover)
+      .presentationSizing(.fitted)
+    }
+    .accessibilityLabel("Send Nudge")
+    .accessibilityHint("Press to send a Nudge. Press and hold for Urgent Nudge.")
+    .accessibilityAction(named: "Urgent Nudge") {
+      onHoldCompleted()
+      isUrgentConfirmationPresented = true
+    }
+    .help("Send Nudge. Hold for Urgent Nudge.")
+    .disabled(isSending)
+  }
+}
+#endif
+
+private struct NudgeHoldGestureModifier: ViewModifier {
+  @Binding var progress: CGFloat
+  @Binding var suppressNextTap: Bool
+  @Binding var isConfirmationPresented: Bool
+
+  let isDisabled: Bool
+  let onCompleted: () -> Void
+
+  @State private var pressStartedAt: Date?
+  @State private var completedCurrentHold = false
+
+  func body(content: Content) -> some View {
+    content.onLongPressGesture(
+      minimumDuration: NudgeButtonState.holdDuration,
+      maximumDistance: 44,
+      pressing: updatePressing,
+      perform: completeHold
+    )
+  }
+
+  private func updatePressing(_ isPressing: Bool) {
+    guard !isDisabled else { return }
+
+    if isPressing {
+      pressStartedAt = Date()
+      completedCurrentHold = false
+      withAnimation(.linear(duration: NudgeButtonState.holdDuration)) {
+        progress = 1
+      }
+      return
+    }
+
+    if let pressStartedAt,
+       NudgeButtonState.shouldSuppressTap(
+         holdDuration: Date().timeIntervalSince(pressStartedAt),
+         completed: completedCurrentHold
+       ) {
+      suppressNextTap = true
+    }
+    pressStartedAt = nil
+    resetProgress()
+  }
+
+  private func completeHold() {
+    guard !isDisabled else { return }
+    completedCurrentHold = true
+    suppressNextTap = true
+    resetProgress()
+    onCompleted()
+    isConfirmationPresented = true
+  }
+
+  private func resetProgress() {
+    var transaction = Transaction()
+    transaction.disablesAnimations = true
+    withTransaction(transaction) {
+      progress = 0
+    }
+  }
+}
+
+private struct NudgeHoldProgressRing: View {
+  let progress: CGFloat
+  let size: CGFloat
+  let lineWidth: CGFloat
+
+  var body: some View {
+    Circle()
+      .trim(from: 0, to: progress)
+      .stroke(.red, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+      .frame(width: size, height: size)
+      .rotationEffect(.degrees(-90))
+      .opacity(progress > 0 ? 1 : 0)
+      .accessibilityHidden(true)
+  }
+}
+
+private struct UrgentNudgeConfirmationView: View {
+  let isSending: Bool
+  let onSend: () -> Void
+
+  var body: some View {
+    VStack(spacing: 14) {
+      Text(NudgeButtonState.urgentNudgeText)
+        .font(.system(size: 48))
+        .accessibilityHidden(true)
+
+      Text("Send an Urgent Nudge?")
+        .font(.title3.weight(.semibold))
+
+      Text(
+        "Urgent Nudge asks Inline to notify them immediately with sound, even when Inline is muted. iOS or macOS settings can still limit delivery."
+      )
+      .font(.subheadline)
+      .foregroundStyle(.secondary)
+      .multilineTextAlignment(.center)
+      .fixedSize(horizontal: false, vertical: true)
+
+      Text("Available after both of you have sent a message in this chat.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
+
+      Button(action: onSend) {
+        Label {
+          Text("Send Urgent Nudge")
+        } icon: {
+          Text(NudgeButtonState.urgentNudgeText)
+        }
+        .font(.headline)
+        .frame(maxWidth: .infinity)
+      }
+      .buttonStyle(.borderedProminent)
+      .controlSize(.large)
+      .disabled(isSending)
+    }
+    .padding(20)
+    .frame(minWidth: 300, idealWidth: 320, maxWidth: 340)
+  }
+}
+
 enum NudgeButtonState {
   static let nudgeIconName = "hand.wave"
   static let nudgeText = "👋"
   static let urgentNudgeText = "🚨"
+  static let holdDuration: TimeInterval = 1.2
+  static let tapSuppressionDelay: TimeInterval = 0.2
 
-  static func attentionTarget(displayName: String?) -> String {
-    if let name = displayName, !name.isEmpty {
-      return "\(name)'s"
-    }
-
-    return "their"
-  }
-}
-
-private struct NudgeGuideView: View {
-  let attentionTarget: String
-  let onDismiss: () -> Void
-
-#if os(iOS)
-  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-#endif
-
-  private var maxWidth: CGFloat? {
-#if os(iOS)
-    return horizontalSizeClass == .compact ? 280 : 320
-#else
-    return 320
-#endif
-  }
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      Text("Nudge")
-        .font(.headline)
-
-      Text(
-        "Send a \(NudgeButtonState.nudgeText) to get \(attentionTarget) attention."
-      )
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
-        .multilineTextAlignment(.leading)
-        .fixedSize(horizontal: false, vertical: true)
-
-      Text("Press and hold for an urgent \(NudgeButtonState.urgentNudgeText) that requests time-sensitive delivery with sound.")
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
-        .multilineTextAlignment(.leading)
-        .fixedSize(horizontal: false, vertical: true)
-
-      HStack {
-        Spacer()
-        if #available(iOS 26, macOS 26, *) {
-          Button("Got it") {
-            onDismiss()
-          }
-          .buttonStyle(.glassProminent)
-        } else {
-          Button("Got it") {
-            onDismiss()
-          }
-          .buttonStyle(.borderedProminent)
-          .controlSize(.regular)
-          .buttonBorderShape(.capsule)
-        }
-      }
-      .padding(.top, 4)
-    }
-    .padding()
-    .frame(maxWidth: maxWidth, alignment: .leading)
-    .fixedSize(horizontal: false, vertical: true)
-  }
-}
-
-private struct NudgeConfirmView: View {
-  let attentionTarget: String
-  let isSending: Bool
-  let onSend: () -> Void
-
-#if os(iOS)
-  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-#endif
-
-  private var maxWidth: CGFloat? {
-#if os(iOS)
-    return horizontalSizeClass == .compact ? 280 : 320
-#else
-    return 320
-#endif
-  }
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      Text("🚨 Send an urgent nudge?")
-        .font(.headline)
-
-      Text("An urgent nudge bypasses Inline notification and silent settings, requesting time-sensitive delivery with sound.")
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
-        .multilineTextAlignment(.leading)
-        .fixedSize(horizontal: false, vertical: true)
-
-      HStack {
-        Spacer()
-        if #available(iOS 26, macOS 26, *) {
-          Button("Send") {
-            onSend()
-          }
-          .buttonStyle(.glassProminent)
-          .disabled(isSending)
-        } else {
-          Button("Send") {
-            onSend()
-          }
-          .buttonStyle(.borderedProminent)
-          .controlSize(.regular)
-          .buttonBorderShape(.capsule)
-          .disabled(isSending)
-        }
-      }
-      .padding(.top, 4)
-    }
-    .padding()
-    .frame(maxWidth: maxWidth, alignment: .leading)
-    .fixedSize(horizontal: false, vertical: true)
-  }
-}
-
-private enum NudgePopover: Identifiable {
-  case guide
-  case confirm
-
-  var id: Int {
-    switch self {
-    case .guide:
-      return 0
-    case .confirm:
-      return 1
-    }
+  static func shouldSuppressTap(holdDuration: TimeInterval, completed: Bool) -> Bool {
+    completed || holdDuration >= tapSuppressionDelay
   }
 }
 

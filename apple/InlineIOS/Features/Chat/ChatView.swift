@@ -118,6 +118,15 @@ struct ChatView: View {
           }
         }
 
+        if peerId.isPrivate {
+          ToolbarItem(placement: .primaryAction) {
+            NudgeButton(
+              peer: peerId,
+              chatId: fullChatViewModel.chat?.id
+            )
+          }
+        }
+
         ToolbarItem(placement: .primaryAction) {
           ChatToolbarMoreMenuHost(
             peer: peerId,
@@ -783,15 +792,7 @@ private struct ChatToolbarMoreMenu: View {
         }
       }
 
-      if peer.isPrivate {
-        NudgeButton(
-          peer: peer,
-          chatId: chat?.id,
-          presentation: .menu
-        )
-      }
-
-      if includesTranslationAction || peer.isPrivate {
+      if includesTranslationAction {
         Divider()
       }
 
