@@ -2940,17 +2940,28 @@ private extension MessagesCollectionView {
             return
           }
           let sectionId = MessageListSectionID.messages(dayStart: section.date)
-          guard snapshot.sectionIdentifiers.contains(sectionId) else {
-            setInitialData(animated: true)
-            return
+          let anchorSectionId: MessageListSectionID?
+          if snapshot.sectionIdentifiers.contains(sectionId) {
+            anchorSectionId = sectionId
+          } else {
+            anchorSectionId = snapshot.sectionIdentifiers.first
+            if sectionIndex < snapshot.sectionIdentifiers.count {
+              snapshot.insertSections(
+                [sectionId],
+                beforeSection: snapshot.sectionIdentifiers[sectionIndex]
+              )
+            } else {
+              snapshot.appendSections([sectionId])
+            }
           }
 
           let sendAnimationContentAnchor: SendAnimationContentAnchor?
           if shouldCoordinateOutgoingInsert,
-             let collectionView = coordinatedCollectionView {
+             let collectionView = coordinatedCollectionView,
+             let anchorSectionId {
             sendAnimationContentAnchor = makeSendAnimationContentAnchor(
               in: snapshot,
-              sectionId: sectionId,
+              sectionId: anchorSectionId,
               collectionView: collectionView
             )
           } else {

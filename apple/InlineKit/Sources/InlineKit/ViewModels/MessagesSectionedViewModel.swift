@@ -271,10 +271,26 @@ public class MessagesSectionedViewModel {
     from update: MessagesProgressiveViewModel
       .MessagesChangeSet
   ) -> SectionedMessagesChangeSet {
-    // Keep the established incremental path unchanged. While collapsed, rebuilding the small
-    // visible projection is safer than translating raw-message indexes through the boundary.
+    // Keep collapsed-history structural changes conservative, but derive head additions and
+    // same-item updates from the rebuilt visible projection. This preserves the normal send
+    // animation path without translating raw indexes through the clear boundary.
     if collapsedMaxId != nil {
       rebuildSections()
+      switch update {
+        case let .added(newMessages, _):
+          return incrementalHeadAddition(from: newMessages) ?? .reload(animated: false)
+        case let .updated(updatedMessages, _, animated):
+          let messageIds = updatedMessages.map(\.id)
+          if let sectionIndex = singleSectionIndex(containingAll: messageIds) {
+            return .messagesUpdated(
+              sectionIndex: sectionIndex,
+              messageIds: messageIds,
+              animated: animated
+            )
+          }
+        case .reload, .deleted:
+          break
+      }
       return .reload(animated: false)
     }
 
@@ -301,8 +317,13 @@ public class MessagesSectionedViewModel {
         }
 
         if sectionsChanged {
-          // Need to add new sections, rebuild everything
+          // Rebuild the section projection, but keep a single newest-day addition on the
+          // incremental path. The iOS message list can then insert the missing section while
+          // preserving its existing compose-to-bubble animation transaction.
           rebuildSections()
+          if let incrementalAddition = incrementalHeadAddition(from: newMessages) {
+            return incrementalAddition
+          }
           return .sectionsChanged(sections: sections)
         } else {
           // All messages fit into existing sections, add incrementally
@@ -444,6 +465,58 @@ public class MessagesSectionedViewModel {
       }
     }
     return nil
+  }
+
+  private func singleSectionIndex(containingAll messageIds: [Int64]) -> Int? {
+    guard !messageIds.isEmpty else { return nil }
+    var matchingSectionIndex: Int?
+    for messageId in Set(messageIds) {
+      guard let sectionIndex = sections.firstIndex(where: { section in
+        section.messages.contains(where: { $0.id == messageId })
+      }) else {
+        return nil
+      }
+      if let matchingSectionIndex, matchingSectionIndex != sectionIndex {
+        return nil
+      }
+      matchingSectionIndex = sectionIndex
+    }
+    return matchingSectionIndex
+  }
+
+  private func incrementalHeadAddition(
+    from newMessages: [FullMessage]
+  ) -> SectionedMessagesChangeSet? {
+    guard !newMessages.isEmpty else { return nil }
+    let newIds = Set(newMessages.map(\.id))
+    guard newIds.count == newMessages.count else { return nil }
+    guard newMessages.allSatisfy({ message in
+      guard let collapsedMaxId else { return true }
+      let messageId = message.message.messageId
+      return messageId <= 0 || messageId > collapsedMaxId
+    }) else {
+      return nil
+    }
+
+    let addedDays = Set(newMessages.map { Self.calendar.startOfDay(for: $0.message.date) })
+    guard addedDays.count == 1,
+          let addedDay = addedDays.first,
+          let newestSection = sections.first,
+          Self.calendar.isDate(newestSection.date, inSameDayAs: addedDay)
+    else {
+      return nil
+    }
+
+    let visibleDayMessages = visibleMessages.filter {
+      Self.calendar.isDate($0.message.date, inSameDayAs: addedDay)
+    }
+    guard Self.areMessagesAtSectionHead(newMessages, in: visibleDayMessages) else { return nil }
+
+    let messageIds = newestSection.messages
+      .filter { newIds.contains($0.id) }
+      .map(\.id)
+    guard messageIds.count == newIds.count else { return nil }
+    return .messagesAdded(sectionIndex: 0, messageIds: messageIds)
   }
 
   // MARK: - Section Helpers

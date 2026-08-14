@@ -1080,8 +1080,9 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       hasWindow: window != nil,
       isEmojiOnlyText: rawText.containsOnlyEmojis
     )
-    let shouldAttemptSendAnimation = sendMode == nil &&
-      SendMessageAnimationFeatureGate.shouldAttemptTextSend(sendAnimationEligibility)
+    let shouldAttemptSendAnimation = SendMessageAnimationFeatureGate.shouldAttemptTextSend(
+      sendAnimationEligibility
+    )
     SendMessageAnimationDiagnostics.event(
       "compose sendMessage gate should=\(shouldAttemptSendAnimation) sendMode=\(sendMode.map { String(describing: $0) } ?? "nil") rawTextLen=\(rawText.count) textLen=\(text?.count ?? 0) \(sendAnimationEligibility.diagnosticSummary)"
     )

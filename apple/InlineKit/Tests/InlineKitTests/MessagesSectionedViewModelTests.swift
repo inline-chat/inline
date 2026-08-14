@@ -122,6 +122,153 @@ struct MessagesSectionedViewModelOrderingTests {
     #expect(messageIds == [optimistic.id])
     #expect(viewModel.sections.first?.messages.map(\.id) == [optimistic.id, existing.id])
   }
+
+  @Test("first message uses the incremental add path")
+  @MainActor
+  func testFirstMessageUsesIncrementalChangeSet() {
+    let date = Date(timeIntervalSince1970: 1_700_000_000)
+    let peer = Peer.user(id: 9_003)
+    let firstMessage = makeSectionTestFullMessage(
+      messageId: -1,
+      globalId: nil,
+      date: date,
+      peerUserId: peer.id,
+      status: .sending
+    )
+    let viewModel = MessagesSectionedViewModel(
+      peer: peer,
+      reversed: true,
+      initialState: .init(
+        messages: [],
+        oldestLoadedMessageId: nil,
+        newestLoadedMessageId: nil,
+        canLoadOlderFromLocal: false,
+        canLoadNewerFromLocal: false
+      )
+    )
+
+    var update: MessagesSectionedViewModel.SectionedMessagesChangeSet?
+    viewModel.observe { update = $0 }
+    MessagesPublisher.shared.publisher.send(.add(.init(messages: [firstMessage], peer: peer)))
+
+    guard case let .messagesAdded(sectionIndex, messageIds)? = update else {
+      Issue.record("Expected messagesAdded for the first message")
+      return
+    }
+
+    #expect(sectionIndex == 0)
+    #expect(messageIds == [firstMessage.id])
+    #expect(viewModel.sections.count == 1)
+  }
+
+  @Test("first message of a newer day uses the incremental add path")
+  @MainActor
+  func testFirstMessageOfNewerDayUsesIncrementalChangeSet() {
+    let oldDate = Date(timeIntervalSince1970: 1_700_000_000)
+    let newDate = Calendar.current.date(byAdding: .day, value: 1, to: oldDate)!
+    let peer = Peer.user(id: 9_004)
+    let existing = makeSectionTestFullMessage(
+      messageId: 20,
+      globalId: 20,
+      date: oldDate,
+      peerUserId: peer.id
+    )
+    let firstMessageOfNewDay = makeSectionTestFullMessage(
+      messageId: -2,
+      globalId: nil,
+      date: newDate,
+      peerUserId: peer.id,
+      status: .sending
+    )
+    let viewModel = MessagesSectionedViewModel(
+      peer: peer,
+      reversed: true,
+      initialState: .init(
+        messages: [existing],
+        oldestLoadedMessageId: existing.message.messageId,
+        newestLoadedMessageId: existing.message.messageId,
+        canLoadOlderFromLocal: false,
+        canLoadNewerFromLocal: false
+      )
+    )
+
+    var update: MessagesSectionedViewModel.SectionedMessagesChangeSet?
+    viewModel.observe { update = $0 }
+    MessagesPublisher.shared.publisher.send(.add(.init(messages: [firstMessageOfNewDay], peer: peer)))
+
+    guard case let .messagesAdded(sectionIndex, messageIds)? = update else {
+      Issue.record("Expected messagesAdded for the first message of a newer day")
+      return
+    }
+
+    #expect(sectionIndex == 0)
+    #expect(messageIds == [firstMessageOfNewDay.id])
+    #expect(viewModel.sections.count == 2)
+    #expect(viewModel.sections.first?.messages.map(\.id) == [firstMessageOfNewDay.id])
+  }
+
+  @Test("first visible message after clear uses the incremental add path")
+  @MainActor
+  func testFirstMessageAfterClearUsesIncrementalChangeSet() {
+    let date = Date(timeIntervalSince1970: 1_700_000_000)
+    let peer = Peer.user(id: 9_005)
+    let clearedMessage = makeSectionTestFullMessage(
+      messageId: 10,
+      globalId: 10,
+      date: date,
+      peerUserId: peer.id
+    )
+    let pendingMessage = makeSectionTestFullMessage(
+      messageId: -3,
+      globalId: nil,
+      date: date,
+      peerUserId: peer.id,
+      status: .sending
+    )
+    let viewModel = MessagesSectionedViewModel(
+      peer: peer,
+      reversed: true,
+      initialState: .init(
+        messages: [clearedMessage],
+        oldestLoadedMessageId: clearedMessage.message.messageId,
+        newestLoadedMessageId: clearedMessage.message.messageId,
+        canLoadOlderFromLocal: false,
+        canLoadNewerFromLocal: false
+      ),
+      collapsedMaxId: clearedMessage.message.messageId
+    )
+
+    #expect(viewModel.sections.isEmpty)
+
+    var update: MessagesSectionedViewModel.SectionedMessagesChangeSet?
+    viewModel.observe { update = $0 }
+    MessagesPublisher.shared.publisher.send(.add(.init(messages: [pendingMessage], peer: peer)))
+
+    guard case let .messagesAdded(sectionIndex, messageIds)? = update else {
+      Issue.record("Expected messagesAdded for the first visible message after clear")
+      return
+    }
+
+    #expect(sectionIndex == 0)
+    #expect(messageIds == [pendingMessage.id])
+    #expect(viewModel.sections.first?.messages.map(\.id) == [pendingMessage.id])
+
+    update = nil
+    MessagesPublisher.shared.publisher.send(.update(.init(
+      message: pendingMessage,
+      animated: true,
+      peer: peer
+    )))
+
+    guard case let .messagesUpdated(updatedSectionIndex, updatedMessageIds, animated)? = update else {
+      Issue.record("Expected messagesUpdated after the post-clear optimistic add")
+      return
+    }
+
+    #expect(updatedSectionIndex == 0)
+    #expect(updatedMessageIds == [pendingMessage.id])
+    #expect(animated == true)
+  }
 }
 
 private func makeSectionTestFullMessage(
