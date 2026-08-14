@@ -135,6 +135,11 @@ public final class InlineSearchViewModel {
     search(query, scope: scope)
   }
 
+  public func refresh() {
+    guard query.isEmpty == false else { return }
+    search(query, scope: scope)
+  }
+
   public func loadMoreMessages() {
     guard hasMoreMessages else { return }
     guard isLoadingMoreMessages == false else { return }

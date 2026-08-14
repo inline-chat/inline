@@ -1,6 +1,8 @@
 import InlineKit
 import InlineSearch
 import InlineUI
+import Logger
+import RealtimeV2
 import SwiftUI
 
 struct InlineSearchResultsList: View {
@@ -8,7 +10,12 @@ struct InlineSearchResultsList: View {
   let openChat: (InlineSearchChatResult) -> Void
   let openMessage: (LocalMessageSearchResult) -> Void
   let openGlobalUser: (InlineSearchGlobalUserResult) -> Void
-  let addToInbox: (Peer) -> Void
+
+  @EnvironmentObject private var dataManager: DataManager
+  @EnvironmentObject private var realtimeState: RealtimeState
+  @Environment(Router.self) private var router
+  @Environment(\.appDatabase) private var appDatabase
+  @Environment(\.realtimeV2) private var realtimeV2
 
   var body: some View {
     List {
@@ -16,14 +23,10 @@ struct InlineSearchResultsList: View {
         InlineSearchSectionHeader(title: "Chats")
 
         ForEach(model.chats) { result in
-          InlineSearchChatRow(result: result) {
-            openChat(result)
-          }
-          .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            if result.snapshot.item.dialog.open != true || result.archived {
-              addToInboxButton(peer: result.peer)
-            }
-          }
+          searchChatRow(for: result)
+            // Match the polished Home rows: spacing belongs inside the
+            // interactive source so hold highlighting lifts the whole cell.
+            .listRowInsets(EdgeInsets())
         }
       }
 
@@ -67,13 +70,212 @@ struct InlineSearchResultsList: View {
     .contentMargins(.bottom, 32, for: .scrollContent)
   }
 
-  private func addToInboxButton(peer: Peer) -> some View {
+  @ViewBuilder
+  private func searchChatRow(for result: InlineSearchChatResult) -> some View {
+    let row = InlineSearchChatRow(result: result) {
+      openChat(result)
+    }
+    .contentShape(.interaction, Rectangle())
+    .contentShape(.contextMenuPreview, Capsule())
+    .contextMenu {
+      chatContextMenuActions(for: result)
+    } preview: {
+      chatPreview(for: result)
+    }
+    .swipeActions(edge: .leading, allowsFullSwipe: false) {
+      pinSwipeButton(for: result)
+    }
+
+    row.swipeActions(edge: .trailing, allowsFullSwipe: true) {
+      openSwipeButton(for: result)
+      if result.peer.asUserId() == nil {
+        followSwipeButton(for: result)
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func chatContextMenuActions(for result: InlineSearchChatResult) -> some View {
     Button {
-      addToInbox(peer)
+      openInInbox(result)
+    } label: {
+      Label("Open", systemImage: "tray.and.arrow.down")
+      Text("Add to Open Chats")
+    }
+
+    Button {
+      updatePin(for: result)
+    } label: {
+      Label(
+        result.pinned ? "Unpin" : "Pin",
+        systemImage: result.pinned ? "pin.slash" : "pin"
+      )
+    }
+
+    if result.peer.asUserId() == nil {
+      Button {
+        updateFollow(for: result)
+      } label: {
+        Label(
+          isFollowed(result) ? "Unfollow" : "Follow",
+          systemImage: isFollowed(result) ? "eye.slash" : "eye"
+        )
+      }
+    }
+  }
+
+  private func pinSwipeButton(for result: InlineSearchChatResult) -> some View {
+    Button {
+      updatePin(for: result)
+    } label: {
+      Label(
+        result.pinned ? "Unpin" : "Pin",
+        systemImage: result.pinned ? "pin.slash.fill" : "pin.fill"
+      )
+    }
+    .tint(.indigo)
+  }
+
+  private func openSwipeButton(for result: InlineSearchChatResult) -> some View {
+    Button {
+      openInInbox(result)
     } label: {
       Label("Open", systemImage: "tray.and.arrow.down.fill")
     }
     .tint(.green)
+  }
+
+  private func followSwipeButton(for result: InlineSearchChatResult) -> some View {
+    Button {
+      updateFollow(for: result)
+    } label: {
+      Label(
+        isFollowed(result) ? "Unfollow" : "Follow",
+        systemImage: isFollowed(result) ? "eye.slash.fill" : "eye.fill"
+      )
+    }
+    .tint(.purple)
+  }
+
+  private func chatPreview(for result: InlineSearchChatResult) -> some View {
+    ChatView(
+      peer: result.peer,
+      contextSpaceId: result.spaceId,
+      onOpenSpace: { _ in },
+      preview: true
+    )
+    // Context-menu previews are hosted in a separate SwiftUI tree.
+    .environment(router)
+    .environmentObject(dataManager)
+    .environmentObject(realtimeState)
+    .environment(\.realtimeV2, realtimeV2)
+    .appDatabase(appDatabase)
+    .frame(idealWidth: 340, idealHeight: 480)
+  }
+
+  private func isOpen(_ result: InlineSearchChatResult) -> Bool {
+    result.snapshot.item.dialog.open == true && result.archived == false
+  }
+
+  private func isFollowed(_ result: InlineSearchChatResult) -> Bool {
+    result.snapshot.item.dialog.followMode == .following
+  }
+
+  private func addToInboxButton(peer: Peer) -> some View {
+    Button {
+      openInInbox(peer: peer)
+    } label: {
+      Label("Open", systemImage: "tray.and.arrow.down.fill")
+    }
+    .tint(.green)
+  }
+
+  private func openInInbox(_ result: InlineSearchChatResult) {
+    if isOpen(result) {
+      ToastManager.shared.showToast(
+        "Already open",
+        description: "This chat is already in Open Chats.",
+        type: .info,
+        systemImage: "bubble.left.fill"
+      )
+      return
+    }
+    openInInbox(peer: result.peer)
+  }
+
+  private func openInInbox(peer: Peer) {
+    Task(priority: .userInitiated) {
+      do {
+        let didPerform = try await InboxMembershipService.shared.open(peer: peer)
+        guard didPerform else { return }
+        model.refresh()
+        ToastManager.shared.showToast(
+          "Now in Open Chats",
+          type: .success,
+          systemImage: "bubble.left.fill"
+        )
+      } catch is CancellationError {
+        return
+      } catch {
+        Log.shared.error("Failed to add Search result to Inbox", error: error)
+        ToastManager.shared.showToast(
+          "Couldn’t open chat",
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
+        )
+      }
+    }
+  }
+
+  private func updatePin(for result: InlineSearchChatResult) {
+    Task(priority: .userInitiated) {
+      do {
+        _ = try await realtimeV2.send(.updateDialogOrder(
+          peerId: result.peer,
+          pinned: !result.pinned
+        ))
+        model.refresh()
+      } catch is CancellationError {
+        return
+      } catch {
+        Log.shared.error("Failed to update Search result pin state", error: error)
+        ToastManager.shared.showToast(
+          "Could not update pin",
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
+        )
+      }
+    }
+  }
+
+  private func updateFollow(for result: InlineSearchChatResult) {
+    let wasFollowed = isFollowed(result)
+    Task(priority: .userInitiated) {
+      do {
+        _ = try await realtimeV2.send(.updateDialogFollowMode(
+          peerId: result.peer,
+          selection: wasFollowed ? .unfollowed : .following
+        ))
+        model.refresh()
+        ToastManager.shared.showToast(
+          wasFollowed ? "Unfollowed" : "Following",
+          description: wasFollowed
+            ? "Only mentions and replies can bring this chat back."
+            : "New messages will appear in Open Chats.",
+          type: .success,
+          systemImage: wasFollowed ? "eye.slash.fill" : "eye.fill"
+        )
+      } catch is CancellationError {
+        return
+      } catch {
+        Log.shared.error("Failed to update Search result follow state", error: error)
+        ToastManager.shared.showToast(
+          "Could not update follow state",
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
+        )
+      }
+    }
   }
 }
 
@@ -104,19 +306,23 @@ private struct InlineSearchChatRow: View {
     Button(action: action) {
       InlineSearchResultRow(
         title: result.title,
-        subtitle: subtitle,
+        subtitle: nil,
         icon: {
           chatIcon
         }
       )
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.init(
+        top: 4,
+        leading: Theme.Layout.screenEdgeOpticalInset,
+        bottom: 4,
+        trailing: Theme.Layout.screenEdgeOpticalInset
+      ))
+      .contentShape(.interaction, Rectangle())
     }
     .buttonStyle(.plain)
-    .listRowInsets(.init(
-      top: 4,
-      leading: Theme.Layout.screenEdgeOpticalInset,
-      bottom: 4,
-      trailing: Theme.Layout.screenEdgeOpticalInset
-    ))
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .contentShape(.interaction, Rectangle())
   }
 
   @ViewBuilder
@@ -133,13 +339,6 @@ private struct InlineSearchChatRow: View {
         shape: .circle
       )
     }
-  }
-
-  private var subtitle: String? {
-    if result.preview.isEmpty == false {
-      return result.preview
-    }
-    return result.subtitle
   }
 }
 

@@ -180,8 +180,7 @@ struct HomeView: View {
           model: searchModel,
           openChat: openSearchChat,
           openMessage: openSearchMessage,
-          openGlobalUser: openSearchGlobalUser,
-          addToInbox: addSearchResultToInbox
+          openGlobalUser: openSearchGlobalUser
         )
       } else {
         ProgressView()
@@ -209,28 +208,6 @@ struct HomeView: View {
     }
   }
 
-  private func addSearchResultToInbox(_ peer: Peer) {
-    Task(priority: .userInitiated) {
-      do {
-        let didPerform = try await InboxMembershipService.shared.open(peer: peer)
-        guard didPerform else { return }
-        ToastManager.shared.showToast(
-          "Now in Open Chats",
-          type: .success,
-          systemImage: "bubble.left.fill"
-        )
-      } catch is CancellationError {
-        return
-      } catch {
-        Log.shared.error("Failed to add Search result to Inbox", error: error)
-        ToastManager.shared.showToast(
-          "Couldn’t open chat",
-          type: .error,
-          systemImage: "exclamationmark.triangle.fill"
-        )
-      }
-    }
-  }
 }
 
 extension UIViewController {
