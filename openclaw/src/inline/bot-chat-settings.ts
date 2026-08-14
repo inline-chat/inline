@@ -19,6 +19,7 @@ export type OpenClawBotChatSettingsOption = {
   value: string
   label: string
   description?: string
+  disabled?: boolean
 }
 
 export type OpenClawBotChatSettingsContext = {
@@ -26,6 +27,7 @@ export type OpenClawBotChatSettingsContext = {
   access: "full" | "readOnly" | "guideOnly"
   isReplyThread?: boolean
   currentModel?: string
+  activeModel?: string
   defaultModel?: string
   modelOptions?: OpenClawBotChatSettingsOption[]
   reasoningLevel?: string
@@ -81,6 +83,7 @@ function optionsRevision(options: OpenClawBotChatSettingsOption[] | undefined): 
     option.value,
     option.label,
     option.description ?? "",
+    String(option.disabled === true),
   ])
 }
 
@@ -115,16 +118,24 @@ export function buildOpenClawBotChatSettingsDocument(
   const runtimeItems: BotChatSettingsDocument["sections"][number]["items"] = []
 
   if (context.currentModel && modelOptions.length > 0) {
+    const currentModelUnavailable = modelOptions.some(
+      (option) => option.value === context.currentModel && option.disabled === true,
+    )
+    const modelDescription = context.activeModel && context.activeModel !== context.currentModel
+      ? `This session. Using backup ${context.activeModel} after ${context.currentModel} failed.`
+      : currentModelUnavailable
+        ? "This session. The selected model is unavailable in OpenClaw."
+        : "This session."
     runtimeItems.push({
       id: MODEL_ITEM_ID,
       label: "Model",
-      description: "This session.",
+      description: modelDescription,
       ...disabled,
       control: {
         oneofKind: "select",
         select: {
           value: context.currentModel,
-          options: modelOptions.map((option) => ({ ...option, disabled: false })),
+          options: modelOptions.map((option) => ({ ...option, disabled: option.disabled === true })),
         },
       },
     })
@@ -236,6 +247,7 @@ export function buildOpenClawBotChatSettingsDocument(
       context.access,
       context.isReplyThread ? "reply" : "top",
       context.currentModel ?? "",
+      context.activeModel ?? "",
       context.defaultModel ?? "",
       context.reasoningLevel ?? "",
       context.following == null ? "unknown" : String(context.following),
@@ -281,7 +293,13 @@ export async function invokeOpenClawBotChatSetting(params: {
 
   const selected = stringValue(params.value)
   if (params.itemId === MODEL_ITEM_ID) {
-    if (!selected || !params.context.modelOptions?.some((option) => option.value === selected) || !params.mutators.setModel) {
+    if (
+      !selected ||
+      !params.context.modelOptions?.some(
+        (option) => option.value === selected && option.disabled !== true,
+      ) ||
+      !params.mutators.setModel
+    ) {
       return openClawBotChatSettingsProblem(BotChatSettingsProblem_Code.INVALID_VALUE, "Model unavailable.", currentDocument)
     }
     await params.mutators.setModel(selected)

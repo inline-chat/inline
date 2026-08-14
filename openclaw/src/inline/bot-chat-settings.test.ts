@@ -65,6 +65,76 @@ describe("OpenClaw Bot Chat Settings", () => {
       .toContain("reply-threads")
   })
 
+  it("keeps the selected primary in the picker while describing an active backup", () => {
+    const document = buildOpenClawBotChatSettingsDocument({
+      ...context,
+      currentModel: "openai/gpt-5.5",
+      activeModel: "minimax/MiniMax-M2.7",
+      modelOptions: [
+        { value: "openai/gpt-5.5", label: "openai/gpt-5.5" },
+        { value: "minimax/MiniMax-M2.7", label: "minimax/MiniMax-M2.7" },
+      ],
+    })
+    const modelItem = document.sections[0]?.items[0]
+
+    expect(modelItem).toMatchObject({
+      id: "model",
+      description:
+        "This session. Using backup minimax/MiniMax-M2.7 after openai/gpt-5.5 failed.",
+      control: {
+        oneofKind: "select",
+        select: { value: "openai/gpt-5.5" },
+      },
+    })
+  })
+
+  it("keeps an unavailable current model visible but prevents selecting it", async () => {
+    const unavailableContext: OpenClawBotChatSettingsContext = {
+      ...context,
+      currentModel: "openai-codex/gpt-5.5",
+      modelOptions: [
+        {
+          value: "openai-codex/gpt-5.5",
+          label: "openai-codex/gpt-5.5",
+          disabled: true,
+        },
+        { value: "openai/gpt-5.5", label: "openai/gpt-5.5" },
+      ],
+    }
+    const document = buildOpenClawBotChatSettingsDocument(unavailableContext)
+    const setModel = vi.fn(async () => {})
+
+    expect(document.sections[0]?.items[0]).toMatchObject({
+      description: "This session. The selected model is unavailable in OpenClaw.",
+      control: {
+        oneofKind: "select",
+        select: {
+          value: "openai-codex/gpt-5.5",
+          options: [
+            { value: "openai-codex/gpt-5.5", disabled: true },
+            { value: "openai/gpt-5.5", disabled: false },
+          ],
+        },
+      },
+    })
+
+    const response = await invokeOpenClawBotChatSetting({
+      context: unavailableContext,
+      mutators: { setModel, resolveContext: async () => unavailableContext },
+      itemId: "model",
+      value: {
+        value: { oneofKind: "stringValue", stringValue: "openai-codex/gpt-5.5" },
+      },
+      documentRevision: document.revision,
+    })
+
+    expect(setModel).not.toHaveBeenCalled()
+    expect(response.result).toMatchObject({
+      oneofKind: "problem",
+      problem: { code: BotChatSettingsProblem_Code.INVALID_VALUE, message: "Model unavailable." },
+    })
+  })
+
   it("keeps chat controls writable while hiding an unauthorized global action", () => {
     const document = buildOpenClawBotChatSettingsDocument({
       ...context,

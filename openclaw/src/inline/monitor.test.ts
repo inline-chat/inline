@@ -8,6 +8,8 @@ import {
 
 const modelRuntimeMocks = vi.hoisted(() => ({
   buildModelsProviderData: vi.fn(),
+  hasAvailableAuthForProvider: vi.fn(),
+  loadModelCatalog: vi.fn(),
   resolveDefaultModelForAgent: vi.fn(),
   getSessionEntry: vi.fn(),
   patchSessionEntry: vi.fn(),
@@ -41,6 +43,8 @@ vi.mock("openclaw/plugin-sdk/agent-runtime", async () => {
   )
   return {
     ...actual,
+    hasAvailableAuthForProvider: modelRuntimeMocks.hasAvailableAuthForProvider,
+    loadModelCatalog: modelRuntimeMocks.loadModelCatalog,
     resolveDefaultModelForAgent: modelRuntimeMocks.resolveDefaultModelForAgent,
   }
 })
@@ -180,6 +184,21 @@ type MonitorSetup = {
         chatId: bigint
         actorUserId: bigint
         version: number
+      }
+    | {
+        kind: "bot.chatSettings.item.invoke"
+        requestId: bigint
+        chatId: bigint
+        actorUserId: bigint
+        version: number
+        itemId: string
+        value?: {
+          value: {
+            oneofKind: "stringValue"
+            stringValue: string
+          }
+        }
+        documentRevision: string
       }
   >
   chats: Record<string, {
@@ -419,6 +438,8 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       resolvedDefault: ref,
     }
   })
+  modelRuntimeMocks.hasAvailableAuthForProvider.mockReset().mockResolvedValue(true)
+  modelRuntimeMocks.loadModelCatalog.mockReset().mockResolvedValue([])
   modelRuntimeMocks.resolveDefaultModelForAgent.mockReset().mockImplementation(({ cfg }: any) => resolveMockModelRef(cfg))
   modelRuntimeMocks.getSessionEntry.mockReset().mockReturnValue(undefined)
   modelRuntimeMocks.patchSessionEntry.mockReset().mockImplementation(async ({ fallbackEntry, update }: any) => {
@@ -816,7 +837,10 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
           continue
         }
 
-        if (event.kind === "bot.chatSettings.request") {
+        if (
+          event.kind === "bot.chatSettings.request" ||
+          event.kind === "bot.chatSettings.item.invoke"
+        ) {
           yield event
           continue
         }
@@ -1191,6 +1215,482 @@ describe("inline/monitor", () => {
     })
 
     await handle.stop()
+  })
+
+  it("shows the selected primary and active automatic fallback in settings", async () => {
+    const harness = await setupMonitorHarness({
+      events: [{
+        kind: "bot.chatSettings.request",
+        requestId: 82n,
+        chatId: 7n,
+        actorUserId: 42n,
+        version: 1,
+      }],
+      chats: {
+        "7": { kind: "direct", title: "Alice", peerUserId: 42n },
+      },
+      runtimeConfig: {
+        agents: { defaults: { model: "openai/gpt-5.6-sol" } },
+      },
+    })
+    modelRuntimeMocks.getSessionEntry.mockReturnValue({
+      sessionId: "fallback-session",
+      updatedAt: Date.now(),
+      providerOverride: "minimax",
+      modelOverride: "MiniMax-M2.7",
+      modelOverrideSource: "auto",
+      modelOverrideFallbackOriginProvider: "openai",
+      modelOverrideFallbackOriginModel: "gpt-5.5",
+      modelProvider: "minimax",
+      model: "MiniMax-M2.7",
+    } as any)
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.answerBotChatSettings).toHaveBeenCalledTimes(1)
+    })
+    const response = harness.calls.answerBotChatSettings.mock.calls[0]?.[0]?.response
+    expect(response?.result.oneofKind).toBe("document")
+    const modelItem = response?.result.document.sections[0]?.items[0]
+    expect(modelItem).toMatchObject({
+      id: "model",
+      description:
+        "This session. Using backup minimax/MiniMax-M2.7 after openai/gpt-5.5 failed.",
+      control: {
+        oneofKind: "select",
+        select: { value: "openai/gpt-5.5" },
+      },
+    })
+
+    await handle.stop()
+  })
+
+  it("omits model choices whose OpenClaw provider authentication is unavailable", async () => {
+    const harness = await setupMonitorHarness({
+      events: [{
+        kind: "bot.chatSettings.request",
+        requestId: 821n,
+        chatId: 7n,
+        actorUserId: 42n,
+        version: 1,
+      }],
+      chats: {
+        "7": { kind: "direct", title: "Alice", peerUserId: 42n },
+      },
+      runtimeConfig: {
+        agents: { defaults: { model: "openai/gpt-5.5" } },
+      },
+    })
+    modelRuntimeMocks.buildModelsProviderData.mockResolvedValue({
+      byProvider: new Map([
+        ["openai", new Set(["gpt-5.5"])],
+        ["openai-codex", new Set(["gpt-5.5"])],
+      ]),
+      providers: ["openai", "openai-codex"],
+    })
+    modelRuntimeMocks.loadModelCatalog.mockResolvedValue([
+      { provider: "openai", id: "gpt-5.5", name: "gpt-5.5", api: "openai-responses" },
+      {
+        provider: "openai-codex",
+        id: "gpt-5.5",
+        name: "gpt-5.5",
+        api: "openai-chatgpt-responses",
+      },
+    ])
+    modelRuntimeMocks.hasAvailableAuthForProvider.mockImplementation(
+      async ({ provider }: { provider: string }) => provider !== "openai-codex",
+    )
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.answerBotChatSettings).toHaveBeenCalledTimes(1)
+    })
+    const response = harness.calls.answerBotChatSettings.mock.calls[0]?.[0]?.response
+    const options = response?.result.document.sections[0]?.items[0]?.control.select.options
+    expect(options).toEqual([
+      expect.objectContaining({ value: "openai/gpt-5.5", disabled: false }),
+    ])
+
+    await handle.stop()
+  })
+
+  it("includes Codex-routable OpenAI models when OAuth is available through Codex", async () => {
+    const harness = await setupMonitorHarness({
+      events: [{
+        kind: "bot.chatSettings.request",
+        requestId: 822n,
+        chatId: 7n,
+        actorUserId: 42n,
+        version: 1,
+      }],
+      chats: {
+        "7": { kind: "direct", title: "Alice", peerUserId: 42n },
+      },
+      runtimeConfig: {
+        agents: { defaults: { model: "openai/gpt-5.5" } },
+      },
+    })
+    modelRuntimeMocks.buildModelsProviderData.mockResolvedValue({
+      byProvider: new Map([
+        ["openai", new Set(["gpt-5.5", "gpt-5.6-sol", "gpt-5.4-mini", "gpt-4.1"])],
+      ]),
+      providers: ["openai"],
+    })
+    modelRuntimeMocks.loadModelCatalog.mockResolvedValue([
+      { provider: "openai", id: "gpt-5.5", api: "openai-responses" },
+      { provider: "openai", id: "gpt-5.6-sol", api: "openai-responses" },
+      { provider: "openai", id: "gpt-5.4-mini", api: "openai-responses" },
+      { provider: "openai", id: "gpt-4.1", api: "openai-responses" },
+    ])
+    modelRuntimeMocks.hasAvailableAuthForProvider.mockImplementation(
+      async ({ modelApi }: { modelApi?: string }) => modelApi === "openai-chatgpt-responses",
+    )
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.answerBotChatSettings).toHaveBeenCalledTimes(1)
+    })
+    const response = harness.calls.answerBotChatSettings.mock.calls[0]?.[0]?.response
+    const options = response?.result.document.sections[0]?.items[0]?.control.select.options
+    expect(options).toEqual([
+      expect.objectContaining({ value: "openai/gpt-5.5", disabled: false }),
+      expect.objectContaining({ value: "openai/gpt-5.4-mini", disabled: false }),
+      expect.objectContaining({ value: "openai/gpt-5.6-sol", disabled: false }),
+    ])
+    expect(modelRuntimeMocks.hasAvailableAuthForProvider).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "openai",
+        modelApi: "openai-chatgpt-responses",
+      }),
+    )
+
+    await handle.stop()
+  })
+
+  it("changes a reply-thread model through OpenClaw's command transaction", async () => {
+    const chats = {
+      "1068": { kind: "group" as const, title: "Exchange" },
+      "5376": {
+        kind: "group" as const,
+        title: "Boba test reply",
+        parentChatId: 1068n,
+        parentMessageId: 1798n,
+      },
+    }
+    const historyByChat = {
+      "1068": [{
+        id: 1798n,
+        date: 1_786_678_153n,
+        fromId: 14_800n,
+        message: "hey boba this is a test please reply",
+      }],
+    }
+    const runtimeConfig = {
+      agents: { defaults: { model: "openai/gpt-5.6-sol" } },
+    }
+    const configureCatalog = () => {
+      modelRuntimeMocks.buildModelsProviderData.mockResolvedValue({
+        byProvider: new Map([
+          ["openai", new Set(["gpt-5.6-sol"])],
+          ["minimax", new Set(["MiniMax-M3"])],
+        ]),
+        providers: ["openai", "minimax"],
+        resolvedDefault: { provider: "openai", model: "gpt-5.6-sol" },
+      })
+    }
+
+    const requestHarness = await setupMonitorHarness({
+      events: [{
+        kind: "bot.chatSettings.request",
+        requestId: 83n,
+        chatId: 5376n,
+        actorUserId: 14_800n,
+        version: 1,
+      }],
+      chats,
+      historyByChat,
+      runtimeConfig,
+    })
+    configureCatalog()
+    const requestHandle = await requestHarness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ groupPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    await waitFor(() => {
+      expect(requestHarness.calls.answerBotChatSettings).toHaveBeenCalledTimes(1)
+    })
+    const requestResponse = requestHarness.calls.answerBotChatSettings.mock.calls[0]?.[0]?.response
+    expect(requestResponse?.result.oneofKind).toBe("document")
+    const revision = requestResponse?.result.document.revision
+    expect(revision).toBeTypeOf("string")
+    await requestHandle.stop()
+
+    let selectedEntry: Record<string, unknown> | undefined
+    const mutationHarness = await setupMonitorHarness({
+      events: [{
+        kind: "bot.chatSettings.item.invoke",
+        requestId: 84n,
+        chatId: 5376n,
+        actorUserId: 14_800n,
+        version: 1,
+        itemId: "model",
+        value: {
+          value: {
+            oneofKind: "stringValue",
+            stringValue: "minimax/MiniMax-M3",
+          },
+        },
+        documentRevision: revision as string,
+      }],
+      chats,
+      historyByChat,
+      runtimeConfig,
+      dispatchReplyBlocker: ({ ctx }) => {
+        expect(ctx).toMatchObject({
+          BodyForCommands: "/model minimax/MiniMax-M3",
+          CommandBody: "/model minimax/MiniMax-M3",
+          SessionKey: "agent:main:inline:group:1068:thread:5376",
+          ParentSessionKey: "agent:main:inline:group:1068",
+          MessageThreadId: "5376",
+          CommandAuthorized: true,
+          CommandTurn: {
+            kind: "text-slash",
+            source: "text",
+            authorized: true,
+          },
+        })
+        selectedEntry = {
+          sessionId: "thread-session",
+          updatedAt: Date.now(),
+          providerOverride: "minimax",
+          modelOverride: "MiniMax-M3",
+          modelOverrideSource: "user",
+        }
+      },
+    })
+    configureCatalog()
+    modelRuntimeMocks.getSessionEntry.mockImplementation(() => selectedEntry as any)
+    const mutationHandle = await mutationHarness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ groupPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(mutationHarness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(mutationHarness.calls.answerBotChatSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestId: 84n,
+          response: expect.objectContaining({
+            result: expect.objectContaining({ oneofKind: "document" }),
+          }),
+        }),
+      )
+    })
+    const mutationResponse = mutationHarness.calls.answerBotChatSettings.mock.calls[0]?.[0]?.response
+    expect(mutationResponse?.result.document.sections[0]?.items[0]?.control).toMatchObject({
+      oneofKind: "select",
+      select: { value: "minimax/MiniMax-M3" },
+    })
+    expect(modelRuntimeMocks.patchSessionEntry).not.toHaveBeenCalled()
+
+    await mutationHandle.stop()
+  })
+
+  it("returns OpenClaw's command explanation when a model change does not stick", async () => {
+    const runtimeConfig = {
+      agents: { defaults: { model: "openai/gpt-5.5" } },
+    }
+    const configureCatalog = () => {
+      modelRuntimeMocks.buildModelsProviderData.mockResolvedValue({
+        byProvider: new Map([
+          ["openai", new Set(["gpt-5.5"])],
+          ["minimax", new Set(["MiniMax-M3"])],
+        ]),
+        providers: ["openai", "minimax"],
+      })
+    }
+    const requestHarness = await setupMonitorHarness({
+      events: [{
+        kind: "bot.chatSettings.request",
+        requestId: 841n,
+        chatId: 7n,
+        actorUserId: 42n,
+        version: 1,
+      }],
+      chats: {
+        "7": { kind: "direct", title: "Alice", peerUserId: 42n },
+      },
+      runtimeConfig,
+    })
+    configureCatalog()
+    const requestHandle = await requestHarness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    await waitFor(() => {
+      expect(requestHarness.calls.answerBotChatSettings).toHaveBeenCalledTimes(1)
+    })
+    const revision = requestHarness.calls.answerBotChatSettings.mock.calls[0]?.[0]
+      ?.response?.result?.document?.revision
+    await requestHandle.stop()
+
+    const mutationHarness = await setupMonitorHarness({
+      events: [{
+        kind: "bot.chatSettings.item.invoke",
+        requestId: 842n,
+        chatId: 7n,
+        actorUserId: 42n,
+        version: 1,
+        itemId: "model",
+        value: {
+          value: { oneofKind: "stringValue", stringValue: "minimax/MiniMax-M3" },
+        },
+        documentRevision: revision as string,
+      }],
+      chats: {
+        "7": { kind: "direct", title: "Alice", peerUserId: 42n },
+      },
+      runtimeConfig,
+      dispatchReplyPayload: {
+        text: "Model unavailable: MiniMax credentials are missing.",
+      },
+    })
+    configureCatalog()
+    const mutationHandle = await mutationHarness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(mutationHarness.calls.answerBotChatSettings).toHaveBeenCalledTimes(1)
+    })
+    const response = mutationHarness.calls.answerBotChatSettings.mock.calls[0]?.[0]?.response
+    expect(response?.result).toMatchObject({
+      oneofKind: "problem",
+      problem: {
+        message: "OpenClaw is missing credentials for this model. Configure the provider and try again.",
+      },
+    })
+
+    await mutationHandle.stop()
+  })
+
+  it("returns a concise authentication error when OpenClaw rejects a model change", async () => {
+    const runtimeConfig = {
+      agents: { defaults: { model: "openai/gpt-5.5" } },
+    }
+    const configureCatalog = () => {
+      modelRuntimeMocks.buildModelsProviderData.mockResolvedValue({
+        byProvider: new Map([
+          ["openai", new Set(["gpt-5.5", "gpt-5.4-mini"])],
+        ]),
+        providers: ["openai"],
+      })
+    }
+    const requestHarness = await setupMonitorHarness({
+      events: [{
+        kind: "bot.chatSettings.request",
+        requestId: 843n,
+        chatId: 7n,
+        actorUserId: 42n,
+        version: 1,
+      }],
+      chats: {
+        "7": { kind: "direct", title: "Alice", peerUserId: 42n },
+      },
+      runtimeConfig,
+    })
+    configureCatalog()
+    const requestHandle = await requestHarness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    await waitFor(() => {
+      expect(requestHarness.calls.answerBotChatSettings).toHaveBeenCalledTimes(1)
+    })
+    const revision = requestHarness.calls.answerBotChatSettings.mock.calls[0]?.[0]
+      ?.response?.result?.document?.revision
+    await requestHandle.stop()
+
+    const mutationHarness = await setupMonitorHarness({
+      events: [{
+        kind: "bot.chatSettings.item.invoke",
+        requestId: 844n,
+        chatId: 7n,
+        actorUserId: 42n,
+        version: 1,
+        itemId: "model",
+        value: {
+          value: { oneofKind: "stringValue", stringValue: "openai/gpt-5.4-mini" },
+        },
+        documentRevision: revision as string,
+      }],
+      chats: {
+        "7": { kind: "direct", title: "Alice", peerUserId: 42n },
+      },
+      runtimeConfig,
+      dispatchReplyBlocker: () => {
+        throw new Error("OpenAI OAuth token refresh failed (401): invalid_refresh_token secret detail")
+      },
+    })
+    configureCatalog()
+    const mutationHandle = await mutationHarness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(mutationHarness.calls.answerBotChatSettings).toHaveBeenCalledTimes(1)
+    })
+    const response = mutationHarness.calls.answerBotChatSettings.mock.calls[0]?.[0]?.response
+    expect(response?.result).toMatchObject({
+      oneofKind: "problem",
+      problem: {
+        message:
+          "OpenClaw authentication failed. Re-authenticate the model provider and try again.",
+      },
+    })
+
+    await mutationHandle.stop()
   })
 
   it("publishes connected and inbound transport status", async () => {
@@ -5789,8 +6289,15 @@ describe("inline/monitor", () => {
     })
 
     await waitFor(() => {
-      expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
-      expect(harness.calls.finalizeInboundContext).not.toHaveBeenCalled()
+      expect(harness.calls.dispatchReply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ctx: expect.objectContaining({
+            BodyForCommands: "/model openai/gpt-4.1",
+            SessionKey: "agent:main:inline:direct:42",
+            CommandAuthorized: true,
+          }),
+        }),
+      )
       expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
         8,
         expect.objectContaining({
@@ -5806,15 +6313,7 @@ describe("inline/monitor", () => {
     })
 
     expect(harness.calls.sendMessage).not.toHaveBeenCalled()
-    expect(modelRuntimeMocks.patchSessionEntry).toHaveBeenCalledWith(
-      expect.objectContaining({
-        replaceEntry: true,
-        preserveActivity: true,
-        fallbackEntry: expect.objectContaining({
-          sessionId: expect.any(String),
-        }),
-      }),
-    )
+    expect(modelRuntimeMocks.patchSessionEntry).not.toHaveBeenCalled()
 
     await handle.stop()
   })

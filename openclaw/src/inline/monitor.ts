@@ -29,7 +29,11 @@ import {
 } from "openclaw/plugin-sdk/channel-inbound"
 import {
   buildConfiguredModelCatalog,
+  hasAvailableAuthForProvider,
+  loadModelCatalog,
   resolveAgentConfig,
+  resolveAgentDir,
+  resolveAgentWorkspaceDir,
   resolveDefaultModelForAgent,
   resolveThinkingDefault,
 } from "openclaw/plugin-sdk/agent-runtime"
@@ -38,7 +42,6 @@ import {
   patchSessionEntry,
   resolveStorePath,
 } from "openclaw/plugin-sdk/session-store-runtime"
-import { applyModelOverrideToSessionEntry } from "openclaw/plugin-sdk/model-session-runtime"
 import { buildModelsProviderData } from "openclaw/plugin-sdk/models-provider-runtime"
 import { listSkillCommandsForAgents } from "openclaw/plugin-sdk/skill-commands-runtime"
 import { getPluginCommandSpecs } from "openclaw/plugin-sdk/plugin-runtime"
@@ -360,6 +363,52 @@ type InlineReplyPayload = {
   replyToId?: string
   channelData?: Record<string, unknown>
   isReasoning?: boolean
+}
+
+class OpenClawBotChatSettingsMutationError extends Error {}
+
+function classifyOpenClawBotSettingsError(error: unknown): string | undefined {
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === "string"
+      ? error
+      : ""
+  if (!message.trim()) return undefined
+  if (/invalid_refresh_token|oauth.{0,40}refresh|\b(?:401|unauthorized)\b/iu.test(message)) {
+    return "OpenClaw authentication failed. Re-authenticate the model provider and try again."
+  }
+  if (/rate.?limit|\b429\b|quota/iu.test(message)) {
+    return "The model provider is rate-limited or out of quota. Try again later or choose another model."
+  }
+  if (/credentials?.{0,40}(?:missing|not found)|(?:missing|no).{0,40}credentials?/iu.test(message)) {
+    return "OpenClaw is missing credentials for this model. Configure the provider and try again."
+  }
+  if (/model.{0,60}(?:unavailable|not found|unknown|not allowed)/iu.test(message)) {
+    return "The selected model is unavailable in OpenClaw. Choose another model or refresh settings."
+  }
+  if (/timed? out|timeout/iu.test(message)) {
+    return "OpenClaw timed out while updating this setting. Try again."
+  }
+  if (/\b403\b|forbidden|permission denied/iu.test(message)) {
+    return "OpenClaw denied this change. Check provider access and try again."
+  }
+  if (/ECONN|ENET|socket|network|gateway.{0,40}(?:closed|unreachable|unavailable)/iu.test(message)) {
+    return "OpenClaw’s gateway or model provider is unreachable. Check the connection and try again."
+  }
+  return undefined
+}
+
+function summarizeOpenClawCommandFailure(reply: string): string {
+  const classified = classifyOpenClawBotSettingsError(reply)
+  if (classified) return classified
+  const concise = reply
+    .replace(/[*_`]/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 220)
+  return concise
+    ? `OpenClaw rejected the model change: ${concise}`
+    : "OpenClaw did not apply the requested session model."
 }
 
 function buildInlineTypingDispatcherOptions(typingCallbacks?: InlineTypingCallbacks) {
@@ -1628,18 +1677,103 @@ function resolveInlineParentSessionKeyCandidate(
   const explicit = normalizeOptionalString(entry?.parentSessionKey)
   if (explicit && explicit !== sessionKey) return explicit
 
-  const inlineThreadMarker = ":inlineThread:"
+  const inlineThreadMarker = ":thread:"
   const markerIndex = sessionKey.lastIndexOf(inlineThreadMarker)
   if (markerIndex > 0) return sessionKey.slice(0, markerIndex)
 
   return undefined
 }
 
+type InlineSessionModelEntry = NonNullable<ReturnType<typeof getSessionEntry>>
+
+type InlineProviderModelRef = {
+  provider: string
+  model: string
+}
+
+function resolveInlineProviderModelRef(
+  providerValue: unknown,
+  modelValue: unknown,
+): InlineProviderModelRef | undefined {
+  let provider = normalizeOptionalString(providerValue)
+  let model = normalizeOptionalString(modelValue)
+  if (!model) return undefined
+
+  const slash = model.indexOf("/")
+  if (!provider && slash > 0 && slash < model.length - 1) {
+    provider = model.slice(0, slash)
+    model = model.slice(slash + 1)
+  } else if (provider && model.startsWith(`${provider}/`)) {
+    model = model.slice(provider.length + 1)
+  }
+
+  return provider && model ? { provider, model } : undefined
+}
+
+function resolveInlineFallbackModelContext(params: {
+  entry?: InlineSessionModelEntry
+  parentEntry?: InlineSessionModelEntry
+  defaultModel: InlineProviderModelRef
+  storedOverride?: InlineProviderModelRef | null
+}): {
+  selected: InlineProviderModelRef
+  activeFallback?: InlineProviderModelRef
+} {
+  const entryHasOverride = Boolean(
+    normalizeOptionalString(params.entry?.providerOverride) ||
+    normalizeOptionalString(params.entry?.modelOverride),
+  )
+  const parentHasOverride = Boolean(
+    normalizeOptionalString(params.parentEntry?.providerOverride) ||
+    normalizeOptionalString(params.parentEntry?.modelOverride),
+  )
+  const overrideEntry = entryHasOverride
+    ? params.entry
+    : parentHasOverride
+    ? params.parentEntry
+    : undefined
+  const fallbackEntry = overrideEntry?.modelOverrideSource === "auto" ||
+      (normalizeOptionalString(overrideEntry?.modelOverrideFallbackOriginProvider) &&
+        normalizeOptionalString(overrideEntry?.modelOverrideFallbackOriginModel))
+    ? overrideEntry
+    : undefined
+
+  const selected = fallbackEntry
+    ? resolveInlineProviderModelRef(
+        fallbackEntry.modelOverrideFallbackOriginProvider,
+        fallbackEntry.modelOverrideFallbackOriginModel,
+      ) ?? resolveInlineProviderModelRef(undefined, fallbackEntry.fallbackNoticeSelectedModel)
+        ?? params.defaultModel
+    : params.storedOverride ?? params.defaultModel
+  if (!fallbackEntry) return { selected }
+
+  const activeFallback = resolveInlineProviderModelRef(
+    params.entry?.modelProvider,
+    params.entry?.model,
+  ) ?? resolveInlineProviderModelRef(
+    fallbackEntry.providerOverride,
+    fallbackEntry.modelOverride,
+  ) ?? resolveInlineProviderModelRef(undefined, fallbackEntry.fallbackNoticeActiveModel)
+  if (
+    !activeFallback ||
+    (activeFallback.provider === selected.provider && activeFallback.model === selected.model)
+  ) {
+    return { selected }
+  }
+  return { selected, activeFallback }
+}
+
 function resolveInlineCommandMenuModelContext(params: {
   cfg: OpenClawConfig
   agentId: string
   sessionKey: string
-}): { provider?: string; model?: string; thinkingLevel?: string } {
+}): {
+  provider?: string
+  model?: string
+  activeProvider?: string
+  activeModel?: string
+  thinkingLevel?: string
+} {
   if (!params.sessionKey.trim()) {
     return {}
   }
@@ -1653,22 +1787,17 @@ function resolveInlineCommandMenuModelContext(params: {
       agentId: params.agentId,
       sessionKey: params.sessionKey,
       storePath,
-    })
+      readConsistency: "latest",
+    }) as InlineSessionModelEntry | undefined
     const thinkingLevel = normalizeOptionalString(entry?.thinkingLevel)
-    if (entry?.modelOverrideSource === "auto" && normalizeOptionalString(entry.modelOverride)) {
-      return {
-        provider: defaultModel.provider,
-        model: defaultModel.model,
-        ...(thinkingLevel ? { thinkingLevel } : {}),
-      }
-    }
     const parentSessionKey = resolveInlineParentSessionKeyCandidate(params.sessionKey, entry)
     const parentEntry = parentSessionKey
       ? getSessionEntry({
           agentId: params.agentId,
           sessionKey: parentSessionKey,
           storePath,
-        })
+          readConsistency: "latest",
+        }) as InlineSessionModelEntry | undefined
       : undefined
     const override = resolveStoredModelOverride({
       ...(entry ? { sessionEntry: entry } : {}),
@@ -1677,21 +1806,28 @@ function resolveInlineCommandMenuModelContext(params: {
       sessionKey: params.sessionKey,
       defaultProvider: defaultModel.provider,
     })
-    if (override?.model) {
-      return {
-        provider: override.provider || defaultModel.provider,
-        model: override.model,
-        ...(thinkingLevel ? { thinkingLevel } : {}),
-      }
-    }
-    const provider =
-      normalizeOptionalString(entry?.providerOverride) ??
-      normalizeOptionalString(entry?.modelProvider)
-    const model =
-      normalizeOptionalString(entry?.modelOverride) ?? normalizeOptionalString(entry?.model)
+    const modelContext = resolveInlineFallbackModelContext({
+      ...(entry ? { entry } : {}),
+      ...(parentEntry ? { parentEntry } : {}),
+      defaultModel,
+      ...(override?.model
+        ? {
+            storedOverride: {
+              provider: override.provider || defaultModel.provider,
+              model: override.model,
+            },
+          }
+        : {}),
+    })
     return {
-      ...(provider ? { provider } : {}),
-      ...(model ? { model } : {}),
+      provider: modelContext.selected.provider,
+      model: modelContext.selected.model,
+      ...(modelContext.activeFallback
+        ? {
+            activeProvider: modelContext.activeFallback.provider,
+            activeModel: modelContext.activeFallback.model,
+          }
+        : {}),
       ...(thinkingLevel ? { thinkingLevel } : {}),
     }
   } catch {
@@ -3020,6 +3156,32 @@ function buildInlineRecentHistoryLines(params: {
     .map((entry) => entry.line ?? entry.attachmentLine ?? entry.entityLine)
     .filter((line): line is string => Boolean(line))
     .slice(-params.maxLines)
+}
+
+const OPENAI_CODEX_RESPONSES_API = "openai-chatgpt-responses"
+// Mirrors OpenClaw's model-catalog visibility rule. The plugin SDK does not
+// export that predicate, so keep this union compatible with supported hosts.
+const OPENAI_CODEX_ROUTABLE_MODEL_IDS = new Set([
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+  "gpt-5.5",
+  "gpt-5.5-pro",
+  "gpt-5.4",
+  "gpt-5.4-codex",
+  "gpt-5.4-pro",
+  "gpt-5.4-mini",
+])
+
+function isCodexRoutableOpenAIModel(params: {
+  provider: string
+  model: string
+  modelApi: string | undefined
+}): boolean {
+  return params.provider.trim().toLowerCase() === "openai"
+    && params.modelApi !== undefined
+    && params.modelApi !== OPENAI_CODEX_RESPONSES_API
+    && OPENAI_CODEX_ROUTABLE_MODEL_IDS.has(params.model.trim().toLowerCase())
 }
 
 export async function monitorInlineProvider(params: {
@@ -4384,38 +4546,25 @@ export async function monitorInlineProvider(params: {
           await deliverModelPickerEdit(`❌ Model "${selection.provider}/${selection.model}" is not allowed.`, [])
         } else {
           try {
-            const storePath = core.channel.session.resolveStorePath(cfg.session?.store, {
-              agentId: route.agentId,
-            })
             const resolvedDefault = resolveDefaultModelForAgent({
               cfg,
               agentId: route.agentId,
             })
             const isDefaultSelection =
               selection.provider === resolvedDefault.provider && selection.model === resolvedDefault.model
-
-            await patchSessionEntry({
-              agentId: route.agentId,
-              sessionKey: inboundSessionKey,
-              storePath,
-              fallbackEntry: {
-                sessionId: inboundSessionKey,
-                updatedAt: Date.now(),
+            await setOpenClawSessionModel({
+              ingress: {
+                channelLabel: effectiveGroupTitle ?? chatInfo.title ?? String(effectiveChatId),
+                sessionKey: inboundSessionKey,
+                agentId: route.agentId,
+                effectiveChatId,
+                isReplyThread: replyThreadContext != null,
+                chatInfo,
               },
-              preserveActivity: true,
-              replaceEntry: true,
-              update: (entry) => {
-                const next = { ...entry }
-                applyModelOverrideToSessionEntry({
-                  entry: next,
-                  selection: {
-                    provider: selection.provider,
-                    model: selection.model,
-                    isDefault: isDefaultSelection,
-                  },
-                })
-                return next
-              },
+              actorUserId: msg.fromId,
+              chatId,
+              requestId: callbackActionEvent.interactionId,
+              selection: `${selection.provider}/${selection.model}`,
             })
 
             const actionText = isDefaultSelection
@@ -5754,38 +5903,87 @@ export async function monitorInlineProvider(params: {
     })
   }
 
+  type OpenClawBotSettingsModelCatalog = {
+    options: OpenClawBotChatSettingsOption[]
+    didLoad: boolean
+  }
   const botSettingsModelCatalogCache = new Map<string, {
     expiresAt: number
-    options: OpenClawBotChatSettingsOption[]
+    catalog: OpenClawBotSettingsModelCatalog
   }>()
-  const botSettingsModelCatalogLoads = new Map<string, Promise<OpenClawBotChatSettingsOption[]>>()
+  const botSettingsModelCatalogLoads = new Map<
+    string,
+    Promise<OpenClawBotSettingsModelCatalog>
+  >()
 
   const loadOpenClawBotSettingsModelCatalog = async (params: {
     cfg: OpenClawConfig
     agentId: string
-  }): Promise<OpenClawBotChatSettingsOption[]> => {
+  }): Promise<OpenClawBotSettingsModelCatalog> => {
     const options = new Map<string, OpenClawBotChatSettingsOption>()
     let timeout: ReturnType<typeof setTimeout> | undefined
     try {
-      const { byProvider, providers } = await Promise.race([
-        buildModelsProviderData(params.cfg, params.agentId),
+      const [{ byProvider, providers }, catalog] = await Promise.race([
+        Promise.all([
+          buildModelsProviderData(params.cfg, params.agentId),
+          loadModelCatalog({ config: params.cfg, readOnly: true }),
+        ]),
         new Promise<never>((_, reject) => {
           timeout = setTimeout(() => reject(new Error("model list timed out")), 5_000)
         }),
       ])
+      const modelApiByRef = new Map<string, string | undefined>(
+        catalog.map((entry) => [`${entry.provider}/${entry.id}`, entry.api] as const),
+      )
+      const agentDir = resolveAgentDir(params.cfg, params.agentId)
+      const workspaceDir = resolveAgentWorkspaceDir(params.cfg, params.agentId)
+      const authAvailability = new Map<string, Promise<boolean>>()
       for (const provider of [...providers].sort()) {
         for (const model of [...(byProvider.get(provider) ?? [])].sort()) {
           const value = `${provider}/${model}`
+          const modelApi = modelApiByRef.get(value)
+          const authKey = `${provider}\u0000${modelApi ?? ""}`
+          let hasAuth = authAvailability.get(authKey)
+          if (!hasAuth) {
+            hasAuth = hasAvailableAuthForProvider({
+              provider,
+              cfg: params.cfg,
+              agentDir,
+              workspaceDir,
+              ...(modelApi ? { modelApi } : {}),
+            })
+            authAvailability.set(authKey, hasAuth)
+          }
+          let isAvailable = await hasAuth
+          if (!isAvailable && isCodexRoutableOpenAIModel({ provider, model, modelApi })) {
+            const codexAuthKey = `${provider}\u0000${OPENAI_CODEX_RESPONSES_API}`
+            let hasCodexAuth = authAvailability.get(codexAuthKey)
+            if (!hasCodexAuth) {
+              hasCodexAuth = hasAvailableAuthForProvider({
+                provider,
+                cfg: params.cfg,
+                agentDir,
+                workspaceDir,
+                modelApi: OPENAI_CODEX_RESPONSES_API,
+              })
+              authAvailability.set(codexAuthKey, hasCodexAuth)
+            }
+            isAvailable = await hasCodexAuth
+          }
+          if (!isAvailable) continue
           options.set(value, { value, label: value })
-          if (options.size >= 100) return [...options.values()]
+          if (options.size >= 100) {
+            return { options: [...options.values()], didLoad: true }
+          }
         }
       }
+      return { options: [...options.values()], didLoad: true }
     } catch (error) {
       log?.warn(`inline agent settings model list unavailable: ${String(error)}`)
+      return { options: [], didLoad: false }
     } finally {
       if (timeout) clearTimeout(timeout)
     }
-    return [...options.values()]
   }
 
   const resolveOpenClawBotSettingsModelOptions = async (params: {
@@ -5795,10 +5993,10 @@ export async function monitorInlineProvider(params: {
   }): Promise<OpenClawBotChatSettingsOption[]> => {
     const startedAt = Date.now()
     const cached = botSettingsModelCatalogCache.get(params.agentId)
-    let catalogOptions: OpenClawBotChatSettingsOption[]
+    let catalog: OpenClawBotSettingsModelCatalog
     let cacheResult: "hit" | "miss" | "shared"
     if (cached && cached.expiresAt > Date.now()) {
-      catalogOptions = cached.options
+      catalog = cached.catalog
       cacheResult = "hit"
     } else {
       let load = botSettingsModelCatalogLoads.get(params.agentId)
@@ -5814,16 +6012,23 @@ export async function monitorInlineProvider(params: {
         }
         load.then(clearLoad, clearLoad)
       }
-      catalogOptions = await load
+      catalog = await load
       botSettingsModelCatalogCache.set(params.agentId, {
-        expiresAt: Date.now() + (catalogOptions.length > 0 ? 60_000 : 5_000),
-        options: catalogOptions,
+        expiresAt: Date.now() + (catalog.options.length > 0 ? 60_000 : 5_000),
+        catalog,
       })
     }
 
     const options = new Map<string, OpenClawBotChatSettingsOption>()
-    options.set(params.currentModel, { value: params.currentModel, label: params.currentModel })
-    for (const option of catalogOptions) {
+    const currentModelAvailable = catalog.options.some(
+      (option) => option.value === params.currentModel,
+    )
+    options.set(params.currentModel, {
+      value: params.currentModel,
+      label: params.currentModel,
+      ...(catalog.didLoad && !currentModelAvailable ? { disabled: true } : {}),
+    })
+    for (const option of catalog.options) {
       options.set(option.value, option)
       if (options.size >= 100) break
     }
@@ -5901,6 +6106,11 @@ export async function monitorInlineProvider(params: {
     const provider = modelContext.provider ?? defaultModel.provider
     const model = modelContext.model ?? defaultModel.model
     const currentModel = provider ? `${provider}/${model}` : model
+    const activeModel = modelContext.activeModel
+      ? modelContext.activeProvider
+        ? `${modelContext.activeProvider}/${modelContext.activeModel}`
+        : modelContext.activeModel
+      : undefined
     const defaultModelValue = defaultModel.provider
       ? `${defaultModel.provider}/${defaultModel.model}`
       : defaultModel.model
@@ -5930,6 +6140,7 @@ export async function monitorInlineProvider(params: {
         access: "full",
         isReplyThread: ingress.isReplyThread,
         currentModel,
+        ...(activeModel ? { activeModel } : {}),
         defaultModel: defaultModelValue,
         modelOptions,
         reasoningLevel,
@@ -5948,37 +6159,113 @@ export async function monitorInlineProvider(params: {
     }
   }
 
-  const setOpenClawSessionModel = async (
-    ingress: InlineSystemEventContext,
-    selection: string,
-  ): Promise<void> => {
-    const separator = selection.indexOf("/")
-    if (separator <= 0 || separator >= selection.length - 1) throw new Error("invalid model")
-    const provider = selection.slice(0, separator)
-    const model = selection.slice(separator + 1)
+  const dispatchOpenClawSettingsCommand = async (params: {
+    ingress: InlineSystemEventContext
+    actorUserId: bigint
+    chatId: bigint
+    requestId: bigint
+    command: string
+  }): Promise<string | undefined> => {
+    // The reply dispatcher owns OpenClaw's live session snapshot and command-side
+    // hooks. A direct session-store patch can update disk without changing the
+    // running session, which is the mismatch this path exists to prevent.
     const currentConfig = core.config.current() as OpenClawConfig
-    const storePath = resolveStorePath(currentConfig.session?.store, { agentId: ingress.agentId })
-    const resolvedDefault = resolveDefaultModelForAgent({ cfg: currentConfig, agentId: ingress.agentId })
-    await patchSessionEntry({
-      agentId: ingress.agentId,
-      sessionKey: ingress.sessionKey,
-      storePath,
-      fallbackEntry: { sessionId: ingress.sessionKey, updatedAt: Date.now() },
-      preserveActivity: true,
-      replaceEntry: true,
-      update: (entry) => {
-        const next = { ...entry }
-        applyModelOverrideToSessionEntry({
-          entry: next,
-          selection: {
-            provider,
-            model,
-            isDefault: provider === resolvedDefault.provider && model === resolvedDefault.model,
-          },
-        })
-        return next
+    const isGroup = params.ingress.chatInfo.kind !== "direct"
+    const ctx = core.channel.reply.finalizeInboundContext({
+      Body: params.command,
+      BodyForAgent: params.command,
+      BodyForCommands: params.command,
+      RawBody: params.command,
+      CommandBody: params.command,
+      From: isGroup
+        ? `inline:chat:${String(params.ingress.effectiveChatId)}`
+        : `inline:${String(params.actorUserId)}`,
+      To: `inline:${String(params.ingress.effectiveChatId)}`,
+      SessionKey: params.ingress.sessionKey,
+      AgentId: params.ingress.agentId,
+      AccountId: account.accountId,
+      ChatType: isGroup ? "group" : "direct",
+      SenderId: String(params.actorUserId),
+      MessageSid: `agent-settings:${String(params.requestId)}`,
+      Provider: CHANNEL_ID,
+      Surface: CHANNEL_ID,
+      ...(botUsername ? { BotUsername: botUsername } : {}),
+      ...(isGroup
+        ? {
+            GroupSubject: params.ingress.chatInfo.title ?? String(params.ingress.effectiveChatId),
+            WasMentioned: true,
+          }
+        : {}),
+      ...(params.ingress.isReplyThread
+        ? {
+            ParentSessionKey: resolveInlineParentSessionKeyCandidate(
+              params.ingress.sessionKey,
+              undefined,
+            ),
+            MessageThreadId: String(params.chatId),
+            ThreadParentId: String(params.ingress.effectiveChatId),
+          }
+        : {}),
+      CommandAuthorized: true,
+      CommandSource: "text",
+      CommandTurn: {
+        kind: "text-slash",
+        source: "text",
+        authorized: true,
+        body: params.command,
+      },
+      Timestamp: Date.now(),
+      OriginatingChannel: CHANNEL_ID,
+      OriginatingTo: `inline:${String(params.ingress.effectiveChatId)}`,
+    })
+    let replyText: string | undefined
+    await core.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
+      ctx,
+      cfg: currentConfig,
+      dispatcherOptions: {
+        deliver: async (payload: InlineReplyPayload) => {
+          const text = payload.text?.replace(/\s+/gu, " ").trim()
+          if (text) replyText = text.slice(0, 300)
+        },
       },
     })
+    return replyText
+  }
+
+  const setOpenClawSessionModel = async (params: {
+    ingress: InlineSystemEventContext
+    actorUserId: bigint
+    chatId: bigint
+    requestId: bigint
+    selection: string
+  }): Promise<void> => {
+    const separator = params.selection.indexOf("/")
+    if (separator <= 0 || separator >= params.selection.length - 1) {
+      throw new OpenClawBotChatSettingsMutationError("Choose a model from the available list.")
+    }
+    const commandReply = await dispatchOpenClawSettingsCommand({
+      ...params,
+      command: `/model ${params.selection}`,
+    })
+
+    const currentConfig = core.config.current() as OpenClawConfig
+    const applied = resolveInlineCommandMenuModelContext({
+      cfg: currentConfig,
+      agentId: params.ingress.agentId,
+      sessionKey: params.ingress.sessionKey,
+    })
+    const appliedValue = applied.model
+      ? applied.provider
+        ? `${applied.provider}/${applied.model}`
+        : applied.model
+      : ""
+    if (appliedValue !== params.selection) {
+      throw new OpenClawBotChatSettingsMutationError(
+        commandReply
+          ? summarizeOpenClawCommandFailure(commandReply)
+          : "OpenClaw did not apply the requested session model.",
+      )
+    }
   }
 
   const setOpenClawSessionReasoning = async (
@@ -6054,7 +6341,7 @@ export async function monitorInlineProvider(params: {
       runtime.error?.(`inline agent settings request failed: ${String(error)}`)
       response = openClawBotChatSettingsProblem(
         BotChatSettingsProblem_Code.FAILED,
-        "OpenClaw could not load settings.",
+        classifyOpenClawBotSettingsError(error) ?? "OpenClaw could not load settings.",
       )
     }
     await client.answerBotChatSettings({ requestId: event.requestId, response }).then(() => {
@@ -6103,7 +6390,13 @@ export async function monitorInlineProvider(params: {
         response = await invokeOpenClawBotChatSetting({
           context: resolved.context,
           mutators: {
-            setModel: (value) => setOpenClawSessionModel(ingress, value),
+            setModel: (value) => setOpenClawSessionModel({
+              ingress,
+              actorUserId: event.actorUserId,
+              chatId: event.chatId,
+              requestId: event.requestId,
+              selection: value,
+            }),
             setDefaultModel: () => setOpenClawDefaultModel(ingress, resolved.context.currentModel ?? ""),
             setReasoningLevel: (value) => setOpenClawSessionReasoning(ingress, value),
             setFollowing: async (value) => {
@@ -6153,7 +6446,10 @@ export async function monitorInlineProvider(params: {
       runtime.error?.(`inline agent settings update failed: ${String(error)}`)
       response = openClawBotChatSettingsProblem(
         BotChatSettingsProblem_Code.FAILED,
-        "OpenClaw could not update this setting.",
+        error instanceof OpenClawBotChatSettingsMutationError
+          ? error.message
+          : classifyOpenClawBotSettingsError(error) ??
+            "OpenClaw could not update this setting. Try again.",
       )
     }
     await client.answerBotChatSettings({ requestId: event.requestId, response }).then(() => {
