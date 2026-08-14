@@ -386,7 +386,13 @@ class MessageSizeCalculator {
       timeInContentFlow && emojiMessage && hasReactions && !reactionsOutsideBubble
     }
 
-    func hasSameConstraintShape(as other: LayoutPlans) -> Bool {
+    private var attachmentConstraintTopology: [(URLPreviewAttachmentLayout.Mode?, UrlPreviewLargeStyle?)] {
+      attachmentItems.map { item in
+        (item.urlPreview?.mode, item.urlPreview?.largeStyle)
+      }
+    }
+
+    func hasSameConstraintTopology(as other: LayoutPlans) -> Bool {
       hasText == other.hasText &&
         hasPhoto == other.hasPhoto &&
         hasVideo == other.hasVideo &&
@@ -398,12 +404,19 @@ class MessageSizeCalculator {
         hasDocument == other.hasDocument &&
         hasReactions == other.hasReactions &&
         hasAttachments == other.hasAttachments &&
-        attachmentItems.map { $0.size.height } == other.attachmentItems.map { $0.size.height } &&
+        attachmentConstraintTopology.elementsEqual(other.attachmentConstraintTopology) { lhs, rhs in
+          lhs.0 == rhs.0 && lhs.1 == rhs.1
+        } &&
         hasActionsRows == other.hasActionsRows &&
         hasTime == other.hasTime &&
         timeInContentFlow == other.timeInContentFlow &&
         reactionsOutsideBubble == other.reactionsOutsideBubble &&
         placesTimeAboveReactions == other.placesTimeAboveReactions
+    }
+
+    func hasSameConstraintShape(as other: LayoutPlans) -> Bool {
+      hasSameConstraintTopology(as: other) &&
+        attachmentItems.map { $0.size.height } == other.attachmentItems.map { $0.size.height }
     }
 
     // used as edge inset for content view stack
@@ -743,6 +756,7 @@ class MessageSizeCalculator {
     let hasReactions = message.reactions.count > 0
     let renderableAttachments = message.attachments.filter(\.isRenderableAttachment)
     let hasAttachments = !renderableAttachments.isEmpty
+    let hasURLPreviewAttachment = renderableAttachments.contains { $0.urlPreview != nil }
     let hasReplyThreadSummary = props.interactionMode != .threadAnchor && message.message.hasReplyThreadSummary
     let renderableActionRows = actionRows(for: message)
     let hasActionRows = !renderableActionRows.isEmpty
@@ -877,14 +891,20 @@ class MessageSizeCalculator {
       } else {
         Theme.documentViewWidth
       }
-      documentWidth = min(parentAvailableWidth, baseWidth)
+      let documentAvailableWidth = hasVoice
+        ? max(1, parentAvailableWidth - (bubbleContentHorizontalInset * 2))
+        : parentAvailableWidth
+      documentWidth = min(documentAvailableWidth, baseWidth)
     }
 
     // Calculate attachments width first if we have attachments
     var attachmentsWidth: CGFloat?
     if hasAttachments {
+      let attachmentAvailableWidth = hasURLPreviewAttachment
+        ? max(1, parentAvailableWidth - (bubbleContentHorizontalInset * 2))
+        : parentAvailableWidth
       attachmentsWidth = attachmentGroupWidth(
-        parentAvailableWidth: parentAvailableWidth,
+        parentAvailableWidth: attachmentAvailableWidth,
         style: .bubble
       )
     }
@@ -973,7 +993,7 @@ class MessageSizeCalculator {
     let textWidth = textSize?.width ?? 0.0
 
     // Update document width based on content (if we have a document with text)
-    if hasDocument, hasText, let currentDocumentWidth = documentWidth {
+    if hasDocument, !hasVoice, hasText, let currentDocumentWidth = documentWidth {
       // Document can expand to fit text content, but has minimum and maximum bounds
       let textWidthWithPadding = textWidth + (bubbleContentHorizontalInset * 2)
       documentWidth = max(currentDocumentWidth, min(parentAvailableWidth, textWidthWithPadding))
@@ -1192,36 +1212,12 @@ class MessageSizeCalculator {
     if hasAttachments, let attachmentsWidth {
       attachmentsPlan = LayoutPlan(size: .zero, spacing: .zero)
       attachmentsPlan!.size = NSSize(width: attachmentsWidth, height: 0)
-      let hasURLPreviewAttachment = renderableAttachments.contains { $0.urlPreview != nil }
       attachmentsPlan!.spacing = NSEdgeInsets(
         top: hasURLPreviewAttachment ? Theme.urlPreviewGroupSpacing : Theme.messageTextAndPhotoSpacing,
         left: bubbleContentHorizontalInset,
         bottom: hasURLPreviewAttachment ? Theme.urlPreviewGroupBottomSpacing : 4,
         right: bubbleContentHorizontalInset
       )
-
-      attachmentItemsPlans = renderableAttachments.enumerated().map { index, attachment in
-        var attachmentPlan = LayoutPlan(size: .zero, spacing: .zero)
-        let isLastAttachment = index == renderableAttachments.count - 1
-
-        // Handle different types of attachments
-        // External Task (Notion, Linear task, etc)
-        if let _ = attachment.externalTask {
-          attachmentPlan.size = NSSize(width: attachmentsWidth, height: Theme.externalTaskViewHeight)
-          attachmentPlan.spacing = .bottom(isLastAttachment ? 0 : Theme.messageAttachmentsSpacing)
-        } else if attachment.urlPreview != nil {
-          let urlPreviewPlan = URLPreviewAttachmentLayout.plan(for: attachment, width: attachmentsWidth)
-          attachmentPlan.size = urlPreviewPlan.size
-          attachmentPlan.urlPreview = urlPreviewPlan
-          attachmentPlan.spacing = .bottom(isLastAttachment ? 0 : Theme.messageAttachmentsSpacing)
-        }
-
-        // Add to total height
-        attachmentsPlan!.size.height += attachmentPlan.size.height
-        attachmentsPlan!.size.height += attachmentPlan.spacing.bottom
-
-        return attachmentPlan
-      }
     }
 
     // MARK: - Reply Thread Summary
@@ -1412,12 +1408,6 @@ class MessageSizeCalculator {
       }
       bubbleWidth = max(bubbleWidth, documentPlan.size.width + documentPlan.spacing.horizontalTotal)
     }
-    if let attachmentsPlan {
-      bubbleHeight += attachmentsPlan.size.height
-      bubbleHeight += attachmentsPlan.spacing.top // between text/reactions and attachments
-      bubbleHeight += attachmentsPlan.spacing.bottom
-      bubbleWidth = max(bubbleWidth, attachmentsPlan.size.width + attachmentsPlan.spacing.horizontalTotal)
-    }
     if let replyThreadSummaryPlan {
       bubbleHeight += replyThreadSummaryPlan.spacing.top
       bubbleHeight += replyThreadSummaryPlan.size.height
@@ -1448,6 +1438,61 @@ class MessageSizeCalculator {
     }
     if timeSharesReactionRow, let sharedReactionTimeWidth {
       bubbleWidth = max(bubbleWidth, sharedReactionTimeWidth)
+    }
+
+    // URL previews and voice are flexible bubble content. Resolve every fixed width first,
+    // then plan each flexible child once at the final inner width.
+    if let attachmentsPlan, hasURLPreviewAttachment {
+      bubbleWidth = max(
+        bubbleWidth,
+        attachmentsPlan.size.width + attachmentsPlan.spacing.horizontalTotal
+      )
+    }
+
+    if hasVoice, var resolvedDocumentPlan = documentPlan {
+      resolvedDocumentPlan.size.width = max(
+        1,
+        bubbleWidth - resolvedDocumentPlan.spacing.horizontalTotal
+      )
+      documentPlan = resolvedDocumentPlan
+    }
+
+    if var resolvedAttachmentsPlan = attachmentsPlan, let attachmentsWidth {
+      let resolvedAttachmentsWidth = hasURLPreviewAttachment
+        ? max(1, bubbleWidth - resolvedAttachmentsPlan.spacing.horizontalTotal)
+        : attachmentsWidth
+      resolvedAttachmentsPlan.size = NSSize(width: resolvedAttachmentsWidth, height: 0)
+
+      attachmentItemsPlans = renderableAttachments.enumerated().map { index, attachment in
+        var attachmentPlan = LayoutPlan(size: .zero, spacing: .zero)
+        let isLastAttachment = index == renderableAttachments.count - 1
+
+        if attachment.externalTask != nil {
+          // TODO: Make external-task cards flexible only when their fixed-height presentation
+          // contract is reviewed with its view; stretching them here would broaden this sizing fix.
+          attachmentPlan.size = NSSize(width: attachmentsWidth, height: Theme.externalTaskViewHeight)
+        } else if attachment.urlPreview != nil {
+          let urlPreviewPlan = URLPreviewAttachmentLayout.plan(
+            for: attachment,
+            width: resolvedAttachmentsWidth
+          )
+          attachmentPlan.size = urlPreviewPlan.size
+          attachmentPlan.urlPreview = urlPreviewPlan
+        }
+
+        attachmentPlan.spacing = .bottom(isLastAttachment ? 0 : Theme.messageAttachmentsSpacing)
+        resolvedAttachmentsPlan.size.height += attachmentPlan.size.height + attachmentPlan.spacing.bottom
+        return attachmentPlan
+      }
+
+      attachmentsPlan = resolvedAttachmentsPlan
+      bubbleHeight += resolvedAttachmentsPlan.size.height
+      bubbleHeight += resolvedAttachmentsPlan.spacing.top
+      bubbleHeight += resolvedAttachmentsPlan.spacing.bottom
+      bubbleWidth = max(
+        bubbleWidth,
+        resolvedAttachmentsPlan.size.width + resolvedAttachmentsPlan.spacing.horizontalTotal
+      )
     }
 
     if hasActionRows {

@@ -467,7 +467,8 @@ class MessageViewAppKit: NSView {
     let view = NSHostingView(rootView: VoiceMessageBubble(
       message: fullMessage.message,
       outgoing: usesOutgoingBubbleStyle,
-      maxWidth: Theme.voiceMessageViewWidth
+      maxWidth: props.layout.document?.size.width ?? Theme.voiceMessageViewWidth,
+      mode: .embeddedBubble
     ))
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
@@ -688,7 +689,8 @@ class MessageViewAppKit: NSView {
       voiceMessageView?.rootView = VoiceMessageBubble(
         message: fullMessage.message,
         outgoing: usesOutgoingBubbleStyle,
-        maxWidth: Theme.voiceMessageViewWidth
+        maxWidth: props.layout.document?.size.width ?? Theme.voiceMessageViewWidth,
+        mode: .embeddedBubble
       )
       desiredView = voiceMessageView
     } else {
@@ -3910,6 +3912,10 @@ class MessageViewAppKit: NSView {
       // disableTextRelayout: props.layout.singleLine // Quick hack to reduce such re-layouts
       disableTextRelayout: true
     )
+
+    if hasVoiceInDocumentSlot {
+      syncDocumentSlotView()
+    }
 
     // if hasReactions {
     updateReactionsSizes()

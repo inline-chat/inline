@@ -8,6 +8,7 @@ import SwiftUI
 public struct VoiceMessageBubble: View {
   public enum Mode {
     case bubble
+    case embeddedBubble
     case minimal
   }
 
@@ -61,6 +62,10 @@ public struct VoiceMessageBubble: View {
     outgoing ? .white.opacity(0.16) : .primary.opacity(0.06)
   }
 
+  private var usesBubbleMetrics: Bool {
+    mode != .minimal
+  }
+
   private var primaryTint: Color {
     outgoing ? .white : .accentColor
   }
@@ -74,35 +79,35 @@ public struct VoiceMessageBubble: View {
   }
 
   private var horizontalPadding: CGFloat {
-    mode == .bubble ? 8 : 0
+    usesBubbleMetrics ? 8 : 0
   }
 
   private var verticalPadding: CGFloat {
-    mode == .bubble ? 5 : 0
+    usesBubbleMetrics ? 5 : 0
   }
 
   private var controlSpacing: CGFloat {
-    mode == .bubble ? 8 : 6
+    usesBubbleMetrics ? 8 : 6
   }
 
   private var buttonSize: CGFloat {
-    mode == .bubble ? 28 : 24
+    usesBubbleMetrics ? 28 : 24
   }
 
   private var iconSize: CGFloat {
-    mode == .bubble ? 12 : 11
+    usesBubbleMetrics ? 12 : 11
   }
 
   private var waveformHeight: CGFloat {
-    mode == .bubble ? 18 : 14
+    usesBubbleMetrics ? 18 : 14
   }
 
   private var waveformTopPadding: CGFloat {
-    mode == .bubble ? 6 : 2
+    usesBubbleMetrics ? 6 : 2
   }
 
   private var waveformBarCount: Int {
-    mode == .bubble ? 48 : 42
+    usesBubbleMetrics ? 48 : 42
   }
 
   private var isDownloading: Bool {
