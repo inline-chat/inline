@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { and, eq } from "drizzle-orm"
 import { MessageEntity_Type } from "@inline-chat/protocol/core"
 import { db, schema } from "@in/server/db"
-import { deleteChat } from "@in/server/functions/messages.deleteChat"
+import { deleteChat, deleteEmptyUntitledThreadAfterClose } from "@in/server/functions/messages.deleteChat"
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import { setupTestLifecycle, testUtils } from "../setup"
 
@@ -72,6 +72,82 @@ describe("messages.deleteChat", () => {
       .from(schema.messages)
       .where(eq(schema.messages.globalId, backlinkMessageGlobalId))
     expect(backlinkMessages).toHaveLength(0)
+  })
+
+  test("conditionally deletes a closed empty anchored reply thread", async () => {
+    const currentUser = await testUtils.createUser("delete-closed-reply-thread-owner@example.com")
+    const parent = await testUtils.createChat(null, "Parent", "thread", false, currentUser.id)
+    const replyThread = await testUtils.createChat(null, "", "thread", false, currentUser.id)
+    if (!parent || !replyThread) {
+      throw new Error("Conditional delete test chats not created")
+    }
+
+    await testUtils.addParticipant(parent.id, currentUser.id)
+    await testUtils.addParticipant(replyThread.id, currentUser.id)
+    await db.insert(schema.messages).values({
+      chatId: parent.id,
+      messageId: 1,
+      fromId: currentUser.id,
+      text: "parent message",
+    })
+    await db
+      .update(schema.chats)
+      .set({ isUntitled: true, parentChatId: parent.id, parentMessageId: 1 })
+      .where(eq(schema.chats.id, replyThread.id))
+    await db.insert(schema.dialogs).values({
+      chatId: replyThread.id,
+      userId: currentUser.id,
+      open: false,
+    })
+
+    await deleteEmptyUntitledThreadAfterClose(
+      replyThread.id,
+      testUtils.functionContext({ userId: currentUser.id }),
+    )
+
+    const [savedReplyThread] = await db
+      .select()
+      .from(schema.chats)
+      .where(eq(schema.chats.id, replyThread.id))
+      .limit(1)
+    const [savedParentMessage] = await db
+      .select()
+      .from(schema.messages)
+      .where(and(eq(schema.messages.chatId, parent.id), eq(schema.messages.messageId, 1)))
+      .limit(1)
+
+    expect(savedReplyThread).toBeUndefined()
+    expect(savedParentMessage).toBeDefined()
+  })
+
+  test("conditional cleanup retains a closed thread that gained a message", async () => {
+    const currentUser = await testUtils.createUser("retain-active-closed-thread-owner@example.com")
+    const thread = await testUtils.createChat(null, "", "thread", false, currentUser.id)
+    if (!thread) {
+      throw new Error("Conditional retain test chat not created")
+    }
+
+    await testUtils.addParticipant(thread.id, currentUser.id)
+    await db.update(schema.chats).set({ isUntitled: true }).where(eq(schema.chats.id, thread.id))
+    await db.insert(schema.dialogs).values({
+      chatId: thread.id,
+      userId: currentUser.id,
+      open: false,
+    })
+    await db.insert(schema.messages).values({
+      chatId: thread.id,
+      messageId: 1,
+      fromId: currentUser.id,
+      text: "arrived before cleanup",
+    })
+
+    await deleteEmptyUntitledThreadAfterClose(
+      thread.id,
+      testUtils.functionContext({ userId: currentUser.id }),
+    )
+
+    const [savedThread] = await db.select().from(schema.chats).where(eq(schema.chats.id, thread.id)).limit(1)
+    expect(savedThread).toBeDefined()
   })
 })
 

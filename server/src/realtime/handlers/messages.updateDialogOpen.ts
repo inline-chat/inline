@@ -2,6 +2,7 @@ import { Method, UpdateDialogOpenInput, UpdateDialogOpenResult } from "@inline-c
 import { Functions } from "@in/server/functions"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import type { HandlerContext } from "@in/server/realtime/types"
+import { queueEmptyUntitledThreadDeletionAfterClose } from "@in/server/functions/messages.deleteChat"
 
 export const method = Method.UPDATE_DIALOG_OPEN
 
@@ -13,11 +14,25 @@ export const updateDialogOpen = async (
     throw RealtimeRpcError.PeerIdInvalid()
   }
 
-  return Functions.messages.updateDialogOpen(
+  const context = {
+    currentSessionId: handlerContext.sessionId,
+    currentUserId: handlerContext.userId,
+  }
+  const result = await Functions.messages.updateDialogOpen(
     { peerId: input.peerId, open: input.open, order: input.order },
-    {
-      currentSessionId: handlerContext.sessionId,
-      currentUserId: handlerContext.userId,
-    },
+    context,
   )
+
+  const chat = result.chat
+  const isEmptyUntitledThreadOwnedByCurrentUser =
+    chat?.peerId?.type.oneofKind === "chat" &&
+    chat.untitled === true &&
+    chat.createdBy === BigInt(handlerContext.userId) &&
+    chat.lastMsgId == null
+
+  if (!input.open && chat && isEmptyUntitledThreadOwnedByCurrentUser) {
+    queueEmptyUntitledThreadDeletionAfterClose(Number(chat.id), context)
+  }
+
+  return result
 }

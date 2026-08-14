@@ -2,6 +2,7 @@ import type { InputPeer, Peer, Update } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { chats, chatParticipants } from "@in/server/db/schema/chats"
 import { dialogs } from "@in/server/db/schema/dialogs"
+import { messages } from "@in/server/db/schema/messages"
 import { members } from "@in/server/db/schema/members"
 import { Log } from "@in/server/utils/log"
 import { ChatModel } from "@in/server/db/models/chats"
@@ -26,6 +27,18 @@ const log = new Log("functions.deleteChat")
  * Also deletes participants and dialogs for the chat.
  */
 export async function deleteChat(input: { peer: InputPeer }, context: FunctionContext): Promise<{}> {
+  return deleteChatWithOptions(input, context)
+}
+
+type DeleteChatOptions = {
+  requireEmptyUntitledAfterClose?: boolean
+}
+
+async function deleteChatWithOptions(
+  input: { peer: InputPeer },
+  context: FunctionContext,
+  options: DeleteChatOptions = {},
+): Promise<{}> {
   const { peer } = input
   const { currentUserId } = context
 
@@ -121,10 +134,36 @@ export async function deleteChat(input: { peer: InputPeer }, context: FunctionCo
 
     // Delete chat, participants, dialogs in a transaction
     try {
-      await db.transaction(async (tx) => {
+      const didDelete = await db.transaction(async (tx) => {
         const [lockedChat] = await tx.select().from(chats).where(eq(chats.id, chat.id)).for("update").limit(1)
         if (!lockedChat) {
           throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Chat not found", 404)
+        }
+
+        if (options.requireEmptyUntitledAfterClose) {
+          const [message] = await tx
+            .select({ messageId: messages.messageId })
+            .from(messages)
+            .where(eq(messages.chatId, lockedChat.id))
+            .limit(1)
+          const [currentDialog] = await tx
+            .select({ open: dialogs.open, pinned: dialogs.pinned })
+            .from(dialogs)
+            .where(and(eq(dialogs.chatId, lockedChat.id), eq(dialogs.userId, currentUserId)))
+            .limit(1)
+
+          const canDeleteClosedDraft =
+            lockedChat.type === "thread" &&
+            lockedChat.createdBy === currentUserId &&
+            lockedChat.isUntitled === true &&
+            (lockedChat.lastMsgId == null || lockedChat.lastMsgId === 0) &&
+            message == null &&
+            currentDialog?.open === false &&
+            currentDialog.pinned !== true
+
+          if (!canDeleteClosedDraft) {
+            return false
+          }
         }
 
         peerId = Encoders.peerFromChat(lockedChat, { currentUserId })
@@ -174,7 +213,14 @@ export async function deleteChat(input: { peer: InputPeer }, context: FunctionCo
         await tx.delete(chatParticipants).where(eq(chatParticipants.chatId, chat.id))
         await tx.delete(dialogs).where(eq(dialogs.chatId, chat.id))
         await tx.delete(chats).where(eq(chats.id, chat.id))
+
+        return true
       })
+
+      if (!didDelete) {
+        log.debug("Skipped conditional empty thread deletion", { chatId: chat.id, currentUserId })
+        return {}
+      }
 
       if (persistedUpdate && peerId) {
         const update: Update = {
@@ -213,4 +259,31 @@ export async function deleteChat(input: { peer: InputPeer }, context: FunctionCo
     }
     throw err
   }
+}
+
+export async function deleteEmptyUntitledThreadAfterClose(chatId: number, context: FunctionContext): Promise<{}> {
+  return deleteChatWithOptions(
+    {
+      peer: {
+        type: {
+          oneofKind: "chat",
+          chat: { chatId: BigInt(chatId) },
+        },
+      },
+    },
+    context,
+    { requireEmptyUntitledAfterClose: true },
+  )
+}
+
+export function queueEmptyUntitledThreadDeletionAfterClose(chatId: number, context: FunctionContext): void {
+  queueMicrotask(() => {
+    void deleteEmptyUntitledThreadAfterClose(chatId, context).catch((error) => {
+      log.error("Failed background deletion of empty untitled thread", {
+        chatId,
+        currentUserId: context.currentUserId,
+        error,
+      })
+    })
+  })
 }
