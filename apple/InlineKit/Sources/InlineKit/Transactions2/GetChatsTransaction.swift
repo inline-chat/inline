@@ -39,73 +39,75 @@ public struct GetChatsTransaction: Transaction2 {
     // Apply to database/UI
 
     do {
-      try await AppDatabase.shared.dbWriter.write { db in
-        // Save spaces
-        for space in result.spaces {
-          do {
-            let spaceModel = Space(from: space)
-            try spaceModel.save(db)
-          } catch {
-            Log.shared.error("Failed to save space", error: error)
-          }
-        }
-
-        // Save users
-        for user in result.users {
-          do {
-            _ = try User.save(db, user: user)
-          } catch {
-            Log.shared.error("Failed to save user", error: error)
-          }
-        }
-
-        // First save chats without lastMsgId to avoid foreign key constraint
-        var chatsToUpdate: [(Chat, Int64?)] = []
-        for chat in result.chats {
-          do {
-            var chatModel = Chat(from: chat)
-            let lastMsgId = chatModel.lastMsgId
-            chatModel.lastMsgId = nil // Temporarily remove lastMsgId
-            _ = try chatModel.saveFull(db)
-            chatsToUpdate.append((chatModel, lastMsgId))
-          } catch {
-            Log.shared.error("Failed to save chat", error: error)
-          }
-        }
-
-        // Save messages
-        for message in result.messages {
-          do {
-            _ = try Message.save(db, protocolMessage: message, publishChanges: false)
-          } catch {
-            Log.shared.error("Failed to save message", error: error)
-          }
-        }
-
-        // Now update chats with lastMsgId since messages exist
-        for (chat, lastMsgId) in chatsToUpdate {
-          do {
-            var updatedChat = chat
-            updatedChat.lastMsgId = lastMsgId
-            _ = try updatedChat.saveFull(db)
-          } catch {
-            Log.shared.error("Failed to update chat with lastMsgId", error: error)
-          }
-        }
-
-        // Save dialogs
-        for dialog in result.dialogs {
-          do {
-            try dialog.saveFull(db)
-          } catch {
-            Log.shared.error("Failed to save dialog", error: error)
-          }
-        }
+      let bucketStates = try await AppDatabase.shared.dbWriter.write { db in
+        try Self.applySnapshot(result, in: db)
       }
+      await Api.realtime.installSnapshotBucketStates(bucketStates)
     } catch {
-      Log.shared.error("Failed to save chats", error: error)
+      Log.shared.error("Failed to apply getChats snapshot", error: error)
       throw TransactionExecutionError.invalid
     }
+  }
+
+  static func applySnapshot(
+    _ result: InlineProtocol.GetChatsResult,
+    in db: Database
+  ) throws -> [BucketKey: BucketState] {
+    var bucketStates: [BucketKey: BucketState] = [:]
+
+    // Save spaces
+    for space in result.spaces {
+      let spaceModel = Space(from: space)
+      try spaceModel.save(db)
+      if space.hasSeq {
+        bucketStates[.space(id: space.id)] = try GRDBSyncStorage.seedSnapshotBucketState(
+          for: .space(id: space.id),
+          seq: Int64(space.seq),
+          in: db
+        )
+      }
+    }
+
+    // Save users
+    for user in result.users {
+      _ = try User.save(db, user: user)
+    }
+
+    // First save chats without lastMsgId to avoid foreign key constraint
+    var chatsToUpdate: [(Chat, Int64?)] = []
+    for chat in result.chats {
+      var chatModel = Chat(from: chat)
+      let lastMsgId = chatModel.lastMsgId
+      chatModel.lastMsgId = nil // Temporarily remove lastMsgId
+      _ = try chatModel.saveFull(db)
+      chatsToUpdate.append((chatModel, lastMsgId))
+      if chat.hasSeq {
+        bucketStates[.chat(peer: chat.peerID)] = try GRDBSyncStorage.seedSnapshotBucketState(
+          for: .chat(peer: chat.peerID),
+          seq: Int64(chat.seq),
+          in: db
+        )
+      }
+    }
+
+    // Save messages
+    for message in result.messages {
+      _ = try Message.save(db, protocolMessage: message, publishChanges: false)
+    }
+
+    // Now update chats with lastMsgId since messages exist
+    for (chat, lastMsgId) in chatsToUpdate {
+      var updatedChat = chat
+      updatedChat.lastMsgId = lastMsgId
+      _ = try updatedChat.saveFull(db)
+    }
+
+    // Save dialogs
+    for dialog in result.dialogs {
+      try dialog.saveFull(db)
+    }
+
+    return bucketStates
   }
 }
 

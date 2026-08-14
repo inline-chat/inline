@@ -70,13 +70,18 @@ public enum BucketKey: Sendable, Hashable {
 }
 
 public protocol SyncStorage: Sendable {
-  func getState() async -> SyncState
+  func getState() async throws -> SyncState
   @discardableResult
   func setState(_ state: SyncState) async -> Bool
 
-  func getBucketState(for key: BucketKey) async -> BucketState
+  func getBucketState(for key: BucketKey) async throws -> BucketState
   @discardableResult
   func setBucketState(for key: BucketKey, state: BucketState) async -> Bool
+
+  /// Advances a production cursor monotonically and returns the effective stored state.
+  /// A snapshot may have installed a newer cursor while a bucket actor was suspended.
+  func advanceBucketState(for key: BucketKey, state: BucketState) async -> BucketState?
+
   @discardableResult
   func removeBucketState(for key: BucketKey) async -> Bool
 

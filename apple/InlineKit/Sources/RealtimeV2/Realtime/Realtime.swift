@@ -1166,6 +1166,12 @@ public actor RealtimeV2 {
     await sync.clearSyncState()
   }
 
+  /// Reconciles already-created in-memory bucket actors with cursors committed by
+  /// an authoritative account snapshot.
+  public func installSnapshotBucketStates(_ states: [BucketKey: BucketState]) async {
+    await sync.installSnapshotBucketStates(states)
+  }
+
 #if DEBUG || DEBUG_BUILD
   public func runSyncDebugScenario(_ scenario: SyncDebugScenario) async -> SyncDebugScenarioResult {
     await sync.runDebugScenario(scenario)

@@ -138,12 +138,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       if MainWindowController.all.isEmpty {
         setupMainWindow()
       }
-      refetchSessionAfterActivationIfNeeded()
       return
     }
 
     restoreMainWindowAfterActivationIfNeeded()
-    refetchSessionAfterActivationIfNeeded()
   }
 
   private func registerMacGlobalSettings() {
@@ -180,11 +178,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     guard !hasVisibleWindows else { return }
 
     setupMainWindow()
-  }
-
-  @MainActor private func refetchSessionAfterActivationIfNeeded() {
-    guard dependencies.viewModel.topLevelRoute == .main else { return }
-    dependencies.session.refetchChats(dependencies: dependencies)
   }
 
   /// Bring Inline to the front and ensure the main window exists.

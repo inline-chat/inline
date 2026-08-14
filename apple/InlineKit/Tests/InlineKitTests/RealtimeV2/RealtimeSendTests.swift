@@ -1282,6 +1282,7 @@ private actor DependencyFailureTransport: Transport {
         } else if rpcCall.method == .getUpdatesState {
           var result = InlineProtocol.GetUpdatesStateResult()
           result.date = Int64(Date().timeIntervalSince1970)
+          result.seq = 0
 
           var rpcResult = InlineProtocol.RpcResult()
           rpcResult.reqMsgID = message.id
@@ -1629,6 +1630,18 @@ private actor SendTestSyncStorage: SyncStorage {
     return true
   }
 
+  func advanceBucketState(for key: BucketKey, state: BucketState) async -> BucketState? {
+    if let existing = bucketStates[key], existing.seq > state.seq {
+      return existing
+    }
+    let effective = BucketState(
+      date: max(bucketStates[key]?.date ?? 0, state.date),
+      seq: state.seq
+    )
+    bucketStates[key] = effective
+    return effective
+  }
+
   @discardableResult
   func removeBucketState(for key: BucketKey) async -> Bool {
     bucketStates.removeValue(forKey: key)
@@ -1638,7 +1651,13 @@ private actor SendTestSyncStorage: SyncStorage {
   @discardableResult
   func setBucketStates(states: [BucketKey: BucketState]) async -> Bool {
     for (key, state) in states {
-      bucketStates[key] = state
+      if let existing = bucketStates[key], existing.seq > state.seq {
+        continue
+      }
+      bucketStates[key] = BucketState(
+        date: max(bucketStates[key]?.date ?? 0, state.date),
+        seq: state.seq
+      )
     }
     return true
   }

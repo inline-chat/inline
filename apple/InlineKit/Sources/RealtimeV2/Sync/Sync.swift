@@ -152,9 +152,9 @@ public enum SyncDebugScenario: String, CaseIterable, Identifiable, Sendable {
       case .clearStateAndFetch:
         "Clears global and bucket cursors, then runs normal discovery from a cold local state."
       case .seedZeroDateAndFetch:
-        "Stores lastSyncDate=0 so the next discovery exercises bounded cold-start lookback."
+        "Clears the global checkpoint so the next discovery requests a fresh current checkpoint."
       case .seedStaleDateAndFetch:
-        "Stores a 15-day-old global cursor so discovery exercises stale-state repair."
+        "Stores a 15-day-old global cursor so discovery runs from the real persisted date."
       case .rewindTrackedBucketsAndFetch:
         "Moves currently tracked bucket cursors back and queues catch-up for those buckets."
     }
@@ -190,10 +190,16 @@ public struct SyncDebugScenarioResult: Sendable {
 #endif
 
 actor Sync {
+  private enum StateFetchAttemptError: Error {
+    case invalidResponse
+    case invalidDate
+    case missingUserSequence
+    case userCheckpointWriteFailed
+    case globalCheckpointWriteFailed
+  }
+
   private static let getUpdatesStateTimeout: Duration = .seconds(15)
   private static let getUpdatesStateRetryDelays: [Duration] = [.seconds(1), .seconds(2), .seconds(5)]
-  private static let initialSyncStateLookbackSeconds: Int64 = 5 * 24 * 60 * 60
-  private static let staleSyncStateMaxAgeSeconds: Int64 = 14 * 24 * 60 * 60
   private static let chatRepairTimeout: Duration = .seconds(20)
   private static let chatRepairHistoryLimit: Int32 = 50
 
@@ -208,6 +214,8 @@ actor Sync {
   private var stats: SyncStats = .empty
   private var activeBucketFetches = 0
   private var isSyncActivityActive = false
+  private var isStateFetchInFlight = false
+  private var isStateFetchPending = false
   private var syncActivityListener: (@Sendable (Bool) async -> Void)?
 
   private var buckets: [BucketKey: BucketActor] = [:]
@@ -324,8 +332,8 @@ actor Sync {
 
     switch state {
       case .connected:
-        // Always fetch user bucket on connection to catch up on personal events (kicks, bans, new dialogs)
-        fetchUserBucket()
+        // Resolve the global checkpoint first. A fresh account installs the current
+        // user sequence; an existing account then catches that bucket up incrementally.
         getStateFromServer()
 
       case .connecting:
@@ -343,14 +351,25 @@ actor Sync {
   }
 
   /// Save bucket state to storage after successful update application
-  @discardableResult
-  func saveBucketState(for key: BucketKey, seq: Int64, date: Int64) async -> Bool {
+  func saveBucketState(for key: BucketKey, seq: Int64, date: Int64) async -> BucketState? {
     log.trace("saving bucket state for \(key): seq=\(seq), date=\(date)")
-    let saved = await syncStorage.setBucketState(for: key, state: BucketState(date: date, seq: seq))
-    if !saved {
+    let saved = await syncStorage.advanceBucketState(
+      for: key,
+      state: BucketState(date: date, seq: seq)
+    )
+    if saved == nil {
       log.error("failed to save bucket state for \(key): seq=\(seq), date=\(date)")
     }
     return saved
+  }
+
+  func installSnapshotBucketStates(_ states: [BucketKey: BucketState]) async {
+    guard acceptsWork, !isResetting else { return }
+    for (key, state) in states {
+      if let actor = buckets[key] {
+        await actor.installSnapshotState(state)
+      }
+    }
   }
 
   func discardBucketState(for key: BucketKey) async {
@@ -449,6 +468,8 @@ actor Sync {
       task.cancel()
     }
     stats = .empty
+    isStateFetchInFlight = false
+    isStateFetchPending = false
     await invalidateAllBuckets()
     for task in tasks {
       await task.value
@@ -463,8 +484,9 @@ actor Sync {
 
   func getStats() async -> SyncStats {
     var snapshot = stats
-    let state = await syncStorage.getState()
-    snapshot.lastSyncDate = state.lastSyncDate
+    if let state = try? await syncStorage.getState() {
+      snapshot.lastSyncDate = state.lastSyncDate
+    }
     let bucketSnapshots = await getBucketSnapshots()
     snapshot.buckets = bucketSnapshots
     snapshot.bucketsTracked = bucketSnapshots.count
@@ -553,7 +575,10 @@ actor Sync {
           guard let actor = buckets[snapshot.key] else { continue }
           let newSeq = max(0, snapshot.seq - 25)
           let newDate = max(0, snapshot.date - 60 * 60)
-          let saved = await saveBucketState(for: snapshot.key, seq: newSeq, date: newDate)
+          let saved = await syncStorage.setBucketState(
+            for: snapshot.key,
+            state: BucketState(date: newDate, seq: newSeq)
+          )
           guard saved else { continue }
           await actor.debugRewindState(seq: newSeq, date: newDate)
           rewound += 1
@@ -576,7 +601,6 @@ actor Sync {
   }
 
   private func queueDebugDiscovery() {
-    fetchUserBucket()
     getStateFromServer()
   }
 #endif
@@ -618,7 +642,13 @@ actor Sync {
     if let bucketActor = buckets[key] {
       return bucketActor
     }
-    let bucketState = await syncStorage.getBucketState(for: key)
+    let bucketState: BucketState
+    do {
+      bucketState = try await syncStorage.getBucketState(for: key)
+    } catch {
+      log.error("failed to load sync bucket state for \(key): \(error)")
+      return nil
+    }
     guard isCurrent(expectedGeneration) else { return nil }
     if let bucketActor = buckets[key] {
       return bucketActor
@@ -650,12 +680,25 @@ actor Sync {
 
   /// Get the state from the server
   private func getStateFromServer() {
-    launchRootTask { sync, generation in
+    guard !isStateFetchInFlight else {
+      isStateFetchPending = true
+      log.trace("getUpdatesState already in flight")
+      return
+    }
+    let launched = launchRootTask { sync, generation in
       await sync.fetchStateFromServerWithRetry(generation: generation)
     }
+    isStateFetchInFlight = launched
   }
 
   private func fetchStateFromServerWithRetry(generation expectedGeneration: UInt64) async {
+    defer {
+      isStateFetchInFlight = false
+      if isStateFetchPending {
+        isStateFetchPending = false
+        getStateFromServer()
+      }
+    }
     guard isCurrent(expectedGeneration) else { return }
     guard let client else {
       log.error("client is nil")
@@ -663,6 +706,10 @@ actor Sync {
     }
 
     guard let state = await preparedSyncState(generation: expectedGeneration) else { return }
+    let isFreshCheckpoint = state.lastSyncDate == 0
+    if !isFreshCheckpoint {
+      fetchUserBucket()
+    }
     let maxAttempts = Self.getUpdatesStateRetryDelays.count + 1
     let totalStartedAt = Date()
     PerformanceTrace.breadcrumb(
@@ -687,25 +734,48 @@ actor Sync {
         // but the primary mechanism for sync is the server pushing 'hasNewUpdates'
         // events in response to this call (or as part of the result).
         let result = try await client.callRpc(method: .getUpdatesState, input: .getUpdatesState(.with {
-          $0.date = state.lastSyncDate
+          if !isFreshCheckpoint {
+            $0.date = state.lastSyncDate
+          }
         }), timeout: Self.getUpdatesStateTimeout)
+        guard isCurrent(expectedGeneration), !Task.isCancelled else { return }
+        guard case let .getUpdatesState(payload) = result else {
+          throw StateFetchAttemptError.invalidResponse
+        }
+        guard payload.date > 0 else {
+          throw StateFetchAttemptError.invalidDate
+        }
+        log.trace("sent get updates state request with date: \(state.lastSyncDate)")
+        log.trace(
+          "received get updates state date: \(payload.date), updatesFound=\(payload.hasUpdatesFound ? String(payload.updatesFound) : "unknown")"
+        )
+        if isFreshCheckpoint {
+          guard payload.hasSeq else {
+            throw StateFetchAttemptError.missingUserSequence
+          }
+          guard let seededUser = await syncStorage.advanceBucketState(
+            for: .user,
+            state: BucketState(date: payload.date, seq: Int64(payload.seq))
+          ) else {
+            throw StateFetchAttemptError.userCheckpointWriteFailed
+          }
+          await installSnapshotBucketStates([.user: seededUser])
+          let seededGlobal = await syncStorage.setState(SyncState(lastSyncDate: payload.date))
+          guard seededGlobal else {
+            throw StateFetchAttemptError.globalCheckpointWriteFailed
+          }
+          stats.lastSyncDate = payload.date
+        } else if payload.hasUpdatesFound, !payload.updatesFound {
+          await updateLastSyncDate(
+            maxAppliedDate: payload.date,
+            source: "getUpdatesState:empty",
+            generation: expectedGeneration
+          )
+        }
         guard isCurrent(expectedGeneration), !Task.isCancelled else { return }
         span.end(
           "attempt=\(attempt) success=true duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: attemptStartedAt))"
         )
-        log.trace("sent get updates state request with date: \(state.lastSyncDate)")
-        if case let .getUpdatesState(payload) = result {
-          log.trace(
-            "received get updates state date: \(payload.date), updatesFound=\(payload.hasUpdatesFound ? String(payload.updatesFound) : "unknown")"
-          )
-          if payload.hasUpdatesFound, !payload.updatesFound {
-            await updateLastSyncDate(
-              maxAppliedDate: payload.date,
-              source: "getUpdatesState:empty",
-              generation: expectedGeneration
-            )
-          }
-        }
         PerformanceTrace.breadcrumb(
           "sync state check completed",
           category: "sync.lifecycle",
@@ -744,33 +814,14 @@ actor Sync {
 
   private func preparedSyncState(generation expectedGeneration: UInt64) async -> SyncState? {
     guard isCurrent(expectedGeneration) else { return nil }
-    var state = await syncStorage.getState()
-    guard isCurrent(expectedGeneration) else { return nil }
-
-    // Handle uninitialized or too old state
-    let now = Int64(Date().timeIntervalSince1970)
-
-    if state.lastSyncDate == 0 {
-      // Temporary rollout safety: when sync state is missing, ask the server for the past 5 days so
-      // we re-trigger buckets that may have changed while clients upgrade. Once all clients run the
-      // new sync engine we can narrow or remove this lookback window.
-      let seedDate = max(0, now - Self.initialSyncStateLookbackSeconds)
-      log.info("Sync state uninitialized (date=0). Seeding lookback to \(seedDate) (5 days ago)")
-      state = SyncState(lastSyncDate: seedDate)
-      if await syncStorage.setState(state) == false {
-        log.error("failed to persist initialized sync lookback state: \(seedDate)")
-      }
-      guard isCurrent(expectedGeneration) else { return nil }
-    } else if now - state.lastSyncDate > Self.staleSyncStateMaxAgeSeconds {
-      let seedDate = max(0, now - Self.initialSyncStateLookbackSeconds)
-      log.warning("Sync state too old (> 14 days). Seeding bounded lookback to \(seedDate) (5 days ago)")
-      state = SyncState(lastSyncDate: seedDate)
-      if await syncStorage.setState(state) == false {
-        log.error("failed to persist stale sync lookback state: \(seedDate)")
-      }
-      guard isCurrent(expectedGeneration) else { return nil }
+    let state: SyncState
+    do {
+      state = try await syncStorage.getState()
+    } catch {
+      log.error("failed to load global sync state: \(error)")
+      return nil
     }
-
+    guard isCurrent(expectedGeneration) else { return nil }
     return state
   }
 
@@ -903,7 +954,13 @@ actor Sync {
 
     let gap = config.lastSyncSafetyGapSeconds
     let proposed = max(0, maxAppliedDate - gap)
-    let currentState = await syncStorage.getState()
+    let currentState: SyncState
+    do {
+      currentState = try await syncStorage.getState()
+    } catch {
+      log.error("failed to load global sync state before advancing from \(source): \(error)")
+      return
+    }
     if let expectedGeneration, !isCurrent(expectedGeneration) { return }
 
     guard proposed > currentState.lastSyncDate else {
@@ -928,10 +985,11 @@ actor Sync {
     )
   }
 
+  @discardableResult
   private func launchRootTask(
     _ operation: @escaping @Sendable (Sync, UInt64) async -> Void
-  ) {
-    guard acceptsWork, !isResetting else { return }
+  ) -> Bool {
+    guard acceptsWork, !isResetting else { return false }
     let id = UUID()
     let expectedGeneration = generation
     let task = Task { [weak self] in
@@ -940,6 +998,7 @@ actor Sync {
       await self.finishRootTask(id)
     }
     rootTasks[id] = task
+    return true
   }
 
   private func finishRootTask(_ id: UUID) {
@@ -1179,6 +1238,19 @@ actor BucketActor {
     self.client = client
     self.sync = sync
     self.fetchLimiter = fetchLimiter
+  }
+
+  /// Advances an already-created actor when an authoritative account snapshot
+  /// installs a newer resource cursor in GRDB.
+  func installSnapshotState(_ state: BucketState) {
+    guard !isInvalidated, state.seq > seq else { return }
+    seq = state.seq
+    date = max(date, state.date)
+    clearPendingCatchupBatch()
+    bufferedRealtimeUpdates = bufferedRealtimeUpdates.filter { $0.key > state.seq }
+    if let fetchSeqEnd, state.seq >= fetchSeqEnd {
+      self.fetchSeqEnd = nil
+    }
   }
 
   /// Determines if an update should be processed based on its type during sync catch-up.
@@ -1440,7 +1512,7 @@ actor BucketActor {
       bufferedRealtimeUpdates.removeValue(forKey: Int64(update.seq))
     }
     let saved = await sync.saveBucketState(for: key, seq: nextSeq, date: nextDate)
-    guard saved else {
+    guard let saved else {
       PerformanceTrace.breadcrumb(
         "realtime drain bucket state save failed",
         category: "sync.realtime",
@@ -1454,9 +1526,10 @@ actor BucketActor {
       return false
     }
 
-    seq = nextSeq
-    date = nextDate
-    if let fetchSeqEnd, nextSeq >= fetchSeqEnd {
+    seq = saved.seq
+    date = saved.date
+    bufferedRealtimeUpdates = bufferedRealtimeUpdates.filter { $0.key > saved.seq }
+    if let fetchSeqEnd, saved.seq >= fetchSeqEnd {
       self.fetchSeqEnd = nil
     }
     let maxAppliedDate = maxUpdateDate(in: contiguous)
@@ -1643,10 +1716,10 @@ actor BucketActor {
     // to fetch up to that boundary, then restore `hardEndSeq` (if any) and continue.
     var sliceEndSeq: Int64? = nil
 
-    // On a cold start (no seq/date), attempt a small catch-up instead of immediately fast-forwarding.
+    // On a cold start (no sequence), attempt a small catch-up instead of immediately fast-forwarding.
     // We cap the first request to avoid pulling large history. If a chat bucket reports TOO_LONG,
     // continue with bounded slices rather than marking stale history as caught up.
-    let isColdStart = seq == 0 || date == 0
+    let isColdStart = seq == 0
     let coldStartTotalLimit: Int32 = 50
 
     do {
@@ -1998,7 +2071,7 @@ actor BucketActor {
         committedDate = max(date, bufferedMaxDate)
       }
       let saved = await sync.saveBucketState(for: key, seq: committedSeq, date: committedDate)
-      guard saved else {
+      guard let saved else {
         PerformanceTrace.breadcrumb(
           "sync bucket state save failed",
           category: "sync.catchup",
@@ -2012,19 +2085,20 @@ actor BucketActor {
         return false
       }
 
-      seq = committedSeq
-      date = committedDate
+      seq = saved.seq
+      date = saved.date
+      bufferedRealtimeUpdates = bufferedRealtimeUpdates.filter { $0.key > saved.seq }
 
       if maxAppliedDate > 0 {
         await sync.updateLastSyncDate(maxAppliedDate: maxAppliedDate, source: "bucket:\(key)")
       }
 
-      if let fetchSeqEnd, committedSeq >= fetchSeqEnd {
+      if let fetchSeqEnd, saved.seq >= fetchSeqEnd {
         self.fetchSeqEnd = nil
       }
 
       log.debug(
-        "completed fetch for bucket \(key): applied \(totalFetched) updates, skipped \(totalSkipped), new seq=\(committedSeq)"
+        "completed fetch for bucket \(key): applied \(totalFetched) updates, skipped \(totalSkipped), new seq=\(saved.seq)"
       )
       resultLabel = "success"
 
@@ -2231,16 +2305,16 @@ actor BucketActor {
     let bufferedMaxDate = await applyBufferedRealtimeUpdates(upTo: targetSeq, reason: "repair:\(reason)")
     let committedDate = max(targetDate, bufferedMaxDate)
     let saved = await sync.saveBucketState(for: key, seq: targetSeq, date: committedDate)
-    guard saved else {
+    guard let saved else {
       log.error("failed to save bucket state after chat repair for \(key): seq=\(targetSeq), date=\(committedDate)")
       return false
     }
 
-    seq = targetSeq
-    date = committedDate
+    seq = saved.seq
+    date = saved.date
     clearPendingCatchupBatch()
-    bufferedRealtimeUpdates = bufferedRealtimeUpdates.filter { $0.key > targetSeq }
-    if let fetchSeqEnd, targetSeq >= fetchSeqEnd {
+    bufferedRealtimeUpdates = bufferedRealtimeUpdates.filter { $0.key > saved.seq }
+    if let fetchSeqEnd, saved.seq >= fetchSeqEnd {
       self.fetchSeqEnd = nil
     }
     if committedDate > 0 {

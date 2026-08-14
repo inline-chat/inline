@@ -254,6 +254,8 @@ extension AppDependencies {
 @MainActor
 @Observable
 final class MainWindowSessionRefresher {
+  private static let chatsRetryDelays: [Duration] = [.milliseconds(250), .seconds(1)]
+
   private(set) var isFetchingSidebarChats = false
   private(set) var hasFetchedSidebarChats = false
 
@@ -312,7 +314,7 @@ final class MainWindowSessionRefresher {
   }
 
   func refetchChats(dependencies: AppDependencies) {
-    guard Auth.shared.getIsLoggedIn() else { return }
+    guard let accountID = Auth.shared.getCurrentUserId() else { return }
     guard chatsTask == nil else { return }
 
     let realtime = dependencies.realtimeV2
@@ -323,13 +325,26 @@ final class MainWindowSessionRefresher {
         self?.chatsTask = nil
       }
 
-      do {
-        try await realtime.send(.getChats())
-        self?.hasFetchedSidebarChats = true
-      } catch is CancellationError {
-        return
-      } catch {
-        Log.shared.error("Error refetching getChats", error: error)
+      let maxAttempts = Self.chatsRetryDelays.count + 1
+      for attempt in 1 ... maxAttempts {
+        guard Auth.shared.getCurrentUserId() == accountID else { return }
+        do {
+          try Task.checkCancellation()
+          try await realtime.send(.getChats())
+          guard Auth.shared.getCurrentUserId() == accountID else { return }
+          self?.hasFetchedSidebarChats = true
+          return
+        } catch is CancellationError {
+          return
+        } catch {
+          Log.shared.error("Error refetching getChats (attempt \(attempt)/\(maxAttempts))", error: error)
+          guard attempt < maxAttempts else { return }
+          do {
+            try await Task.sleep(for: Self.chatsRetryDelays[attempt - 1])
+          } catch {
+            return
+          }
+        }
       }
     }
   }

@@ -24,6 +24,10 @@ struct StubSyncStorage: SyncStorage {
     true
   }
 
+  func advanceBucketState(for key: BucketKey, state: BucketState) async -> BucketState? {
+    state
+  }
+
   @discardableResult
   func removeBucketState(for key: BucketKey) async -> Bool {
     // TODO: Persist to database

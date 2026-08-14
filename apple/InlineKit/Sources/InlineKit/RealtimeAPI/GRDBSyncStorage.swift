@@ -40,16 +40,11 @@ public struct GRDBSyncStorage: SyncStorage {
     self.db = db
   }
 
-  public func getState() async -> SyncState {
-    do {
-      return try await db.reader.read { db in
-        if let state = try DbGlobalSyncState.fetchOne(db) {
-          return SyncState(lastSyncDate: state.lastSyncDate)
-        }
-        return SyncState(lastSyncDate: 0)
+  public func getState() async throws -> SyncState {
+    try await db.reader.read { db in
+      if let state = try DbGlobalSyncState.fetchOne(db) {
+        return SyncState(lastSyncDate: state.lastSyncDate)
       }
-    } catch {
-      AppDatabase.log.error("Failed to fetch global sync state: \(error)")
       return SyncState(lastSyncDate: 0)
     }
   }
@@ -68,22 +63,16 @@ public struct GRDBSyncStorage: SyncStorage {
     }
   }
 
-  public func getBucketState(for key: BucketKey) async -> BucketState {
-    do {
-      return try await db.reader.read { db in
-        if let state = try DbBucketState
-          .filter(
-            DbBucketState.Columns.bucketType == key.getBucket()
-              && DbBucketState.Columns.entityId == key.getEntityId()
-          )
-          .fetchOne(db)
-        {
-          return BucketState(date: state.date, seq: state.seq)
-        }
-        return BucketState(date: 0, seq: 0)
+  public func getBucketState(for key: BucketKey) async throws -> BucketState {
+    try await db.reader.read { db in
+      if let state = try DbBucketState
+        .filter(
+          DbBucketState.Columns.bucketType == key.getBucket()
+            && DbBucketState.Columns.entityId == key.getEntityId()
+        )
+        .fetchOne(db) {
+        return BucketState(date: state.date, seq: state.seq)
       }
-    } catch {
-      AppDatabase.log.error("Failed to fetch bucket state for \(key): \(error)")
       return BucketState(date: 0, seq: 0)
     }
   }
@@ -104,6 +93,38 @@ public struct GRDBSyncStorage: SyncStorage {
     } catch {
       AppDatabase.log.error("Failed to save bucket state for \(key): \(error)")
       return false
+    }
+  }
+
+  public func advanceBucketState(for key: BucketKey, state: BucketState) async -> BucketState? {
+    do {
+      return try await db.dbWriter.write { database in
+        let existing = try DbBucketState
+          .filter(
+            DbBucketState.Columns.bucketType == key.getBucket()
+              && DbBucketState.Columns.entityId == key.getEntityId()
+          )
+          .fetchOne(database)
+
+        if let existing, existing.seq > state.seq {
+          return BucketState(date: existing.date, seq: existing.seq)
+        }
+
+        let effectiveState = BucketState(
+          date: max(existing?.date ?? 0, state.date),
+          seq: state.seq
+        )
+        try DbBucketState(
+          bucketType: key.getBucket(),
+          entityId: key.getEntityId(),
+          date: effectiveState.date,
+          seq: effectiveState.seq
+        ).save(database)
+        return effectiveState
+      }
+    } catch {
+      AppDatabase.log.error("Failed to advance bucket state for \(key): \(error)")
+      return nil
     }
   }
 
@@ -130,10 +151,19 @@ public struct GRDBSyncStorage: SyncStorage {
     do {
       try await db.dbWriter.write { db in
         for (key, state) in states {
+          let existing = try DbBucketState
+            .filter(
+              DbBucketState.Columns.bucketType == key.getBucket()
+                && DbBucketState.Columns.entityId == key.getEntityId()
+            )
+            .fetchOne(db)
+          if let existing, existing.seq > state.seq {
+            continue
+          }
           let dbState = DbBucketState(
             bucketType: key.getBucket(),
             entityId: key.getEntityId(),
-            date: state.date,
+            date: max(existing?.date ?? 0, state.date),
             seq: state.seq
           )
           try dbState.save(db)
@@ -158,5 +188,33 @@ public struct GRDBSyncStorage: SyncStorage {
       AppDatabase.log.error("Failed to clear sync state: \(error)")
       return false
     }
+  }
+}
+
+extension GRDBSyncStorage {
+  /// Seeds a resource cursor carried by an authoritative snapshot without ever
+  /// moving an already-newer local cursor backwards.
+  static func seedSnapshotBucketState(
+    for key: BucketKey,
+    seq: Int64,
+    in database: Database
+  ) throws -> BucketState {
+    let existing = try DbBucketState
+      .filter(
+        DbBucketState.Columns.bucketType == key.getBucket()
+          && DbBucketState.Columns.entityId == key.getEntityId()
+      )
+      .fetchOne(database)
+
+    if let existing, seq <= existing.seq {
+      return BucketState(date: existing.date, seq: existing.seq)
+    }
+    try DbBucketState(
+      bucketType: key.getBucket(),
+      entityId: key.getEntityId(),
+      date: 0,
+      seq: seq
+    ).save(database)
+    return BucketState(date: 0, seq: seq)
   }
 }
