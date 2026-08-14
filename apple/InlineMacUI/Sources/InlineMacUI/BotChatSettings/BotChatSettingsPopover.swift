@@ -60,7 +60,7 @@ public struct BotChatSettingsPopover: View {
         localFolderPickerAvailable: localFolderPickerAvailable
       )
     }
-    .frame(width: 336, height: 300)
+    .frame(width: 420, height: 300)
     .task(id: coordinator.selectedBotID) {
       coordinator.refreshSelectedIfStale()
     }
@@ -407,7 +407,7 @@ private struct BotChatSettingsItemView: View {
       }
     case let .select(value, options):
       VStack(alignment: .leading, spacing: 3) {
-        alignedRow(description: item.description, controlMaxWidth: 164) {
+        alignedRow(description: item.description, controlMaxWidth: 250) {
           if item.isDisabled {
             Text(options.first(where: { $0.value == value })?.label ?? value)
               .foregroundStyle(.secondary)
