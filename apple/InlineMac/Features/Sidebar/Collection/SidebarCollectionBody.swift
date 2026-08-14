@@ -999,7 +999,7 @@ final class SidebarCollectionBodyController: NSViewController {
       switch row.kind {
       case .chat:
         chatCount += 1
-      case .sectionHeader, .archiveHeader:
+      case .sectionHeader, .timelineHeader, .archiveHeader:
         headerCount += 1
       case .pinDropGuide:
         guideCount += 1
@@ -1986,7 +1986,13 @@ final class SidebarCollectionBodyController: NSViewController {
       }
     }
     let pinnedRows = chatRows(projectedItems.filter { $0.lane == .pinned })
-    let contentRows = chatRows(projectedItems.filter { $0.lane == .normal })
+    let contentItems = projectedItems.filter { $0.lane == .normal }
+    let usesTimelineSections = baseRows.contains {
+      $0.id == .sectionHeader(.content)
+    } == false
+    let contentRows = usesTimelineSections
+      ? SidebarCollectionRow.timelineRows(contentItems, chatRowHeight: rowHeight)
+      : chatRows(contentItems)
     let pinnedExpanded = baseRows.first(where: { $0.id == .sectionHeader(.pinned) })?
       .sectionHeader?.isExpanded ?? true
     let contentExpanded = baseRows.first(where: { $0.id == .sectionHeader(.content) })?
@@ -2003,15 +2009,20 @@ final class SidebarCollectionBodyController: NSViewController {
       logicalRows.append(.sectionHeader(.pinned, isExpanded: true, height: 0))
       logicalRows.append(.pinDropGuide())
     }
-    logicalRows.append(.sectionHeader(.content, isExpanded: contentExpanded))
-    if contentExpanded {
+    if usesTimelineSections {
       logicalRows.append(contentsOf: contentRows)
+    } else {
+      logicalRows.append(.sectionHeader(.content, isExpanded: contentExpanded))
+      if contentExpanded {
+        logicalRows.append(contentsOf: contentRows)
+      }
     }
 
     var result: [SidebarCollectionRow] = []
     var insertedLogicalRows = false
     for row in baseRows {
-      if row.projectedItem != nil || row.isSectionHeader || row.id == .pinDropGuide {
+      if row.projectedItem != nil || row.isSectionHeader || row.isTimelineHeader
+        || row.id == .pinDropGuide {
         if insertedLogicalRows == false {
           result.append(contentsOf: logicalRows)
           insertedLogicalRows = true
@@ -2035,6 +2046,7 @@ final class SidebarCollectionBodyController: NSViewController {
 
     var stableRows = rows
     let insertionIndex = rows.firstIndex(where: { $0.id == .sectionHeader(.content) })
+      ?? rows.firstIndex(where: \.isTimelineHeader)
       ?? rows.firstIndex(where: { $0.projectedItem != nil })
       ?? rows.endIndex
     stableRows.insert(contentsOf: [
@@ -2411,7 +2423,7 @@ final class SidebarCollectionBodyController: NSViewController {
     appendRootProposals(
       roots: pinned,
       lane: .pinned,
-      fallbackGuideY: sectionHeaderFrame(.content, session: session)?.minY
+      fallbackGuideY: normalLaneBoundaryFrame(session: session)?.minY
         ?? firstGuideY,
       reducedRows: reducedRows,
       session: session,
@@ -2420,7 +2432,7 @@ final class SidebarCollectionBodyController: NSViewController {
     appendRootProposals(
       roots: normal,
       lane: .normal,
-      fallbackGuideY: sectionHeaderFrame(.content, session: session)?.maxY
+      fallbackGuideY: normalLaneBoundaryFrame(session: session)?.maxY
         ?? lastRootGuideY(roots, session: session),
       reducedRows: reducedRows,
       session: session,
@@ -2595,6 +2607,10 @@ final class SidebarCollectionBodyController: NSViewController {
         return pinnedHeader + 1
       }
       return rowIDs.firstIndex(of: .sectionHeader(.content))
+        ?? rowIDs.firstIndex(where: { id in
+          guard case .timelineHeader = id else { return false }
+          return true
+        })
         ?? firstChatIndex(in: rowIDs, rows: displayRows)
     case .normal:
       return rowIDs.firstIndex(of: .sectionHeader(.content)).map { $0 + 1 }
@@ -2607,6 +2623,23 @@ final class SidebarCollectionBodyController: NSViewController {
     session: ReorderSession
   ) -> CGRect? {
     session.stableFrames[.sectionHeader(header)]
+  }
+
+  private func normalLaneBoundaryFrame(session: ReorderSession) -> CGRect? {
+    if let contentHeaderFrame = sectionHeaderFrame(.content, session: session) {
+      return contentHeaderFrame
+    }
+    guard let rowID = normalLaneBoundaryRowID(in: session.originalRows) else {
+      return nil
+    }
+    return session.stableFrames[rowID]
+  }
+
+  private func normalLaneBoundaryRowID(
+    in rows: [SidebarCollectionRow]
+  ) -> SidebarCollectionRow.ID? {
+    rows.first(where: \.isTimelineHeader)?.id
+      ?? rows.first(where: { $0.projectedItem?.lane == .normal })?.id
   }
 
   private func childProposals(
@@ -2812,7 +2845,9 @@ final class SidebarCollectionBodyController: NSViewController {
           targetHeight: Double(SidebarCollectionRow.emptyPinnedTargetHeight)
         )
       )
-      session.pinBoundaryY = plan.rowFrames[.sectionHeader(.content)].map {
+      let boundaryRowID = normalLaneBoundaryRowID(in: session.originalRows)
+        ?? .sectionHeader(.content)
+      session.pinBoundaryY = plan.rowFrames[boundaryRowID].map {
         CGFloat($0.minY)
       }
     } else {

@@ -160,6 +160,8 @@ final class SidebarCollectionBodyLayout: NSCollectionViewLayout {
       attributes[indexPath] = itemAttributes
       if case .sectionHeader(.content, _) = row.kind {
         laneBoundaryFrame = itemAttributes.frame
+      } else if laneBoundaryFrame == nil, case .timelineHeader = row.kind {
+        laneBoundaryFrame = itemAttributes.frame
       }
     }
 

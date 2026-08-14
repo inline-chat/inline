@@ -370,6 +370,7 @@ struct SidebarView: View {
     let contentItems = projectedItems.filter { $0.lane == .normal }
     let pinnedExpanded = collapsedAppKitSections.contains(.pinned) == false
     let contentExpanded = collapsedAppKitSections.contains(.content) == false
+    let isAllChatsMode = settings.sidebarAsInbox == false && isArchiveVisible == false
 
     if pinnedItems.isEmpty == false {
       rows.append(.sectionHeader(.pinned, isExpanded: pinnedExpanded))
@@ -377,8 +378,15 @@ struct SidebarView: View {
         appendAppKitChatRows(pinnedItems, to: &rows)
       }
     }
-    rows.append(.sectionHeader(.content, isExpanded: contentExpanded))
-    if contentExpanded {
+    if isAllChatsMode {
+      rows.append(contentsOf: SidebarCollectionRow.timelineRows(
+        contentItems,
+        chatRowHeight: chatRowHeight
+      ))
+    } else {
+      rows.append(.sectionHeader(.content, isExpanded: contentExpanded))
+    }
+    if contentExpanded, isAllChatsMode == false {
       if isArchiveVisible, shouldShowEmptyState {
         rows.append(SidebarCollectionRow(
           id: .emptyState,
@@ -434,6 +442,13 @@ struct SidebarView: View {
       )
     case let .sectionHeader(section, isExpanded):
       AnyView(appKitSectionHeader(section, isExpanded: isExpanded))
+    case let .timelineHeader(period):
+      AnyView(SidebarCollectionTimelineHeaderView(
+        title: ChatListTimelinePeriodTitle.string(
+          for: period,
+          calendar: .autoupdatingCurrent
+        )
+      ))
     case .pinDropGuide:
       AnyView(SidebarCollectionPinDropGuideView(
         dimsInstruction: context.dimsPinDropInstruction

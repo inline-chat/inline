@@ -97,6 +97,22 @@ struct SidebarCollectionSectionHeaderView: View {
   }
 }
 
+/// A plain chronological label. Unlike the app-owned lane headers, timeline
+/// headers have no disclosure state, hover treatment, or interaction.
+struct SidebarCollectionTimelineHeaderView: View {
+  let title: String
+
+  var body: some View {
+    Text(title)
+      .font(.system(size: 11, weight: .medium))
+      .foregroundStyle(.secondary)
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+      .padding(.leading, Theme.sidebarItemInnerSpacing + 8)
+      .padding(.trailing, 7)
+      .accessibilityAddTraits(.isHeader)
+  }
+}
+
 struct SidebarOpenChatsCleanupMenu: View {
   @Binding var cleanupInterval: SidebarCleanupInterval
   let onCleanUp: () -> Void

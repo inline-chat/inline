@@ -20,6 +20,7 @@ struct SidebarCollectionRow: Equatable, Identifiable {
   }
 
   static let sectionHeaderHeight: CGFloat = 28
+  static let timelineHeaderHeight: CGFloat = 28
   static let sectionTopSpacing: CGFloat = 4
   static let spacedSectionHeaderHeight = sectionHeaderHeight + sectionTopSpacing
   static let emptyPinnedTargetHeight: CGFloat = 56
@@ -35,6 +36,7 @@ struct SidebarCollectionRow: Equatable, Identifiable {
     case grid
     case archiveHeader
     case sectionHeader(SectionHeader)
+    case timelineHeader(ChatListTimelinePeriod)
     case pinDropGuide
     case chat(ChatListItem.Identifier)
     case newThread
@@ -46,6 +48,7 @@ struct SidebarCollectionRow: Equatable, Identifiable {
     case grid
     case archiveHeader
     case sectionHeader(SectionHeader, isExpanded: Bool)
+    case timelineHeader(ChatListTimelinePeriod)
     case pinDropGuide
     case chat(SidebarProjectedItem)
     case newThread
@@ -66,11 +69,16 @@ struct SidebarCollectionRow: Equatable, Identifiable {
     return true
   }
 
+  var isTimelineHeader: Bool {
+    guard case .timelineHeader = kind else { return false }
+    return true
+  }
+
   /// Interactive paint and hit testing belong to a full-width AppKit item;
   /// each SwiftUI row applies its own visual inset inside that stable boundary.
   var usesFullWidthCollectionLayout: Bool {
     switch id {
-    case .allChats, .grid, .sectionHeader, .pinDropGuide, .chat, .newThread:
+    case .allChats, .grid, .sectionHeader, .timelineHeader, .pinDropGuide, .chat, .newThread:
       true
     case .archiveHeader, .emptyState:
       false
@@ -100,6 +108,39 @@ struct SidebarCollectionRow: Equatable, Identifiable {
       kind: .pinDropGuide,
       height: height
     )
+  }
+
+  static func timelineRows(
+    _ items: [SidebarProjectedItem],
+    chatRowHeight: CGFloat,
+    relativeTo now: Date = Date(),
+    calendar: Calendar = .autoupdatingCurrent
+  ) -> [Self] {
+    var rows: [Self] = []
+    var currentPeriod: ChatListTimelinePeriod?
+
+    for item in items {
+      let period = ChatListTimelinePeriod.classify(
+        item.item.lastActivityAt,
+        relativeTo: now,
+        calendar: calendar
+      )
+      if currentPeriod != period {
+        rows.append(Self(
+          id: .timelineHeader(period),
+          kind: .timelineHeader(period),
+          height: timelineHeaderHeight
+        ))
+        currentPeriod = period
+      }
+      rows.append(Self(
+        id: .chat(item.id),
+        kind: .chat(item),
+        height: chatRowHeight
+      ))
+    }
+
+    return rows
   }
 }
 
