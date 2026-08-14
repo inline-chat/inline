@@ -411,6 +411,98 @@ final class RealtimeSendTests {
     await realtime.loggedOut()
   }
 
+  @Test("application termination waits for in-flight apply and preserves sync state")
+  func testTerminationWaitsForApplyAndPreservesSyncState() async throws {
+    await TerminationApplyGate.shared.reset()
+
+    let auth = Auth.mocked(authenticated: true)
+    let storage = SendTestSyncStorage()
+    let realtime = RealtimeV2(
+      transport: ImmediateRoundTripTransport(),
+      auth: auth.handle,
+      applyUpdates: SendTestApplyUpdates(),
+      syncStorage: storage
+    )
+
+    #expect(await waitForCondition(timeout: .seconds(2)) {
+      await MainActor.run { realtime.stateObject.connectionState == .connected }
+    })
+
+    let sendTask = Task {
+      do {
+        _ = try await realtime.send(TerminationBlockingTransaction())
+        return false
+      } catch is CancellationError {
+        return true
+      } catch {
+        Issue.record("Expected termination cancellation, got \(error)")
+        return false
+      }
+    }
+    try #require(await waitForCondition(timeout: .seconds(3)) {
+      await TerminationApplyGate.shared.hasStarted()
+    })
+
+    let terminationReturned = SendTestFlag()
+    let terminationTask = Task {
+      await realtime.prepareForTermination()
+      await terminationReturned.set()
+    }
+
+    try await Task.sleep(for: .milliseconds(100))
+    #expect(await terminationReturned.get() == false)
+
+    await TerminationApplyGate.shared.release()
+    await terminationTask.value
+
+    #expect(await terminationReturned.get())
+    #expect(await sendTask.value)
+    #expect(await storage.clearCallCount() == 0)
+  }
+
+  @Test("application termination preserves persisted mutations")
+  func testTerminationPreservesPersistedMutations() async throws {
+    await FailingDependencyResolver.shared.reset()
+    await FailingDependencyResolver.shared.setState(.blocked, for: .chatCreated(chatId: 77))
+
+    let auth = Auth.mocked(authenticated: true)
+    let persistence = AccountSwitchSendPersistence()
+    let storage = SendTestSyncStorage()
+    let realtime = RealtimeV2(
+      transport: AccountSwitchSendTransport(),
+      auth: auth.handle,
+      applyUpdates: SendTestApplyUpdates(),
+      syncStorage: storage,
+      persistenceHandler: persistence,
+      blockerResolver: FailingDependencyResolver.shared
+    )
+
+    #expect(await waitForCondition(timeout: .seconds(2)) {
+      await MainActor.run { realtime.stateObject.connectionState == .connected }
+    })
+
+    let sendTask = Task {
+      do {
+        _ = try await realtime.send(TerminationPersistedTransaction(chatId: 77))
+        return false
+      } catch is CancellationError {
+        return true
+      } catch {
+        Issue.record("Expected termination cancellation, got \(error)")
+        return false
+      }
+    }
+    try #require(await waitForCondition(timeout: .seconds(3)) {
+      await persistence.savedOwners().isEmpty == false
+    })
+
+    await realtime.prepareForTermination()
+
+    #expect(await sendTask.value)
+    #expect(await persistence.deletedAllOwners().isEmpty)
+    #expect(await storage.clearCallCount() == 0)
+  }
+
   @Test("failed dependency wakes blocked send and fails it")
   func testFailedDependencyFailsBlockedSend() async throws {
     await FailingDependencyResolver.shared.reset()
@@ -695,6 +787,7 @@ private struct AccountSwitchSendTransaction: Transaction, Codable {
 
 private actor AccountSwitchSendPersistence: TransactionPersistenceHandler {
   private var owners: [TransactionOwner] = []
+  private var deletedOwners: [TransactionOwner] = []
 
   func saveTransaction(_ transaction: TransactionWrapper, for owner: TransactionOwner) async throws {
     owners.append(owner)
@@ -702,10 +795,16 @@ private actor AccountSwitchSendPersistence: TransactionPersistenceHandler {
 
   func deleteTransaction(_ transactionId: TransactionId, for owner: TransactionOwner) async throws {}
   func loadTransactions(for owner: TransactionOwner) async throws -> [TransactionWrapper] { [] }
-  func deleteAllTransactions(for owner: TransactionOwner) async throws {}
+  func deleteAllTransactions(for owner: TransactionOwner) async throws {
+    deletedOwners.append(owner)
+  }
 
   func savedOwners() -> [TransactionOwner] {
     owners
+  }
+
+  func deletedAllOwners() -> [TransactionOwner] {
+    deletedOwners
   }
 }
 
@@ -838,6 +937,80 @@ private actor SendTestFlag {
   func get() -> Bool {
     value
   }
+}
+
+private let terminationBlockingMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_977)
+private let terminationPersistedMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_978)
+
+private actor TerminationApplyGate {
+  static let shared = TerminationApplyGate()
+
+  private var started = false
+  private var waiter: CheckedContinuation<Void, Never>?
+
+  func reset() {
+    started = false
+    waiter = nil
+  }
+
+  func hold() async {
+    started = true
+    await withCheckedContinuation { continuation in
+      waiter = continuation
+    }
+  }
+
+  func hasStarted() -> Bool {
+    started
+  }
+
+  func release() {
+    waiter?.resume()
+    waiter = nil
+  }
+}
+
+private struct TerminationBlockingTransaction: Transaction, Codable {
+  struct Context: Sendable, Codable {}
+
+  enum CodingKeys: String, CodingKey {
+    case context
+  }
+
+  var method: InlineProtocol.Method = terminationBlockingMethod
+  var type: TransactionKindType = .query()
+  var context = Context()
+
+  func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? { nil }
+
+  func apply(_ rpcResult: InlineProtocol.RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {
+    await TerminationApplyGate.shared.hold()
+  }
+}
+
+private struct TerminationPersistedTransaction: Transaction, Codable {
+  struct Context: Sendable, Codable {
+    let chatId: Int64
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case context
+  }
+
+  var method: InlineProtocol.Method = terminationPersistedMethod
+  var type: TransactionKindType = .mutation()
+  var context: Context
+
+  init(chatId: Int64) {
+    context = Context(chatId: chatId)
+  }
+
+  var blockers: [TransactionBlocker] {
+    [.chatCreated(chatId: context.chatId)]
+  }
+
+  func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? { nil }
+  func apply(_ rpcResult: InlineProtocol.RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {}
 }
 
 private actor SendCancellationRecorder {
@@ -1609,6 +1782,7 @@ private actor SendTestApplyUpdates: ApplyUpdates {
 private actor SendTestSyncStorage: SyncStorage {
   private var state = SyncState(lastSyncDate: 0)
   private var bucketStates: [BucketKey: BucketState] = [:]
+  private var clearCount = 0
 
   func getState() async -> SyncState {
     state
@@ -1664,9 +1838,14 @@ private actor SendTestSyncStorage: SyncStorage {
 
   @discardableResult
   func clearSyncState() async -> Bool {
+    clearCount += 1
     state = SyncState(lastSyncDate: 0)
     bucketStates.removeAll()
     return true
+  }
+
+  func clearCallCount() -> Int {
+    clearCount
   }
 }
 

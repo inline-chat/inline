@@ -35,6 +35,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }()
 
   @MainActor private var globalHotkeyController: GlobalHotkeyController?
+  @MainActor private var terminationTask: Task<Void, Never>?
 
   private let installLocationPrompt = AppInstallLocationPrompt()
   private let launchAtLoginController = LaunchAtLoginController()
@@ -99,13 +100,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    MainActor.assumeIsolated {
+    MainActor.assumeIsolated { () -> NSApplication.TerminateReply in
+      guard terminationTask == nil else { return .terminateLater }
+
       dockBadgeService.prepareForTermination()
       CLIInstallerWindowController.prepareForApplicationTermination()
       AgentSetupWindowController.prepareForApplicationTermination()
+      dependencies.session.reset()
+      Drafts2.shared.flushBlocking()
+
+      let realtime = dependencies.realtimeV2
+      terminationTask = Task { @MainActor in
+        await realtime.prepareForTermination()
+        sender.reply(toApplicationShouldTerminate: true)
+      }
+      return .terminateLater
     }
-    Drafts2.shared.flushBlocking()
-    return .terminateNow
   }
 
   func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {

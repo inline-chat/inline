@@ -203,6 +203,48 @@ public actor RealtimeV2 {
     log.info("Stopped realtime account generation")
   }
 
+  /// Stops process-owned work before application teardown without deleting
+  /// durable transactions or sync checkpoints needed by the next launch.
+  public func prepareForTermination() async {
+    log.info("Quiescing realtime for application termination")
+    acceptsTransactions = false
+    authRecoveryTask?.cancel()
+    authRecoveryTask = nil
+    transactionRetryTask?.cancel()
+    let retryTask = transactionRetryTask
+    transactionRetryTask = nil
+
+    let ownerTransitionTask = transactionOwnerTransitionTask
+    await ownerTransitionTask?.value
+
+    let endingOwner = transactionOwner
+    transactionOwner = nil
+    resumeAllTransactionContinuations(throwing: CancellationError())
+
+    let listenerTasks = tasks
+    tasks.removeAll()
+    for task in listenerTasks {
+      task.cancel()
+    }
+
+    async let connectionTermination: Void = connectionManager.stop()
+    async let syncTermination: Void = sync.prepareForTermination()
+    await retryTask?.value
+    for task in listenerTasks {
+      await task.value
+    }
+    await connectionTermination
+    await waitForTransactionOperationsToFinish()
+
+    if let endingOwner {
+      await transactions.reset(owner: endingOwner, deletePersisted: false)
+    } else {
+      await transactions.waitForPersistence()
+    }
+    await syncTermination
+    log.info("Realtime quiesced for application termination")
+  }
+
   /// Listen for auth events, transport events, sync events, etc.
   private func startListeners() async {
     let authDiagnosticSnapshots = authDiagnosticSnapshots

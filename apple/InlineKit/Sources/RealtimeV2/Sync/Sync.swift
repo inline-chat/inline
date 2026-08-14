@@ -458,7 +458,15 @@ actor Sync {
   }
 
   func clearSyncState(acceptNewWork: Bool = true) async {
-    log.debug("clearing sync state and bucket cache")
+    await resetSyncState(clearPersistentState: true, acceptNewWork: acceptNewWork)
+  }
+
+  func prepareForTermination() async {
+    await resetSyncState(clearPersistentState: false, acceptNewWork: false)
+  }
+
+  private func resetSyncState(clearPersistentState: Bool, acceptNewWork: Bool) async {
+    log.debug("resetting sync runtime and bucket cache")
     generation &+= 1
     acceptsWork = false
     isResetting = true
@@ -475,7 +483,9 @@ actor Sync {
       await task.value
     }
     await waitForOperationsToFinish()
-    await syncStorage.clearSyncState()
+    if clearPersistentState {
+      await syncStorage.clearSyncState()
+    }
     activeBucketFetches = 0
     await publishSyncActivityIfNeeded()
     isResetting = false
