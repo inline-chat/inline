@@ -67,21 +67,27 @@ public struct ComposeActionActivityIndicator: View {
 
 @MainActor
 public struct ComposeActionCompactAccessory: View {
+  private let reservesSpaceWhenInactive: Bool
   @State private var activityState: ComposeActionActivityState
 
-  public init(peer: Peer) {
+  public init(peer: Peer, reservesSpaceWhenInactive: Bool = true) {
+    self.reservesSpaceWhenInactive = reservesSpaceWhenInactive
     _activityState = State(initialValue: ComposeActions.shared.activityState(for: peer))
   }
 
+  @ViewBuilder
   public var body: some View {
+    if reservesSpaceWhenInactive {
+      reservedAccessory
+    } else {
+      collapsibleAccessory
+    }
+  }
+
+  private var reservedAccessory: some View {
     ZStack {
       if let presentation = visiblePresentation {
-        ComposeActionActivityIndicator(
-          action: presentation.action,
-          color: .accentColor
-        )
-        .id("activity-\(presentation.action.rawValue)")
-        .transition(.opacity.combined(with: .offset(y: 2)))
+        indicator(for: presentation)
       }
     }
     .frame(width: 16, height: 12)
@@ -90,6 +96,27 @@ public struct ComposeActionCompactAccessory: View {
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(Text(visiblePresentation?.text ?? ""))
     .accessibilityHidden(visiblePresentation == nil)
+  }
+
+  @ViewBuilder
+  private var collapsibleAccessory: some View {
+    if let presentation = visiblePresentation {
+      indicator(for: presentation)
+        .frame(width: 16, height: 12)
+        .clipped()
+        .animation(.easeInOut(duration: 0.18), value: visiblePresentation)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(presentation.text))
+    }
+  }
+
+  private func indicator(for presentation: ComposeActionPresentation) -> some View {
+    ComposeActionActivityIndicator(
+      action: presentation.action,
+      color: .accentColor
+    )
+    .id("activity-\(presentation.action.rawValue)")
+    .transition(.opacity.combined(with: .offset(y: 2)))
   }
 
   private var visiblePresentation: ComposeActionPresentation? {

@@ -370,7 +370,10 @@ struct SidebarChatItemView: Equatable, View {
         closeButton
       } else {
         if size == .compact {
-          ComposeActionCompactAccessory(peer: peerId)
+          ComposeActionCompactAccessory(
+            peer: peerId,
+            reservesSpaceWhenInactive: false
+          )
             .id(peerId)
         }
 
