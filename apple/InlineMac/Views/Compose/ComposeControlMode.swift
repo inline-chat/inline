@@ -201,6 +201,15 @@ enum ComposeControlMode {
     }
   }
 
+  var sendButtonTrailingInset: CGFloat {
+    switch self {
+      case .legacy:
+        pillContentInset
+      case .glass:
+        pillContentInset + 2
+    }
+  }
+
   var usesInputStyleTextInsets: Bool {
     switch self {
       case .legacy:
@@ -218,6 +227,15 @@ enum ComposeControlMode {
         0
       case .glass:
         max(0, (textMinHeight - inlineButtonSize) / 2)
+    }
+  }
+
+  var sendButtonBottomInset: CGFloat {
+    switch self {
+      case .legacy:
+        inlineButtonBottomInset
+      case .glass:
+        inlineButtonBottomInset + 1
     }
   }
 

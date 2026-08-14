@@ -34,28 +34,34 @@ struct ComposeSendButtonSwiftUI: View {
 
   var body: some View {
     let isEnabled = state.canSend
-    let targetSize = isEnabled ? size : size * 0.9
-    let iconSize = isEnabled ? mode.sendIconPointSize : mode.sendIconPointSize - 2
-    let padding = isEnabled ? 5.0 : 4.0
+    let backgroundScale = isEnabled ? (isHovering ? 0.95 : 1.0) : 0.9
     Button(action: {
       guard isEnabled else { return }
       action()
     }) {
-      Image(systemName: "arrow.up")
-        .font(.system(size: iconSize, weight: .medium))
-        .foregroundStyle(iconForegroundColor)
-        .padding(padding)
-        .frame(width: targetSize, height: targetSize)
-        .background(
-          Circle()
-            .fill(
-              isEnabled
-                ? (isHovering ? hoveredEnabledBackgroundColor : enabledBackgroundColor)
-                : disabledBackgroundColor
-            )
-        )
-        .scaleEffect(isEnabled && isHovering ? 0.95 : 1.0)
-        .animation(.easeInOut(duration: 0.1), value: isHovering)
+      ZStack {
+        Circle()
+          .fill(
+            isEnabled
+              ? (isHovering ? hoveredEnabledBackgroundColor : enabledBackgroundColor)
+              : disabledBackgroundColor
+          )
+          .frame(width: size, height: size)
+          .scaleEffect(backgroundScale)
+          .animation(.easeInOut(duration: 0.1), value: isHovering)
+          .animation(.easeInOut(duration: 0.15), value: isEnabled)
+          .animation(.easeInOut(duration: 0.18), value: state.sendSilently)
+
+        Image(systemName: "arrow.up")
+          .font(.system(size: mode.sendIconPointSize, weight: .medium))
+          .foregroundStyle(iconForegroundColor)
+          .frame(width: size, height: size)
+          .opacity(isEnabled ? 1 : 0.7)
+          .animation(.easeInOut(duration: 0.15), value: isEnabled)
+          .animation(.easeInOut(duration: 0.18), value: state.sendSilently)
+      }
+      .frame(width: size, height: size)
+      .contentShape(Circle())
     }
     .buttonStyle(.plain)
     .opacity(1.0)
@@ -66,12 +72,8 @@ struct ComposeSendButtonSwiftUI: View {
     }
     .onHover { hovering in
       guard isEnabled else { return }
-      withAnimation(.easeInOut(duration: 0.2)) {
-        isHovering = hovering
-      }
+      isHovering = hovering
     }
-    .animation(.easeInOut(duration: 0.18), value: state.sendSilently)
-    .animation(.easeInOut(duration: 0.15), value: isEnabled)
   }
 }
 

@@ -614,11 +614,20 @@ class GlassComposeAppKit: NSView {
       emojiButton.bottomAnchor.constraint(equalTo: glassEditorRowView.bottomAnchor, constant: -controlMode.inlineButtonBottomInset),
 
       // send
-      sendButton.trailingAnchor.constraint(equalTo: glassEditorRowView.trailingAnchor, constant: -controlMode.pillContentInset),
-      sendButton.bottomAnchor.constraint(equalTo: glassEditorRowView.bottomAnchor, constant: -controlMode.inlineButtonBottomInset),
+      sendButton.trailingAnchor.constraint(
+        equalTo: glassEditorRowView.trailingAnchor,
+        constant: -controlMode.sendButtonTrailingInset
+      ),
+      sendButton.bottomAnchor.constraint(
+        equalTo: glassEditorRowView.bottomAnchor,
+        constant: -controlMode.sendButtonBottomInset
+      ),
 
       // send silently indicator
-      silentModeButton.bottomAnchor.constraint(equalTo: glassEditorRowView.bottomAnchor, constant: -controlMode.inlineButtonBottomInset),
+      silentModeButton.bottomAnchor.constraint(
+        equalTo: glassEditorRowView.bottomAnchor,
+        constant: -controlMode.sendButtonBottomInset
+      ),
       silentModeButtonWidthConstraint!,
       silentModeButton.heightAnchor.constraint(equalToConstant: controlMode.silentButtonSize),
       silentModeToSendConstraint!,
@@ -750,7 +759,8 @@ class GlassComposeAppKit: NSView {
 
     let showsSend = canSend
     let buttonWidth = showsSend ? controlMode.sendButtonSize : controlMode.emojiButtonSize
-    var width = controlMode.pillContentInset + buttonWidth + rightButtonSpacing
+    let trailingInset = showsSend ? controlMode.sendButtonTrailingInset : controlMode.pillContentInset
+    var width = trailingInset + buttonWidth + rightButtonSpacing
 
     if showsSend, state.sendSilently {
       width += controlMode.silentButtonSize + rightButtonSpacing
