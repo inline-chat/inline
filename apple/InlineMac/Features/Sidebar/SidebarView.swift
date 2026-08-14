@@ -546,7 +546,23 @@ struct SidebarView: View {
         archiveVisible: isArchiveVisible
       ),
       isExpanded: isExpanded,
+      topSpacing: SidebarCollectionRow.sectionTopSpacing,
+      cleanupMenu: appKitSectionCleanupMenu(section),
       onToggle: { toggleAppKitSection(section) }
+    )
+  }
+
+  private func appKitSectionCleanupMenu(
+    _ section: SidebarCollectionRow.SectionHeader
+  ) -> SidebarOpenChatsCleanupMenu? {
+    guard section == .content, settings.sidebarAsInbox, isArchiveVisible == false else {
+      return nil
+    }
+
+    return SidebarOpenChatsCleanupMenu(
+      cleanupInterval: $settings.sidebarCleanupInterval,
+      onCleanUp: cleanUpOpenChats,
+      onCloseAll: closeAllOpenChats
     )
   }
 
@@ -794,10 +810,9 @@ struct SidebarView: View {
 
       sidebarLocationMenu
     }
-    // move it a bit higher up
-    .padding(.top, -4)
-    // distance it a bit from content
-    .padding(.bottom, 12)
+    // Keep the picker inside its safe-area allocation in every button/state
+    // combination, and use the same section gap as the collection below.
+    .padding(.bottom, SidebarCollectionRow.sectionTopSpacing)
     // side spacing visually must match the items below
     .padding(.leading, SidebarTopBarMetrics.leadingPadding)
     .padding(.trailing, Theme.sidebarItemOuterSpacing)
@@ -1656,6 +1671,34 @@ struct SidebarView: View {
     }
   }
 
+  private func cleanUpOpenChats() {
+    guard let dependencies else { return }
+    SidebarCleanup.shared.cleanNow(realtimeV2: dependencies.realtimeV2) { result in
+      switch result {
+      case let .cleaned(count):
+        if count == 0 {
+          ToastCenter.shared.showSuccess("No chats to clean up")
+        } else {
+          ToastCenter.shared.showSuccess("Cleaned up \(count) \(count == 1 ? "chat" : "chats")")
+        }
+      case .unavailable:
+        ToastCenter.shared.showInfo("Cleanup isn’t available right now")
+      case .failed:
+        ToastCenter.shared.showError("Couldn’t clean up chats")
+      }
+    }
+  }
+
+  private func closeAllOpenChats() {
+    let rootItems = appKitSidebarTree.projectedItems()
+      .filter { $0.lane == .normal && $0.depth == 0 }
+      .map(\.item)
+
+    for item in rootItems {
+      closeChat(item)
+    }
+  }
+
   private func appKitAttachedGroupItems(
     startingAt item: SidebarViewModel.Item
   ) -> [SidebarViewModel.Item] {
@@ -2394,12 +2437,13 @@ private struct SidebarInboxActionRow: View {
             .padding(.leading, 6)
         }
       }
-      .frame(height: rowHeight)
+      .frame(height: SidebarCollectionRow.paintedItemHeight(for: rowHeight))
       .padding(.leading, Theme.sidebarItemInnerSpacing)
       .padding(.trailing, Theme.sidebarItemOuterSpacing)
       .contentShape(.interaction, .rect(cornerRadius: Theme.sidebarItemRadius))
       .background(background)
       .padding(.horizontal, outerHorizontalPadding)
+      .padding(.vertical, SidebarCollectionRow.itemVisualEdgeInset)
     }
     .buttonStyle(.plain)
     .help(title)
@@ -2524,7 +2568,7 @@ private struct SidebarGridRowContent: View {
       }
       .animation(.smoothSnappy, value: avatars.map(\.id))
     }
-    .frame(height: size.rowHeight)
+    .frame(height: SidebarCollectionRow.paintedItemHeight(for: size.rowHeight))
     .padding(.leading, Theme.sidebarItemInnerSpacing)
     .padding(.trailing, Theme.sidebarItemOuterSpacing)
     .contentShape(.rect(cornerRadius: Theme.sidebarItemRadius))
@@ -2533,6 +2577,7 @@ private struct SidebarGridRowContent: View {
         .fill(backgroundColor)
     }
     .padding(.horizontal, outerHorizontalPadding)
+    .padding(.vertical, SidebarCollectionRow.itemVisualEdgeInset)
   }
 
   private var outerHorizontalPadding: CGFloat {
@@ -2799,12 +2844,13 @@ private struct SidebarNewThreadRow: View {
           .lineLimit(1)
           .frame(maxWidth: .infinity, alignment: .leading)
       }
-      .frame(height: rowHeight)
+      .frame(height: SidebarCollectionRow.paintedItemHeight(for: rowHeight))
       .padding(.leading, Theme.sidebarItemInnerSpacing)
       .padding(.trailing, Theme.sidebarItemOuterSpacing)
       .contentShape(.interaction, .rect(cornerRadius: Theme.sidebarItemRadius))
       .background(background)
       .padding(.horizontal, outerHorizontalPadding)
+      .padding(.vertical, SidebarCollectionRow.itemVisualEdgeInset)
     }
     .buttonStyle(.plain)
     .help("New Thread")

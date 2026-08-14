@@ -11,6 +11,7 @@ final class SidebarCleanup {
   static let shared = SidebarCleanup()
 
   private static let checkIntervalSeconds: Int64 = 15 * 60
+  private static let manualCleanupTimeout: TimeInterval = 12 * 60 * 60
 
   private let log = Log.scoped("SidebarCleanup")
   private var owners = Set<UUID>()
@@ -21,6 +22,12 @@ final class SidebarCleanup {
   private var runID: UUID?
 
   private init() {}
+
+  enum ManualResult {
+    case cleaned(Int)
+    case unavailable
+    case failed
+  }
 
   struct Preconditions {
     let hasFetchedServerState: Bool
@@ -65,6 +72,17 @@ final class SidebarCleanup {
     }
   }
 
+  func cleanNow(
+    realtimeV2: RealtimeV2,
+    completion: @escaping (ManualResult) -> Void
+  ) {
+    startRun(
+      realtimeV2: realtimeV2,
+      timeout: Self.manualCleanupTimeout,
+      completion: completion
+    )
+  }
+
   private func configure(realtimeV2: RealtimeV2) {
     guard owners.isEmpty == false,
           AppSettings.shared.sidebarAsInbox,
@@ -99,13 +117,26 @@ final class SidebarCleanup {
   }
 
   private func runNow(realtimeV2: RealtimeV2) {
-    guard runTask == nil else { return }
+    guard let timeout = AppSettings.shared.sidebarCleanupInterval.timeout else { return }
+    startRun(realtimeV2: realtimeV2, timeout: timeout)
+  }
+
+  private func startRun(
+    realtimeV2: RealtimeV2,
+    timeout: TimeInterval,
+    completion: ((ManualResult) -> Void)? = nil
+  ) {
+    guard runTask == nil else {
+      completion?(.unavailable)
+      return
+    }
 
     let id = UUID()
     runID = id
     runTask = Task { [weak self] in
-      await self?.cleanup(realtimeV2: realtimeV2)
+      let result = await self?.cleanup(realtimeV2: realtimeV2, timeout: timeout) ?? .unavailable
       self?.clearRunTask(id: id)
+      completion?(result)
     }
   }
 
@@ -130,13 +161,12 @@ final class SidebarCleanup {
     runID = nil
   }
 
-  private func cleanup(realtimeV2: RealtimeV2) async {
-    guard let timeout = AppSettings.shared.sidebarCleanupInterval.timeout,
-          AppSettings.shared.sidebarAsInbox,
+  private func cleanup(realtimeV2: RealtimeV2, timeout: TimeInterval) async -> ManualResult {
+    guard AppSettings.shared.sidebarAsInbox,
           allowsCleanup,
           let currentUserId = Auth.shared.getCurrentUserId()
     else {
-      return
+      return .unavailable
     }
 
     let now = Date()
@@ -147,12 +177,12 @@ final class SidebarCleanup {
       let candidates = try await Self.staleOpenCandidates(cutoff: cutoff, currentUserId: currentUserId)
       let activeCandidates = candidates
         .filter { MainWindowOpenCoordinator.shared.hasActivePeer($0.peerId) == false }
-      guard activeCandidates.isEmpty == false else { return }
+      guard activeCandidates.isEmpty == false else { return .cleaned(0) }
 
       let closeReadyIDs = activeCandidates
         .filter { MainWindowOpenCoordinator.shared.hasActivePeer($0.peerId) == false }
         .map(\.id)
-      guard closeReadyIDs.isEmpty == false else { return }
+      guard closeReadyIDs.isEmpty == false else { return .cleaned(0) }
 
       let confirmedCandidates = try await Self.staleOpenCandidates(
         cutoff: cutoff,
@@ -162,8 +192,8 @@ final class SidebarCleanup {
       let stillCloseReadyIDs = confirmedCandidates
         .filter { MainWindowOpenCoordinator.shared.hasActivePeer($0.peerId) == false }
         .map(\.id)
-      guard stillCloseReadyIDs.isEmpty == false else { return }
-      guard allowsCleanup else { return }
+      guard stillCloseReadyIDs.isEmpty == false else { return .cleaned(0) }
+      guard allowsCleanup else { return .unavailable }
 
       let closedCandidates = try await Self.closeStaleCandidates(
         cutoff: cutoff,
@@ -173,14 +203,16 @@ final class SidebarCleanup {
       let peers = closedCandidates
         .filter { MainWindowOpenCoordinator.shared.hasActivePeer($0.peerId) == false }
         .map(\.peerId)
-      guard peers.isEmpty == false else { return }
+      guard peers.isEmpty == false else { return .cleaned(0) }
 
       log.info("Closing \(peers.count) stale sidebar chats")
       await queueCloseRequests(peers, realtimeV2: realtimeV2)
+      return .cleaned(peers.count)
     } catch is CancellationError {
-      return
+      return .unavailable
     } catch {
       log.error("Failed to clean up sidebar", error: error)
+      return .failed
     }
   }
 
@@ -319,10 +351,27 @@ final class SidebarCleanup {
       FROM "dialog"
       LEFT JOIN "chat" ON "chat"."id" = "dialog"."chatId"
       LEFT JOIN "latestOwnMessage" ON "latestOwnMessage"."chatId" = "dialog"."chatId"
+      LEFT JOIN "draft2" ON "draft2"."peerKey" = CASE
+        WHEN "dialog"."peerUserId" IS NOT NULL
+          THEN 'user_' || CAST("dialog"."peerUserId" AS TEXT)
+        ELSE 'thread_' || CAST("dialog"."peerThreadId" AS TEXT)
+      END
       WHERE \(cleanupBaseSQL)
       AND "dialog"."openedDate" IS NOT NULL
-      AND \(effectiveActivityDateSQL) <= ?
-      AND NOT (\(Dialog.prominentUnreadSQL) AND \(Dialog.unreadSQL))
+      AND (
+        (
+          "dialog"."peerThreadId" IS NOT NULL
+          AND COALESCE("chat"."isUntitled" = 1, 0)
+          AND "chat"."lastMsgId" IS NULL
+        )
+        OR \(effectiveActivityDateSQL) <= ?
+      )
+      AND NOT (\(Dialog.unreadSQL))
+      AND (
+        "draft2"."peerKey" IS NULL
+        OR (TRIM("draft2"."text") = '' AND "draft2"."attachments" IS NULL)
+      )
+      AND "dialog"."draftMessage" IS NULL
       \(dialogFilter)
       ORDER BY \(effectiveActivityDateSQL) ASC
       """,

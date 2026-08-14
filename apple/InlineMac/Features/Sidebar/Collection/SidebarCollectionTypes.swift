@@ -20,7 +20,15 @@ struct SidebarCollectionRow: Equatable, Identifiable {
   }
 
   static let sectionHeaderHeight: CGFloat = 28
+  static let sectionTopSpacing: CGFloat = 4
+  static let spacedSectionHeaderHeight = sectionHeaderHeight + sectionTopSpacing
   static let emptyPinnedTargetHeight: CGFloat = 56
+  static let itemVisualGap: CGFloat = 1
+  static let itemVisualEdgeInset = itemVisualGap / 2
+
+  static func paintedItemHeight(for rowHeight: CGFloat) -> CGFloat {
+    max(rowHeight - itemVisualGap, 0)
+  }
 
   enum ID: Hashable {
     case allChats
@@ -77,7 +85,7 @@ struct SidebarCollectionRow: Equatable, Identifiable {
   static func sectionHeader(
     _ section: SectionHeader,
     isExpanded: Bool,
-    height: CGFloat = sectionHeaderHeight
+    height: CGFloat = spacedSectionHeaderHeight
   ) -> Self {
     Self(
       id: .sectionHeader(section),

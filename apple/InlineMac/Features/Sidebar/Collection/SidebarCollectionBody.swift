@@ -1304,7 +1304,7 @@ final class SidebarCollectionBodyController: NSViewController {
       || localSettle?.keepsEmptyPinnedSection == true
     guard isRevealed else { return nil }
     return SidebarCollectionEmptyPinnedLayoutState(
-      headerHeight: Double(SidebarCollectionRow.sectionHeaderHeight),
+      headerHeight: Double(SidebarCollectionRow.spacedSectionHeaderHeight),
       targetHeight: Double(SidebarCollectionRow.emptyPinnedTargetHeight)
     )
   }
@@ -2712,7 +2712,7 @@ final class SidebarCollectionBodyController: NSViewController {
     let plannedRows = plannedLayoutRows(for: session)
     let emptyPinned = revealsEmptyPinnedSection
       ? SidebarCollectionEmptyPinnedLayoutState(
-        headerHeight: Double(SidebarCollectionRow.sectionHeaderHeight),
+        headerHeight: Double(SidebarCollectionRow.spacedSectionHeaderHeight),
         targetHeight: Double(SidebarCollectionRow.emptyPinnedTargetHeight)
       )
       : nil
@@ -2808,7 +2808,7 @@ final class SidebarCollectionBodyController: NSViewController {
         rows: plannedLayoutRows(for: session),
         drag: Optional<SidebarCollectionDragLayoutState<SidebarCollectionRow.ID>>.none,
         emptyPinned: SidebarCollectionEmptyPinnedLayoutState(
-          headerHeight: Double(SidebarCollectionRow.sectionHeaderHeight),
+          headerHeight: Double(SidebarCollectionRow.spacedSectionHeaderHeight),
           targetHeight: Double(SidebarCollectionRow.emptyPinnedTargetHeight)
         )
       )

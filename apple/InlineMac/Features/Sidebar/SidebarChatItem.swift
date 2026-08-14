@@ -83,7 +83,6 @@ struct SidebarChatItemView: Equatable, View {
   private static let replyThreadTitleFont: Font = .system(size: 12, weight: .regular)
   private static let parentTitleFont: Font = .system(size: 10, weight: .regular)
   private static let subtitleFont: Font = .system(size: 11)
-  private static let outerPaddingVertical = 0.0
   private static let trailingAccessoryMinWidth = 14.0
   private static let showsParentChatTitle = false
 
@@ -211,7 +210,7 @@ struct SidebarChatItemView: Equatable, View {
           .allowsHitTesting(true)
       }
     }
-    .frame(height: rowHeight)
+    .frame(height: SidebarCollectionRow.paintedItemHeight(for: rowHeight))
     .animation(.smoothSnappy, value: size)
     .animation(.smoothSnappy, value: item.unread)
     .animation(.smoothSnappy, value: item.unreadCount)
@@ -223,7 +222,7 @@ struct SidebarChatItemView: Equatable, View {
     .background(background)
     // Outer paddings
     .padding(.horizontal, outerHorizontalPadding)
-    .padding(.vertical, Self.outerPaddingVertical)
+    .padding(.vertical, SidebarCollectionRow.itemVisualEdgeInset)
     .contentShape(.interaction, .rect(cornerRadius: Theme.sidebarItemRadius))
     .onHover {
       guard allowsHoverEffects else { return }

@@ -7,41 +7,169 @@ import SwiftUI
 struct SidebarCollectionSectionHeaderView: View {
   let title: String
   let isExpanded: Bool
+  let topSpacing: CGFloat
+  let cleanupMenu: SidebarOpenChatsCleanupMenu?
   let onToggle: () -> Void
+
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @State private var isHovered = false
+  @State private var isDisclosureHovered = false
+  @State private var presentedIsExpanded: Bool
+
+  init(
+    title: String,
+    isExpanded: Bool,
+    topSpacing: CGFloat,
+    cleanupMenu: SidebarOpenChatsCleanupMenu?,
+    onToggle: @escaping () -> Void
+  ) {
+    self.title = title
+    self.isExpanded = isExpanded
+    self.topSpacing = topSpacing
+    self.cleanupMenu = cleanupMenu
+    self.onToggle = onToggle
+    _presentedIsExpanded = State(initialValue: isExpanded)
+  }
+
+  var body: some View {
+    HStack(alignment: .center, spacing: 0) {
+      Button(action: toggleImmediately) {
+        Text(title)
+          .font(.system(size: 11, weight: .medium))
+          .foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+          .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel(presentedIsExpanded ? "Collapse \(title)" : "Expand \(title)")
+      .accessibilityAddTraits(.isHeader)
+
+      if let cleanupMenu {
+        cleanupMenu
+          .opacity(isHovered ? 1 : 0)
+          .animation(reduceMotion ? nil : .easeInOut(duration: 0.1), value: isHovered)
+      }
+
+      Button(action: toggleImmediately) {
+        Image(systemName: "chevron.right")
+          .font(.system(size: 9, weight: .semibold))
+          .foregroundStyle(.tertiary)
+          .rotationEffect(.degrees(presentedIsExpanded ? 90 : 0))
+          .frame(width: 24, height: 24)
+          .contentShape(Rectangle())
+          .opacity(isHovered ? 1 : 0)
+          .background {
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+              .fill(Color.primary.opacity(isDisclosureHovered ? 0.045 : 0))
+          }
+          .animation(reduceMotion ? nil : .easeInOut(duration: 0.1), value: isHovered)
+          .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: isDisclosureHovered)
+      }
+      .buttonStyle(.plain)
+      .onHover { isDisclosureHovered = $0 }
+      .accessibilityLabel(presentedIsExpanded ? "Collapse \(title)" : "Expand \(title)")
+    }
+    // Match the row identity axis and keep the larger disclosure target's
+    // center on the same 19-point trailing axis as compact accessories.
+    .padding(.leading, Theme.sidebarItemInnerSpacing + 8)
+    .padding(.trailing, 7)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    .padding(.top, topSpacing)
+    .contentShape(Rectangle())
+    .onHover { isHovered = $0 }
+    .onChange(of: isExpanded) { _, newValue in
+      guard presentedIsExpanded != newValue else { return }
+      withAnimation(disclosureAnimation) {
+        presentedIsExpanded = newValue
+      }
+    }
+  }
+
+  private var disclosureAnimation: Animation? {
+    reduceMotion ? nil : .easeOut(duration: 0.1)
+  }
+
+  private func toggleImmediately() {
+    withAnimation(disclosureAnimation) {
+      presentedIsExpanded.toggle()
+    }
+    onToggle()
+  }
+}
+
+struct SidebarOpenChatsCleanupMenu: View {
+  @Binding var cleanupInterval: SidebarCleanupInterval
+  let onCleanUp: () -> Void
+  let onCloseAll: () -> Void
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var isHovered = false
 
   var body: some View {
-    HStack(alignment: .center, spacing: 6) {
-      Text(title)
-        .font(.system(size: 11, weight: .medium))
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityAddTraits(.isHeader)
-
-      Button(action: onToggle) {
-        Image(systemName: "chevron.right")
-          .font(.system(size: 9, weight: .semibold))
-          .foregroundStyle(.tertiary)
-          .rotationEffect(.degrees(isExpanded ? 90 : 0))
-          .animation(reduceMotion ? nil : .easeInOut(duration: 0.16), value: isExpanded)
-          .frame(width: 18, height: 18)
-          .contentShape(Rectangle())
+    Menu {
+      Button(action: onCleanUp) {
+        Label("Cleanup…", systemImage: "eraser.line.dashed")
       }
-      .buttonStyle(.plain)
-      .opacity(isHovered ? 1 : 0)
-      .animation(reduceMotion ? nil : .easeInOut(duration: 0.12), value: isHovered)
-      .accessibilityLabel(isExpanded ? "Collapse \(title)" : "Expand \(title)")
+
+      Button(role: .destructive, action: onCloseAll) {
+        Label("Close All", systemImage: "xmark.circle")
+      }
+
+      Divider()
+
+      Menu {
+        // Mirror SidebarViewOptionsMenuButton.Coordinator.cleanupItem() so
+        // cleanup settings have the same ordering in both sidebar menus.
+        cleanupIntervalButton(.never)
+
+        Divider()
+
+        Section("Close Open Chats After") {
+          ForEach(SidebarCleanupInterval.allCases.filter { $0 != .never }) { interval in
+            cleanupIntervalButton(interval)
+          }
+        }
+      } label: {
+        Label("Auto Cleanup", systemImage: "clock.arrow.circlepath")
+      }
+    } label: {
+      Image(systemName: "eraser.line.dashed")
+        .font(.system(size: 10, weight: .medium))
+        .foregroundStyle(.tertiary)
+        .frame(width: 24, height: 24)
+        .contentShape(Rectangle())
+        .background {
+          RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .fill(Color.primary.opacity(isHovered ? 0.045 : 0))
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: isHovered)
     }
-    .contentShape(Rectangle())
+    .menuStyle(.button)
+    .buttonStyle(.plain)
+    .menuIndicator(.hidden)
     .onHover { isHovered = $0 }
-    // Chat rows use an eight-point full-width hover inset before their own
-    // content padding. Match that visible leading edge instead of leaving
-    // section titles stuck to the collection boundary.
-    .padding(.leading, Theme.sidebarItemInnerSpacing + 8)
-    .padding(.trailing, Theme.sidebarContentSideSpacing)
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    .help("Open Chats Cleanup")
+    .accessibilityLabel("Open Chats Cleanup")
+  }
+
+  private func cleanupIntervalButton(_ interval: SidebarCleanupInterval) -> some View {
+    Button {
+      cleanupInterval = interval
+    } label: {
+      HStack {
+        VStack(alignment: .leading, spacing: 1) {
+          Text(interval.title)
+          if interval == .never {
+            Text(interval.detailText)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        }
+        if cleanupInterval == interval {
+          Image(systemName: "checkmark")
+        }
+      }
+    }
   }
 }
 
