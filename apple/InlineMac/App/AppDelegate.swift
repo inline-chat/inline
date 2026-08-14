@@ -160,8 +160,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       // Keep this off so message list layout stays stable.
       "NSTableViewCanEstimateRowHeights": false,
 
-      // Disable macOS SMS one-time-code autofill heuristics inside Inline inputs.
-      "NSAutoFillHeuristicControllerEnabled": false,
+      // Keep macOS autofill heuristics enabled so email login codes can be offered from Mail.
 
       "showSidebarMessagePreview": true,
       "includeSpaceChatsInHomeSidebar": true,
