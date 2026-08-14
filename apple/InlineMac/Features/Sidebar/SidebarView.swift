@@ -2012,10 +2012,10 @@ struct SidebarView: View {
     Task(priority: .userInitiated) {
       do {
         let result = try await dependencies.realtimeV2.send(.joinPublicSpace(handle: "townhall"))
-        guard case let .joinPublicSpace(response) = result else {
+        guard case .joinPublicSpace = result else {
           throw TransactionExecutionError.invalid
         }
-        selectSpace(response.space.id)
+        selectHome()
       } catch {
         ToastCenter.shared.showError("Couldn’t join Town Hall. Please try again.")
       }
