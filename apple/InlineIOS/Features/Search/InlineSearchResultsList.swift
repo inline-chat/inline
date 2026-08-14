@@ -71,7 +71,7 @@ struct InlineSearchResultsList: View {
     Button {
       addToInbox(peer)
     } label: {
-      Label("Open", systemImage: "bubble.left.fill")
+      Label("Open", systemImage: "tray.and.arrow.down.fill")
     }
     .tint(.green)
   }

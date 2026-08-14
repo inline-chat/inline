@@ -14,7 +14,7 @@ struct SidebarCollectionRow: Equatable, Identifiable {
       case .pinned:
         "Pinned"
       case .content:
-        archiveVisible ? "Archived" : (sidebarAsInbox ? "Open Chats" : "Chats")
+        archiveVisible ? "Archived" : (sidebarAsInbox ? "Open" : "Chats")
       }
     }
   }

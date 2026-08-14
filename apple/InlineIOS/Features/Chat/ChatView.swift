@@ -801,16 +801,8 @@ private struct ChatToolbarMoreMenu: View {
         Button {
           addToInbox()
         } label: {
-          Label {
-            VStack(alignment: .leading, spacing: 1) {
-              Text("Open")
-              Text("Add to Open Chats")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-          } icon: {
-            Image(systemName: "bubble.left.fill")
-          }
+          Label("Open", systemImage: "tray.and.arrow.down")
+          Text("Add to Open Chats")
         }
         .disabled(isAddingToInbox)
       }

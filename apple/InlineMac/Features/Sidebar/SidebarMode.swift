@@ -11,7 +11,7 @@ enum SidebarMode: String, CaseIterable, Identifiable {
     case .allChats:
       "All Chats"
     case .inbox:
-      "Open Chats"
+      "Open"
     }
   }
 

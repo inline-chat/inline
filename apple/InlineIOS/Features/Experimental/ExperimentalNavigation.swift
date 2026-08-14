@@ -649,7 +649,7 @@ private struct ExperimentalChatListView: View {
     if !items.isEmpty {
       sections.append(InboxListSection(
         id: .inbox,
-        title: "Chats",
+        title: "Open",
         items: items
       ))
     }
@@ -687,20 +687,17 @@ private struct ExperimentalChatListView: View {
       contextMenuNavigateToChatButton(for: item)
       contextMenuReadUnreadButton(for: item)
       contextMenuPinButton(for: item)
-      copyLinkButton(for: item)
       Divider()
       contextMenuCloseButton(for: item)
       contextMenuArchiveButton(for: item)
     } else if mode == .allChats {
       contextMenuOpenButton(for: item)
       contextMenuReadUnreadButton(for: item)
-      copyLinkButton(for: item)
       Divider()
       contextMenuArchiveButton(for: item)
     } else if mode == .archived {
       contextMenuUnarchiveButton(for: item)
       contextMenuReadUnreadButton(for: item)
-      copyLinkButton(for: item)
     }
   }
 
@@ -752,16 +749,8 @@ private struct ExperimentalChatListView: View {
     Button {
       performOpen(item)
     } label: {
-      Label {
-        VStack(alignment: .leading, spacing: 1) {
-          Text("Open")
-          Text("Add to Open Chats")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-      } icon: {
-        Image(systemName: "bubble.left.fill")
-      }
+      Label("Open", systemImage: "tray.and.arrow.down")
+      Text("Add to Open Chats")
     }
   }
 
@@ -778,23 +767,6 @@ private struct ExperimentalChatListView: View {
       performUnarchive(item)
     } label: {
       Label("Unarchive", systemImage: "arrow.uturn.backward")
-    }
-  }
-
-  @ViewBuilder
-  private func copyLinkButton(for item: ChatListItemSnapshot) -> some View {
-    if case let .thread(id) = item.peer,
-       let url = InlineDeepLink.chat(id: id).webURL {
-      Button {
-        UIPasteboard.general.url = url
-        ToastManager.shared.showToast(
-          "Copied link",
-          type: .success,
-          systemImage: "link"
-        )
-      } label: {
-        Label("Copy Link", systemImage: "link")
-      }
     }
   }
 
@@ -886,7 +858,7 @@ private struct ExperimentalChatListView: View {
     Button {
       performOpen(item)
     } label: {
-      Label("Open", systemImage: "bubble.left.fill")
+      Label("Open", systemImage: "tray.and.arrow.down.fill")
     }
     .tint(.green)
   }

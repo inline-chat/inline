@@ -1068,7 +1068,7 @@ class UIMessageView: UIView {
     let addToInboxAction = UIAction(
       title: "Open",
       subtitle: "Add to Open Chats",
-      image: UIImage(systemName: "bubble.left.fill"),
+      image: UIImage(systemName: "tray.and.arrow.down"),
       attributes: attributes
     ) { [weak self] _ in
       guard let self else { return }
