@@ -65,14 +65,14 @@ struct ChatToolbarMenuButton: View {
       }
 
       if peer.isThread, model.state.isChatListHidden {
-        Button("Keep in Chat List", systemImage: "sidebar.left") {
+        Button("Show in All Chats", systemImage: "bubble.left.and.bubble.right") {
           keepInChatList()
         }
       }
 
       if settings.sidebarAsInbox,
          !(model.state.isOpen && model.state.isArchived == false && model.state.isChatListHidden == false) {
-        Button("Open in Sidebar", systemImage: "sidebar.left") {
+        Button("Keep in Sidebar", systemImage: "sidebar.left") {
           openInSidebar()
         }
       }
@@ -308,7 +308,7 @@ struct ChatToolbarMenuButton: View {
         _ = try await realtimeV2.send(.showInChatList(peerId: peer))
       } catch {
         await MainActor.run {
-          ToastCenter.shared.showError("Failed to keep chat in chat list")
+          ToastCenter.shared.showError("Couldn’t show in All Chats")
         }
       }
     }

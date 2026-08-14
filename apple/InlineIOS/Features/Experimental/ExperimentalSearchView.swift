@@ -268,16 +268,16 @@ struct ExperimentalSearchView: View {
         let didPerform = try await InboxMembershipService.shared.open(peer: peer)
         guard didPerform else { return }
         ToastManager.shared.showToast(
-          "Added to Inbox",
+          "Now in Open Chats",
           type: .success,
-          systemImage: "tray.full.fill"
+          systemImage: "bubble.left.fill"
         )
       } catch is CancellationError {
         return
       } catch {
         Log.shared.error("Failed to add Search result to Inbox", error: error)
         ToastManager.shared.showToast(
-          "Could not add to Inbox",
+          "Couldn’t open chat",
           type: .error,
           systemImage: "exclamationmark.triangle.fill"
         )

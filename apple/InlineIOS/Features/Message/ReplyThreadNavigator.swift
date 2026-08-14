@@ -92,27 +92,26 @@ enum ReplyThreadNavigator {
         let peer = try await resolveThreadPeer(message: message, source: .menu)
         ToastManager.shared.hideToast()
         ToastManager.shared.showToast(
-          "Adding to inbox...",
+          "Opening…",
           type: .loading,
-          systemImage: "tray.and.arrow.down"
+          systemImage: "bubble.left"
         )
 
-        _ = try await Api.realtime.send(.updateDialogFollowMode(peerId: peer, selection: .following))
-        _ = try await Api.realtime.send(.showInChatList(peerId: peer))
-        _ = try await Api.realtime.send(.updateDialogOpen(peerId: peer, open: true))
+        let didPerform = try await InboxMembershipService.shared.open(peer: peer)
 
         ToastManager.shared.hideToast()
+        guard didPerform else { return }
         ToastManager.shared.showToast(
-          "Added to inbox",
+          "Now in Open Chats",
           type: .success,
-          systemImage: "tray.and.arrow.down.fill"
+          systemImage: "bubble.left.fill"
         )
       } catch OpenError.alreadyOpening {
         return
       } catch {
         ToastManager.shared.hideToast()
         ToastManager.shared.showToast(
-          "Failed to add to inbox",
+          "Couldn’t open thread",
           type: .error,
           systemImage: "exclamationmark.triangle"
         )

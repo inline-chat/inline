@@ -63,7 +63,7 @@ struct SidebarViewOptionsMenuButton: NSViewRepresentable {
     }
 
     private func sidebarModeItem() -> NSMenuItem {
-      let submenu = NSMenu(title: "Sidebar Mode")
+      let submenu = NSMenu(title: "Sidebar View")
       for (index, mode) in SidebarMode.allCases.enumerated() {
         submenu.addItem(choiceItem(
           title: mode.title,
@@ -74,7 +74,7 @@ struct SidebarViewOptionsMenuButton: NSViewRepresentable {
         ))
       }
       return submenuItem(
-        title: "Sidebar Mode",
+        title: "Sidebar View",
         subtitle: configuration.sidebarMode.title,
         systemImage: "sidebar.left",
         submenu: submenu
@@ -125,7 +125,7 @@ struct SidebarViewOptionsMenuButton: NSViewRepresentable {
     }
 
     private func cleanupItem() -> NSMenuItem {
-      let submenu = NSMenu(title: "Auto Cleanup")
+      let submenu = NSMenu(title: "Open Chats Cleanup")
       submenu.addItem(choiceItem(
         title: SidebarCleanupInterval.never.title,
         subtitle: SidebarCleanupInterval.never.detailText,
@@ -134,7 +134,7 @@ struct SidebarViewOptionsMenuButton: NSViewRepresentable {
         action: #selector(selectCleanupInterval(_:))
       ))
       submenu.addItem(.separator())
-      submenu.addItem(.sectionHeader(title: "Close Chats After"))
+      submenu.addItem(.sectionHeader(title: "Close Open Chats After"))
       for (index, interval) in SidebarCleanupInterval.allCases.enumerated()
         where interval != .never {
         submenu.addItem(choiceItem(
@@ -145,7 +145,7 @@ struct SidebarViewOptionsMenuButton: NSViewRepresentable {
         ))
       }
       return submenuItem(
-        title: "Auto Cleanup",
+        title: "Open Chats Cleanup",
         subtitle: configuration.cleanupInterval.title,
         systemImage: "clock.arrow.circlepath",
         submenu: submenu

@@ -337,7 +337,7 @@ struct ExperimentalHomeView: View {
           daySections: [],
           mode: .inbox,
           emptyStyle: .inbox,
-          emptyTitle: "Inbox is clear",
+          emptyTitle: "No open chats",
           emptySubtitle: "Open a chat from All Chats to keep it here.",
           chatItemRenderMode: chatItemRenderMode,
           unreadBadgeStyle: unreadBadgeStyle,
@@ -649,7 +649,7 @@ private struct ExperimentalChatListView: View {
     if !items.isEmpty {
       sections.append(InboxListSection(
         id: .inbox,
-        title: "Inbox",
+        title: "Chats",
         items: items
       ))
     }
@@ -748,13 +748,19 @@ private struct ExperimentalChatListView: View {
     }
   }
 
-  @ViewBuilder
   private func contextMenuOpenButton(for item: ChatListItemSnapshot) -> some View {
-    if !item.isOpen {
-      Button {
-        performOpen(item)
-      } label: {
-        Label("Open", systemImage: "tray.and.arrow.down")
+    Button {
+      performOpen(item)
+    } label: {
+      Label {
+        VStack(alignment: .leading, spacing: 1) {
+          Text("Open")
+          Text("Add to Open Chats")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+      } icon: {
+        Image(systemName: "bubble.left.fill")
       }
     }
   }
@@ -876,27 +882,33 @@ private struct ExperimentalChatListView: View {
     }
   }
 
-  @ViewBuilder
   private func openButton(for item: ChatListItemSnapshot) -> some View {
-    if !item.isOpen {
-      Button {
-        performOpen(item)
-      } label: {
-        Label("Open", systemImage: "tray.and.arrow.down.fill")
-      }
-      .tint(.green)
+    Button {
+      performOpen(item)
+    } label: {
+      Label("Open", systemImage: "bubble.left.fill")
     }
+    .tint(.green)
   }
 
   private func performOpen(_ item: ChatListItemSnapshot) {
     Task {
       do {
+        if item.isOpen {
+          ToastManager.shared.showToast(
+            "Already open",
+            description: "This chat is already in Open Chats.",
+            type: .info,
+            systemImage: "bubble.left.fill"
+          )
+          return
+        }
         let didPerform = try await InboxMembershipService.shared.open(peer: item.peer)
         guard didPerform else { return }
         ToastManager.shared.showToast(
-          "Opened in Inbox",
+          "Now in Open Chats",
           type: .success,
-          systemImage: "tray.full.fill"
+          systemImage: "bubble.left.fill"
         )
       } catch {
         Log.shared.error("Failed to update Inbox state", error: error)
@@ -1050,7 +1062,7 @@ private struct ExperimentalChatListView: View {
           isFollowed ? "Unfollowed" : "Following",
           description: isFollowed
             ? "Only mentions and replies can bring this chat back."
-            : "New messages will appear in Inbox.",
+            : "New messages will appear in Open Chats.",
           type: .success,
           systemImage: isFollowed ? "eye.slash.fill" : "eye.fill"
         )

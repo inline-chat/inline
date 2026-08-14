@@ -96,7 +96,7 @@ struct GeneralSettingsDetailView: View {
 
       Section {
         LabeledContent {
-          Picker("Sidebar Cleanup", selection: $appSettings.sidebarCleanupInterval) {
+          Picker("Open Chats Cleanup", selection: $appSettings.sidebarCleanupInterval) {
             ForEach(SidebarCleanupInterval.allCases) { interval in
               Text(interval.title).tag(interval)
             }
@@ -105,7 +105,7 @@ struct GeneralSettingsDetailView: View {
           .pickerStyle(.menu)
         } label: {
           SettingsRowLabel(
-            "Sidebar Cleanup",
+            "Open Chats Cleanup",
             dynamicDescription: appSettings.sidebarCleanupInterval.detailText
           )
         }

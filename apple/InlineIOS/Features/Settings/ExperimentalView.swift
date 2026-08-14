@@ -10,7 +10,7 @@ struct ExperimentalView: View {
         } label: {
           VStack(alignment: .leading, spacing: 3) {
             Text("New Home")
-            Text("Use the new Inbox, All Chats, and Search tabs.")
+            Text("Use the Open Chats, All Chats, and Search tabs.")
               .font(.footnote)
               .foregroundStyle(.secondary)
           }

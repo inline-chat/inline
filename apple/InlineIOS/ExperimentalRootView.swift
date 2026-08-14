@@ -393,7 +393,7 @@ private struct ExperimentalAuthedRootView: View {
 
       // TODO: Decide the badge color before bridging UIKit's global
       // `UITabBarItem.badgeColor`; SwiftUI's native tab badge has no tint API.
-      Tab("Inbox", systemImage: "tray.full.fill", value: .inbox) {
+      Tab("Open Chats", systemImage: "bubble.left.fill", value: .inbox) {
         chatsRoot(nav: nav, rootTab: .inbox)
       }
       .badge(homeListStore.state.presentation.inboxUnreadCount)

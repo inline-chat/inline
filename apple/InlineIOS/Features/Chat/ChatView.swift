@@ -798,8 +798,19 @@ private struct ChatToolbarMoreMenu: View {
       Button("Chat Info", systemImage: "info.circle", action: openChatInfo)
 
       if shouldOfferAddToInbox {
-        Button("Add to Inbox", systemImage: "tray.and.arrow.down") {
+        Button {
           addToInbox()
+        } label: {
+          Label {
+            VStack(alignment: .leading, spacing: 1) {
+              Text("Open")
+              Text("Add to Open Chats")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+          } icon: {
+            Image(systemName: "bubble.left.fill")
+          }
         }
         .disabled(isAddingToInbox)
       }
@@ -980,15 +991,21 @@ private struct ChatToolbarMoreMenu: View {
     isAddingToInbox = true
     Task(priority: .userInitiated) {
       do {
-        _ = try await InboxMembershipService.shared.open(peer: peer)
+        let didPerform = try await InboxMembershipService.shared.open(peer: peer)
         isAddingToInbox = false
+        guard didPerform else { return }
+        ToastManager.shared.showToast(
+          "Now in Open Chats",
+          type: .success,
+          systemImage: "bubble.left.fill"
+        )
       } catch is CancellationError {
         isAddingToInbox = false
       } catch {
         isAddingToInbox = false
         Log.shared.error("Failed to add chat to Inbox", error: error)
         ToastManager.shared.showToast(
-          "Could not add chat to Inbox",
+          "Couldn’t open chat",
           type: .error,
           systemImage: "exclamationmark.triangle.fill"
         )

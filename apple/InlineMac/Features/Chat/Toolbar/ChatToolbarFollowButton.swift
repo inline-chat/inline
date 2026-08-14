@@ -65,7 +65,7 @@ struct ChatToolbarFollowPresentation: Equatable {
 
   var tooltip: String {
     isFollowing
-      ? "Stop adding this thread in my sidebar for every message (will be shown only for mention and replies)"
-      : "Add to my sidebar on new messages"
+      ? "Stop opening this thread for every new message. Mentions and replies can still open it."
+      : "Open this thread in the sidebar for new messages"
   }
 }

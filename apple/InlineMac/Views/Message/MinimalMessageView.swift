@@ -3148,8 +3148,8 @@ class MinimalMessageViewAppKit: NSView {
       action: #selector(copyReplyThreadLinkFromSummaryMenu)
     ))
     menu.addItem(replyThreadMenuItem(
-      title: "Add to Inbox",
-      systemSymbolName: "tray.and.arrow.down",
+      title: "Open in Sidebar",
+      systemSymbolName: "sidebar.left",
       action: #selector(addReplyThreadToInboxFromSummaryMenu)
     ))
     return menu
@@ -3206,17 +3206,17 @@ class MinimalMessageViewAppKit: NSView {
         }
 
         let peer = try await resolveReplyThreadPeerForMenuAction()
-        ToastCenter.shared.showLoading("Adding to inbox…")
+        ToastCenter.shared.showLoading("Opening in sidebar…")
 
         _ = try await dependencies.realtimeV2.send(.updateDialogFollowMode(peerId: peer, selection: .following))
         _ = try await dependencies.realtimeV2.send(.showInChatList(peerId: peer))
         _ = try await dependencies.realtimeV2.send(.updateDialogOpen(peerId: peer, open: true))
 
         ToastCenter.shared.dismiss()
-        ToastCenter.shared.showSuccess("Added to inbox")
+        ToastCenter.shared.showSuccess("Opened in sidebar")
       } catch {
         ToastCenter.shared.dismiss()
-        ToastCenter.shared.showError("Failed to add to inbox")
+        ToastCenter.shared.showError("Couldn’t open in sidebar")
         log.error("Failed to add reply thread to inbox", error: error)
       }
     }

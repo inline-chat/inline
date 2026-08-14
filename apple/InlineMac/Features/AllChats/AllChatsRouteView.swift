@@ -559,6 +559,7 @@ struct AllChatsItem: Identifiable, Equatable {
   let unreadCount: Int
   let unreadMark: Bool
   let prominentUnreadIndicator: Bool
+  let isOpen: Bool
   let pinned: Bool
   let archived: Bool
   let chatListHidden: Bool
@@ -584,6 +585,7 @@ struct AllChatsItem: Identifiable, Equatable {
     unreadMark = snapshot.unreadMark
     unread = snapshot.isUnread
     prominentUnreadIndicator = snapshot.isProminent
+    isOpen = snapshot.isOpen
     pinned = snapshot.isPinned
     archived = snapshot.isArchived
     chatListHidden = snapshot.isChatListHidden
@@ -1068,12 +1070,18 @@ private struct ChatListRow: View {
     Task(priority: .userInitiated) {
       do {
         guard let dependencies else { return }
+        guard item.isOpen == false else {
+          ToastCenter.shared.showInfo("Already open")
+          return
+        }
         if peerId.isThread, item.chatListHidden {
           _ = try await dependencies.realtimeV2.send(.showInChatList(peerId: peerId))
         }
         _ = try await dependencies.realtimeV2.send(.updateDialogOpen(peerId: peerId, open: true))
+        ToastCenter.shared.showSuccess("Opened in sidebar")
       } catch {
         Log.shared.error("Failed to open chat in sidebar", error: error)
+        ToastCenter.shared.showError("Couldn’t open in sidebar")
       }
     }
   }

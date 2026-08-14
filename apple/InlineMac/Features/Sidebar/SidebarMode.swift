@@ -11,7 +11,7 @@ enum SidebarMode: String, CaseIterable, Identifiable {
     case .allChats:
       "All Chats"
     case .inbox:
-      "Inbox"
+      "Open Chats"
     }
   }
 
@@ -20,7 +20,7 @@ enum SidebarMode: String, CaseIterable, Identifiable {
     case .allChats:
       "Every chat, ordered by recent activity"
     case .inbox:
-      "Chats opened in your focused inbox"
+      "Chats you keep open in the sidebar"
     }
   }
 }
