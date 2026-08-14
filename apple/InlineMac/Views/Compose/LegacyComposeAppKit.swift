@@ -749,6 +749,7 @@ class LegacyComposeAppKit: NSView {
 
   private func sendVoiceRecording() {
     guard !drafts2.hasPendingAttachments(peer: peerId) else { return }
+    guard voiceViewModel.finalizeRecordingForSend() else { return }
 
     do {
       guard let mediaItem = try voiceViewModel.takeVoiceMediaItem() else { return }

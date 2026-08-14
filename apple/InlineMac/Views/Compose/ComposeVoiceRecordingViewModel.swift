@@ -127,6 +127,14 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     }
   }
 
+  func finalizeRecordingForSend() -> Bool {
+    if phase == .recording {
+      pauseRecording()
+    }
+
+    return phase == .review && recording != nil
+  }
+
   func cancel() {
     startId = UUID()
     isStarting = false

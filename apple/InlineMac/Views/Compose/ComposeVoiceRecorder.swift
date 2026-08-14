@@ -387,6 +387,7 @@ private final class VoiceCaptureState: @unchecked Sendable {
   private var file: AVAudioFile?
   private var frames: AVAudioFramePosition = 0
   private var samples: [UInt8] = []
+  private var lastMeterSample: UInt8?
   private var error: Error?
 
   init(rawURL: URL, finalURL: URL, file: AVAudioFile, sampleRate: Double) {
@@ -405,7 +406,10 @@ private final class VoiceCaptureState: @unchecked Sendable {
     do {
       try file.write(from: buffer)
       frames += AVAudioFramePosition(buffer.frameLength)
-      samples.append(Self.meterSample(from: buffer))
+      let meterSample = Self.meterSample(from: buffer)
+      let smoothedSample = Self.smoothedMeterSample(meterSample, previous: lastMeterSample)
+      samples.append(smoothedSample)
+      lastMeterSample = smoothedSample
     } catch {
       self.error = error
     }
@@ -474,4 +478,17 @@ private final class VoiceCaptureState: @unchecked Sendable {
     let normalized = ComposeVoiceRecorder.normalizedPower(db)
     return UInt8(max(0, min(255, Int((normalized * 255).rounded()))))
   }
+
+  private static func smoothedMeterSample(_ sample: UInt8, previous: UInt8?) -> UInt8 {
+    guard let previous else { return sample }
+
+    let current = Float(sample)
+    let prior = Float(previous)
+    let response = current >= prior ? meterAttack : meterRelease
+    let smoothed = prior + (current - prior) * response
+    return UInt8(max(0, min(255, Int(smoothed.rounded()))))
+  }
+
+  private static let meterAttack: Float = 0.72
+  private static let meterRelease: Float = 0.28
 }

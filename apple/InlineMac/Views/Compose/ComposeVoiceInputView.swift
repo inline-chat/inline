@@ -36,6 +36,7 @@ struct ComposeVoiceInputView: View {
         waveform(progress: 0)
         durationLabel
         iconButton("stop.fill", title: "Stop recording", action: onPause)
+        iconButton("arrow.up", title: "Send voice message", isPrimary: true, action: onSend)
 
       case .review:
         iconButton("xmark", title: "Cancel", action: onCancel)
@@ -102,19 +103,26 @@ struct ComposeVoiceInputView: View {
   }
 
   private func waveform(progress: Double, onSeek: (@MainActor @Sendable (Double) -> Void)? = nil) -> some View {
-    AudioWaveformView(
+    let isRecording = viewModel.phase == .recording
+    let activeColor = Color(nsColor: .labelColor).opacity(0.88)
+    let inactiveColor = isRecording
+      ? activeColor
+      : Color(nsColor: .secondaryLabelColor).opacity(0.72)
+
+    return AudioWaveformView(
       samples: viewModel.samples,
       progress: progress,
-      foreground: Color(nsColor: .secondaryLabelColor),
-      background: Color(nsColor: .tertiaryLabelColor).opacity(0.45),
+      foreground: activeColor,
+      background: inactiveColor,
       targetBarCount: mode.voiceInputTargetBarCount,
       barWidth: mode.voiceInputBarWidth,
       barSpacing: mode.voiceInputBarSpacing,
       minBarHeight: 2,
       horizontalAlignment: isGlass ? .center : .leading,
       verticalAlignment: isGlass ? .center : .bottom,
-      shortSamplesMode: viewModel.phase == .recording ? .padLeadingQuiet : .stretch,
-      motion: viewModel.phase == .recording ? .recordingReel : .fixed,
+      shortSamplesMode: isRecording ? .padLeadingQuiet : .stretch,
+      motion: isRecording ? .recordingReel : .fixed,
+      amplitudeScale: .fixed,
       onSeek: onSeek
     )
     .frame(height: mode.voiceInputWaveformHeight)

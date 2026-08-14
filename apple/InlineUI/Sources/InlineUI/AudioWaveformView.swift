@@ -23,6 +23,11 @@ public struct AudioWaveformView: View {
     case recordingReel
   }
 
+  public enum AmplitudeScale {
+    case relative
+    case fixed
+  }
+
   private let samples: [UInt8]
   private let progress: Double
   private let foreground: Color
@@ -35,6 +40,7 @@ public struct AudioWaveformView: View {
   private let verticalAlignment: VerticalBarsAlignment
   private let shortSamplesMode: ShortSamplesMode
   private let motion: Motion
+  private let amplitudeScale: AmplitudeScale
   private let onSeek: (@MainActor @Sendable (Double) -> Void)?
 
   public init(
@@ -50,6 +56,7 @@ public struct AudioWaveformView: View {
     verticalAlignment: VerticalBarsAlignment = .center,
     shortSamplesMode: ShortSamplesMode = .stretch,
     motion: Motion = .fixed,
+    amplitudeScale: AmplitudeScale = .relative,
     onSeek: (@MainActor @Sendable (Double) -> Void)? = nil
   ) {
     self.samples = samples
@@ -64,6 +71,7 @@ public struct AudioWaveformView: View {
     self.verticalAlignment = verticalAlignment
     self.shortSamplesMode = shortSamplesMode
     self.motion = motion
+    self.amplitudeScale = amplitudeScale
     self.onSeek = onSeek
   }
 
@@ -80,6 +88,7 @@ public struct AudioWaveformView: View {
     verticalAlignment: VerticalBarsAlignment = .center,
     shortSamplesMode: ShortSamplesMode = .stretch,
     motion: Motion = .fixed,
+    amplitudeScale: AmplitudeScale = .relative,
     onSeek: (@MainActor @Sendable (Double) -> Void)? = nil
   ) {
     self.init(
@@ -95,6 +104,7 @@ public struct AudioWaveformView: View {
       verticalAlignment: verticalAlignment,
       shortSamplesMode: shortSamplesMode,
       motion: motion,
+      amplitudeScale: amplitudeScale,
       onSeek: onSeek
     )
   }
@@ -110,7 +120,8 @@ public struct AudioWaveformView: View {
       let bars = Self.normalizedBars(
         from: samples,
         targetCount: barCount,
-        shortSamplesMode: shortSamplesMode
+        shortSamplesMode: shortSamplesMode,
+        amplitudeScale: amplitudeScale
       )
       let contentWidth = Self.contentWidth(
         barCount: bars.count,
@@ -172,10 +183,11 @@ public struct AudioWaveformView: View {
     return max(1, min(max(targetCount, 1), max(availableCount, 1)))
   }
 
-  private static func normalizedBars(
+  nonisolated static func normalizedBars(
     from samples: [UInt8],
     targetCount: Int,
-    shortSamplesMode: ShortSamplesMode
+    shortSamplesMode: ShortSamplesMode,
+    amplitudeScale: AmplitudeScale
   ) -> [CGFloat] {
     let count = max(targetCount, 1)
     guard !samples.isEmpty else {
@@ -183,20 +195,25 @@ public struct AudioWaveformView: View {
     }
 
     let reduced = reduce(samples: samples, targetCount: count, shortSamplesMode: shortSamplesMode)
-    let minSample = CGFloat(reduced.min() ?? 0)
-    let maxSample = CGFloat(reduced.max() ?? 0)
-    let spread = max(maxSample - minSample, 1)
-
-    return reduced.map { sample in
-      let value = CGFloat(sample)
-      let absolute = value / 255
-      let relative = (value - minSample) / spread
-      let mixed = min(max(max(absolute, relative), 0), 1)
-      return normalizedBar(from: mixed)
+    switch amplitudeScale {
+    case .relative:
+      let minSample = CGFloat(reduced.min() ?? 0)
+      let maxSample = CGFloat(reduced.max() ?? 0)
+      let spread = max(maxSample - minSample, 1)
+      return reduced.map { sample in
+        let value = CGFloat(sample)
+        let absolute = value / 255
+        let relative = (value - minSample) / spread
+        return relativeBar(from: min(max(max(absolute, relative), 0), 1))
+      }
+    case .fixed:
+      return reduced.map { sample in
+        fixedBar(from: CGFloat(sample) / 255)
+      }
     }
   }
 
-  private static func reduce(
+  nonisolated private static func reduce(
     samples: [UInt8],
     targetCount: Int,
     shortSamplesMode: ShortSamplesMode
@@ -208,6 +225,10 @@ public struct AudioWaveformView: View {
       return Array(repeating: 0, count: targetCount - samples.count) + samples
     }
 
+    if samples.count > targetCount, shortSamplesMode == .padLeadingQuiet {
+      return Array(samples.suffix(targetCount))
+    }
+
     let bucketSize = Double(samples.count) / Double(targetCount)
     return (0 ..< targetCount).map { index in
       let start = Int(Double(index) * bucketSize)
@@ -216,14 +237,25 @@ public struct AudioWaveformView: View {
     }
   }
 
-  private static func placeholderBars(count: Int) -> [CGFloat] {
+  nonisolated private static func placeholderBars(count: Int) -> [CGFloat] {
     Array(repeating: 0.12, count: count)
   }
 
-  private static func normalizedBar(from value: CGFloat) -> CGFloat {
+  nonisolated private static func relativeBar(from value: CGFloat) -> CGFloat {
     let curved = CGFloat(pow(Double(min(max(value, 0), 1)), 0.72))
-    return min(1, max(0.12, 0.12 + curved * 0.88))
+    return min(1, max(minBarScale, minBarScale + curved * (1 - minBarScale)))
   }
+
+  nonisolated private static func fixedBar(from value: CGFloat) -> CGFloat {
+    let clamped = min(max(value, 0), 1)
+    let ranged = min(max((clamped - noiseFloor) / (fullScaleLevel - noiseFloor), 0), 1)
+    let curved = CGFloat(pow(Double(ranged), 0.72))
+    return minBarScale + curved * (1 - minBarScale)
+  }
+
+  nonisolated private static let noiseFloor: CGFloat = 0.035
+  nonisolated private static let fullScaleLevel: CGFloat = 0.85
+  nonisolated private static let minBarScale: CGFloat = 0.12
 
   private static func contentWidth(barCount: Int, barWidth: CGFloat, barSpacing: CGFloat) -> CGFloat {
     guard barCount > 0 else { return 0 }
