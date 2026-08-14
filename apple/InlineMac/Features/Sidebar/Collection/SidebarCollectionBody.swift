@@ -1453,10 +1453,22 @@ final class SidebarCollectionBodyController: NSViewController {
           let source = rowForHosting(rowID)?.projectedItem,
           source.orderLane != nil,
           reorderPolicy == .manual || source.parentID == nil,
+          // A reply inherited into a pinned parent's presentation lane keeps
+          // its own persisted order lane. Until those order domains are
+          // decoupled, do not offer a drag whose apparent move would also
+          // mutate pin state or immediately snap back into the parent.
+          source.parentID == nil || source.orderLane == source.lane,
           let dragGroup = try? tree.snapshot.dragGroup(for: source.id),
-          let legalSlots = try? tree.snapshot.legalSlots(for: source.id),
+          let allLegalSlots = try? tree.snapshot.legalSlots(for: source.id),
           let window = collectionView.window
     else { return }
+
+    // Pinned parents own their reply presentation. Same-lane replies may
+    // still reorder as siblings, but a root destination would claim to detach
+    // and then immediately be overridden by the projection invariant.
+    let legalSlots = source.parentID != nil && source.lane == .pinned
+      ? allLegalSlots.filter { $0.parentID == source.parentID }
+      : allLegalSlots
 
     collectionView.layoutSubtreeIfNeeded()
     let rowIDs = displayRows.map(\.id)

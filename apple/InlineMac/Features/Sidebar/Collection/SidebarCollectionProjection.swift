@@ -94,7 +94,8 @@ enum SidebarCollectionProjection {
   }
 
   /// Projects the sidebar according to the mode's explicit containment policy.
-  /// A nested child must share its parent's pinned/normal lane.
+  /// A pinned parent owns its visible reply hierarchy even when a child keeps
+  /// an unpinned persistence lane.
   static func projectSidebar(
     pinnedItems: [SidebarViewModel.Item],
     normalItems: [SidebarViewModel.Item],
@@ -158,12 +159,15 @@ enum SidebarCollectionProjection {
          let parent = itemByChatID[parentChatID],
          parent.item.id != item.id {
         semanticParentByID[item.id] = parent.item.id
-        // A visual subtree may never cross a pinned/normal section boundary.
-        // The semantic parent is still retained so an Inbox reply can reattach
-        // after its own pin state changes. All Chats intentionally stays flat.
+        // A visible pinned parent owns its reply hierarchy. The child retains
+        // its own order lane so presentation containment never silently changes
+        // persisted pin state. Ordinary unpinned groups keep the explicit
+        // detach behavior. All Chats intentionally stays flat.
+        let pinnedParentOwnsPresentation = parent.lane == .pinned
         if nestingPolicy == .replyThreads,
-           detachedReplyIDs.contains(item.id) == false,
-           input.lane == parent.lane {
+           pinnedParentOwnsPresentation
+             || (detachedReplyIDs.contains(item.id) == false
+               && input.lane == parent.lane) {
           presentationParentByID[item.id] = parent.item.id
         }
       }

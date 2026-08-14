@@ -1147,11 +1147,15 @@ struct SidebarView: View {
           let parent = visibleItems.first(where: { $0.chatId == parentChatID })
     else { return }
 
-    let section: SidebarCollectionRow.SectionHeader = thread.pinned ? .pinned : .content
+    let tree = appKitSidebarTree
+    let projectedLane = tree.snapshot.sectionID(containing: thread.id).flatMap { $0 }
+    let section: SidebarCollectionRow.SectionHeader = projectedLane == .pinned
+      ? .pinned
+      : .content
     if collapsedAppKitSections.remove(section) != nil {
       persistCollapsedAppKitSections()
     }
-    guard detachedAppKitReplyIDs.contains(thread.id) == false else { return }
+    guard tree.snapshot.parentID(of: thread.id) == parent.id else { return }
     if collapsedAppKitThreadParentIDs.remove(parent.id) != nil {
       persistCollapsedAppKitThreadParentIDs()
     }
