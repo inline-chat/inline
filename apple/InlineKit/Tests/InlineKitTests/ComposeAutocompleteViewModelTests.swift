@@ -322,6 +322,128 @@ struct ComposeAutocompleteViewModelTests {
     )
   }
 
+  @Test("numbered space reply thread is searchable by its provisional reference")
+  func numberedSpaceReplyThreadIsSearchableByReference() async throws {
+    let db = AppDatabase.empty()
+    try await db.dbWriter.write { sqlDb in
+      try Space(id: 7, name: "Engineering", date: Date(timeIntervalSince1970: 1)).insert(sqlDb)
+      let parent = Chat(
+        id: 4_001,
+        date: Date(timeIntervalSince1970: 1),
+        type: .thread,
+        title: "Planning",
+        spaceId: 7
+      )
+      let reply = Chat(
+        id: 4_002,
+        date: Date(timeIntervalSince1970: 2),
+        type: .thread,
+        title: "Decision follow-up",
+        spaceId: 7,
+        number: 123,
+        parentChatId: parent.id,
+        parentMessageId: 77
+      )
+      let home = Chat(
+        id: 4_003,
+        date: Date(timeIntervalSince1970: 3),
+        type: .thread,
+        title: "Home notes",
+        spaceId: nil,
+        number: 123
+      )
+      try Self.insertCatalogChat(parent, in: sqlDb)
+      try Self.insertCatalogChat(reply, in: sqlDb)
+      try Self.insertCatalogChat(home, in: sqlDb)
+    }
+
+    var externalCallCount = 0
+    let viewModel = ComposeAutocompleteViewModel(
+      db: db,
+      externalResourceItems: { _, _ in
+        externalCallCount += 1
+        return []
+      }
+    )
+
+    for query in ["123", "#123"] {
+      viewModel.update(
+        match: ComposeAutocompleteMatch(
+          kind: .thread,
+          range: NSRange(location: 0, length: query.utf16.count + 2),
+          query: query
+        )
+      )
+
+      await waitForItems(viewModel, count: 1)
+      #expect(viewModel.items.first?.title == "Decision follow-up")
+      #expect(viewModel.items.first?.subtitle == "Planning • #123")
+      #expect(
+        viewModel.items.first?.payload
+          == .thread(chatId: 4_002, spaceId: 7, title: "Decision follow-up")
+      )
+    }
+
+    viewModel.update(
+      match: ComposeAutocompleteMatch(
+        kind: .threadNumber,
+        range: NSRange(location: 0, length: 3),
+        query: "12"
+      )
+    )
+    await waitForItems(viewModel, count: 1)
+    #expect(viewModel.items.first?.kind == .threadNumber)
+    #expect(viewModel.items.first?.spaceThreadReference == SpaceThreadReference(chatId: 4_002, number: 123))
+    #expect(externalCallCount == 0)
+
+    try await db.dbWriter.write { sqlDb in
+      try Self.insertCatalogChat(
+        Chat(
+          id: 4_004,
+          date: Date(timeIntervalSince1970: 4),
+          type: .thread,
+          title: "Ticket 123",
+          spaceId: 7,
+          number: 999
+        ),
+        in: sqlDb
+      )
+      try Self.insertCatalogChat(
+        Chat(
+          id: 4_005,
+          date: Date(timeIntervalSince1970: 5),
+          type: .thread,
+          title: "Later prefix",
+          spaceId: 7,
+          number: 1_234
+        ),
+        in: sqlDb
+      )
+    }
+
+    viewModel.update(
+      match: ComposeAutocompleteMatch(
+        kind: .threadNumber,
+        range: NSRange(location: 0, length: 4),
+        query: "123"
+      )
+    )
+    await waitForItems(viewModel, count: 2)
+    #expect(viewModel.items.compactMap(\.spaceThreadReference?.chatId) == [4_002, 4_005])
+    #expect(externalCallCount == 0)
+
+    viewModel.update(
+      match: ComposeAutocompleteMatch(
+        kind: .thread,
+        range: NSRange(location: 0, length: 6),
+        query: "#123"
+      )
+    )
+    await waitForItems(viewModel, count: 2)
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(externalCallCount == 0)
+  }
+
   @Test("thread lookup starts on one character")
   func threadLookupStartsOnOneCharacter() async throws {
     let db = AppDatabase.empty()

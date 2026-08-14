@@ -134,6 +134,22 @@ class ComposeTextView: UITextView {
       composeView?.handlePastedImage()
     } else if selectedRange.length > 0, let urlString = pastedLinkURLString(from: .general) {
       applyLink(urlString, to: selectedRange)
+    } else if let reference = SpaceThreadReferencePasteboard.reference() {
+      let detector = ThreadLinkDetector()
+      var linkAttributes = typingAttributes
+      linkAttributes[.foregroundColor] = composeView?.linkColor ?? tintColor ?? UIColor.systemBlue
+      let result = detector.replaceThreadNumberReference(
+        in: attributedText ?? NSAttributedString(),
+        range: selectedRange,
+        with: reference,
+        trailingText: "",
+        linkAttributes: linkAttributes
+      )
+      attributedText = result.newAttributedText
+      selectedRange = NSRange(location: result.newCursorPosition, length: 0)
+      resetTypingAttributesToDefault()
+      textDidChange()
+      delegate?.textViewDidChange?(self)
     } else if let string = UIPasteboard.general.string {
       let pasteResult = ComposeThreadLinkEditing.insertPlainText(
         string,

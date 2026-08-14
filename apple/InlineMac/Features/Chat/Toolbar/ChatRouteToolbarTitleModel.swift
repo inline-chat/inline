@@ -78,6 +78,7 @@ final class ChatRouteToolbarTitleModel {
   var windowTitle: String
   var iconPeer: ChatIcon.PeerType?
   var breadcrumb: Breadcrumb?
+  var reference: SpaceThreadReference?
   var status: Status = .none
   var canRename = false
   var isEditingTitle = false
@@ -261,6 +262,8 @@ final class ChatRouteToolbarTitleModel {
     updateParentChatSubscription()
     updateSpaceSubscription()
     breadcrumb = resolvedBreadcrumb()
+    let chat = resolvedChat()
+    reference = chat?.isReplyThread == true ? chat?.spaceThreadReference : nil
     refreshWindowTitle()
     refreshStatus()
   }

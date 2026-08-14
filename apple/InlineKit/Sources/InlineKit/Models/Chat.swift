@@ -140,6 +140,17 @@ public extension Chat {
     return type == .thread ? "New thread" : nil
   }
 
+  /// Provisional, presentation-only label for a numbered space thread.
+  /// Keep the format centralized so the experiment can be renamed or removed mechanically.
+  var spaceThreadReferenceLabel: String? {
+    spaceThreadReference?.label
+  }
+
+  var spaceThreadReference: SpaceThreadReference? {
+    guard type == .thread, spaceId != nil, let number else { return nil }
+    return SpaceThreadReference(chatId: id, number: number)
+  }
+
   var peerId: InlineProtocol.Peer {
     if let peerUserId {
       .with { $0.user.userID = peerUserId }
@@ -159,6 +170,18 @@ public extension Chat {
   var isReplyThread: Bool {
     parentMessageId != nil
   }
+}
+
+public struct SpaceThreadReference: Codable, Hashable, Sendable {
+  public let chatId: Int64
+  public let number: Int
+
+  public init(chatId: Int64, number: Int) {
+    self.chatId = chatId
+    self.number = number
+  }
+
+  public var label: String { "#\(number)" }
 }
 
 // MARK: - Preview

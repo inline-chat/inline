@@ -102,8 +102,12 @@ struct ChatToolbarLeadingView: View {
       return .timezone(text)
     }
 
+    let reference = fullChatViewModel.chat?.isReplyThread == true
+      ? fullChatViewModel.chat?.spaceThreadReference
+      : nil
+
     if let toolbarContext, toolbarContext.hasBreadcrumb {
-      return .breadcrumb(toolbarContext)
+      return .breadcrumb(toolbarContext, reference: reference)
     }
 
     return .empty
@@ -215,7 +219,7 @@ enum ChatSubtitle: Equatable {
   case connectionState(String)
   case composeAction(ComposeActionPresentation)
   case timezone(String)
-  case breadcrumb(ReplyThreadToolbarContext)
+  case breadcrumb(ReplyThreadToolbarContext, reference: SpaceThreadReference?)
   case empty
 
   var transitionID: String {
@@ -226,13 +230,14 @@ enum ChatSubtitle: Equatable {
       "compose:\(presentation.action.rawValue):\(presentation.text)"
     case let .timezone(text):
       "timezone:\(text)"
-    case let .breadcrumb(context):
+    case let .breadcrumb(context, reference):
       [
         "breadcrumb",
         "\(context.space?.id ?? 0)",
         context.space?.title ?? "",
         context.parent?.peer.toString() ?? "none",
         context.parent?.title ?? "",
+        reference?.label ?? "",
       ].joined(separator: ":")
     case .empty:
       "empty"
@@ -348,9 +353,10 @@ private struct ChatToolbarSubtitleContent: View {
       ChatToolbarComposeActionSubtitle(presentation: presentation)
     case let .timezone(text):
       ChatToolbarTimezoneSubtitle(text: text)
-    case let .breadcrumb(context):
+    case let .breadcrumb(context, reference):
       ChatToolbarBreadcrumbSubtitle(
         context: context,
+        reference: reference,
         onOpenSpace: onOpenSpace,
         onOpenParentThread: onOpenParentThread
       )
@@ -438,6 +444,7 @@ private struct ChatToolbarComposeActionIndicator: View {
 
 private struct ChatToolbarBreadcrumbSubtitle: View {
   let context: ReplyThreadToolbarContext
+  let reference: SpaceThreadReference?
   let onOpenSpace: (ReplyThreadToolbarContext.SpaceLink) -> Void
   let onOpenParentThread: (ReplyThreadToolbarContext.ParentLink) -> Void
 
@@ -461,8 +468,32 @@ private struct ChatToolbarBreadcrumbSubtitle: View {
         }
         .layoutPriority(1)
       }
+
+      if let reference {
+        Text("/")
+          .font(.caption)
+          .foregroundStyle(.tertiary)
+        breadcrumbButton(
+          title: reference.label,
+          accessibilityLabel: "Copy thread reference \(reference.label)"
+        ) {
+          copyReference(reference)
+        }
+      }
     }
     .lineLimit(1)
+  }
+
+  private func copyReference(_ reference: SpaceThreadReference) {
+    if SpaceThreadReferencePasteboard.copy(reference) {
+      ToastManager.shared.showToast("Copied thread link", type: .success, systemImage: "link")
+    } else {
+      ToastManager.shared.showToast(
+        "Failed to copy thread link",
+        type: .error,
+        systemImage: "exclamationmark.triangle"
+      )
+    }
   }
 
   private func breadcrumbButton(

@@ -291,6 +291,17 @@ final class ComposeAutocompleteManager: NSObject {
       return ComposeAutocompleteMatch(kind: .thread, range: threadRange.range, query: threadRange.query)
     }
 
+    if let referenceRange = threadLinkDetector.detectThreadNumberReferenceAt(
+      cursorPosition: cursorPosition,
+      in: attributedText
+    ), !hasEntityAttribute(in: referenceRange.range, attributedText: attributedText) {
+      return ComposeAutocompleteMatch(
+        kind: .threadNumber,
+        range: referenceRange.range,
+        query: referenceRange.query
+      )
+    }
+
     if !suppressMentionDetection,
        let range = mentionDetector.detectMentionAt(cursorPosition: cursorPosition, in: attributedText),
        NSMaxRange(range.range) == cursorPosition,
@@ -547,14 +558,25 @@ final class ComposeAutocompleteManager: NSObject {
       break
 
     case let .thread(chatId, _, title):
-      let result = threadLinkDetector.replaceThreadLink(
-        in: currentAttributedText,
-        range: match.range,
-        with: title,
-        chatId: chatId,
-        linkAttributes: threadLinkAttributes(for: textView),
-        trailingAttributes: baseTextAttributes(for: textView)
-      )
+      let result = if match.kind == .threadNumber,
+                      let reference = item.spaceThreadReference {
+        threadLinkDetector.replaceThreadNumberReference(
+          in: currentAttributedText,
+          range: match.range,
+          with: reference,
+          linkAttributes: threadLinkAttributes(for: textView),
+          trailingAttributes: baseTextAttributes(for: textView)
+        )
+      } else {
+        threadLinkDetector.replaceThreadLink(
+          in: currentAttributedText,
+          range: match.range,
+          with: title,
+          chatId: chatId,
+          linkAttributes: threadLinkAttributes(for: textView),
+          trailingAttributes: baseTextAttributes(for: textView)
+        )
+      }
 
       apply(result.newAttributedText, cursorPosition: result.newCursorPosition, to: textView)
 

@@ -323,6 +323,39 @@ struct InlineSearchViewModelTests {
     ])
   }
 
+  @Test("command bar catalog searches numbered space threads by provisional reference")
+  func commandBarCatalogSearchesSpaceThreadReferences() async throws {
+    let (queue, _) = try makeInMemoryDB()
+    let numberedThreadId: Int64 = 7_011
+    let homeThreadId: Int64 = 7_012
+
+    try await queue.write { db in
+      try seedSpace(db, id: spaceId)
+      try seedThread(db, id: numberedThreadId, title: "Decision follow-up", spaceId: spaceId, number: 314)
+      try seedThread(db, id: homeThreadId, title: "Home notes", spaceId: nil, number: 314)
+      try seedDialog(db, chat: try Chat.fetchOne(db, id: numberedThreadId)!)
+      try seedDialog(db, chat: try Chat.fetchOne(db, id: homeThreadId)!)
+    }
+
+    let snapshots = try await queue.read { db in
+      try HomeChatListItemSnapshot.snapshots(from: HomeChatItem.all().fetchAll(db), db: db)
+    }
+    let catalog = InlineSearchChatCatalog()
+    await catalog.replace(snapshots)
+
+    for query in ["314", "#314"] {
+      let projection = await catalog.project(
+        query: query,
+        usage: [:],
+        currentPeer: nil,
+        scope: InlineSearchScope(includeArchived: true)
+      )
+
+      #expect(projection.chats.map(\.peer) == [.thread(id: numberedThreadId)])
+      #expect(projection.chats.first?.chat?.spaceThreadReferenceLabel == "#314")
+    }
+  }
+
   @Test("chat catalog query affinity learns the selected Dena")
   func chatCatalogUsesQueryAffinity() async throws {
     let (queue, _) = try makeInMemoryDB()
@@ -464,6 +497,7 @@ struct InlineSearchViewModelTests {
     id: Int64,
     title: String,
     spaceId: Int64?,
+    number: Int? = nil,
     parentChatId: Int64? = nil,
     parentMessageId: Int64? = nil
   ) throws {
@@ -473,6 +507,7 @@ struct InlineSearchViewModelTests {
       type: .thread,
       title: title,
       spaceId: spaceId,
+      number: number,
       parentChatId: parentChatId,
       parentMessageId: parentMessageId
     ).insert(db)

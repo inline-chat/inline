@@ -6,6 +6,7 @@ public enum ComposeAutocompleteKind: String, Hashable, Sendable {
   case mention
   case command
   case thread
+  case threadNumber
   case emoji
 }
 
@@ -45,6 +46,7 @@ public struct ComposeAutocompleteItem: Identifiable, Hashable, Sendable {
   public let emoji: String?
   public let avatarUserInfo: UserInfo?
   public let showsAppIcon: Bool
+  public let spaceThreadReference: SpaceThreadReference?
   public let payload: Payload
 
   public init(
@@ -56,6 +58,7 @@ public struct ComposeAutocompleteItem: Identifiable, Hashable, Sendable {
     emoji: String? = nil,
     avatarUserInfo: UserInfo? = nil,
     showsAppIcon: Bool = false,
+    spaceThreadReference: SpaceThreadReference? = nil,
     payload: Payload
   ) {
     self.id = id
@@ -66,6 +69,7 @@ public struct ComposeAutocompleteItem: Identifiable, Hashable, Sendable {
     self.emoji = emoji
     self.avatarUserInfo = avatarUserInfo
     self.showsAppIcon = showsAppIcon
+    self.spaceThreadReference = spaceThreadReference
     self.payload = payload
   }
 }
@@ -273,7 +277,9 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
     case .command:
       loadSynchronousItems(commandItems(match.query, limit))
     case .thread:
-      loadThreadItems(query: match.query)
+      loadThreadItems(query: match.query, kind: .thread)
+    case .threadNumber:
+      loadThreadItems(query: match.query, kind: .threadNumber)
     case .emoji:
       loadSynchronousItems(emojiItems(match.query, limit))
     }
@@ -285,8 +291,10 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
     selectedIndex = items.isEmpty ? 0 : min(selectedIndex, items.count - 1)
   }
 
-  private func loadThreadItems(query: String) {
-    let referenceQuery = Self.referenceQuery(from: query)
+  private func loadThreadItems(query: String, kind: ComposeAutocompleteKind) {
+    let referenceQuery = kind == .threadNumber
+      ? ReferenceQuery(source: .inline, query: query)
+      : Self.referenceQuery(from: query)
     log.debug(
       "event=reference_scope source=\(referenceQuery.source.rawValue) " +
         "query_length=\(referenceQuery.query.utf16.count) " +
@@ -341,7 +349,8 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
             from: snapshots,
             preferredChatIds: preferredChatIds,
             query: referenceQuery.query,
-            limit: min(searchedThreadLimit, limit)
+            limit: min(searchedThreadLimit, limit),
+            kind: kind
           )
         } else {
           threadItems = []
@@ -366,7 +375,7 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
           )
         }
 
-        guard cachedResources == nil else { return }
+        guard kind == .thread, cachedResources == nil else { return }
 
         // Give local results priority and avoid a provider request for every
         // intermediate keystroke while the user is still typing.
@@ -424,7 +433,8 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
           from: snapshots,
           preferredChatIds: preferredChatIds,
           query: nil,
-          limit: min(recentThreadLimit, limit)
+          limit: min(recentThreadLimit, limit),
+          kind: .thread
         )
 
         await MainActor.run { [weak self] in
@@ -449,7 +459,8 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
     from snapshots: [HomeChatListItemSnapshot],
     preferredChatIds: [Int64],
     query: String?,
-    limit: Int
+    limit: Int,
+    kind: ComposeAutocompleteKind
   ) -> [ComposeAutocompleteItem] {
     guard limit > 0 else { return [] }
 
@@ -460,12 +471,19 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
             let chatId = snapshot.peerId.asThreadId(),
             let chat = snapshot.item.chat,
             chat.type == .thread,
+            kind != .threadNumber || chat.spaceThreadReference != nil,
             !snapshot.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       else {
         return nil
       }
 
-      if !normalizedQuery.isEmpty {
+      if kind == .threadNumber {
+        guard let number = chat.number,
+              String(number).hasPrefix(normalizedQuery)
+        else {
+          return nil
+        }
+      } else if !normalizedQuery.isEmpty {
         let searchText = snapshot.searchText
         guard searchText.contains(normalizedQuery)
           || compactWhitespace(searchText).contains(compactQuery)
@@ -483,6 +501,12 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
     }
 
     candidates.sort { lhs, rhs in
+      if kind == .threadNumber, !normalizedQuery.isEmpty {
+        let lhsIsExact = lhs.chat.number.map(String.init) == normalizedQuery
+        let rhsIsExact = rhs.chat.number.map(String.init) == normalizedQuery
+        if lhsIsExact != rhsIsExact { return lhsIsExact }
+      }
+
       switch (preferredRank[lhs.chatId], preferredRank[rhs.chatId]) {
       case let (lhsRank?, rhsRank?) where lhsRank != rhsRank:
         return lhsRank < rhsRank
@@ -508,12 +532,19 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
       let chat = candidate.chat
       let title = snapshot.title
       let spaceId = snapshot.item.dialog.spaceId ?? chat.spaceId
+      let subtitle = [
+        snapshot.parentTitle ?? snapshot.spaceTitle ?? "Thread",
+        chat.spaceThreadReferenceLabel,
+      ]
+      .compactMap { $0 }
+      .joined(separator: " • ")
       return ComposeAutocompleteItem(
         id: "thread-\(candidate.chatId)",
-        kind: .thread,
+        kind: kind,
         title: title,
-        subtitle: snapshot.parentTitle ?? snapshot.spaceTitle ?? "Thread",
+        subtitle: subtitle,
         emoji: chat.emoji,
+        spaceThreadReference: chat.spaceThreadReference,
         payload: .thread(chatId: candidate.chatId, spaceId: spaceId, title: title)
       )
     }
@@ -587,6 +618,11 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
 
   private static func referenceQuery(from value: String) -> ReferenceQuery {
     let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    let hashtagQuery = trimmedValue.dropFirst()
+    if trimmedValue.first == "#", !hashtagQuery.isEmpty, hashtagQuery.allSatisfy(\.isNumber) {
+      return ReferenceQuery(source: .inline, query: trimmedValue)
+    }
+
     guard let slashIndex = trimmedValue.firstIndex(of: "/") else {
       return ReferenceQuery(source: .all, query: trimmedValue)
     }

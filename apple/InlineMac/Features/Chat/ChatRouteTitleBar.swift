@@ -47,7 +47,7 @@ struct ChatRouteTitleBar: View {
         if model.status.text != nil {
           statusView(model.status)
         } else if let breadcrumb = model.breadcrumb {
-          breadcrumbView(breadcrumb)
+          breadcrumbView(breadcrumb, reference: model.reference)
         }
       }
       .frame(minWidth: 0, alignment: .leading)
@@ -169,7 +169,10 @@ struct ChatRouteTitleBar: View {
     }
   }
 
-  private func breadcrumbView(_ breadcrumb: ChatRouteToolbarTitleModel.Breadcrumb) -> some View {
+  private func breadcrumbView(
+    _ breadcrumb: ChatRouteToolbarTitleModel.Breadcrumb,
+    reference: SpaceThreadReference?
+  ) -> some View {
     HStack(spacing: 4) {
       if let space = breadcrumb.space {
         BreadcrumbSegmentButton(
@@ -197,9 +200,30 @@ struct ChatRouteTitleBar: View {
         }
         .layoutPriority(1)
       }
+
+      if let reference {
+        Text("/")
+          .font(.system(size: toolbarLayout.subtitleFontSize))
+          .foregroundStyle(.tertiary)
+        BreadcrumbSegmentButton(
+          title: reference.label,
+          help: "Copy Thread Reference",
+          accessibilityLabel: "Copy thread reference \(reference.label)"
+        ) {
+          copyReference(reference)
+        }
+      }
     }
     .lineLimit(1)
     .offset(x: -5)
+  }
+
+  private func copyReference(_ reference: SpaceThreadReference) {
+    if SpaceThreadReferencePasteboard.copy(reference) {
+      ToastCenter.shared.showSuccess("Copied thread link")
+    } else {
+      ToastCenter.shared.showError("Failed to copy thread link")
+    }
   }
 
   @ViewBuilder

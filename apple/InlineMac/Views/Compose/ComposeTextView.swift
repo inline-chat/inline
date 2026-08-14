@@ -362,6 +362,17 @@ class ComposeNSTextView: NSTextView {
       return
     }
 
+    if let reference = SpaceThreadReferencePasteboard.reference() {
+      var attributes = defaultTypingAttributes
+      attributes[.foregroundColor] = ComposeTextEditor.linkColor
+      attributes[.threadLink] = ThreadLinkTarget.chatId(reference.chatId)
+      attributes[.cursor] = NSCursor.pointingHand
+      let linkedText = NSAttributedString(string: reference.label, attributes: attributes)
+      insertText(linkedText, replacementRange: selectedRange())
+      resetTypingAttributesToDefault()
+      return
+    }
+
     // Note(@Mo) Important: Temporarily disable rich-text paste entirely. We still rely on AppKit's native
     // plain-text paste pipeline for correct undo/redo, IME behavior, and selection handling, but we do not
     // allow any clipboard-provided styling to enter the compose view while we stabilize edge cases.

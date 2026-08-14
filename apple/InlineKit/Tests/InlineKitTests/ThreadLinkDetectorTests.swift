@@ -75,6 +75,42 @@ struct ThreadLinkDetectorTests {
     #expect(result == nil)
   }
 
+  @Test("detects only standalone numeric hashtag references")
+  func detectsStandaloneNumericHashtagReferences() {
+    let detector = ThreadLinkDetector()
+
+    for text in ["#123", "Open #123"] {
+      let attributed = NSAttributedString(string: text)
+      let result = detector.detectThreadNumberReferenceAt(
+        cursorPosition: (text as NSString).length,
+        in: attributed
+      )
+      #expect(result?.query == "123")
+      if let result {
+        #expect((text as NSString).substring(with: result.range) == "#123")
+      }
+    }
+
+    for text in ["#", "#abc", "issue#123", "#123abc"] {
+      let result = detector.detectThreadNumberReferenceAt(
+        cursorPosition: (text as NSString).length,
+        in: NSAttributedString(string: text)
+      )
+      #expect(result == nil)
+    }
+
+    let linked = NSAttributedString(
+      string: "#123",
+      attributes: [.threadLink: ThreadLinkTarget.chatId(42)]
+    )
+    #expect(detector.detectThreadNumberReferenceAt(cursorPosition: linked.length, in: linked) == nil)
+
+    for attribute in [NSAttributedString.Key.inlineCode, .preCode] {
+      let code = NSAttributedString(string: "#123", attributes: [attribute: true])
+      #expect(detector.detectThreadNumberReferenceAt(cursorPosition: code.length, in: code) == nil)
+    }
+  }
+
   @Test("replace inserts thread link attribute")
   func replaceInsertsThreadLinkAttribute() {
     let detector = ThreadLinkDetector()
@@ -110,6 +146,20 @@ struct ThreadLinkDetectorTests {
       effectiveRange: nil
     ) as? ThreadLinkTarget
     #expect(trailingTarget == nil)
+  }
+
+  @Test("replace inserts compact numbered thread reference")
+  func replaceInsertsCompactNumberedThreadReference() {
+    let detector = ThreadLinkDetector()
+    let result = detector.replaceThreadNumberReference(
+      in: NSAttributedString(string: "Open #12"),
+      range: NSRange(location: 5, length: 3),
+      with: SpaceThreadReference(chatId: 42, number: 123)
+    )
+
+    #expect(result.newAttributedText.string == "Open #123 ")
+    #expect(result.newCursorPosition == 10)
+    #expect(result.newAttributedText.attribute(.threadLink, at: 5, effectiveRange: nil) as? ThreadLinkTarget == .chatId(42))
   }
 
   @Test("replace consumes auto-paired closing brackets")

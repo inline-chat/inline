@@ -7,10 +7,54 @@ public struct ThreadLinkRange {
   public let openLocation: Int
 }
 
+public struct ThreadNumberReferenceRange {
+  public let range: NSRange
+  public let query: String
+}
+
 public final class ThreadLinkDetector {
   private let log = Log.scoped("ThreadLinkDetector")
 
   public init() {}
+
+  public func detectThreadNumberReferenceAt(
+    cursorPosition: Int,
+    in attributedText: NSAttributedString
+  ) -> ThreadNumberReferenceRange? {
+    let text = attributedText.string as NSString
+    guard cursorPosition >= 2, cursorPosition <= text.length else { return nil }
+
+    var hashLocation = cursorPosition - 1
+    while hashLocation >= 0 {
+      let character = text.character(at: hashLocation)
+      if character == 35 { break }
+      guard let scalar = UnicodeScalar(character), CharacterSet.decimalDigits.contains(scalar) else {
+        return nil
+      }
+      hashLocation -= 1
+    }
+
+    guard hashLocation >= 0,
+          text.character(at: hashLocation) == 35,
+          hashLocation + 1 < cursorPosition
+    else {
+      return nil
+    }
+
+    if hashLocation > 0 {
+      let preceding = text.character(at: hashLocation - 1)
+      guard preceding == 32 || preceding == 9 || preceding == 10 || preceding == 13 else {
+        return nil
+      }
+    }
+
+    let range = NSRange(location: hashLocation, length: cursorPosition - hashLocation)
+    guard !hasEntityAttribute(in: range, attributedText: attributedText) else { return nil }
+    return ThreadNumberReferenceRange(
+      range: range,
+      query: text.substring(with: NSRange(location: hashLocation + 1, length: range.length - 1))
+    )
+  }
 
   public func detectThreadLinkAt(cursorPosition: Int, in attributedText: NSAttributedString) -> ThreadLinkRange? {
     let text = attributedText.string
@@ -86,6 +130,29 @@ public final class ThreadLinkDetector {
     return (newAttributedText, newCursorPosition)
   }
 
+  public func replaceThreadNumberReference(
+    in attributedText: NSAttributedString,
+    range: NSRange,
+    with reference: SpaceThreadReference,
+    trailingText: String = " ",
+    linkAttributes: [NSAttributedString.Key: Any]? = nil,
+    trailingAttributes: [NSAttributedString.Key: Any]? = nil
+  ) -> (newAttributedText: NSAttributedString, newCursorPosition: Int) {
+    let replacement = threadLinkText(
+      reference.label,
+      target: .chatId(reference.chatId),
+      attributes: linkAttributes
+    )
+    replacement.append(NSAttributedString(string: trailingText, attributes: trailingAttributes))
+
+    let mutable = NSMutableAttributedString(attributedString: attributedText)
+    mutable.replaceCharacters(in: range, with: replacement)
+    return (
+      NSAttributedString(attributedString: mutable),
+      range.location + reference.label.utf16.count + trailingText.utf16.count
+    )
+  }
+
   private func threadLinkText(
     _ text: String,
     target: ThreadLinkTarget,
@@ -115,6 +182,21 @@ public final class ThreadLinkDetector {
 
   private func isLineBreak(_ character: unichar) -> Bool {
     character == 10 || character == 13
+  }
+
+  private func hasEntityAttribute(in range: NSRange, attributedText: NSAttributedString) -> Bool {
+    var found = false
+    attributedText.enumerateAttributes(in: range, options: []) { attributes, _, stop in
+      found = attributes[.mentionUserId] != nil ||
+        attributes[.mentionGroupId] != nil ||
+        attributes[.botCommand] != nil ||
+        attributes[.threadLink] != nil ||
+        attributes[.link] != nil ||
+        attributes[.inlineCode] != nil ||
+        attributes[.preCode] != nil
+      stop.pointee = ObjCBool(found)
+    }
+    return found
   }
 
   private func rangeIncludingImmediateClosingBrackets(in text: String, range: NSRange) -> NSRange {

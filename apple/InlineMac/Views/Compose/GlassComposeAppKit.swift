@@ -1316,6 +1316,23 @@ class GlassComposeAppKit: NSView {
       return true
     }
 
+    if let referenceRange = threadLinkDetector.detectThreadNumberReferenceAt(
+      cursorPosition: cursorPosition,
+      in: attributedText
+    ) {
+      hideMentionCompletion()
+      hideCommandCompletion()
+      autocompleteViewModel.configure(spaceId: chat?.spaceId)
+      autocompleteViewModel.update(
+        match: ComposeAutocompleteMatch(
+          kind: .threadNumber,
+          range: referenceRange.range,
+          query: referenceRange.query
+        )
+      )
+      return true
+    }
+
     hideAutocomplete()
     return false
   }
@@ -2790,14 +2807,25 @@ extension GlassComposeAppKit: ComposeAutocompleteMenuDelegate {
 
     switch item.payload {
       case let .thread(chatId, _, title):
-        let result = threadLinkDetector.replaceThreadLink(
-          in: textEditor.attributedString,
-          range: match.range,
-          with: title,
-          chatId: chatId,
-          linkAttributes: composeThreadLinkAttributes,
-          trailingAttributes: composeBaseTextAttributes
-        )
+        let result = if match.kind == .threadNumber,
+                        let reference = item.spaceThreadReference {
+          threadLinkDetector.replaceThreadNumberReference(
+            in: textEditor.attributedString,
+            range: match.range,
+            with: reference,
+            linkAttributes: composeThreadLinkAttributes,
+            trailingAttributes: composeBaseTextAttributes
+          )
+        } else {
+          threadLinkDetector.replaceThreadLink(
+            in: textEditor.attributedString,
+            range: match.range,
+            with: title,
+            chatId: chatId,
+            linkAttributes: composeThreadLinkAttributes,
+            trailingAttributes: composeBaseTextAttributes
+          )
+        }
 
         ignoreNextHeightChange = true
         textEditor.setAttributedString(result.newAttributedText)

@@ -1730,7 +1730,7 @@ private struct QuickSearchRow: View {
               HStack(spacing: QuickSearchLayout.itemTextSpacing) {
                 Text(result.title)
                   .lineLimit(1)
-                if let subtitle = result.subtitle, subtitle != result.title {
+                if let subtitle = chatSubtitle(for: result), subtitle != result.title {
                   Text(subtitle)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -1930,6 +1930,16 @@ private struct QuickSearchRow: View {
     } else {
       InitialsCircle(name: result.title, size: QuickSearchLayout.iconSize, symbol: "bubble.fill")
     }
+  }
+
+  private func chatSubtitle(for result: InlineSearchChatResult) -> String? {
+    guard let referenceLabel = result.chat?.spaceThreadReferenceLabel else {
+      return result.subtitle
+    }
+    guard let subtitle = result.subtitle, !subtitle.isEmpty else {
+      return referenceLabel
+    }
+    return "\(subtitle) • \(referenceLabel)"
   }
 
   @ViewBuilder

@@ -318,7 +318,8 @@ public actor InlineSearchChatCatalog {
         username: user?.username,
         email: user?.email,
         chatTitle: snapshot.item.chat?.title,
-        spaceTitle: snapshot.spaceTitle
+        spaceTitle: snapshot.spaceTitle,
+        threadReferenceLabel: snapshot.item.chat?.spaceThreadReferenceLabel
       )
       if let previous, previous.searchKey == searchKey {
         fields = previous.fields
@@ -329,6 +330,7 @@ public actor InlineSearchChatCatalog {
           InlineSearchField(searchKey.email, priority: 200),
           InlineSearchField(searchKey.chatTitle, priority: 400),
           InlineSearchField(searchKey.spaceTitle, priority: 100),
+          InlineSearchField(searchKey.threadReferenceLabel, priority: 400),
         ].compactMap(InlineSearchMatcher.prepareField)
       }
     }
@@ -339,6 +341,7 @@ public actor InlineSearchChatCatalog {
       let email: String?
       let chatTitle: String?
       let spaceTitle: String?
+      let threadReferenceLabel: String?
     }
   }
 
