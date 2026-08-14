@@ -13,13 +13,12 @@ struct NudgeButtonTests {
   @Test("Uses a deliberate hold without repeated progress ticks")
   func holdTimingConstants() async throws {
     #expect(NudgeButtonState.holdDuration == 1.2)
-    #expect(NudgeButtonState.tapSuppressionDelay == 0.2)
+    #expect(NudgeButtonState.maximumHoldMovement == 44)
   }
 
-  @Test("Suppresses taps after a hold attempt or completed hold")
+  @Test("Suppresses only the click that follows a completed hold")
   func tapSuppressionPolicy() async throws {
-    #expect(!NudgeButtonState.shouldSuppressTap(holdDuration: 0.19, completed: false))
-    #expect(NudgeButtonState.shouldSuppressTap(holdDuration: 0.2, completed: false))
-    #expect(NudgeButtonState.shouldSuppressTap(holdDuration: 0, completed: true))
+    #expect(!NudgeButtonState.shouldSuppressTap(completed: false))
+    #expect(NudgeButtonState.shouldSuppressTap(completed: true))
   }
 }

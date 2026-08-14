@@ -206,7 +206,6 @@ private struct MacNudgeToolbarButton: View {
         .font(.system(size: 16, weight: .regular))
         .imageScale(.medium)
         .frame(width: 24, height: 24)
-        .frame(minWidth: 32)
     }
     .overlay {
       NudgeHoldProgressRing(progress: holdProgress, size: 26, lineWidth: 2)
@@ -252,48 +251,83 @@ private struct NudgeHoldGestureModifier: ViewModifier {
   let isDisabled: Bool
   let onCompleted: () -> Void
 
-  @State private var pressStartedAt: Date?
+  @State private var holdTask: Task<Void, Never>?
+  @State private var isPressing = false
   @State private var completedCurrentHold = false
+  @State private var cancelledCurrentHold = false
 
   func body(content: Content) -> some View {
-    content.onLongPressGesture(
-      minimumDuration: NudgeButtonState.holdDuration,
-      maximumDistance: 44,
-      pressing: updatePressing,
-      perform: completeHold
-    )
+    content
+      .simultaneousGesture(
+        DragGesture(minimumDistance: 0)
+          .onChanged(updatePressing)
+          .onEnded { _ in endPress() }
+      )
+      .onDisappear {
+        cancelPress()
+      }
+      .onChange(of: isDisabled) { _, disabled in
+        if disabled {
+          cancelPress()
+        }
+      }
   }
 
-  private func updatePressing(_ isPressing: Bool) {
-    guard !isDisabled else { return }
+  private func updatePressing(_ value: DragGesture.Value) {
+    guard !isDisabled, !cancelledCurrentHold, !completedCurrentHold else { return }
 
-    if isPressing {
-      pressStartedAt = Date()
-      completedCurrentHold = false
-      withAnimation(.linear(duration: NudgeButtonState.holdDuration)) {
-        progress = 1
-      }
+    let distance = hypot(value.translation.width, value.translation.height)
+    guard distance <= NudgeButtonState.maximumHoldMovement else {
+      cancelPress(cancelledUntilRelease: true)
       return
     }
 
-    if let pressStartedAt,
-       NudgeButtonState.shouldSuppressTap(
-         holdDuration: Date().timeIntervalSince(pressStartedAt),
-         completed: completedCurrentHold
-       ) {
-      suppressNextTap = true
+    guard !isPressing else { return }
+    beginPress()
+  }
+
+  private func beginPress() {
+    isPressing = true
+    completedCurrentHold = false
+    cancelledCurrentHold = false
+    withAnimation(.linear(duration: NudgeButtonState.holdDuration)) {
+      progress = 1
     }
-    pressStartedAt = nil
-    resetProgress()
+
+    holdTask?.cancel()
+    holdTask = Task { @MainActor in
+      try? await Task.sleep(for: .seconds(NudgeButtonState.holdDuration))
+      guard !Task.isCancelled, isPressing else { return }
+      completeHold()
+    }
   }
 
   private func completeHold() {
-    guard !isDisabled else { return }
+    guard !isDisabled, isPressing, !completedCurrentHold else { return }
+    holdTask = nil
     completedCurrentHold = true
     suppressNextTap = true
     resetProgress()
     onCompleted()
     isConfirmationPresented = true
+  }
+
+  private func endPress() {
+    holdTask?.cancel()
+    holdTask = nil
+    isPressing = false
+    cancelledCurrentHold = false
+    suppressNextTap = NudgeButtonState.shouldSuppressTap(completed: completedCurrentHold)
+    resetProgress()
+  }
+
+  private func cancelPress(cancelledUntilRelease: Bool = false) {
+    holdTask?.cancel()
+    holdTask = nil
+    isPressing = false
+    completedCurrentHold = false
+    cancelledCurrentHold = cancelledUntilRelease
+    resetProgress()
   }
 
   private func resetProgress() {
@@ -370,10 +404,10 @@ enum NudgeButtonState {
   static let nudgeText = "👋"
   static let urgentNudgeText = "🚨"
   static let holdDuration: TimeInterval = 1.2
-  static let tapSuppressionDelay: TimeInterval = 0.2
+  static let maximumHoldMovement: CGFloat = 44
 
-  static func shouldSuppressTap(holdDuration: TimeInterval, completed: Bool) -> Bool {
-    completed || holdDuration >= tapSuppressionDelay
+  static func shouldSuppressTap(completed: Bool) -> Bool {
+    completed
   }
 }
 
