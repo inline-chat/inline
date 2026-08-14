@@ -142,6 +142,7 @@ public struct NudgeButton: View {
         .overlay {
           holdProgressRing(size: 26, lineWidth: 2)
         }
+        .frame(minWidth: 32)
         .animation(.easeOut(duration: 0.15), value: isHolding)
 #else
       ZStack {
