@@ -278,6 +278,7 @@ export class UsersModel {
       where: and(
         queryMatch,
         botVisibility,
+        eq(users.appearInGlobalSearch, true),
         excludeUserId ? not(eq(users.id, excludeUserId)) : undefined,
         eq(users.pendingSetup, false),
         userNotDeleted(),

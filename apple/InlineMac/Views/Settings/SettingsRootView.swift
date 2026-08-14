@@ -166,6 +166,8 @@ private struct SettingsDetailView: View {
         BotsSettingsDetailView()
       case .notifications:
         NotificationsSettingsDetailView()
+      case .privacy:
+        PrivacySettingsDetailView()
       case .experimental:
         ExperimentalSettingsDetailView()
       case .debug:

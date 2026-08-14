@@ -2019,6 +2019,15 @@ message GetUserSettingsResult { UserSettings user_settings = 1; }
 
 message UserSettings {
   optional NotificationSettings notification_settings = 1;
+  optional PrivacySettings privacy_settings = 2;
+}
+
+message PrivacySettings {
+  // If true, the user's time zone may be shared with other users.
+  optional bool share_time_zone = 1;
+
+  // If true, the user may appear in global user search results.
+  optional bool appear_in_global_search = 2;
 }
 
 message NotificationSettings {

@@ -54,6 +54,19 @@ describe("searchUsersHandler", () => {
     expect(result.users).toEqual([])
   })
 
+  test("does not return users who disabled global search visibility", async () => {
+    const viewer = await testUtils.createUser("rpc-search-private-viewer@example.com")
+    await db.insert(users).values({
+      email: "rpc-search-private-user@example.com",
+      username: "globally-hidden-user",
+      pendingSetup: false,
+      appearInGlobalSearch: false,
+    })
+
+    const result = await searchUsersHandler({ query: "globally-hidden", limit: 20 }, context(viewer.id))
+    expect(result.users).toEqual([])
+  })
+
   test("treats PostgreSQL wildcard characters as literal username text", async () => {
     const viewer = await testUtils.createUser("rpc-search-literal-viewer@example.com")
     await db.insert(users).values([

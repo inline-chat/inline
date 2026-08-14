@@ -8,17 +8,29 @@ export const decodeUserSettings = (userSettings?: UserSettings): UserSettingsGen
   }
 
   const notificationSettings = userSettings.notificationSettings
-  if (!notificationSettings) {
+  const privacySettings = userSettings.privacySettings
+  if (!notificationSettings && !privacySettings) {
     return undefined
   }
 
-  const { mode, disableDmNotifications } = decodeProtocolNotificationMode(notificationSettings)
+  const notifications = notificationSettings
+    ? (() => {
+        const { mode, disableDmNotifications } = decodeProtocolNotificationMode(notificationSettings)
+        return {
+          mode,
+          silent: notificationSettings.silent ?? false,
+          disableDmNotifications,
+        }
+      })()
+    : undefined
 
   return {
-    notifications: {
-      mode,
-      silent: notificationSettings.silent ?? false,
-      disableDmNotifications,
-    },
+    notifications,
+    privacy: privacySettings
+      ? {
+          shareTimeZone: privacySettings.shareTimeZone ?? true,
+          appearInGlobalSearch: privacySettings.appearInGlobalSearch ?? true,
+        }
+      : undefined,
   }
 }

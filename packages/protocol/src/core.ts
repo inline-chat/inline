@@ -5632,6 +5632,27 @@ export interface UserSettings {
      * @generated from protobuf field: optional NotificationSettings notification_settings = 1;
      */
     notificationSettings?: NotificationSettings;
+    /**
+     * @generated from protobuf field: optional PrivacySettings privacy_settings = 2;
+     */
+    privacySettings?: PrivacySettings;
+}
+/**
+ * @generated from protobuf message PrivacySettings
+ */
+export interface PrivacySettings {
+    /**
+     * If true, the user's time zone may be shared with other users.
+     *
+     * @generated from protobuf field: optional bool share_time_zone = 1;
+     */
+    shareTimeZone?: boolean;
+    /**
+     * If true, the user may appear in global user search results.
+     *
+     * @generated from protobuf field: optional bool appear_in_global_search = 2;
+     */
+    appearInGlobalSearch?: boolean;
 }
 /**
  * @generated from protobuf message NotificationSettings
@@ -24571,7 +24592,8 @@ export const GetUserSettingsResult = new GetUserSettingsResult$Type();
 class UserSettings$Type extends MessageType<UserSettings> {
     constructor() {
         super("UserSettings", [
-            { no: 1, name: "notification_settings", kind: "message", T: () => NotificationSettings }
+            { no: 1, name: "notification_settings", kind: "message", T: () => NotificationSettings },
+            { no: 2, name: "privacy_settings", kind: "message", T: () => PrivacySettings }
         ]);
     }
     create(value?: PartialMessage<UserSettings>): UserSettings {
@@ -24588,6 +24610,9 @@ class UserSettings$Type extends MessageType<UserSettings> {
                 case /* optional NotificationSettings notification_settings */ 1:
                     message.notificationSettings = NotificationSettings.internalBinaryRead(reader, reader.uint32(), options, message.notificationSettings);
                     break;
+                case /* optional PrivacySettings privacy_settings */ 2:
+                    message.privacySettings = PrivacySettings.internalBinaryRead(reader, reader.uint32(), options, message.privacySettings);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -24603,6 +24628,9 @@ class UserSettings$Type extends MessageType<UserSettings> {
         /* optional NotificationSettings notification_settings = 1; */
         if (message.notificationSettings)
             NotificationSettings.internalBinaryWrite(message.notificationSettings, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional PrivacySettings privacy_settings = 2; */
+        if (message.privacySettings)
+            PrivacySettings.internalBinaryWrite(message.privacySettings, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -24613,6 +24641,59 @@ class UserSettings$Type extends MessageType<UserSettings> {
  * @generated MessageType for protobuf message UserSettings
  */
 export const UserSettings = new UserSettings$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class PrivacySettings$Type extends MessageType<PrivacySettings> {
+    constructor() {
+        super("PrivacySettings", [
+            { no: 1, name: "share_time_zone", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 2, name: "appear_in_global_search", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<PrivacySettings>): PrivacySettings {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<PrivacySettings>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: PrivacySettings): PrivacySettings {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional bool share_time_zone */ 1:
+                    message.shareTimeZone = reader.bool();
+                    break;
+                case /* optional bool appear_in_global_search */ 2:
+                    message.appearInGlobalSearch = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: PrivacySettings, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional bool share_time_zone = 1; */
+        if (message.shareTimeZone !== undefined)
+            writer.tag(1, WireType.Varint).bool(message.shareTimeZone);
+        /* optional bool appear_in_global_search = 2; */
+        if (message.appearInGlobalSearch !== undefined)
+            writer.tag(2, WireType.Varint).bool(message.appearInGlobalSearch);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message PrivacySettings
+ */
+export const PrivacySettings = new PrivacySettings$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class NotificationSettings$Type extends MessageType<NotificationSettings> {
     constructor() {

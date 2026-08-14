@@ -9235,11 +9235,54 @@ public nonisolated struct UserSettings: Sendable {
   /// Clears the value of `notificationSettings`. Subsequent reads from it will return its default value.
   public mutating func clearNotificationSettings() {self._notificationSettings = nil}
 
+  public var privacySettings: PrivacySettings {
+    get {_privacySettings ?? PrivacySettings()}
+    set {_privacySettings = newValue}
+  }
+  /// Returns true if `privacySettings` has been explicitly set.
+  public var hasPrivacySettings: Bool {self._privacySettings != nil}
+  /// Clears the value of `privacySettings`. Subsequent reads from it will return its default value.
+  public mutating func clearPrivacySettings() {self._privacySettings = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _notificationSettings: NotificationSettings? = nil
+  fileprivate var _privacySettings: PrivacySettings? = nil
+}
+
+public nonisolated struct PrivacySettings: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// If true, the user's time zone may be shared with other users.
+  public var shareTimeZone: Bool {
+    get {_shareTimeZone ?? false}
+    set {_shareTimeZone = newValue}
+  }
+  /// Returns true if `shareTimeZone` has been explicitly set.
+  public var hasShareTimeZone: Bool {self._shareTimeZone != nil}
+  /// Clears the value of `shareTimeZone`. Subsequent reads from it will return its default value.
+  public mutating func clearShareTimeZone() {self._shareTimeZone = nil}
+
+  /// If true, the user may appear in global user search results.
+  public var appearInGlobalSearch: Bool {
+    get {_appearInGlobalSearch ?? false}
+    set {_appearInGlobalSearch = newValue}
+  }
+  /// Returns true if `appearInGlobalSearch` has been explicitly set.
+  public var hasAppearInGlobalSearch: Bool {self._appearInGlobalSearch != nil}
+  /// Clears the value of `appearInGlobalSearch`. Subsequent reads from it will return its default value.
+  public mutating func clearAppearInGlobalSearch() {self._appearInGlobalSearch = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _shareTimeZone: Bool? = nil
+  fileprivate var _appearInGlobalSearch: Bool? = nil
 }
 
 public nonisolated struct NotificationSettings: Sendable {
@@ -28309,7 +28352,7 @@ nonisolated extension GetUserSettingsResult: SwiftProtobuf.Message, SwiftProtobu
 
 nonisolated extension UserSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UserSettings"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}notification_settings\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}notification_settings\0\u{3}privacy_settings\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -28318,6 +28361,7 @@ nonisolated extension UserSettings: SwiftProtobuf.Message, SwiftProtobuf._Messag
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._notificationSettings) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._privacySettings) }()
       default: break
       }
     }
@@ -28331,11 +28375,54 @@ nonisolated extension UserSettings: SwiftProtobuf.Message, SwiftProtobuf._Messag
     try { if let v = self._notificationSettings {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
     } }()
+    try { if let v = self._privacySettings {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UserSettings, rhs: UserSettings) -> Bool {
     if lhs._notificationSettings != rhs._notificationSettings {return false}
+    if lhs._privacySettings != rhs._privacySettings {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension PrivacySettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "PrivacySettings"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}share_time_zone\0\u{3}appear_in_global_search\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularBoolField(value: &self._shareTimeZone) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self._appearInGlobalSearch) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._shareTimeZone {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._appearInGlobalSearch {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: PrivacySettings, rhs: PrivacySettings) -> Bool {
+    if lhs._shareTimeZone != rhs._shareTimeZone {return false}
+    if lhs._appearInGlobalSearch != rhs._appearInGlobalSearch {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

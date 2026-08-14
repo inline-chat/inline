@@ -10,32 +10,60 @@ struct NotificationSettingsValues: Equatable, Sendable {
   var mode: NotificationMode
   var silent: Bool
   var disableDmNotifications: Bool
+  var shareTimeZone: Bool
+  var appearInGlobalSearch: Bool
 
   static let defaults = NotificationSettingsValues(
     mode: .all,
     silent: false,
-    disableDmNotifications: false
+    disableDmNotifications: false,
+    shareTimeZone: true,
+    appearInGlobalSearch: true
   )
 
   init(
     mode: NotificationMode,
     silent: Bool,
-    disableDmNotifications: Bool
+    disableDmNotifications: Bool,
+    shareTimeZone: Bool = true,
+    appearInGlobalSearch: Bool = true
   ) {
     self.mode = mode
     self.silent = silent
     self.disableDmNotifications = disableDmNotifications
+    self.shareTimeZone = shareTimeZone
+    self.appearInGlobalSearch = appearInGlobalSearch
   }
 
   init(_ settings: NotificationSettingsManager) {
     mode = settings.mode
     silent = settings.silent
     disableDmNotifications = settings.disableDmNotifications
+    shareTimeZone = true
+    appearInGlobalSearch = true
+  }
+
+  init(_ notification: NotificationSettingsManager, _ privacy: PrivacySettingsManager) {
+    mode = notification.mode
+    silent = notification.silent
+    disableDmNotifications = notification.disableDmNotifications
+    shareTimeZone = privacy.shareTimeZone
+    appearInGlobalSearch = privacy.appearInGlobalSearch
   }
 
   init(_ settings: InlineProtocol.NotificationSettings) {
     let manager = NotificationSettingsManager(from: settings)
     self.init(manager)
+  }
+
+  init(_ settings: InlineProtocol.UserSettings) {
+    let notification = settings.hasNotificationSettings
+      ? NotificationSettingsManager(from: settings.notificationSettings)
+      : NotificationSettingsManager()
+    let privacy = settings.hasPrivacySettings
+      ? PrivacySettingsManager(from: settings.privacySettings)
+      : PrivacySettingsManager()
+    self.init(notification, privacy)
   }
 
   func apply(to settings: NotificationSettingsManager) {
@@ -47,6 +75,15 @@ struct NotificationSettingsValues: Equatable, Sendable {
     }
     if settings.disableDmNotifications != disableDmNotifications {
       settings.disableDmNotifications = disableDmNotifications
+    }
+  }
+
+  func apply(to settings: PrivacySettingsManager) {
+    if settings.shareTimeZone != shareTimeZone {
+      settings.shareTimeZone = shareTimeZone
+    }
+    if settings.appearInGlobalSearch != appearInGlobalSearch {
+      settings.appearInGlobalSearch = appearInGlobalSearch
     }
   }
 
@@ -79,6 +116,7 @@ public class INUserSettings {
   // MARK: - Public data
 
   public var notification = NotificationSettingsManager()
+  public var privacy = PrivacySettingsManager()
   public var autoDownload = AutoDownloadSettingsManager()
 
   // MARK: - Private properties
@@ -87,6 +125,8 @@ public class INUserSettings {
   private static let notificationSettingsKey = "notificationSettings"
   private static let notificationSettingsAccountKeyPrefix = "notificationSettings.account"
   private static let pendingNotificationAccountKeyPrefix = "notificationSettings.pending.account"
+  private static let privacySettingsAccountKeyPrefix = "privacySettings.account"
+  private static let pendingPrivacySettingsAccountKeyPrefix = "privacySettings.pending.account"
   private static let legacyNotificationSettingsOwnerKey = "notificationSettings.legacyOwner.v1"
   private static let autoDownloadSettingsKey = "autoDownloadSettings"
   private let userDefaults: UserDefaults
@@ -219,6 +259,12 @@ public class INUserSettings {
       }
       .store(in: &cancellables)
 
+    privacy.objectWillChange
+      .sink { [weak self] _ in
+        self?.notificationSettingsWillChange()
+      }
+      .store(in: &cancellables)
+
     autoDownload.objectWillChange
       .sink { [weak self] _ in
         self?.autoDownloadSettingsWillChange()
@@ -261,7 +307,7 @@ public class INUserSettings {
         return
       }
 
-      let values = NotificationSettingsValues(self.notification)
+      let values = NotificationSettingsValues(self.notification, self.privacy)
       self.pendingLocalValues = values
       self.savePendingNotificationSettingsToUserDefaults(values, for: userID)
       self.saveNotificationSettingsToUserDefaults(values, for: userID)
@@ -286,6 +332,7 @@ public class INUserSettings {
         ?? loadNotificationSettingsFromUserDefaults(for: activeUserID)
         ?? .defaults
       values.apply(to: notification)
+      values.apply(to: privacy)
     }
 
     loadAutoDownloadSettingsFromUserDefaults()
@@ -312,7 +359,8 @@ public class INUserSettings {
     do {
       let cachedSettings = try JSONDecoder().decode(NotificationSettingsManager.self, from: notificationData)
       log.info("Loaded cached notification settings for current account")
-      return NotificationSettingsValues(cachedSettings)
+      let privacy = loadPrivacySettingsFromUserDefaults(for: userID) ?? PrivacySettingsManager()
+      return NotificationSettingsValues(cachedSettings, privacy)
     } catch {
       log.error("Failed to decode cached notification settings: \(error)")
       return nil
@@ -338,13 +386,33 @@ public class INUserSettings {
     "\(Self.pendingNotificationAccountKeyPrefix).\(userID)"
   }
 
+  private func privacySettingsKey(for userID: Int64) -> String {
+    "\(Self.privacySettingsAccountKeyPrefix).\(userID)"
+  }
+
+  private func pendingPrivacySettingsKey(for userID: Int64) -> String {
+    "\(Self.pendingPrivacySettingsAccountKeyPrefix).\(userID)"
+  }
+
+  private func loadPrivacySettingsFromUserDefaults(for userID: Int64) -> PrivacySettingsManager? {
+    guard let data = userDefaults.data(forKey: privacySettingsKey(for: userID)) else { return nil }
+    return try? JSONDecoder().decode(PrivacySettingsManager.self, from: data)
+  }
+
   private func restorePendingLocalChange(for userID: Int64) -> NotificationSettingsValues? {
     let key = pendingNotificationSettingsKey(for: userID)
     guard let data = userDefaults.data(forKey: key) else { return nil }
 
     do {
       let manager = try JSONDecoder().decode(NotificationSettingsManager.self, from: data)
-      let values = NotificationSettingsValues(manager)
+      let privacy: PrivacySettingsManager
+      if let privacyData = userDefaults.data(forKey: pendingPrivacySettingsKey(for: userID)),
+         let pendingPrivacy = try? JSONDecoder().decode(PrivacySettingsManager.self, from: privacyData) {
+        privacy = pendingPrivacy
+      } else {
+        privacy = loadPrivacySettingsFromUserDefaults(for: userID) ?? PrivacySettingsManager()
+      }
+      let values = NotificationSettingsValues(manager, privacy)
       localNotificationRevision &+= 1
       pendingLocalRevision = localNotificationRevision
       pendingLocalUserID = userID
@@ -354,6 +422,7 @@ public class INUserSettings {
     } catch {
       log.error("Failed to decode pending notification settings", error: error)
       userDefaults.removeObject(forKey: key)
+      userDefaults.removeObject(forKey: pendingPrivacySettingsKey(for: userID))
       return nil
     }
   }
@@ -383,6 +452,8 @@ public class INUserSettings {
     do {
       let notificationData = try JSONEncoder().encode(values.makeManager())
       userDefaults.set(notificationData, forKey: notificationSettingsKey(for: userID))
+      let privacyData = try JSONEncoder().encode(values.makePrivacyManager())
+      userDefaults.set(privacyData, forKey: privacySettingsKey(for: userID))
       log.trace("Saved notification settings to UserDefaults")
     } catch {
       log.error("Failed to encode notification settings: \(error)")
@@ -396,6 +467,8 @@ public class INUserSettings {
     do {
       let data = try JSONEncoder().encode(values.makeManager())
       userDefaults.set(data, forKey: pendingNotificationSettingsKey(for: userID))
+      let privacyData = try JSONEncoder().encode(values.makePrivacyManager())
+      userDefaults.set(privacyData, forKey: pendingPrivacySettingsKey(for: userID))
       log.trace("Saved pending notification settings to UserDefaults")
     } catch {
       log.error("Failed to encode pending notification settings", error: error)
@@ -534,9 +607,10 @@ public class INUserSettings {
   ) {
     guard activeUserID == userID else { return }
 
-    if NotificationSettingsValues(notification) != values {
+    if NotificationSettingsValues(notification, privacy) != values {
       isApplyingServerUpdate = true
       values.apply(to: notification)
+      values.apply(to: privacy)
       isApplyingServerUpdate = false
     }
     saveNotificationSettingsToUserDefaults(values, for: userID)
@@ -566,12 +640,14 @@ public class INUserSettings {
     }
     isApplyingServerUpdate = true
     values.apply(to: notification)
+    values.apply(to: privacy)
     isApplyingServerUpdate = false
   }
 
   private func clearPendingLocalChange(persistedFor userID: Int64? = nil) {
     if let userID {
       userDefaults.removeObject(forKey: pendingNotificationSettingsKey(for: userID))
+      userDefaults.removeObject(forKey: pendingPrivacySettingsKey(for: userID))
     }
     pendingLocalRevision = nil
     pendingLocalUserID = nil
@@ -584,13 +660,13 @@ public class INUserSettings {
       throw UserSettingsRefreshError.invalidResponse
     }
 
-    guard result.userSettings.hasNotificationSettings else { return nil }
-    return NotificationSettingsValues(result.userSettings.notificationSettings)
+    return NotificationSettingsValues(result.userSettings)
   }
 
   private static func saveNotificationSettingsToRealtime(_ values: NotificationSettingsValues) async throws {
     _ = try await Api.realtime.send(.updateUserSettings(
-      notificationSettings: values.makeManager()
+      notificationSettings: values.makeManager(),
+      privacySettings: values.makePrivacyManager()
     ))
   }
 
@@ -600,7 +676,7 @@ public class INUserSettings {
   }
 
   func updateFromServer(_ settings: InlineProtocol.UserSettings, receivingUserID: Int64) {
-    guard settings.hasNotificationSettings else { return }
+    guard settings.hasNotificationSettings || settings.hasPrivacySettings else { return }
     guard currentUserIDProvider() == receivingUserID else {
       log.debug("Ignored a user settings update received for a previous account")
       return
@@ -611,8 +687,17 @@ public class INUserSettings {
       return
     }
     applyServerNotificationSettings(
-      NotificationSettingsValues(settings.notificationSettings),
+      NotificationSettingsValues(settings),
       for: receivingUserID
+    )
+  }
+}
+
+private extension NotificationSettingsValues {
+  func makePrivacyManager() -> PrivacySettingsManager {
+    PrivacySettingsManager(
+      shareTimeZone: shareTimeZone,
+      appearInGlobalSearch: appearInGlobalSearch
     )
   }
 }

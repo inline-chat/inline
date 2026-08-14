@@ -48,6 +48,8 @@ export const users = pgTable(
     photoFileId: integer("photo_file_id").references((): AnyPgColumn => files.id),
     pendingSetup: boolean("pending_setup").default(false),
     timeZone: varchar("time_zone", { length: 256 }),
+    shareTimeZone: boolean("share_time_zone").default(true).notNull(),
+    appearInGlobalSearch: boolean("appear_in_global_search").default(true).notNull(),
 
     // bot
     bot: boolean("bot").default(false),
@@ -80,7 +82,13 @@ export function userNotDeleted(): SQL {
   return or(isNull(users.deleted), eq(users.deleted, false)) as SQL
 }
 
-export type DbUser = typeof users.$inferSelect
+type DbUserRow = typeof users.$inferSelect
+export type DbUser = Omit<DbUserRow, "shareTimeZone" | "appearInGlobalSearch"> & {
+  /** Optional only for legacy in-memory fixtures; persisted rows always provide it. */
+  shareTimeZone?: boolean
+  /** Optional only for legacy in-memory fixtures; persisted rows always provide it. */
+  appearInGlobalSearch?: boolean
+}
 export type DbUserWithPhoto = DbUser & { photo?: (DbFile & { thumbs?: DbFile[] | null }) | null }
 export type DbUserWithProfile = DbUser & {
   photoFile: DbFile | undefined | null

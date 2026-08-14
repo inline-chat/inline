@@ -14,6 +14,11 @@ export const defaultNotificationSettings = {
   disableDmNotifications: false,
 } as const
 
+export const defaultPrivacySettings = {
+  shareTimeZone: true,
+  appearInGlobalSearch: true,
+} as const
+
 export const UserSettingsGeneralSchema = z.object({
   /** Default notifications for all of your chats */
   notifications: z
@@ -29,6 +34,13 @@ export const UserSettingsGeneralSchema = z.object({
     })
     .optional()
     .default(defaultNotificationSettings),
+  privacy: z
+    .object({
+      shareTimeZone: z.boolean().optional().default(defaultPrivacySettings.shareTimeZone),
+      appearInGlobalSearch: z.boolean().optional().default(defaultPrivacySettings.appearInGlobalSearch),
+    })
+    .optional()
+    .default(defaultPrivacySettings),
 })
 
 export type UserSettingsGeneralInput = z.input<typeof UserSettingsGeneralSchema>

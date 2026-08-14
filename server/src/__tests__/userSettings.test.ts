@@ -5,6 +5,9 @@ import { updateUserSettingsHandler } from "@in/server/realtime/handlers/user.upd
 import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings/types"
 import { UserSettingsModel } from "@in/server/db/models/userSettings/userSettings"
 import { NotificationSettings_Mode } from "@inline-chat/protocol/core"
+import { db } from "@in/server/db"
+import { users } from "@in/server/db/schema"
+import { eq } from "drizzle-orm"
 
 describe("User Settings RPC", () => {
   let userId: number
@@ -32,6 +35,44 @@ describe("User Settings RPC", () => {
 
     expect(result.userSettings).toBeDefined()
     expect(result.userSettings?.notificationSettings).toBeUndefined()
+    expect(result.userSettings?.privacySettings?.shareTimeZone).toBe(true)
+    expect(result.userSettings?.privacySettings?.appearInGlobalSearch).toBe(true)
+  })
+
+  test("updates privacy settings and their user-row projections", async () => {
+    const context = {
+      userId,
+      sessionId: 1,
+      connectionId: "test",
+      sendRaw: () => {},
+      sendRpcReply: () => {},
+    }
+
+    await updateUserSettingsHandler(
+      {
+        userSettings: {
+          privacySettings: {
+            shareTimeZone: false,
+            appearInGlobalSearch: false,
+          },
+        },
+      },
+      context,
+    )
+
+    const result = await getUserSettingsHandler({}, context)
+    expect(result.userSettings?.privacySettings?.shareTimeZone).toBe(false)
+    expect(result.userSettings?.privacySettings?.appearInGlobalSearch).toBe(false)
+
+    const [user] = await db
+      .select({
+        shareTimeZone: users.shareTimeZone,
+        appearInGlobalSearch: users.appearInGlobalSearch,
+      })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1)
+    expect(user).toEqual({ shareTimeZone: false, appearInGlobalSearch: false })
   })
 
   test("updateUserSettings should save and return settings", async () => {

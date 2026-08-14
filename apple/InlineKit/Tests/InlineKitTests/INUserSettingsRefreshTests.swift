@@ -25,6 +25,28 @@ struct INUserSettingsRefreshTests {
     #expect(config.retryAfterAck)
   }
 
+  @Test("legacy notification transactions do not overwrite privacy")
+  func legacyNotificationTransactionKeepsPrivacyAbsent() throws {
+    let notification = NotificationSettingsManager()
+    let legacyContext = try JSONDecoder().decode(
+      UpdateUserSettingsTransaction.Context.self,
+      from: JSONEncoder().encode(
+        UpdateUserSettingsTransaction.Context(notificationSettings: notification)
+      )
+    )
+    let transaction = UpdateUserSettingsTransaction(
+      notificationSettings: legacyContext.notificationSettings,
+      privacySettings: legacyContext.privacySettings
+    )
+
+    guard case let .updateUserSettings(input) = transaction.input(from: transaction.context) else {
+      Issue.record("Expected an updateUserSettings input")
+      return
+    }
+    #expect(input.userSettings.hasNotificationSettings)
+    #expect(!input.userSettings.hasPrivacySettings)
+  }
+
   @Test("coalesces concurrent refreshes for the same account")
   func coalescesConcurrentRefreshes() async throws {
     let harness = try makeHarness()
@@ -76,6 +98,21 @@ struct INUserSettingsRefreshTests {
 
     // Let the injected no-op debounce complete before releasing the harness.
     try await Task.sleep(for: .milliseconds(350))
+  }
+
+  @Test("saves privacy edits through the shared user-settings lane")
+  func savesPrivacyEdits() async throws {
+    let harness = try makeHarness(controlledSaves: true)
+    defer { harness.removeUserDefaults() }
+
+    harness.settings.privacy.shareTimeZone = false
+    harness.settings.privacy.appearInGlobalSearch = false
+
+    await harness.saver.waitForCalls(1)
+    let savedValues = await harness.saver.savedValues
+    #expect(savedValues.last?.shareTimeZone == false)
+    #expect(savedValues.last?.appearInGlobalSearch == false)
+    await harness.saver.succeed()
   }
 
   @Test("rejects a response fetched for a previous account")

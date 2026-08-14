@@ -45,6 +45,12 @@ struct SettingsView: View {
           destination: NotificationsSettingsView()
         )
         SettingsNavigationRow(
+          title: "Privacy",
+          systemImage: "hand.raised.fill",
+          color: .blue,
+          destination: PrivacySettingsView()
+        )
+        SettingsNavigationRow(
           title: "Data & Storage",
           systemImage: "externaldrive.fill",
           color: .indigo,

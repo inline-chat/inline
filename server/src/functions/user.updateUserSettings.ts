@@ -2,7 +2,11 @@ import { UserSettingsModel } from "@in/server/db/models/userSettings"
 import { getCachedUserSettings, invalidateUserSettingsCache } from "@in/server/modules/cache/userSettings"
 import type { FunctionContext } from "@in/server/functions/_types"
 import type { UserSettingsGeneral, UserSettingsGeneralInput } from "@in/server/db/models/userSettings/types"
-import { defaultNotificationSettings, UserSettingsGeneralSchema } from "@in/server/db/models/userSettings/types"
+import {
+  defaultNotificationSettings,
+  defaultPrivacySettings,
+  UserSettingsGeneralSchema,
+} from "@in/server/db/models/userSettings/types"
 import type { Update } from "@inline-chat/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeUpdates } from "@in/server/realtime/message"
@@ -23,6 +27,10 @@ function normalizedGeneral(current: UserSettingsGeneral | null, input: UserSetti
       notifications: {
         ...(current?.notifications ?? defaultNotificationSettings),
         ...input.notifications,
+      },
+      privacy: {
+        ...(current?.privacy ?? defaultPrivacySettings),
+        ...input.privacy,
       },
     }),
   )

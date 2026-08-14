@@ -12,6 +12,11 @@ export const getMe = async (_: GetMeInput, handlerContext: HandlerContext): Prom
   }
 
   return {
-    user: Encoders.user({ user, photoFile: user.photoFile ?? undefined, min: false }),
+    user: Encoders.user({
+      user,
+      photoFile: user.photoFile ?? undefined,
+      min: false,
+      viewerUserId: handlerContext.userId,
+    }),
   }
 }

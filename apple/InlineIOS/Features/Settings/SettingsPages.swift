@@ -183,6 +183,43 @@ struct NotificationsSettingsView: View {
   }
 }
 
+struct PrivacySettingsView: View {
+  @ObservedObject private var privacy = INUserSettings.current.privacy
+
+  var body: some View {
+    List {
+      Section {
+        SettingsItem(
+          icon: "globe",
+          iconColor: .blue,
+          title: "Appear in Global Search"
+        ) {
+          Toggle("Appear in Global Search", isOn: $privacy.appearInGlobalSearch)
+            .labelsHidden()
+        }
+      } footer: {
+        Text("Allow other people to find you by username in global search.")
+      }
+
+      Section {
+        SettingsItem(
+          icon: "clock.fill",
+          iconColor: .orange,
+          title: "Share Time Zone"
+        ) {
+          Toggle("Share Time Zone", isOn: $privacy.shareTimeZone)
+            .labelsHidden()
+        }
+      } footer: {
+        Text("Allow people you chat with to see your local time.")
+      }
+    }
+    .listStyle(.insetGrouped)
+    .navigationTitle("Privacy")
+    .navigationBarTitleDisplayMode(.inline)
+  }
+}
+
 struct DataStorageSettingsView: View {
   var body: some View {
     List {

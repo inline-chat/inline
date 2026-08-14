@@ -7,7 +7,8 @@ import {
 import { normalizeUserSettingsGeneral } from "@in/server/modules/notifications/notificationSettingsCompat"
 import { decrypt, encrypt } from "@in/server/modules/encryption/encryption"
 import { Log } from "@in/server/utils/log"
-import { userSettings } from "@in/server/db/schema"
+import { userSettings, users } from "@in/server/db/schema"
+import { eq } from "drizzle-orm"
 
 const log = new Log("UserSettingsModel")
 
@@ -72,22 +73,32 @@ async function updateGeneral(userId: number, general: UserSettingsGeneralInput):
   const encryptedGeneral = encrypt(generalJson)
 
   // Insert or update the user settings
-  await db
-    .insert(userSettings)
-    .values({
-      userId,
-      generalEncrypted: encryptedGeneral.encrypted,
-      generalIv: encryptedGeneral.iv,
-      generalTag: encryptedGeneral.authTag,
-    })
-    .onConflictDoUpdate({
-      target: [userSettings.userId],
-      set: {
+  await db.transaction(async (tx) => {
+    await tx
+      .insert(userSettings)
+      .values({
+        userId,
         generalEncrypted: encryptedGeneral.encrypted,
         generalIv: encryptedGeneral.iv,
         generalTag: encryptedGeneral.authTag,
-      },
-    })
+      })
+      .onConflictDoUpdate({
+        target: [userSettings.userId],
+        set: {
+          generalEncrypted: encryptedGeneral.encrypted,
+          generalIv: encryptedGeneral.iv,
+          generalTag: encryptedGeneral.authTag,
+        },
+      })
+
+    await tx
+      .update(users)
+      .set({
+        shareTimeZone: validatedGeneral.privacy.shareTimeZone,
+        appearInGlobalSearch: validatedGeneral.privacy.appearInGlobalSearch,
+      })
+      .where(eq(users.id, userId))
+  })
 
   log.debug("Updated general settings", { userId })
 

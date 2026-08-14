@@ -13,6 +13,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
 #endif
   case appearance
   case notifications
+  case privacy
   case experimental
   case debug
 
@@ -42,6 +43,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
 #endif
     case .notifications:
       return "Notifications"
+    case .privacy:
+      return "Privacy"
     case .experimental:
       return "Experimental"
     case .debug:
@@ -73,6 +76,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
 #endif
     case .notifications:
       return "bell"
+    case .privacy:
+      return "hand.raised"
     case .experimental:
       return "testtube.2"
     case .debug:

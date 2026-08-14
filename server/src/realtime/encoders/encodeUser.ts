@@ -10,12 +10,14 @@ export const encodeUser = ({
   botAvatar,
   botAvatarFile,
   min = false,
+  viewerUserId,
 }: {
   user: DbUser
   photoFile?: DbFile
   botAvatar?: DbBotAvatarAsset
   botAvatarFile?: DbFile
   min?: boolean
+  viewerUserId?: number
 }): User => {
   let cdnUrl: string | undefined = undefined
   if (photoFile) {
@@ -38,7 +40,10 @@ export const encodeUser = ({
           online: user.online ? UserStatus_Status.ONLINE : UserStatus_Status.OFFLINE,
           lastOnline: { date: user.lastOnline ? encodeDate(user.lastOnline) : undefined },
         },
-    timeZone: min ? undefined : user.timeZone ?? undefined,
+    timeZone:
+      min || (user.shareTimeZone === false && viewerUserId !== user.id)
+        ? undefined
+        : user.timeZone ?? undefined,
     bot: user.bot === true ? true : undefined,
     profilePhoto: cdnUrl
       ? {

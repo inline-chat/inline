@@ -64,7 +64,7 @@ export const changeUsernameHandler = async (
 
   if (!username) {
     const { user, update } = await updateUserAndPush(context, { username: null })
-    return { user: encodeUser({ user }), updates: [update] }
+    return { user: encodeUser({ user, viewerUserId: context.userId }), updates: [update] }
   }
 
   const availability = await usernameAvailability(username, context.userId)
@@ -82,7 +82,7 @@ export const changeUsernameHandler = async (
       if (completedSignup) {
         BotAlerts.signupCompleted({ user })
       }
-      return { user: encodeUser({ user }), updates: [update] }
+      return { user: encodeUser({ user, viewerUserId: context.userId }), updates: [update] }
     }
     case UsernameAvailability.USERNAME_INVALID:
       throw RealtimeRpcError.UsernameInvalid()
@@ -120,11 +120,11 @@ export const updateProfileHandler = async (
 
   if (Object.keys(props).length === 0) {
     const user = await getUser(context.userId)
-    return { user: encodeUser({ user }), updates: [] }
+    return { user: encodeUser({ user, viewerUserId: context.userId }), updates: [] }
   }
 
   const { user, update } = await updateUserAndPush(context, props)
-  return { user: encodeUser({ user }), updates: [update] }
+  return { user: encodeUser({ user, viewerUserId: context.userId }), updates: [update] }
 }
 
 export const setProfilePhotoHandler = async (
@@ -145,7 +145,7 @@ export const setProfilePhotoHandler = async (
     context,
     { photoFileId: photoFile?.id ?? null },
   )
-  return { user: encodeUser({ user, photoFile }), updates: [update] }
+  return { user: encodeUser({ user, photoFile, viewerUserId: context.userId }), updates: [update] }
 }
 
 export const getExternalProfilePhotoHandler = async (
@@ -225,7 +225,7 @@ async function updateUserAndPush(
     const currentPhotoFile = user.photoFileId
       ? await tx.select().from(files).where(eq(files.id, user.photoFileId)).limit(1).then((rows) => rows[0])
       : undefined
-    const protocolUser = encodeUser({ user, photoFile: currentPhotoFile })
+    const protocolUser = encodeUser({ user, photoFile: currentPhotoFile, viewerUserId: context.userId })
     const serverUpdate: ServerUpdate["update"] = {
       oneofKind: "updatedUser",
       updatedUser: {

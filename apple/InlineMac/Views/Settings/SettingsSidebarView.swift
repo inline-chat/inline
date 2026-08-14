@@ -37,7 +37,11 @@ struct SettingsSidebarView: View {
       categories.append(.account)
     }
 
-    categories.append(contentsOf: [.general, .appearance, .notifications, .dataStorage])
+    categories.append(contentsOf: [.general, .appearance, .notifications])
+    if auth.isLoggedIn {
+      categories.append(.privacy)
+    }
+    categories.append(.dataStorage)
     if auth.isLoggedIn {
       categories.append(.connectors)
     }
