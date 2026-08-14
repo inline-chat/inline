@@ -644,7 +644,6 @@ final class SidebarCollectionBodyController: NSViewController {
         rebasedRows,
         animatingDifferences: resumedFromLoading == false
           && suppressesModeTransitionAnimations == false
-          && disclosureChanged == false
           && (previousExternalIDs != inputRows.map(\.id)
             || reconciliation?.cancelledMoveIDs.isEmpty == false),
         reason: resumedFromLoading
@@ -657,7 +656,6 @@ final class SidebarCollectionBodyController: NSViewController {
         rows,
         animatingDifferences: resumedFromLoading == false
           && suppressesModeTransitionAnimations == false
-          && disclosureChanged == false
           && (previousExternalIDs != inputRows.map(\.id)
             || reconciliation?.cancelledMoveIDs.isEmpty == false),
         reason: resumedFromLoading
@@ -675,11 +673,9 @@ final class SidebarCollectionBodyController: NSViewController {
     handleScrollRequestIfPossible()
   }
 
-  /// Section disclosure removes or restores an entire lane at once. Running
-  /// that through the generic move/fade transition keeps outgoing rows alive
-  /// while surviving rows cross them, producing a visibly duplicated stack.
-  /// Header insertion/removal remains eligible for ordinary model animation;
-  /// only a state change on the same semantic header takes the direct path.
+  /// Section disclosure is still an identifier-changing snapshot, but the
+  /// collection layout gives it accordion-specific insertion/removal geometry
+  /// so it never falls back to the generic overlapping row fade.
   private func sectionDisclosureChanged(
     from previousRows: [SidebarCollectionRow],
     to nextRows: [SidebarCollectionRow]
@@ -831,7 +827,7 @@ final class SidebarCollectionBodyController: NSViewController {
       ? nil
       : captureViewportAnchor(survivingIn: Set(next.orderedIDs))
     transitionRowByID = previousRows.merging(next.rowByID) { _, latest in latest }
-    layout.prepareTransition(from: previousPresentation)
+    layout.prepareTransition(from: previousPresentation, to: next)
     presentation = next
     configureLayout(for: next)
     inFlightRefreshScope = refreshScope(from: previousPresentation, to: next)

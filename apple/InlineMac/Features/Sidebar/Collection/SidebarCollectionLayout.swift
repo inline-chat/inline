@@ -47,6 +47,12 @@ struct SidebarBodyLayoutDrag: Equatable {
 /// Owns only physical collection geometry: rows, the one drag reservation,
 /// the nonvisual pinned-lane boundary, and diffable move/fade attributes.
 final class SidebarCollectionBodyLayout: NSCollectionViewLayout {
+  private struct SectionDisclosureTransition {
+    let section: SidebarCollectionRow.SectionHeader
+    let isExpanding: Bool
+    let affectedRowIDs: Set<SidebarCollectionRow.ID>
+  }
+
   private(set) var slotFrame: CGRect?
   private(set) var laneBoundaryFrame: CGRect?
   private(set) var scrollEdgeContentHeight: CGFloat = 0
@@ -60,12 +66,16 @@ final class SidebarCollectionBodyLayout: NSCollectionViewLayout {
   private var transitionFromAttributes: [
     SidebarCollectionRow.ID: NSCollectionViewLayoutAttributes
   ] = [:]
+  private var sectionDisclosureTransition: SectionDisclosureTransition?
   private var hasTransitionSource = false
   private var contentSize = CGSize.zero
 
-  func prepareTransition(from presentation: SidebarBodyPresentation?) {
-    hasTransitionSource = presentation != nil
-    transitionFromIDs = presentation?.orderedIDs ?? []
+  func prepareTransition(
+    from previousPresentation: SidebarBodyPresentation?,
+    to nextPresentation: SidebarBodyPresentation
+  ) {
+    hasTransitionSource = previousPresentation != nil
+    transitionFromIDs = previousPresentation?.orderedIDs ?? []
     transitionFromAttributes = Dictionary(
       uniqueKeysWithValues: transitionFromIDs.enumerated().compactMap { index, id in
         guard let attributes = itemAttributes[IndexPath(item: index, section: 0)]?.copy()
@@ -73,6 +83,10 @@ final class SidebarCollectionBodyLayout: NSCollectionViewLayout {
         else { return nil }
         return (id, attributes)
       }
+    )
+    sectionDisclosureTransition = Self.sectionDisclosureTransition(
+      from: previousPresentation,
+      to: nextPresentation
     )
   }
 
@@ -216,6 +230,11 @@ final class SidebarCollectionBodyLayout: NSCollectionViewLayout {
     guard NSWorkspace.shared.accessibilityDisplayShouldReduceMotion == false else {
       return targetAttributes
     }
+    if sectionDisclosureTransition?.isExpanding == true,
+       sectionDisclosureTransition?.affectedRowIDs.contains(rowID) == true,
+       let collapsed = collapsedAttributes(for: targetAttributes) {
+      return collapsed
+    }
     targetAttributes.alpha = 0
     targetAttributes.frame.origin.y -= 4
     return targetAttributes
@@ -242,6 +261,11 @@ final class SidebarCollectionBodyLayout: NSCollectionViewLayout {
     guard NSWorkspace.shared.accessibilityDisplayShouldReduceMotion == false else {
       return attributes
     }
+    if sectionDisclosureTransition?.isExpanding == false,
+       sectionDisclosureTransition?.affectedRowIDs.contains(rowID) == true,
+       let collapsed = collapsedAttributes(for: attributes) {
+      return collapsed
+    }
     attributes.alpha = 0
     attributes.frame.origin.y -= 4
     return attributes
@@ -251,6 +275,76 @@ final class SidebarCollectionBodyLayout: NSCollectionViewLayout {
     super.finalizeCollectionViewUpdates()
     transitionFromIDs.removeAll()
     transitionFromAttributes.removeAll()
+    sectionDisclosureTransition = nil
+  }
+
+  private func collapsedAttributes(
+    for source: NSCollectionViewLayoutAttributes
+  ) -> NSCollectionViewLayoutAttributes? {
+    guard let sectionDisclosureTransition,
+          let presentation,
+          let headerIndex = presentation.orderedIDs.firstIndex(
+            of: .sectionHeader(sectionDisclosureTransition.section)
+          ),
+          let headerAttributes = layoutAttributesForItem(
+            at: IndexPath(item: headerIndex, section: 0)
+          ),
+          let collapsed = source.copy() as? NSCollectionViewLayoutAttributes
+    else { return nil }
+
+    collapsed.frame = CGRect(
+      x: source.frame.minX,
+      y: headerAttributes.frame.maxY,
+      width: source.frame.width,
+      height: 0
+    )
+    collapsed.alpha = 0
+    return collapsed
+  }
+
+  private static func sectionDisclosureTransition(
+    from previous: SidebarBodyPresentation?,
+    to next: SidebarBodyPresentation
+  ) -> SectionDisclosureTransition? {
+    guard let previous else { return nil }
+
+    let changedSections: [(
+      section: SidebarCollectionRow.SectionHeader,
+      isExpanding: Bool
+    )] = SidebarCollectionRow.SectionHeader.allCases.compactMap { section in
+      let previousExpanded = previous.rowByID[.sectionHeader(section)]?
+        .sectionHeader?.isExpanded
+      let nextExpanded = next.rowByID[.sectionHeader(section)]?
+        .sectionHeader?.isExpanded
+      guard let previousExpanded, let nextExpanded, previousExpanded != nextExpanded else {
+        return nil
+      }
+      return (section: section, isExpanding: nextExpanded)
+    }
+    guard changedSections.count == 1, let changedSection = changedSections.first else {
+      return nil
+    }
+
+    let previousIDs = Set(previous.orderedIDs)
+    let nextIDs = Set(next.orderedIDs)
+    let affectedRowIDs = previousIDs.symmetricDifference(nextIDs).filter { rowID in
+      let row = next.rowByID[rowID] ?? previous.rowByID[rowID]
+      return switch row?.kind {
+      case let .chat(item):
+        item.lane == (changedSection.section == .pinned ? .pinned : .normal)
+      case .emptyState:
+        changedSection.section == .content
+      default:
+        false
+      }
+    }
+    guard affectedRowIDs.isEmpty == false else { return nil }
+
+    return SectionDisclosureTransition(
+      section: changedSection.section,
+      isExpanding: changedSection.isExpanding,
+      affectedRowIDs: Set(affectedRowIDs)
+    )
   }
 
   private func itemFrame(
