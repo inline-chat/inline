@@ -437,6 +437,12 @@ export const AdminEmailProviderStatusQuery = Schema.Struct({
   identifier: "AdminEmailProviderStatusQuery",
 })
 
+export const AdminEmailProviderTestInput = Schema.Struct({
+  provider: AdminEmailProvider,
+}).annotate({
+  identifier: "AdminEmailProviderTestInput",
+})
+
 export const AdminEmailCampaignPreviewInput = Schema.Struct({
   provider: AdminEmailProvider,
   subject: Schema.String,
@@ -558,6 +564,8 @@ export const AdminEmailProviderStatusResult = Schema.Struct({
   ok: Schema.Literal(true),
   providerStatus: Schema.Struct({
     provider: AdminEmailProvider,
+    fromAddress: Schema.String,
+    replyToAddress: Schema.String,
     region: NullableString,
     refreshedAt: Schema.String,
     available: Schema.Boolean,
@@ -579,6 +587,18 @@ export const AdminEmailProviderStatusResult = Schema.Struct({
   }),
 }).annotate({
   identifier: "AdminEmailProviderStatusResult",
+})
+
+export const AdminEmailProviderTestResult = Schema.Struct({
+  ok: Schema.Literal(true),
+  provider: AdminEmailProvider,
+  recipient: Schema.String,
+  fromAddress: Schema.String,
+  replyToAddress: Schema.String,
+  messageId: NullableString,
+  sentAt: Schema.String,
+}).annotate({
+  identifier: "AdminEmailProviderTestResult",
 })
 
 export const AdminSpacesResult = Schema.Struct({

@@ -52,6 +52,9 @@ import {
   validateCampaignBodyImages,
 } from "@in/server/modules/emailCampaigns/render"
 import { getEmailProviderStatus } from "@in/server/modules/emailCampaigns/providerStatus"
+import {
+  makeTestEmailProviderOperation,
+} from "./adminEmailProviderTestOperation.effect"
 import { syncProviderSuppressions } from "@in/server/modules/emailCampaigns/providerSuppressions"
 import type { EmailCampaignAudience } from "@in/server/modules/emailCampaigns/types"
 import {
@@ -113,6 +116,7 @@ type ManagementOperationName =
   | "serverConfig"
   | "updateServerConfig"
   | "emailProviderStatus"
+  | "testEmailProvider"
   | "previewEmailCampaign"
   | "createEmailCampaign"
   | "testEmailCampaign"
@@ -1402,13 +1406,19 @@ const validateCount = (
   count >= 1 &&
   count <= max
 
-export const makeAdminManagementOperations =
-  (): AdminManagementOperations => ({
+export const makeAdminManagementOperations = (
+  dependencies: {
+    readonly sendProviderEmail?: Parameters<typeof makeTestEmailProviderOperation>[0] | undefined
+  } = {},
+): AdminManagementOperations => ({
     waitlist: waitlistOperation,
     emailCampaigns: emailCampaignsOperation,
     serverConfig: serverConfigOperation,
     updateServerConfig: updateServerConfigOperation,
     emailProviderStatus: emailProviderStatusOperation,
+    testEmailProvider: makeTestEmailProviderOperation(
+      dependencies.sendProviderEmail,
+    ),
     previewEmailCampaign: previewEmailCampaignOperation,
     createEmailCampaign: createEmailCampaignOperation,
     testEmailCampaign: testEmailCampaignOperation,

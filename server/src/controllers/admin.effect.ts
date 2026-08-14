@@ -91,6 +91,8 @@ import {
   AdminEmailCampaignTestInput,
   AdminEmailProviderStatusResult,
   AdminEmailProviderStatusQuery,
+  AdminEmailProviderTestInput,
+  AdminEmailProviderTestResult,
   AdminInviteCodesResult,
   AdminInviteCountInput,
   AdminInvitesQuery,
@@ -550,6 +552,18 @@ const emailProviderStatusEndpoint = setupEndpoint(
   ),
 )
 
+const testEmailProviderEndpoint = stepUpEndpoint(
+  HttpApiEndpoint.post(
+    "adminTestEmailProvider",
+    "/admin/email-provider-test",
+    {
+      payload: AdminEmailProviderTestInput,
+      success: AdminEmailProviderTestResult,
+      error: [AdminTransportBadRequest, AdminValidationError],
+    },
+  ),
+)
+
 const previewEmailCampaignEndpoint = setupEndpoint(
   HttpApiEndpoint.post(
     "adminPreviewEmailCampaign",
@@ -765,6 +779,7 @@ export const AdminApiGroup = HttpApiGroup.make(
   serverConfigEndpoint,
   updateServerConfigEndpoint,
   emailProviderStatusEndpoint,
+  testEmailProviderEndpoint,
   previewEmailCampaignEndpoint,
   createEmailCampaignEndpoint,
   testEmailCampaignEndpoint,
@@ -1138,6 +1153,23 @@ export const makeAdminRouteGroup = () => {
                     Effect.flatMap(({ input }) =>
                       withSession((session) =>
                         operations.emailProviderStatus(input, session),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          )
+          .handleRaw(
+            "adminTestEmailProvider",
+            ({ request }) =>
+              run(
+                complete(
+                  "admin.email-provider-test",
+                  AdminEmailProviderTestResult,
+                  decodeBody(request, AdminEmailProviderTestInput).pipe(
+                    Effect.flatMap(({ input }) =>
+                      withSession((session) =>
+                        operations.testEmailProvider(input, session),
                       ),
                     ),
                   ),

@@ -1,13 +1,13 @@
 {
   "version": 1,
-  "count": 231,
+  "count": 232,
   "methodCounts": {
     "GET": 134,
-    "POST": 95,
+    "POST": 96,
     "PUT": 1,
     "WS": 1
   },
-  "sha256": "ff759ccaf3d117a2f232afb808109333150f93a8fe0fbb9cf083c3d894500853",
+  "sha256": "f6c246ad716868fd897b36200323641ed18b0a3aba3692eb3552118162a3e5ae",
   "routes": [
     {
       "method": "GET",
@@ -596,6 +596,10 @@
     {
       "method": "POST",
       "path": "/admin/email-campaigns/{id}/test"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/email-provider-test"
     },
     {
       "method": "POST",

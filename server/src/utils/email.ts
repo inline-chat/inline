@@ -1,5 +1,9 @@
-import { sendEmail as sendEmailViaSES } from "@in/server/libs/ses"
-import { sendEmail as sendEmailViaResend } from "@in/server/libs/resend"
+import {
+  sendEmail as sendEmailViaSES,
+} from "@in/server/libs/ses"
+import {
+  sendEmail as sendEmailViaResend,
+} from "@in/server/libs/resend"
 import { CodeEmail } from "@inline-chat/email-templates"
 import { SEND_EMAIL, isProd } from "@in/server/env"
 import { styleText } from "node:util"
@@ -8,6 +12,35 @@ import type { UserName } from "@in/server/modules/cache/userNames"
 import { render } from "@react-email/render"
 import * as React from "react"
 import { getServerConfig } from "@in/server/modules/serverConfig"
+import {
+  TRANSACTIONAL_EMAIL_FROM_ADDRESS,
+  transactionalEmailReplyTo,
+  type TransactionalEmailSender,
+} from "@in/server/modules/email/transactionalIdentity"
+
+export const sendTransactionalEmailWithProvider: TransactionalEmailSender = async (input) => {
+  if (input.provider === "ses") {
+    const result = await sendEmailViaSES({
+      to: input.to,
+      from: TRANSACTIONAL_EMAIL_FROM_ADDRESS,
+      content: input.content,
+    })
+    return { messageId: result.MessageId ?? null }
+  }
+
+  const result = await sendEmailViaResend({
+    from: `Inline <${TRANSACTIONAL_EMAIL_FROM_ADDRESS}>`,
+    to: input.to,
+    subject: input.content.subject,
+    text: input.content.text,
+    html: input.content.html,
+    replyTo: transactionalEmailReplyTo(input.provider),
+  })
+
+  if (result.error) throw result.error
+  return { messageId: result.data?.id ?? null }
+}
+
 type SendEmailInput = {
   to: string
   content: SendEmailContent
@@ -47,30 +80,11 @@ ${styleText("cyan", "[Preview email. Force sending via SEND_EMAIL=1]")}
   }
 
   const provider = await getServerConfig("email.default_provider")
-  if (provider.value === "ses") {
-    await sendEmailViaSES({
-      to: input.to,
-      from: "team@inline.chat",
-      content: {
-        subject: template.subject,
-        text: template.text,
-        html: template.html,
-      },
-    })
-  } else {
-    let result = await sendEmailViaResend({
-      from: "Inline <team@inline.chat>",
-      to: input.to,
-      subject: template.subject,
-      text: template.text,
-      html: template.html,
-      replyTo: "founders@inline.chat",
-    })
-
-    if (result.error) {
-      throw result.error
-    }
-  }
+  await sendTransactionalEmailWithProvider({
+    provider: provider.value,
+    to: input.to,
+    content: template,
+  })
 }
 
 // ----------------------------------------------------------------------------

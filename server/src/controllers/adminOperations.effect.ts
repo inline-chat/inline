@@ -9,6 +9,7 @@ import type {
   AdminCreateEmailCampaignInput,
   AdminEmailCampaignPreviewInput,
   AdminEmailProviderStatusQuery,
+  AdminEmailProviderTestInput,
   AdminEmailCampaignSendInput,
   AdminEmailCampaignTestInput,
   AdminInviteCountInput,
@@ -162,6 +163,10 @@ export interface AdminOperationsShape {
   ) => AdminOperation
   readonly emailProviderStatus: (
     input: BodyOf<typeof AdminEmailProviderStatusQuery>,
+    session: AdminSessionValue,
+  ) => AdminOperation
+  readonly testEmailProvider: (
+    input: BodyOf<typeof AdminEmailProviderTestInput>,
     session: AdminSessionValue,
   ) => AdminOperation
   readonly previewEmailCampaign: (
