@@ -1,4 +1,5 @@
 import AppKit
+import Auth
 import Combine
 import GRDB
 import InlineKit
@@ -15,11 +16,16 @@ struct AllChatsRouteView: View {
   @ObservedObject private var settings = AppSettings.shared
   @State private var rowLayout: AllChatsRowLayout = .twoLine
   @State private var listFilter: AllChatsListFilter = .all
+  @AppStorage private var pinnedExpanded: Bool
 
   private let filter: AllChatsFilter
 
   init(archived: Bool = false) {
     filter = archived ? .archived : .chats
+    _pinnedExpanded = AppStorage(
+      wrappedValue: true,
+      "macos.allChats.pinnedExpanded.\(Auth.shared.getCurrentUserId().map(String.init) ?? "signed-out")"
+    )
     _viewModel = EnvironmentStateObject { env in
       AllChatsViewModel(db: env.appDatabase)
     }
@@ -27,7 +33,7 @@ struct AllChatsRouteView: View {
 
   var body: some View {
     let title = pageTitle
-    let sections = viewModel.sections(
+    let presentation = viewModel.presentation(
       for: filter,
       listFilter: listFilter,
       spaceId: nav.selectedSpaceId
@@ -37,13 +43,13 @@ struct AllChatsRouteView: View {
       if viewModel.isLoading {
         ProgressView()
           .controlSize(.small)
-      } else if viewModel.errorText != nil || showsEmptyFilterState(sections: sections) {
+      } else if viewModel.errorText != nil || showsEmptyFilterState(presentation: presentation) {
         RoutePlaceholderView(
           title: viewModel.errorText ?? emptyTitle,
           systemImage: viewModel.errorText == nil ? emptySystemImage : "exclamationmark.triangle"
         )
       } else {
-        chatList(sections: sections)
+        chatList(presentation: presentation)
       }
     }
     .navigationTitle(title)
@@ -90,7 +96,7 @@ struct AllChatsRouteView: View {
     }
   }
 
-  private func chatList(sections: [AllChatsSection]) -> some View {
+  private func chatList(presentation: AllChatsPresentation) -> some View {
     List {
       if filter == .chats {
         NewThreadListRow(action: createNewThread)
@@ -99,24 +105,15 @@ struct AllChatsRouteView: View {
           .listRowBackground(Color.clear)
       }
 
-      ForEach(sections) { section in
+      if !presentation.pinnedItems.isEmpty {
+        AllChatsPinnedSection(isExpanded: $pinnedExpanded) {
+          chatRows(presentation.pinnedItems)
+        }
+      }
+
+      ForEach(presentation.sections) { section in
         Section {
-          ForEach(section.items) { item in
-            ChatListRow(
-              item: item,
-              selected: nav.currentRoute.selectedPeer == item.peerId,
-              showsSpaceName: nav.selectedSpaceId == nil,
-              layout: rowLayout,
-              unreadBadgeStyle: settings.unreadBadgeStyle,
-              switchToSpace: openSpace,
-              action: {
-                open(item)
-              }
-            )
-            .listRowInsets(EdgeInsets(top: 0, leading: 5, bottom: 0, trailing: 5))
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
-          }
+          chatRows(section.items)
         } header: {
           AllChatsSectionHeader(title: section.title)
         }
@@ -126,6 +123,25 @@ struct AllChatsRouteView: View {
     .listStyle(.inset)
     .scrollContentBackground(.hidden)
     .allChatsScrollEdgeEffect()
+  }
+
+  private func chatRows(_ items: [AllChatsItem]) -> some View {
+    ForEach(items) { item in
+      ChatListRow(
+        item: item,
+        selected: nav.currentRoute.selectedPeer == item.peerId,
+        showsSpaceName: nav.selectedSpaceId == nil,
+        layout: rowLayout,
+        unreadBadgeStyle: settings.unreadBadgeStyle,
+        switchToSpace: openSpace,
+        action: {
+          open(item)
+        }
+      )
+      .listRowInsets(EdgeInsets(top: 0, leading: 5, bottom: 0, trailing: 5))
+      .listRowSeparator(.hidden)
+      .listRowBackground(Color.clear)
+    }
   }
 
   private var pageTitle: String {
@@ -207,8 +223,8 @@ struct AllChatsRouteView: View {
     }
   }
 
-  private func showsEmptyFilterState(sections: [AllChatsSection]) -> Bool {
-    sections.isEmpty && (filter == .archived || listFilter == .unread)
+  private func showsEmptyFilterState(presentation: AllChatsPresentation) -> Bool {
+    presentation.isEmpty && (filter == .archived || listFilter == .unread)
   }
 
   private var emptyTitle: String {
@@ -246,6 +262,71 @@ struct AllChatsRouteView: View {
     let index = nav.historyIndex - 1
     guard nav.history.indices.contains(index) else { return nil }
     return nav.history[index].route
+  }
+}
+
+private struct AllChatsPinnedSection<Rows: View>: View {
+  @Binding var isExpanded: Bool
+  let rows: Rows
+
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  init(isExpanded: Binding<Bool>, @ViewBuilder rows: () -> Rows) {
+    _isExpanded = isExpanded
+    self.rows = rows()
+  }
+
+  var body: some View {
+    Section {
+      if isExpanded {
+        rows
+      }
+    } header: {
+      AllChatsPinnedSectionHeader(isExpanded: isExpanded, action: toggle)
+    }
+    .listSectionSeparator(.hidden)
+  }
+
+  private func toggle() {
+    withAnimation(reduceMotion ? nil : .smooth(duration: 0.18)) {
+      isExpanded.toggle()
+    }
+  }
+}
+
+private struct AllChatsPinnedSectionHeader: View {
+  let isExpanded: Bool
+  let action: () -> Void
+
+  var body: some View {
+    HStack(spacing: 6) {
+      Text("Pinned")
+        .frame(maxWidth: .infinity, alignment: .leading)
+      Button(action: action) {
+        Image(systemName: "chevron.down")
+          .font(.caption.weight(.semibold))
+          .rotationEffect(.degrees(isExpanded ? 0 : -90))
+          .frame(width: 20, height: 20)
+          .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("Pinned")
+      .accessibilityValue(accessibilityValue)
+      .accessibilityHint(accessibilityHint)
+    }
+    .font(.system(size: 12, weight: .semibold))
+    .foregroundStyle(.secondary)
+    .lineLimit(1)
+    .padding(.horizontal, 13)
+    .padding(.top, 2)
+  }
+
+  private var accessibilityValue: LocalizedStringKey {
+    isExpanded ? "Expanded" : "Collapsed"
+  }
+
+  private var accessibilityHint: LocalizedStringKey {
+    isExpanded ? "Collapses pinned chats" : "Expands pinned chats"
   }
 }
 
@@ -503,17 +584,27 @@ final class AllChatsViewModel: ObservableObject {
     snapshots.map(AllChatsItem.init)
   }
 
-  fileprivate func sections(
+  fileprivate func presentation(
     for filter: AllChatsFilter,
     listFilter: AllChatsListFilter,
     spaceId: Int64?
-  ) -> [AllChatsSection] {
-    Self.makeSections(items: items.filter { item in
+  ) -> AllChatsPresentation {
+    let filteredItems = items.filter { item in
       item.chatListHidden == false
         && filter.includes(item)
         && listFilter.includes(item)
         && (spaceId == nil || item.spaceId == spaceId)
-    })
+    }
+    let pinnedItems = filter == .chats
+      ? filteredItems.filter(\.pinned).sorted(by: Self.pinnedOrdered)
+      : []
+    let timelineItems = filter == .chats
+      ? filteredItems.filter { !$0.pinned }
+      : filteredItems
+    return AllChatsPresentation(
+      pinnedItems: pinnedItems,
+      sections: Self.makeSections(items: timelineItems)
+    )
   }
 
   fileprivate func spaceName(id: Int64?) -> String? {
@@ -526,13 +617,16 @@ final class AllChatsViewModel: ObservableObject {
     var sections: [AllChatsSection] = []
 
     for item in items {
-      let day = calendar.startOfDay(for: item.lastActivityDate)
-      if sections.last?.id == day {
+      let period = ChatListTimelinePeriod.classify(
+        item.lastActivityDate,
+        calendar: calendar
+      )
+      if sections.last?.id == period {
         sections[sections.count - 1].items.append(item)
       } else {
         sections.append(AllChatsSection(
-          id: day,
-          title: AllChatsDateFormatter.title(for: day, calendar: calendar),
+          id: period,
+          title: AllChatsDateFormatter.title(for: period, calendar: calendar),
           items: [item]
         ))
       }
@@ -540,10 +634,35 @@ final class AllChatsViewModel: ObservableObject {
 
     return sections
   }
+
+  private static func pinnedOrdered(_ lhs: AllChatsItem, _ rhs: AllChatsItem) -> Bool {
+    switch (lhs.pinnedOrder, rhs.pinnedOrder) {
+    case let (lhsOrder?, rhsOrder?) where lhsOrder != rhsOrder:
+      return lhsOrder < rhsOrder
+    case (_?, nil):
+      return true
+    case (nil, _?):
+      return false
+    default:
+      if lhs.lastActivityDate != rhs.lastActivityDate {
+        return lhs.lastActivityDate > rhs.lastActivityDate
+      }
+      return lhs.chatId > rhs.chatId
+    }
+  }
+}
+
+struct AllChatsPresentation: Equatable {
+  let pinnedItems: [AllChatsItem]
+  let sections: [AllChatsSection]
+
+  var isEmpty: Bool {
+    pinnedItems.isEmpty && sections.isEmpty
+  }
 }
 
 struct AllChatsSection: Identifiable, Equatable {
-  let id: Date
+  let id: ChatListTimelinePeriod
   let title: String
   var items: [AllChatsItem]
 }
@@ -561,6 +680,7 @@ struct AllChatsItem: Identifiable, Equatable {
   let prominentUnreadIndicator: Bool
   let isOpen: Bool
   let pinned: Bool
+  let pinnedOrder: String?
   let archived: Bool
   let chatListHidden: Bool
   let identity: ChatListIdentityDescriptor?
@@ -587,6 +707,7 @@ struct AllChatsItem: Identifiable, Equatable {
     prominentUnreadIndicator = snapshot.isProminent
     isOpen = snapshot.isOpen
     pinned = snapshot.isPinned
+    pinnedOrder = snapshot.pinnedOrder
     archived = snapshot.isArchived
     chatListHidden = snapshot.isChatListHidden
     identity = snapshot.identity
@@ -1326,32 +1447,33 @@ private enum AllChatsDateFormatter {
     return formatter
   }()
 
-  private static let currentYearFormatter: DateFormatter = {
-    let formatter = DateFormatter()
-    formatter.setLocalizedDateFormatFromTemplate("MMM d")
-    return formatter
-  }()
-
   private static let otherYearFormatter: DateFormatter = {
     let formatter = DateFormatter()
     formatter.setLocalizedDateFormatFromTemplate("MMM d, y")
     return formatter
   }()
 
-  static func title(for date: Date, calendar: Calendar) -> String {
-    if calendar.isDateInToday(date) {
-      return "Today"
+  static func title(for period: ChatListTimelinePeriod, calendar: Calendar) -> String {
+    switch period {
+    case let .day(day):
+      if calendar.isDateInToday(day) {
+        return String(localized: "Today")
+      }
+      if calendar.isDateInYesterday(day) {
+        return String(localized: "Yesterday")
+      }
+      return day.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
+    case let .month(year, month):
+      guard let date = calendar.date(
+        from: DateComponents(year: year, month: month, day: 1)
+      ) else { return "\(month)" }
+      return date.formatted(.dateTime.month(.wide))
+    case let .year(year):
+      guard let date = calendar.date(
+        from: DateComponents(year: year, month: 1, day: 1)
+      ) else { return "\(year)" }
+      return date.formatted(.dateTime.year())
     }
-
-    if calendar.isDateInYesterday(date) {
-      return "Yesterday"
-    }
-
-    if calendar.component(.year, from: date) == calendar.component(.year, from: Date()) {
-      return currentYearFormatter.string(from: date)
-    }
-
-    return otherYearFormatter.string(from: date)
   }
 
   static func rowTitle(for date: Date, calendar: Calendar) -> String? {
