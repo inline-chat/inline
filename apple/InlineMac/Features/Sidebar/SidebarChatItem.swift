@@ -77,6 +77,7 @@ struct SidebarChatItemView: Equatable, View {
   @State private var isDisclosureHovered = false
   @State private var isPressing = false
   @State private var pendingDestructiveAction: ChatDestructiveAction?
+  @State private var showRenameSheet = false
 
   private static let titleFont: Font = .system(size: 13, weight: .regular)
   private static let replyThreadTitleFont: Font = .system(size: 12, weight: .regular)
@@ -238,6 +239,11 @@ struct SidebarChatItemView: Equatable, View {
       isPressing: $isPressing,
       open: open
     ))
+    .simultaneousGesture(TapGesture(count: 2).onEnded {
+      guard item.parentChatId != nil else { return }
+      guard isCloseHovered == false, isDisclosureHovered == false else { return }
+      showRenameSheet = true
+    })
     .accessibilityElement(children: .combine)
     .accessibilityLabel(accessibilityTitle)
     .accessibilityValue(accessibilityUnreadValue)
@@ -257,6 +263,14 @@ struct SidebarChatItemView: Equatable, View {
         MainWindowOpenCoordinator.shared.openNewWindow(.chat(peer: peerId))
       } label: {
         Label("Open in New Window", systemImage: "macwindow")
+      }
+
+      if item.parentChatId != nil {
+        Button {
+          showRenameSheet = true
+        } label: {
+          Label("Rename Thread...", systemImage: "pencil")
+        }
       }
 
       Divider()
@@ -337,6 +351,9 @@ struct SidebarChatItemView: Equatable, View {
       }
     } message: { action in
       Text(action.confirmationMessage(chatTitle: item.title))
+    }
+    .sheet(isPresented: $showRenameSheet) {
+      RenameChatSheet(peer: peerId, initialTitle: item.title)
     }
   }
 
