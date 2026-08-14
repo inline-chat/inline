@@ -102,6 +102,28 @@ struct ThemeTests {
     #expect(abs(Theme.messageBubbleGradientOverlayAlpha(atWindowFraction: 0.5) - 0.14) < 0.001)
     #expect(abs(Theme.messageBubbleGradientOverlayAlpha(atWindowFraction: 1) - 0.02) < 0.001)
     #expect(abs(Theme.messageBubbleGradientOverlayAlpha(atWindowFraction: 2) - 0.02) < 0.001)
+
+    let darkOutgoing = Theme.messageBubbleGradientOverlayAlphas(variant: .dark, outgoing: true)
+    #expect(abs(darkOutgoing.top - 0.156) < 0.001)
+    #expect(abs(darkOutgoing.bottom - 0.012) < 0.001)
+    #expect(
+      abs(Theme.messageBubbleGradientOverlayAlpha(
+        atWindowFraction: 0.5,
+        variant: .dark,
+        outgoing: true
+      ) - 0.084) < 0.001
+    )
+
+    let darkIncoming = Theme.messageBubbleGradientOverlayAlphas(variant: .dark, outgoing: false)
+    #expect(abs(darkIncoming.top - 0.104) < 0.001)
+    #expect(abs(darkIncoming.bottom - 0.008) < 0.001)
+    #expect(
+      abs(Theme.messageBubbleGradientOverlayAlpha(
+        atWindowFraction: 0.5,
+        variant: .dark,
+        outgoing: false
+      ) - 0.056) < 0.001
+    )
   }
 
   @Test("all semantic emphasis roles resolve from one primary seed")
@@ -282,6 +304,51 @@ struct ThemeTests {
           userDefaults: defaults
         ) == ThemeColorValue(rgb: 0xECECEC)
       )
+      #expect(
+        Theme.resolvedSecondaryBubbleColor(
+          preset: .system,
+          variant: .dark,
+          userDefaults: defaults
+        ) == ThemeColorValue(rgb: 0x2E2E2E)
+      )
+
+      let systemLightPrimary = Theme.resolvedPalette(
+        preset: .system,
+        variant: .light,
+        userDefaults: defaults
+      ).primary
+      let systemLightLink = Theme.resolvedSecondaryBubbleLinkColor(
+        preset: .system,
+        variant: .light,
+        userDefaults: defaults
+      )
+      let systemLightBubbleTop = ThemeColorValue(
+        nsColor: ThemeColorValue(rgb: 0xECECEC).nsColor.blended(
+          withFraction: Theme.messageBubbleGradientTopOverlayAlpha,
+          of: .white
+        ) ?? ThemeColorValue(rgb: 0xECECEC).nsColor,
+        appearance: ThemeAppearanceVariant.light.nsAppearance
+      )
+      #expect(systemLightLink.hexRGB == "#0097E0")
+      #expect(
+        contrastRatio(systemLightBubbleTop, systemLightLink) >
+          contrastRatio(systemLightBubbleTop, systemLightPrimary)
+      )
+
+      #expect(
+        rgbDistance(
+          Theme.resolvedSecondaryBubbleLinkColor(
+            preset: .midnight,
+            variant: .light,
+            userDefaults: defaults
+          ),
+          Theme.resolvedPalette(
+            preset: .midnight,
+            variant: .light,
+            userDefaults: defaults
+          ).primary
+        ) < 0.001
+      )
 
       for preset in AppThemePreset.allCases where preset != .system {
         let page = Theme.resolvedPalette(
@@ -314,13 +381,35 @@ struct ThemeTests {
         )
         let darkAtWindowTop = ThemeColorValue(
           nsColor: darkIncoming.nsColor.blended(
-            withFraction: Theme.messageBubbleGradientTopOverlayAlpha,
+            withFraction: Theme.messageBubbleGradientOverlayAlphas(
+              variant: .dark,
+              outgoing: false
+            ).top,
             of: .white
           ) ?? darkIncoming.nsColor,
           appearance: ThemeAppearanceVariant.dark.nsAppearance
         )
-        #expect(darkIncoming == ThemeColorValue(rgb: 0x3A3A3A))
+        #expect(darkIncoming == ThemeColorValue(rgb: 0x2E2E2E))
         #expect(contrastRatio(darkAtWindowTop, .init(rgb: 0xFFFFFF)) >= 4.5)
+
+        let darkText = Theme.resolvedSecondaryBubbleTextColor(variant: .dark)
+        let darkLink = Theme.resolvedSecondaryBubbleLinkColor(
+          preset: preset,
+          variant: .dark,
+          userDefaults: defaults
+        )
+        #expect(darkText == ThemeColorValue(rgb: 0xFFFFFF))
+        #expect(contrastRatio(darkAtWindowTop, darkText) >= 4.5)
+        #expect(contrastRatio(darkAtWindowTop, darkLink) >= 4.0)
+        let primary = Theme.resolvedPalette(
+          preset: preset,
+          variant: .dark,
+          userDefaults: defaults
+        ).primary
+        #expect(relativeLuminance(darkLink) > relativeLuminance(primary))
+        if channelRange(primary) > 0.15 {
+          #expect(channelRange(darkLink) > 0.15)
+        }
       }
 
       let original = Theme.resolvedSecondaryBubbleColor(
@@ -566,6 +655,10 @@ struct ThemeTests {
     return 0.2126 * linear(color.red) +
       0.7152 * linear(color.green) +
       0.0722 * linear(color.blue)
+  }
+
+  private func channelRange(_ color: ThemeColorValue) -> Double {
+    max(color.red, color.green, color.blue) - min(color.red, color.green, color.blue)
   }
 
   private func withUserDefaults(_ body: (UserDefaults) throws -> Void) rethrows {

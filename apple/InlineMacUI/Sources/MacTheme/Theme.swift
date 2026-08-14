@@ -227,12 +227,50 @@ public enum Theme {
   public static let messageBubbleGradientTopOverlayAlpha: CGFloat = 0.26
   public static let messageBubbleGradientBottomOverlayAlpha: CGFloat = 0.02
 
+  public static func messageBubbleGradientOverlayAlphas(
+    variant: ThemeAppearanceVariant,
+    outgoing: Bool
+  ) -> (top: CGFloat, bottom: CGFloat) {
+    guard variant == .dark else {
+      return (messageBubbleGradientTopOverlayAlpha, messageBubbleGradientBottomOverlayAlpha)
+    }
+
+    // Dark bubbles need a quieter lighting range than Light. Incoming neutral
+    // surfaces take less white than outgoing colored surfaces so they do not
+    // swing from washed out at the top to nearly black at the bottom.
+    let strength: CGFloat = outgoing ? 0.6 : 0.4
+    return (
+      messageBubbleGradientTopOverlayAlpha * strength,
+      messageBubbleGradientBottomOverlayAlpha * strength
+    )
+  }
+
+  public static func messageBubbleGradientOverlayAlphas(
+    appearance: NSAppearance,
+    outgoing: Bool
+  ) -> (top: CGFloat, bottom: CGFloat) {
+    messageBubbleGradientOverlayAlphas(
+      variant: ThemeAppearanceVariant(appearance: appearance),
+      outgoing: outgoing
+    )
+  }
+
   public static func messageBubbleGradientOverlayAlpha(
     atWindowFraction fraction: CGFloat
   ) -> CGFloat {
     let progress = min(max(fraction, 0), 1)
     return messageBubbleGradientTopOverlayAlpha
       + (messageBubbleGradientBottomOverlayAlpha - messageBubbleGradientTopOverlayAlpha) * progress
+  }
+
+  public static func messageBubbleGradientOverlayAlpha(
+    atWindowFraction fraction: CGFloat,
+    variant: ThemeAppearanceVariant,
+    outgoing: Bool
+  ) -> CGFloat {
+    let progress = min(max(fraction, 0), 1)
+    let alphas = messageBubbleGradientOverlayAlphas(variant: variant, outgoing: outgoing)
+    return alphas.top + (alphas.bottom - alphas.top) * progress
   }
 
   public static var messageBubbleSecondaryBgColor: NSColor {
@@ -252,28 +290,90 @@ public enum Theme {
       if variant == .light {
         return .init(rgb: 0xECECEC)
       }
-
-      let palette = resolvedPalette(
-        preset: preset,
-        variant: variant,
-        userDefaults: userDefaults
-      )
-      let color = solidBubbleColor(
-        background: palette.background.nsColor,
-        overlay: .white,
-        alpha: 0.1,
-        appearance: variant.nsAppearance
-      )
-      return ThemeColorValue(nsColor: color, appearance: variant.nsAppearance)
     }
 
     // Incoming bubbles are a neutral supporting surface, not a third authored
-    // theme color. Light themes share a clean gray; dark themes use OpenCode
-    // V2's neutral grey-800 instead of inheriting muddy canvas hues.
+    // theme color. Styled Light themes share a clean gray; every dark theme uses
+    // OpenCode V2's neutral grey-900. Combined with the quieter Dark incoming
+    // lighting, its midpoint stays close to the earlier lower-window tone.
     if variant == .light {
       return .init(rgb: 0xEAEAEA)
     }
-    return .init(rgb: 0x3A3A3A)
+    return .init(rgb: 0x2E2E2E)
+  }
+
+  public static var messageBubbleSecondaryTextColor: NSColor {
+    .init(name: nil) { appearance in
+      let variant = ThemeAppearanceVariant(appearance: appearance)
+      return resolvedSecondaryBubbleTextColor(variant: variant).nsColor
+    }
+  }
+
+  public static func resolvedSecondaryBubbleTextColor(
+    variant: ThemeAppearanceVariant
+  ) -> ThemeColorValue {
+    if variant == .dark {
+      return .init(rgb: 0xFFFFFF)
+    }
+    return ThemeColorValue(nsColor: .labelColor, appearance: variant.nsAppearance)
+  }
+
+  public static var messageBubbleSecondaryLinkColor: NSColor {
+    .init(name: nil) { appearance in
+      let preset = ThemePreference.selectedPreset()
+      let variant = ThemeAppearanceVariant(appearance: appearance)
+      return resolvedSecondaryBubbleLinkColor(preset: preset, variant: variant).nsColor
+    }
+  }
+
+  public static func resolvedSecondaryBubbleLinkColor(
+    preset: AppThemePreset,
+    variant: ThemeAppearanceVariant,
+    userDefaults: UserDefaults = .standard
+  ) -> ThemeColorValue {
+    let primary = resolvedPalette(
+      preset: preset,
+      variant: variant,
+      userDefaults: userDefaults
+    ).primary
+
+    let resolved = primary.nsColor.usingColorSpace(.sRGB) ?? primary.nsColor
+    var hue: CGFloat = 0
+    var saturation: CGFloat = 0
+    var brightness: CGFloat = 0
+    var alpha: CGFloat = 0
+    resolved.getHue(
+      &hue,
+      saturation: &saturation,
+      brightness: &brightness,
+      alpha: &alpha
+    )
+
+    let color: NSColor
+    switch variant {
+    case .light:
+      // Keep authored accents that already have enough weight. Only cap very
+      // bright colors, such as System cyan, to add a small amount of contrast.
+      color = NSColor(
+        colorSpace: .sRGB,
+        hue: hue,
+        saturation: saturation,
+        brightness: min(brightness, 0.88),
+        alpha: alpha
+      )
+    case .dark:
+      // Preserve the primary hue and a visible amount of its saturation while
+      // raising brightness. This produces accent-colored ink, not white ink
+      // with a trace of the theme color.
+      color = NSColor(
+        colorSpace: .sRGB,
+        hue: hue,
+        saturation: saturation * 0.48,
+        brightness: max(0.9, min(1, brightness + 0.15)),
+        alpha: alpha
+      )
+    }
+    return ThemeColorValue(nsColor: color, appearance: variant.nsAppearance)
   }
 
   /// used for bubbles diff to edge
@@ -324,17 +424,6 @@ public enum Theme {
     appearance.name == .darkAqua ? NSColor.white
       .withAlphaComponent(0.1) : NSColor.black
       .withAlphaComponent(0.09)
-  }
-
-  private static func solidBubbleColor(
-    background: NSColor,
-    overlay: NSColor,
-    alpha: CGFloat,
-    appearance: NSAppearance
-  ) -> NSColor {
-    let bg = background.resolvedColor(with: appearance).withAlphaComponent(1)
-    let fg = overlay.resolvedColor(with: appearance).withAlphaComponent(1)
-    return bg.blended(withFraction: alpha, of: fg)?.withAlphaComponent(1) ?? bg
   }
 
   private static func semanticColor(role: ThemeColorRole) -> NSColor {

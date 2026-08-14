@@ -250,7 +250,7 @@ class MessageViewAppKit: NSView {
   }
 
   static func textColor(usesOutgoingBubbleStyle: Bool) -> NSColor {
-    usesOutgoingBubbleStyle ? .white : .labelColor
+    usesOutgoingBubbleStyle ? .white : Theme.messageBubbleSecondaryTextColor
   }
 
   static func textColor(outgoing: Bool) -> NSColor {
@@ -258,7 +258,7 @@ class MessageViewAppKit: NSView {
   }
 
   static func linkColor(usesOutgoingBubbleStyle: Bool) -> NSColor {
-    usesOutgoingBubbleStyle ? .white : Theme.accentColor
+    usesOutgoingBubbleStyle ? .white : Theme.messageBubbleSecondaryLinkColor
   }
 
   static func linkColor(outgoing: Bool) -> NSColor {
@@ -351,22 +351,31 @@ class MessageViewAppKit: NSView {
     view.translatesAutoresizingMaskIntoConstraints = false
     view.cornerRadius = Theme.messageBubbleCornerRadius
     view.backgroundColor = bubbleBackgroundColor
-    view.configureContinuousGradient(
-      topAlpha: Theme.messageBubbleGradientTopOverlayAlpha,
-      bottomAlpha: Theme.messageBubbleGradientBottomOverlayAlpha
-    )
+    let alphas = bubbleGradientOverlayAlphas
+    view.configureContinuousGradient(topAlpha: alphas.top, bottomAlpha: alphas.bottom)
     return view
   }()
 
   private lazy var bubbleTailView: MessageBubbleTailView = {
     let view = MessageBubbleTailView()
     view.translatesAutoresizingMaskIntoConstraints = false
-    view.configureContinuousGradient(
-      topAlpha: Theme.messageBubbleGradientTopOverlayAlpha,
-      bottomAlpha: Theme.messageBubbleGradientBottomOverlayAlpha
-    )
+    let alphas = bubbleGradientOverlayAlphas
+    view.configureContinuousGradient(topAlpha: alphas.top, bottomAlpha: alphas.bottom)
     return view
   }()
+
+  private var bubbleGradientOverlayAlphas: (top: CGFloat, bottom: CGFloat) {
+    Theme.messageBubbleGradientOverlayAlphas(
+      appearance: effectiveAppearance,
+      outgoing: outgoing
+    )
+  }
+
+  private func configureContinuousBubbleGradientLighting() {
+    let alphas = bubbleGradientOverlayAlphas
+    bubbleView.configureContinuousGradient(topAlpha: alphas.top, bottomAlpha: alphas.bottom)
+    bubbleTailView.configureContinuousGradient(topAlpha: alphas.top, bottomAlpha: alphas.bottom)
+  }
 
   private var shineEffectView: ShineEffectView?
 
@@ -4224,6 +4233,7 @@ extension MessageViewAppKit: AppThemeRefreshable {
     swipeAnimationView = nil
     bubbleView.backgroundColor = bubbleBackgroundColor
     syncBubbleTail()
+    configureContinuousBubbleGradientLighting()
     syncContinuousBubbleGradient()
     setupMessageText()
   }
