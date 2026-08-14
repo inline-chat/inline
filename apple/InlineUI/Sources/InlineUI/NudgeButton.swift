@@ -160,6 +160,7 @@ private struct IOSNudgeToolbarButton: View {
         suppressNextTap: $suppressNextTap,
         isConfirmationPresented: $isUrgentConfirmationPresented,
         isDisabled: isSending,
+        holdDuration: NudgeButtonState.iOSHoldDuration,
         onCompleted: onHoldCompleted
       )
     )
@@ -217,6 +218,7 @@ private struct MacNudgeToolbarButton: View {
         suppressNextTap: $suppressNextTap,
         isConfirmationPresented: $isUrgentConfirmationPresented,
         isDisabled: isSending,
+        holdDuration: NudgeButtonState.macOSHoldDuration,
         onCompleted: onHoldCompleted
       )
     )
@@ -249,6 +251,7 @@ private struct NudgeHoldGestureModifier: ViewModifier {
   @Binding var isConfirmationPresented: Bool
 
   let isDisabled: Bool
+  let holdDuration: TimeInterval
   let onCompleted: () -> Void
 
   @State private var holdTask: Task<Void, Never>?
@@ -290,13 +293,13 @@ private struct NudgeHoldGestureModifier: ViewModifier {
     isPressing = true
     completedCurrentHold = false
     cancelledCurrentHold = false
-    withAnimation(.linear(duration: NudgeButtonState.holdDuration)) {
+    withAnimation(.linear(duration: holdDuration)) {
       progress = 1
     }
 
     holdTask?.cancel()
     holdTask = Task { @MainActor in
-      try? await Task.sleep(for: .seconds(NudgeButtonState.holdDuration))
+      try? await Task.sleep(for: .seconds(holdDuration))
       guard !Task.isCancelled, isPressing else { return }
       completeHold()
     }
@@ -317,7 +320,9 @@ private struct NudgeHoldGestureModifier: ViewModifier {
     holdTask = nil
     isPressing = false
     cancelledCurrentHold = false
-    suppressNextTap = NudgeButtonState.shouldSuppressTap(completed: completedCurrentHold)
+    let releaseState = NudgeButtonState.releaseState(completed: completedCurrentHold)
+    completedCurrentHold = releaseState.completedCurrentHold
+    suppressNextTap = releaseState.suppressNextTap
     resetProgress()
   }
 
@@ -403,11 +408,12 @@ enum NudgeButtonState {
   static let nudgeIconName = "hand.wave"
   static let nudgeText = "👋"
   static let urgentNudgeText = "🚨"
-  static let holdDuration: TimeInterval = 1.2
+  static let iOSHoldDuration: TimeInterval = 0.5
+  static let macOSHoldDuration: TimeInterval = 1.2
   static let maximumHoldMovement: CGFloat = 44
 
-  static func shouldSuppressTap(completed: Bool) -> Bool {
-    completed
+  static func releaseState(completed: Bool) -> (suppressNextTap: Bool, completedCurrentHold: Bool) {
+    (suppressNextTap: completed, completedCurrentHold: false)
   }
 }
 

@@ -116,6 +116,10 @@ struct ChatView: View {
           ToolbarItem(placement: .primaryAction) {
             TranslationButton(peer: peerId, activeColor: ThemeManager.shared.accentColor)
           }
+
+          if #available(iOS 26.0, *), peerId.isPrivate {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+          }
         }
 
         if peerId.isPrivate {
@@ -124,6 +128,10 @@ struct ChatView: View {
               peer: peerId,
               chatId: fullChatViewModel.chat?.id
             )
+          }
+
+          if #available(iOS 26.0, *) {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
           }
         }
 
