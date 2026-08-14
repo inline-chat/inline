@@ -9,6 +9,7 @@ struct ChatRouteView: View {
 
   @Environment(\.appDatabase) private var db
   @Environment(\.dependencies) private var dependencies
+  @Environment(\.mainWindowID) private var mainWindowID
   @Environment(\.nav) private var nav
 
   @ObservedObject private var botPresenceController = BotPresenceController.shared
@@ -123,6 +124,10 @@ struct ChatRouteView: View {
           botChatSettingsCoordinator = BotChatSettingsCoordinator(peer: peer)
           nudgePopoverPresented = false
         }
+        syncChatMenuContext(dependencies: dependencies)
+      }
+      .onChange(of: toolbarDialog) { _, _ in
+        syncChatMenuContext(dependencies: dependencies)
       }
       .onEscapeKey(
         "chat_route_popover_escape_\(peer.toString())",
@@ -143,6 +148,9 @@ struct ChatRouteView: View {
       .onDisappear {
         BotPresenceController.shared.clearContext(peer: peer)
         botChatSettingsCoordinator.cancel()
+        if let mainWindowID {
+          MainWindowOpenCoordinator.shared.unregisterChatMenuContext(id: mainWindowID, peer: peer)
+        }
       }
       .onReceive(
         NotificationCenter.default
@@ -315,6 +323,89 @@ struct ChatRouteView: View {
       RoutePlaceholderView(
         title: "Missing App Dependencies",
         systemImage: "exclamationmark.triangle"
+      )
+    }
+  }
+
+  private func syncChatMenuContext(dependencies: AppDependencies) {
+    guard let mainWindowID else { return }
+    let dialog = toolbarDialog
+    let isUnread = (dialog?.unreadCount ?? 0) > 0 || dialog?.unreadMark == true
+
+    MainWindowOpenCoordinator.shared.registerChatMenuContext(
+      id: mainWindowID,
+      context: ChatMenuContext(
+        peer: peer,
+        isUnread: isUnread,
+        isFollowing: dialog?.isFollowingThread == true,
+        isOpenInSidebar: dialog?.open == true && dialog?.archived != true && dialog?.chatListHidden != true,
+        isPinned: dialog?.pinned == true,
+        isArchived: dialog?.archived == true,
+        canRename: peer.isThread,
+        perform: { command in
+          performChatMenuCommand(command, dialog: dialog, dependencies: dependencies)
+        }
+      )
+    )
+  }
+
+  private func performChatMenuCommand(
+    _ command: ChatMenuCommand,
+    dialog: Dialog?,
+    dependencies: AppDependencies
+  ) {
+    switch command {
+    case .showInfo:
+      dependencies.openChatInfo(peer: peer)
+    case .copyLink:
+      ChatMenuActions.copyLink(for: peer)
+    case .openNewTab:
+      MainWindowOpenCoordinator.shared.openTab(.chat(peer: peer))
+    case .openNewWindow:
+      MainWindowOpenCoordinator.shared.openNewWindow(.chat(peer: peer))
+    case .rename:
+      if MainWindowOpenCoordinator.shared.renameThread() == false {
+        NotificationCenter.default.post(name: .renameThread, object: nil)
+      }
+    case .toggleRead:
+      Task(priority: .userInitiated) {
+        do {
+          let isUnread = (dialog?.unreadCount ?? 0) > 0 || dialog?.unreadMark == true
+          if isUnread {
+            guard let chatId = dialog?.chatId else {
+              await MainActor.run { ToastCenter.shared.showError("Failed to update read status") }
+              return
+            }
+            UnreadManager.shared.readAll(peer, chatId: chatId)
+          } else {
+            try await dependencies.realtimeV2.send(.markAsUnread(peerId: peer))
+          }
+        } catch {
+          await MainActor.run { ToastCenter.shared.showError("Failed to update read status") }
+        }
+      }
+    case .toggleFollow:
+      ChatToolbarFollowButton.toggleFollowMode(
+        peer: peer,
+        isFollowing: dialog?.isFollowingThread == true
+      )
+    case .openInSidebar:
+      ChatMenuActions.openInSidebar(
+        peer: peer,
+        isHidden: dialog?.chatListHidden == true,
+        dependencies: dependencies
+      )
+    case .togglePin:
+      ChatMenuActions.togglePin(
+        peer: peer,
+        isPinned: dialog?.pinned == true,
+        spaceID: dialog?.spaceId
+      )
+    case .toggleArchive:
+      ChatMenuActions.toggleArchive(
+        peer: peer,
+        isArchived: dialog?.archived == true,
+        spaceID: dialog?.spaceId
       )
     }
   }

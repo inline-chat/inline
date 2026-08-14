@@ -36,12 +36,10 @@ struct ChatToolbarMenuButton: View {
         openChatInfo()
       }
 
-      if !peer.isThread {
-        Divider()
+      Divider()
 
-        Button("Copy Link", systemImage: "link") {
-          copyChatLink()
-        }
+      Button("Copy Link", systemImage: "link") {
+        ChatMenuActions.copyLink(for: peer)
       }
 
       Divider()
@@ -89,26 +87,22 @@ struct ChatToolbarMenuButton: View {
         model.state.isPinned ? "Unpin" : "Pin",
         systemImage: model.state.isPinned ? "pin.slash.fill" : "pin.fill"
       ) {
-        Task(priority: .userInitiated) {
-          try await DataManager.shared.updateDialog(
-            peerId: peer,
-            pinned: !model.state.isPinned,
-            spaceId: dependencies.activeSpaceId
-          )
-        }
+        ChatMenuActions.togglePin(
+          peer: peer,
+          isPinned: model.state.isPinned,
+          spaceID: dependencies.activeSpaceId
+        )
       }
 
       Button(
         model.state.isArchived ? "Unarchive" : "Archive",
         systemImage: "archivebox.fill"
       ) {
-        Task(priority: .userInitiated) {
-          try await DataManager.shared.updateDialog(
-            peerId: peer,
-            archived: !model.state.isArchived,
-            spaceId: dependencies.activeSpaceId
-          )
-        }
+        ChatMenuActions.toggleArchive(
+          peer: peer,
+          isArchived: model.state.isArchived,
+          spaceID: dependencies.activeSpaceId
+        )
       }
 
       if model.state.canClearHistory || model.state.destructiveAction != nil {
@@ -213,27 +207,6 @@ struct ChatToolbarMenuButton: View {
     dependencies.openChatInfo(peer: peer)
   }
 
-  private func copyChatLink() {
-    guard let url = chatLinkURL else {
-      ToastCenter.shared.showError("Failed to copy link")
-      return
-    }
-
-    let pasteboard = NSPasteboard.general
-    pasteboard.clearContents()
-    pasteboard.setString(url.absoluteString, forType: .string)
-    ToastCenter.shared.showSuccess("Copied link")
-  }
-
-  private var chatLinkURL: URL? {
-    switch peer {
-    case let .user(id):
-      InlineDeepLink.user(id: id).url
-    case let .thread(id):
-      InlineDeepLink.chat(id: id).url
-    }
-  }
-
   @MainActor
   private func prepareTranscript() {
     guard transcriptTask == nil else { return }
@@ -315,18 +288,11 @@ struct ChatToolbarMenuButton: View {
   }
 
   private func openInSidebar() {
-    Task(priority: .userInitiated) {
-      do {
-        if peer.isThread, model.state.isChatListHidden {
-          _ = try await realtimeV2.send(.showInChatList(peerId: peer))
-        }
-        _ = try await realtimeV2.send(.updateDialogOpen(peerId: peer, open: true))
-      } catch {
-        await MainActor.run {
-          ToastCenter.shared.showError("Failed to open chat in sidebar")
-        }
-      }
-    }
+    ChatMenuActions.openInSidebar(
+      peer: peer,
+      isHidden: model.state.isChatListHidden,
+      dependencies: dependencies
+    )
   }
 
   @MainActor

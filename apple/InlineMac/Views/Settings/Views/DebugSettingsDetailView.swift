@@ -4,6 +4,7 @@ import MacDevtools
 import SwiftUI
 
 struct DebugSettingsDetailView: View {
+  @Environment(\.dependencies) private var dependencies
   @State private var showSyncStats = false
   @State private var showPermissions = false
   @State private var confirmDeleteDatabase = false
@@ -60,6 +61,18 @@ struct DebugSettingsDetailView: View {
 #if DEBUG || DEBUG_BUILD
         LabeledContent {
           Button("Open") {
+            dependencies?.viewModel.openOnboardingForDebug()
+          }
+          .disabled(dependencies?.auth.currentUserId == nil)
+        } label: {
+          SettingsRowLabel(
+            "Onboarding",
+            description: "Open the onboarding flow for this development build."
+          )
+        }
+
+        LabeledContent {
+          Button("Open") {
             DeveloperPlaygroundWindowController.show()
           }
         } label: {
@@ -71,6 +84,43 @@ struct DebugSettingsDetailView: View {
 #endif
       } header: {
         SettingsSectionHeader("Tools")
+      }
+
+      Section {
+        LabeledContent {
+          Button("Clear…", role: .destructive) {
+            AppRecoveryActions.clearCache(confirming: true)
+          }
+        } label: {
+          SettingsRowLabel(
+            "App Cache",
+            description: "Clear local app data and sync state, then reload the account from the server."
+          )
+        }
+
+        LabeledContent {
+          Button("Clear") {
+            AppRecoveryActions.clearMediaCache()
+          }
+        } label: {
+          SettingsRowLabel(
+            "Media Cache",
+            description: "Remove downloaded images, videos, and files without resetting app data."
+          )
+        }
+
+        LabeledContent {
+          Button("Reset") {
+            AppRecoveryActions.resetDismissedPopovers()
+          }
+        } label: {
+          SettingsRowLabel(
+            "Dismissed Popovers",
+            description: "Show informational popovers and notices that were previously dismissed."
+          )
+        }
+      } header: {
+        SettingsSectionHeader("Recovery")
       }
 #if DEBUG || DEBUG_BUILD
       Section {

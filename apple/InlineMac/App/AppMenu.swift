@@ -3,8 +3,8 @@ import Auth
 import InlineCLIInstaller
 import InlineKit
 import MacDevtools
+import MacTheme
 import Observation
-import Translation
 
 extension Notification.Name {
   static let toggleSidebar = Notification.Name("toggleSidebar")
@@ -23,6 +23,9 @@ final class AppMenu: NSObject {
   private weak var cliInstallerMenuItem: NSMenuItem?
   private var cliInstallerMenuItemEnabled = true
   private weak var tabBarMenuItem: NSMenuItem?
+  private weak var closeWindowMenuItem: NSMenuItem?
+  private weak var spaceMenu: NSMenu?
+  private var chatMenuItems: [ChatMenuCommand: NSMenuItem] = [:]
 #if SPARKLE
   private weak var updateMenuItem: NSMenuItem?
   private var updateMenuItemEnabled = true
@@ -37,15 +40,17 @@ final class AppMenu: NSObject {
 
   @MainActor func setupMainMenu(dependencies: AppDependencies) {
     self.dependencies = dependencies
+    mainMenu.removeAllItems()
+    chatMenuItems.removeAll()
     NSApp.mainMenu = mainMenu
 
     setupApplicationMenu()
     setupFileMenu()
     setupEditMenu()
+    setupFormatMenu()
     setupViewMenu()
-#if DEBUG || DEBUG_BUILD
-    setupDebugMenu()
-#endif
+    setupChatMenu()
+    setupSpaceMenu()
     setupWindowMenu()
     setupHelpMenu()
   }
@@ -79,6 +84,19 @@ final class AppMenu: NSObject {
     updateMenuItem = checkForUpdatesMenuItem
     bindUpdateMenuItemState()
 #endif
+
+    appMenu.addItem(NSMenuItem.separator())
+
+    let settingsMenuItem = NSMenuItem(
+      title: "Settings…",
+      action: #selector(showPreferences),
+      keyEquivalent: ","
+    )
+    settingsMenuItem.target = self
+    settingsMenuItem.image = NSImage(systemSymbolName: "gear", accessibilityDescription: nil)
+    appMenu.addItem(settingsMenuItem)
+
+    appMenu.addItem(NSMenuItem.separator())
 
     let installCLIMenuItem = NSMenuItem(
       title: "Install Inline CLI…",
@@ -114,19 +132,6 @@ final class AppMenu: NSObject {
     appMenu.addItem(servicesMenuItem)
     NSApp.servicesMenu = servicesMenu
 
-    appMenu.addItem(NSMenuItem.separator())
-
-    let settingsMenuItem = NSMenuItem(
-      title: "Settings…",
-      action: #selector(showPreferences),
-      keyEquivalent: ","
-    )
-    settingsMenuItem.target = self
-    settingsMenuItem.image = NSImage(systemSymbolName: "gear", accessibilityDescription: nil)
-    appMenu.addItem(settingsMenuItem)
-
-    appMenu.addItem(NSMenuItem.separator())
-
     let logoutMenuItem = NSMenuItem(
       title: "Log Out…",
       action: #selector(logOut(_:)),
@@ -138,31 +143,6 @@ final class AppMenu: NSObject {
       accessibilityDescription: nil
     )
     appMenu.addItem(logoutMenuItem)
-
-    let clearCacheMenuItem = NSMenuItem(
-      title: "Clear Cache…",
-      action: #selector(clearCache(_:)),
-      keyEquivalent: ""
-    )
-    clearCacheMenuItem.target = self
-    clearCacheMenuItem.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
-    appMenu.addItem(clearCacheMenuItem)
-
-    let clearMediaCacheMenuItem = NSMenuItem(
-      title: "Clear Media Cache…",
-      action: #selector(clearMediaCache(_:)),
-      keyEquivalent: ""
-    )
-    clearMediaCacheMenuItem.target = self
-    appMenu.addItem(clearMediaCacheMenuItem)
-
-    let resetDismissedPopoversMenuItem = NSMenuItem(
-      title: "Reset Dismissed Popovers…",
-      action: #selector(resetDismissedPopovers(_:)),
-      keyEquivalent: ""
-    )
-    resetDismissedPopoversMenuItem.target = self
-    appMenu.addItem(resetDismissedPopoversMenuItem)
 
     appMenu.addItem(NSMenuItem.separator())
 
@@ -231,11 +211,13 @@ final class AppMenu: NSObject {
 
     fileMenu.addItem(NSMenuItem.separator())
 
-    fileMenu.addItem(
-      withTitle: "Close Window",
+    let closeItem = NSMenuItem(
+      title: "Close Window",
       action: #selector(NSWindow.performClose(_:)),
       keyEquivalent: "w"
     )
+    fileMenu.addItem(closeItem)
+    closeWindowMenuItem = closeItem
   }
 
   private func setupEditMenu() {
@@ -274,6 +256,13 @@ final class AppMenu: NSObject {
       action: #selector(NSText.paste(_:)),
       keyEquivalent: "v"
     )
+    let pasteAndMatchStyleItem = NSMenuItem(
+      title: "Paste and Match Style",
+      action: #selector(NSTextView.pasteAsPlainText(_:)),
+      keyEquivalent: "v"
+    )
+    pasteAndMatchStyleItem.keyEquivalentModifierMask = [.command, .option, .shift]
+    editMenu.addItem(pasteAndMatchStyleItem)
     editMenu.addItem(
       withTitle: "Delete",
       action: #selector(NSText.delete(_:)),
@@ -284,12 +273,6 @@ final class AppMenu: NSObject {
       action: #selector(NSText.selectAll(_:)),
       keyEquivalent: "a"
     )
-    editMenu.addItem(
-      withTitle: "Bold",
-      action: #selector(ComposeNSTextView.toggleBold(_:)),
-      keyEquivalent: "b"
-    )
-
     editMenu.addItem(NSMenuItem.separator())
 
     // Find
@@ -479,6 +462,40 @@ final class AppMenu: NSObject {
     editMenu.addItem(emojiItem)
   }
 
+  private func setupFormatMenu() {
+    let formatMenu = NSMenu(title: "Format")
+    let formatMenuItem = NSMenuItem(title: "Format", action: nil, keyEquivalent: "")
+    formatMenuItem.identifier = NSUserInterfaceItemIdentifier("menu.format")
+    formatMenuItem.submenu = formatMenu
+    mainMenu.addItem(formatMenuItem)
+
+    formatMenu.addItem(
+      withTitle: "Bold",
+      action: #selector(ComposeNSTextView.toggleBold(_:)),
+      keyEquivalent: "b"
+    )
+    formatMenu.addItem(
+      withTitle: "Italic",
+      action: #selector(ComposeNSTextView.toggleItalic(_:)),
+      keyEquivalent: "i"
+    )
+
+    let inlineCodeItem = NSMenuItem(
+      title: "Inline Code",
+      action: #selector(ComposeNSTextView.toggleInlineCode(_:)),
+      keyEquivalent: "c"
+    )
+    inlineCodeItem.keyEquivalentModifierMask = [.command, .shift]
+    formatMenu.addItem(inlineCodeItem)
+
+    formatMenu.addItem(NSMenuItem.separator())
+    formatMenu.addItem(
+      withTitle: "Add Link…",
+      action: #selector(ComposeNSTextView.makeLink(_:)),
+      keyEquivalent: ""
+    )
+  }
+
   private func setupViewMenu() {
     let viewMenu = NSMenu(title: "View")
     let viewMenuItem = NSMenuItem(title: "View", action: nil, keyEquivalent: "")
@@ -540,6 +557,10 @@ final class AppMenu: NSObject {
 
     viewMenu.addItem(NSMenuItem.separator())
 
+    setupViewPreferenceMenus(in: viewMenu)
+
+    viewMenu.addItem(NSMenuItem.separator())
+
     let backItem = NSMenuItem(
       title: "Back",
       action: #selector(goBack(_:)),
@@ -560,28 +581,179 @@ final class AppMenu: NSObject {
     forwardItem.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
     viewMenu.addItem(forwardItem)
 
-    viewMenu.addItem(NSMenuItem.separator())
+  }
 
-    // Navigation between chats in sidebar
-    let prevChatItem = NSMenuItem(
+  private func setupViewPreferenceMenus(in menu: NSMenu) {
+    menu.addItem(preferenceSubmenu(
+      title: "Appearance",
+      values: AppAppearance.pickerOrder,
+      action: #selector(selectAppearance(_:)),
+      itemTitle: \AppAppearance.title
+    ))
+    menu.addItem(preferenceSubmenu(
+      title: "Theme",
+      values: AppThemePreset.allCases,
+      action: #selector(selectTheme(_:)),
+      itemTitle: \AppThemePreset.title
+    ))
+    menu.addItem(preferenceSubmenu(
+      title: "Message Style",
+      values: MessageRenderStyle.allCases,
+      action: #selector(selectMessageStyle(_:)),
+      itemTitle: \MessageRenderStyle.title
+    ))
+    menu.addItem(togglePreferenceItem(
+      title: "Compact Toolbar",
+      action: #selector(toggleCompactToolbar(_:))
+    ))
+    menu.addItem(togglePreferenceItem(
+      title: "Sidebar Tint",
+      action: #selector(toggleSidebarTint(_:))
+    ))
+
+    menu.addItem(NSMenuItem.separator())
+
+    menu.addItem(preferenceSubmenu(
+      title: "Sidebar View",
+      values: SidebarMode.allCases,
+      action: #selector(selectSidebarMode(_:)),
+      itemTitle: \SidebarMode.title
+    ))
+    menu.addItem(preferenceSubmenu(
+      title: "Sidebar Item Size",
+      values: SidebarItemSize.allCases,
+      action: #selector(selectSidebarItemSize(_:)),
+      itemTitle: { String(localized: $0.title) }
+    ))
+    menu.addItem(preferenceSubmenu(
+      title: "Sidebar Sort",
+      values: SidebarSortMode.allCases,
+      action: #selector(selectSidebarSort(_:)),
+      itemTitle: \SidebarSortMode.title
+    ))
+    menu.addItem(sidebarCleanupSubmenu())
+    menu.addItem(togglePreferenceItem(
+      title: "Open Reply Threads in Side Pane",
+      action: #selector(toggleReplyThreadSidePane(_:))
+    ))
+    menu.addItem(togglePreferenceItem(
+      title: "Show Dock Badge",
+      action: #selector(toggleDockBadge(_:))
+    ))
+  }
+
+  private func preferenceSubmenu<Value>(
+    title: String,
+    values: [Value],
+    action: Selector,
+    itemTitle: (Value) -> String
+  ) -> NSMenuItem {
+    let submenu = NSMenu(title: title)
+    for (index, value) in values.enumerated() {
+      let item = NSMenuItem(title: itemTitle(value), action: action, keyEquivalent: "")
+      item.target = self
+      item.tag = index
+      submenu.addItem(item)
+    }
+    let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+    item.submenu = submenu
+    return item
+  }
+
+  private func togglePreferenceItem(title: String, action: Selector) -> NSMenuItem {
+    let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+    item.target = self
+    return item
+  }
+
+  private func sidebarCleanupSubmenu() -> NSMenuItem {
+    let submenu = NSMenu(title: "Open Chats Cleanup")
+    let off = NSMenuItem(
+      title: SidebarCleanupInterval.never.title,
+      action: #selector(selectSidebarCleanupInterval(_:)),
+      keyEquivalent: ""
+    )
+    off.target = self
+    off.tag = SidebarCleanupInterval.allCases.firstIndex(of: .never) ?? 0
+    submenu.addItem(off)
+    submenu.addItem(NSMenuItem.separator())
+    submenu.addItem(.sectionHeader(title: "Close Open Chats After"))
+    for (index, interval) in SidebarCleanupInterval.allCases.enumerated() where interval != .never {
+      let item = NSMenuItem(
+        title: interval.title,
+        action: #selector(selectSidebarCleanupInterval(_:)),
+        keyEquivalent: ""
+      )
+      item.target = self
+      item.tag = index
+      submenu.addItem(item)
+    }
+    let item = NSMenuItem(title: "Open Chats Cleanup", action: nil, keyEquivalent: "")
+    item.submenu = submenu
+    return item
+  }
+
+  private func setupSpaceMenu() {
+    let menu = NSMenu(title: "Space")
+    menu.delegate = self
+    let item = NSMenuItem(title: "Space", action: nil, keyEquivalent: "")
+    item.identifier = NSUserInterfaceItemIdentifier("menu.space")
+    item.submenu = menu
+    mainMenu.addItem(item)
+    spaceMenu = menu
+  }
+
+  private func setupChatMenu() {
+    let menu = NSMenu(title: "Chat")
+    let item = NSMenuItem(title: "Chat", action: nil, keyEquivalent: "")
+    item.identifier = NSUserInterfaceItemIdentifier("menu.chat")
+    item.submenu = menu
+    mainMenu.addItem(item)
+
+    let commandGroups: [[ChatMenuCommand]] = [
+      [.openNewTab, .openNewWindow],
+      [.showInfo, .rename, .copyLink],
+      [.toggleRead, .openInSidebar],
+      [.toggleFollow, .togglePin, .toggleArchive],
+    ]
+
+    for (groupIndex, commands) in commandGroups.enumerated() {
+      if groupIndex > 0 {
+        menu.addItem(NSMenuItem.separator())
+      }
+      for command in commands {
+        let commandItem = NSMenuItem(
+          title: ChatMenuContext.placeholderTitle(for: command),
+          action: #selector(performChatCommand(_:)),
+          keyEquivalent: ""
+        )
+        commandItem.target = self
+        commandItem.tag = command.rawValue
+        commandItem.identifier = command.identifier
+        menu.addItem(commandItem)
+        chatMenuItems[command] = commandItem
+      }
+    }
+
+    menu.addItem(NSMenuItem.separator())
+
+    let previous = NSMenuItem(
       title: "Previous Chat",
       action: #selector(prevChat(_:)),
       keyEquivalent: String(UnicodeScalar(NSEvent.SpecialKey.upArrow.rawValue)!)
     )
-    prevChatItem.keyEquivalentModifierMask = [.option]
-    prevChatItem.target = self
-    prevChatItem.image = NSImage(systemSymbolName: "chevron.up", accessibilityDescription: nil)
-    viewMenu.addItem(prevChatItem)
+    previous.keyEquivalentModifierMask = [.option]
+    previous.target = self
+    menu.addItem(previous)
 
-    let nextChatItem = NSMenuItem(
+    let next = NSMenuItem(
       title: "Next Chat",
       action: #selector(nextChat(_:)),
       keyEquivalent: String(UnicodeScalar(NSEvent.SpecialKey.downArrow.rawValue)!)
     )
-    nextChatItem.keyEquivalentModifierMask = [.option]
-    nextChatItem.target = self
-    nextChatItem.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)
-    viewMenu.addItem(nextChatItem)
+    next.keyEquivalentModifierMask = [.option]
+    next.target = self
+    menu.addItem(next)
   }
 
   private func setupWindowMenu() {
@@ -645,27 +817,6 @@ final class AppMenu: NSObject {
 
     NSApp.windowsMenu = windowMenu
   }
-
-#if DEBUG || DEBUG_BUILD
-  private func setupDebugMenu() {
-    let debugMenu = NSMenu(title: "Debug")
-    let debugMenuItem = NSMenuItem(title: "Debug", action: nil, keyEquivalent: "")
-    debugMenuItem.submenu = debugMenu
-    mainMenu.addItem(debugMenuItem)
-
-    let onboardingItem = NSMenuItem(
-      title: "Open Onboarding",
-      action: #selector(openOnboardingForDebug(_:)),
-      keyEquivalent: ""
-    )
-    onboardingItem.target = self
-    onboardingItem.image = NSImage(
-      systemSymbolName: "person.crop.circle.badge.plus",
-      accessibilityDescription: nil
-    )
-    debugMenu.addItem(onboardingItem)
-  }
-#endif
 
   private func setupHelpMenu() {
     let helpMenu = NSMenu(title: "Help")
@@ -748,6 +899,17 @@ final class AppMenu: NSObject {
     statusPageItem.target = self
     statusPageItem.image = NSImage(systemSymbolName: "antenna.radiowaves.left.and.right", accessibilityDescription: nil)
     helpMenu.addItem(statusPageItem)
+
+    helpMenu.addItem(NSMenuItem.separator())
+
+    let clearCacheItem = NSMenuItem(
+      title: "Clear Cache…",
+      action: #selector(clearCache(_:)),
+      keyEquivalent: ""
+    )
+    clearCacheItem.target = self
+    clearCacheItem.image = NSImage(systemSymbolName: "wrench.and.screwdriver", accessibilityDescription: nil)
+    helpMenu.addItem(clearCacheItem)
   }
 
   @objc private func showPreferences(_ sender: Any?) {
@@ -784,34 +946,7 @@ final class AppMenu: NSObject {
   }
 
   @objc private func clearCache(_ sender: Any?) {
-    guard confirm(
-      title: "Clear Cache",
-      message: "This clears local cached app data and sync state. Inline will reload your account from the server."
-    ) else { return }
-
-    Task { @MainActor in
-      guard let appDelegate = NSApp.delegate as? AppDelegate else {
-        ToastCenter.shared.showError("Failed to clear cache")
-        return
-      }
-
-      do {
-        try await appDelegate.clearCacheAndResetApp()
-        ToastCenter.shared.showSuccess("Cache cleared")
-      } catch {
-        ToastCenter.shared.showError("Failed to clear cache")
-      }
-    }
-  }
-
-  @objc private func clearMediaCache(_ sender: Any?) {
-    Task {
-      try await FileCache.shared.clearCache()
-    }
-  }
-
-  @objc private func resetDismissedPopovers(_ sender: Any?) {
-    TranslationAlertDismiss.shared.resetAllDismissStates()
+    AppRecoveryActions.clearCache(confirming: true)
   }
 
   @objc private func openDocs(_ sender: Any?) {
@@ -851,17 +986,6 @@ final class AppMenu: NSObject {
     NSWorkspace.shared.open(url)
   }
 
-  private func confirm(title: String, message: String) -> Bool {
-    let alert = NSAlert()
-    alert.messageText = title
-    alert.informativeText = message
-    alert.addButton(withTitle: "Cancel")
-    alert.alertStyle = .warning
-    let button = alert.addButton(withTitle: title)
-    button.hasDestructiveAction = true
-    return alert.runModal() == .alertSecondButtonReturn
-  }
-
   @objc private func toggleAlwaysOnTop(_ sender: NSMenuItem) {
     guard let window = NSApp.keyWindow else { return }
 
@@ -883,12 +1007,6 @@ final class AppMenu: NSObject {
     DeveloperPlaygroundWindowController.show(sender: sender)
   }
 
-  @objc private func openOnboardingForDebug(_ sender: Any?) {
-    guard let dependencies, dependencies.auth.currentUserId != nil else { return }
-    dependencies.viewModel.openOnboardingForDebug()
-    activeWindow()?.makeKeyAndOrderFront(sender)
-    NSApp.activate()
-  }
 #endif
 
   @objc private func showAllTabs(_ sender: Any?) {
@@ -966,6 +1084,110 @@ final class AppMenu: NSObject {
     if MainWindowOpenCoordinator.shared.navigateChat(offset: 1) == false {
       NotificationCenter.default.post(name: .nextChat, object: nil)
     }
+  }
+
+  @objc private func performChatCommand(_ sender: NSMenuItem) {
+    guard let command = ChatMenuCommand(rawValue: sender.tag) else { return }
+    MainWindowOpenCoordinator.shared.performChatMenuCommand(command)
+  }
+
+  @objc private func selectHomeSpace(_ sender: Any?) {
+    MainWindowOpenCoordinator.shared.activeSpaceMenuContext?.selectHome()
+  }
+
+  @objc private func selectSpace(_ sender: NSMenuItem) {
+    guard let id = (sender.representedObject as? NSNumber)?.int64Value else { return }
+    MainWindowOpenCoordinator.shared.activeSpaceMenuContext?.selectSpace(id)
+  }
+
+  @objc private func createSpace(_ sender: Any?) {
+    MainWindowOpenCoordinator.shared.activeSpaceMenuContext?.createSpace()
+  }
+
+  @objc private func showSpaceSettings(_ sender: Any?) {
+    guard let context = MainWindowOpenCoordinator.shared.activeSpaceMenuContext,
+          let id = context.selectedSpaceID
+    else { return }
+    context.showSettings(id)
+  }
+
+  @objc private func showSpaceMembers(_ sender: Any?) {
+    guard let context = MainWindowOpenCoordinator.shared.activeSpaceMenuContext,
+          let id = context.selectedSpaceID
+    else { return }
+    context.showMembers(id)
+  }
+
+  @objc private func inviteToSpace(_ sender: Any?) {
+    guard let context = MainWindowOpenCoordinator.shared.activeSpaceMenuContext else { return }
+    context.invitePeople(context.selectedSpaceID)
+  }
+
+  @objc private func showSpaceIntegrations(_ sender: Any?) {
+    guard let context = MainWindowOpenCoordinator.shared.activeSpaceMenuContext,
+          let id = context.selectedSpaceID
+    else { return }
+    context.showIntegrations(id)
+  }
+
+  @objc private func showSpaceGrid(_ sender: Any?) {
+    guard let context = MainWindowOpenCoordinator.shared.activeSpaceMenuContext,
+          let id = context.selectedSpaceID
+    else { return }
+    context.showGrid(id)
+  }
+
+  @objc private func selectAppearance(_ sender: NSMenuItem) {
+    guard AppAppearance.pickerOrder.indices.contains(sender.tag) else { return }
+    AppSettings.shared.appearance = AppAppearance.pickerOrder[sender.tag]
+  }
+
+  @objc private func selectTheme(_ sender: NSMenuItem) {
+    guard AppThemePreset.allCases.indices.contains(sender.tag) else { return }
+    AppSettings.shared.appTheme = AppThemePreset.allCases[sender.tag]
+  }
+
+  @objc private func selectMessageStyle(_ sender: NSMenuItem) {
+    guard MessageRenderStyle.allCases.indices.contains(sender.tag) else { return }
+    AppSettings.shared.messageRenderStyle = MessageRenderStyle.allCases[sender.tag]
+  }
+
+  @objc private func toggleCompactToolbar(_ sender: Any?) {
+    AppSettings.shared.usesCompactToolbar.toggle()
+  }
+
+  @objc private func toggleSidebarTint(_ sender: Any?) {
+    AppSettings.shared.sidebarGlassAndTintEnabled.toggle()
+  }
+
+  @objc private func selectSidebarMode(_ sender: NSMenuItem) {
+    guard SidebarMode.allCases.indices.contains(sender.tag) else { return }
+    AppSettings.shared.sidebarMode = SidebarMode.allCases[sender.tag]
+  }
+
+  @objc private func selectSidebarItemSize(_ sender: NSMenuItem) {
+    guard SidebarItemSize.allCases.indices.contains(sender.tag) else { return }
+    AppSettings.shared.sidebarItemSize = SidebarItemSize.allCases[sender.tag]
+  }
+
+  @objc private func selectSidebarSort(_ sender: NSMenuItem) {
+    guard SidebarSortMode.allCases.indices.contains(sender.tag) else { return }
+    let mode = SidebarSortMode.allCases[sender.tag]
+    guard AppSettings.shared.sidebarMode != .allChats || mode == .recentActivity else { return }
+    AppSettings.shared.sidebarSort = mode
+  }
+
+  @objc private func selectSidebarCleanupInterval(_ sender: NSMenuItem) {
+    guard SidebarCleanupInterval.allCases.indices.contains(sender.tag) else { return }
+    AppSettings.shared.sidebarCleanupInterval = SidebarCleanupInterval.allCases[sender.tag]
+  }
+
+  @objc private func toggleReplyThreadSidePane(_ sender: Any?) {
+    AppSettings.shared.openReplyThreadsInSidePane.toggle()
+  }
+
+  @objc private func toggleDockBadge(_ sender: Any?) {
+    AppSettings.shared.showDockBadgeUnreadDMs.toggle()
   }
 
 #if SPARKLE
@@ -1047,6 +1269,82 @@ final class AppMenu: NSObject {
 
 }
 
+extension AppMenu: NSMenuDelegate {
+  func menuNeedsUpdate(_ menu: NSMenu) {
+    guard menu === spaceMenu else { return }
+    menu.removeAllItems()
+
+    guard let context = MainWindowOpenCoordinator.shared.activeSpaceMenuContext else {
+      let unavailable = NSMenuItem(title: "No Active Space", action: nil, keyEquivalent: "")
+      unavailable.isEnabled = false
+      menu.addItem(unavailable)
+      return
+    }
+
+    let selectedSpace = context.selectedSpaceID.flatMap { selectedID in
+      context.spaces.first { $0.id == selectedID }
+    }
+    let contextTitle = context.selectedSpaceID == nil ? "Home" : selectedSpace?.name ?? "Space"
+    menu.addItem(.sectionHeader(title: contextTitle))
+
+    let newThread = NSMenuItem(title: "New Thread", action: #selector(newThread(_:)), keyEquivalent: "")
+    newThread.target = self
+    menu.addItem(newThread)
+
+    if context.selectedSpaceID != nil {
+      let settings = NSMenuItem(title: "Space Settings…", action: #selector(showSpaceSettings(_:)), keyEquivalent: "")
+      settings.target = self
+      menu.addItem(settings)
+
+      let members = NSMenuItem(title: "Members", action: #selector(showSpaceMembers(_:)), keyEquivalent: "")
+      members.target = self
+      menu.addItem(members)
+
+      let integrations = NSMenuItem(title: "Integrations", action: #selector(showSpaceIntegrations(_:)), keyEquivalent: "")
+      integrations.target = self
+      menu.addItem(integrations)
+
+      let grid = NSMenuItem(title: "Grid", action: #selector(showSpaceGrid(_:)), keyEquivalent: "")
+      grid.target = self
+      menu.addItem(grid)
+    }
+
+    let invite = NSMenuItem(title: "Invite…", action: #selector(inviteToSpace(_:)), keyEquivalent: "")
+    invite.target = self
+    menu.addItem(invite)
+
+    menu.addItem(NSMenuItem.separator())
+
+    let switchSpaceMenu = NSMenu(title: "Switch Space")
+    let home = NSMenuItem(title: "Home", action: #selector(selectHomeSpace(_:)), keyEquivalent: "")
+    home.target = self
+    home.subtitle = "Your main chat list"
+    home.state = context.selectedSpaceID == nil ? .on : .off
+    switchSpaceMenu.addItem(home)
+
+    if context.spaces.isEmpty == false {
+      switchSpaceMenu.addItem(NSMenuItem.separator())
+    }
+
+    for space in context.spaces {
+      let item = NSMenuItem(title: space.name, action: #selector(selectSpace(_:)), keyEquivalent: "")
+      item.target = self
+      item.representedObject = NSNumber(value: space.id)
+      item.identifier = NSUserInterfaceItemIdentifier("space.select.\(space.id)")
+      item.state = context.selectedSpaceID == space.id ? .on : .off
+      switchSpaceMenu.addItem(item)
+    }
+
+    let switchSpace = NSMenuItem(title: "Switch Space", action: nil, keyEquivalent: "")
+    switchSpace.submenu = switchSpaceMenu
+    menu.addItem(switchSpace)
+
+    let create = NSMenuItem(title: "Create Space…", action: #selector(createSpace(_:)), keyEquivalent: "")
+    create.target = self
+    menu.addItem(create)
+  }
+}
+
 extension AppMenu: NSMenuItemValidation {
   func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
     guard let dependencies else { return false }
@@ -1059,6 +1357,90 @@ extension AppMenu: NSMenuItemValidation {
 
     if menuItem == cliInstallerMenuItem {
       return cliInstallerMenuItemEnabled
+    }
+
+    if menuItem === closeWindowMenuItem {
+      guard let window = activeWindow() else { return false }
+      menuItem.title = (window.tabGroup?.windows.count ?? 0) > 1 ? "Close Tab" : "Close Window"
+      return true
+    }
+
+    if let command = ChatMenuCommand(rawValue: menuItem.tag), chatMenuItems[command] === menuItem {
+      guard let context = MainWindowOpenCoordinator.shared.activeChatMenuContext else {
+        menuItem.title = ChatMenuContext.placeholderTitle(for: command)
+        menuItem.state = .off
+        return false
+      }
+      menuItem.title = context.title(for: command)
+      switch command {
+      case .toggleFollow:
+        menuItem.state = context.isFollowing ? .on : .off
+      case .togglePin:
+        menuItem.state = context.isPinned ? .on : .off
+      case .toggleArchive:
+        menuItem.state = context.isArchived ? .on : .off
+      default:
+        menuItem.state = .off
+      }
+      if command == .rename {
+        return context.isEnabled(command) && MainWindowOpenCoordinator.shared.canRenameThread
+      }
+      return context.isEnabled(command)
+    }
+
+    let settings = AppSettings.shared
+    if menuItem.action == #selector(selectAppearance(_:)) {
+      guard AppAppearance.pickerOrder.indices.contains(menuItem.tag) else { return false }
+      menuItem.state = settings.appearance == AppAppearance.pickerOrder[menuItem.tag] ? .on : .off
+      return true
+    }
+    if menuItem.action == #selector(selectTheme(_:)) {
+      guard AppThemePreset.allCases.indices.contains(menuItem.tag) else { return false }
+      menuItem.state = settings.appTheme == AppThemePreset.allCases[menuItem.tag] ? .on : .off
+      return true
+    }
+    if menuItem.action == #selector(selectMessageStyle(_:)) {
+      guard MessageRenderStyle.allCases.indices.contains(menuItem.tag) else { return false }
+      menuItem.state = settings.messageRenderStyle == MessageRenderStyle.allCases[menuItem.tag] ? .on : .off
+      return true
+    }
+    if menuItem.action == #selector(toggleCompactToolbar(_:)) {
+      menuItem.state = settings.usesCompactToolbar ? .on : .off
+      return true
+    }
+    if menuItem.action == #selector(toggleSidebarTint(_:)) {
+      menuItem.state = settings.sidebarGlassAndTintEnabled ? .on : .off
+      return true
+    }
+    if menuItem.action == #selector(selectSidebarMode(_:)) {
+      guard SidebarMode.allCases.indices.contains(menuItem.tag) else { return false }
+      menuItem.state = settings.sidebarMode == SidebarMode.allCases[menuItem.tag] ? .on : .off
+      return true
+    }
+    if menuItem.action == #selector(selectSidebarItemSize(_:)) {
+      guard SidebarItemSize.allCases.indices.contains(menuItem.tag) else { return false }
+      menuItem.state = settings.sidebarItemSize == SidebarItemSize.allCases[menuItem.tag] ? .on : .off
+      return true
+    }
+    if menuItem.action == #selector(selectSidebarSort(_:)) {
+      guard SidebarSortMode.allCases.indices.contains(menuItem.tag) else { return false }
+      let mode = SidebarSortMode.allCases[menuItem.tag]
+      let effectiveMode: SidebarSortMode = settings.sidebarMode == .allChats ? .recentActivity : settings.sidebarSort
+      menuItem.state = effectiveMode == mode ? .on : .off
+      return settings.sidebarMode != .allChats || mode == .recentActivity
+    }
+    if menuItem.action == #selector(selectSidebarCleanupInterval(_:)) {
+      guard SidebarCleanupInterval.allCases.indices.contains(menuItem.tag) else { return false }
+      menuItem.state = settings.sidebarCleanupInterval == SidebarCleanupInterval.allCases[menuItem.tag] ? .on : .off
+      return true
+    }
+    if menuItem.action == #selector(toggleReplyThreadSidePane(_:)) {
+      menuItem.state = settings.openReplyThreadsInSidePane ? .on : .off
+      return true
+    }
+    if menuItem.action == #selector(toggleDockBadge(_:)) {
+      menuItem.state = settings.showDockBadgeUnreadDMs ? .on : .off
+      return true
     }
 
     if menuItem.action == #selector(prevChat(_:)) || menuItem.action == #selector(nextChat(_:)) {
@@ -1075,12 +1457,6 @@ extension AppMenu: NSMenuItemValidation {
     if menuItem.action == #selector(newThread(_:)) {
       return dependencies.auth.currentUserId != nil && dependencies.viewModel.topLevelRoute == .main
     }
-
-#if DEBUG || DEBUG_BUILD
-    if menuItem.action == #selector(openOnboardingForDebug(_:)) {
-      return dependencies.auth.currentUserId != nil && dependencies.viewModel.topLevelRoute == .main
-    }
-#endif
 
     if menuItem.action == #selector(goBack(_:)) {
       let coordinator = MainWindowOpenCoordinator.shared

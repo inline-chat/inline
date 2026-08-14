@@ -31,6 +31,8 @@ final class MainWindowOpenCoordinator {
     let canGoForward: @MainActor () -> Bool
     var navigateChat: (@MainActor (_ offset: Int) -> Void)?
     var renameThread: (@MainActor () -> Bool)?
+    var chatMenuContext: ChatMenuContext?
+    var spaceMenuContext: SpaceMenuContext?
   }
 
   private var pendingDestination: MainWindowDestination?
@@ -39,6 +41,8 @@ final class MainWindowOpenCoordinator {
   private var windows: [UUID: WindowEntry] = [:]
   private var sidebarNavigation: [UUID: @MainActor (_ offset: Int) -> Void] = [:]
   private var threadRenaming: [UUID: @MainActor () -> Bool] = [:]
+  private var chatMenuContexts: [UUID: ChatMenuContext] = [:]
+  private var spaceMenuContexts: [UUID: SpaceMenuContext] = [:]
 
   func register(
     openMainWindow: @escaping () -> Void,
@@ -82,7 +86,9 @@ final class MainWindowOpenCoordinator {
       canGoBack: canGoBack,
       canGoForward: canGoForward,
       navigateChat: sidebarNavigation[id],
-      renameThread: threadRenaming[id]
+      renameThread: threadRenaming[id],
+      chatMenuContext: chatMenuContexts[id],
+      spaceMenuContext: spaceMenuContexts[id]
     )
   }
 
@@ -90,6 +96,8 @@ final class MainWindowOpenCoordinator {
     windows.removeValue(forKey: id)
     sidebarNavigation.removeValue(forKey: id)
     threadRenaming.removeValue(forKey: id)
+    chatMenuContexts.removeValue(forKey: id)
+    spaceMenuContexts.removeValue(forKey: id)
   }
 
   func updateSelectedPeer(id: UUID, peer: Peer?) {
@@ -139,11 +147,42 @@ final class MainWindowOpenCoordinator {
     windows[id] = entry
   }
 
+  func registerChatMenuContext(id: UUID, context: ChatMenuContext) {
+    chatMenuContexts[id] = context
+    guard var entry = windows[id] else { return }
+    entry.chatMenuContext = context
+    windows[id] = entry
+  }
+
+  func unregisterChatMenuContext(id: UUID, peer: Peer? = nil) {
+    if let peer, chatMenuContexts[id]?.peer != peer { return }
+    chatMenuContexts.removeValue(forKey: id)
+    guard var entry = windows[id] else { return }
+    entry.chatMenuContext = nil
+    windows[id] = entry
+  }
+
+  func updateSpaceMenuContext(id: UUID, context: SpaceMenuContext) {
+    spaceMenuContexts[id] = context
+    guard var entry = windows[id] else { return }
+    entry.spaceMenuContext = context
+    windows[id] = entry
+  }
+
+  func unregisterSpaceMenuContext(id: UUID) {
+    spaceMenuContexts.removeValue(forKey: id)
+    guard var entry = windows[id] else { return }
+    entry.spaceMenuContext = nil
+    windows[id] = entry
+  }
+
   func resetWindows() {
     pendingDestination = nil
     windows.removeAll()
     sidebarNavigation.removeAll()
     threadRenaming.removeAll()
+    chatMenuContexts.removeAll()
+    spaceMenuContexts.removeAll()
   }
 
   func openWindow(_ destination: MainWindowDestination) {
@@ -285,12 +324,35 @@ final class MainWindowOpenCoordinator {
     return renameThread()
   }
 
+  var activeChatMenuContext: ChatMenuContext? {
+    activeEntry()?.chatMenuContext
+  }
+
+  var activeSpaceMenuContext: SpaceMenuContext? {
+    activeEntry()?.spaceMenuContext
+  }
+
+  @discardableResult
+  func performChatMenuCommand(_ command: ChatMenuCommand) -> Bool {
+    guard let entry = activeEntry(),
+          let context = entry.chatMenuContext,
+          context.isEnabled(command)
+    else { return false }
+
+    context.perform(command)
+    return true
+  }
+
   var activeToastPresenter: (any ToastPresenting)? {
     activeEntry()?.toastPresenter
   }
 
   var canNavigateChat: Bool {
     activeEntry()?.navigateChat != nil
+  }
+
+  var canRenameThread: Bool {
+    activeEntry()?.renameThread != nil
   }
 
   var hasActiveWindow: Bool {
@@ -387,5 +449,7 @@ final class MainWindowOpenCoordinator {
     threadRenaming = threadRenaming.filter { id, _ in
       windows[id] != nil
     }
+    chatMenuContexts = chatMenuContexts.filter { id, _ in windows[id] != nil }
+    spaceMenuContexts = spaceMenuContexts.filter { id, _ in windows[id] != nil }
   }
 }

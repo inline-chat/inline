@@ -30,12 +30,22 @@ class ComposeNSTextView: NSTextView {
   private var isStrippingEmailLinks = false
   private var isHandlingKeyDown = false
   private let boldUndoActionName = "Bold"
+  private let italicUndoActionName = "Italic"
+  private let inlineCodeUndoActionName = "Inline Code"
   private let linkUndoActionName = "Make Link"
 
   override func keyDown(with event: NSEvent) {
     let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
     if modifiers == [.command], event.charactersIgnoringModifiers?.lowercased() == "b" {
       toggleBold(self)
+      return
+    }
+    if modifiers == [.command], event.charactersIgnoringModifiers?.lowercased() == "i" {
+      toggleItalic(self)
+      return
+    }
+    if modifiers == [.command, .shift], event.charactersIgnoringModifiers?.lowercased() == "c" {
+      toggleInlineCode(self)
       return
     }
 
@@ -288,6 +298,59 @@ class ComposeNSTextView: NSTextView {
     toggleBold(in: range)
   }
 
+  @objc func toggleItalic(_ sender: Any?) {
+    toggleFontTrait(
+      actionName: italicUndoActionName,
+      attribute: .italic,
+      contains: { NSFontManager.shared.traits(of: $0).contains(.italicFontMask) },
+      convert: { font, enabled in
+        enabled
+          ? NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
+          : NSFontManager.shared.convert(font, toNotHaveTrait: .italicFontMask)
+      }
+    )
+  }
+
+  @objc func toggleInlineCode(_ sender: Any?) {
+    let range = selectedRange()
+    guard range.location != NSNotFound else { return }
+
+    let snapshot = FormattingSnapshot(
+      attributedString: NSAttributedString(attributedString: attributedString()),
+      selectedRange: range,
+      typingAttributes: typingAttributes,
+      actionName: inlineCodeUndoActionName
+    )
+    registerUndo(snapshot)
+
+    if range.length == 0 {
+      let enabled = typingAttributes[.inlineCode] == nil
+      var attributes = typingAttributes
+      attributes[.inlineCode] = enabled ? true : nil
+      attributes[.font] = enabled
+        ? NSFont.monospacedSystemFont(ofSize: ComposeTextEditor.font.pointSize, weight: .regular)
+        : ComposeTextEditor.font
+      typingAttributes = attributes
+    } else if let textStorage {
+      let enabled = textStorage.attribute(.inlineCode, at: range.location, effectiveRange: nil) == nil
+      textStorage.beginEditing()
+      if enabled {
+        textStorage.addAttribute(.inlineCode, value: true, range: range)
+        textStorage.addAttribute(
+          .font,
+          value: NSFont.monospacedSystemFont(ofSize: ComposeTextEditor.font.pointSize, weight: .regular),
+          range: range
+        )
+      } else {
+        textStorage.removeAttribute(.inlineCode, range: range)
+        textStorage.addAttribute(.font, value: ComposeTextEditor.font, range: range)
+      }
+      textStorage.endEditing()
+      setSelectedRange(range)
+    }
+    notifyDelegateAboutFormattingChange()
+  }
+
   override func paste(_ sender: Any?) {
     // Intercept non-text content (files/images/videos) and route through our attachment pipeline.
     if handleAttachments(from: .general, includeText: false) {
@@ -331,6 +394,17 @@ class ComposeNSTextView: NSTextView {
     guard let urlString = promptForLinkURL(prefill: prefill) else { return }
 
     applyLink(urlString, to: range)
+  }
+
+  override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+    switch item.action {
+    case #selector(makeLink(_:)):
+      selectedLinkTextRange() != nil
+    case #selector(toggleBold(_:)), #selector(toggleItalic(_:)), #selector(toggleInlineCode(_:)):
+      isEditable
+    default:
+      super.validateUserInterfaceItem(item)
+    }
   }
 
   private func promptForLinkURL(prefill: String) -> String? {
@@ -898,6 +972,53 @@ class ComposeNSTextView: NSTextView {
     let wantsBold = !PlatformFontTraits.isBold(currentFont)
 
     setTypingAttributesBold(wantsBold)
+    notifyDelegateAboutFormattingChange()
+  }
+
+  private func toggleFontTrait(
+    actionName: String,
+    attribute: NSAttributedString.Key,
+    contains: (NSFont) -> Bool,
+    convert: (NSFont, Bool) -> NSFont
+  ) {
+    let range = selectedRange()
+    guard range.location != NSNotFound else { return }
+
+    let snapshot = FormattingSnapshot(
+      attributedString: NSAttributedString(attributedString: attributedString()),
+      selectedRange: range,
+      typingAttributes: typingAttributes,
+      actionName: actionName
+    )
+    registerUndo(snapshot)
+
+    if range.length == 0 {
+      var attributes = typingAttributes
+      let font = (attributes[.font] as? NSFont) ?? ComposeTextEditor.font
+      let enabled = !contains(font)
+      attributes[.font] = convert(font, enabled)
+      attributes[attribute] = enabled ? true : nil
+      typingAttributes = attributes
+    } else if let textStorage {
+      let font = (textStorage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont)
+        ?? ComposeTextEditor.font
+      let enabled = !contains(font)
+      var runs: [(NSRange, NSFont)] = []
+      textStorage.enumerateAttribute(.font, in: range) { value, subrange, _ in
+        runs.append((subrange, (value as? NSFont) ?? ComposeTextEditor.font))
+      }
+      textStorage.beginEditing()
+      for (subrange, runFont) in runs {
+        textStorage.addAttribute(.font, value: convert(runFont, enabled), range: subrange)
+        if enabled {
+          textStorage.addAttribute(attribute, value: true, range: subrange)
+        } else {
+          textStorage.removeAttribute(attribute, range: subrange)
+        }
+      }
+      textStorage.endEditing()
+      setSelectedRange(range)
+    }
     notifyDelegateAboutFormattingChange()
   }
 

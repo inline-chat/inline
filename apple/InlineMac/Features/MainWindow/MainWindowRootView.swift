@@ -91,15 +91,23 @@ struct MainWindowRootView: View {
       syncTopLevelRoute(viewModel.topLevelRoute)
       nativeTab.update(peer: currentSelectedPeer)
       syncCurrentPeer()
+      syncSpaceMenuContext()
       installNativeTabShortcuts()
     }
     .onReceive(viewModel.$topLevelRoute) { route in
       syncTopLevelRoute(route)
       syncCurrentPeer()
+      syncSpaceMenuContext()
     }
     .onChange(of: nav3.currentRoute) { _, _ in
       nativeTab.update(peer: currentSelectedPeer)
       syncCurrentPeer()
+    }
+    .onChange(of: nav3.selectedSpaceId) { _, _ in
+      syncSpaceMenuContext()
+    }
+    .onChange(of: sidebarViewModel.spaces) { _, _ in
+      syncSpaceMenuContext()
     }
     .onDisappear {
       chatOpenPreloader.cancelPendingOpen()
@@ -193,6 +201,28 @@ struct MainWindowRootView: View {
     MainWindowOpenCoordinator.shared.updateSelectedPeer(id: windowID, peer: peer)
     guard let peer else { return }
     SidebarCleanup.shared.markOpened(peer)
+  }
+
+  private func syncSpaceMenuContext() {
+    guard showsMain else {
+      MainWindowOpenCoordinator.shared.unregisterSpaceMenuContext(id: windowID)
+      return
+    }
+    MainWindowOpenCoordinator.shared.updateSpaceMenuContext(
+      id: windowID,
+      context: SpaceMenuContext(
+        selectedSpaceID: nav3.selectedSpaceId,
+        spaces: sidebarViewModel.spaces.map { .init(id: $0.id, name: $0.displayName) },
+        selectHome: { nav3.selectHome() },
+        selectSpace: { nav3.selectSpace($0) },
+        createSpace: { nav3.open(.createSpace) },
+        showSettings: { nav3.open(.spaceSettings(spaceId: $0)) },
+        showMembers: { nav3.open(.members(spaceId: $0)) },
+        showIntegrations: { nav3.open(.spaceIntegrations(spaceId: $0)) },
+        showGrid: { nav3.open(.grid(spaceId: $0)) },
+        invitePeople: { nav3.open(.inviteToSpace(spaceId: $0)) }
+      )
+    )
   }
 
   private var activeSelectedPeer: Peer? {
