@@ -93,3 +93,11 @@ final class ScrollToBottomButtonHostingView: NSControl {
     isHovered = hovered
   }
 }
+
+extension ScrollToBottomButtonHostingView: AppThemeRefreshable {
+  func refreshAppTheme() {
+    var rootView = hostingView.rootView
+    rootView.themeRevision &+= 1
+    hostingView.rootView = rootView
+  }
+}

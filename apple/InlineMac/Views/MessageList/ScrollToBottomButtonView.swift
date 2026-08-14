@@ -4,6 +4,7 @@ struct ScrollToBottomButtonView: View {
   @Environment(\.colorScheme) private var colorScheme
   var isHovered: Bool = false
   var isVisible: Bool = true
+  var themeRevision = 0
 
   let buttonSize: CGFloat = Theme.scrollButtonSize
   var hasUnread: Bool = false
@@ -23,7 +24,7 @@ struct ScrollToBottomButtonView: View {
 
         if hasUnread {
           Circle()
-            .fill(Color.accentColor)
+            .fill(Color(nsColor: Theme.prominentColor))
             .frame(width: 8, height: 8)
             .offset(x: 1, y: -1)
             .allowsHitTesting(false)

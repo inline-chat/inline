@@ -49,7 +49,7 @@ struct AppearanceSettingsDetailView: View {
         } label: {
           SettingsRowLabel(
             "Message Style",
-            description: "Choose how messages are arranged in newly opened chats."
+            description: "Choose how messages are arranged in chats."
           )
         }
       } header: {
