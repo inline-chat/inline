@@ -1,4 +1,5 @@
 @testable import InlineKit
+import Foundation
 import InlineProtocol
 import Testing
 
@@ -156,6 +157,27 @@ struct BotChatSettingsCoordinatorTests {
     #expect(coordinator.selectedState.problem == nil)
   }
 
+  @Test("preserves an actionable mutation transport error after rollback")
+  func mutationTransportErrorPresentation() async {
+    let invocations = FailedMutationSequence()
+    let coordinator = BotChatSettingsCoordinator(
+      peer: .thread(id: 77),
+      discoveryFetcher: { _ in discoveryResult() },
+      settingsRequester: { _, _ in documentResponse(revision: "one", replyThreads: "auto") },
+      itemInvoker: { _, _, _, _, _ in try await invocations.invoke() },
+      transientMutationRetryDelay: .milliseconds(0)
+    )
+    await coordinator.warmUp()
+    await waitUntil { coordinator.selectedState.phase == .loaded }
+
+    coordinator.invoke(itemID: "reply-threads", value: .string("on"))
+    await waitUntil { coordinator.isMutating == false }
+
+    #expect(await invocations.count == 2)
+    #expect(replyThreadsValue(in: coordinator.selectedState.document) == "auto")
+    #expect(coordinator.selectedState.problem?.message == "The selected OpenClaw model is unavailable.")
+  }
+
   @Test("cancel clears pending mutation state before the panel reappears")
   func cancelClearsMutationState() async {
     let gate = InvocationGate()
@@ -292,6 +314,19 @@ private actor TransientMutationSequence {
     count += 1
     if count == 1 { throw Failure.disconnected }
     return documentResponse(revision: "two", replyThreads: "on")
+  }
+}
+
+private actor FailedMutationSequence {
+  struct Failure: LocalizedError {
+    var errorDescription: String? { "The selected OpenClaw model is unavailable." }
+  }
+
+  private(set) var count = 0
+
+  func invoke() throws -> InlineProtocol.BotChatSettingsResponse {
+    count += 1
+    throw Failure()
   }
 }
 

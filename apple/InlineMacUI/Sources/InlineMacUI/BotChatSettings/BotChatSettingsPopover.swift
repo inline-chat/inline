@@ -291,7 +291,7 @@ private struct BotChatSettingsAccessNote: View {
       Image(systemName: "lock")
     }
     .font(.caption)
-    .foregroundStyle(.secondary)
+    .foregroundStyle(.tertiary)
     .padding(.horizontal, 12)
     .padding(.vertical, 9)
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -319,7 +319,7 @@ private struct BotChatSettingsSectionView: View {
           if let description = section.description {
             Text(description)
               .font(.caption2)
-              .foregroundStyle(.secondary)
+              .foregroundStyle(.tertiary)
               .fixedSize(horizontal: false, vertical: true)
           }
         }
@@ -354,9 +354,15 @@ private struct BotChatSettingsItemView: View {
 
   private var isDisabled: Bool { item.isDisabled }
   private var label: String { item.label ?? "" }
+  private var usesAlignedDescription: Bool {
+    switch item.control {
+    case .toggle, .select: true
+    default: false
+    }
+  }
   private var showsDescriptionBelowControl: Bool {
     if case .button = item.control { return false }
-    return true
+    return !usesAlignedDescription
   }
 
   var body: some View {
@@ -365,13 +371,13 @@ private struct BotChatSettingsItemView: View {
       if showsDescriptionBelowControl, let description = item.description {
         Text(description)
           .font(.caption2)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(.tertiary)
           .fixedSize(horizontal: false, vertical: true)
       }
       if item.isDisabled, showsDisabledReason, let disabledReason = item.disabledReason {
         Text(disabledReason)
           .font(.caption2)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(.tertiary)
           .fixedSize(horizontal: false, vertical: true)
       }
     }
@@ -382,7 +388,7 @@ private struct BotChatSettingsItemView: View {
   private var control: some View {
     switch item.control {
     case let .toggle(value):
-      alignedRow {
+      alignedRow(description: item.description, controlWidth: nil) {
         if item.isDisabled {
           Text(value ? "On" : "Off")
             .foregroundStyle(.secondary)
@@ -401,7 +407,7 @@ private struct BotChatSettingsItemView: View {
       }
     case let .select(value, options):
       VStack(alignment: .leading, spacing: 3) {
-        alignedRow {
+        alignedRow(description: item.description, controlWidth: 164) {
           if item.isDisabled {
             Text(options.first(where: { $0.value == value })?.label ?? value)
               .foregroundStyle(.secondary)
@@ -418,7 +424,7 @@ private struct BotChatSettingsItemView: View {
               }
             }
             .labelsHidden()
-            .frame(width: 164)
+            .fixedSize(horizontal: true, vertical: false)
             .disabled(isDisabled)
             .accessibilityLabel(label)
             .accessibilityHint(accessibilityHint)
@@ -427,7 +433,7 @@ private struct BotChatSettingsItemView: View {
         if let optionDescription = options.first(where: { $0.value == value })?.description {
           Text(optionDescription)
             .font(.caption2)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.tertiary)
             .frame(maxWidth: .infinity, alignment: .trailing)
         }
       }
@@ -441,7 +447,7 @@ private struct BotChatSettingsItemView: View {
           }
           Text(text)
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.tertiary)
             .fixedSize(horizontal: false, vertical: true)
             .textSelection(.enabled)
         }
@@ -452,19 +458,20 @@ private struct BotChatSettingsItemView: View {
         if let description = item.description {
           Text(description)
             .font(.caption2)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.tertiary)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        pendingIndicator
         Button(label) { onInvoke(item.id, nil) }
           .controlSize(.small)
           .disabled(isDisabled || isPending)
           .accessibilityHint(accessibilityHint)
-        pendingIndicator
       }
       .frame(maxWidth: .infinity, alignment: .trailing)
     case .folder:
       if let folder = item.control.folderPresentation {
       HStack(spacing: 7) {
+        pendingIndicator
         BotChatSettingsFolderControl(
           label: label,
           presentation: folder,
@@ -476,19 +483,31 @@ private struct BotChatSettingsItemView: View {
           onSelect: { onInvoke(item.id, .string($0)) },
           onPickedFolder: { onInvoke(item.id, .string($0)) }
         )
-        pendingIndicator
       }
       }
     }
   }
 
-  private func alignedRow<Control: View>(@ViewBuilder control: () -> Control) -> some View {
+  private func alignedRow<Control: View>(
+    description: String?,
+    controlWidth: CGFloat?,
+    @ViewBuilder control: () -> Control
+  ) -> some View {
     HStack(spacing: 10) {
-      Text(label)
-        .font(.callout)
+      VStack(alignment: .leading, spacing: 1) {
+        Text(label)
+          .font(.callout)
+        if let description {
+          Text(description)
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      }
         .frame(maxWidth: .infinity, alignment: .leading)
-      control()
       pendingIndicator
+      control()
+        .frame(width: controlWidth, alignment: .trailing)
     }
     .frame(minHeight: 24)
   }
@@ -596,26 +615,26 @@ private struct BotChatSettingsFolderControl: View {
       if let parentHint = presentation.selectedFolder.parentHint {
         Text(parentHint)
           .font(.caption2)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(.tertiary)
           .frame(maxWidth: .infinity, alignment: .trailing)
       }
       Text("On \(presentation.hostLabel)")
         .font(.caption2)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.tertiary)
         .frame(maxWidth: .infinity, alignment: .trailing)
       if !canPickLocally {
         Text(pickerUnavailableReason)
           .font(.caption2)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(.tertiary)
           .fixedSize(horizontal: false, vertical: true)
         Text(presentation.commandFallback)
           .font(.caption2.monospaced())
-          .foregroundStyle(.secondary)
+          .foregroundStyle(.tertiary)
           .textSelection(.enabled)
       } else if isPickingFolder {
         Label("Choosing a folder…", systemImage: "folder.badge.plus")
           .font(.caption2)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(.tertiary)
       } else if let pickerError {
         Text(pickerError)
           .font(.caption2)

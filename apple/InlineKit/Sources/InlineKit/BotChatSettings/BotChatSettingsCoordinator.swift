@@ -317,7 +317,10 @@ public final class BotChatSettingsCoordinator {
         )
         self.mutationTask = nil
         self.activeMutation = nil
-        self.finishQueuedMutation(mutation, problem: .failed("Couldn’t update bot settings"))
+        self.finishQueuedMutation(
+          mutation,
+          problem: .failed(Self.presentedErrorMessage(error, fallback: "Couldn’t update bot settings"))
+        )
       }
       self.startNextMutationIfNeeded()
     }
@@ -467,7 +470,10 @@ public final class BotChatSettingsCoordinator {
           "BOT_SETTINGS_TRACE trace=\(traceID) phase=request_error bot=\(botID) " +
             "elapsed_ms=\(Self.elapsedMilliseconds(since: startedAt))"
         )
-        self.finishRequest(botID: botID, problem: .failed("Couldn’t load bot settings"))
+        self.finishRequest(
+          botID: botID,
+          problem: .failed(Self.presentedErrorMessage(error, fallback: "Couldn’t load bot settings"))
+        )
       }
     }
   }
@@ -608,6 +614,14 @@ public final class BotChatSettingsCoordinator {
 
   private static func elapsedMilliseconds(since date: Date) -> Int {
     max(0, Int(Date().timeIntervalSince(date) * 1_000))
+  }
+
+  private static func presentedErrorMessage(_ error: Error, fallback: String) -> String {
+    guard let description = (error as? LocalizedError)?.errorDescription?
+      .trimmingCharacters(in: .whitespacesAndNewlines),
+      !description.isEmpty
+    else { return fallback }
+    return description
   }
 
   private static func traceResult(_ response: InlineProtocol.BotChatSettingsResponse) -> String {
