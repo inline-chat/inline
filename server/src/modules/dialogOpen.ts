@@ -1,7 +1,7 @@
 import { db } from "@in/server/db"
 import { UsersModel } from "@in/server/db/models/users"
 import type { Transaction } from "@in/server/db/types"
-import { dialogs, type DbChat, type DbDialog, type DbNewDialog } from "@in/server/db/schema"
+import { chats, dialogs, type DbChat, type DbDialog, type DbNewDialog } from "@in/server/db/schema"
 import { and, desc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm"
 import { FractionalIndex } from "@in/server/modules/fractionalIndex"
 
@@ -76,6 +76,50 @@ export async function nextDialogOrder(
     .limit(1)
 
   return FractionalIndex.after(lastDialog?.order ?? null)
+}
+
+export async function openPrimarySpaceChatForUser(input: {
+  spaceId: number
+  userId: number
+  canAccessPublicChats: boolean
+}): Promise<{ chat: DbChat; dialog: DbDialog; changed: boolean } | null> {
+  if (!input.canAccessPublicChats) {
+    return null
+  }
+
+  const [chat] = await db
+    .select()
+    .from(chats)
+    .where(
+      and(
+        eq(chats.spaceId, input.spaceId),
+        eq(chats.type, "thread"),
+        eq(chats.publicThread, true),
+        eq(chats.threadNumber, 1),
+        isNull(chats.parentChatId),
+      ),
+    )
+    .limit(1)
+  if (!chat) {
+    return null
+  }
+
+  const { dialogs: userDialogs, changedDialogs } = await setDialogOpenForUsers({
+    chat,
+    userIds: [input.userId],
+    open: true,
+    showInChatList: true,
+  })
+  const dialog = userDialogs.find((candidate) => candidate.userId === input.userId)
+  if (!dialog) {
+    return null
+  }
+
+  return {
+    chat,
+    dialog,
+    changed: changedDialogs.some((candidate) => candidate.userId === input.userId),
+  }
 }
 
 export async function setDialogOpenForUsers(input: {

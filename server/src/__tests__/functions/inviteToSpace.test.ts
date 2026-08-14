@@ -6,6 +6,9 @@ import { schema } from "@in/server/db/relations"
 import { db } from "@in/server/db"
 import { and, eq } from "drizzle-orm"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { handler as createSpace } from "@in/server/methods/createSpace"
+import { UpdatesModel } from "@in/server/db/models/updates"
+import { UpdateBucket } from "@in/server/db/schema"
 
 function makeFunctionContext(userId: number) {
   return {
@@ -63,6 +66,74 @@ describe("inviteToSpace", () => {
     expect(result.user?.email).toBe("owner-invitee@ex.com")
     expect(result.member?.spaceId).toBe(BigInt(space.id))
     expect(result.member?.role).toBe(Member_Role.MEMBER)
+  })
+
+  test("opens the primary chat for an invited member", async () => {
+    const owner = await testUtils.createUser("primary-chat-inviter@ex.com")
+    const invitee = await testUtils.createUser("primary-chat-invitee@ex.com")
+    const created = await createSpace(
+      { name: "Invited Town Hall" },
+      { currentUserId: owner.id, currentSessionId: 1, ip: undefined },
+    )
+
+    await inviteToSpace(
+      {
+        spaceId: BigInt(created.space.id),
+        role: { role: { oneofKind: "member", member: { canAccessPublicChats: true } } },
+        via: { oneofKind: "userId", userId: BigInt(invitee.id) },
+      },
+      makeFunctionContext(owner.id),
+    )
+
+    const [primaryChat] = await db
+      .select()
+      .from(schema.chats)
+      .where(and(eq(schema.chats.spaceId, created.space.id), eq(schema.chats.threadNumber, 1)))
+      .limit(1)
+    expect(primaryChat).toBeTruthy()
+    if (!primaryChat) throw new Error("Expected primary chat")
+
+    const [dialog] = await db
+      .select()
+      .from(schema.dialogs)
+      .where(and(eq(schema.dialogs.chatId, primaryChat.id), eq(schema.dialogs.userId, invitee.id)))
+      .limit(1)
+    expect(dialog?.open).toBe(true)
+    expect(dialog?.order).toBeString()
+
+    const userUpdates = await db
+      .select()
+      .from(schema.updates)
+      .where(and(eq(schema.updates.bucket, UpdateBucket.User), eq(schema.updates.entityId, invitee.id)))
+    expect(userUpdates.map((row) => UpdatesModel.decrypt(row).payload.update.oneofKind)).toEqual([
+      "userJoinSpace",
+      "userChatOpen",
+    ])
+  })
+
+  test("does not open the public primary chat for a restricted member", async () => {
+    const owner = await testUtils.createUser("restricted-primary-inviter@ex.com")
+    const invitee = await testUtils.createUser("restricted-primary-invitee@ex.com")
+    const created = await createSpace(
+      { name: "Restricted Town Hall" },
+      { currentUserId: owner.id, currentSessionId: 1, ip: undefined },
+    )
+
+    await inviteToSpace(
+      {
+        spaceId: BigInt(created.space.id),
+        role: { role: { oneofKind: "member", member: { canAccessPublicChats: false } } },
+        via: { oneofKind: "userId", userId: BigInt(invitee.id) },
+      },
+      makeFunctionContext(owner.id),
+    )
+
+    expect(await db.select().from(schema.dialogs).where(eq(schema.dialogs.userId, invitee.id))).toHaveLength(0)
+    const userUpdates = await db
+      .select()
+      .from(schema.updates)
+      .where(and(eq(schema.updates.bucket, UpdateBucket.User), eq(schema.updates.entityId, invitee.id)))
+    expect(userUpdates.map((row) => UpdatesModel.decrypt(row).payload.update.oneofKind)).toEqual(["userJoinSpace"])
   })
 
   test("allows public space members to invite regular members", async () => {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { db } from "@in/server/db"
-import { members, spaces, updates, UpdateBucket } from "@in/server/db/schema"
+import { chats, dialogs, members, spaces, updates, UpdateBucket } from "@in/server/db/schema"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import { joinPublicSpace } from "@in/server/functions/space.joinPublicSpace"
 import { handleRpcCall } from "@in/server/realtime/handlers/_rpc"
@@ -22,6 +22,17 @@ describe("joinPublicSpace", () => {
       .values({ name: "Town Hall", handle: "TownHall", isPublic: true })
       .returning()
     if (!space) throw new Error("Failed to create public space")
+    const [primaryChat] = await db
+      .insert(chats)
+      .values({
+        spaceId: space.id,
+        type: "thread",
+        title: space.name,
+        publicThread: true,
+        threadNumber: 1,
+      })
+      .returning()
+    if (!primaryChat) throw new Error("Failed to create primary chat")
 
     const result = await joinPublicSpace({ handle: "  @TOWNHALL  " }, context(user.id))
 
@@ -40,16 +51,25 @@ describe("joinPublicSpace", () => {
     expect(savedMembers[0]?.role).toBe("member")
     expect(savedMembers[0]?.canAccessPublicChats).toBe(true)
 
+    const [primaryDialog] = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, primaryChat.id), eq(dialogs.userId, user.id)))
+      .limit(1)
+    expect(primaryDialog?.open).toBe(true)
+    expect(primaryDialog?.order).toBeString()
+
     const userUpdates = await db
       .select()
       .from(updates)
       .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, user.id)))
-    expect(userUpdates).toHaveLength(1)
+    expect(userUpdates).toHaveLength(2)
     const userPayload = UpdatesModel.decrypt(userUpdates[0]!).payload.update
     expect(userPayload.oneofKind).toBe("userJoinSpace")
     if (userPayload.oneofKind !== "userJoinSpace") throw new Error("Expected userJoinSpace")
     if (!userPayload.userJoinSpace.space) throw new Error("Expected joined space update")
     expect(userPayload.userJoinSpace.space.handle).toBe("TownHall")
+    expect(UpdatesModel.decrypt(userUpdates[1]!).payload.update.oneofKind).toBe("userChatOpen")
 
     const spaceUpdates = await db
       .select()
@@ -72,6 +92,17 @@ describe("joinPublicSpace", () => {
       .values({ name: "Community", handle: "community", isPublic: true })
       .returning()
     if (!space) throw new Error("Failed to create public space")
+    const [primaryChat] = await db
+      .insert(chats)
+      .values({
+        spaceId: space.id,
+        type: "thread",
+        title: space.name,
+        publicThread: true,
+        threadNumber: 1,
+      })
+      .returning()
+    if (!primaryChat) throw new Error("Failed to create primary chat")
 
     const first = await joinPublicSpace({ handle: "community" }, context(user.id))
     const second = await joinPublicSpace({ handle: "COMMUNITY" }, context(user.id))
@@ -86,7 +117,13 @@ describe("joinPublicSpace", () => {
         .from(members)
         .where(and(eq(members.spaceId, space.id), eq(members.userId, user.id))),
     ).toHaveLength(1)
-    expect(await db.select().from(updates)).toHaveLength(2)
+    expect(
+      await db
+        .select()
+        .from(dialogs)
+        .where(and(eq(dialogs.chatId, primaryChat.id), eq(dialogs.userId, user.id))),
+    ).toHaveLength(1)
+    expect(await db.select().from(updates)).toHaveLength(3)
   })
 
   test("serializes concurrent retries into one membership", async () => {

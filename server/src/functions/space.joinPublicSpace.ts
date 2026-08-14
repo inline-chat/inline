@@ -24,6 +24,8 @@ import { UpdateBucket } from "@in/server/db/schema/updates"
 import { Log } from "@in/server/utils/log"
 import type { JoinPublicSpaceInput, JoinPublicSpaceResult, Update } from "@inline-chat/protocol/core"
 import { and, eq, isNull } from "drizzle-orm"
+import { openPrimarySpaceChatForUser } from "@in/server/modules/dialogOpen"
+import { emitChatListOpenUpdates } from "@in/server/modules/subthreads"
 
 const log = new Log("space.joinPublicSpace")
 type JoinOutcome = {
@@ -123,6 +125,18 @@ export const joinPublicSpace = async (
     await pushSpaceMemberUpdate(outcome, context.currentUserId).catch((error: unknown) => {
       // The durable space-bucket update repairs missed live fanout.
       log.error("Failed to fan out public-space join", { spaceId: outcome.space.id, error })
+    })
+  }
+
+  const primaryChatOpen = await openPrimarySpaceChatForUser({
+    spaceId: outcome.space.id,
+    userId: context.currentUserId,
+    canAccessPublicChats: outcome.member.canAccessPublicChats !== false,
+  })
+  if (primaryChatOpen?.changed) {
+    await emitChatListOpenUpdates({
+      chat: primaryChatOpen.chat,
+      dialogs: [primaryChatOpen.dialog],
     })
   }
 

@@ -1,6 +1,6 @@
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { db } from "@in/server/db"
-import { chats, dialogs, members, spaces } from "@in/server/db/schema"
+import { chats, members, spaces } from "@in/server/db/schema"
 import {
   encodeChatInfo,
   encodeDialogInfo,
@@ -22,6 +22,7 @@ import {
   lockPublicHandleNamespace,
   normalizeSpaceHandle,
 } from "@in/server/modules/spaces/spaceHandle"
+import { setDialogOpenForUsers } from "@in/server/modules/dialogOpen"
 
 export const Input = Type.Object({
   name: Type.String(),
@@ -88,13 +89,13 @@ export const handler = async (
       throw new InlineError(InlineError.ApiError.INTERNAL)
     }
 
-    // Create the main chat
+    // Create the primary chat with the space's identity.
     let [mainChat] = await db
       .insert(chats)
       .values({
         spaceId: space.id,
         type: "thread",
-        title: "Main",
+        title: space.name,
         publicThread: true,
         description: "Main chat for everyone in the space",
         threadNumber: 1,
@@ -106,14 +107,16 @@ export const handler = async (
       throw new InlineError(InlineError.ApiError.INTERNAL)
     }
 
-    let [newDialog] = await db
-      .insert(dialogs)
-      .values({
-        userId: context.currentUserId,
-        chatId: mainChat.id,
-        spaceId: space.id,
-      })
-      .returning()
+    const { dialogs: openedDialogs } = await setDialogOpenForUsers({
+      chat: mainChat,
+      userIds: [context.currentUserId],
+      open: true,
+      showInChatList: true,
+    })
+    const newDialog = openedDialogs.find((dialog) => dialog.userId === context.currentUserId)
+    if (!newDialog) {
+      throw new InlineError(InlineError.ApiError.INTERNAL)
+    }
 
     // Best-effort internal alert (should never affect the user action).
     BotAlerts.spaceCreated({

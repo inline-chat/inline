@@ -24,6 +24,8 @@ import { eq } from "drizzle-orm"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 import { encodePublicUser } from "@in/server/modules/privacy/userPrivacy"
+import { openPrimarySpaceChatForUser } from "@in/server/modules/dialogOpen"
+import { emitChatListOpenUpdates } from "@in/server/modules/subthreads"
 
 const log = new Log("space.inviteToSpace")
 
@@ -108,6 +110,21 @@ export const inviteToSpace = async (
     currentUserId: context.currentUserId,
     persisted: persistedSpaceUpdate,
   })
+
+  const primaryChatOpen = await openPrimarySpaceChatForUser({
+    spaceId,
+    userId: inviteInfo.user.id,
+    canAccessPublicChats: member.canAccessPublicChats !== false,
+  })
+  if (primaryChatOpen?.changed) {
+    await emitChatListOpenUpdates({
+      chat: primaryChatOpen.chat,
+      dialogs: [primaryChatOpen.dialog],
+    }).catch((error: unknown) => {
+      // The open dialog remains authoritative and will be returned by the next chat sync.
+      log.error("Failed to fan out invited member primary chat", { spaceId, userId: inviteInfo.user.id, error })
+    })
+  }
 
   return {
     user: Encoders.user({ user: inviteInfo.user, min: false }),
