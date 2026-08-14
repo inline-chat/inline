@@ -388,7 +388,7 @@ private struct BotChatSettingsItemView: View {
   private var control: some View {
     switch item.control {
     case let .toggle(value):
-      alignedRow(description: item.description, controlWidth: nil) {
+      alignedRow(description: item.description, controlMaxWidth: nil) {
         if item.isDisabled {
           Text(value ? "On" : "Off")
             .foregroundStyle(.secondary)
@@ -407,7 +407,7 @@ private struct BotChatSettingsItemView: View {
       }
     case let .select(value, options):
       VStack(alignment: .leading, spacing: 3) {
-        alignedRow(description: item.description, controlWidth: 164) {
+        alignedRow(description: item.description, controlMaxWidth: 164) {
           if item.isDisabled {
             Text(options.first(where: { $0.value == value })?.label ?? value)
               .foregroundStyle(.secondary)
@@ -424,7 +424,6 @@ private struct BotChatSettingsItemView: View {
               }
             }
             .labelsHidden()
-            .fixedSize(horizontal: true, vertical: false)
             .disabled(isDisabled)
             .accessibilityLabel(label)
             .accessibilityHint(accessibilityHint)
@@ -490,7 +489,7 @@ private struct BotChatSettingsItemView: View {
 
   private func alignedRow<Control: View>(
     description: String?,
-    controlWidth: CGFloat?,
+    controlMaxWidth: CGFloat?,
     @ViewBuilder control: () -> Control
   ) -> some View {
     HStack(spacing: 10) {
@@ -507,7 +506,7 @@ private struct BotChatSettingsItemView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
       pendingIndicator
       control()
-        .frame(width: controlWidth, alignment: .trailing)
+        .frame(maxWidth: controlMaxWidth, alignment: .trailing)
     }
     .frame(minHeight: 24)
   }
