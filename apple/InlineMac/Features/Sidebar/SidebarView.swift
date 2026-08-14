@@ -575,7 +575,6 @@ struct SidebarView: View {
     }
 
     return SidebarOpenChatsCleanupMenu(
-      cleanupInterval: $settings.sidebarCleanupInterval,
       onCleanUp: cleanUpOpenChats,
       onCloseAll: closeAllOpenChats
     )

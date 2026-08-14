@@ -588,7 +588,12 @@ final class SidebarCollectionBodyController: NSViewController {
     let inputRows = input.rows
     let rows = rowsWithLatentEmptyPinnedGuide(inputRows)
     let tree = input.tree
+    let previousExternalRows = externalRows
     let previousExternalIDs = externalRows.map(\.id)
+    let disclosureChanged = sectionDisclosureChanged(
+      from: previousExternalRows,
+      to: inputRows
+    )
     let sidebarModeChanged = latestRenderState.map {
       $0.sidebarAsInbox != input.renderState.sidebarAsInbox
     } ?? false
@@ -639,6 +644,7 @@ final class SidebarCollectionBodyController: NSViewController {
         rebasedRows,
         animatingDifferences: resumedFromLoading == false
           && suppressesModeTransitionAnimations == false
+          && disclosureChanged == false
           && (previousExternalIDs != inputRows.map(\.id)
             || reconciliation?.cancelledMoveIDs.isEmpty == false),
         reason: resumedFromLoading
@@ -651,19 +657,41 @@ final class SidebarCollectionBodyController: NSViewController {
         rows,
         animatingDifferences: resumedFromLoading == false
           && suppressesModeTransitionAnimations == false
+          && disclosureChanged == false
           && (previousExternalIDs != inputRows.map(\.id)
             || reconciliation?.cancelledMoveIDs.isEmpty == false),
         reason: resumedFromLoading
           ? "model-ready"
           : (sidebarModeChanged
             ? "sidebar-mode-update"
-            : (reconciliation?.acknowledgedMoveIDs.isEmpty == false
-              ? "optimistic-acknowledged"
-              : "model-update"))
+            : (disclosureChanged
+              ? "section-disclosure"
+              : (reconciliation?.acknowledgedMoveIDs.isEmpty == false
+                ? "optimistic-acknowledged"
+                : "model-update")))
       )
     }
 
     handleScrollRequestIfPossible()
+  }
+
+  /// Section disclosure removes or restores an entire lane at once. Running
+  /// that through the generic move/fade transition keeps outgoing rows alive
+  /// while surviving rows cross them, producing a visibly duplicated stack.
+  /// Header insertion/removal remains eligible for ordinary model animation;
+  /// only a state change on the same semantic header takes the direct path.
+  private func sectionDisclosureChanged(
+    from previousRows: [SidebarCollectionRow],
+    to nextRows: [SidebarCollectionRow]
+  ) -> Bool {
+    SidebarCollectionRow.SectionHeader.allCases.contains { section in
+      let previous = previousRows.first { $0.id == .sectionHeader(section) }?
+        .sectionHeader?.isExpanded
+      let next = nextRows.first { $0.id == .sectionHeader(section) }?
+        .sectionHeader?.isExpanded
+      guard let previous, let next else { return false }
+      return previous != next
+    }
   }
 
   /// Source observation follows the preference update and can publish one or
@@ -917,8 +945,12 @@ final class SidebarCollectionBodyController: NSViewController {
     transitionRowByID = presentation?.rowByID ?? [:]
     let refreshScope = inFlightRefreshScope
     inFlightRefreshScope = .none
-    refreshVisibleContent(refreshScope)
+    // Hosted rows derive both content suppression and accessibility hit
+    // testing from layout visibility. Resolve the final scene first so a
+    // disclosure cannot refresh its surviving header against transitional
+    // hidden attributes and leave that header blank or non-interactive.
     collectionView.layoutSubtreeIfNeeded()
+    refreshVisibleContent(refreshScope)
     restoreViewportAnchor(inFlightViewportAnchor)
     inFlightViewportAnchor = nil
     updateScrollEdges(animated: false)

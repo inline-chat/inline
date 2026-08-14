@@ -2,6 +2,7 @@ import Auth
 import Foundation
 import GRDB
 import InlineKit
+import InlineMacSidebarModel
 import Logger
 import RealtimeV2
 
@@ -11,7 +12,6 @@ final class SidebarCleanup {
   static let shared = SidebarCleanup()
 
   private static let checkIntervalSeconds: Int64 = 15 * 60
-  private static let manualCleanupTimeout: TimeInterval = 12 * 60 * 60
 
   private let log = Log.scoped("SidebarCleanup")
   private var owners = Set<UUID>()
@@ -78,7 +78,7 @@ final class SidebarCleanup {
   ) {
     startRun(
       realtimeV2: realtimeV2,
-      timeout: Self.manualCleanupTimeout,
+      policy: .manual,
       completion: completion
     )
   }
@@ -118,12 +118,12 @@ final class SidebarCleanup {
 
   private func runNow(realtimeV2: RealtimeV2) {
     guard let timeout = AppSettings.shared.sidebarCleanupInterval.timeout else { return }
-    startRun(realtimeV2: realtimeV2, timeout: timeout)
+    startRun(realtimeV2: realtimeV2, policy: .automatic(timeout: timeout))
   }
 
   private func startRun(
     realtimeV2: RealtimeV2,
-    timeout: TimeInterval,
+    policy: SidebarCleanupPolicy,
     completion: ((ManualResult) -> Void)? = nil
   ) {
     guard runTask == nil else {
@@ -134,7 +134,7 @@ final class SidebarCleanup {
     let id = UUID()
     runID = id
     runTask = Task { [weak self] in
-      let result = await self?.cleanup(realtimeV2: realtimeV2, timeout: timeout) ?? .unavailable
+      let result = await self?.cleanup(realtimeV2: realtimeV2, policy: policy) ?? .unavailable
       self?.clearRunTask(id: id)
       completion?(result)
     }
@@ -161,7 +161,10 @@ final class SidebarCleanup {
     runID = nil
   }
 
-  private func cleanup(realtimeV2: RealtimeV2, timeout: TimeInterval) async -> ManualResult {
+  private func cleanup(
+    realtimeV2: RealtimeV2,
+    policy: SidebarCleanupPolicy
+  ) async -> ManualResult {
     guard AppSettings.shared.sidebarAsInbox,
           allowsCleanup,
           let currentUserId = Auth.shared.getCurrentUserId()
@@ -170,11 +173,14 @@ final class SidebarCleanup {
     }
 
     let now = Date()
-    let cutoff = now.addingTimeInterval(-timeout)
 
     do {
       try await Self.stampMissingOpenedDates(date: now)
-      let candidates = try await Self.staleOpenCandidates(cutoff: cutoff, currentUserId: currentUserId)
+      let candidates = try await Self.staleOpenCandidates(
+        policy: policy,
+        now: now,
+        currentUserId: currentUserId
+      )
       let activeCandidates = candidates
         .filter { MainWindowOpenCoordinator.shared.hasActivePeer($0.peerId) == false }
       guard activeCandidates.isEmpty == false else { return .cleaned(0) }
@@ -185,7 +191,8 @@ final class SidebarCleanup {
       guard closeReadyIDs.isEmpty == false else { return .cleaned(0) }
 
       let confirmedCandidates = try await Self.staleOpenCandidates(
-        cutoff: cutoff,
+        policy: policy,
+        now: now,
         currentUserId: currentUserId,
         dialogIDs: closeReadyIDs
       )
@@ -196,7 +203,8 @@ final class SidebarCleanup {
       guard allowsCleanup else { return .unavailable }
 
       let closedCandidates = try await Self.closeStaleCandidates(
-        cutoff: cutoff,
+        policy: policy,
+        now: now,
         currentUserId: currentUserId,
         dialogIDs: stillCloseReadyIDs
       )
@@ -267,35 +275,56 @@ final class SidebarCleanup {
   }
 
   nonisolated private static func staleOpenCandidates(
-    cutoff: Date,
+    policy: SidebarCleanupPolicy,
+    now: Date,
     currentUserId: Int64
   ) async throws -> [SidebarCleanupCandidate] {
     try await AppDatabase.shared.reader.read { db in
-      try staleOpenCandidates(db, cutoff: cutoff, currentUserId: currentUserId, dialogIDs: nil)
+      try staleOpenCandidates(
+        db,
+        policy: policy,
+        now: now,
+        currentUserId: currentUserId,
+        dialogIDs: nil
+      )
     }
   }
 
   nonisolated private static func staleOpenCandidates(
-    cutoff: Date,
+    policy: SidebarCleanupPolicy,
+    now: Date,
     currentUserId: Int64,
     dialogIDs: [Int64]
   ) async throws -> [SidebarCleanupCandidate] {
     guard dialogIDs.isEmpty == false else { return [] }
 
     return try await AppDatabase.shared.reader.read { db in
-      try staleOpenCandidates(db, cutoff: cutoff, currentUserId: currentUserId, dialogIDs: dialogIDs)
+      try staleOpenCandidates(
+        db,
+        policy: policy,
+        now: now,
+        currentUserId: currentUserId,
+        dialogIDs: dialogIDs
+      )
     }
   }
 
   nonisolated private static func closeStaleCandidates(
-    cutoff: Date,
+    policy: SidebarCleanupPolicy,
+    now: Date,
     currentUserId: Int64,
     dialogIDs: [Int64]
   ) async throws -> [SidebarCleanupCandidate] {
     guard dialogIDs.isEmpty == false else { return [] }
 
     return try await AppDatabase.shared.dbWriter.write { db in
-      let candidates = try staleOpenCandidates(db, cutoff: cutoff, currentUserId: currentUserId, dialogIDs: dialogIDs)
+      let candidates = try staleOpenCandidates(
+        db,
+        policy: policy,
+        now: now,
+        currentUserId: currentUserId,
+        dialogIDs: dialogIDs
+      )
       let ids = candidates.map(\.id)
       guard ids.isEmpty == false else { return [] }
 
@@ -316,7 +345,8 @@ final class SidebarCleanup {
 
   nonisolated private static func staleOpenCandidates(
     _ db: Database,
-    cutoff: Date,
+    policy: SidebarCleanupPolicy,
+    now: Date,
     currentUserId: Int64,
     dialogIDs: [Int64]?
   ) throws -> [SidebarCleanupCandidate] {
@@ -330,7 +360,6 @@ final class SidebarCleanup {
 
     var arguments = StatementArguments([currentUserId])
     arguments += StatementArguments([MessageSendingStatus.sent.rawValue])
-    arguments += StatementArguments([cutoff])
     if let dialogIDs {
       arguments += StatementArguments(dialogIDs)
     }
@@ -347,10 +376,24 @@ final class SidebarCleanup {
       SELECT
         "dialog"."id",
         "dialog"."peerUserId",
-        "dialog"."peerThreadId"
+        "dialog"."peerThreadId",
+        "dialog"."openedDate",
+        "lastMessage"."date" AS "lastActivityAt",
+        "latestOwnMessage"."latestOwnMessageDate",
+        CASE WHEN
+          "dialog"."peerThreadId" IS NOT NULL
+          AND (
+            COALESCE("chat"."isUntitled" = 1, 0)
+            OR TRIM(COALESCE("chat"."title", '')) = ''
+          )
+          AND "chat"."lastMsgId" IS NULL
+        THEN 1 ELSE 0 END AS "isEmptyUntitled"
       FROM "dialog"
       LEFT JOIN "chat" ON "chat"."id" = "dialog"."chatId"
       LEFT JOIN "latestOwnMessage" ON "latestOwnMessage"."chatId" = "dialog"."chatId"
+      LEFT JOIN "message" AS "lastMessage"
+        ON "lastMessage"."chatId" = "chat"."id"
+        AND "lastMessage"."messageId" = "chat"."lastMsgId"
       LEFT JOIN "draft2" ON "draft2"."peerKey" = CASE
         WHEN "dialog"."peerUserId" IS NOT NULL
           THEN 'user_' || CAST("dialog"."peerUserId" AS TEXT)
@@ -358,14 +401,7 @@ final class SidebarCleanup {
       END
       WHERE \(cleanupBaseSQL)
       AND "dialog"."openedDate" IS NOT NULL
-      AND (
-        (
-          "dialog"."peerThreadId" IS NOT NULL
-          AND COALESCE("chat"."isUntitled" = 1, 0)
-          AND "chat"."lastMsgId" IS NULL
-        )
-        OR \(effectiveActivityDateSQL) <= ?
-      )
+      AND ("chat"."lastMsgId" IS NULL OR "lastMessage"."date" IS NOT NULL)
       AND NOT (\(Dialog.unreadSQL))
       AND (
         "draft2"."peerKey" IS NULL
@@ -373,12 +409,20 @@ final class SidebarCleanup {
       )
       AND "dialog"."draftMessage" IS NULL
       \(dialogFilter)
-      ORDER BY \(effectiveActivityDateSQL) ASC
+      ORDER BY "dialog"."openedDate" ASC
       """,
       arguments: arguments
     )
 
-    return try request.fetchAll(db)
+    return try request.fetchAll(db).filter { candidate in
+      policy.shouldClose(
+        now: now,
+        openedAt: candidate.openedDate,
+        lastActivityAt: candidate.lastActivityAt,
+        latestOwnMessageAt: candidate.latestOwnMessageDate,
+        isEmptyUntitled: candidate.isEmptyUntitled
+      )
+    }
   }
 
   nonisolated private static func placeholders(count: Int) -> String {
@@ -393,24 +437,16 @@ final class SidebarCleanup {
     """
   }
 
-  nonisolated private static var effectiveActivityDateSQL: String {
-    """
-    (
-      CASE
-        WHEN "latestOwnMessage"."latestOwnMessageDate" IS NULL THEN "dialog"."openedDate"
-        WHEN "latestOwnMessage"."latestOwnMessageDate" > "dialog"."openedDate"
-          THEN "latestOwnMessage"."latestOwnMessageDate"
-        ELSE "dialog"."openedDate"
-      END
-    )
-    """
-  }
 }
 
 private struct SidebarCleanupCandidate: FetchableRecord, Decodable, Sendable {
   let id: Int64
   let peerUserId: Int64?
   let peerThreadId: Int64?
+  let openedDate: Date
+  let lastActivityAt: Date?
+  let latestOwnMessageDate: Date?
+  let isEmptyUntitled: Bool
 
   var peerId: Peer {
     if let peerUserId {

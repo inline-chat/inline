@@ -21,7 +21,7 @@ struct SidebarCollectionRow: Equatable, Identifiable {
 
   static let sectionHeaderHeight: CGFloat = 28
   static let timelineHeaderHeight: CGFloat = 28
-  static let sectionTopSpacing: CGFloat = 4
+  static let sectionTopSpacing: CGFloat = 8
   static let spacedSectionHeaderHeight = sectionHeaderHeight + sectionTopSpacing
   static let emptyPinnedTargetHeight: CGFloat = 56
   static let itemVisualGap: CGFloat = 1
