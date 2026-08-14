@@ -14,6 +14,7 @@ struct AllChatsRouteView: View {
   @EnvironmentStateObject private var viewModel: AllChatsViewModel
   @ObservedObject private var settings = AppSettings.shared
   @State private var rowLayout: AllChatsRowLayout = .twoLine
+  @State private var listFilter: AllChatsListFilter = .all
 
   private let filter: AllChatsFilter
 
@@ -26,16 +27,20 @@ struct AllChatsRouteView: View {
 
   var body: some View {
     let title = pageTitle
-    let sections = viewModel.sections(for: filter, spaceId: nav.selectedSpaceId)
+    let sections = viewModel.sections(
+      for: filter,
+      listFilter: listFilter,
+      spaceId: nav.selectedSpaceId
+    )
 
     ZStack {
       if viewModel.isLoading {
         ProgressView()
           .controlSize(.small)
-      } else if viewModel.errorText != nil || (sections.isEmpty && filter == .archived) {
+      } else if viewModel.errorText != nil || showsEmptyFilterState(sections: sections) {
         RoutePlaceholderView(
-          title: viewModel.errorText ?? filter.emptyTitle,
-          systemImage: viewModel.errorText == nil ? filter.emptySystemImage : "exclamationmark.triangle"
+          title: viewModel.errorText ?? emptyTitle,
+          systemImage: viewModel.errorText == nil ? emptySystemImage : "exclamationmark.triangle"
         )
       } else {
         chatList(sections: sections)
@@ -59,9 +64,15 @@ struct AllChatsRouteView: View {
         ToolbarSpacer(.flexible)
       }
 
-      ToolbarItem {
-        rowLayoutMenu
+      if filter == .chats {
+        ToolbarItem {
+          listFilterMenu
+        }
       }
+
+      // Keep the alternate row layout available in source, but do not expose
+      // it in production while the toolbar is dedicated to chat filtering.
+      // ToolbarItem { rowLayoutMenu }
 
       ToolbarItem {
         Button(action: toggleArchiveFilter) {
@@ -171,6 +182,43 @@ struct AllChatsRouteView: View {
     .help("View Options")
   }
 
+  private var listFilterMenu: some View {
+    Menu {
+      listFilterButton(.all, title: "All Chats")
+      listFilterButton(.unread, title: "Unread")
+    } label: {
+      Label("Filter", systemImage: "line.3.horizontal.decrease")
+    }
+    .help("Filter Chats")
+  }
+
+  private func listFilterButton(
+    _ value: AllChatsListFilter,
+    title: LocalizedStringKey
+  ) -> some View {
+    Button {
+      listFilter = value
+    } label: {
+      if listFilter == value {
+        Label(title, systemImage: "checkmark")
+      } else {
+        Text(title)
+      }
+    }
+  }
+
+  private func showsEmptyFilterState(sections: [AllChatsSection]) -> Bool {
+    sections.isEmpty && (filter == .archived || listFilter == .unread)
+  }
+
+  private var emptyTitle: String {
+    listFilter == .unread ? "No unread chats" : filter.emptyTitle
+  }
+
+  private var emptySystemImage: String {
+    listFilter == .unread ? "checkmark.message" : filter.emptySystemImage
+  }
+
   private func toggleArchiveFilter() {
     if filter == .archived {
       closeArchiveFilter()
@@ -204,6 +252,20 @@ struct AllChatsRouteView: View {
 private enum AllChatsRowLayout: Equatable {
   case twoLine
   case titlePreviewLine
+}
+
+private enum AllChatsListFilter: Equatable {
+  case all
+  case unread
+
+  func includes(_ item: AllChatsItem) -> Bool {
+    switch self {
+    case .all:
+      true
+    case .unread:
+      item.unread
+    }
+  }
 }
 
 private enum AllChatsFilter: Equatable {
@@ -441,10 +503,15 @@ final class AllChatsViewModel: ObservableObject {
     snapshots.map(AllChatsItem.init)
   }
 
-  fileprivate func sections(for filter: AllChatsFilter, spaceId: Int64?) -> [AllChatsSection] {
+  fileprivate func sections(
+    for filter: AllChatsFilter,
+    listFilter: AllChatsListFilter,
+    spaceId: Int64?
+  ) -> [AllChatsSection] {
     Self.makeSections(items: items.filter { item in
       item.chatListHidden == false
         && filter.includes(item)
+        && listFilter.includes(item)
         && (spaceId == nil || item.spaceId == spaceId)
     })
   }
@@ -598,6 +665,38 @@ private struct NewThreadListRow: View {
   }
 }
 
+private enum AllChatsRowConfirmation {
+  case archive
+  case destructive(ChatDestructiveAction)
+
+  var title: String {
+    switch self {
+    case .archive:
+      "Archive Chat?"
+    case let .destructive(action):
+      action.title
+    }
+  }
+
+  var actionTitle: String {
+    switch self {
+    case .archive:
+      "Archive"
+    case let .destructive(action):
+      action.shortTitle
+    }
+  }
+
+  func message(chatTitle: String) -> String {
+    switch self {
+    case .archive:
+      "\(chatTitle) will move to Archived Chats. You can find it from the Archive button in the toolbar."
+    case let .destructive(action):
+      action.confirmationMessage(chatTitle: chatTitle)
+    }
+  }
+}
+
 private struct ChatListRow: View {
   let item: AllChatsItem
   let selected: Bool
@@ -611,7 +710,7 @@ private struct ChatListRow: View {
   @Environment(\.nav) private var nav
   @Environment(\.colorScheme) private var colorScheme
   @State private var isHovered = false
-  @State private var pendingDestructiveAction: ChatDestructiveAction?
+  @State private var pendingConfirmation: AllChatsRowConfirmation?
 
   private static let iconSize: CGFloat = 30
   private static let compactIconSize: CGFloat = 22
@@ -653,10 +752,10 @@ private struct ChatListRow: View {
 
   private var destructiveConfirmationPresented: Binding<Bool> {
     Binding {
-      pendingDestructiveAction != nil
+      pendingConfirmation != nil
     } set: { isPresented in
       if isPresented == false {
-        pendingDestructiveAction = nil
+        pendingConfirmation = nil
       }
     }
   }
@@ -729,36 +828,44 @@ private struct ChatListRow: View {
         )
       }
 
-      Button {
-        toggleArchive()
-      } label: {
-        Label(item.archived ? "Unarchive" : "Archive", systemImage: "archivebox")
+      if item.archived {
+        Button {
+          toggleArchive()
+        } label: {
+          Label("Unarchive", systemImage: "archivebox")
+        }
+      } else {
+        Button(role: .destructive) {
+          pendingConfirmation = .archive
+        } label: {
+          Label("Archive", systemImage: "archivebox")
+        }
       }
 
       if let destructiveAction {
         Divider()
 
         Button(role: .destructive) {
-          pendingDestructiveAction = destructiveAction
+          pendingConfirmation = .destructive(destructiveAction)
         } label: {
           Label(destructiveAction.title, systemImage: destructiveAction.systemImage)
         }
       }
     }
     .alert(
-      pendingDestructiveAction?.title ?? "Confirm",
+      pendingConfirmation?.title ?? "Confirm",
       isPresented: destructiveConfirmationPresented,
-      presenting: pendingDestructiveAction
-    ) { action in
+      presenting: pendingConfirmation
+    ) { confirmation in
       Button("Cancel", role: .cancel) {
-        pendingDestructiveAction = nil
+        pendingConfirmation = nil
       }
 
-      Button(action.shortTitle, role: .destructive) {
-        performDestructiveAction(action)
+      Button(confirmation.actionTitle, role: .destructive) {
+        perform(confirmation)
       }
-    } message: { action in
-      Text(action.confirmationMessage(chatTitle: item.title))
+    } message: { confirmation in
+      Text(confirmation.message(chatTitle: item.title))
     }
   }
 
@@ -1019,9 +1126,19 @@ private struct ChatListRow: View {
     }
   }
 
+  private func perform(_ confirmation: AllChatsRowConfirmation) {
+    pendingConfirmation = nil
+
+    switch confirmation {
+    case .archive:
+      toggleArchive()
+    case let .destructive(action):
+      performDestructiveAction(action)
+    }
+  }
+
   @MainActor
   private func performDestructiveAction(_ action: ChatDestructiveAction) {
-    pendingDestructiveAction = nil
     ChatDestructiveActionRunner.perform(action, peer: peerId, dependencies: dependencies) {
       if isSelectedInCurrentNavigation {
         dependencies?.nav2?.navigate(to: .empty)

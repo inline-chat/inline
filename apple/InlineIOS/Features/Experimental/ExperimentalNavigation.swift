@@ -497,13 +497,12 @@ private struct ExperimentalChatListView: View {
         )
       }
     }
-    .confirmationDialog(
+    .alert(
       "Archive Chat?",
       isPresented: Binding(
         get: { pendingArchiveItem != nil },
         set: { if !$0 { pendingArchiveItem = nil } }
       ),
-      titleVisibility: .visible,
       presenting: pendingArchiveItem
     ) { item in
       Button("Archive", role: .destructive) {
@@ -514,7 +513,7 @@ private struct ExperimentalChatListView: View {
         pendingArchiveItem = nil
       }
     } message: { _ in
-      Text("This chat will move to Archived Chats.")
+      Text("This chat will move to Archived Chats. You can find it from the ••• menu.")
     }
   }
 
