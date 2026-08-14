@@ -74,8 +74,8 @@ public struct NudgeButton: View {
   private var content: some View {
     switch presentation {
     case .toolbar:
-      let button = nudgeButton
 #if os(iOS)
+      let button = nudgeButton
       button
         .alert(
           alertTitle,
@@ -106,17 +106,7 @@ public struct NudgeButton: View {
           }
         )
 #else
-      button
-        .popover(item: $activePopover, arrowEdge: .top) { popover in
-          let content = popoverContent(popover)
-            .presentationCompactAdaptation(.popover)
-
-          if #available(macOS 15, *) {
-            content.presentationSizing(.fitted)
-          } else {
-            content
-          }
-        }
+      macToolbarNudgeMenu
 #endif
     case .menu:
       Button {
@@ -130,6 +120,41 @@ public struct NudgeButton: View {
     }
   }
 
+#if os(macOS)
+  private var macToolbarNudgeMenu: some View {
+    Menu {
+      Button {
+        triggerUrgentHaptic()
+        sendNudge(nudgeText: NudgeButtonState.urgentNudgeText)
+      } label: {
+        Label {
+          Text("Urgent Nudge", comment: "Menu action that sends an urgent Nudge.")
+        } icon: {
+          Image(systemName: "bell.badge.fill")
+        }
+        Text(
+          "Bypasses Inline notification settings and always plays a sound.",
+          comment: "Description for the Urgent Nudge menu action."
+        )
+      }
+    } label: {
+      Label {
+        Text("Nudge", comment: "Toolbar button that sends a Nudge.")
+      } icon: {
+        Image(systemName: NudgeButtonState.nudgeIconName)
+      }
+      .labelStyle(.iconOnly)
+    } primaryAction: {
+      triggerHaptic()
+      sendNudge()
+    }
+    .menuIndicator(.hidden)
+    .accessibilityLabel("Send nudge")
+    .help("Send nudge")
+    .disabled(isSending)
+  }
+#endif
+
   private var nudgeButton: some View {
     Button {
       handleTap()
@@ -142,7 +167,6 @@ public struct NudgeButton: View {
         .overlay {
           holdProgressRing(size: 26, lineWidth: 2)
         }
-        .frame(minWidth: 32)
         .animation(.easeOut(duration: 0.15), value: isHolding)
 #else
       ZStack {

@@ -17,7 +17,6 @@ struct ChatRouteView: View {
   @State private var chatToolbarState = ChatToolbarState()
   @State private var botChatSettingsCoordinator: BotChatSettingsCoordinator
   @State private var toolbarDialog: Dialog?
-  @State private var nudgePopoverPresented = false
   @State private var navigationTitle = ""
   @State private var userGroupMentionTarget: UserGroupMentionTarget?
 
@@ -122,7 +121,6 @@ struct ChatRouteView: View {
           chatToolbarState.dismissPresentation()
           botChatSettingsCoordinator.cancel()
           botChatSettingsCoordinator = BotChatSettingsCoordinator(peer: peer)
-          nudgePopoverPresented = false
         }
         syncChatMenuContext(dependencies: dependencies)
       }
@@ -131,13 +129,9 @@ struct ChatRouteView: View {
       }
       .onEscapeKey(
         "chat_route_popover_escape_\(peer.toString())",
-        enabled: chatToolbarState.presentation?.isPopover == true || nudgePopoverPresented
+        enabled: chatToolbarState.presentation?.isPopover == true
       ) {
-        if nudgePopoverPresented {
-          nudgePopoverPresented = false
-        } else {
-          chatToolbarState.dismissPresentation()
-        }
+        chatToolbarState.dismissPresentation()
       }
       .task(id: peer.toString(), priority: .utility) {
         BotPresenceController.shared.setContext(peer: peer, realtimeV2: dependencies.realtimeV2)
@@ -299,7 +293,7 @@ struct ChatRouteView: View {
 
         if case .user = peer {
           ToolbarItem {
-            NudgeButton(peer: peer, isPopoverPresented: $nudgePopoverPresented)
+            NudgeButton(peer: peer)
               .id(peer.id)
           }
 
