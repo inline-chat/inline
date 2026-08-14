@@ -738,7 +738,6 @@ private struct ExperimentalChatListView: View {
   @ViewBuilder
   private func contextMenuActions(for item: ChatListItemSnapshot) -> some View {
     if mode == .inbox {
-      contextMenuNavigateToChatButton(for: item)
       contextMenuReadUnreadButton(for: item)
       contextMenuPinButton(for: item)
       Divider()
@@ -752,18 +751,6 @@ private struct ExperimentalChatListView: View {
     } else if mode == .archived {
       contextMenuUnarchiveButton(for: item)
       contextMenuReadUnreadButton(for: item)
-    }
-  }
-
-  private func contextMenuNavigateToChatButton(for item: ChatListItemSnapshot) -> some View {
-    Button {
-      ExperimentalHomeNavigationPerformance.beginChatOpen(
-        peer: item.peer,
-        source: "inbox_context_menu"
-      )
-      router.push(.chat(peer: item.peer))
-    } label: {
-      Label("Open", systemImage: "arrow.up.right")
     }
   }
 
@@ -874,8 +861,8 @@ private struct ExperimentalChatListView: View {
     if mode == .inbox {
       closeButton(for: item)
     } else if mode == .allChats {
-      archiveButton(for: item)
       openButton(for: item)
+      archiveButton(for: item)
     } else if mode == .archived {
       unarchiveButton(for: item)
     }
