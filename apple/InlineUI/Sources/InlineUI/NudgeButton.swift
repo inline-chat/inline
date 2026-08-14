@@ -133,7 +133,7 @@ public struct NudgeButton: View {
           Image(systemName: "bell.badge.fill")
         }
         Text(
-          "Bypasses Inline notification settings and always plays a sound.",
+          "Bypasses Inline notification and silent settings, requesting time-sensitive delivery with sound.",
           comment: "Description for the Urgent Nudge menu action."
         )
       }
@@ -281,7 +281,7 @@ public struct NudgeButton: View {
     case .guide:
       return "Send a \(NudgeButtonState.nudgeText) to get \(attentionTarget) attention."
     case .confirm:
-      return "An urgent nudge will pass through any notification setting and make a sound."
+      return "An urgent nudge bypasses Inline notification and silent settings, requesting time-sensitive delivery with sound."
     case .none:
       return ""
     }
@@ -556,7 +556,7 @@ private struct NudgeGuideView: View {
         .multilineTextAlignment(.leading)
         .fixedSize(horizontal: false, vertical: true)
 
-      Text("Press and hold for an urgent \(NudgeButtonState.urgentNudgeText) that can notify even if their notifications are off.")
+      Text("Press and hold for an urgent \(NudgeButtonState.urgentNudgeText) that requests time-sensitive delivery with sound.")
         .font(.subheadline)
         .foregroundStyle(.secondary)
         .multilineTextAlignment(.leading)
@@ -608,7 +608,7 @@ private struct NudgeConfirmView: View {
       Text("🚨 Send an urgent nudge?")
         .font(.headline)
 
-      Text("An urgent nudge will pass through any notification setting and make a sound.")
+      Text("An urgent nudge bypasses Inline notification and silent settings, requesting time-sensitive delivery with sound.")
         .font(.subheadline)
         .foregroundStyle(.secondary)
         .multilineTextAlignment(.leading)

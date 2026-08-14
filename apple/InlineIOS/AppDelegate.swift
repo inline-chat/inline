@@ -110,7 +110,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
   func requestPushNotifications() {
     let notificationCenter = UNUserNotificationCenter.current()
-    notificationCenter.requestAuthorization(options: [.alert, .sound, .badge, .timeSensitive]) { granted, _ in
+    notificationCenter.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
       guard granted else { return }
       self.getNotificationSettings()
     }
@@ -204,6 +204,14 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     default:
       completionHandler(.noData)
     }
+  }
+
+  func userNotificationCenter(
+    _: UNUserNotificationCenter,
+    willPresent notification: UNNotification,
+    withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+  ) {
+    completionHandler(UrgentNotificationPresentation.foregroundOptions(for: notification.request.content))
   }
 
   func userNotificationCenter(

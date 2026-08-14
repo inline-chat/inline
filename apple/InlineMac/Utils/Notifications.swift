@@ -47,6 +47,12 @@ extension NotificationsManager: UNUserNotificationCenterDelegate {
     }
 #endif
 
+    let urgentOptions = UrgentNotificationPresentation.foregroundOptions(for: notification.request.content)
+    if !urgentOptions.isEmpty {
+      completionHandler(urgentOptions)
+      return
+    }
+
     // Don't alert the user for other types.
     completionHandler([])
   }

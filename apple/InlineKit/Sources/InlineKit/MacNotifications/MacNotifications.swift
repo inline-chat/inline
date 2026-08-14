@@ -55,6 +55,9 @@ public actor MacNotifications {
     content.userInfo = userInfo
     let isSoundEnabled = await isSoundEnabled()
     content.sound = (soundOverride ?? (forceSound || isSoundEnabled)) ? .default : nil
+    if forceSound {
+      content.interruptionLevel = .timeSensitive
+    }
 
     if let imageURL {
       do {

@@ -77,6 +77,7 @@ type ApsOverrides = {
 const configureTimeSensitive = (notification: Notification) => {
   const aps = notification.aps as unknown as ApsOverrides
   aps["interruption-level"] = "time-sensitive"
+  notification.priority = 10
 }
 
 export const shouldPlayNotificationSound = ({

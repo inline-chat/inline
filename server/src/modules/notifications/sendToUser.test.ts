@@ -194,6 +194,47 @@ describe("sendToUser APN payloads", () => {
     })
     expect(notification.aps.sound).toBe("default")
     expect((notification.aps as unknown as Record<string, unknown>)["interruption-level"]).toBe("time-sensitive")
+    expect(notification.priority).toBe(10)
+  })
+
+  it("preserves urgent delivery metadata for encrypted messages", () => {
+    const notification = buildApnNotification({
+      session: {
+        pushContentKeyPublic: Buffer.alloc(32),
+        pushContentKeyId: "key-1",
+        pushContentVersion: PUSH_CONTENT_VERSION,
+        pushContentKeyAlgorithm: PUSH_CONTENT_ALGORITHM,
+      },
+      payload: {
+        kind: "send_message",
+        senderUserId: 12,
+        threadId: "chat_34",
+        messageId: "90",
+        title: "Title",
+        body: "Body",
+        isUrgentNudge: true,
+      },
+      silent: true,
+      topic: "chat.inline.Inline",
+      nowSeconds: 500,
+      encrypt: () => ({
+        version: PUSH_CONTENT_VERSION,
+        algorithm: PUSH_CONTENT_ALGORITHM,
+        keyId: "key-1",
+        ephemeralPublicKey: "public",
+        salt: "salt",
+        iv: "iv",
+        ciphertext: "ciphertext",
+        tag: "tag",
+      }),
+    })
+
+    expect(notification).toBeDefined()
+    if (!notification) throw new Error("expected APN notification")
+    expect(notification.payload).toMatchObject({ kind: "send_message_encrypted" })
+    expect(notification.aps.sound).toBe("default")
+    expect((notification.aps as unknown as Record<string, unknown>)["interruption-level"]).toBe("time-sensitive")
+    expect(notification.priority).toBe(10)
   })
 
   it("reports encryption failure and falls back to plaintext", () => {

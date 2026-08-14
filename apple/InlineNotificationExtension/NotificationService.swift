@@ -356,8 +356,15 @@ private extension NotificationService {
         let intent = try await InlineMessageIntentDonation.donate(request)
         logger.info("notification interaction donation succeeded")
         let updated = try bestAttemptContent.updating(from: intent)
-        contentToDeliver = updated
-        self.bestAttemptContent = updated as? UNMutableNotificationContent
+        if let mutableUpdated = updated.mutableCopy() as? UNMutableNotificationContent {
+          mutableUpdated.interruptionLevel = bestAttemptContent.interruptionLevel
+          mutableUpdated.sound = bestAttemptContent.sound
+          contentToDeliver = mutableUpdated
+          self.bestAttemptContent = mutableUpdated
+        } else {
+          contentToDeliver = updated
+          self.bestAttemptContent = updated as? UNMutableNotificationContent
+        }
         logger.info("notification content updated from intent")
       } catch {
         logger.error("notification interaction donation or content update failed")
