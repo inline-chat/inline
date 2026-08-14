@@ -203,6 +203,21 @@ const makeOperations = (
       })
     },
     emailProviderStatus: () => called("emailProviderStatus"),
+    testEmailProvider: () => {
+      probe.calls.push("testEmailProvider")
+      return Effect.succeed({
+        kind: "json",
+        body: {
+          ok: true,
+          provider: "ses",
+          recipient: "admin@inline.chat",
+          fromAddress: "team@inline.chat",
+          replyToAddress: "hi@inline.chat",
+          messageId: "test-message-id",
+          sentAt: "2026-08-14T00:00:00.000Z",
+        },
+      })
+    },
     previewEmailCampaign: () => called("previewEmailCampaign"),
     createEmailCampaign: () => called("createEmailCampaign"),
     testEmailCampaign: () => called("testEmailCampaign"),
@@ -428,6 +443,7 @@ describe("AdminRouteGroup", () => {
         "POST /admin/email-campaigns/{id}/pause",
         "POST /admin/email-campaigns/{id}/send",
         "POST /admin/email-campaigns/{id}/test",
+        "POST /admin/email-provider-test",
         "POST /admin/invites/generate",
         "POST /admin/users/{id}/invites",
         "POST /admin/users/{id}/sessions/{sessionId}/revoke",
@@ -645,7 +661,7 @@ describe("AdminRouteGroup", () => {
     await withKernel(
       async ({ handler }) => {
         const response = await handler(
-          adminRequest("/admin/invites/generate", {
+          adminRequest("/admin/email-provider-test", {
             method: "POST",
             headers: {
               "content-type": "application/json",
@@ -673,7 +689,7 @@ describe("AdminRouteGroup", () => {
     await withKernel(
       async ({ handler }) => {
         const response = await handler(
-          adminRequest("/admin/invites/generate", {
+          adminRequest("/admin/email-provider-test", {
             method: "POST",
             headers: {
               "content-type": "application/json",
@@ -819,6 +835,26 @@ describe("AdminRouteGroup", () => {
         )
         expect(updatedConfig.status).toBe(200)
 
+        const providerTest = await handler(
+          adminRequest("/admin/email-provider-test", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ provider: "ses" }),
+          }),
+        )
+        expect(providerTest.status).toBe(200)
+        expect(await providerTest.json()).toEqual({
+          ok: true,
+          provider: "ses",
+          recipient: "admin@inline.chat",
+          fromAddress: "team@inline.chat",
+          replyToAddress: "hi@inline.chat",
+          messageId: "test-message-id",
+          sentAt: "2026-08-14T00:00:00.000Z",
+        })
+
         const generated = await handler(
           adminRequest("/admin/invites/generate", {
             method: "POST",
@@ -839,6 +875,7 @@ describe("AdminRouteGroup", () => {
           "emailCampaigns",
           "serverConfig",
           "updateServerConfig",
+          "testEmailProvider",
           "generateInvites",
         ])
       },

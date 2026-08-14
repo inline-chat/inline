@@ -1,9 +1,15 @@
 import { GetAccountCommand, GetEmailIdentityCommand, type GetAccountCommandOutput } from "@aws-sdk/client-sesv2"
 import { RESEND_API_KEY, SES_REGION } from "@in/server/env"
 import { sesClient } from "@in/server/libs/ses"
+import {
+  TRANSACTIONAL_EMAIL_FROM_ADDRESS,
+  transactionalEmailReplyTo,
+} from "@in/server/modules/email/transactionalIdentity"
 
 export interface EmailProviderStatus {
   readonly provider: "resend" | "ses"
+  readonly fromAddress: string
+  readonly replyToAddress: string
   readonly region: string | null
   readonly refreshedAt: string
   readonly available: boolean
@@ -46,6 +52,8 @@ const resendStatus = async (): Promise<EmailProviderStatus> => {
   const resetSeconds = numberHeader(response.headers, "ratelimit-reset")
   return {
     provider: "resend",
+    fromAddress: TRANSACTIONAL_EMAIL_FROM_ADDRESS,
+    replyToAddress: transactionalEmailReplyTo("resend"),
     region: null,
     refreshedAt: new Date().toISOString(),
     available: response.ok,
@@ -83,6 +91,8 @@ const sesStatus = async (): Promise<EmailProviderStatus> => {
     .catch(() => null)
   return {
     provider: "ses",
+    fromAddress: TRANSACTIONAL_EMAIL_FROM_ADDRESS,
+    replyToAddress: transactionalEmailReplyTo("ses"),
     region: SES_REGION,
     refreshedAt: new Date().toISOString(),
     available: true,
@@ -108,6 +118,8 @@ const sesStatus = async (): Promise<EmailProviderStatus> => {
 
 const unavailableStatus = (provider: "resend" | "ses"): EmailProviderStatus => ({
   provider,
+  fromAddress: TRANSACTIONAL_EMAIL_FROM_ADDRESS,
+  replyToAddress: transactionalEmailReplyTo(provider),
   region: provider === "ses" ? SES_REGION : null,
   refreshedAt: new Date().toISOString(),
   available: false,

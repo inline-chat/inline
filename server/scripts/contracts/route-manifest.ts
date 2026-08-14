@@ -221,6 +221,7 @@ const intentionalCandidateOnly =
     "POST\t/admin/email-campaigns/{id}/pause",
     "POST\t/admin/email-campaigns/{id}/send",
     "POST\t/admin/email-campaigns/{id}/test",
+    "POST\t/admin/email-provider-test",
     "POST\t/email/unsubscribe/{token}",
     "PUT\t/admin/server-config",
   ])
