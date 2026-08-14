@@ -39,4 +39,20 @@ describe("encodeUser time-zone privacy", () => {
   test("shares the time zone when enabled", () => {
     expect(encodeUser({ user: { ...user, shareTimeZone: true }, viewerUserId: 200 }).timeZone).toBe("Asia/Tehran")
   })
+
+  test("includes a shared time zone in an explicitly authorized min projection", () => {
+    expect(
+      encodeUser({
+        user: { ...user, shareTimeZone: true },
+        min: true,
+        includeTimeZone: true,
+        viewerUserId: 200,
+      }).timeZone,
+    ).toBe("Asia/Tehran")
+  })
+
+  test("keeps ordinary and hidden min projections redacted", () => {
+    expect(encodeUser({ user: { ...user, shareTimeZone: true }, min: true, viewerUserId: 200 }).timeZone).toBeUndefined()
+    expect(encodeUser({ user, min: true, includeTimeZone: true, viewerUserId: 200 }).timeZone).toBeUndefined()
+  })
 })

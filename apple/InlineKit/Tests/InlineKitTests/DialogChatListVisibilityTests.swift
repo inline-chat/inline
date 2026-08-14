@@ -327,7 +327,7 @@ struct DialogChatListVisibilityTests {
     #expect(placeholder.needsFullFetch)
     #expect(placeholder.displayName == "User")
     #expect(named.needsDisplayNameFetch == false)
-    #expect(named.needsFullFetch)
+    #expect(named.needsFullFetch == false)
     #expect(named.displayName == "Riley Stone")
 
     var namedWithTimeZone = named

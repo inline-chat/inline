@@ -425,11 +425,11 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
     guard !Task.isCancelled else { return }
 
     if cachedChatItem?.chat != nil {
-      await refetchHistoryAndUser(peer: peer_)
+      await refetchHistoryAndUser(peer: peer_, cachedUser: cachedChatItem?.user)
       return
     }
 
-    await fetchPeerUserIfNeeded(peer: peer_)
+    await fetchPeerUserIfNeeded(peer: peer_, cachedUser: cachedChatItem?.user)
 
     guard !Task.isCancelled else { return }
     _ = try? await Api.realtime.send(.getChat(peer: peer_))
@@ -465,10 +465,10 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 
   private func refetchHistoryOnlyAsync() async {
     let peer_ = peer
-    await refetchHistoryAndUser(peer: peer_)
+    await refetchHistoryAndUser(peer: peer_, cachedUser: chatItem?.user)
   }
 
-  private func refetchHistoryAndUser(peer: Peer) async {
+  private func refetchHistoryAndUser(peer: Peer, cachedUser: User?) async {
     await withTaskGroup(of: Void.self) { group in
       group.addTask {
         guard !Task.isCancelled else { return }
@@ -477,32 +477,22 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 
       group.addTask {
         guard !Task.isCancelled else { return }
-        await self.fetchPeerUserIfNeeded(peer: peer)
+        await self.fetchPeerUserIfNeeded(peer: peer, cachedUser: cachedUser)
       }
     }
   }
 
-  private func fetchPeerUserIfNeeded(peer: Peer) async {
+  private func fetchPeerUserIfNeeded(peer: Peer, cachedUser: User?) async {
     guard let userId = peer.asUserId() else { return }
+    guard cachedUser?.needsDisplayNameFetch ?? true else { return }
 
     do {
-      guard try await shouldFetchPeerUser(userId: userId) else { return }
       try Task.checkCancellation()
       try await DataManager.shared.getUser(id: userId)
     } catch {
       if Self.isCancellation(error) { return }
       log.error("Failed to refetch user info", error: error)
     }
-  }
-
-  private func shouldFetchPeerUser(userId: Int64) async throws -> Bool {
-    try Task.checkCancellation()
-    let shouldFetch = try await db.reader.read { db in
-      guard let user = try User.fetchOne(db, id: userId) else { return true }
-      return user.needsFullFetch
-    }
-    try Task.checkCancellation()
-    return shouldFetch
   }
 
   /// Query chat item from database directly.
@@ -567,7 +557,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 
     do {
       try Task.checkCancellation()
-      if let userId = peer_.asUserId(), try await shouldFetchPeerUser(userId: userId) {
+      if let userId = peer_.asUserId(), cachedChatItem?.user?.needsDisplayNameFetch ?? true {
         try await DataManager.shared.getUser(id: userId)
         try Task.checkCancellation()
 

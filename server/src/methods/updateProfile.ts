@@ -14,6 +14,7 @@ import {
   getPublicHandleAvailability,
   lockPublicHandleNamespace,
 } from "@in/server/modules/spaces/spaceHandle"
+import { syncTimeZoneForElectedAppleSession } from "@in/server/modules/users/timeZoneSync"
 
 export const Input = Type.Object({
   firstName: Type.Optional(Type.String()),
@@ -34,6 +35,7 @@ const log = new Log("updateProfile")
 export const handler = async (input: Input, context: HandlerContext): Promise<Static<typeof Response>> => {
   try {
     let props: DbNewUser = {}
+    let timeZone: string | undefined
     if (input.firstName !== undefined) {
       const firstName = input.firstName.trim()
       if (!firstName) {
@@ -65,13 +67,12 @@ export const handler = async (input: Input, context: HandlerContext): Promise<St
       }
     }
     if (input.timeZone !== undefined) {
-      const timeZone = input.timeZone.trim()
-      if (timeZone && !validateIanaTimezone(timeZone)) {
+      const requestedTimeZone = input.timeZone.trim()
+      if (requestedTimeZone && !validateIanaTimezone(requestedTimeZone)) {
         throw new InlineError(InlineError.ApiError.TIMEZONE_INVALID)
       }
-      if (timeZone) {
-        log.debug("Setting timeZone", { timeZone })
-        props.timeZone = timeZone
+      if (requestedTimeZone) {
+        timeZone = requestedTimeZone
       }
     }
 
@@ -79,10 +80,22 @@ export const handler = async (input: Input, context: HandlerContext): Promise<St
       props.pendingSetup = false
     }
 
-    const { user, completedSignup } = await updateUserAndDetectSignupCompletion(context.currentUserId, props)
+    let { user, completedSignup } = await updateUserAndDetectSignupCompletion(context.currentUserId, props)
     if (!user) {
       log.error("Failed to set profile", { userId: context.currentUserId })
       throw new InlineError(InlineError.ApiError.INTERNAL)
+    }
+
+    if (timeZone) {
+      const syncedUser = await syncTimeZoneForElectedAppleSession({
+        userId: context.currentUserId,
+        sessionId: context.currentSessionId,
+        timeZone,
+      })
+      if (syncedUser) {
+        user = syncedUser
+        log.debug("Set timeZone from elected Apple session")
+      }
     }
 
     if (completedSignup) {
@@ -103,6 +116,11 @@ async function updateUserAndDetectSignupCompletion(
   userId: number,
   props: DbNewUser,
 ): Promise<{ user: DbUser | undefined; completedSignup: boolean }> {
+  if (Object.keys(props).length === 0) {
+    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
+    return { user, completedSignup: false }
+  }
+
   if (props.pendingSetup !== false && typeof props.username !== "string") {
     const [user] = await db.update(users).set(props).where(eq(users.id, userId)).returning()
     return { user, completedSignup: false }

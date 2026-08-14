@@ -163,8 +163,12 @@ describe("updateProfile", () => {
 
   test("persists valid hyphenated timezones", async () => {
     const user = await testUtils.createUser("valid-timezone-profile@example.com")
+    const { session } = await testUtils.createSessionForUser(user.id, { clientType: "ios" })
 
-    const result = await handler({ timeZone: "America/Port-au-Prince" }, makeContext(user.id))
+    const result = await handler(
+      { timeZone: "America/Port-au-Prince" },
+      { ...makeContext(user.id), currentSessionId: session.id },
+    )
 
     expect(result.user.timeZone).toBe("America/Port-au-Prince")
 
@@ -180,5 +184,19 @@ describe("updateProfile", () => {
       code: InlineError.ApiError.TIMEZONE_INVALID[1],
       description: InlineError.ApiError.TIMEZONE_INVALID[2],
     })
+  })
+
+  test("ignores time-zone writes from older Apple sessions", async () => {
+    const user = await testUtils.createUser("old-timezone-profile@example.com")
+    const oldSession = await testUtils.createSessionForUser(user.id, { clientType: "ios" })
+    await testUtils.createSessionForUser(user.id, { clientType: "macos" })
+    await db.update(users).set({ timeZone: "Asia/Tehran" }).where(eq(users.id, user.id))
+
+    const result = await handler(
+      { timeZone: "America/Toronto" },
+      { ...makeContext(user.id), currentSessionId: oldSession.session.id },
+    )
+
+    expect(result.user.timeZone).toBe("Asia/Tehran")
   })
 })

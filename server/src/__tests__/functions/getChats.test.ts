@@ -73,6 +73,51 @@ describe("getChats", () => {
     expect(returnedChat?.spaceId).toBeUndefined()
   })
 
+  test("includes time zones only for sharing DM peers", async () => {
+    const currentUser = await testUtils.createUser("get-chats-timezone-current@example.com")
+    const sharingPeer = await testUtils.createUser("get-chats-timezone-sharing@example.com")
+    const hiddenPeer = await testUtils.createUser("get-chats-timezone-hidden@example.com")
+    const threadSender = await testUtils.createUser("get-chats-timezone-thread@example.com")
+
+    await db
+      .update(schema.users)
+      .set({ timeZone: "Asia/Tehran", shareTimeZone: true })
+      .where(eq(schema.users.id, sharingPeer.id))
+    await db
+      .update(schema.users)
+      .set({ timeZone: "Europe/London", shareTimeZone: false })
+      .where(eq(schema.users.id, hiddenPeer.id))
+    await db
+      .update(schema.users)
+      .set({ timeZone: "America/Toronto", shareTimeZone: true })
+      .where(eq(schema.users.id, threadSender.id))
+
+    const sharingChat = await testUtils.createPrivateChat(currentUser, sharingPeer)
+    const hiddenChat = await testUtils.createPrivateChat(currentUser, hiddenPeer)
+    await db.insert(schema.dialogs).values([
+      { userId: currentUser.id, chatId: sharingChat!.id, peerUserId: sharingPeer.id },
+      { userId: currentUser.id, chatId: hiddenChat!.id, peerUserId: hiddenPeer.id },
+    ])
+
+    const thread = await testUtils.createChat(null, "Time-zone thread", "thread", false, currentUser.id)
+    await testUtils.addParticipant(thread!.id, currentUser.id)
+    await db.insert(schema.messages).values({
+      chatId: thread!.id,
+      messageId: 1,
+      fromId: threadSender.id,
+      text: "hello",
+    })
+    await db.insert(schema.dialogs).values({ userId: currentUser.id, chatId: thread!.id })
+    await db.update(schema.chats).set({ lastMsgId: 1 }).where(eq(schema.chats.id, thread!.id))
+
+    const result = await getChats({}, makeHandlerContext(currentUser.id))
+    const usersById = new Map(result.users.map((user) => [Number(user.id), user]))
+
+    expect(usersById.get(sharingPeer.id)?.timeZone).toBe("Asia/Tehran")
+    expect(usersById.get(hiddenPeer.id)?.timeZone).toBeUndefined()
+    expect(usersById.get(threadSender.id)?.timeZone).toBeUndefined()
+  })
+
   test("includes each chat's last message in result.messages", async () => {
     const { space, users } = await testUtils.createSpaceWithMembers("LastMsg Space", [
       "lastmsg-a@example.com",

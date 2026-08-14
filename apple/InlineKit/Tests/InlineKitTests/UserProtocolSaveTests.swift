@@ -18,7 +18,7 @@ struct UserProtocolSaveTests {
     let dbQueue = try makeInMemoryDB()
 
     try dbQueue.write { db in
-      try User(
+      var existing = User(
         id: 100,
         email: "old@example.com",
         firstName: "Old",
@@ -26,7 +26,8 @@ struct UserProtocolSaveTests {
         username: "oldhandle",
         bio: "Old bio"
       )
-      .insert(db)
+      existing.timeZone = "Asia/Tehran"
+      try existing.insert(db)
 
       var protocolUser = InlineProtocol.User()
       protocolUser.id = 100
@@ -40,6 +41,7 @@ struct UserProtocolSaveTests {
       #expect(saved.lastName == nil)
       #expect(saved.bio == nil)
       #expect(saved.username == nil)
+      #expect(saved.timeZone == nil)
     }
   }
 
@@ -59,6 +61,7 @@ struct UserProtocolSaveTests {
       existing.pendingSetup = false
       existing.online = true
       existing.lastOnline = Date(timeIntervalSince1970: 123)
+      existing.timeZone = "Asia/Tehran"
       try existing.insert(db)
 
       var protocolUser = InlineProtocol.User()
@@ -76,6 +79,7 @@ struct UserProtocolSaveTests {
       #expect(saved.pendingSetup == false)
       #expect(saved.online == true)
       #expect(saved.lastOnline == Date(timeIntervalSince1970: 123))
+      #expect(saved.timeZone == "Asia/Tehran")
     }
   }
 }

@@ -176,7 +176,7 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   }
 
   public var needsFullFetch: Bool {
-    needsDisplayNameFetch || (!bot && timeZone == nil)
+    needsDisplayNameFetch
   }
 
   private var resolvedFullName: String? {

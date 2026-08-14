@@ -220,7 +220,6 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     bindToolbarStyle(window)
     installContent()
     applyWindowAppearance()
-    TimezoneManager.shared.mainWindowDidOpen()
   }
 
   @available(*, unavailable)

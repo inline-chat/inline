@@ -18,6 +18,7 @@ import { normalizeAuthClientType } from "@in/server/modules/auth/clientType"
 import { db } from "@in/server/db"
 import { users } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
+import { syncTimeZoneForElectedAppleSession } from "@in/server/modules/users/timeZoneSync"
 
 export const Input = Type.Object({
   phoneNumber: Type.String(),
@@ -155,6 +156,15 @@ export const handler = async (
       osVersion: osVersion ?? undefined,
       deviceId: input.deviceId ?? undefined,
     })
+
+    if (timezone) {
+      user =
+        (await syncTimeZoneForElectedAppleSession({
+          userId,
+          sessionId: session.id,
+          timeZone: timezone,
+        })) ?? user
+    }
 
     // New users are reported only after onboarding has saved their final profile.
     if (isSignupComplete(user)) {
