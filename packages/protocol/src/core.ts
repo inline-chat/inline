@@ -842,6 +842,12 @@ export interface Chat {
      * @generated from protobuf field: optional ChatPermissions permissions = 15;
      */
     permissions?: ChatPermissions;
+    /**
+     * Current sequence of this chat's update bucket.
+     *
+     * @generated from protobuf field: optional int32 seq = 16;
+     */
+    seq?: number;
 }
 /**
  * @generated from protobuf message MessageReplies
@@ -1528,6 +1534,12 @@ export interface Space {
      * @generated from protobuf field: optional string handle = 6;
      */
     handle?: string;
+    /**
+     * Current sequence of this space's update bucket.
+     *
+     * @generated from protobuf field: optional int32 seq = 7;
+     */
+    seq?: number;
 }
 /**
  * @generated from protobuf message JoinPublicSpaceInput
@@ -4696,11 +4708,11 @@ export interface RemoveSpaceUrlPreviewExclusionResult {
  */
 export interface GetUpdatesStateInput {
     /**
-     * Local date of state
+     * Local discovery date. Absent when requesting a fresh current checkpoint.
      *
-     * @generated from protobuf field: int64 date = 2;
+     * @generated from protobuf field: optional int64 date = 2;
      */
-    date: bigint;
+    date?: bigint;
 }
 /**
  * @generated from protobuf message GetUpdatesStateResult
@@ -4718,6 +4730,12 @@ export interface GetUpdatesStateResult {
      * @generated from protobuf field: optional bool updates_found = 2;
      */
     updatesFound?: boolean;
+    /**
+     * Current sequence of the user's update bucket.
+     *
+     * @generated from protobuf field: optional int32 seq = 4;
+     */
+    seq?: number;
 }
 /**
  * @generated from protobuf message GetChatInput
@@ -11998,7 +12016,8 @@ class Chat$Type extends MessageType<Chat> {
             { no: 12, name: "parent_message_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 13, name: "untitled", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 14, name: "number", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
-            { no: 15, name: "permissions", kind: "message", T: () => ChatPermissions }
+            { no: 15, name: "permissions", kind: "message", T: () => ChatPermissions },
+            { no: 16, name: "seq", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<Chat>): Chat {
@@ -12059,6 +12078,9 @@ class Chat$Type extends MessageType<Chat> {
                 case /* optional ChatPermissions permissions */ 15:
                     message.permissions = ChatPermissions.internalBinaryRead(reader, reader.uint32(), options, message.permissions);
                     break;
+                case /* optional int32 seq */ 16:
+                    message.seq = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -12116,6 +12138,9 @@ class Chat$Type extends MessageType<Chat> {
         /* optional ChatPermissions permissions = 15; */
         if (message.permissions)
             ChatPermissions.internalBinaryWrite(message.permissions, writer.tag(15, WireType.LengthDelimited).fork(), options).join();
+        /* optional int32 seq = 16; */
+        if (message.seq !== undefined)
+            writer.tag(16, WireType.Varint).int32(message.seq);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -13731,7 +13756,8 @@ class Space$Type extends MessageType<Space> {
             { no: 3, name: "creator", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 4, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 5, name: "is_public", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 6, name: "handle", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 6, name: "handle", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "seq", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<Space>): Space {
@@ -13767,6 +13793,9 @@ class Space$Type extends MessageType<Space> {
                 case /* optional string handle */ 6:
                     message.handle = reader.string();
                     break;
+                case /* optional int32 seq */ 7:
+                    message.seq = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -13797,6 +13826,9 @@ class Space$Type extends MessageType<Space> {
         /* optional string handle = 6; */
         if (message.handle !== undefined)
             writer.tag(6, WireType.LengthDelimited).string(message.handle);
+        /* optional int32 seq = 7; */
+        if (message.seq !== undefined)
+            writer.tag(7, WireType.Varint).int32(message.seq);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -21022,12 +21054,11 @@ export const RemoveSpaceUrlPreviewExclusionResult = new RemoveSpaceUrlPreviewExc
 class GetUpdatesStateInput$Type extends MessageType<GetUpdatesStateInput> {
     constructor() {
         super("GetUpdatesStateInput", [
-            { no: 2, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 2, name: "date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<GetUpdatesStateInput>): GetUpdatesStateInput {
         const message = globalThis.Object.create((this.messagePrototype!));
-        message.date = 0n;
         if (value !== undefined)
             reflectionMergePartial<GetUpdatesStateInput>(this, message, value);
         return message;
@@ -21037,7 +21068,7 @@ class GetUpdatesStateInput$Type extends MessageType<GetUpdatesStateInput> {
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
-                case /* int64 date */ 2:
+                case /* optional int64 date */ 2:
                     message.date = reader.int64().toBigInt();
                     break;
                 default:
@@ -21052,8 +21083,8 @@ class GetUpdatesStateInput$Type extends MessageType<GetUpdatesStateInput> {
         return message;
     }
     internalBinaryWrite(message: GetUpdatesStateInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* int64 date = 2; */
-        if (message.date !== 0n)
+        /* optional int64 date = 2; */
+        if (message.date !== undefined)
             writer.tag(2, WireType.Varint).int64(message.date);
         let u = options.writeUnknownFields;
         if (u !== false)
@@ -21070,7 +21101,8 @@ class GetUpdatesStateResult$Type extends MessageType<GetUpdatesStateResult> {
     constructor() {
         super("GetUpdatesStateResult", [
             { no: 1, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "updates_found", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 2, name: "updates_found", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 4, name: "seq", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<GetUpdatesStateResult>): GetUpdatesStateResult {
@@ -21091,6 +21123,9 @@ class GetUpdatesStateResult$Type extends MessageType<GetUpdatesStateResult> {
                 case /* optional bool updates_found */ 2:
                     message.updatesFound = reader.bool();
                     break;
+                case /* optional int32 seq */ 4:
+                    message.seq = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -21109,6 +21144,9 @@ class GetUpdatesStateResult$Type extends MessageType<GetUpdatesStateResult> {
         /* optional bool updates_found = 2; */
         if (message.updatesFound !== undefined)
             writer.tag(2, WireType.Varint).bool(message.updatesFound);
+        /* optional int32 seq = 4; */
+        if (message.seq !== undefined)
+            writer.tag(4, WireType.Varint).int32(message.seq);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

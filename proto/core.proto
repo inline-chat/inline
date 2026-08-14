@@ -305,6 +305,9 @@ message Chat {
 
   // Effective permissions for the user this chat was encoded for.
   optional ChatPermissions permissions = 15;
+
+  // Current sequence of this chat's update bucket.
+  optional int32 seq = 16;
 }
 
 message MessageReplies {
@@ -568,6 +571,9 @@ message Space {
 
   // Public, case-insensitive address used for joining and links.
   optional string handle = 6;
+
+  // Current sequence of this space's update bucket.
+  optional int32 seq = 7;
 }
 
 message JoinPublicSpaceInput {
@@ -1658,8 +1664,8 @@ message GetUpdatesStateInput {
   reserved 3;
   reserved "core_sync_schema_revision";
 
-  // Local date of state
-  int64 date = 2;
+  // Local discovery date. Absent when requesting a fresh current checkpoint.
+  optional int64 date = 2;
 }
 
 message GetUpdatesStateResult {
@@ -1671,6 +1677,9 @@ message GetUpdatesStateResult {
 
   // Set by newer servers to tell clients whether discovery found any bucket work.
   optional bool updates_found = 2;
+
+  // Current sequence of the user's update bucket.
+  optional int32 seq = 4;
 }
 
 message GetChatInput {

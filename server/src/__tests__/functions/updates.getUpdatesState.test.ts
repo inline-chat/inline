@@ -3,13 +3,15 @@ import { getUpdatesState } from "@in/server/functions/updates.getUpdatesState"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { setupTestLifecycle, testUtils } from "../setup"
 import { db } from "@in/server/db"
-import { chats, members, spaces } from "@in/server/db/schema"
+import { chats, members, spaces, users as usersTable } from "@in/server/db/schema"
 import { and, eq } from "drizzle-orm"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 
 describe("getUpdatesState", () => {
   setupTestLifecycle()
 
-  test("scans bounded recent state when input date is 0", async () => {
+  test("returns a fresh current checkpoint without discovering old bucket work", async () => {
     const { users, space } = await testUtils.createSpaceWithMembers("Updates State Zero", [
       "updates-state-zero@example.com",
     ])
@@ -28,11 +30,63 @@ describe("getUpdatesState", () => {
       })
       .where(eq(chats.id, chat.id))
       .execute()
+    await db
+      .update(spaces)
+      .set({ lastUpdateDate: chatUpdateDate, updateSeq: 5 })
+      .where(eq(spaces.id, space.id))
+      .execute()
+    await db.update(usersTable).set({ updateSeq: 17 }).where(eq(usersTable.id, user.id)).execute()
 
-    const result = await getUpdatesState({ date: 0n }, testUtils.functionContext({ userId: user.id }))
+    const before = encodeDateStrict(new Date())
+    const result = await getUpdatesState({}, testUtils.functionContext({ userId: user.id }))
+    const after = encodeDateStrict(new Date())
 
-    expect(result.date).toBe(encodeDateStrict(chatUpdateDate))
-    expect(result.updatesFound).toBe(true)
+    expect(result.date).toBeGreaterThanOrEqual(before)
+    expect(result.date).toBeLessThanOrEqual(after)
+    expect(result.updatesFound).toBe(false)
+    expect(result.seq).toBe(17)
+  })
+
+  test("rejects zero as an explicit discovery date", async () => {
+    const user = await testUtils.createUser("updates-state-invalid-zero@example.com")
+
+    await expect(
+      getUpdatesState({ date: 0n }, testUtils.functionContext({ userId: user.id })),
+    ).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+  })
+
+  test("fresh checkpoint reconciles a stale user counter with persisted updates", async () => {
+    const user = await testUtils.createUser("updates-state-stale-user-seq@example.com")
+
+    await UserBucketUpdates.enqueue({
+      userId: user.id,
+      update: {
+        oneofKind: "userDialogArchived",
+        userDialogArchived: {
+          peerId: { type: { oneofKind: "chat", chat: { chatId: 123n } } },
+          archived: true,
+        },
+      },
+    })
+    await db.update(usersTable).set({ updateSeq: null }).where(eq(usersTable.id, user.id)).execute()
+
+    const lazyResult = await getUpdatesState({}, testUtils.functionContext({ userId: user.id }))
+    expect(lazyResult.seq).toBe(1)
+
+    await UserBucketUpdates.enqueue({
+      userId: user.id,
+      update: {
+        oneofKind: "userDialogArchived",
+        userDialogArchived: {
+          peerId: { type: { oneofKind: "chat", chat: { chatId: 123n } } },
+          archived: false,
+        },
+      },
+    })
+    await db.update(usersTable).set({ updateSeq: 1 }).where(eq(usersTable.id, user.id)).execute()
+
+    const staleResult = await getUpdatesState({}, testUtils.functionContext({ userId: user.id }))
+    expect(staleResult.seq).toBe(2)
   })
 
   test("advances date when there are no updates", async () => {

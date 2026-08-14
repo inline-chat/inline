@@ -56,6 +56,7 @@ export function encodeChat(chat: DbChat, { encodingForUserId, permissions }: Enc
     untitled: chat.isUntitled === true ? true : undefined,
     number: chat.threadNumber ?? undefined,
     permissions,
+    seq: chat.updateSeq ?? undefined,
   }
 }
 

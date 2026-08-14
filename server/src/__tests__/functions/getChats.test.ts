@@ -100,6 +100,25 @@ describe("getChats", () => {
     expect(hasLastMsg).toBe(true)
   })
 
+  test("includes authoritative chat and space sequences", async () => {
+    const { users, space } = await testUtils.createSpaceWithMembers("Snapshot Seq Space", [
+      "snapshot-seq@example.com",
+    ])
+    const user = users[0]
+    if (!user) throw new Error("Fixture creation failed")
+
+    const chat = await testUtils.createChat(space.id, "Snapshot Seq Chat", "thread", true)
+    if (!chat) throw new Error("Chat creation failed")
+
+    await db.update(schema.chats).set({ updateSeq: 23 }).where(eq(schema.chats.id, chat.id))
+    await db.update(schema.spaces).set({ updateSeq: 11 }).where(eq(schema.spaces.id, space.id))
+
+    const result = await getChats({}, makeHandlerContext(user.id))
+
+    expect(result.chats.find((item) => Number(item.id) === chat.id)?.seq).toBe(23)
+    expect(result.spaces.find((item) => Number(item.id) === space.id)?.seq).toBe(11)
+  })
+
   test("excludes linked subthreads whose dialog is hidden from chat list", async () => {
     const owner = await testUtils.createUser("hidden-subthread-owner@example.com")
     const participant = await testUtils.createUser("hidden-subthread-participant@example.com")

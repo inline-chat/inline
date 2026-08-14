@@ -9,22 +9,58 @@ import { RealtimeUpdates } from "@in/server/realtime/message"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { Log } from "@in/server/utils/log"
+import { UsersModel } from "@in/server/db/models/users"
+import { db } from "@in/server/db"
+import { UpdateBucket } from "@in/server/db/schema"
 
 const log = new Log("updates.getUpdatesState")
-const INITIAL_STATE_LOOKBACK_MS = 5 * 24 * 60 * 60 * 1000
 
 export const getUpdatesState = async (
   input: GetUpdatesStateInput,
   context: FunctionContext,
 ): Promise<GetUpdatesStateResult> => {
   const startedAt = performance.now()
+  if (input.date !== undefined && input.date <= 0n) {
+    throw RealtimeRpcError.BadRequest()
+  }
+
+  const user = await UsersModel.getUserById(context.currentUserId)
+  if (!user) {
+    throw RealtimeRpcError.InternalError()
+  }
+  const latestUserUpdate = await db.query.updates.findFirst({
+    columns: {
+      seq: true,
+    },
+    where: {
+      bucket: UpdateBucket.User,
+      entityId: context.currentUserId,
+    },
+    orderBy: {
+      seq: "desc",
+    },
+  })
+  const userSeq = Math.max(user.updateSeq ?? 0, latestUserUpdate?.seq ?? 0)
   const nowEncoded = encodeDateStrict(new Date())
-  // If client sends 0 (uninitialized), scan a bounded recent window instead of
-  // returning "now". Unknown local state should trigger repair hints, but not an
-  // unbounded all-history scan.
-  let userLocalDate = input.date === 0n
-    ? new Date(Date.now() - INITIAL_STATE_LOOKBACK_MS)
-    : decodeDate(input.date)
+
+  // An absent date requests a fresh checkpoint. Snapshot RPCs seed the resource
+  // buckets independently, so bootstrap must not discover or replay old work.
+  if (input.date === undefined) {
+    logGetUpdatesStateTiming({
+      result: "checkpoint",
+      totalMs: elapsedMs(startedAt),
+      chats: 0,
+      spaces: 0,
+      pushed: 0,
+    })
+    return {
+      date: nowEncoded,
+      updatesFound: false,
+      seq: userSeq,
+    }
+  }
+
+  const userLocalDate = decodeDate(input.date)
 
   // check latest changes of chats from this user's dialogs for changes compared to date
   // get a list of dialogs for this user
@@ -72,6 +108,7 @@ export const getUpdatesState = async (
     return {
       date: nowEncoded > input.date ? nowEncoded : input.date,
       updatesFound: false,
+      seq: userSeq,
     }
   }
   let latestUpdateDate = new Date(latestUpdateTs)
@@ -136,11 +173,12 @@ export const getUpdatesState = async (
   return {
     date: latestUpdateDateEncoded,
     updatesFound: true,
+    seq: userSeq,
   }
 }
 
 type GetUpdatesStateTiming = {
-  result: "empty" | "updates"
+  result: "checkpoint" | "empty" | "updates"
   totalMs: number
   chatsMs?: number
   spacesMs?: number
