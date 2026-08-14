@@ -220,7 +220,7 @@ struct MainWindowRootView: View {
         showMembers: { nav3.open(.members(spaceId: $0)) },
         showIntegrations: { nav3.open(.spaceIntegrations(spaceId: $0)) },
         showGrid: { nav3.open(.grid(spaceId: $0)) },
-        invitePeople: { nav3.open(.inviteToSpace(spaceId: $0)) }
+        invitePeople: { nav3.beginInvite(spaceId: $0) }
       )
     )
   }

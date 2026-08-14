@@ -1,3 +1,4 @@
+import Foundation
 import InlineKit
 import InlineUI
 import Invite
@@ -44,35 +45,60 @@ struct NewChatRouteView: View {
   }
 }
 
-struct InviteToSpaceRouteView: View {
+struct InviteRouteView: View {
+  let sessionID: UUID
   let spaceId: Int64?
+  let stage: InviteFlowStage
 
   @Environment(\.nav) private var nav
   @Environment(\.dependencies) private var dependencies
 
+  @ViewBuilder
   var body: some View {
-    InviteView(
-      destination: spaceId.map { .space(id: $0) } ?? .inline,
-      onManageMembers: spaceId.map { _ in
-        { destinationSpaceID in
+    if let session = nav.inviteSession(id: sessionID) {
+      InviteView(
+        session: session,
+        stage: stage,
+        onContinue: {
+          nav.open(
+            .inviteReview(sessionID: sessionID, spaceId: spaceId),
+            tracksChatNavigation: false
+          )
+        },
+        onShowOutcome: {
+          nav.replace(.inviteOutcome(sessionID: sessionID, spaceId: spaceId))
+        },
+        onInviteMore: {
+          if nav.canGoBack {
+            nav.goBack()
+          } else {
+            nav.replace(.invite(sessionID: sessionID, spaceId: spaceId))
+          }
+        },
+        onManageMembers: { destinationSpaceID in
           if let nav2 = dependencies?.nav2 {
             nav2.navigate(to: .members(spaceId: destinationSpaceID))
           } else {
             nav.open(.members(spaceId: destinationSpaceID))
           }
+        },
+        onOpenChat: { peer in
+          if let dependencies {
+            dependencies.openChatRoute(peer: peer)
+          } else {
+            nav.open(.chat(peer: peer))
+          }
         }
-      },
-      onOpenChat: { peer in
-        if let dependencies {
-          dependencies.openChatRoute(peer: peer)
-        } else {
-          nav.open(.chat(peer: peer))
-        }
-      },
-      onCreateSpace: {
-        nav.open(.createSpace)
+      )
+    } else {
+      RoutePlaceholderView(
+        title: "Start a new invitation",
+        systemImage: "person.badge.plus"
+      )
+      .task {
+        nav.beginInvite(spaceId: spaceId)
       }
-    )
+    }
   }
 }
 

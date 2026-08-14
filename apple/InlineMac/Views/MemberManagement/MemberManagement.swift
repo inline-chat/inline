@@ -150,7 +150,7 @@ public struct MemberManagementView: View {
 
             nav2.navigate(to: .inviteToSpace)
           } else if let nav3 = dependencies?.nav3 {
-            nav3.open(.inviteToSpace(spaceId: spaceId))
+            nav3.beginInvite(spaceId: spaceId)
           } else {
             nav.open(.inviteToSpace(spaceId: spaceId))
           }

@@ -200,11 +200,14 @@ private enum NavHistoryMenuLabel {
     case .newChat:
       return "New Chat"
 
-    case .inviteToSpace:
-      return "Invite to Space"
+    case .invite:
+      return "Invite"
 
-    case .inviteToInline:
-      return "Invite to Inline"
+    case .inviteReview:
+      return "Review Invite"
+
+    case .inviteOutcome:
+      return "Invitations"
 
     case let .members(spaceId):
       return spaceRouteTitle(spaceId: spaceId, suffix: "Members", fallback: "Members")
@@ -246,10 +249,7 @@ private enum NavHistoryMenuLabel {
     case .newChat:
       return "square.and.pencil"
 
-    case .inviteToSpace:
-      return "person.badge.plus"
-
-    case .inviteToInline:
+    case .invite, .inviteReview, .inviteOutcome:
       return "person.badge.plus"
 
     case .members:

@@ -42,11 +42,14 @@ struct RouteView: View {
     case let .newChat(spaceId):
       NewChatRouteView(spaceId: spaceId)
 
-    case let .inviteToSpace(spaceId):
-      InviteToSpaceRouteView(spaceId: spaceId)
+    case let .invite(sessionID, spaceId):
+      InviteRouteView(sessionID: sessionID, spaceId: spaceId, stage: .selection)
 
-    case .inviteToInline:
-      InviteToSpaceRouteView(spaceId: nil)
+    case let .inviteReview(sessionID, spaceId):
+      InviteRouteView(sessionID: sessionID, spaceId: spaceId, stage: .review)
+
+    case let .inviteOutcome(sessionID, spaceId):
+      InviteRouteView(sessionID: sessionID, spaceId: spaceId, stage: .outcome)
 
     case let .members(spaceId):
       MembersRouteView(spaceId: spaceId)

@@ -1,5 +1,6 @@
 import Foundation
 import InlineKit
+import Invite
 import Observation
 import os.signpost
 
@@ -20,8 +21,9 @@ enum Nav3Route: Hashable, Codable {
   case profile(userId: Int64)
   case createSpace
   case newChat(spaceId: Int64?)
-  case inviteToInline
-  case inviteToSpace(spaceId: Int64?)
+  case invite(sessionID: UUID, spaceId: Int64?)
+  case inviteReview(sessionID: UUID, spaceId: Int64?)
+  case inviteOutcome(sessionID: UUID, spaceId: Int64?)
   case members(spaceId: Int64)
   case spaceSettings(spaceId: Int64)
   case spaceIntegrations(spaceId: Int64)
@@ -29,6 +31,15 @@ enum Nav3Route: Hashable, Codable {
 }
 
 extension Nav3Route {
+  var isInviteFlow: Bool {
+    switch self {
+    case .invite, .inviteReview, .inviteOutcome:
+      true
+    default:
+      false
+    }
+  }
+
   var selectedPeer: Peer? {
     switch self {
     case let .chat(peer), let .chatInfo(peer, _):
@@ -40,7 +51,10 @@ extension Nav3Route {
 
   var selectedSpaceId: Int64? {
     switch self {
-    case let .newChat(spaceId), let .inviteToSpace(spaceId):
+    case let .newChat(spaceId),
+         let .invite(_, spaceId),
+         let .inviteReview(_, spaceId),
+         let .inviteOutcome(_, spaceId):
       spaceId
     case let .members(spaceId), let .spaceSettings(spaceId), let .spaceIntegrations(spaceId), let .grid(spaceId):
       spaceId
@@ -139,6 +153,7 @@ class Nav3 {
   @ObservationIgnored private var lastUsagePeer: Peer?
   @ObservationIgnored var onRouteChange: (() -> Void)?
   @ObservationIgnored private var isRestoringInitialState = true
+  @ObservationIgnored private var inviteSessions: [UUID: InviteFlowSession] = [:]
 
   var history: [Nav3RouteState] = []
   var historyIndex: Int = -1
@@ -199,6 +214,19 @@ class Nav3 {
 
   func open(_ route: Nav3Route, tracksChatNavigation: Bool = true) {
     open(state(for: route), tracksChatNavigation: tracksChatNavigation)
+  }
+
+  @MainActor
+  func beginInvite(spaceId: Int64?) {
+    let destination: InviteDestination = spaceId.map { .space(id: $0) } ?? .inline
+    let session = InviteFlowSession(destination: destination)
+    inviteSessions[session.id] = session
+    open(.invite(sessionID: session.id, spaceId: spaceId), tracksChatNavigation: false)
+  }
+
+  @MainActor
+  func inviteSession(id: UUID) -> InviteFlowSession? {
+    inviteSessions[id]
   }
 
   /// Opens a Grid route without changing the Home or Space sidebar context.
@@ -499,7 +527,10 @@ class Nav3 {
   }
 
   func encodedRouteState() -> String? {
-    currentState.rawValue
+    if currentRoute.isInviteFlow {
+      return Nav3RouteState(route: .empty, selectedSpaceId: selectedSpaceId).rawValue
+    }
+    return currentState.rawValue
   }
 
   private static func decodeRouteState(_ routeState: String) -> Nav3RouteState? {

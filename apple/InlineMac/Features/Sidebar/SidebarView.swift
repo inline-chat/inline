@@ -1006,11 +1006,7 @@ struct SidebarView: View {
         createNewThread()
       },
       onInvite: {
-        if let activeSpaceId {
-          nav.open(.inviteToSpace(spaceId: activeSpaceId))
-        } else {
-          nav.open(.inviteToInline)
-        }
+        nav.beginInvite(spaceId: activeSpaceId)
       },
       onOpenDocs: openDocs,
       onOpenTownHall: openTownHall,

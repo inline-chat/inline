@@ -1,4 +1,5 @@
 import Contacts
+import Foundation
 import InlineKit
 import InlineProtocol
 import InlineUI
@@ -10,16 +11,44 @@ import SwiftUI
 public enum InviteDestination: Hashable, Sendable {
   case inline
   case space(id: Int64)
+
+  fileprivate var isSpace: Bool {
+    if case .space = self { return true }
+    return false
+  }
+}
+
+public enum InviteFlowStage: Hashable, Sendable {
+  case selection
+  case review
+  case outcome
+}
+
+@MainActor
+public final class InviteFlowSession: Identifiable {
+  public let id: UUID
+  let model: InviteComposerModel
+
+  public init(id: UUID = UUID(), destination: InviteDestination) {
+    self.id = id
+    model = InviteComposerModel(
+      destination: destination,
+      fixesDestination: destination.isSpace
+    )
+  }
 }
 
 public struct InviteView: View {
   @Environment(\.appDatabase) private var database
   @Environment(\.realtimeV2) private var realtime
-  @State private var model: InviteComposerModel
+  @State private var session: InviteFlowSession
 
   private let onManageMembers: ((Int64) -> Void)?
   private let onOpenChat: ((InlineKit.Peer) -> Void)?
-  private let onCreateSpace: (() -> Void)?
+  private let macStage: InviteFlowStage?
+  private let onContinue: (() -> Void)?
+  private let onShowOutcome: (() -> Void)?
+  private let onInviteMore: (() -> Void)?
 
   public init(
     destination: InviteDestination,
@@ -29,18 +58,43 @@ public struct InviteView: View {
   ) {
     self.onManageMembers = onManageMembers
     self.onOpenChat = onOpenChat
-    self.onCreateSpace = onCreateSpace
-    _model = State(initialValue: InviteComposerModel(destination: destination))
+    macStage = nil
+    onContinue = nil
+    onShowOutcome = nil
+    onInviteMore = nil
+    _session = State(initialValue: InviteFlowSession(destination: destination))
+  }
+
+  public init(
+    session: InviteFlowSession,
+    stage: InviteFlowStage,
+    onContinue: (() -> Void)? = nil,
+    onShowOutcome: (() -> Void)? = nil,
+    onInviteMore: (() -> Void)? = nil,
+    onManageMembers: ((Int64) -> Void)? = nil,
+    onOpenChat: ((InlineKit.Peer) -> Void)? = nil
+  ) {
+    self.onManageMembers = onManageMembers
+    self.onOpenChat = onOpenChat
+    macStage = stage
+    self.onContinue = onContinue
+    self.onShowOutcome = onShowOutcome
+    self.onInviteMore = onInviteMore
+    _session = State(initialValue: session)
   }
 
   public var body: some View {
+    @Bindable var model = session.model
     Group {
       #if os(macOS)
       InviteMacView(
         model: model,
+        stage: macStage,
+        onContinue: onContinue,
+        onShowOutcome: onShowOutcome,
+        onInviteMore: onInviteMore,
         onManageMembers: onManageMembers,
-        onOpenChat: onOpenChat,
-        onCreateSpace: onCreateSpace
+        onOpenChat: onOpenChat
       )
       #else
       InviteIOSView(model: model, onOpenChat: onOpenChat)
@@ -84,6 +138,7 @@ final class InviteComposerModel {
   }
 
   var destination: InviteDestination
+  let fixesDestination: Bool
   var spaces: [InlineKit.Space] = []
   var query = "" {
     didSet { refreshContactTargets() }
@@ -107,8 +162,9 @@ final class InviteComposerModel {
   var errorMessage: String?
   var showsOutcome = false
 
-  init(destination: InviteDestination) {
+  init(destination: InviteDestination, fixesDestination: Bool = false) {
     self.destination = destination
+    self.fixesDestination = fixesDestination
   }
 
   var title: String {
@@ -313,7 +369,7 @@ final class InviteComposerModel {
     guard !selected.isEmpty, !isSending else { return false }
     isSending = true
     let targets = selected
-    var failures: [String] = []
+    var failures: [(title: String, message: String)] = []
     completed = []
 
     for target in targets {
@@ -327,7 +383,7 @@ final class InviteComposerModel {
           "Invite target failed mechanism=\(target.logMechanism) destination=\(destination.logKind)",
           error: error
         )
-        failures.append(target.title)
+        failures.append((target.title, inviteFailureDescription(error)))
       }
     }
 
@@ -339,7 +395,7 @@ final class InviteComposerModel {
     }
     if !failures.isEmpty {
       errorMessage = failures.count == 1
-        ? "The invitation for \(failures[0]) failed."
+        ? failures[0].message
         : "\(failures.count) invitations failed. Successful invitations are shown below."
       showsError = true
     }
@@ -406,6 +462,34 @@ final class InviteComposerModel {
       }
       guard case let .inviteToSpace(response) = result else { throw InviteComposerError.invalidResponse }
       return response.user.id
+    }
+  }
+
+  private func inviteFailureDescription(_ error: any Error) -> String {
+    guard let realtimeError = error as? RealtimeDirectRpcError else {
+      return error.localizedDescription
+    }
+
+    return switch realtimeError {
+    case let .rpcError(errorCode, _, _):
+      switch errorCode {
+      case .userIDInvalid:
+        "This person can’t be invited. They may be unavailable, or this may be your own email or phone number."
+      case .userAlreadyMember:
+        "This person is already a member of the space."
+      case .emailInvalid:
+        "Enter a valid email address."
+      case .phoneNumberInvalid:
+        "Enter a valid phone number."
+      case .spaceAdminRequired:
+        "A space admin must send this invitation."
+      case .rateLimit:
+        "You’ve sent several invitations. Wait a moment and try again."
+      default:
+        realtimeError.localizedDescription
+      }
+    case .notAuthorized, .notConnected, .timeout, .unknown:
+      realtimeError.localizedDescription
     }
   }
 }
@@ -589,241 +673,7 @@ private func inviteContactsAuthorized(_ status: CNAuthorizationStatus) -> Bool {
   #endif
 }
 
-// MARK: - macOS components
-
-#if os(macOS)
-private struct InviteHeader: View {
-  let title: String
-  let subtitle: String
-
-  var body: some View {
-    HStack(alignment: .top, spacing: 12) {
-      ZStack {
-        RoundedRectangle(cornerRadius: 12)
-          .fill(LinearGradient(colors: [.accentColor, .accentColor.opacity(0.72)], startPoint: .topLeading, endPoint: .bottomTrailing))
-        Image(systemName: "person.badge.plus")
-          .font(.title2.weight(.semibold))
-          .foregroundStyle(.white)
-      }
-      .frame(width: 46, height: 46)
-      .accessibilityHidden(true)
-
-      VStack(alignment: .leading, spacing: 3) {
-        Text(title)
-          .font(.headline)
-        Text(subtitle)
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-    }
-    .padding(14)
-    .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 12))
-  }
-}
-
-private struct InviteTargetRow: View {
-  let target: InviteTarget
-  let selected: Bool
-  let action: () -> Void
-
-  var body: some View {
-    Button(action: action) {
-      HStack(spacing: 9) {
-        targetArtwork
-        Text(target.oneLineTitle)
-          .foregroundStyle(.primary)
-          .lineLimit(1)
-          .frame(maxWidth: .infinity, alignment: .leading)
-        Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-          .foregroundStyle(selected ? Color.accentColor : Color.secondary)
-      }
-      .contentShape(Rectangle())
-    }
-    .buttonStyle(.plain)
-    .disabled(!target.isActionable)
-    .opacity(target.isActionable ? 1 : 0.7)
-    .accessibilityAddTraits(selected ? .isSelected : [])
-  }
-
-  @ViewBuilder private var targetArtwork: some View {
-    switch target.kind {
-    case let .user(info):
-      UserAvatar(userInfo: info, size: 28)
-    case .email, .phone:
-      Image(systemName: target.symbol)
-        .foregroundStyle(.secondary)
-        .frame(width: 28)
-    }
-  }
-}
-
-private struct InvitePrimaryButton: View {
-  let count: Int
-  let isLoading: Bool
-  let action: () -> Void
-  var body: some View {
-    Button(action: action) {
-      HStack(spacing: 8) {
-        if isLoading { ProgressView().controlSize(.small) }
-        Text(count == 1 ? "Invite one person" : "Invite \(count) people")
-          .fontWeight(.semibold)
-      }
-      .padding(.horizontal, 22)
-      .frame(minHeight: 24)
-    }
-    .controlSize(.large)
-    .buttonBorderShape(.capsule)
-    .disabled(count == 0 || isLoading)
-    .modifier(InviteProminentButtonStyle())
-  }
-}
-
-private struct InviteProminentButtonStyle: ViewModifier {
-  @ViewBuilder func body(content: Content) -> some View {
-    if #available(iOS 26.0, macOS 26.0, *) {
-      content.buttonStyle(.glassProminent)
-    } else {
-      content.buttonStyle(.borderedProminent)
-    }
-  }
-}
-
-private struct InviteSelectionTokens: View {
-  let targets: [InviteTarget]
-  let onRemove: (InviteTarget) -> Void
-
-  var body: some View {
-    if !targets.isEmpty {
-      ScrollView(.horizontal) {
-        if #available(iOS 26.0, macOS 26.0, *) {
-          GlassEffectContainer(spacing: 7) {
-            InviteSelectionTokenRow(targets: targets, onRemove: onRemove)
-          }
-        } else {
-          InviteSelectionTokenRow(targets: targets, onRemove: onRemove)
-        }
-      }
-      .scrollIndicators(.hidden)
-    }
-  }
-}
-
-private struct InviteSelectionTokenRow: View {
-  let targets: [InviteTarget]
-  let onRemove: (InviteTarget) -> Void
-
-  var body: some View {
-    HStack(spacing: 7) {
-      ForEach(targets) { target in
-        InviteSelectionToken(target: target) { onRemove(target) }
-      }
-    }
-    .padding(.vertical, 2)
-  }
-}
-
-private struct InviteSelectionToken: View {
-  let target: InviteTarget
-  let onRemove: () -> Void
-
-  var body: some View {
-    let label = Button(action: onRemove) {
-      HStack(spacing: 6) {
-        InviteTargetTokenArtwork(target: target)
-        Text(target.title)
-          .font(.subheadline)
-          .lineLimit(1)
-        Image(systemName: "xmark.circle.fill")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
-      .padding(.leading, 7)
-      .padding(.trailing, 6)
-      .frame(height: 30)
-    }
-    .buttonStyle(.plain)
-    .accessibilityLabel("Remove \(target.title) from invitation")
-
-    if #available(iOS 26.0, macOS 26.0, *) {
-      label.glassEffect(.regular.interactive(), in: .capsule)
-    } else {
-      label.background(.quaternary, in: Capsule())
-    }
-  }
-}
-
-private struct InviteTargetTokenArtwork: View {
-  let target: InviteTarget
-
-  var body: some View {
-    HStack {
-      switch target.kind {
-      case let .user(info):
-        UserAvatar(userInfo: info, size: 20)
-      case .email, .phone:
-        Image(systemName: target.symbol)
-          .font(.caption)
-          .frame(width: 20)
-      }
-    }
-  }
-}
-
-private struct InviteDestinationSettings: View {
-  @Bindable var model: InviteComposerModel
-  let onCreateSpace: (() -> Void)?
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 11) {
-      Picker("Invite to", selection: $model.destination) {
-        Text("Inline — start a chat").tag(InviteDestination.inline)
-        ForEach(model.spaces) { space in
-          Text(space.displayName).tag(InviteDestination.space(id: space.id))
-        }
-      }
-      .pickerStyle(.menu)
-      .disabled(model.isSending)
-
-      switch model.destination {
-      case .inline:
-        Text("Creating a team or community? Create a space, then invite everyone into it.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-        if let onCreateSpace {
-          Button("Create a space", systemImage: "person.3") {
-            onCreateSpace()
-          }
-          .buttonStyle(.plain)
-          .font(.callout.weight(.medium))
-          .foregroundStyle(.tint)
-        }
-      case .space:
-        if model.selected.isEmpty {
-          Text("Select people to configure their space access.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        } else {
-          Divider()
-          Picker("Access", selection: $model.accessLevel) {
-            ForEach(InviteComposerModel.AccessLevel.allCases) { level in
-              Text(level.title).tag(level)
-            }
-          }
-          .pickerStyle(.menu)
-          if model.accessLevel == .member {
-            Toggle("Can access all public chats", isOn: $model.canAccessPublicChats)
-          }
-        }
-      }
-    }
-    .padding(14)
-    .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 12))
-  }
-}
-#endif
+// MARK: - Contacts permission
 
 private struct InviteContactsPermissionView: View {
   let isLoading: Bool
@@ -862,323 +712,6 @@ private struct InviteContactsPermissionView: View {
     .padding(24)
   }
 }
-
-#if os(macOS)
-private struct InviteSearchField: View {
-  @Bindable var model: InviteComposerModel
-
-  var body: some View {
-    let field = HStack(spacing: 9) {
-      Image(systemName: "magnifyingglass")
-        .foregroundStyle(.secondary)
-      searchTextField
-      if model.isSearching {
-        ProgressView()
-          .controlSize(.small)
-      }
-      if !model.query.isEmpty {
-        Button("Clear", systemImage: "xmark.circle.fill") { model.query = "" }
-          .labelStyle(.iconOnly)
-          .buttonStyle(.plain)
-          .foregroundStyle(.tertiary)
-      }
-      Divider()
-        .frame(height: 18)
-      Button("Find from Contacts", systemImage: "person.crop.circle.badge.plus") {
-        model.showContacts()
-      }
-      .labelStyle(.iconOnly)
-      .buttonStyle(.plain)
-      .foregroundStyle(.secondary)
-    }
-    .padding(.horizontal, 13)
-    .frame(height: 40)
-
-    if #available(iOS 26.0, macOS 26.0, *) {
-      field.glassEffect(.regular.interactive(), in: .capsule)
-    } else {
-      field
-        .background(.regularMaterial, in: Capsule())
-        .overlay { Capsule().stroke(.separator.opacity(0.6), lineWidth: 0.5) }
-    }
-  }
-
-  @ViewBuilder private var searchTextField: some View {
-    TextField("Search by username, or invite by email or phone", text: $model.query)
-      .textFieldStyle(.plain)
-  }
-}
-#endif
-
-// MARK: - macOS
-
-#if os(macOS)
-private struct InviteMacView: View {
-  @Bindable var model: InviteComposerModel
-  @Environment(\.realtimeV2) private var realtime
-  let onManageMembers: ((Int64) -> Void)?
-  let onOpenChat: ((InlineKit.Peer) -> Void)?
-  let onCreateSpace: (() -> Void)?
-
-  var body: some View {
-    if model.showsOutcome {
-      InviteOutcomeView(
-        model: model,
-        onOpenChat: onOpenChat,
-        onManageMembers: onManageMembers
-      )
-      .toolbar {
-        ToolbarItem(placement: .navigation) {
-          Button("Back to Invite", systemImage: "chevron.backward") {
-            model.returnToInvite()
-          }
-        }
-      }
-    } else {
-      InviteMacComposer(model: model, onCreateSpace: onCreateSpace)
-        .safeAreaInset(edge: .bottom) {
-          if !model.selected.isEmpty {
-            InvitePrimaryButton(count: model.selected.count, isLoading: model.isSending) {
-              Task { await model.invite(realtime: realtime) }
-            }
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity)
-          }
-        }
-    }
-  }
-}
-
-private struct InviteMacComposer: View {
-  @Bindable var model: InviteComposerModel
-  let onCreateSpace: (() -> Void)?
-
-  var body: some View {
-    ScrollView {
-      VStack(spacing: 16) {
-        InviteHeader(title: model.title, subtitle: model.subtitle)
-        InviteSearchField(model: model)
-        InviteSelectionTokens(targets: model.selected, onRemove: model.toggle)
-        if model.hasSuggestions || !model.normalizedQuery.isEmpty || model.isSearching {
-          ScrollView {
-            InviteSuggestionSections(model: model)
-              .padding(12)
-          }
-          .frame(height: 230)
-          .background(.quaternary.opacity(0.38), in: RoundedRectangle(cornerRadius: 12))
-        }
-        InviteDestinationSettings(model: model, onCreateSpace: onCreateSpace)
-      }
-      .frame(maxWidth: 560)
-      .padding(24)
-      .padding(.bottom, 60)
-      .frame(maxWidth: .infinity)
-    }
-  }
-}
-
-private struct InviteSuggestionSections: View {
-  let model: InviteComposerModel
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      InviteSuggestionGroup(title: "Invite users", targets: model.userTargets, model: model)
-      InviteSuggestionGroup(title: "Contacts", targets: model.contactTargets, model: model)
-      InviteSuggestionGroup(
-        title: "Send email invite",
-        targets: model.emailSuggestion.map { [$0] } ?? [],
-        model: model
-      )
-      InviteSuggestionGroup(
-        title: "Invite phone number",
-        targets: model.phoneTarget.map { [$0] } ?? [],
-        model: model
-      )
-      if let message = model.emptyResultMessage {
-        Text(message)
-          .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-          .frame(maxWidth: .infinity).frame(minHeight: 42)
-      }
-    }
-  }
-}
-
-private struct InviteSuggestionGroup: View {
-  let title: LocalizedStringResource
-  let targets: [InviteTarget]
-  let model: InviteComposerModel
-
-  var body: some View {
-    if !targets.isEmpty {
-      VStack(alignment: .leading, spacing: 5) {
-        Text(title).font(.caption.weight(.medium)).foregroundStyle(.secondary)
-        ForEach(targets) { target in
-          InviteTargetRow(target: target, selected: model.isSelected(target)) { model.toggle(target) }
-            .frame(height: 32)
-            .padding(.horizontal, 8)
-            .background(model.isSelected(target) ? Color.accentColor.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 7))
-        }
-      }
-    }
-  }
-}
-#endif
-
-// MARK: - macOS outcome
-
-#if os(macOS)
-private struct InviteOutcomeView: View {
-  let model: InviteComposerModel
-  let onOpenChat: ((InlineKit.Peer) -> Void)?
-  let onManageMembers: ((Int64) -> Void)?
-
-  var body: some View {
-    ScrollView {
-      VStack(spacing: 16) {
-        InviteHeader(
-          title: "Invitations are on their way",
-          subtitle: outcomeSubtitle
-        )
-        InviteOutcomeGroup(
-          title: model.isSpaceInvite ? "Added to the space" : "Ready to chat",
-          description: model.isSpaceInvite
-            ? "These people can open the space now."
-            : "These people are already on Inline, so their chat is ready.",
-          completions: model.peopleCompletions,
-          model: model,
-          onOpenChat: onOpenChat
-        )
-        InviteOutcomeGroup(
-          title: "Email sent",
-          description: model.isSpaceInvite
-            ? "They’ll join this space after accepting and signing in."
-            : "They can join Inline from the email and continue in your shared chat.",
-          completions: model.emailCompletions,
-          model: model,
-          onOpenChat: onOpenChat
-        )
-        InviteOutcomeGroup(
-          title: "Share these invitations",
-          description: model.isSpaceInvite
-            ? "Send each person an invite message. After joining Inline, they’ll be part of this space."
-            : "Send each person an invite message so they can join Inline and start chatting with you.",
-          completions: model.phoneCompletions,
-          model: model,
-          onOpenChat: onOpenChat
-        )
-        if case let .space(spaceID) = model.destination, let onManageMembers {
-          Button("Manage Members", systemImage: "person.3") {
-            onManageMembers(spaceID)
-          }
-        }
-      }
-      .frame(maxWidth: 560)
-      .padding(24)
-      .frame(maxWidth: .infinity)
-    }
-    .navigationTitle("Invitation results")
-  }
-
-  private var outcomeSubtitle: String {
-    switch model.destination {
-    case .inline:
-      "Inline handled each person in the way that fits how you invited them."
-    case .space:
-      "Review who was added, which emails were sent, and which invitations still need sharing."
-    }
-  }
-}
-
-private struct InviteOutcomeGroup: View {
-  let title: LocalizedStringResource
-  let description: LocalizedStringResource
-  let completions: [InviteCompletion]
-  let model: InviteComposerModel
-  let onOpenChat: ((InlineKit.Peer) -> Void)?
-
-  var body: some View {
-    if !completions.isEmpty {
-      VStack(alignment: .leading, spacing: 8) {
-        Text(title)
-          .font(.headline)
-        Text(description)
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-        VStack(spacing: 0) {
-          ForEach(completions) { completion in
-            InviteOutcomeRow(model: model, completion: completion, onOpenChat: onOpenChat)
-            if completion.id != completions.last?.id {
-              Divider().padding(.leading, 31)
-            }
-          }
-        }
-        .padding(.horizontal, 10)
-        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-    }
-  }
-}
-
-private struct InviteOutcomeRow: View {
-  let model: InviteComposerModel
-  let completion: InviteCompletion
-  let onOpenChat: ((InlineKit.Peer) -> Void)?
-  @Environment(\.realtimeV2) private var realtime
-  @State private var hoveringAction = false
-
-  var body: some View {
-    HStack(spacing: 9) {
-      Image(systemName: completion.target.symbol).foregroundStyle(.secondary).frame(width: 22)
-      Text(completion.target.oneLineTitle).lineLimit(1)
-      .frame(maxWidth: .infinity, alignment: .leading)
-
-      if case .phone = completion.target.kind {
-        ShareLink(item: inviteMessage) {
-          Label("Share", systemImage: "square.and.arrow.up")
-        }
-        .labelStyle(.iconOnly)
-        .buttonStyle(.plain)
-      } else if case .inline = completion.destination,
-                case .user = completion.target.kind,
-                let onOpenChat {
-        Button("Open Chat") { onOpenChat(.user(id: completion.userID)) }
-      }
-
-      if case .space = completion.destination {
-        Button {
-          Task { await model.revoke(completion, realtime: realtime) }
-        } label: {
-          Image(systemName: hoveringAction ? "xmark.circle.fill" : "checkmark.circle.fill")
-            .foregroundStyle(hoveringAction ? .red : .green)
-        }
-        .buttonStyle(.plain)
-        #if os(macOS)
-        .onHover { hoveringAction = $0 }
-        #endif
-        .accessibilityLabel("Revoke invitation for \(completion.target.title)")
-      } else {
-        if case .phone = completion.target.kind {
-          EmptyView()
-        } else if case .user = completion.target.kind, onOpenChat != nil {
-          EmptyView()
-        } else {
-          Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-        }
-      }
-    }
-    .frame(minHeight: 38)
-  }
-
-  private var inviteMessage: String {
-    switch completion.destination {
-    case .inline: "Join me on Inline so we can chat: https://inline.chat/download"
-    case .space: "Join me on Inline in \(model.name(for: completion.destination) ?? "our space"): https://inline.chat/download"
-    }
-  }
-}
-#endif
 
 #Preview("General invite") {
   InviteView(destination: .inline)
