@@ -481,20 +481,21 @@ struct HomeChatListPresentationTests {
     #expect(presentation.allChats.map(\.peer).contains(.thread(id: 2)))
   }
 
-  @Test("All Chats includes Inbox and keeps closed pinned chats in activity order")
+  @Test("All Chats extracts open and closed pins without duplicating them")
   func allChatsMembership() {
     let presentation = ChatListPresentation.make(from: [
       item(1, open: true, pinned: false, activity: date(day: 3)),
-      item(2, open: false, pinned: true, activity: date(day: 4)),
+      item(2, open: false, pinned: true, pinnedOrder: "b", activity: date(day: 4)),
       item(3, open: false, pinned: false, activity: date(day: 2)),
-      item(4, open: true, pinned: true, activity: date(day: 1)),
-    ], inboxSort: .lastUpdated, calendar: calendar)
+      item(4, open: true, pinned: true, pinnedOrder: "a", activity: date(day: 1)),
+    ], inboxSort: .lastUpdated, now: date(day: 4), calendar: calendar)
 
     #expect(Set(presentation.allChats.map(\.peer)) == Set([
       .thread(id: 1), .thread(id: 2), .thread(id: 3), .thread(id: 4),
     ]))
+    #expect(presentation.allChatsPinned.map(\.peer) == [.thread(id: 4), .thread(id: 2)])
     #expect(presentation.allChatSections.flatMap(\.items).map(\.peer) == [
-      .thread(id: 2), .thread(id: 1), .thread(id: 3), .thread(id: 4),
+      .thread(id: 1), .thread(id: 3),
     ])
   }
 
@@ -521,10 +522,12 @@ struct HomeChatListPresentationTests {
     let presentation = ChatListPresentation.make(from: [
       item(1, open: true, activity: date(day: 4), opened: date(day: 1)),
       item(2, open: true, activity: date(day: 2), opened: date(day: 3)),
-    ], inboxSort: .recentlyOpened, calendar: calendar)
+    ], inboxSort: .recentlyOpened, now: date(day: 4), calendar: calendar)
 
     #expect(presentation.inbox.map(\.peer) == [.thread(id: 2), .thread(id: 1)])
-    #expect(presentation.allChatSections.map(\.id) == [date(day: 4), date(day: 2)])
+    #expect(presentation.allChatSections.map(\.id) == [
+      .day(date(day: 4)), .day(date(day: 2)),
+    ])
     #expect(presentation.allChatSections.flatMap(\.items).map(\.peer) == [
       .thread(id: 1), .thread(id: 2),
     ])
@@ -545,6 +548,69 @@ struct HomeChatListPresentationTests {
 
     #expect(presentation.inbox.map(\.peer) == [.thread(id: 1), .thread(id: 2)])
     #expect(presentation.allChats.map(\.peer) == [.thread(id: 2), .thread(id: 3)])
+  }
+
+  @Test("All Chats uses recent days, then current-year months, then years")
+  func hybridTimelineSections() {
+    let now = date(year: 2026, month: 8, day: 14)
+    let presentation = ChatListPresentation.make(
+      from: [
+        item(1, activity: date(year: 2026, month: 8, day: 14)),
+        item(2, activity: date(year: 2026, month: 8, day: 13)),
+        item(3, activity: date(year: 2026, month: 8, day: 8)),
+        item(4, activity: date(year: 2026, month: 8, day: 7)),
+        item(5, activity: date(year: 2026, month: 2, day: 20)),
+        item(6, activity: date(year: 2025, month: 12, day: 31)),
+        item(7, activity: date(year: 2025, month: 1, day: 1)),
+      ],
+      inboxSort: .lastUpdated,
+      now: now,
+      calendar: calendar
+    )
+
+    #expect(presentation.allChatSections.map(\.id) == [
+      .day(date(year: 2026, month: 8, day: 14)),
+      .day(date(year: 2026, month: 8, day: 13)),
+      .day(date(year: 2026, month: 8, day: 8)),
+      .month(year: 2026, month: 8),
+      .month(year: 2026, month: 2),
+      .year(2025),
+    ])
+    #expect(presentation.allChatSections.last?.items.map(\.peer) == [
+      .thread(id: 6), .thread(id: 7),
+    ])
+  }
+
+  @Test("Timeline boundaries use local calendar days across daylight saving time")
+  func timelineCalendarBoundaries() {
+    var localCalendar = Calendar(identifier: .gregorian)
+    localCalendar.timeZone = TimeZone(identifier: "America/New_York")!
+    let now = localCalendar.date(from: DateComponents(year: 2026, month: 3, day: 10))!
+    let sixDaysAgo = localCalendar.date(from: DateComponents(year: 2026, month: 3, day: 4))!
+    let sevenDaysAgo = localCalendar.date(from: DateComponents(year: 2026, month: 3, day: 3))!
+    let eightDaysAgo = localCalendar.date(from: DateComponents(year: 2026, month: 3, day: 2))!
+
+    #expect(
+      ChatListTimelinePeriod.classify(
+        sixDaysAgo,
+        relativeTo: now,
+        calendar: localCalendar
+      ) == .day(sixDaysAgo)
+    )
+    #expect(
+      ChatListTimelinePeriod.classify(
+        sevenDaysAgo,
+        relativeTo: now,
+        calendar: localCalendar
+      ) == .month(year: 2026, month: 3)
+    )
+    #expect(
+      ChatListTimelinePeriod.classify(
+        eightDaysAgo,
+        relativeTo: now,
+        calendar: localCalendar
+      ) == .month(year: 2026, month: 3)
+    )
   }
 
   @Test("Inbox unread badge excludes closed chats")
@@ -709,8 +775,9 @@ struct HomeChatListPresentationTests {
     let unpinnedSuffixIsValid = presentation.inbox
       .drop { $0.isPinned }
       .allSatisfy { !$0.isPinned }
-    let allChatsAreActivityOrdered = presentation.allChats.elementsEqual(
-      presentation.allChats.sorted {
+    let allChatsTimeline = presentation.allChatSections.flatMap(\.items)
+    let allChatsTimelineIsActivityOrdered = allChatsTimeline.elementsEqual(
+      allChatsTimeline.sorted {
         ($0.lastUpdatedAt ?? .distantPast) > ($1.lastUpdatedAt ?? .distantPast)
       }
     )
@@ -719,10 +786,12 @@ struct HomeChatListPresentationTests {
     #expect(presentation.inbox.count == expectedInbox.count)
     #expect(presentation.inboxPinned.allSatisfy { $0.isPinned })
     #expect(presentation.inboxUnpinned.allSatisfy { !$0.isPinned })
+    #expect(presentation.allChatsPinned.allSatisfy { $0.isPinned })
+    #expect(allChatsTimeline.allSatisfy { !$0.isPinned })
     #expect(Set(allPeers).count == allPeers.count)
     #expect(pinnedPrefixIsValid)
     #expect(unpinnedSuffixIsValid)
-    #expect(allChatsAreActivityOrdered)
+    #expect(allChatsTimelineIsActivityOrdered)
     #expect(presentation.structuralLocationChangeCount(from: presentation) == 0)
   }
 
@@ -733,7 +802,11 @@ struct HomeChatListPresentationTests {
   }
 
   private func date(day: Int) -> Date {
-    calendar.date(from: DateComponents(year: 2026, month: 8, day: day))!
+    date(year: 2026, month: 8, day: day)
+  }
+
+  private func date(year: Int, month: Int, day: Int) -> Date {
+    calendar.date(from: DateComponents(year: year, month: month, day: day))!
   }
 
   private func preview(
@@ -764,6 +837,7 @@ struct HomeChatListPresentationTests {
     _ id: Int64,
     open: Bool = false,
     pinned: Bool = false,
+    pinnedOrder: String? = nil,
     archived: Bool = false,
     hidden: Bool = false,
     unreadCount: Int = 0,
@@ -783,7 +857,8 @@ struct HomeChatListPresentationTests {
       isChatListHidden: hidden,
       isArchived: archived,
       lastUpdatedAt: activity,
-      openedDate: opened
+      openedDate: opened,
+      pinnedOrder: pinnedOrder
     )
   }
 

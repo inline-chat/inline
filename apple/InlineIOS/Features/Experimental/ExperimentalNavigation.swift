@@ -1,3 +1,4 @@
+import Auth
 import InlineKit
 import InlineUI
 import Invite
@@ -319,6 +320,8 @@ struct ExperimentalHomeView: View {
   var allChatsFilter: ChatListFilter = .all
   var onRetry: () -> Void = {}
 
+  @AppStorage private var pinnedExpanded: Bool
+
   @EnvironmentObject private var homeListStore: ExperimentalHomeListStore
 
   @AppStorage(ExperimentalHomePreferenceKeys.chatItemRenderMode)
@@ -327,13 +330,34 @@ struct ExperimentalHomeView: View {
   @AppStorage(ExperimentalHomePreferenceKeys.unreadBadgeStyle)
   private var unreadBadgeStyleRawValue = ExperimentalHomeUnreadBadgeStyle.defaultValue.rawValue
 
+  init(
+    nav: ExperimentalNavigationModel,
+    initialTab: ExperimentalHomeTab,
+    allChatsFilter: ChatListFilter = .all,
+    onRetry: @escaping () -> Void = {}
+  ) {
+    self.nav = nav
+    self.initialTab = initialTab
+    self.allChatsFilter = allChatsFilter
+    self.onRetry = onRetry
+    let surface: ExperimentalHomePinnedSurface = initialTab == .allChats ? .allChats : .inbox
+    _pinnedExpanded = AppStorage(
+      wrappedValue: true,
+      ExperimentalHomePreferenceKeys.pinnedExpanded(
+        surface: surface,
+        userID: Auth.shared.getCurrentUserId()
+      )
+    )
+  }
+
   var body: some View {
     Group {
       switch initialTab {
       case .inbox:
         ExperimentalChatListView(
           items: homeListStore.state.presentation.inboxUnpinned,
-          inboxPinnedItems: homeListStore.state.presentation.inboxPinned,
+          pinnedItems: homeListStore.state.presentation.inboxPinned,
+          timelineSections: [],
           daySections: [],
           mode: .inbox,
           emptyStyle: .inbox,
@@ -343,13 +367,15 @@ struct ExperimentalHomeView: View {
           unreadBadgeStyle: unreadBadgeStyle,
           isLoading: homeListStore.state.isLoading,
           status: homeStatus,
+          pinnedExpanded: $pinnedExpanded,
           onRetry: onRetry
         )
       case .allChats:
         ExperimentalChatListView(
           items: [],
-          inboxPinnedItems: [],
-          daySections: homeListStore.state.presentation.allChatSections,
+          pinnedItems: homeListStore.state.presentation.allChatsPinned,
+          timelineSections: homeListStore.state.presentation.allChatSections,
+          daySections: [],
           mode: .allChats,
           emptyStyle: allChatsFilter == .unread ? .unreadFilter : .inlineLogo,
           emptyTitle: allChatsFilter == .unread ? "No unread chats" : "No chats",
@@ -360,12 +386,14 @@ struct ExperimentalHomeView: View {
           unreadBadgeStyle: unreadBadgeStyle,
           isLoading: homeListStore.state.isLoading,
           status: homeStatus,
+          pinnedExpanded: $pinnedExpanded,
           onRetry: onRetry
         )
       case .archived:
         ExperimentalChatListView(
           items: [],
-          inboxPinnedItems: [],
+          pinnedItems: [],
+          timelineSections: [],
           daySections: homeListStore.state.presentation.archivedSections,
           mode: .archived,
           emptyStyle: .text,
@@ -375,6 +403,7 @@ struct ExperimentalHomeView: View {
           unreadBadgeStyle: unreadBadgeStyle,
           isLoading: homeListStore.state.isLoading,
           status: homeStatus,
+          pinnedExpanded: $pinnedExpanded,
           onRetry: onRetry
         )
       }
@@ -424,7 +453,8 @@ private struct ExperimentalChatListView: View {
   }
 
   let items: [ChatListItemSnapshot]
-  let inboxPinnedItems: [ChatListItemSnapshot]
+  let pinnedItems: [ChatListItemSnapshot]
+  let timelineSections: [ChatListTimelineSection]
   let daySections: [ChatListDaySection]
   let mode: ExperimentalChatListMode
   let emptyStyle: EmptyStyle
@@ -434,6 +464,7 @@ private struct ExperimentalChatListView: View {
   let unreadBadgeStyle: ExperimentalHomeUnreadBadgeStyle
   let isLoading: Bool
   let status: ExperimentalHomeStatus?
+  @Binding var pinnedExpanded: Bool
   let onRetry: () -> Void
 
   @EnvironmentObject private var data: DataManager
@@ -442,6 +473,7 @@ private struct ExperimentalChatListView: View {
   @Environment(\.appDatabase) private var appDatabase
   @Environment(\.realtimeV2) private var realtimeV2
   @Environment(ExperimentalHomeActionCoordinator.self) private var homeActions
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var pendingArchiveItem: ChatListItemSnapshot?
 
   var body: some View {
@@ -454,7 +486,31 @@ private struct ExperimentalChatListView: View {
         emptyContent
       } else {
         List {
-          if mode == .allChats || mode == .archived {
+          if !pinnedItems.isEmpty {
+            ExperimentalPinnedChatSection(
+              isExpanded: $pinnedExpanded,
+              chatItemRenderMode: chatItemRenderMode,
+              headerInsets: sectionHeaderInsets
+            ) {
+              rows(for: pinnedItems)
+            }
+          }
+
+          if mode == .allChats {
+            ForEach(timelineSections) { section in
+              Section {
+                ExperimentalChatTimelineSectionHeader(
+                  period: section.id,
+                  chatItemRenderMode: chatItemRenderMode
+                )
+                  .listRowInsets(sectionHeaderInsets)
+                  .listRowSeparator(.hidden)
+                  .listRowBackground(Color.clear)
+
+                rows(for: section.items)
+              }
+            }
+          } else if mode == .archived {
             ForEach(daySections) { section in
               Section {
                 ExperimentalChatDaySectionHeader(
@@ -495,6 +551,12 @@ private struct ExperimentalChatListView: View {
           mode == .inbox ? .snappy(duration: 0.25, extraBounce: 0) : nil,
           value: animatedInboxRows
         )
+        // Collapse changes rendered rows without changing their model identity,
+        // so it needs its own animation key at the List diff boundary.
+        .animation(
+          reduceMotion ? nil : .smooth(duration: 0.18),
+          value: pinnedExpanded
+        )
       }
     }
     .alert(
@@ -521,12 +583,12 @@ private struct ExperimentalChatListView: View {
   /// Content updates keep the same identity sequence and do not animate.
   private var animatedInboxRows: [InboxRowLocation] {
     guard mode == .inbox else { return [] }
-    return inboxPinnedItems.map { InboxRowLocation(peer: $0.peer, section: .pinned) }
+    return pinnedItems.map { InboxRowLocation(peer: $0.peer, section: .pinned) }
       + items.map { InboxRowLocation(peer: $0.peer, section: .inbox) }
   }
 
   private var isEmpty: Bool {
-    items.isEmpty && inboxPinnedItems.isEmpty && daySections.isEmpty
+    items.isEmpty && pinnedItems.isEmpty && timelineSections.isEmpty && daySections.isEmpty
   }
 
   @ViewBuilder
@@ -638,18 +700,10 @@ private struct ExperimentalChatListView: View {
 
   private var inboxSections: [InboxListSection] {
     var sections: [InboxListSection] = []
-    sections.reserveCapacity(2)
-    if !inboxPinnedItems.isEmpty {
-      sections.append(InboxListSection(
-        id: .pinned,
-        title: "Pinned",
-        items: inboxPinnedItems
-      ))
-    }
     if !items.isEmpty {
       sections.append(InboxListSection(
         id: .inbox,
-        title: "Open",
+        title: "Open Chats",
         items: items
       ))
     }
@@ -1128,6 +1182,80 @@ private struct ExperimentalHomeFailureStateView: View {
   }
 }
 
+private struct ExperimentalPinnedChatSection<Rows: View>: View {
+  @Binding var isExpanded: Bool
+  let chatItemRenderMode: ExperimentalHomeChatItemRenderMode
+  let headerInsets: EdgeInsets
+  let rows: Rows
+
+  init(
+    isExpanded: Binding<Bool>,
+    chatItemRenderMode: ExperimentalHomeChatItemRenderMode,
+    headerInsets: EdgeInsets,
+    @ViewBuilder rows: () -> Rows
+  ) {
+    _isExpanded = isExpanded
+    self.chatItemRenderMode = chatItemRenderMode
+    self.headerInsets = headerInsets
+    self.rows = rows()
+  }
+
+  var body: some View {
+    Section {
+      ExperimentalPinnedChatSectionHeader(
+        isExpanded: isExpanded,
+        chatItemRenderMode: chatItemRenderMode,
+        action: toggle
+      )
+        .listRowInsets(headerInsets)
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
+
+      if isExpanded {
+        rows
+      }
+    }
+  }
+
+  private func toggle() {
+    isExpanded.toggle()
+  }
+}
+
+private struct ExperimentalPinnedChatSectionHeader: View {
+  let isExpanded: Bool
+  let chatItemRenderMode: ExperimentalHomeChatItemRenderMode
+  let action: () -> Void
+
+  var body: some View {
+    Button(action: action) {
+      HStack(spacing: 6) {
+        Text("Pinned")
+          .frame(maxWidth: .infinity, alignment: .leading)
+        if !isExpanded {
+          Image(systemName: "chevron.right")
+            .font(.caption.weight(.semibold))
+            .offset(x: 2)
+            .transition(.opacity)
+        }
+      }
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .modifier(ExperimentalChatSectionHeaderStyle(chatItemRenderMode: chatItemRenderMode))
+    .accessibilityValue(accessibilityValue)
+    .accessibilityHint(accessibilityHint)
+  }
+
+  private var accessibilityValue: LocalizedStringKey {
+    isExpanded ? "Expanded" : "Collapsed"
+  }
+
+  private var accessibilityHint: LocalizedStringKey {
+    isExpanded ? "Collapses pinned chats" : "Expands pinned chats"
+  }
+}
+
 private struct ExperimentalChatSectionHeader: View {
   let title: LocalizedStringResource
   let chatItemRenderMode: ExperimentalHomeChatItemRenderMode
@@ -1153,6 +1281,43 @@ private struct ExperimentalChatDaySectionHeader: View {
       return Text(day, format: .dateTime.month(.abbreviated).day())
     }
     return Text(day, format: .dateTime.month(.abbreviated).day().year())
+  }
+}
+
+private struct ExperimentalChatTimelineSectionHeader: View {
+  let period: ChatListTimelinePeriod
+  let chatItemRenderMode: ExperimentalHomeChatItemRenderMode
+
+  @Environment(\.calendar) private var calendar
+
+  var body: some View {
+    title
+      .modifier(ExperimentalChatSectionHeaderStyle(chatItemRenderMode: chatItemRenderMode))
+  }
+
+  private var title: Text {
+    switch period {
+    case let .day(day):
+      if calendar.isDateInToday(day) {
+        Text("Today")
+      } else if calendar.isDateInYesterday(day) {
+        Text("Yesterday")
+      } else {
+        Text(day, format: .dateTime.weekday(.wide).month(.abbreviated).day())
+      }
+    case let .month(year, month):
+      if let date = calendar.date(from: DateComponents(year: year, month: month, day: 1)) {
+        Text(date, format: .dateTime.month(.wide))
+      } else {
+        Text(verbatim: "\(month)")
+      }
+    case let .year(year):
+      if let date = calendar.date(from: DateComponents(year: year, month: 1, day: 1)) {
+        Text(date, format: .dateTime.year())
+      } else {
+        Text(verbatim: "\(year)")
+      }
+    }
   }
 }
 

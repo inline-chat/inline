@@ -10,6 +10,41 @@ public struct ChatListDaySection: Identifiable, Equatable, Sendable {
   }
 }
 
+public enum ChatListTimelinePeriod: Hashable, Sendable {
+  case day(Date)
+  case month(year: Int, month: Int)
+  case year(Int)
+
+  public static func classify(
+    _ date: Date,
+    relativeTo now: Date = Date(),
+    calendar: Calendar = .autoupdatingCurrent
+  ) -> Self {
+    let day = calendar.startOfDay(for: date)
+    let today = calendar.startOfDay(for: now)
+    let daysAgo = calendar.dateComponents([.day], from: day, to: today).day
+    if let daysAgo, daysAgo < 7 {
+      return .day(day)
+    }
+
+    let year = calendar.component(.year, from: day)
+    if year == calendar.component(.year, from: today) {
+      return .month(year: year, month: calendar.component(.month, from: day))
+    }
+    return .year(year)
+  }
+}
+
+public struct ChatListTimelineSection: Identifiable, Equatable, Sendable {
+  public let id: ChatListTimelinePeriod
+  public let items: [ChatListItemSnapshot]
+
+  public init(id: ChatListTimelinePeriod, items: [ChatListItemSnapshot]) {
+    self.id = id
+    self.items = items
+  }
+}
+
 /// Every render-ready Home surface prepared from one database snapshot.
 ///
 /// Keeping Inbox, All Chats, and Archived Chats in one immutable value means
@@ -18,6 +53,7 @@ public struct ChatListDaySection: Identifiable, Equatable, Sendable {
 public struct ChatListPresentation: Equatable, Sendable {
   public static let empty = Self(
     inbox: [],
+    allChatsPinned: [],
     allChatSections: [],
     archived: [],
     inboxUnreadCount: 0
@@ -26,14 +62,16 @@ public struct ChatListPresentation: Equatable, Sendable {
   public let inbox: [ChatListItemSnapshot]
   public let inboxPinned: [ChatListItemSnapshot]
   public let inboxUnpinned: [ChatListItemSnapshot]
-  public let allChatSections: [ChatListDaySection]
+  public let allChatsPinned: [ChatListItemSnapshot]
+  public let allChatSections: [ChatListTimelineSection]
   public let archived: [ChatListItemSnapshot]
   public let archivedSections: [ChatListDaySection]
   public let inboxUnreadCount: Int
 
   public init(
     inbox: [ChatListItemSnapshot],
-    allChatSections: [ChatListDaySection],
+    allChatsPinned: [ChatListItemSnapshot],
+    allChatSections: [ChatListTimelineSection],
     archived: [ChatListItemSnapshot],
     inboxUnreadCount: Int,
     calendar: Calendar = .autoupdatingCurrent
@@ -41,6 +79,7 @@ public struct ChatListPresentation: Equatable, Sendable {
     self.inbox = inbox
     self.inboxPinned = inbox.filter(\.isPinned)
     self.inboxUnpinned = inbox.filter { !$0.isPinned }
+    self.allChatsPinned = allChatsPinned
     self.allChatSections = allChatSections
     self.archived = archived
     self.archivedSections = Self.daySections(from: archived, calendar: calendar)
@@ -51,6 +90,7 @@ public struct ChatListPresentation: Equatable, Sendable {
     from snapshots: [ChatListItemSnapshot],
     inboxSort: ChatListSort,
     allChatsFilter: ChatListFilter = .all,
+    now: Date = Date(),
     calendar: Calendar = .autoupdatingCurrent
   ) -> Self {
     let visible = snapshots.filter(\.isVisibleInHome)
@@ -60,13 +100,25 @@ public struct ChatListPresentation: Equatable, Sendable {
     let timeline = visible
       .filter { allChatsFilter == .all || $0.isUnread }
       .sorted { timelineOrdered($0, before: $1, sort: .lastUpdated) }
+    let allChatsPinned = timeline
+      .filter(\.isPinned)
+      .sorted { lhs, rhs in
+        compareOptionalOrder(lhs.pinnedOrder, rhs.pinnedOrder)
+          ?? timelineOrdered(lhs, before: rhs, sort: .lastUpdated)
+      }
+    let allChatsTimeline = timeline.filter { !$0.isPinned }
     let archived = snapshots
       .filter { !$0.isChatListHidden && $0.isArchived }
       .sorted { timelineOrdered($0, before: $1, sort: .lastUpdated) }
 
     return Self(
       inbox: inbox,
-      allChatSections: daySections(from: timeline, calendar: calendar),
+      allChatsPinned: allChatsPinned,
+      allChatSections: timelineSections(
+        from: allChatsTimeline,
+        now: now,
+        calendar: calendar
+      ),
       archived: archived,
       inboxUnreadCount: inbox.lazy.filter(\.isUnread).count,
       calendar: calendar
@@ -74,11 +126,11 @@ public struct ChatListPresentation: Equatable, Sendable {
   }
 
   public var allChats: [ChatListItemSnapshot] {
-    allChatSections.flatMap(\.items)
+    allChatsPinned + allChatSections.flatMap(\.items)
   }
 
   public var allChatCount: Int {
-    allChatSections.reduce(into: 0) { count, section in
+    allChatSections.reduce(into: allChatsPinned.count) { count, section in
       count += section.items.count
     }
   }
@@ -108,6 +160,29 @@ public struct ChatListPresentation: Equatable, Sendable {
     }
 
     return grouped.map { ChatListDaySection(id: $0.day, items: $0.items) }
+  }
+
+  private static func timelineSections(
+    from items: [ChatListItemSnapshot],
+    now: Date,
+    calendar: Calendar
+  ) -> [ChatListTimelineSection] {
+    var grouped: [(period: ChatListTimelinePeriod, items: [ChatListItemSnapshot])] = []
+
+    for item in items {
+      let period = ChatListTimelinePeriod.classify(
+        sortDate(for: item, sort: .lastUpdated),
+        relativeTo: now,
+        calendar: calendar
+      )
+      if grouped.last?.period == period {
+        grouped[grouped.count - 1].items.append(item)
+      } else {
+        grouped.append((period: period, items: [item]))
+      }
+    }
+
+    return grouped.map { ChatListTimelineSection(id: $0.period, items: $0.items) }
   }
 
   private static func inboxOrdered(
@@ -165,7 +240,8 @@ public struct ChatListPresentation: Equatable, Sendable {
   private enum OrderedSectionID: Equatable {
     case inboxPinned
     case inbox
-    case allChats(Date)
+    case allChatsPinned
+    case allChats(ChatListTimelinePeriod)
     case archived(Date)
   }
 
@@ -198,6 +274,15 @@ public struct ChatListPresentation: Equatable, Sendable {
       locations[item.peer, default: Locations()].inbox = OrderedPosition(
         predecessor: predecessor,
         sectionID: .inbox
+      )
+      predecessor = item.peer
+    }
+
+    predecessor = nil
+    for item in allChatsPinned {
+      locations[item.peer, default: Locations()].allChats = OrderedPosition(
+        predecessor: predecessor,
+        sectionID: .allChatsPinned
       )
       predecessor = item.peer
     }

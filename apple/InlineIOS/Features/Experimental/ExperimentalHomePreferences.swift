@@ -9,6 +9,18 @@ enum ExperimentalHomePreferenceKeys {
   static let chatItemRenderMode = "ios.experimental.home.chatItemRenderMode"
   static let sortMode = "ios.experimental.home.sortMode"
   static let unreadBadgeStyle = "unreadBadgeStyle"
+
+  static func pinnedExpanded(
+    surface: ExperimentalHomePinnedSurface,
+    userID: Int64?
+  ) -> String {
+    "ios.home.pinnedExpanded.\(surface.rawValue).\(userID.map(String.init) ?? "signed-out")"
+  }
+}
+
+enum ExperimentalHomePinnedSurface: String {
+  case inbox
+  case allChats
 }
 
 enum ExperimentalHomeUnreadBadgeStyle: String, CaseIterable, Identifiable {
