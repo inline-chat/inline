@@ -8,7 +8,8 @@ RSA_PAD/DH, encrypted records, Inline application constructors, abridged quick
 ACK framing, and bounded receive-window behavior. In the workspace, the public
 schema source is `proto/core.proto`; the crate also packages a matching copy so
 published builds are self-contained. Generated Rust code is produced at build
-time with `prost`.
+time with `prost`. The `vectors` module embeds the same frozen JSON conformance
+corpus shipped by the TypeScript and Swift packages.
 
 Most application code should depend on `inline-sdk` rather than using this
 crate directly.

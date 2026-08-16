@@ -25,6 +25,7 @@
     "dist/secure",
     "dist/index.d.ts",
     "dist/index.js",
+    "vectors/inline-protocol-v1.json",
     "README.md"
   ],
   "main": "./dist/index.js",
@@ -61,7 +62,8 @@
     "./vectors": {
       "types": "./dist/vectors.d.ts",
       "default": "./dist/vectors.js"
-    }
+    },
+    "./vectors/inline-protocol-v1.json": "./vectors/inline-protocol-v1.json"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

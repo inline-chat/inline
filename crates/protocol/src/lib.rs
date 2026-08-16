@@ -10,6 +10,9 @@
 /// MTProto-compatible secure transport primitives used by Inline Protocol v1.
 pub mod secure;
 
+/// Frozen language-neutral interoperability vectors.
+pub mod vectors;
+
 /// Protobuf-generated Inline protocol module.
 pub mod proto {
     #![allow(

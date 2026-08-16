@@ -28,6 +28,7 @@ sha2 = "0.10.8"
 
 [dev-dependencies]
 hex = "0.4.3"
+serde_json.workspace = true
 
 [build-dependencies]
 prost-build.workspace = true

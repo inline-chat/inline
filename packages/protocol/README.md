@@ -23,6 +23,7 @@ bun add @inline-chat/protocol
 - `@inline-chat/protocol/carrier` is the client/server-neutral obfuscated abridged carrier surface, including Telegram-compatible quick ACK framing.
 - `@inline-chat/protocol/server` exposes the server handshake and session engine.
 - `@inline-chat/protocol/vectors` contains frozen cross-language conformance vectors.
+- `@inline-chat/protocol/vectors/inline-protocol-v1.json` is the exact language-neutral corpus consumed by the TypeScript, Rust, and Swift tests.
 
 ## Regenerate
 
@@ -30,6 +31,7 @@ From repo root:
 
 ```bash
 bun run generate:proto
+cd packages/protocol && bun run generate:vectors
 ```
 
 Do not manually edit generated schema files. Secure-transport changes require the cross-language vectors and security review described in the Inline Protocol specification.
