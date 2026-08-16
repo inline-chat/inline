@@ -38,6 +38,7 @@ import {
   encodeInlineUpdate,
   decodeBadMessageNotification,
   decodeGzipPacked,
+  decodeInvokeAfter,
   decodeMessageContainer,
   decodeMsgCopy,
   decodeDestroySession,
@@ -54,6 +55,8 @@ import {
   encodeDestroyAuthKeyResult,
   encodeFutureSalts,
   encodeGetFutureSalts,
+  encodeInvokeAfterMsg,
+  encodeInvokeAfterMsgs,
   encodeMsgsAck,
   encodeRpcResult,
   encodeServerDhParamsFail,
@@ -429,6 +432,17 @@ describe("reliability service objects", () => {
       kind: "salt", badMessageId: 12n, badSequenceNumber: 1, errorCode: 48, newServerSalt: 99n,
     })
     expect(() => encodeMessageContainer([{ messageId: 16n, sequenceNumber: 0, body: container }])).toThrow()
+  })
+
+  test("matches Telegram invoke-after constructors and preserves the inner query bytes", () => {
+    const query = encodeInlineInvoke(Uint8Array.of(1, 2, 3))
+    expect(decodeInvokeAfter(encodeInvokeAfterMsg(4n, query))).toEqual({ messageIds: [4n], query })
+    expect(decodeInvokeAfter(encodeInvokeAfterMsgs([4n, 8n], query))).toEqual({
+      messageIds: [4n, 8n],
+      query,
+    })
+    expect(bytesToHex(encodeInvokeAfterMsg(4n, query)).slice(0, 8)).toBe("2d379fcb")
+    expect(bytesToHex(encodeInvokeAfterMsgs([4n, 8n], query)).slice(0, 8)).toBe("f0b4c43d")
   })
 
   test("enforces the decompressed gzip limit before exposing an object", () => {

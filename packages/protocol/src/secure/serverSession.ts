@@ -6,6 +6,7 @@ import {
 import {
   MAX_PACKET_BYTES,
   bytesToHex,
+  equalBytes,
   int64LE,
   readInt64LE,
   uint32LE,
@@ -45,6 +46,7 @@ import {
 import {
   ServiceConstructor,
   decodeGzipPacked,
+  decodeInvokeAfter,
   decodeDestroySession,
   decodeGetFutureSalts,
   decodeMessageContainer,
@@ -68,6 +70,9 @@ import {
 
 const BOOL_TRUE = 0x997275b5
 const MAX_SESSION_OUTPUTS = 2048
+const MAX_COMPLETED_INCOMING_MESSAGES = 8192
+const MAX_DEFERRED_INVOKE_AFTER = 1024
+const MAX_INVOKE_AFTER_NESTING = 16
 const NON_CONTENT_CONSTRUCTORS = new Set<number>([
   ServiceConstructor.msgContainer,
   ServiceConstructor.msgsAck,
@@ -169,6 +174,7 @@ type PreparedLogicalMessage = {
   constructor: number
   contentRelated: boolean
   duplicate: boolean
+  dependencies: bigint[]
 }
 
 export interface InlineProtocolServerSessionOptions {
@@ -193,6 +199,8 @@ export class InlineProtocolServerSession {
   readonly #receivedSequences = new ReceiveSequenceValidator()
   readonly #acknowledgements = new AcknowledgementQueue()
   readonly #pending = new PendingMessageCache()
+  readonly #completedIncoming = new Map<bigint, true>()
+  readonly #deferredInvokeAfter = new Map<bigint, PreparedLogicalMessage>()
   readonly #handshake: InlineHandshakeServer
   #authorization: LoadedServerAuthorizationKey | undefined
   #sessionId: bigint | undefined
@@ -307,9 +315,12 @@ export class InlineProtocolServerSession {
     }
     const prepared: PreparedLogicalMessage[] = []
     for (const message of messages) {
-      const constructor = serviceConstructor(message.body)
-      const contentRelated = this.#isContentRelated(constructor)
-      const allowDuplicate = constructor === BindingConstructor.bindTempAuthKey ||
+      const originalBody = message.body
+      const unwrapped = this.#unwrapInvokeAfter(originalBody)
+      const constructor = serviceConstructor(unwrapped.body)
+      const contentRelated = unwrapped.wrapped || this.#isContentRelated(constructor)
+      const allowDuplicate = unwrapped.wrapped ||
+        constructor === BindingConstructor.bindTempAuthKey ||
         constructor === ServiceConstructor.gzipPacked ||
         constructor === ServiceConstructor.msgCopy ||
         constructor === INLINE_INVOKE_CONSTRUCTOR
@@ -320,7 +331,17 @@ export class InlineProtocolServerSession {
           encodeBadMsgNotification(message.messageId, message.sequenceNumber, validation), false, 1,
         )]
       }
-      prepared.push({ message, constructor, contentRelated, duplicate })
+      prepared.push({
+        message: !unwrapped.wrapped ? message : {
+          ...message,
+          body: unwrapped.body,
+          authenticatedBody: message.authenticatedBody ?? originalBody,
+        },
+        constructor,
+        contentRelated,
+        duplicate,
+        dependencies: unwrapped.dependencies,
+      })
     }
 
     receiveOptions.onQuickAck?.(quickAckId)
@@ -337,7 +358,12 @@ export class InlineProtocolServerSession {
       }
     }
     for (const item of prepared) {
-      outputs.push(...await this.#handleLogical(item.message, item))
+      if (this.#dependenciesComplete(item.dependencies)) {
+        outputs.push(...await this.#completePrepared(item))
+        outputs.push(...await this.#drainDeferred())
+      } else {
+        this.#defer(item)
+      }
       if (outputs.length > MAX_SESSION_OUTPUTS) throw new RangeError("Too many Inline Protocol outputs")
     }
     const acknowledgements = this.#acknowledgements.drain()
@@ -349,6 +375,69 @@ export class InlineProtocolServerSession {
     const children = decodeMessageContainer(outer.body)
     if (children.some((child) => child.messageId >= outer.messageId)) throw new RangeError("Container ID must exceed child IDs")
     return children
+  }
+
+  #unwrapInvokeAfter(body: Uint8Array): { body: Uint8Array; dependencies: bigint[]; wrapped: boolean } {
+    const dependencies: bigint[] = []
+    let query = body
+    for (let depth = 0; depth < MAX_INVOKE_AFTER_NESTING; depth += 1) {
+      const constructor = serviceConstructor(query)
+      if (constructor !== ServiceConstructor.invokeAfterMsg &&
+          constructor !== ServiceConstructor.invokeAfterMsgs) {
+        return { body: query, dependencies, wrapped: dependencies.length > 0 || query !== body }
+      }
+      const wrapper = decodeInvokeAfter(query)
+      dependencies.push(...wrapper.messageIds)
+      if (dependencies.length > 8192) throw new RangeError("Too many invoke-after dependencies")
+      query = wrapper.query
+    }
+    throw new RangeError("Invoke-after nesting exceeds the limit")
+  }
+
+  #dependenciesComplete(dependencies: readonly bigint[]): boolean {
+    return dependencies.every((messageId) => this.#completedIncoming.has(messageId))
+  }
+
+  #defer(item: PreparedLogicalMessage): void {
+    const existing = this.#deferredInvokeAfter.get(item.message.messageId)
+    if (existing) {
+      if (!equalBytes(
+        existing.message.authenticatedBody ?? existing.message.body,
+        item.message.authenticatedBody ?? item.message.body,
+      )) throw new RangeError("Conflicting deferred invoke-after replay")
+      return
+    }
+    if (this.#deferredInvokeAfter.size >= MAX_DEFERRED_INVOKE_AFTER) {
+      throw new RangeError("Too many deferred invoke-after queries")
+    }
+    this.#deferredInvokeAfter.set(item.message.messageId, item)
+  }
+
+  async #completePrepared(item: PreparedLogicalMessage): Promise<Uint8Array[]> {
+    const outputs = await this.#handleLogical(item.message, item)
+    this.#completedIncoming.delete(item.message.messageId)
+    this.#completedIncoming.set(item.message.messageId, true)
+    if (this.#completedIncoming.size > MAX_COMPLETED_INCOMING_MESSAGES) {
+      const oldest = this.#completedIncoming.keys().next().value
+      if (oldest !== undefined) this.#completedIncoming.delete(oldest)
+    }
+    return outputs
+  }
+
+  async #drainDeferred(): Promise<Uint8Array[]> {
+    const outputs: Uint8Array[] = []
+    let madeProgress = true
+    while (madeProgress) {
+      madeProgress = false
+      for (const [messageId, item] of this.#deferredInvokeAfter) {
+        if (!this.#dependenciesComplete(item.dependencies)) continue
+        this.#deferredInvokeAfter.delete(messageId)
+        outputs.push(...await this.#completePrepared(item))
+        if (outputs.length > MAX_SESSION_OUTPUTS) throw new RangeError("Too many Inline Protocol outputs")
+        madeProgress = true
+      }
+    }
+    return outputs
   }
 
   async #handleLogical(
