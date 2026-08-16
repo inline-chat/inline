@@ -2,6 +2,7 @@ import { chmod, readFile, writeFile } from "node:fs/promises"
 import { basename, resolve } from "node:path"
 import { generateKeyPairSync, randomBytes } from "node:crypto"
 import { makeInlineProtocolRsaSigner } from "../src/modules/inlineProtocol/rsaSigner"
+import { decodeInlineProtocolSecretKeyRing } from "../src/modules/inlineProtocol/keyCipher"
 
 type SecretRing = { activeId: string; keys: Record<string, string> }
 type KeyBundle = {
@@ -42,12 +43,8 @@ const requireBundle = (value: unknown): KeyBundle => {
   }
   const bundle = value as KeyBundle
   makeInlineProtocolRsaSigner(JSON.stringify(bundle.rsaPrivateKeys))
-  for (const ring of [bundle.authKeyKekRing, bundle.authCodePepperRing]) {
-    const active = ring.keys[ring.activeId]
-    if (!active || Buffer.from(active, "base64").length !== 32) {
-      throw new Error("Invalid Inline Protocol secret ring")
-    }
-  }
+  decodeInlineProtocolSecretKeyRing(JSON.stringify(bundle.authKeyKekRing), "bundle auth-key KEK")
+  decodeInlineProtocolSecretKeyRing(JSON.stringify(bundle.authCodePepperRing), "bundle auth-code pepper")
   return bundle
 }
 
