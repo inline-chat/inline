@@ -700,6 +700,9 @@ message UrlPreview {
 
   // Author, channel, account, or publisher avatar, separate from primary media.
   optional Photo author_photo = 14;
+
+  // Native emoji used by the destination as its page icon, when provided.
+  optional string icon_emoji = 15;
 }
 
 // Typed media attached to a URL preview.
@@ -986,6 +989,7 @@ message RpcError {
     USERNAME_INVALID = 15;
     USERNAME_TAKEN = 16;
     FIRST_NAME_INVALID = 17;
+    URL_PREVIEW_UNAVAILABLE = 18;
   }
 }
 
@@ -1095,6 +1099,7 @@ enum Method {
   DISCONNECT_CONNECTOR = 102;
   SEARCH_USERS = 103;
   INVITE_TO_INLINE = 104;
+  RESOLVE_URL_PREVIEW = 105;
 }
 
 message RpcCall {
@@ -1204,6 +1209,7 @@ message RpcCall {
     DisconnectConnectorInput disconnectConnector = 103;
     SearchUsersInput searchUsers = 104;
     InviteToInlineInput inviteToInline = 105;
+    ResolveUrlPreviewInput resolveUrlPreview = 106;
   }
 }
 
@@ -1315,6 +1321,7 @@ message RpcResult {
     DisconnectConnectorResult disconnectConnector = 103;
     SearchUsersResult searchUsers = 104;
     InviteToInlineResult inviteToInline = 105;
+    ResolveUrlPreviewResult resolveUrlPreview = 106;
   }
 }
 
@@ -2020,6 +2027,12 @@ message GetUserSettingsResult { UserSettings user_settings = 1; }
 message UserSettings {
   optional NotificationSettings notification_settings = 1;
   optional PrivacySettings privacy_settings = 2;
+  optional ComposeSettings compose_settings = 3;
+}
+
+message ComposeSettings {
+  // If true, eligible pasted URLs may be replaced with titled text links.
+  optional bool replace_pasted_links_with_titles = 1;
 }
 
 message PrivacySettings {
@@ -2072,6 +2085,16 @@ message DialogNotificationSettings {
 message UpdateUserSettingsInput { UserSettings user_settings = 1; }
 
 message UpdateUserSettingsResult { repeated Update updates = 1; }
+
+message ResolveUrlPreviewInput {
+  InputPeer peer_id = 1;
+  string url = 2;
+}
+
+message ResolveUrlPreviewResult {
+  UrlPreview url_preview = 1;
+  bool can_substitute = 2;
+}
 
 message UpdateDialogNotificationSettingsInput {
   // Peer to update settings for
@@ -3475,4 +3498,117 @@ message BotChatSettingsItemInvoked {
   string item_id = 5;
   optional BotChatSettingsValue value = 6;
   string document_revision = 7;
+}
+
+// --- Realtime V3 application envelope ---
+// Inline Protocol owns transport IDs, sequencing, acknowledgements, pings,
+// replay handling, and authentication. These messages carry only the Inline
+// Schema application contract inside inline.invoke/result/update.
+
+message RealtimeV3Request {
+  oneof body {
+    RpcCall rpc = 1;
+    AuthBeginRequest auth_begin = 2;
+    AuthCompleteRequest auth_complete = 3;
+    CreateHttpUploadRequest create_http_upload = 4;
+    FinishHttpUploadRequest finish_http_upload = 5;
+  }
+}
+
+message RealtimeV3Response {
+  oneof body {
+    RpcResult rpc_result = 1;
+    RpcError rpc_error = 2;
+    AuthBeginResult auth_begin = 3;
+    AuthCompleteResult auth_complete = 4;
+    CreateHttpUploadResult create_http_upload = 5;
+    FinishHttpUploadResult finish_http_upload = 6;
+  }
+}
+
+message RealtimeV3Update { ServerMessage message = 1; }
+
+message ClientInfo {
+  optional string device_id = 1;
+  optional string client_type = 2;
+  optional string client_version = 3;
+  optional string os_version = 4;
+  optional string device_name = 5;
+}
+
+message AuthBeginRequest {
+  oneof identifier {
+    string email = 1;
+    string phone_number = 2;
+  }
+  ClientInfo client = 3;
+}
+
+message AuthBeginResult {
+  bytes challenge_id = 1;
+  enum Delivery {
+    DELIVERY_UNSPECIFIED = 0;
+    EMAIL = 1;
+    SMS = 2;
+  }
+  Delivery delivery = 2;
+  int64 expires_at = 3;
+  uint32 retry_after_seconds = 4;
+}
+
+message AuthCompleteRequest {
+  bytes challenge_id = 1;
+  string code = 2;
+  optional string invite_code = 3;
+  optional string time_zone = 4;
+}
+
+message AuthAuthorized {
+  User user = 1;
+  int64 account_session_id = 2;
+}
+
+message AuthInviteRequired {}
+
+message AuthCompleteResult {
+  oneof state {
+    AuthAuthorized authorized = 1;
+    AuthInviteRequired invite_required = 2;
+  }
+}
+
+enum HttpUploadKind {
+  HTTP_UPLOAD_KIND_UNSPECIFIED = 0;
+  PHOTO = 1;
+  VIDEO = 2;
+  DOCUMENT = 3;
+  VOICE = 4;
+}
+
+message CreateHttpUploadRequest {
+  string file_name = 1;
+  string mime_type = 2;
+  uint64 byte_count = 3;
+  bytes sha256 = 4;
+  HttpUploadKind kind = 5;
+}
+
+message CreateHttpUploadResult {
+  bytes upload_id = 1;
+  string upload_url = 2;
+  bytes capability = 3;
+  int64 expires_at = 4;
+}
+
+message FinishHttpUploadRequest { bytes upload_id = 1; }
+
+message HttpUploadPending { uint32 retry_after_seconds = 1; }
+
+message HttpUploadComplete { string file_unique_id = 1; }
+
+message FinishHttpUploadResult {
+  oneof state {
+    HttpUploadPending pending = 1;
+    HttpUploadComplete complete = 2;
+  }
 }
