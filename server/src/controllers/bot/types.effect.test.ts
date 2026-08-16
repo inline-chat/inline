@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Schema } from "effect"
-import { BotChatParticipant, BotMembership, BotMessageAction, BotUpdate } from "./types.effect"
+import { BotChatParticipant, BotMessageAction, BotParticipation, BotUpdate } from "./types.effect"
 
 const chat = {
   chat_id: 10,
@@ -38,22 +38,22 @@ describe("BotUpdate", () => {
     expect("message" in update).toBe(true)
   })
 
-  it("decodes the Inline-native bot membership event", () => {
+  it("decodes the Inline-native bot participation event", () => {
     const update = decodeUpdate({
       update_id: 2,
-      bot_membership: {
+      bot_participation: {
         chat,
         date: 1_786_000_020,
-        old_membership: {
+        old_participation: {
           status: "removed",
         },
-        new_membership: {
-          status: "member",
+        new_participation: {
+          status: "participating",
         },
       },
     })
 
-    expect("bot_membership" in update).toBe(true)
+    expect("bot_participation" in update).toBe(true)
   })
 
   it("rejects an update containing more than one event key", () => {
@@ -124,8 +124,8 @@ describe("BotChatParticipant", () => {
     expect(participant.member?.role).toBe("admin")
   })
 
-  it("does not expose an unsupported blocked membership state", () => {
-    expect(() => Schema.decodeUnknownSync(BotMembership)({
+  it("does not expose an unsupported blocked participation state", () => {
+    expect(() => Schema.decodeUnknownSync(BotParticipation)({
       status: "blocked",
     })).toThrow()
   })

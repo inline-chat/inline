@@ -530,7 +530,7 @@ export const BotUpdateKey = Schema.Literals([
   "deleted_messages",
   "message_reaction",
   "message_action",
-  "bot_membership",
+  "bot_participation",
 ]).annotate({ identifier: "BotUpdateKey" })
 
 export const BotMessageTrigger = Schema.Literals([
@@ -538,17 +538,17 @@ export const BotMessageTrigger = Schema.Literals([
   "mentions",
 ]).annotate({ identifier: "BotMessageTrigger" })
 
-export const BotMembership = Schema.Struct({
-  status: Schema.Literals(["member", "removed"]),
-}).annotate({ identifier: "BotMembership" })
+export const BotParticipation = Schema.Struct({
+  status: Schema.Literals(["participating", "removed"]),
+}).annotate({ identifier: "BotParticipation" })
 
-export const BotMembershipChange = Schema.Struct({
+export const BotParticipationChange = Schema.Struct({
   chat: BotEventChat,
   actor: Schema.optionalKey(BotUser),
   date: WireNonNegativeInteger,
-  old_membership: BotMembership,
-  new_membership: BotMembership,
-}).annotate({ identifier: "BotMembershipChange" })
+  old_participation: BotParticipation,
+  new_participation: BotParticipation,
+}).annotate({ identifier: "BotParticipationChange" })
 
 const BotUpdateBaseFields = {
   update_id: WirePositiveInteger,
@@ -609,7 +609,7 @@ export const BotUpdate = Schema.Union([
   }),
   Schema.Struct({
     ...BotUpdateBaseFields,
-    bot_membership: BotMembershipChange,
+    bot_participation: BotParticipationChange,
   }),
 ], { mode: "oneOf" }).annotate({
   identifier: "BotUpdate",

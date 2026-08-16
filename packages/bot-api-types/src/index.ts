@@ -23,7 +23,7 @@ export type BotUpdateKey =
   | "deleted_messages"
   | "message_reaction"
   | "message_action"
-  | "bot_membership"
+  | "bot_participation"
 
 export type BotDefaultUpdateKey = Exclude<BotUpdateKey, "message_reaction">
 export const BOT_DEFAULT_UPDATE_KEYS = [
@@ -31,7 +31,7 @@ export const BOT_DEFAULT_UPDATE_KEYS = [
   "edited_message",
   "deleted_messages",
   "message_action",
-  "bot_membership",
+  "bot_participation",
 ] as const satisfies ReadonlyArray<BotDefaultUpdateKey>
 export type BotMessageTrigger = "all" | "mentions"
 export type BotActivationReason =
@@ -232,16 +232,16 @@ export type BotEventMessage = Omit<BotMessage, "chat"> & {
   chat: BotEventChat
 }
 
-export type BotMembership = {
-  status: "member" | "removed"
+export type BotParticipation = {
+  status: "participating" | "removed"
 }
 
-export type BotMembershipChange = {
+export type BotParticipationChange = {
   chat: BotEventChat
   actor?: BotUser
   date: number
-  old_membership: BotMembership
-  new_membership: BotMembership
+  old_participation: BotParticipation
+  new_participation: BotParticipation
 }
 
 export type BotSpaceMember = {
@@ -300,7 +300,7 @@ export type BotUpdate = BotUpdateBase &
             )
         }
       }
-    | { bot_membership: BotMembershipChange }
+    | { bot_participation: BotParticipationChange }
   )
 
 export type WebhookInfo = {

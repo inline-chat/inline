@@ -305,7 +305,7 @@ async function actionInvoked(input: {
   })
 }
 
-async function membershipChanged(input: {
+async function participationChanged(input: {
   botUserId: number
   chat: DbChat
   actorUserId: number
@@ -317,17 +317,17 @@ async function membershipChanged(input: {
   ])
   if (!bot?.bot) return
   const removed = { status: "removed" as const }
-  const member = { status: "member" as const }
+  const participating = { status: "participating" as const }
   await BotUpdatesModel.queue({
     botUserId: input.botUserId,
-    updateType: "bot_membership",
+    updateType: "bot_participation",
     payload: {
-      bot_membership: {
+      bot_participation: {
         chat: toEventChat(input.chat),
         actor: actor ? toUser(actor) : undefined,
         date: Math.floor(Date.now() / 1_000),
-        old_membership: input.added ? removed : member,
-        new_membership: input.added ? member : removed,
+        old_participation: input.added ? removed : participating,
+        new_participation: input.added ? participating : removed,
       },
     },
   })
@@ -344,5 +344,5 @@ export const BotUpdateProjector = {
   messagesDeleted: safely("deleted messages", messagesDeleted),
   reactionChanged: safely("reaction", reactionChanged),
   actionInvoked: safely("message action", actionInvoked),
-  membershipChanged: safely("bot membership", membershipChanged),
+  participationChanged: safely("bot participation", participationChanged),
 }

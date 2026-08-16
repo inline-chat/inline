@@ -136,7 +136,7 @@ export async function removeChatParticipant(
     })
     pushChatPermissionUpdates(permissionUpdates)
     const [chat] = await db.select().from(chats).where(eq(chats.id, input.chatId)).limit(1)
-    if (chat) BotUpdateProjector.membershipChanged({ botUserId: userId, chat, actorUserId: context.currentUserId, added: false })
+    if (chat) BotUpdateProjector.participationChanged({ botUserId: userId, chat, actorUserId: context.currentUserId, added: false })
   } catch (error) {
     Log.shared.error(`Failed to remove participant from chat ${input.chatId}: ${error}`)
     if (error instanceof RealtimeRpcError) {

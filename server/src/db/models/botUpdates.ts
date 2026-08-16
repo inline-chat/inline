@@ -22,7 +22,7 @@ const defaultUpdates: BotUpdateKey[] = [
   "edited_message",
   "deleted_messages",
   "message_action",
-  "bot_membership",
+  "bot_participation",
 ]
 const allUpdates: BotUpdateKey[] = [...defaultUpdates, "message_reaction"]
 

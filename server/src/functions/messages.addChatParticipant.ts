@@ -183,7 +183,7 @@ export async function addChatParticipant(
       })
       pushChatPermissionUpdates(result.permissionUpdates)
       const [chat] = await db.select().from(chats).where(eq(chats.id, input.chatId)).limit(1)
-      if (chat) BotUpdateProjector.membershipChanged({ botUserId: userId, chat, actorUserId: context.currentUserId, added: true })
+      if (chat) BotUpdateProjector.participationChanged({ botUserId: userId, chat, actorUserId: context.currentUserId, added: true })
     }
 
     return { participant: result.participant, users: [] }

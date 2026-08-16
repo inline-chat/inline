@@ -1038,7 +1038,7 @@ const createThread = async (
     { type: { oneofKind: "chat", chat: { chatId: BigInt(result.chat.id) } } },
     context,
   )
-  BotUpdateProjector.membershipChanged({
+  BotUpdateProjector.participationChanged({
     botUserId: context.currentUserId,
     chat: createdChat,
     actorUserId: context.currentUserId,

@@ -181,7 +181,7 @@ describe("Bot HTTP API", () => {
     const auth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
 
     const updates = await app.handle(new Request(
-      "http://localhost/bot/getUpdates?timeout=0&allowed_updates=%5B%22message%22%2C%22bot_membership%22%5D",
+      "http://localhost/bot/getUpdates?timeout=0&allowed_updates=%5B%22message%22%2C%22bot_participation%22%5D",
       { headers: auth },
     ))
     expect(updates.status).toBe(200)
@@ -201,7 +201,7 @@ describe("Bot HTTP API", () => {
         url: "",
         pending_update_count: 0,
         message_trigger: "all",
-        allowed_updates: ["message", "bot_membership"],
+        allowed_updates: ["message", "bot_participation"],
         dropped_update_count: 0,
       },
     })

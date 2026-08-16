@@ -1577,7 +1577,7 @@ describe("Effect Bot routes", () => {
       )
       const updatesResponse = await kernel.handler(
         new Request(
-          "http://inline.test/bot/getUpdates?timeout=0&allowed_updates=%5B%22message%22%2C%22bot_membership%22%5D",
+          "http://inline.test/bot/getUpdates?timeout=0&allowed_updates=%5B%22message%22%2C%22bot_participation%22%5D",
           { headers: { authorization: "Bearer 42:HEADER" } },
         ),
       )
@@ -1593,7 +1593,7 @@ describe("Effect Bot routes", () => {
       })
       expect(updatesInput).toEqual({
         timeout: 0,
-        allowed_updates: ["message", "bot_membership"],
+        allowed_updates: ["message", "bot_participation"],
       })
     } finally {
       await kernel.dispose()
