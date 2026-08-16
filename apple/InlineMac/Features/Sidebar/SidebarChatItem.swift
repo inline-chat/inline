@@ -76,7 +76,6 @@ struct SidebarChatItemView: Equatable, View {
   @State private var isCloseHovered = false
   @State private var isDisclosureHovered = false
   @State private var isPressing = false
-  @State private var pendingDestructiveAction: ChatDestructiveAction?
   @State private var showRenameSheet = false
 
   private static let titleFont: Font = .system(size: 13, weight: .regular)
@@ -97,27 +96,6 @@ struct SidebarChatItemView: Equatable, View {
 
   private var peerId: Peer {
     item.peerId
-  }
-
-  private var destructiveAction: ChatDestructiveAction? {
-    ChatDestructiveActionResolver.action(
-      peer: peerId,
-      chatType: item.chatType,
-      chatCreatedBy: item.chatCreatedBy,
-      chatSpaceId: item.spaceId,
-      chatIsPublic: item.chatIsPublic,
-      currentUserId: dependencies?.auth.getCurrentUserId()
-    )
-  }
-
-  private var destructiveConfirmationPresented: Binding<Bool> {
-    Binding {
-      pendingDestructiveAction != nil
-    } set: { isPresented in
-      if isPresented == false {
-        pendingDestructiveAction = nil
-      }
-    }
   }
 
   private var showsPreview: Bool {
@@ -324,32 +302,7 @@ struct SidebarChatItemView: Equatable, View {
         // } label: {
         //   Label(item.archived ? "Unarchive" : "Archive", systemImage: "archivebox")
         // }
-
-        if let destructiveAction {
-          Divider()
-
-          Button(role: .destructive) {
-            pendingDestructiveAction = destructiveAction
-          } label: {
-            Label(destructiveAction.title, systemImage: destructiveAction.systemImage)
-          }
-        }
       }
-    }
-    .alert(
-      pendingDestructiveAction?.title ?? "Confirm",
-      isPresented: destructiveConfirmationPresented,
-      presenting: pendingDestructiveAction
-    ) { action in
-      Button("Cancel", role: .cancel) {
-        pendingDestructiveAction = nil
-      }
-
-      Button(action.shortTitle, role: .destructive) {
-        performDestructiveAction(action)
-      }
-    } message: { action in
-      Text(action.confirmationMessage(chatTitle: item.title))
     }
     .sheet(isPresented: $showRenameSheet) {
       RenameChatSheet(peer: peerId, initialTitle: item.title)
@@ -603,34 +556,6 @@ struct SidebarChatItemView: Equatable, View {
         Log.shared.error("Failed to update archive state", error: error)
       }
     }
-  }
-
-  @MainActor
-  private func performDestructiveAction(_ action: ChatDestructiveAction) {
-    pendingDestructiveAction = nil
-    ChatDestructiveActionRunner.perform(action, peer: peerId, dependencies: dependencies) {
-      if isSelectedInCurrentNavigation {
-        dependencies?.nav2?.navigate(to: .empty)
-        dependencies?.nav3?.open(.empty)
-        nav.open(.empty)
-      }
-    }
-  }
-
-  private var isSelectedInCurrentNavigation: Bool {
-    if nav.currentRoute.selectedPeer == peerId {
-      return true
-    }
-
-    if dependencies?.nav3?.currentRoute.selectedPeer == peerId {
-      return true
-    }
-
-    if case let .chat(peer)? = dependencies?.nav2?.currentRoute, peer == peerId {
-      return true
-    }
-
-    return false
   }
 }
 
