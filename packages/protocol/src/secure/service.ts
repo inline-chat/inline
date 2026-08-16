@@ -44,6 +44,11 @@ export const ServiceConstructor = {
   futureSalts: 0xae500895,
   invokeAfterMsg: 0xcb9f372d,
   invokeAfterMsgs: 0x3dc4b4f0,
+  rpcDropAnswer: 0x58e4a740,
+  rpcAnswerUnknown: 0x5e2ad36e,
+  rpcAnswerDroppedRunning: 0xcd78e586,
+  rpcAnswerDropped: 0xa43ad8b7,
+  httpWait: 0x9299359f,
 } as const
 
 export interface ContainerMessage {
@@ -61,6 +66,17 @@ export type FutureSalt = {
 export type InvokeAfter = {
   messageIds: bigint[]
   query: Uint8Array
+}
+
+export type RpcDropAnswer =
+  | { kind: "unknown" }
+  | { kind: "running" }
+  | { kind: "dropped"; messageId: bigint; sequenceNumber: number; bytes: number }
+
+export type HttpWait = {
+  maximumDelay: number
+  waitAfter: number
+  maximumWait: number
 }
 
 const constructor = (value: number): Uint8Array => uint32LE(value)
@@ -190,6 +206,67 @@ export const decodeRpcResult = (body: Uint8Array): { requestMessageId: bigint; r
 
 export const encodeRpcError = (code: number, message: string): Uint8Array =>
   fixedBody(ServiceConstructor.rpcError, int32LE(code), encodeTlBytes(new TextEncoder().encode(message)))
+
+export const encodeRpcDropAnswer = (requestMessageId: bigint): Uint8Array =>
+  fixedBody(ServiceConstructor.rpcDropAnswer, int64LE(requestMessageId))
+
+export const decodeRpcDropAnswer = (body: Uint8Array): bigint => {
+  const reader = readerFor(body, ServiceConstructor.rpcDropAnswer)
+  const requestMessageId = reader.readLong()
+  reader.expectEnd()
+  return requestMessageId
+}
+
+export const encodeRpcDropAnswerResult = (result: RpcDropAnswer): Uint8Array => {
+  if (result.kind === "unknown") return fixedBody(ServiceConstructor.rpcAnswerUnknown)
+  if (result.kind === "running") return fixedBody(ServiceConstructor.rpcAnswerDroppedRunning)
+  if (!Number.isSafeInteger(result.bytes) || result.bytes < 0 || result.bytes > MAX_PACKET_BYTES) {
+    throw new RangeError("Invalid dropped-answer byte count")
+  }
+  return fixedBody(
+    ServiceConstructor.rpcAnswerDropped,
+    int64LE(result.messageId),
+    int32LE(result.sequenceNumber),
+    int32LE(result.bytes),
+  )
+}
+
+export const decodeRpcDropAnswerResult = (body: Uint8Array): RpcDropAnswer => {
+  const id = serviceConstructor(body)
+  if (id === ServiceConstructor.rpcAnswerUnknown && body.length === 4) return { kind: "unknown" }
+  if (id === ServiceConstructor.rpcAnswerDroppedRunning && body.length === 4) return { kind: "running" }
+  const reader = readerFor(body, ServiceConstructor.rpcAnswerDropped)
+  const messageId = reader.readLong()
+  const sequenceNumber = reader.readInt()
+  const bytes = reader.readInt()
+  reader.expectEnd()
+  if (bytes < 0 || bytes > MAX_PACKET_BYTES) throw new RangeError("Invalid dropped-answer byte count")
+  return { kind: "dropped", messageId, sequenceNumber, bytes }
+}
+
+export const encodeHttpWait = (input: HttpWait): Uint8Array => {
+  for (const value of [input.maximumDelay, input.waitAfter, input.maximumWait]) {
+    if (!Number.isSafeInteger(value) || value < 0) throw new RangeError("Invalid HTTP wait interval")
+  }
+  return fixedBody(
+    ServiceConstructor.httpWait,
+    int32LE(input.maximumDelay),
+    int32LE(input.waitAfter),
+    int32LE(input.maximumWait),
+  )
+}
+
+export const decodeHttpWait = (body: Uint8Array): HttpWait => {
+  const reader = readerFor(body, ServiceConstructor.httpWait)
+  const result = {
+    maximumDelay: reader.readInt(),
+    waitAfter: reader.readInt(),
+    maximumWait: reader.readInt(),
+  }
+  reader.expectEnd()
+  if (Object.values(result).some((value) => value < 0)) throw new RangeError("Invalid HTTP wait interval")
+  return result
+}
 
 export const encodeMsgsAck = (messageIds: readonly bigint[]): Uint8Array =>
   encodeMessageIds(ServiceConstructor.msgsAck, messageIds)

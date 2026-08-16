@@ -38,6 +38,7 @@ import {
   encodeInlineUpdate,
   decodeBadMessageNotification,
   decodeGzipPacked,
+  decodeHttpWait,
   decodeInvokeAfter,
   decodeMessageContainer,
   decodeMsgCopy,
@@ -45,6 +46,8 @@ import {
   decodeGetFutureSalts,
   decodeMsgsAck,
   decodeRpcResult,
+  decodeRpcDropAnswer,
+  decodeRpcDropAnswerResult,
   encodeBadServerSalt,
   encodeGzipPacked,
   encodeMessageContainer,
@@ -55,10 +58,13 @@ import {
   encodeDestroyAuthKeyResult,
   encodeFutureSalts,
   encodeGetFutureSalts,
+  encodeHttpWait,
   encodeInvokeAfterMsg,
   encodeInvokeAfterMsgs,
   encodeMsgsAck,
   encodeRpcResult,
+  encodeRpcDropAnswer,
+  encodeRpcDropAnswerResult,
   encodeServerDhParamsFail,
   encodeTlBytes,
   encryptRecord,
@@ -428,9 +434,17 @@ describe("session counters", () => {
 
   test("tracks sequence order, acknowledgements, pending resends, and state", () => {
     const sequences = new ReceiveSequenceValidator()
+    const sequenceCheckpoint = sequences.checkpoint()
     expect(sequences.validate(8n, 1, true)).toBeUndefined()
     expect(sequences.validate(4n, 0, false)).toBeUndefined()
     expect(sequences.validate(12n, 2, true)).toBe(35)
+    sequences.restore(sequenceCheckpoint)
+    expect(sequences.validate(12n, 1, true)).toBeUndefined()
+    const received = new ReceiveMessageWindow()
+    const receivedCheckpoint = received.checkpoint()
+    expect(received.claim(8n)).toBeTrue()
+    received.restore(receivedCheckpoint)
+    expect(received.has(8n)).toBeFalse()
     const acknowledgements = new AcknowledgementQueue()
     acknowledgements.add(8n)
     acknowledgements.add(8n)
@@ -441,6 +455,10 @@ describe("session counters", () => {
     expect(pending.resend([8n]).length).toBe(1)
     pending.acknowledge([8n])
     expect(pending.resend([8n])).toEqual([])
+    const answer = encodeRpcResult(44n, encodeMsgsAck([44n]))
+    pending.retain({ messageId: 48n, sequenceNumber: 3, body: answer })
+    expect(pending.dropRpcResult(44n)).toEqual({ messageId: 48n, sequenceNumber: 3, body: answer })
+    expect(pending.dropRpcResult(44n)).toBeUndefined()
   })
 })
 
@@ -489,5 +507,18 @@ describe("reliability service objects", () => {
     expect(bytesToHex(encodeDestroySessionResult(99n, true)).slice(0, 8)).toBe("fc4520e2")
     expect(bytesToHex(encodeDestroyAuthKey())).toBe("605143d1")
     expect(bytesToHex(encodeDestroyAuthKeyResult("ok"))).toBe("d4e160f6")
+  })
+
+  test("matches Telegram dropped-answer and HTTP-wait constructors", () => {
+    expect(decodeRpcDropAnswer(encodeRpcDropAnswer(44n))).toBe(44n)
+    expect(decodeRpcDropAnswerResult(encodeRpcDropAnswerResult({ kind: "unknown" }))).toEqual({ kind: "unknown" })
+    expect(decodeRpcDropAnswerResult(encodeRpcDropAnswerResult({ kind: "running" }))).toEqual({ kind: "running" })
+    const dropped = { kind: "dropped" as const, messageId: 48n, sequenceNumber: 3, bytes: 64 }
+    expect(decodeRpcDropAnswerResult(encodeRpcDropAnswerResult(dropped))).toEqual(dropped)
+    expect(decodeHttpWait(encodeHttpWait({ maximumDelay: 100, waitAfter: 200, maximumWait: 300 }))).toEqual({
+      maximumDelay: 100,
+      waitAfter: 200,
+      maximumWait: 300,
+    })
   })
 })

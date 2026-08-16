@@ -5,6 +5,7 @@ import { db, schema } from "@in/server/db"
 import { setupTestLifecycle, testUtils } from "@in/server/__tests__/setup"
 import {
   countInlineProtocolChallengesBlockingPepperRetirement,
+  InlineProtocolReplayRepository,
   PermanentAuthorizationKeyRepository,
 } from "@in/server/db/models/inlineProtocol"
 import { makeAuthorizationKeyCipher } from "./keyCipher"
@@ -151,5 +152,17 @@ describe("Inline Protocol durable authorization-key lifecycle", () => {
       .where(eq(schema.sessions.id, account.session.id))
     expect(await authorizations.load(temporaryKeyId)).toBeUndefined()
     expect(temporary.size).toBe(0)
+  })
+
+  test("atomically replaces a queued replay result with a dropped-answer tombstone", async () => {
+    await repository("old").create({ key, keyId, serverSalt: 456n, temporary: false })
+    const replay = new InlineProtocolReplayRepository()
+    const identity = { authKeyId: keyId, protocolSessionId: 11n, messageId: 12n }
+    expect(await replay.claim({ ...identity, authenticatedBody: Uint8Array.of(1, 2, 3, 4) }))
+      .toEqual({ kind: "claimed" })
+    expect(await replay.complete({ ...identity, resultBody: Uint8Array.of(5, 6, 7, 8) })).toBeTrue()
+    expect(await replay.result(identity)).toEqual(Uint8Array.of(5, 6, 7, 8))
+    expect(await replay.replaceResult({ ...identity, resultBody: Uint8Array.of(9, 10, 11, 12) })).toBeTrue()
+    expect(await replay.result(identity)).toEqual(Uint8Array.of(9, 10, 11, 12))
   })
 })

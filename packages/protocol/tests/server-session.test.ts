@@ -10,12 +10,16 @@ import {
   createTemporaryKeyBindingProof,
   decodeInlineApplicationObject,
   decodeRpcResult,
+  decodeRpcDropAnswerResult,
   decodeUnencryptedRecord,
   decryptRecord,
   decryptRecordWithMetadata,
   encodeInlineInvoke,
   encodeInvokeAfterMsg,
   encodeMessageContainer,
+  encodePing,
+  encodeRpcDropAnswer,
+  encodeRpcResult,
   encodeBindTempAuthKey,
   encodeUnencryptedRecord,
   encryptRecord,
@@ -110,9 +114,37 @@ class MemoryReplay implements ServerReplayRepository {
     sessionId: bigint
     messageId: bigint
     resultBody: Uint8Array
+  }): Promise<{ kind: "completed" } | { kind: "superseded"; resultBody: Uint8Array }> {
+    const id = `${bytesToHex(input.authKeyId)}:${input.sessionId}:${input.messageId}`
+    const value = this.values.get(id)!
+    if (value.result) return { kind: "superseded", resultBody: value.result.slice() }
+    value.result = input.resultBody.slice()
+    return { kind: "completed" }
+  }
+
+  async dropAnswer(input: {
+    authKeyId: Uint8Array
+    sessionId: bigint
+    messageId: bigint
+    runningResultBody: Uint8Array
+  }): Promise<"running" | "unknown"> {
+    const id = `${bytesToHex(input.authKeyId)}:${input.sessionId}:${input.messageId}`
+    const value = this.values.get(id)
+    if (!value || value.result) return "unknown"
+    value.result = input.runningResultBody.slice()
+    return "running"
+  }
+
+  async forgetAnswer(input: {
+    authKeyId: Uint8Array
+    sessionId: bigint
+    messageId: bigint
+    forgottenResultBody: Uint8Array
   }): Promise<void> {
     const id = `${bytesToHex(input.authKeyId)}:${input.sessionId}:${input.messageId}`
-    this.values.get(id)!.result = input.resultBody.slice()
+    const value = this.values.get(id)
+    if (!value?.result) throw new Error("Completed answer not found")
+    value.result = input.forgottenResultBody.slice()
   }
 }
 
@@ -253,15 +285,94 @@ describe("carrier-independent Inline Protocol server session", () => {
     expect(dispatches).toBe(4)
     expect(dispatchedPayloads.slice(-2)).toEqual([[6], [5]])
 
+    const retryablePingId = clientIds.next(nowMilliseconds, 104, 0)
+    const invalidChildId = clientIds.next(nowMilliseconds, 105, 0)
+    const pingBody = encodePing(777n)
+    const invalidContainer = encodeMessageContainer([
+      { messageId: retryablePingId, sequenceNumber: 8, body: pingBody },
+      { messageId: invalidChildId, sequenceNumber: 8, body: encodeInlineInvoke(Uint8Array.of(7)) },
+    ])
+    await server.receive(encryptRecord(established!.key, "client-to-server", {
+      serverSalt: established!.serverSalt,
+      sessionId,
+      messageId: clientIds.next(nowMilliseconds, 106, 0),
+      sequenceNumber: 10,
+      body: invalidContainer,
+    }, randomBytes(paddingFor(invalidContainer.length))))
+    const retriedPing = await server.receive(encryptRecord(established!.key, "client-to-server", {
+      serverSalt: established!.serverSalt,
+      sessionId,
+      messageId: retryablePingId,
+      sequenceNumber: 8,
+      body: pingBody,
+    }, randomBytes(paddingFor(pingBody.length))))
+    expect(retriedPing.some((output) => serviceConstructor(decryptRecord(output, established!.key, {
+      direction: "server-to-client", sessionId,
+      validServerSalts: new Set([established!.serverSalt]),
+      nowSeconds: nowMilliseconds / 1000,
+    }).body) === ServiceConstructor.pong)).toBeTrue()
+
+    const runningRequestId = clientIds.next(nowMilliseconds, 107, 0)
+    await replay.claim({
+      authKeyId: established!.keyId,
+      sessionId,
+      messageId: runningRequestId,
+      authenticatedBody: encodeInlineInvoke(Uint8Array.of(8)),
+    })
+    const dropBody = encodeRpcDropAnswer(runningRequestId)
+    const dropMessageId = clientIds.next(nowMilliseconds, 108, 0)
+    const dropOutputs = await server.receive(encryptRecord(established!.key, "client-to-server", {
+      serverSalt: established!.serverSalt,
+      sessionId,
+      messageId: dropMessageId,
+      sequenceNumber: 9,
+      body: dropBody,
+    }, randomBytes(paddingFor(dropBody.length))))
+    const dropResultBody = dropOutputs.map((output) => decryptRecord(output, established!.key, {
+      direction: "server-to-client", sessionId,
+      validServerSalts: new Set([established!.serverSalt]),
+      nowSeconds: nowMilliseconds / 1000,
+    }).body).find((body) => serviceConstructor(body) === ServiceConstructor.rpcResult)
+    expect(dropResultBody).toBeDefined()
+    expect(decodeRpcDropAnswerResult(decodeRpcResult(dropResultBody!).result)).toEqual({ kind: "running" })
+    const superseded = await replay.complete({
+      authKeyId: established!.keyId,
+      sessionId,
+      messageId: runningRequestId,
+      resultBody: encodeRpcResult(runningRequestId, encodeInlineInvoke(Uint8Array.of(9))),
+    })
+    expect(superseded.kind).toBe("superseded")
+    if (superseded.kind === "superseded") {
+      expect(decodeRpcDropAnswerResult(decodeRpcResult(superseded.resultBody).result)).toEqual({ kind: "running" })
+    }
+
+    const queuedDropBody = encodeRpcDropAnswer(messageId)
+    const queuedDropOutputs = await server.receive(encryptRecord(established!.key, "client-to-server", {
+      serverSalt: established!.serverSalt,
+      sessionId,
+      messageId: clientIds.next(nowMilliseconds, 109, 0),
+      sequenceNumber: 11,
+      body: queuedDropBody,
+    }, randomBytes(paddingFor(queuedDropBody.length))))
+    const queuedDropResult = queuedDropOutputs.map((output) => decryptRecord(output, established!.key, {
+      direction: "server-to-client", sessionId,
+      validServerSalts: new Set([established!.serverSalt]),
+      nowSeconds: nowMilliseconds / 1000,
+    }).body).find((body) => serviceConstructor(body) === ServiceConstructor.rpcResult)
+    expect(queuedDropResult).toBeDefined()
+    expect(decodeRpcDropAnswerResult(decodeRpcResult(queuedDropResult!).result).kind).toBe("dropped")
+
     const replayedOutputs = await server.receive(encrypted)
-    expect(replayedOutputs.some((output) => {
+    const replayedResult = replayedOutputs.map((output) => {
       const body = decryptRecord(output, established!.key, {
         direction: "server-to-client", sessionId,
         validServerSalts: new Set([established!.serverSalt]),
         nowSeconds: nowMilliseconds / 1000,
       }).body
-      return serviceConstructor(body) === ServiceConstructor.rpcResult
-    })).toBeTrue()
+      return serviceConstructor(body) === ServiceConstructor.rpcResult ? body : undefined
+    }).find((body) => body !== undefined)
+    expect(replayedResult).toBeDefined()
+    expect(decodeRpcDropAnswerResult(decodeRpcResult(replayedResult!).result)).toEqual({ kind: "unknown" })
     expect(dispatches).toBe(4)
 
     server = makeServer()

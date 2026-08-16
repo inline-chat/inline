@@ -18,6 +18,31 @@ export const makeInlineProtocolReplayRepository = (
       messageId: input.messageId,
       resultBody: input.resultBody,
     })
-    if (!completed) throw new InlineProtocolReplayError({ operation: "complete_missing_claim" })
+    if (completed) return { kind: "completed" }
+    const resultBody = await repository.result({
+      authKeyId: input.authKeyId,
+      protocolSessionId: input.sessionId,
+      messageId: input.messageId,
+    })
+    if (!resultBody) throw new InlineProtocolReplayError({ operation: "complete_missing_claim" })
+    return { kind: "superseded", resultBody }
+  },
+  dropAnswer: async (input) => {
+    const dropped = await repository.complete({
+      authKeyId: input.authKeyId,
+      protocolSessionId: input.sessionId,
+      messageId: input.messageId,
+      resultBody: input.runningResultBody,
+    })
+    return dropped ? "running" : "unknown"
+  },
+  forgetAnswer: async (input) => {
+    const replaced = await repository.replaceResult({
+      authKeyId: input.authKeyId,
+      protocolSessionId: input.sessionId,
+      messageId: input.messageId,
+      resultBody: input.forgottenResultBody,
+    })
+    if (!replaced) throw new InlineProtocolReplayError({ operation: "forget_missing_result" })
   },
 })

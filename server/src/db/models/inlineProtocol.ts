@@ -1,5 +1,5 @@
 import { authKeyId as deriveAuthKeyId, equalBytes, type EstablishedAuthorizationKey } from "@inline-chat/protocol/secure"
-import { and, count, eq, exists, gt, isNull, lte, ne, or, sql } from "drizzle-orm"
+import { and, count, eq, exists, gt, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm"
 import { createHash, timingSafeEqual } from "node:crypto"
 import { db } from "@in/server/db"
 import {
@@ -315,6 +315,50 @@ export class InlineProtocolReplayRepository {
       return updated.length === 1
     } catch (cause) {
       throw new InlineProtocolReplayError({ operation: "complete", cause })
+    }
+  }
+
+  async result(input: {
+    authKeyId: Uint8Array
+    protocolSessionId: bigint
+    messageId: bigint
+  }): Promise<Uint8Array | undefined> {
+    try {
+      const row = (await db.select({
+        resultBody: inlineProtocolRequests.resultBody,
+      }).from(inlineProtocolRequests).where(and(
+        eq(inlineProtocolRequests.authKeyId, Buffer.from(input.authKeyId)),
+        eq(inlineProtocolRequests.protocolSessionId, input.protocolSessionId),
+        eq(inlineProtocolRequests.messageId, input.messageId),
+      )).limit(1))[0]
+      return row?.resultBody === null || row?.resultBody === undefined
+        ? undefined
+        : Uint8Array.from(row.resultBody)
+    } catch (cause) {
+      throw new InlineProtocolReplayError({ operation: "result", cause })
+    }
+  }
+
+  async replaceResult(input: {
+    authKeyId: Uint8Array
+    protocolSessionId: bigint
+    messageId: bigint
+    resultBody: Uint8Array
+  }): Promise<boolean> {
+    if (input.resultBody.length > MAX_RESULT_BYTES) throw new InlineProtocolReplayError({ operation: "replace_size" })
+    try {
+      const updated = await db.update(inlineProtocolRequests).set({
+        resultBody: Buffer.from(input.resultBody),
+        completedAt: new Date(),
+      }).where(and(
+        eq(inlineProtocolRequests.authKeyId, Buffer.from(input.authKeyId)),
+        eq(inlineProtocolRequests.protocolSessionId, input.protocolSessionId),
+        eq(inlineProtocolRequests.messageId, input.messageId),
+        isNotNull(inlineProtocolRequests.resultBody),
+      )).returning({ messageId: inlineProtocolRequests.messageId })
+      return updated.length === 1
+    } catch (cause) {
+      throw new InlineProtocolReplayError({ operation: "replace_result", cause })
     }
   }
 }

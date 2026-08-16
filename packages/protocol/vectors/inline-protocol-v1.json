@@ -64,6 +64,11 @@
     "badMsgNotificationHex": "11f8efa704000000000000000100000014000000",
     "getFutureSaltsHex": "04bd21b908000000",
     "destroySessionHex": "262151e71817161514131211",
-    "destroyAuthKeyHex": "605143d1"
+    "destroyAuthKeyHex": "605143d1",
+    "rpcDropAnswerHex": "40a7e4580c00000000000000",
+    "rpcAnswerUnknownHex": "6ed32a5e",
+    "rpcAnswerDroppedRunningHex": "86e578cd",
+    "rpcAnswerDroppedHex": "b7d83aa410000000000000000300000040000000",
+    "httpWaitHex": "9f35999264000000c80000002c010000"
   }
 }

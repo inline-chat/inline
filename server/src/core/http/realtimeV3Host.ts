@@ -201,6 +201,7 @@ export const makeInlineProtocolRealtimeTransport = (
       gunzip: (packed, maximumOutputBytes) => Uint8Array.from(gunzipSync(packed, {
         maxOutputLength: maximumOutputBytes,
       })),
+      carrierProfile: "websocket",
       dc: 1,
     })
     const state: InlineProtocolConnectionState = {

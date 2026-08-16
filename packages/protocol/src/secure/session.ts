@@ -32,6 +32,16 @@ export class ReceiveMessageWindow {
     for (const value of this.#accepted) if (minimum === undefined || value < minimum) minimum = value
     return minimum
   }
+
+  checkpoint(): { accepted: bigint[]; highest?: bigint } {
+    return { accepted: [...this.#accepted], highest: this.#highest }
+  }
+
+  restore(checkpoint: { accepted: readonly bigint[]; highest?: bigint }): void {
+    this.#accepted.clear()
+    for (const messageId of checkpoint.accepted) this.#accepted.add(messageId)
+    this.#highest = checkpoint.highest
+  }
 }
 
 export class MessageIdGenerator {
@@ -135,6 +145,14 @@ export class ReceiveSequenceValidator {
     if (this.#received.length > 1000) this.#received.splice(0, this.#received.length - 1000)
     return undefined
   }
+
+  checkpoint(): ReceivedSequence[] {
+    return this.#received.map((value) => ({ ...value }))
+  }
+
+  restore(checkpoint: readonly ReceivedSequence[]): void {
+    this.#received.splice(0, this.#received.length, ...checkpoint.map((value) => ({ ...value })))
+  }
 }
 
 export class AcknowledgementQueue {
@@ -190,6 +208,17 @@ export class PendingMessageCache {
 
   state(messageIds: readonly bigint[]): Uint8Array {
     return Uint8Array.from(messageIds, (messageId) => this.#messages.has(messageId) ? 0x04 : 0x01)
+  }
+
+  dropRpcResult(requestMessageId: bigint): PendingMessage | undefined {
+    for (const [messageId, message] of this.#messages) {
+      if (message.body.length < 12) continue
+      const view = new DataView(message.body.buffer, message.body.byteOffset, message.body.byteLength)
+      if (view.getUint32(0, true) !== 0xf35c6d01 || view.getBigInt64(4, true) !== requestMessageId) continue
+      this.#messages.delete(messageId)
+      return { ...message, body: message.body.slice() }
+    }
+    return undefined
   }
 }
 

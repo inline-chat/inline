@@ -74,7 +74,9 @@ const fixture = (operations: unknown = {}): InlineProtocolRuntime & { clientKey:
     authorizationKeys: new MemoryKeys(),
     replay: {
       claim: async () => ({ kind: "claimed" }),
-      complete: async () => {},
+      complete: async () => ({ kind: "completed" }),
+      dropAnswer: async () => "unknown",
+      forgetAnswer: async () => {},
     } satisfies ServerReplayRepository,
     operations: operations as never,
     close: () => {},
