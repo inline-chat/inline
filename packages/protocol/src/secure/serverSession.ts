@@ -491,7 +491,12 @@ export class InlineProtocolServerSession {
   }
 
   async #dispatchApplication(message: LogicalMessage): Promise<Uint8Array[]> {
-    const authorization = this.#authorization!
+    const authorization = await this.options.authorizationKeys.load(this.#authorization!.keyId)
+    if (!authorization) {
+      this.#destroyed = true
+      throw new RangeError("Authorization key is no longer active")
+    }
+    this.#authorization = authorization
     if ((authorization.temporary && !authorization.binding) ||
         (!authorization.temporary && authorization.authorized)) {
       throw new RangeError("Authorization-key state does not permit application dispatch")
