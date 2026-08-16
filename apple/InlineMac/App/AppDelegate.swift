@@ -290,6 +290,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
       // Handle different URL patterns
       switch url.host?.lowercased() {
+      case "auth" where ProviderSignInCoordinator.shared.canHandle(url):
+        await ProviderSignInCoordinator.shared.handleCallback(url)
       case "cli-auth":
         await handleCLIAuthURL(url)
       case "user":

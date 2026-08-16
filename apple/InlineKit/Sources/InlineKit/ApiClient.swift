@@ -80,6 +80,7 @@ public enum Path: String {
   case getAlphaText
   case sendSmsCode
   case verifySmsCode
+  case providerAuthRedeem = "auth/provider/redeem"
   case getNotionDatabases
   case saveNotionDatabaseId
   case getLinearTeams
@@ -490,6 +491,14 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     return try await postRequest(
       .verifySmsCode,
       body: body,
+      includeToken: false
+    )
+  }
+
+  public func redeemProviderAuth(ticket: String, codeVerifier: String) async throws -> VerifyCode {
+    try await postRequest(
+      .providerAuthRedeem,
+      body: ["ticket": ticket, "code_verifier": codeVerifier],
       includeToken: false
     )
   }

@@ -48,7 +48,9 @@ private struct InlineSceneRoot: View {
       .environmentObject(appDelegate.nav)
       .environmentObject(INUserSettings.current.notification)
       .onOpenURL { url in
-        if InlineDeepLink.isCurrentAppScheme(url.scheme),
+        if ProviderSignInCoordinator.shared.canHandle(url) {
+          Task { await ProviderSignInCoordinator.shared.handleCallback(url) }
+        } else if InlineDeepLink.isCurrentAppScheme(url.scheme),
            ConnectorOAuthCallback(url: url) != nil {
           router.presentedSheet = .connectors(callbackURL: url.absoluteString)
         } else {
