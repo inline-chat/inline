@@ -4,6 +4,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use inline_sdk::InlineProtocolAuthorization;
 use rand::{RngCore, rngs::OsRng};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -14,6 +16,8 @@ pub enum AuthError {
     Io(#[from] io::Error),
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("invalid saved Inline Protocol credential: {0}")]
+    InvalidInlineProtocol(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -23,6 +27,57 @@ struct SecretsFile {
     api_base_url: Option<String>,
     updated_at: Option<i64>,
     device_id: Option<String>,
+    inline_protocol_permanent: Option<StoredInlineProtocolAuthorization>,
+    inline_protocol_temporary: Option<StoredInlineProtocolAuthorization>,
+    inline_protocol_pending_challenge: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredInlineProtocolAuthorization {
+    key: String,
+    key_id: String,
+    server_salt: i64,
+    temporary: bool,
+    expires_at: Option<i32>,
+}
+
+impl From<&InlineProtocolAuthorization> for StoredInlineProtocolAuthorization {
+    fn from(value: &InlineProtocolAuthorization) -> Self {
+        Self {
+            key: URL_SAFE_NO_PAD.encode(value.key),
+            key_id: URL_SAFE_NO_PAD.encode(value.key_id),
+            server_salt: value.server_salt,
+            temporary: value.temporary,
+            expires_at: value.expires_at,
+        }
+    }
+}
+
+impl TryFrom<StoredInlineProtocolAuthorization> for InlineProtocolAuthorization {
+    type Error = AuthError;
+
+    fn try_from(value: StoredInlineProtocolAuthorization) -> Result<Self, Self::Error> {
+        let key: [u8; 256] = URL_SAFE_NO_PAD
+            .decode(value.key)
+            .map_err(|error| AuthError::InvalidInlineProtocol(error.to_string()))?
+            .try_into()
+            .map_err(|_| {
+                AuthError::InvalidInlineProtocol("invalid authorization key length".into())
+            })?;
+        let key_id: [u8; 8] = URL_SAFE_NO_PAD
+            .decode(value.key_id)
+            .map_err(|error| AuthError::InvalidInlineProtocol(error.to_string()))?
+            .try_into()
+            .map_err(|_| AuthError::InvalidInlineProtocol("invalid key id length".into()))?;
+        Ok(Self {
+            key,
+            key_id,
+            server_salt: value.server_salt,
+            temporary: value.temporary,
+            expires_at: value.expires_at,
+        })
+    }
 }
 
 pub struct AuthStore {
@@ -92,6 +147,63 @@ impl AuthStore {
         self.write_secrets(&secrets)
     }
 
+    pub fn store_inline_protocol_pending(
+        &self,
+        permanent: &InlineProtocolAuthorization,
+        challenge_id: &[u8],
+    ) -> Result<(), AuthError> {
+        let mut secrets = self.read_secrets_for_current_api()?.unwrap_or_default();
+        secrets.inline_protocol_permanent = Some(permanent.into());
+        secrets.inline_protocol_pending_challenge = Some(URL_SAFE_NO_PAD.encode(challenge_id));
+        secrets.api_base_url = Some(self.api_base_url.clone());
+        secrets.updated_at = Some(current_epoch_seconds() as i64);
+        self.write_secrets(&secrets)
+    }
+
+    pub fn load_inline_protocol_pending(
+        &self,
+    ) -> Result<Option<(InlineProtocolAuthorization, Vec<u8>)>, AuthError> {
+        let Some(secrets) = self.read_secrets_for_current_api()? else {
+            return Ok(None);
+        };
+        let (Some(permanent), Some(challenge)) = (
+            secrets.inline_protocol_permanent,
+            secrets.inline_protocol_pending_challenge,
+        ) else {
+            return Ok(None);
+        };
+        let challenge = URL_SAFE_NO_PAD
+            .decode(challenge)
+            .map_err(|error| AuthError::InvalidInlineProtocol(error.to_string()))?;
+        Ok(Some((permanent.try_into()?, challenge)))
+    }
+
+    pub fn store_inline_protocol_authorizations(
+        &self,
+        permanent: &InlineProtocolAuthorization,
+        temporary: &InlineProtocolAuthorization,
+    ) -> Result<(), AuthError> {
+        let mut secrets = self.read_secrets_for_current_api()?.unwrap_or_default();
+        secrets.inline_protocol_permanent = Some(permanent.into());
+        secrets.inline_protocol_temporary = Some(temporary.into());
+        secrets.inline_protocol_pending_challenge = None;
+        secrets.api_base_url = Some(self.api_base_url.clone());
+        secrets.updated_at = Some(current_epoch_seconds() as i64);
+        self.write_secrets(&secrets)
+    }
+
+    pub fn load_inline_protocol_temporary(
+        &self,
+    ) -> Result<Option<InlineProtocolAuthorization>, AuthError> {
+        let Some(secrets) = self.read_secrets_for_current_api()? else {
+            return Ok(None);
+        };
+        secrets
+            .inline_protocol_temporary
+            .map(TryInto::try_into)
+            .transpose()
+    }
+
     pub fn clear_token(&self) -> Result<(), AuthError> {
         let mut secrets = match self.read_secrets_for_current_api()? {
             Some(secrets) => secrets,
@@ -113,6 +225,9 @@ impl AuthStore {
         }
 
         secrets.token = None;
+        secrets.inline_protocol_permanent = None;
+        secrets.inline_protocol_temporary = None;
+        secrets.inline_protocol_pending_challenge = None;
         secrets.api_base_url = Some(self.api_base_url.clone());
         secrets.updated_at = Some(current_epoch_seconds() as i64);
         self.write_secrets(&secrets)

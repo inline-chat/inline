@@ -1,6 +1,7 @@
 use dialoguer::{Input, Select};
 use serde::Serialize;
 use std::io::{self, IsTerminal, Read};
+use std::path::Path;
 
 use crate::auth::AuthStore;
 use crate::errors::CliError;
@@ -60,6 +61,20 @@ pub(crate) async fn handle_login(
     json: bool,
     json_format: JsonFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(ring_path) = std::env::var_os("INLINE_PROTOCOL_PUBLIC_RING") {
+        if !args.mac_app_bootstrap && (args.send_code || args.code.is_some() || args.code_stdin) {
+            return handle_inline_protocol_login(
+                &args,
+                auth_store,
+                realtime_url,
+                local_db,
+                Path::new(&ring_path),
+                json,
+                json_format,
+            )
+            .await;
+        }
+    }
     let send_code_only = args.send_code;
     let supplied_code = args.code.clone();
     let code_stdin = args.code_stdin;
@@ -289,6 +304,130 @@ pub(crate) async fn handle_login(
             }
         }
     }
+}
+
+async fn handle_inline_protocol_login(
+    args: &AuthLoginArgs,
+    auth_store: &AuthStore,
+    realtime_url: &str,
+    local_db: &LocalDb,
+    ring_path: &Path,
+    json: bool,
+    json_format: JsonFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let contact = require_contact(contact_from_args(args.clone())?, "Inline Protocol login")?;
+    let v3_url = format!("{}/v3", realtime_url.trim_end_matches('/'));
+    if args.send_code {
+        let keys = client_info::load_inline_protocol_public_ring(ring_path)?;
+        let mut connection =
+            client_info::connect_inline_protocol_fresh(&v3_url, keys, false).await?;
+        let identifier = match contact {
+            Contact::Email(email) => proto::auth_begin_request::Identifier::Email(email),
+            Contact::Phone(phone) => proto::auth_begin_request::Identifier::PhoneNumber(phone),
+        };
+        let challenge = connection
+            .auth_begin(proto::AuthBeginRequest {
+                identifier: Some(identifier),
+                client: Some(inline_protocol_client_info(auth_store)?),
+            })
+            .await?;
+        auth_store
+            .store_inline_protocol_pending(&connection.authorization(), &challenge.challenge_id)?;
+        let delivery = if challenge.delivery == proto::auth_begin_result::Delivery::Sms as i32 {
+            "sms"
+        } else {
+            "email"
+        };
+        let output = AuthCodeSentOutput {
+            status: "code_sent",
+            delivery,
+            existing_user: true,
+            needs_invite_code: false,
+            challenge_token: None,
+        };
+        if json {
+            output::print_json(&output, json_format)?;
+        } else {
+            println!("Login code sent by {delivery}.");
+            println!("Complete login with --code CODE.");
+        }
+        return Ok(());
+    }
+
+    let code = match args.code.clone() {
+        Some(code) => normalize_code(code)?,
+        None if args.code_stdin => read_code_from_stdin()?,
+        None => {
+            return Err(CliError::invalid_args(
+                "Inline Protocol login requires --send-code or --code",
+            )
+            .into());
+        }
+    };
+    let (permanent_authorization, challenge_id) = auth_store
+        .load_inline_protocol_pending()?
+        .ok_or_else(|| CliError::invalid_args("send a new Inline Protocol login code first"))?;
+    let mut permanent =
+        client_info::reconnect_inline_protocol(&v3_url, permanent_authorization.clone()).await?;
+    let completed = permanent
+        .auth_complete(proto::AuthCompleteRequest {
+            challenge_id,
+            code,
+            invite_code: None,
+            time_zone: None,
+        })
+        .await?;
+    let authorized = match completed.state {
+        Some(proto::auth_complete_result::State::Authorized(value)) => value,
+        Some(proto::auth_complete_result::State::InviteRequired(_)) => {
+            return Err(CliError::invalid_args("this account requires an invite code").into());
+        }
+        None => {
+            return Err(CliError::invalid_args("authentication returned no account state").into());
+        }
+    };
+    let keys = client_info::load_inline_protocol_public_ring(ring_path)?;
+    let mut temporary = client_info::connect_inline_protocol_fresh(&v3_url, keys, true).await?;
+    temporary.bind_temporary(&permanent_authorization).await?;
+    auth_store.store_inline_protocol_authorizations(
+        &permanent_authorization,
+        &temporary.authorization(),
+    )?;
+    let user = match authorized.user {
+        Some(user) => user,
+        None => temporary
+            .call(proto::GetMeInput {})
+            .await?
+            .user
+            .ok_or_else(|| CliError::unexpected_api_response("getMe", "missing user"))?,
+    };
+    local_db.set_current_user(user.clone())?;
+    let output = AuthLoginOutput {
+        status: "authenticated",
+        user_id: user.id,
+        token_saved: false,
+        profile_loaded: true,
+        user: Some(user),
+        warning: None,
+    };
+    if json {
+        output::print_json(&output, json_format)?;
+    } else if let Some(user) = output.user.as_ref() {
+        println!("Welcome, {}.", user_display_name(user));
+    }
+    Ok(())
+}
+
+fn inline_protocol_client_info(
+    auth_store: &AuthStore,
+) -> Result<proto::ClientInfo, Box<dyn std::error::Error>> {
+    Ok(proto::ClientInfo {
+        device_id: Some(auth_store.device_id()?),
+        client_type: Some(client_info::client_type().into()),
+        client_version: Some(client_info::client_version().into()),
+        os_version: client_info::current_os_version(),
+        device_name: client_info::device_name(),
+    })
 }
 
 fn ensure_expected_mac_app_user(

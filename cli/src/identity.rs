@@ -1,4 +1,12 @@
-use inline_sdk::{AuthMetadata, ClientIdentity, RealtimeClient, RealtimeError, client_info};
+use std::path::Path;
+
+use inline_protocol::secure::handshake::RsaPublicKey;
+use inline_sdk::{
+    AuthMetadata, ClientIdentity, InlineProtocolAuthorization, InlineProtocolPublicKey,
+    InlineProtocolV3Connection, InlineProtocolV3Options, RealtimeClient, RealtimeError,
+    client_info,
+};
+use serde::Deserialize;
 
 pub const CLIENT_TYPE: &str = "cli";
 pub const CLIENT_TYPE_HEADER: &str = client_info::CLIENT_TYPE_HEADER;
@@ -44,5 +52,39 @@ pub async fn connect_realtime(url: &str, token: &str) -> Result<RealtimeClient, 
     RealtimeClient::builder(url, token)
         .identity(client_identity())
         .connect()
+        .await
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PublicRing {
+    rsa_public_key_ring: Vec<InlineProtocolPublicKey>,
+}
+
+pub fn load_inline_protocol_public_ring(
+    path: &Path,
+) -> Result<Vec<RsaPublicKey>, Box<dyn std::error::Error>> {
+    let ring: PublicRing = serde_json::from_slice(&std::fs::read(path)?)?;
+    ring.rsa_public_key_ring
+        .into_iter()
+        .map(|key| key.try_into().map_err(Into::into))
+        .collect()
+}
+
+pub async fn connect_inline_protocol_fresh(
+    url: &str,
+    keys: Vec<RsaPublicKey>,
+    temporary: bool,
+) -> Result<InlineProtocolV3Connection, inline_sdk::InlineProtocolV3Error> {
+    let mut options = InlineProtocolV3Options::permanent(url, keys);
+    options.temporary = temporary;
+    InlineProtocolV3Connection::connect(options).await
+}
+
+pub async fn reconnect_inline_protocol(
+    url: &str,
+    authorization: InlineProtocolAuthorization,
+) -> Result<InlineProtocolV3Connection, inline_sdk::InlineProtocolV3Error> {
+    InlineProtocolV3Connection::connect(InlineProtocolV3Options::reconnect(url, authorization))
         .await
 }

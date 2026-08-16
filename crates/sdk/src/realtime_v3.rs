@@ -356,6 +356,23 @@ impl InlineProtocolV3Connection {
         }
     }
 
+    /// Invokes a typed RPC using the same request mapping as Realtime V2.
+    pub async fn call<R>(&mut self, request: R) -> Result<R::Response, InlineProtocolV3Error>
+    where
+        R: crate::realtime::RpcRequest,
+    {
+        let result = self
+            .call_rpc(proto::RpcCall {
+                method: R::METHOD as i32,
+                input: Some(request.into_rpc_input()),
+            })
+            .await?
+            .result
+            .ok_or(InlineProtocolV3Error::UnexpectedResponse)?;
+        R::response_from_rpc_result(result)
+            .map_err(|error| InlineProtocolV3Error::Rpc(error.to_string()))
+    }
+
     /// Binds this temporary connection to an authenticated permanent key.
     pub async fn bind_temporary(
         &mut self,

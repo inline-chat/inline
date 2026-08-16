@@ -530,7 +530,7 @@ enum AuthCommand {
     Logout,
 }
 
-#[derive(Args)]
+#[derive(Args, Clone)]
 pub(crate) struct AuthLoginArgs {
     #[arg(
         long,
@@ -2015,10 +2015,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     .await?;
                 }
                 AuthCommand::Me => {
-                    let token = require_token(&auth_store)?;
-                    let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
-                    let me = fetch_me(&mut realtime).await?;
+                    let me = fetch_authenticated_me(&config, &auth_store).await?;
                     local_db.set_current_user(me.clone())?;
                     if cli.json {
                         output::print_json(&me, json_format)?;
@@ -2052,9 +2049,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 }
             }
             Command::Me => {
-                let token = require_token(&auth_store)?;
-                let mut realtime = connect_realtime(&config.realtime_url, &token).await?;
-                let me = fetch_me(&mut realtime).await?;
+                let me = fetch_authenticated_me(&config, &auth_store).await?;
                 local_db.set_current_user(me.clone())?;
                 if cli.json {
                     output::print_json(&me, json_format)?;
@@ -4335,6 +4330,24 @@ async fn fetch_me(
     payload
         .user
         .ok_or_else(|| CliError::unexpected_api_response("getMe", "missing user").into())
+}
+
+async fn fetch_authenticated_me(
+    config: &Config,
+    auth_store: &AuthStore,
+) -> Result<proto::User, Box<dyn std::error::Error>> {
+    if let Some(authorization) = auth_store.load_inline_protocol_temporary()? {
+        let url = format!("{}/v3", config.realtime_url.trim_end_matches('/'));
+        let mut realtime = identity::reconnect_inline_protocol(&url, authorization).await?;
+        return realtime
+            .call(proto::GetMeInput {})
+            .await?
+            .user
+            .ok_or_else(|| CliError::unexpected_api_response("getMe", "missing user").into());
+    }
+    let token = require_token(auth_store)?;
+    let mut realtime = connect_realtime(&config.realtime_url, &token).await?;
+    fetch_me(&mut realtime).await
 }
 
 async fn fetch_user_settings(
