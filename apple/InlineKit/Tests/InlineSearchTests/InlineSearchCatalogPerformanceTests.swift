@@ -16,7 +16,6 @@ struct InlineSearchCatalogPerformanceTests {
     let projection = await catalog.project(
       query: "target",
       usage: [:],
-      currentPeer: nil,
       scope: InlineSearchScope(includeArchived: true),
       chatLimit: 20
     )
@@ -36,7 +35,6 @@ struct InlineSearchCatalogPerformanceTests {
     let projection = await catalog.project(
       query: "target",
       usage: [:],
-      currentPeer: nil,
       scope: InlineSearchScope(includeArchived: true),
       chatLimit: 20
     )
@@ -61,7 +59,6 @@ struct InlineSearchCatalogPerformanceTests {
     let projection = await catalog.project(
       query: "target",
       usage: usage,
-      currentPeer: nil,
       scope: InlineSearchScope(includeArchived: true),
       chatLimit: 20
     )

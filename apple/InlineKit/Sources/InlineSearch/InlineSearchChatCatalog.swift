@@ -63,8 +63,6 @@ public actor InlineSearchChatCatalog {
   public func project(
     query: String,
     usage: [Peer: InlineSearchUsageSignal],
-    currentPeer: Peer?,
-    currentUserID: Int64? = nil,
     contextSpaceId: Int64? = nil,
     scope: InlineSearchScope,
     suggestionLimit: Int = 5,
@@ -72,7 +70,7 @@ public actor InlineSearchChatCatalog {
   ) -> InlineSearchChatProjection {
     guard let preparedQuery = InlineSearchMatcher.prepare(query) else {
       let candidates = entries.filter {
-        Self.includes($0, currentPeer: currentPeer, scope: scope)
+        Self.includes($0, scope: scope)
       }
       let suggestions = candidates
         .compactMap { entry -> RankedSuggestion? in
@@ -106,7 +104,7 @@ public actor InlineSearchChatCatalog {
     var bestMatches: [RankedSearchResult] = []
     bestMatches.reserveCapacity(resultLimit)
     for entry in entries {
-      guard Self.includes(entry, currentPeer: currentPeer, scope: scope) else { continue }
+      guard Self.includes(entry, scope: scope) else { continue }
       guard let match = InlineSearchMatcher.match(
         query: preparedQuery,
         preparedFields: entry.fields
@@ -132,9 +130,7 @@ public actor InlineSearchChatCatalog {
     if scope.spaceId == nil {
       bestKnownUsers.reserveCapacity(resultLimit)
       for entry in knownUserEntries {
-        guard entry.user.id != currentUserID,
-              currentPeer != .user(id: entry.user.id),
-              let match = InlineSearchMatcher.match(query: preparedQuery, preparedFields: entry.fields)
+        guard let match = InlineSearchMatcher.match(query: preparedQuery, preparedFields: entry.fields)
         else { continue }
         Self.insert(
           RankedKnownUser(entry: entry, match: match),
@@ -159,10 +155,8 @@ public actor InlineSearchChatCatalog {
 
   private static func includes(
     _ entry: Entry,
-    currentPeer: Peer?,
     scope: InlineSearchScope
   ) -> Bool {
-    guard entry.snapshot.peerId != currentPeer else { return false }
     guard scope.includeArchived || entry.snapshot.archived == false else { return false }
 
     if let spaceId = scope.spaceId {

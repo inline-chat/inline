@@ -882,8 +882,6 @@ final class QuickSearchViewModel {
       let projection = await catalogService.project(CommandBarCatalogService.ProjectionRequest(
         query: query,
         usage: usage,
-        currentPeer: commandContext.activePeer,
-        currentUserID: dependencies.auth.currentUserId,
         contextSpaceId: commandContext.selectedSpaceId,
         scope: InlineSearchScope(includeArchived: true),
         suggestionLimit: 5,
@@ -999,7 +997,7 @@ final class QuickSearchViewModel {
   private func updateRenderedGlobalResults() {
     renderedGlobalResults = rawGlobalResults.compactMap { result in
       guard result.match.tier != .exact,
-            excludedGlobalUserIDs.contains(result.user.id) == false
+            representedLocalUserIDs.contains(result.user.id) == false
       else { return nil }
       return .users(result.user)
     }
@@ -1007,19 +1005,8 @@ final class QuickSearchViewModel {
 
   private var promotedGlobalUsers: [RankedGlobalUser] {
     rawGlobalResults.filter {
-      $0.match.tier == .exact && excludedGlobalUserIDs.contains($0.user.id) == false
+      $0.match.tier == .exact && representedLocalUserIDs.contains($0.user.id) == false
     }
-  }
-
-  private var excludedGlobalUserIDs: Set<Int64> {
-    var userIDs = representedLocalUserIDs
-    if let currentUserID = dependencies.auth.currentUserId {
-      userIDs.insert(currentUserID)
-    }
-    if case let .user(id)? = commandContext.activePeer {
-      userIDs.insert(id)
-    }
-    return userIDs
   }
 
   private var representedLocalUserIDs: Set<Int64> {

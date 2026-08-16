@@ -9,8 +9,6 @@ actor CommandBarCatalogService {
   struct ProjectionRequest: Sendable {
     let query: String
     let usage: [Peer: InlineSearchUsageSignal]
-    let currentPeer: Peer?
-    let currentUserID: Int64?
     let contextSpaceId: Int64?
     let scope: InlineSearchScope
     let suggestionLimit: Int
@@ -172,8 +170,6 @@ actor CommandBarCatalogService {
     let chats = await catalog.project(
       query: request.query,
       usage: request.usage,
-      currentPeer: request.currentPeer,
-      currentUserID: request.currentUserID,
       contextSpaceId: request.contextSpaceId,
       scope: request.scope,
       suggestionLimit: request.suggestionLimit,

@@ -111,7 +111,7 @@ struct InlineSearchViewModelTests {
     #expect(Set(commandBarSnapshot.spaces.map(\.id)) == [spaceId, unreferencedSpaceId])
   }
 
-  @Test("command bar catalog includes cached people without duplicating dialogs or self")
+  @Test("command bar catalog includes cached people and self without duplicating dialogs")
   func commandBarCatalogIncludesCachedPeople() async throws {
     let (queue, appDatabase) = try makeInMemoryDB()
     let cachedUserId: Int64 = 41
@@ -131,12 +131,10 @@ struct InlineSearchViewModelTests {
     let projection = await catalog.project(
       query: "mo",
       usage: [:],
-      currentPeer: nil,
-      currentUserID: currentUserId,
       scope: InlineSearchScope(includeArchived: true)
     )
 
-    #expect(projection.knownUsers.map(\.id) == [cachedUserId])
+    #expect(projection.knownUsers.map(\.id) == [cachedUserId, currentUserId])
     #expect(projection.chats.map(\.peer) == [.user(id: dialogUserId)])
   }
 
@@ -313,7 +311,6 @@ struct InlineSearchViewModelTests {
         .user(id: alexanderId): InlineSearchUsageSignal(switchFrecency: 50),
         .thread(id: alexThreadId): InlineSearchUsageSignal(switchFrecency: 1),
       ],
-      currentPeer: nil,
       scope: InlineSearchScope(includeArchived: true)
     )
 
@@ -328,13 +325,16 @@ struct InlineSearchViewModelTests {
     let (queue, _) = try makeInMemoryDB()
     let numberedThreadId: Int64 = 7_011
     let homeThreadId: Int64 = 7_012
+    let fuzzyDateThreadId: Int64 = 7_013
 
     try await queue.write { db in
       try seedSpace(db, id: spaceId)
-      try seedThread(db, id: numberedThreadId, title: "Decision follow-up", spaceId: spaceId, number: 314)
-      try seedThread(db, id: homeThreadId, title: "Home notes", spaceId: nil, number: 314)
+      try seedThread(db, id: numberedThreadId, title: "Decision follow-up", spaceId: spaceId, number: 130)
+      try seedThread(db, id: homeThreadId, title: "Home notes", spaceId: nil, number: 130)
+      try seedThread(db, id: fuzzyDateThreadId, title: "July 13, 2026", spaceId: spaceId)
       try seedDialog(db, chat: try Chat.fetchOne(db, id: numberedThreadId)!)
       try seedDialog(db, chat: try Chat.fetchOne(db, id: homeThreadId)!)
+      try seedDialog(db, chat: try Chat.fetchOne(db, id: fuzzyDateThreadId)!)
     }
 
     let snapshots = try await queue.read { db in
@@ -343,16 +343,16 @@ struct InlineSearchViewModelTests {
     let catalog = InlineSearchChatCatalog()
     await catalog.replace(snapshots)
 
-    for query in ["314", "#314"] {
+    for query in ["130", "#130"] {
       let projection = await catalog.project(
         query: query,
         usage: [:],
-        currentPeer: nil,
         scope: InlineSearchScope(includeArchived: true)
       )
 
-      #expect(projection.chats.map(\.peer) == [.thread(id: numberedThreadId)])
-      #expect(projection.chats.first?.chat?.spaceThreadReferenceLabel == "#314")
+      #expect(projection.chats.first?.peer == .thread(id: numberedThreadId))
+      #expect(projection.chats.first?.chat?.spaceThreadReferenceLabel == "#130")
+      #expect(projection.chats.contains { $0.peer == .thread(id: fuzzyDateThreadId) })
     }
   }
 
@@ -381,7 +381,6 @@ struct InlineSearchViewModelTests {
         .user(id: preferredId): InlineSearchUsageSignal(queryAffinity: 8),
         .user(id: otherId): InlineSearchUsageSignal(queryAffinity: 1),
       ],
-      currentPeer: nil,
       scope: InlineSearchScope(includeArchived: true)
     )
 
@@ -415,7 +414,6 @@ struct InlineSearchViewModelTests {
           queryAffinity: 1_000_000
         )
       ],
-      currentPeer: nil,
       scope: InlineSearchScope(includeArchived: true)
     )
 
@@ -425,15 +423,15 @@ struct InlineSearchViewModelTests {
     ])
   }
 
-  @Test("empty chat catalog returns suggestions then deduped chats")
+  @Test("empty chat catalog includes the highest-usage peer in suggestions")
   func chatCatalogEmptyProjection() async throws {
     let (queue, _) = try makeInMemoryDB()
     let firstId: Int64 = 30
     let secondId: Int64 = 31
-    let currentId: Int64 = 32
+    let highestUsageId: Int64 = 32
 
     try await queue.write { db in
-      for (id, name) in [(firstId, "First"), (secondId, "Second"), (currentId, "Current")] {
+      for (id, name) in [(firstId, "First"), (secondId, "Second"), (highestUsageId, "Highest")] {
         try seedUser(db, id: id, firstName: name, lastName: nil, username: name.lowercased())
         try seedPrivateChat(db, chatId: 5_000 + id, userId: id)
       }
@@ -450,16 +448,15 @@ struct InlineSearchViewModelTests {
       usage: [
         .user(id: firstId): InlineSearchUsageSignal(switchFrecency: 10),
         .user(id: secondId): InlineSearchUsageSignal(switchFrecency: 5),
-        .user(id: currentId): InlineSearchUsageSignal(switchFrecency: 100),
+        .user(id: highestUsageId): InlineSearchUsageSignal(switchFrecency: 100),
       ],
-      currentPeer: .user(id: currentId),
       scope: InlineSearchScope(includeArchived: false),
       suggestionLimit: 1,
       chatLimit: 5
     )
 
-    #expect(projection.suggestions.map(\.peer) == [.user(id: firstId)])
-    #expect(projection.chats.map(\.peer) == [.user(id: secondId)])
+    #expect(projection.suggestions.map(\.peer) == [.user(id: highestUsageId)])
+    #expect(projection.chats.map(\.peer) == [.user(id: secondId), .user(id: firstId)])
   }
 
   nonisolated private func makeInMemoryDB() throws -> (DatabaseQueue, AppDatabase) {
