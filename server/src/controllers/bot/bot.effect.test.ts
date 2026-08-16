@@ -1448,10 +1448,16 @@ describe("Effect Bot routes", () => {
       properties: {
         type: {},
         parent_chat_id: {},
-        parent_message_id: {},
+        parent_message: {},
         participants: {},
       },
     })
+    expect(
+      spec.components.schemas["BotChatLastMessage"],
+    ).not.toHaveProperty("properties.chat")
+    expect(
+      spec.components.schemas["BotChatLastMessage"],
+    ).not.toHaveProperty("properties.reply_to_message")
     expect(
       spec.components.schemas["BotMessage"],
     ).toMatchObject({

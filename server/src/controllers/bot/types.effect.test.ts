@@ -1,13 +1,19 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Schema } from "effect"
-import { BotChatParticipant, BotMessageAction, BotParticipation, BotUpdate } from "./types.effect"
+import { BotChat, BotChatParticipant, BotMessageAction, BotUpdate } from "./types.effect"
 
 const chat = {
   chat_id: 10,
   type: "thread",
   title: "Deployments",
   parent_chat_id: 9,
-  parent_message_id: 40,
+  parent_message: {
+    message_id: 40,
+    from_id: 7,
+    from: { id: 7, is_bot: false, first_name: "Maya" },
+    date: 1_785_999_900,
+    text: "Deployment context",
+  },
 } as const
 
 const message = {
@@ -44,12 +50,7 @@ describe("BotUpdate", () => {
       bot_participation: {
         chat,
         date: 1_786_000_020,
-        old_participation: {
-          status: "removed",
-        },
-        new_participation: {
-          status: "participating",
-        },
+        status: "added",
       },
     })
 
@@ -124,9 +125,13 @@ describe("BotChatParticipant", () => {
     expect(participant.member?.role).toBe("admin")
   })
 
-  it("does not expose an unsupported blocked participation state", () => {
-    expect(() => Schema.decodeUnknownSync(BotParticipation)({
-      status: "blocked",
-    })).toThrow()
+  it("serializes chat message summaries without recursive chat objects", () => {
+    const decoded = Schema.decodeUnknownSync(BotChat)(chat)
+    const serialized = JSON.stringify(decoded)
+
+    expect(serialized).toContain('"parent_message"')
+    expect(decoded.parent_message).not.toHaveProperty("chat")
+    expect(decoded.parent_message).not.toHaveProperty("reply_to_message")
+    expect(serialized.length).toBeLessThan(1_000)
   })
 })

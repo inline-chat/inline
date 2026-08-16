@@ -89,6 +89,15 @@ export const TBotAttachment = t.Object({
   image: t.Optional(TBotFile),
 })
 
+export const TBotChatLastMessage = t.Object({
+  message_id: t.Number(),
+  from_id: t.Number(),
+  from: TBotUser,
+  date: t.Number(),
+  text: t.Optional(t.String()),
+  entities: t.Optional(TBotMessageEntitiesOutput),
+})
+
 export const TBotChat = t.Object({
   chat_id: t.Number(),
   type: t.Optional(t.Union([t.Literal("user"), t.Literal("thread")])),
@@ -96,19 +105,10 @@ export const TBotChat = t.Object({
   space_id: t.Optional(t.Number()),
   is_public: t.Optional(t.Boolean()),
   parent_chat_id: t.Optional(t.Number()),
-  parent_message_id: t.Optional(t.Number()),
+  parent_message: t.Optional(TBotChatLastMessage),
   participants: t.Optional(t.Object({ count: t.Number() })),
   last_message_id: t.Optional(t.Number()),
-  last_message: t.Optional(
-    t.Object({
-      message_id: t.Number(),
-      from_id: t.Number(),
-      from: TBotUser,
-      date: t.Number(),
-      text: t.Optional(t.String()),
-      entities: t.Optional(TBotMessageEntitiesOutput),
-    }),
-  ),
+  last_message: t.Optional(TBotChatLastMessage),
   emoji: t.Optional(t.String()),
 })
 

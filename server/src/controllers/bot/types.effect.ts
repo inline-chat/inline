@@ -299,8 +299,11 @@ export const BotChat = Schema.Struct({
   parent_chat_id: OptionalChatId.annotateKey({
     description: "Structural parent for a nested or reply thread.",
   }),
-  parent_message_id: OptionalMessageId.annotateKey({
-    description: "Parent message anchoring this reply thread.",
+  parent_message: Schema.optionalKey(
+    BotChatLastMessage,
+  ).annotateKey({
+    description:
+      "Shallow message anchoring this reply thread. It never contains chat or reply_to_message.",
   }),
   participants: Schema.optionalKey(
     Schema.Struct({
@@ -538,16 +541,11 @@ export const BotMessageTrigger = Schema.Literals([
   "mentions",
 ]).annotate({ identifier: "BotMessageTrigger" })
 
-export const BotParticipation = Schema.Struct({
-  status: Schema.Literals(["participating", "removed"]),
-}).annotate({ identifier: "BotParticipation" })
-
 export const BotParticipationChange = Schema.Struct({
   chat: BotEventChat,
   actor: Schema.optionalKey(BotUser),
   date: WireNonNegativeInteger,
-  old_participation: BotParticipation,
-  new_participation: BotParticipation,
+  status: Schema.Literals(["added", "removed"]),
 }).annotate({ identifier: "BotParticipationChange" })
 
 const BotUpdateBaseFields = {

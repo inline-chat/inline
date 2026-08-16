@@ -37,7 +37,6 @@ const toEventChat = (chat: DbChat): BotEventChat => ({
   space_id: chat.spaceId ?? undefined,
   is_public: chat.publicThread ?? undefined,
   parent_chat_id: chat.parentChatId ?? undefined,
-  parent_message_id: chat.parentMessageId ?? undefined,
   emoji: chat.emoji ?? undefined,
 })
 
@@ -316,8 +315,6 @@ async function participationChanged(input: {
     UsersModel.getUserById(input.actorUserId),
   ])
   if (!bot?.bot) return
-  const removed = { status: "removed" as const }
-  const participating = { status: "participating" as const }
   await BotUpdatesModel.queue({
     botUserId: input.botUserId,
     updateType: "bot_participation",
@@ -326,8 +323,7 @@ async function participationChanged(input: {
         chat: toEventChat(input.chat),
         actor: actor ? toUser(actor) : undefined,
         date: Math.floor(Date.now() / 1_000),
-        old_participation: input.added ? removed : participating,
-        new_participation: input.added ? participating : removed,
+        status: input.added ? "added" : "removed",
       },
     },
   })

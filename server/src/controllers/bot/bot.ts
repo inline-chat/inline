@@ -280,7 +280,6 @@ const toBotChat = (chat: any): BotChat => {
     space_id: chat.spaceId ? Number(chat.spaceId) : undefined,
     is_public: typeof chat.isPublic === "boolean" ? chat.isPublic : undefined,
     parent_chat_id: chat.parentChatId ? Number(chat.parentChatId) : undefined,
-    parent_message_id: chat.parentMessageId ? Number(chat.parentMessageId) : undefined,
     last_message_id: chat.lastMsgId ? Number(chat.lastMsgId) : undefined,
     emoji: chat.emoji ?? undefined,
   }
@@ -298,6 +297,16 @@ const toBotChatLastMessageFromDb = (message: any, usersById?: Map<number, BotUse
     text: message.text ?? undefined,
     entities: encodeBotEntities(message.entities, { usersById }),
   }
+}
+
+const loadBotMessageSummary = async (messageId: number, chatId: number): Promise<BotChatLastMessage | undefined> => {
+  const message = await MessageModel.getMessage(messageId, chatId).catch(() => null)
+  if (!message) return undefined
+  const usersById = await loadUsersByIds([
+    ...mentionUserIdsFromEntities(message.entities),
+    Number(message.fromId),
+  ])
+  return toBotChatLastMessageFromDb(message, usersById)
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
@@ -559,6 +568,14 @@ const botMethods = (authPlugin: any): any => {
         const result = await getChatFn({ peerId }, ctxFromStore(store))
         const chat = toBotChat(result.chat)
         const chatId = Number(result.chat.id)
+        const parentMessage =
+          result.chat.parentChatId && result.chat.parentMessageId
+            ? await loadBotMessageSummary(
+                Number(result.chat.parentMessageId),
+                Number(result.chat.parentChatId),
+              )
+            : undefined
+        const chatWithParent = parentMessage ? { ...chat, parent_message: parentMessage } : chat
         const lastMessageId =
           result.chat.lastMsgId !== undefined && result.chat.lastMsgId !== null
             ? Number(result.chat.lastMsgId)
@@ -572,12 +589,12 @@ const botMethods = (authPlugin: any): any => {
             const usersById = await loadUsersByIds([...mentionIds, ...fromIds])
             return {
               ok: true,
-              result: { chat: { ...chat, last_message: toBotChatLastMessageFromDb(last, usersById) } },
+              result: { chat: { ...chatWithParent, last_message: toBotChatLastMessageFromDb(last, usersById) } },
             }
           }
         }
 
-        return { ok: true, result: { chat } }
+        return { ok: true, result: { chat: chatWithParent } }
       } catch (error) {
         throwInlineFromUnknown(error)
       }
