@@ -37,6 +37,7 @@
 pub mod api;
 pub mod client_info;
 pub mod realtime;
+pub mod realtime_v3;
 
 pub use api::{
     ApiClient, ApiClientBuilder, ApiError, CreateLinearIssueInput, CreateLinearIssueResult,
@@ -52,6 +53,10 @@ pub use realtime::{
     DEFAULT_RPC_TIMEOUT, DEFAULT_SESSION_COMMAND_CAPACITY, DEFAULT_SESSION_EVENT_CAPACITY,
     DEFAULT_SESSION_MAX_IN_FLIGHT_RPCS, RealtimeClient, RealtimeClientBuilder, RealtimeError,
     RealtimeEvent, RealtimeEventReceiver, RealtimeSession, RpcRequest,
+};
+pub use realtime_v3::{
+    InlineProtocolAuthorization, InlineProtocolPublicKey, InlineProtocolV3Connection,
+    InlineProtocolV3Error, InlineProtocolV3Options,
 };
 
 /// Convenient imports for common SDK consumers.

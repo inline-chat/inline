@@ -5,6 +5,9 @@ use num_bigint::BigUint;
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 
+/// Stateful client authorization-key handshake.
+pub mod client;
+
 /// Telegram's built-in 2048-bit safe prime used by Inline Protocol v1.
 pub const TELEGRAM_DH_PRIME: [u8; 256] = hex_literal::hex!(
     "c71caeb9c6b1c9048e6c522f70f13f73980d40238e3e21c14934d037563d930f
@@ -32,12 +35,101 @@ pub struct RsaPadIntermediate {
     pub encrypted_data: Vec<u8>,
 }
 
+/// A pinned RSA public key accepted during authorization-key negotiation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RsaPublicKey {
+    /// Unsigned 2048-bit RSA modulus in network byte order.
+    pub modulus: Vec<u8>,
+    /// Unsigned RSA exponent in network byte order.
+    pub exponent: Vec<u8>,
+    /// Telegram-compatible signed fingerprint.
+    pub fingerprint: i64,
+}
+
 fn sha1(parts: &[&[u8]]) -> [u8; 20] {
     let mut hash = Sha1::new();
     for part in parts {
         hash.update(part);
     }
     hash.finalize().into()
+}
+
+fn encode_tl_bytes(value: &[u8]) -> Result<Vec<u8>, InvalidEncryptedRecord> {
+    if value.len() > 0x00ff_ffff {
+        return Err(InvalidEncryptedRecord);
+    }
+    let mut output = Vec::with_capacity(value.len() + 4);
+    if value.len() < 254 {
+        output.push(value.len() as u8);
+    } else {
+        output.extend_from_slice(&[
+            254,
+            value.len() as u8,
+            (value.len() >> 8) as u8,
+            (value.len() >> 16) as u8,
+        ]);
+    }
+    output.extend_from_slice(value);
+    output.resize(output.len().next_multiple_of(4), 0);
+    Ok(output)
+}
+
+/// Computes Telegram's signed RSA public-key fingerprint.
+pub fn rsa_public_key_fingerprint(
+    modulus: &[u8],
+    exponent: &[u8],
+) -> Result<i64, InvalidEncryptedRecord> {
+    if modulus.len() != 256 || exponent.is_empty() {
+        return Err(InvalidEncryptedRecord);
+    }
+    let digest = sha1(&[&encode_tl_bytes(modulus)?, &encode_tl_bytes(exponent)?]);
+    Ok(i64::from_le_bytes(
+        digest[12..20].try_into().expect("fixed SHA-1 slice"),
+    ))
+}
+
+/// Constructs and validates a pinned RSA public key.
+pub fn make_rsa_public_key(
+    modulus: Vec<u8>,
+    exponent: Vec<u8>,
+) -> Result<RsaPublicKey, InvalidEncryptedRecord> {
+    let fingerprint = rsa_public_key_fingerprint(&modulus, &exponent)?;
+    Ok(RsaPublicKey {
+        modulus,
+        exponent,
+        fingerprint,
+    })
+}
+
+/// Runs RSA_PAD with fresh caller-supplied randomness, retrying candidates above the modulus.
+pub fn rsa_pad<F>(
+    serialized_inner: &[u8],
+    modulus: &[u8],
+    exponent: &[u8],
+    mut random_bytes: F,
+) -> Result<RsaPadIntermediate, InvalidEncryptedRecord>
+where
+    F: FnMut(&mut [u8]) -> Result<(), InvalidEncryptedRecord>,
+{
+    if serialized_inner.len() > 144 {
+        return Err(InvalidEncryptedRecord);
+    }
+    for _ in 0..64 {
+        let mut padding = vec![0; 192 - serialized_inner.len()];
+        let mut temporary_key = [0; 32];
+        random_bytes(&mut padding)?;
+        random_bytes(&mut temporary_key)?;
+        if let Ok(result) = rsa_pad_attempt(
+            serialized_inner,
+            &padding,
+            &temporary_key,
+            modulus,
+            exponent,
+        ) {
+            return Ok(result);
+        }
+    }
+    Err(InvalidEncryptedRecord)
 }
 
 fn sha256(parts: &[&[u8]]) -> [u8; 32] {
@@ -191,6 +283,125 @@ pub fn derive_auth_key(
     )?
     .try_into()
     .map_err(|_| InvalidEncryptedRecord)
+}
+
+/// Computes the eight-byte authorization-key auxiliary hash.
+pub fn auth_key_aux_hash(auth_key: &[u8]) -> Result<[u8; 8], InvalidEncryptedRecord> {
+    if auth_key.len() != 256 {
+        return Err(InvalidEncryptedRecord);
+    }
+    Ok(sha1(&[auth_key])[..8]
+        .try_into()
+        .expect("fixed SHA-1 slice"))
+}
+
+/// Computes one of the three server confirmations for a newly negotiated key.
+pub fn new_nonce_hash(
+    new_nonce: &[u8],
+    index: u8,
+    auth_key: &[u8],
+) -> Result<[u8; 16], InvalidEncryptedRecord> {
+    if new_nonce.len() != 32 || !(1..=3).contains(&index) {
+        return Err(InvalidEncryptedRecord);
+    }
+    Ok(
+        sha1(&[new_nonce, &[index], &auth_key_aux_hash(auth_key)?])[4..20]
+            .try_into()
+            .expect("fixed SHA-1 slice"),
+    )
+}
+
+/// Computes the server's `server_DH_params_fail` confirmation.
+pub fn server_dh_failure_hash(new_nonce: &[u8]) -> Result<[u8; 16], InvalidEncryptedRecord> {
+    if new_nonce.len() != 32 {
+        return Err(InvalidEncryptedRecord);
+    }
+    Ok(sha1(&[new_nonce])[4..20]
+        .try_into()
+        .expect("fixed SHA-1 slice"))
+}
+
+/// Derives the initial server salt from the handshake nonce chain.
+pub fn initial_server_salt(
+    new_nonce: &[u8],
+    server_nonce: &[u8],
+) -> Result<i64, InvalidEncryptedRecord> {
+    if new_nonce.len() != 32 || server_nonce.len() != 16 {
+        return Err(InvalidEncryptedRecord);
+    }
+    let mixed: [u8; 8] = std::array::from_fn(|index| new_nonce[index] ^ server_nonce[index]);
+    Ok(i64::from_le_bytes(mixed))
+}
+
+/// Returns the retry identifier for an authorization-key collision.
+pub fn bind_retry_id(auth_key: &[u8]) -> Result<i64, InvalidEncryptedRecord> {
+    Ok(i64::from_le_bytes(auth_key_aux_hash(auth_key)?))
+}
+
+fn gcd(mut left: u64, mut right: u64) -> u64 {
+    while right != 0 {
+        (left, right) = (right, left % right);
+    }
+    left
+}
+
+fn modular_multiply(left: u64, right: u64, modulus: u64) -> u64 {
+    ((u128::from(left) * u128::from(right)) % u128::from(modulus)) as u64
+}
+
+fn minimal_big_endian(value: u64) -> Vec<u8> {
+    let bytes = value.to_be_bytes();
+    bytes[bytes.iter().position(|byte| *byte != 0).unwrap_or(7)..].to_vec()
+}
+
+/// Factors Telegram's bounded `pq` challenge with Pollard rho.
+pub fn factor_pq<F>(
+    pq_bytes: &[u8],
+    mut random_bytes: F,
+) -> Result<(Vec<u8>, Vec<u8>), InvalidEncryptedRecord>
+where
+    F: FnMut(&mut [u8]) -> Result<(), InvalidEncryptedRecord>,
+{
+    if pq_bytes.is_empty() || pq_bytes.len() > 8 {
+        return Err(InvalidEncryptedRecord);
+    }
+    let mut encoded = [0; 8];
+    encoded[8 - pq_bytes.len()..].copy_from_slice(pq_bytes);
+    let value = u64::from_be_bytes(encoded);
+    if value <= 3 || value >= (1_u64 << 63) {
+        return Err(InvalidEncryptedRecord);
+    }
+    if value.is_multiple_of(2) {
+        return Ok((vec![2], minimal_big_endian(value / 2)));
+    }
+    for _ in 0..32 {
+        let mut random = [0; 8];
+        random_bytes(&mut random)?;
+        let mut x = u64::from_be_bytes(random) % (value - 2) + 2;
+        let mut y = x;
+        random_bytes(&mut random)?;
+        let c = u64::from_be_bytes(random) % (value - 1) + 1;
+        let mut divisor = 1;
+        for _ in 0..1_000_000 {
+            if divisor != 1 {
+                break;
+            }
+            x = (modular_multiply(x, x, value) + c) % value;
+            y = (modular_multiply(y, y, value) + c) % value;
+            y = (modular_multiply(y, y, value) + c) % value;
+            divisor = gcd(x.abs_diff(y), value);
+        }
+        if divisor > 1 && divisor < value {
+            let other = value / divisor;
+            let (p, q) = if divisor < other {
+                (divisor, other)
+            } else {
+                (other, divisor)
+            };
+            return Ok((minimal_big_endian(p), minimal_big_endian(q)));
+        }
+    }
+    Err(InvalidEncryptedRecord)
 }
 
 fn generator_matches_prime(prime: &BigUint, generator: u32) -> bool {

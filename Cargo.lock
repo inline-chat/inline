@@ -1439,7 +1439,9 @@ dependencies = [
 name = "inline-sdk"
 version = "0.7.3"
 dependencies = [
+ "base64",
  "futures-util",
+ "getrandom 0.3.4",
  "hostname",
  "inline-protocol",
  "log",

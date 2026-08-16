@@ -6,6 +6,10 @@ use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 
+/// Temporary authorization-key binding construction.
+pub mod binding;
+/// MTProto obfuscated2 carrier state.
+pub mod carrier;
 /// Authorization-key handshake cryptography.
 pub mod handshake;
 
