@@ -813,6 +813,27 @@
       "when": 1786883719274,
       "tag": "0115_bot-update-stream",
       "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "7",
+      "when": 1786890036206,
+      "tag": "0116_inline-protocol-v1",
+      "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "7",
+      "when": 1786890755528,
+      "tag": "0117_user-space-thread-scopes",
+      "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1786892094888,
+      "tag": "0118_inline-protocol-auth-uploads",
+      "breakpoints": true
     }
   ]
 }
