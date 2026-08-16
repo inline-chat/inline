@@ -23,7 +23,7 @@ bun add @inline-chat/protocol
 - `@inline-chat/protocol/carrier` is the client/server-neutral obfuscated abridged carrier surface, including Telegram-compatible quick ACK framing.
 - `@inline-chat/protocol/server` exposes the server handshake and session engine.
 - `@inline-chat/protocol/vectors` contains frozen cross-language conformance vectors.
-- `@inline-chat/protocol/vectors/inline-protocol-v1.json` is the exact language-neutral corpus consumed by the TypeScript, Rust, and Swift tests.
+- `@inline-chat/protocol/vectors/inline-protocol-v1.json` is the exact language-neutral corpus consumed by the TypeScript, Rust, and Swift tests. It includes deterministic permanent and temporary three-step DH transcripts, every random input, the derived authorization keys/IDs and salts, RSA_PAD intermediates, both record directions, and reliability/application objects.
 
 ## Regenerate
 

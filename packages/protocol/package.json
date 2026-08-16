@@ -71,6 +71,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "bunx oxlint --ignore-path ../../.oxlintignore src",
     "test": "bun test",
+    "generate:vectors": "bun scripts/generate-vectors.ts",
     "prepack": "bun run build",
     "release:preflight": "npm publish --dry-run --access public"
   },
