@@ -46,6 +46,7 @@ import {
 import {
   ServiceConstructor,
   decodeGzipPacked,
+  decodeHttpWait,
   decodeInvokeAfter,
   decodeDestroySession,
   decodeGetFutureSalts,
@@ -54,6 +55,7 @@ import {
   decodeMsgResendReq,
   decodeMsgsAck,
   decodeMsgsStateReq,
+  decodeRpcDropAnswer,
   encodeBadMsgNotification,
   encodeBadServerSalt,
   encodeDestroyAuthKeyResult,
@@ -63,6 +65,7 @@ import {
   encodeMsgsStateInfo,
   encodePong,
   encodeNewSessionCreated,
+  encodeRpcDropAnswerResult,
   encodeRpcError,
   encodeRpcResult,
   serviceConstructor,
@@ -83,6 +86,7 @@ const NON_CONTENT_CONSTRUCTORS = new Set<number>([
   ServiceConstructor.ping,
   ServiceConstructor.pingDelayDisconnect,
   ServiceConstructor.pong,
+  ServiceConstructor.httpWait,
 ])
 
 export type LoadedServerAuthorizationKey = {
@@ -137,6 +141,18 @@ export interface ServerReplayRepository {
     sessionId: bigint
     messageId: bigint
     resultBody: Uint8Array
+  }): Promise<{ kind: "completed" } | { kind: "superseded"; resultBody: Uint8Array }>
+  dropAnswer(input: {
+    authKeyId: Uint8Array
+    sessionId: bigint
+    messageId: bigint
+    runningResultBody: Uint8Array
+  }): Promise<"running" | "unknown">
+  forgetAnswer(input: {
+    authKeyId: Uint8Array
+    sessionId: bigint
+    messageId: bigint
+    forgottenResultBody: Uint8Array
   }): Promise<void>
 }
 
@@ -185,6 +201,7 @@ export interface InlineProtocolServerSessionOptions {
   randomBytes: (length: number) => Uint8Array
   nowMilliseconds: () => number
   gunzip: (packed: Uint8Array, maximumOutputBytes: number) => Uint8Array
+  carrierProfile?: "websocket" | "http"
   dc?: number
 }
 
@@ -304,10 +321,14 @@ export class InlineProtocolServerSession {
     this.#sessionId ??= fields.sessionId
     if (fields.sessionId !== this.#sessionId) throw new InvalidEncryptedRecord()
 
+    const receivedIdsCheckpoint = this.#receivedIds.checkpoint()
+    const receivedSequencesCheckpoint = this.#receivedSequences.checkpoint()
     let messages: LogicalMessage[]
     if (serviceConstructor(fields.body) === ServiceConstructor.msgContainer) {
       const outerError = this.#validateLogical(fields, false, true)
       if (outerError !== undefined) {
+        this.#receivedIds.restore(receivedIdsCheckpoint)
+        this.#receivedSequences.restore(receivedSequencesCheckpoint)
         return [this.#encryptOutgoing(
           encodeBadMsgNotification(fields.messageId, fields.sequenceNumber, outerError), false, 1,
         )]
@@ -330,6 +351,8 @@ export class InlineProtocolServerSession {
       const duplicate = this.#receivedIds.has(message.messageId)
       const validation = this.#validateLogical(message, contentRelated, allowDuplicate)
       if (validation !== undefined) {
+        this.#receivedIds.restore(receivedIdsCheckpoint)
+        this.#receivedSequences.restore(receivedSequencesCheckpoint)
         return [this.#encryptOutgoing(
           encodeBadMsgNotification(message.messageId, message.sequenceNumber, validation), false, 1,
         )]
@@ -488,6 +511,49 @@ export class InlineProtocolServerSession {
         if (message.body.length !== (constructor === ServiceConstructor.ping ? 12 : 16)) throw new RangeError("Invalid ping")
         return [this.#encryptOutgoing(encodePong(message.messageId, readInt64LE(message.body, 4)), false, 1)]
       }
+      case ServiceConstructor.httpWait:
+        decodeHttpWait(message.body)
+        if (this.options.carrierProfile !== "http") {
+          throw new RangeError("HTTP wait is invalid outside the HTTP carrier profile")
+        }
+        return []
+      case ServiceConstructor.rpcDropAnswer: {
+        const requestMessageId = decodeRpcDropAnswer(message.body)
+        const dropped = this.#pending.dropRpcResult(requestMessageId)
+        if (dropped) {
+          await this.options.replay.forgetAnswer({
+            authKeyId: this.#authorization!.keyId,
+            sessionId: this.#sessionId!,
+            messageId: requestMessageId,
+            forgottenResultBody: encodeRpcResult(
+              requestMessageId,
+              encodeRpcDropAnswerResult({ kind: "unknown" }),
+            ),
+          })
+        }
+        const status = dropped
+          ? {
+            kind: "dropped" as const,
+            messageId: dropped.messageId,
+            sequenceNumber: dropped.sequenceNumber,
+            bytes: dropped.body.length,
+          }
+          : await this.options.replay.dropAnswer({
+            authKeyId: this.#authorization!.keyId,
+            sessionId: this.#sessionId!,
+            messageId: requestMessageId,
+            runningResultBody: encodeRpcResult(
+              requestMessageId,
+              encodeRpcDropAnswerResult({ kind: "running" }),
+            ),
+          }) === "running"
+            ? { kind: "running" as const }
+            : { kind: "unknown" as const }
+        return [this.#encryptOutgoing(encodeRpcResult(
+          message.messageId,
+          encodeRpcDropAnswerResult(status),
+        ), true, 1)]
+      }
       case ServiceConstructor.gzipPacked: {
         const unpacked = decodeGzipPacked(message.body, this.options.gunzip)
         return this.#handleLogical({
@@ -589,8 +655,7 @@ export class InlineProtocolServerSession {
       throw new RangeError("Authorization key is no longer active")
     }
     this.#authorization = authorization
-    if ((authorization.temporary && !authorization.binding) ||
-        (!authorization.temporary && authorization.authorized)) {
+    if (authorization.temporary && !authorization.binding) {
       throw new RangeError("Authorization-key state does not permit application dispatch")
     }
     const application = decodeInlineApplicationObject(message.body)
@@ -633,7 +698,7 @@ export class InlineProtocolServerSession {
       ? encodeInlineResult(dispatched.payload)
       : encodeRpcError(dispatched.code, dispatched.message)
     const resultBody = encodeRpcResult(message.messageId, resultObject)
-    await this.options.replay.complete({
+    const completion = await this.options.replay.complete({
       authKeyId: authorization.keyId,
       sessionId: this.#sessionId!,
       messageId: message.messageId,
@@ -641,7 +706,11 @@ export class InlineProtocolServerSession {
     })
     const refreshed = await this.options.authorizationKeys.load(authorization.keyId)
     if (refreshed) this.#authorization = refreshed
-    return [this.#encryptOutgoing(resultBody, true, 1), ...updates]
+    return [this.#encryptOutgoing(
+      completion.kind === "completed" ? resultBody : completion.resultBody,
+      true,
+      1,
+    ), ...updates]
   }
 
   #validateLogical(

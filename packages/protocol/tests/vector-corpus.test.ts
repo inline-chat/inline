@@ -13,7 +13,7 @@ describe("language-neutral conformance corpus", () => {
   test("is the frozen corpus consumed by the TypeScript implementation", async () => {
     const data = await Bun.file(new URL("../vectors/inline-protocol-v1.json", import.meta.url)).bytes()
     expect(new Bun.CryptoHasher("sha256").update(data).digest("hex")).toBe(
-      "c82d1dbadeb51edd5821c91e518f6a6a2575e865d9439696ddc57cd881c36155",
+      "95a0c56e90ea6f91eaa67c2cc5a0072b820f6e1d960265366757a40fbb7b11e9",
     )
     const corpus = JSON.parse(new TextDecoder().decode(data)) as VectorCorpus
     expect(corpus.formatVersion).toBe(1)
