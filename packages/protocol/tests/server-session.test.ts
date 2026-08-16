@@ -14,6 +14,8 @@ import {
   decryptRecord,
   decryptRecordWithMetadata,
   encodeInlineInvoke,
+  encodeInvokeAfterMsg,
+  encodeMessageContainer,
   encodeBindTempAuthKey,
   encodeUnencryptedRecord,
   encryptRecord,
@@ -139,6 +141,7 @@ describe("carrier-independent Inline Protocol server session", () => {
     const authorizationKeys = new MemoryAuthorizationKeys()
     const replay = new MemoryReplay()
     let dispatches = 0
+    const dispatchedPayloads: number[][] = []
     const makeServer = () => new InlineProtocolServerSession({
       rsaKeys: [rsa.server],
       authorizationKeys,
@@ -146,6 +149,7 @@ describe("carrier-independent Inline Protocol server session", () => {
       application: {
         dispatch: async ({ payload }) => {
           dispatches += 1
+          dispatchedPayloads.push([...payload])
           return { kind: "result", payload: Uint8Array.of(9, ...payload) }
         },
       },
@@ -220,6 +224,35 @@ describe("carrier-independent Inline Protocol server session", () => {
     })
     expect(dispatches).toBe(1)
 
+    const dependentBody = encodeInvokeAfterMsg(messageId, encodeInlineInvoke(Uint8Array.of(4)))
+    await server.receive(encryptRecord(established!.key, "client-to-server", {
+      serverSalt: established!.serverSalt,
+      sessionId,
+      messageId: clientIds.next(nowMilliseconds, 100, 0),
+      sequenceNumber: 3,
+      body: dependentBody,
+    }, randomBytes(paddingFor(dependentBody.length))))
+    expect(dispatches).toBe(2)
+
+    const deferredMessageId = clientIds.next(nowMilliseconds, 101, 0)
+    const dependencyMessageId = clientIds.next(nowMilliseconds, 102, 0)
+    const deferredBody = encodeInvokeAfterMsg(dependencyMessageId, encodeInlineInvoke(Uint8Array.of(5)))
+    const dependencyBody = encodeInlineInvoke(Uint8Array.of(6))
+    const containerBody = encodeMessageContainer([
+      { messageId: deferredMessageId, sequenceNumber: 5, body: deferredBody },
+      { messageId: dependencyMessageId, sequenceNumber: 7, body: dependencyBody },
+    ])
+    const containerOutputs = await server.receive(encryptRecord(established!.key, "client-to-server", {
+      serverSalt: established!.serverSalt,
+      sessionId,
+      messageId: clientIds.next(nowMilliseconds, 103, 0),
+      sequenceNumber: 8,
+      body: containerBody,
+    }, randomBytes(paddingFor(containerBody.length))))
+    expect(containerOutputs.length).toBeGreaterThan(0)
+    expect(dispatches).toBe(4)
+    expect(dispatchedPayloads.slice(-2)).toEqual([[6], [5]])
+
     const replayedOutputs = await server.receive(encrypted)
     expect(replayedOutputs.some((output) => {
       const body = decryptRecord(output, established!.key, {
@@ -229,12 +262,12 @@ describe("carrier-independent Inline Protocol server session", () => {
       }).body
       return serviceConstructor(body) === ServiceConstructor.rpcResult
     })).toBeTrue()
-    expect(dispatches).toBe(1)
+    expect(dispatches).toBe(4)
 
     server = makeServer()
     const restartedOutputs = await server.receive(encrypted)
     expect(restartedOutputs.length).toBeGreaterThan(0)
-    expect(dispatches).toBe(1)
+    expect(dispatches).toBe(4)
   }, 20_000)
 
   test("binds a temporary key to an authorized permanent key before application dispatch", async () => {

@@ -42,6 +42,8 @@ export const ServiceConstructor = {
   getFutureSalts: 0xb921bd04,
   futureSalt: 0x0949d9dc,
   futureSalts: 0xae500895,
+  invokeAfterMsg: 0xcb9f372d,
+  invokeAfterMsgs: 0x3dc4b4f0,
 } as const
 
 export interface ContainerMessage {
@@ -54,6 +56,11 @@ export type FutureSalt = {
   validSince: number
   validUntil: number
   salt: bigint
+}
+
+export type InvokeAfter = {
+  messageIds: bigint[]
+  query: Uint8Array
 }
 
 const constructor = (value: number): Uint8Array => uint32LE(value)
@@ -139,6 +146,33 @@ export const decodeMsgCopy = (body: Uint8Array): ContainerMessage => {
     throw new RangeError("A copied message cannot contain a container")
   }
   return { messageId, sequenceNumber, body: copied }
+}
+
+export const encodeInvokeAfterMsg = (messageId: bigint, query: Uint8Array): Uint8Array => {
+  requireAlignedBody(query)
+  return fixedBody(ServiceConstructor.invokeAfterMsg, int64LE(messageId), query)
+}
+
+export const encodeInvokeAfterMsgs = (messageIds: readonly bigint[], query: Uint8Array): Uint8Array => {
+  if (messageIds.length > MAX_SERVICE_MESSAGE_IDS) throw new RangeError("Too many invoke-after dependencies")
+  requireAlignedBody(query)
+  return fixedBody(ServiceConstructor.invokeAfterMsgs, encodeTlVector(messageIds.map(int64LE)), query)
+}
+
+export const decodeInvokeAfter = (body: Uint8Array): InvokeAfter => {
+  const id = serviceConstructor(body)
+  const reader = readerFor(body, id)
+  let messageIds: bigint[]
+  if (id === ServiceConstructor.invokeAfterMsg) {
+    messageIds = [reader.readLong()]
+  } else if (id === ServiceConstructor.invokeAfterMsgs) {
+    messageIds = reader.readVector((item) => item.readLong(), MAX_SERVICE_MESSAGE_IDS)
+  } else {
+    throw new RangeError("Unexpected invoke-after constructor")
+  }
+  const query = reader.readFixed(reader.remaining)
+  requireAlignedBody(query)
+  return { messageIds, query }
 }
 
 export const encodeRpcResult = (requestMessageId: bigint, result: Uint8Array): Uint8Array => {
