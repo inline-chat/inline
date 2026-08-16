@@ -46,6 +46,15 @@ import {
   makeCoreRealtimeTransport,
   type RealtimeWebSocketData,
 } from "./realtimeHost"
+import {
+  makeInlineProtocolRealtimeTransport,
+  makeInlineProtocolRuntime,
+  type InlineProtocolRealtimeTransport,
+  type InlineProtocolWebSocketData,
+} from "./realtimeV3Host"
+import { loadInlineProtocolConfiguration } from "../../modules/inlineProtocol/config"
+
+export type CoreWebSocketData = RealtimeWebSocketData | InlineProtocolWebSocketData
 
 const DEFAULT_GRACEFUL_SHUTDOWN_MILLIS =
   20_000
@@ -143,7 +152,7 @@ export interface StartCoreProductionServerOptions<
   readonly bindRealtimeServer?:
     | ((
       server: Server<
-        RealtimeWebSocketData
+        CoreWebSocketData
       >,
     ) => void | Promise<void>)
     | undefined
@@ -169,7 +178,7 @@ export interface CoreProductionServerHandle {
   readonly hostname: string
   readonly port: number
   readonly server: Server<
-    RealtimeWebSocketData
+    CoreWebSocketData
   >
   readonly shutdown: (
     signal?: CoreShutdownSignal,
@@ -178,7 +187,7 @@ export interface CoreProductionServerHandle {
 
 const bindCurrentRealtimeServer = async (
   server: Server<
-    RealtimeWebSocketData
+    CoreWebSocketData
   >,
 ): Promise<void> => {
   const { connectionManager } =
@@ -309,12 +318,65 @@ export const startCoreProductionServer = async <
     makeCoreHttpDrain()
 
   let server:
-    | Server<RealtimeWebSocketData>
+    | Server<CoreWebSocketData>
+    | undefined
+  let realtimeV3:
+    | InlineProtocolRealtimeTransport
     | undefined
 
   try {
+    const inlineProtocolConfiguration =
+      loadInlineProtocolConfiguration()
+    realtimeV3 = inlineProtocolConfiguration.enabled
+      ? makeInlineProtocolRealtimeTransport(
+        makeInlineProtocolRuntime(
+          inlineProtocolConfiguration,
+        ),
+        { clientIpHeader },
+      )
+      : undefined
+    const websocket:
+      Bun.WebSocketHandler<CoreWebSocketData> = {
+        ...realtime.websocket,
+        open: (socket) => {
+          if ("protocol" in socket.data && socket.data.protocol === "inline-v3") {
+            return realtimeV3?.websocket.open?.(
+              socket as never,
+            )
+          }
+          return realtime.websocket.open?.(
+            socket as never,
+          )
+        },
+        message: (socket, message) => {
+          if ("protocol" in socket.data && socket.data.protocol === "inline-v3") {
+            return realtimeV3?.websocket.message(
+              socket as never,
+              message,
+            )
+          }
+          return realtime.websocket.message(
+            socket as never,
+            message,
+          )
+        },
+        close: (socket, code, reason) => {
+          if ("protocol" in socket.data && socket.data.protocol === "inline-v3") {
+            return realtimeV3?.websocket.close?.(
+              socket as never,
+              code,
+              reason,
+            )
+          }
+          return realtime.websocket.close?.(
+            socket as never,
+            code,
+            reason,
+          )
+        },
+      }
     server = Bun.serve<
-      RealtimeWebSocketData
+      CoreWebSocketData
     >({
       hostname,
       port,
@@ -325,10 +387,26 @@ export const startCoreProductionServer = async <
             { status: 503 },
           )
         }
+        const unsupportedV3 =
+          realtimeV3
+            ?.rejectUnsupportedUpgrade(
+              request,
+            )
+        if (unsupportedV3 !== undefined) {
+          return unsupportedV3
+        }
+        if (
+          realtimeV3?.tryUpgrade(
+            request,
+            bunServer as never,
+          )
+        ) {
+          return undefined
+        }
         if (
           realtime.tryUpgrade(
             request,
-            bunServer,
+            bunServer as never,
           )
         ) {
           return undefined
@@ -336,6 +414,33 @@ export const startCoreProductionServer = async <
 
         const completeRequest =
           httpDrain.enter()
+        const v3Upload =
+          realtimeV3
+            ?.handleHttpUpload(
+              request,
+              bunServer.requestIP(request)
+                ?.address,
+            )
+        if (v3Upload !== undefined) {
+          return v3Upload.then(
+            (response) => {
+              if (response === undefined) {
+                return httpHandler(
+                  request,
+                  bunServer.requestIP(request)
+                    ?.address,
+                  completeRequest,
+                )
+              }
+              completeRequest()
+              return response
+            },
+            (cause) => {
+              completeRequest()
+              throw cause
+            },
+          )
+        }
         return httpHandler(
           request,
           bunServer.requestIP(request)
@@ -346,7 +451,7 @@ export const startCoreProductionServer = async <
           throw cause
         })
       },
-      websocket: realtime.websocket,
+      websocket,
     })
 
     await bindRealtimeServer(server)
@@ -395,6 +500,7 @@ export const startCoreProductionServer = async <
         async () => {
           shutdownStage =
             "realtime transport"
+          await realtimeV3?.shutdown()
           await realtime.shutdown()
           shutdownStage =
             "in-flight HTTP drain"
