@@ -242,10 +242,12 @@ describe("carrier-independent Inline Protocol server session", () => {
     const authorizationKeys = new MemoryAuthorizationKeys()
     const replay = new MemoryReplay()
     let observedAuthorization: unknown
+    let dispatches = 0
     const makeServer = () => new InlineProtocolServerSession({
       rsaKeys: [rsa.server], authorizationKeys, replay,
       application: {
         dispatch: async ({ authorization }) => {
+          dispatches += 1
           observedAuthorization = authorization
           return { kind: "result", payload: Uint8Array.of(7) }
         },
@@ -325,5 +327,16 @@ describe("carrier-independent Inline Protocol server session", () => {
       userId: 42,
       accountSessionId: 84,
     })
+    expect(dispatches).toBe(1)
+
+    authorizationKeys.values.delete(bytesToHex(temporary.keyId))
+    await expect(server.receive(encryptRecord(temporary.key, "client-to-server", {
+      serverSalt: temporary.serverSalt,
+      sessionId,
+      messageId: ids.next(nowMilliseconds, 22, 0),
+      sequenceNumber: 5,
+      body: invoke,
+    }, randomBytes(paddingFor(invoke.length))))).rejects.toThrow("Authorization key is no longer active")
+    expect(dispatches).toBe(1)
   }, 30_000)
 })
