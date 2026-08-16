@@ -223,6 +223,12 @@ let package = Package(
     ),
 
     .testTarget(
+      name: "InlineProtocolTests",
+      dependencies: ["InlineProtocol"],
+      swiftSettings: swiftSettings
+    ),
+
+    .testTarget(
       name: "InlineKitTests",
       dependencies: [
         "InlineAvatarCore",
