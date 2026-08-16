@@ -299,7 +299,16 @@ const toBotChatLastMessageFromDb = (message: any, usersById?: Map<number, BotUse
   }
 }
 
-const loadBotMessageSummary = async (messageId: number, chatId: number): Promise<BotChatLastMessage | undefined> => {
+const loadBotMessageSummary = async (
+  messageId: number,
+  chatId: number,
+  context: Parameters<typeof getChatFn>[1],
+): Promise<BotChatLastMessage | undefined> => {
+  const parentChat = await getChatFn(
+    { peerId: makeInputPeer(undefined, chatId) },
+    context,
+  ).catch(() => null)
+  if (!parentChat) return undefined
   const message = await MessageModel.getMessage(messageId, chatId).catch(() => null)
   if (!message) return undefined
   const usersById = await loadUsersByIds([
@@ -573,6 +582,7 @@ const botMethods = (authPlugin: any): any => {
             ? await loadBotMessageSummary(
                 Number(result.chat.parentMessageId),
                 Number(result.chat.parentChatId),
+                ctxFromStore(store),
               )
             : undefined
         const chatWithParent = parentMessage ? { ...chat, parent_message: parentMessage } : chat

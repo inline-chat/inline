@@ -457,7 +457,13 @@ const toBotChatLastMessageFromDb = (
 const loadBotMessageSummary = async (
   messageId: number,
   chatId: number,
+  context: BotOperationContext,
 ): Promise<BotChatLastMessage | undefined> => {
+  const parentChat = await getChatFn(
+    { peerId: makeInputPeer(undefined, chatId) },
+    context,
+  ).catch(() => null)
+  if (!parentChat) return undefined
   const message = await MessageModel.getMessage(messageId, chatId).catch(() => null)
   if (!message) return undefined
   const usersById = await loadUsersByIds([
@@ -876,6 +882,7 @@ const getChat = async (
       ? await loadBotMessageSummary(
           Number(result.chat.parentMessageId),
           Number(result.chat.parentChatId),
+          context,
         )
       : undefined
   const chatWithParent = parentMessage
@@ -1087,7 +1094,7 @@ const createReplyThread = async (
     },
     context,
   )
-  const parentMessage = await loadBotMessageSummary(messageId, chatId)
+  const parentMessage = await loadBotMessageSummary(messageId, chatId, context)
   return {
     chat: {
       ...toBotChat(result.chat),
