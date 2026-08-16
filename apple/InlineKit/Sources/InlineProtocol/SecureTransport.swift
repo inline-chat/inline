@@ -1,3 +1,4 @@
+import BigInt
 import CommonCrypto
 import Foundation
 import Security
@@ -79,6 +80,7 @@ public enum InlineSecureTransport {
   public static let invokeAfterMessagesConstructor: UInt32 = 0x3dc4b4f0
   private static let vectorConstructor: UInt32 = 0x1cb5c415
   private static let maximumInvokeAfterDependencies = 8_192
+  private static let dhPrimeCache = DHPrimeValidationCache(capacity: 64)
   public static let realtimeLayer: Int32 = 3
   public static let telegramDHPrime: [UInt8] = hexBytes(
     "c71caeb9c6b1c9048e6c522f70f13f73980d40238e3e21c14934d037563d930f" +
@@ -173,8 +175,39 @@ public enum InlineSecureTransport {
     return serialized
   }
 
+  public static func validateDHParameters(primeBytes: [UInt8], generator: Int32) throws {
+    guard primeBytes.count == 256,
+          primeBytes[0] & 0x80 != 0,
+          (2...7).contains(generator)
+    else { throw InlineProtocolError.invalidInput }
+
+    let prime = BigUInt(Data(primeBytes))
+    let remainder: (Int) -> Int = { Int(prime % BigUInt($0)) }
+    let generatorMatchesPrime: Bool = switch generator {
+    case 2: remainder(8) == 7
+    case 3: remainder(3) == 2
+    case 4: true
+    case 5: remainder(5) == 1 || remainder(5) == 4
+    case 6: remainder(24) == 19 || remainder(24) == 23
+    case 7: [3, 5, 6].contains(remainder(7))
+    default: false
+    }
+    guard generatorMatchesPrime else { throw InlineProtocolError.invalidInput }
+
+    if primeBytes != telegramDHPrime {
+      let cacheKey = Data(primeBytes)
+      let isSafePrime = dhPrimeCache.value(for: cacheKey) ?? {
+        let result = prime.isPrime(rounds: 64) && ((prime - 1) / 2).isPrime(rounds: 64)
+        dhPrimeCache.insert(result, for: cacheKey)
+        return result
+      }()
+      guard isSafePrime else { throw InlineProtocolError.invalidInput }
+    }
+  }
+
   public static func validateBuiltinDHParameters(prime: [UInt8], generator: Int32) throws {
-    guard prime == telegramDHPrime, generator == 3 else { throw InlineProtocolError.invalidInput }
+    guard prime == telegramDHPrime else { throw InlineProtocolError.invalidInput }
+    try validateDHParameters(primeBytes: prime, generator: generator)
   }
 
   public static func validateDHPublicValue(_ value: [UInt8], prime: [UInt8]) throws {
@@ -674,6 +707,33 @@ public enum InlineSecureTransport {
       result | UInt64(pair.element) << UInt64(pair.offset * 8)
     }
     return Int64(bitPattern: raw)
+  }
+}
+
+private final class DHPrimeValidationCache: @unchecked Sendable {
+  private let capacity: Int
+  private let lock = NSLock()
+  private var order: [Data] = []
+  private var values: [Data: Bool] = [:]
+
+  init(capacity: Int) {
+    self.capacity = capacity
+  }
+
+  func value(for key: Data) -> Bool? {
+    lock.withLock { values[key] }
+  }
+
+  func insert(_ value: Bool, for key: Data) {
+    lock.withLock {
+      guard values[key] == nil else { return }
+      if order.count == capacity, let oldest = order.first {
+        order.removeFirst()
+        values.removeValue(forKey: oldest)
+      }
+      order.append(key)
+      values[key] = value
+    }
   }
 }
 

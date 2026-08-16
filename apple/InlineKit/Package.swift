@@ -63,6 +63,7 @@ let package = Package(
   ],
   dependencies: [
     .package(path: "../InlineThumbnailing"),
+    .package(url: "https://github.com/attaswift/BigInt.git", exact: "6.0.0"),
     .package(url: "https://github.com/inline-chat/GRDB.swift", from: "7.10.0"),
     // Keep SQLCipher exact so every SwiftPM root and Xcode preview resolves
     // the same binary framework used by GRDBSQLCipher.
@@ -177,6 +178,7 @@ let package = Package(
     .target(
       name: "InlineProtocol",
       dependencies: [
+        .product(name: "BigInt", package: "BigInt"),
         .product(name: "SwiftProtobuf", package: "swift-protobuf"),
         "Logger",
       ],

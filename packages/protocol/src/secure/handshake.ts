@@ -191,7 +191,11 @@ const isProbablePrime = (value: bigint, randomBytes: RandomBytes, rounds: number
   let power = 0
   while ((odd & 1n) === 0n) { odd >>= 1n; power += 1 }
   for (let round = 0; round < rounds; round += 1) {
-    const base = bigEndianBytesToBigInt(randomBytes(256)) % (value - 3n) + 2n
+    const baseRange = value - 3n
+    let candidate: bigint
+    do candidate = bigEndianBytesToBigInt(randomBytes(256))
+    while (candidate >= baseRange)
+    const base = candidate + 2n
     let witness = modPow(base, odd, value)
     if (witness === 1n || witness === value - 1n) continue
     let composite = true
