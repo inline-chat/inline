@@ -101,6 +101,7 @@ describe("plugin entry", () => {
       "inline_update_profile",
       "inline_bot_avatar",
       "inline_bot_commands",
+      "inline_agents",
       "inline_nudge",
       "inline_forward",
       "inline_bot_presence",

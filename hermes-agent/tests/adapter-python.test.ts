@@ -557,6 +557,7 @@ assert ctx.tool["schema"]["parameters"]["properties"]["comment"]["description"] 
 assert "get_history" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
 assert "create_thread" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
 assert "create_chat" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
+assert "create_agent" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
 assert ctx.tool["schema"]["parameters"]["properties"]["participant_user_ids"]["maxItems"] == 50
 assert "requires space_id" in ctx.tool["schema"]["parameters"]["properties"]["is_public"]["description"]
 assert "search_messages" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
@@ -640,6 +641,12 @@ def fake_inline_sidecar(path, body):
             },
             "dialog": {"chatId": "322"},
         }}
+    if path == "/create-agent":
+        return {"ok": True, "result": {"agent": {
+            "id": "73",
+            "botUserId": "20",
+            "name": body["name"],
+        }}}
     return {"ok": True, "result": {}}
 
 real_inline_sidecar = inline_tools._sidecar_call
@@ -872,6 +879,14 @@ try:
     }))
     assert public_with_participants["error"] == "public create_chat cannot include participant_user_ids"
     assert len(tool_calls) == calls_before_invalid_create
+
+    name_only_agent = json.loads(ctx.tool["handler"]({
+        "action": "create_agent",
+        "name": "Concierge",
+    }))
+    assert name_only_agent["success"] is True
+    assert name_only_agent["result"]["agent"]["name"] == "Concierge"
+    assert tool_calls[-1] == ("/create-agent", {"name": "Concierge"})
 
     os.environ["HERMES_SESSION_PLATFORM"] = "inline"
     os.environ["HERMES_SESSION_CHAT_ID"] = "10"
@@ -1604,6 +1619,51 @@ async def assert_default_auto_reply_threads_keep_fresh_parent_messages_flat():
     assert "thread_id" not in events[0].metadata["inline"]
 
 asyncio.run(assert_default_auto_reply_threads_keep_fresh_parent_messages_flat())
+
+async def assert_mentioned_agent_projection():
+    adapter = InlineAdapter(PlatformConfig(extra={
+        **base_extra,
+        "require_mention": False,
+    }))
+    adapter._me_id = "20"
+    events = []
+
+    async def fake_handle_message(event):
+        events.append(event)
+
+    async def fake_get_chat_info(chat_id):
+        return {"chatId": chat_id, "title": "Planning"}
+
+    async def fake_sidecar_call(path, body):
+        assert (path, body) == ("/get-agent", {"agentId": "73"})
+        return {"agent": {"id": "73", "name": "Data Analyst", "skillKey": "analysis"}}
+
+    adapter.handle_message = fake_handle_message
+    adapter._get_chat_info = fake_get_chat_info
+    adapter._sidecar_call = fake_sidecar_call
+    await adapter._dispatch_message({
+        "seq": 10,
+        "chatId": "10",
+        "message": {
+            "id": "9002",
+            "chatId": "10",
+            "fromId": "u1",
+            "message": "Data Analyst inspect this",
+            "peerId": {"peer": {"oneofKind": "chat"}},
+            "entities": {"entities": [{
+                "type": 4,
+                "offset": "0",
+                "length": "12",
+                "entity": {"oneofKind": "mention", "mention": {"userId": "20", "agentId": "73"}},
+            }]},
+        },
+    })
+
+    assert len(events) == 1
+    assert 'You are a specialized agent named "Data Analyst".' in events[0].channel_prompt
+    assert events[0].auto_skill == ["analysis"]
+
+asyncio.run(assert_mentioned_agent_projection())
 
 async def assert_forced_reply_thread_creation():
     adapter = InlineAdapter(PlatformConfig(extra={

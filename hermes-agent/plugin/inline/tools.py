@@ -78,6 +78,7 @@ _ACTION_MANIFEST = [
     ("list_pins", "(chat_id?)", "List pinned Inline message IDs for a chat or reply thread."),
     ("create_thread", "(parent_chat_id?, parent_message_id?, title?)", "Create an Inline reply thread."),
     ("create_chat", "(title, space_id?, participant_user_ids?, is_public?)", "Create a top-level Inline thread/chat."),
+    ("create_agent", "(name, skill_key?, instructions?)", "Create a named Inline Agent backed by this bot."),
     ("set_presence", "(chat_id?|user_id?, kind, comment?)", "Set the bot avatar presence/status message."),
 ]
 _ACTIONS = [name for name, _, _ in _ACTION_MANIFEST]
@@ -190,6 +191,10 @@ INLINE_TOOL_SCHEMA = {
                 "description": "Parent message ID for create_thread. Defaults to the triggering message when available.",
             },
             "title": {"type": "string", "description": "Thread title. Required for create_chat and optional for create_thread."},
+            "name": {"type": "string", "description": "Agent name for create_agent."},
+            "handle": {"type": "string", "description": "Optional Agent handle."},
+            "skill_key": {"type": "string", "description": "Optional harness skill key for create_agent."},
+            "instructions": {"type": "string", "description": "Optional specialized Agent instructions."},
             "description": {"type": "string", "description": "Optional thread description for create_thread or create_chat."},
             "emoji": {"type": "string", "description": "Optional thread emoji for create_thread/create_chat, or reaction emoji for reaction actions."},
             "space_id": {"type": "string", "description": "Optional parent space ID for create_chat."},
@@ -358,6 +363,14 @@ def _request_for_action(action: str, args: Dict[str, Any]) -> tuple[str, Dict[st
             if value:
                 body[key] = _truncate(value, limit)
         return "/create-chat", body
+
+    if action == "create_agent":
+        body = {"name": _required_str(args, "name", max_chars=256)}
+        for key in ("handle", "emoji", "description", "skill_key", "instructions"):
+            value = _str(args.get(key))
+            if value:
+                body[key] = value
+        return "/create-agent", body
 
     if action == "set_presence":
         kind = _str(args.get("kind"))
@@ -528,6 +541,8 @@ def _compact_result(action: str, result: Dict[str, Any]) -> Dict[str, Any]:
             "chat": _compact_chat(result.get("chat") if isinstance(result.get("chat"), dict) else {}),
             "dialog": _summarize_value(result.get("dialog")) if result.get("dialog") is not None else None,
         }
+    if action == "create_agent":
+        return {"agent": _summarize_value(result.get("agent"))}
     return result
 
 

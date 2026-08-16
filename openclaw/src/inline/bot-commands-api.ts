@@ -26,13 +26,19 @@ export async function callInlineBotApi<T>(params: {
   methodName: string
   method: "GET" | "POST"
   body?: unknown
+  query?: Record<string, string | number | boolean | undefined>
 }): Promise<T> {
   const baseUrl = normalizeInlineBotBaseUrl(params.baseUrl)
   const invoke = async (authMode: "header" | "path") => {
-    const url =
+    const rawUrl =
       authMode === "header"
         ? `${baseUrl}/bot/${params.methodName}`
         : `${baseUrl}/bot${encodeURIComponent(params.token)}/${params.methodName}`
+    const parsedUrl = new URL(rawUrl)
+    for (const [key, value] of Object.entries(params.query ?? {})) {
+      if (value !== undefined) parsedUrl.searchParams.set(key, String(value))
+    }
+    const url = parsedUrl.toString()
     const request: RequestInit = {
       method: params.method,
       headers: {

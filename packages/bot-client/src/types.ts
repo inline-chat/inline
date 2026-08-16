@@ -2,6 +2,7 @@ export { BOT_DEFAULT_UPDATE_KEYS, BOT_ID_MAX } from "@inline-chat/bot-api-types"
 
 export type {
   BotActivationReason,
+  BotAgent,
   BotApiEnvelope,
   BotApiError,
   BotApiSuccess,
@@ -41,6 +42,8 @@ export type {
   BotReaction,
   BotSearchFilter,
   CreateReplyThreadParams,
+  CreateAgentParams,
+  CreateAgentResult,
   CreateReplyThreadResult,
   CreateThreadParams,
   CreateThreadResult,
@@ -66,6 +69,9 @@ export type {
   GetFileParams,
   GetFileResult,
   GetMeResult,
+  GetAgentParams,
+  GetAgentResult,
+  GetMyAgentsResult,
   GetMessagesParams,
   GetMessagesResult,
   GetUpdatesParams,

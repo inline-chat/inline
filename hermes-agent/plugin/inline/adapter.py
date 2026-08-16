@@ -2209,6 +2209,21 @@ class InlineAdapter(BasePlatformAdapter):
                 parent_message_id = msg_id
 
         channel_prompt, auto_skill = self._resolve_thread_bindings(chat_id, thread_id, parent_chat_id)
+        mentioned_agent_id = self._mentioned_agent_id(msg)
+        if mentioned_agent_id:
+            try:
+                resolved_agent = await self._sidecar_call("/get-agent", {"agentId": mentioned_agent_id})
+                agent = resolved_agent.get("agent") if isinstance(resolved_agent.get("agent"), dict) else {}
+                agent_name = str(agent.get("name") or "").strip()
+                agent_instructions = str(agent.get("instructions") or "").strip()
+                agent_skill = str(agent.get("skillKey") or agent.get("skill_key") or "").strip()
+                if agent_name:
+                    specialization = agent_instructions or f'You are a specialized agent named "{agent_name}".'
+                    channel_prompt = self._merge_channel_prompt(channel_prompt, specialization)
+                if agent_skill:
+                    auto_skill = [agent_skill]
+            except Exception as exc:
+                logger.warning("[inline] failed to resolve mentioned Agent %s: %s", mentioned_agent_id, exc)
         entity_text = self._inline_entity_text(msg, str(msg.get("message") or ""))
         parent_chat_info: Dict[str, Any] = {}
         if parent_chat_id:
@@ -2769,6 +2784,19 @@ class InlineAdapter(BasePlatformAdapter):
         if len(entities) > _INLINE_ENTITY_LIMIT:
             parts.append(f"+{len(entities) - _INLINE_ENTITY_LIMIT} more")
         return " | ".join(parts) if parts else None
+
+    def _mentioned_agent_id(self, msg: Dict[str, Any]) -> Optional[str]:
+        for entity in self._message_entities(msg):
+            if self._entity_kind(entity) != "mention":
+                continue
+            payload = self._entity_payload(entity, "mention")
+            user_id = self._entity_id(payload, "userId")
+            if self._me_id and user_id != self._me_id:
+                continue
+            agent_id = self._entity_id(payload, "agentId")
+            if agent_id:
+                return agent_id
+        return None
 
     @staticmethod
     def _merge_channel_prompt(*parts: Optional[str]) -> Optional[str]:

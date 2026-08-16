@@ -7,6 +7,7 @@ import { sanitizeInlineVisibleText } from "./inline/outbound-sanitize.js"
 import { createInlineBotAvatarTool } from "./inline/bot-avatar-tool.js"
 import { createInlineProfileTool } from "./inline/profile-tool.js"
 import { createInlineBotCommandsTool } from "./inline/bot-commands-tool.js"
+import { createInlineAgentsTool } from "./inline/agents-tool.js"
 import { syncInlineNativeCommands } from "./inline/bot-commands-sync.js"
 import { createInlineFollowCommands } from "./inline/follow-command.js"
 import { createInlineThreadReplyCommand } from "./inline/threadreply-command.js"
@@ -24,6 +25,9 @@ export function registerInlinePluginFull(api: OpenClawPluginApi): void {
   })
   api.registerTool((ctx) => createInlineBotCommandsTool(ctx) as AnyAgentTool, {
     names: ["inline_bot_commands"],
+  })
+  api.registerTool((ctx) => createInlineAgentsTool(ctx) as AnyAgentTool, {
+    names: ["inline_agents"],
   })
   api.registerTool((ctx) => createInlineMessageTools(ctx) as AnyAgentTool[], {
     names: ["inline_nudge", "inline_forward", "inline_bot_presence"],

@@ -112,6 +112,7 @@ import {
   summarizeInlineMessageContent,
   type InlineMessageEntitySummary,
 } from "./message-content.js"
+import { callInlineBotApi } from "./bot-commands-api.js"
 import {
   sanitizeInlineActionCallbackData,
   sanitizeInlineActionCopyText,
@@ -3199,6 +3200,7 @@ export async function monitorInlineProvider(params: {
   if (!account.configured || !account.baseUrl) {
     throw new Error(`Inline not configured for account "${account.accountId}" (missing baseUrl or token)`)
   }
+  const botApiBaseUrl = account.baseUrl
   const token = await resolveInlineToken(account)
 
   const stateDir = core.state.resolveStateDir()
@@ -4740,10 +4742,43 @@ export async function monitorInlineProvider(params: {
       deliveryChatId,
       !replyThreadContext && deliveryReplyThreadContext ? deliveryReplyThreadContext.parentChatId : null,
     ])
-    const deliverySessionKey =
+    const inlineAgentId = currentContent?.entities.find((entity) =>
+      entity.type === "mention" && entity.userId === String(meId) && entity.agentId)?.agentId
+    let inlineAgent: {
+      name: string
+      skillKey?: string
+      instructions?: string
+    } | null = null
+    if (inlineAgentId) {
+      try {
+        const result = await callInlineBotApi<{
+          agent?: { name?: string; skill_key?: string; instructions?: string }
+        }>({
+          baseUrl: botApiBaseUrl,
+          token,
+          methodName: "getAgent",
+          method: "GET",
+          query: { agent_id: inlineAgentId },
+        })
+        const agent = result.agent
+        if (agent?.name) {
+          inlineAgent = {
+            name: agent.name,
+            ...(agent.skill_key ? { skillKey: agent.skill_key } : {}),
+            ...(agent.instructions ? { instructions: agent.instructions } : {}),
+          }
+        }
+      } catch (error) {
+        runtime.error?.(`inline: failed to resolve mentioned Agent ${inlineAgentId}: ${String(error)}`)
+      }
+    }
+    const baseDeliverySessionKey =
       deliveryReplyThreadContext && isGroup
         ? buildInlineReplyThreadSessionKey(route.sessionKey, deliveryReplyThreadContext.childChatId)
         : route.sessionKey
+    const deliverySessionKey = inlineAgentId
+      ? `${baseDeliverySessionKey}:inline-agent:${inlineAgentId}`
+      : baseDeliverySessionKey
     const groupHistoryKey = isGroup
       ? deliveryReplyThreadContext
         ? deliverySessionKey
@@ -4769,6 +4804,11 @@ export async function monitorInlineProvider(params: {
     const rawBodyForAgent = isGroup && mentionGate.effectiveWasMentioned
       ? stripInlineBotMention(rawBody, botUsername)
       : rawBody
+    const agentBodyForCommands = inlineAgent?.skillKey
+      ? `/skill ${inlineAgent.skillKey}${rawBodyForAgent ? ` ${rawBodyForAgent}` : ""}`
+      : inlineAgent
+        ? rawBodyForAgent
+        : normalizedCommandBody
     const currentEntityTextForAgent =
       isGroup && mentionGate.effectiveWasMentioned
         ? stripInlineBotMentionEntityText(currentEntityText, botUsername)
@@ -4800,11 +4840,15 @@ export async function monitorInlineProvider(params: {
       ...(commandSource ? { commandSource } : {}),
     })
     const effectiveSurface = CHANNEL_ID
-    const systemPrompt = resolveInlineSystemPrompt({
+    const baseSystemPrompt = resolveInlineSystemPrompt({
       account,
       ...(isGroup ? { groupId: String(effectiveChatId) } : {}),
       replyThread: Boolean(deliveryReplyThreadContext),
     })
+    const inlineAgentPrompt = inlineAgent
+      ? inlineAgent.instructions?.trim() || `You are a specialized agent named "${inlineAgent.name}".`
+      : undefined
+    const systemPrompt = [baseSystemPrompt, inlineAgentPrompt].filter(Boolean).join("\n\n") || undefined
     const messageSid = buildInlineInboundMessageSid({
       msgId: msg.id,
       ...(callbackActionEvent ? { callbackActionEvent } : {}),
@@ -4816,7 +4860,7 @@ export async function monitorInlineProvider(params: {
       Body: rawBody,
       InboundEventKind: inboundEventKind,
       BodyForAgent: currentBody,
-      BodyForCommands: normalizedCommandBody,
+      BodyForCommands: agentBodyForCommands,
       InboundHistory: inboundHistory,
       RawBody: rawBody,
       CommandBody: normalizedCommandBody,
@@ -4885,7 +4929,7 @@ export async function monitorInlineProvider(params: {
           }
         : {}),
       CommandAuthorized: commandAuthorized,
-      GroupSystemPrompt: systemPrompt,
+      ...(systemPrompt ? { GroupSystemPrompt: systemPrompt } : {}),
       OriginatingChannel: CHANNEL_ID,
       OriginatingTo: `inline:${String(effectiveChatId)}`,
     })

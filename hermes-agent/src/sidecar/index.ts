@@ -304,6 +304,12 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     case "/create-chat":
       await endpointCreateChat(res, body)
       return
+    case "/create-agent":
+      await endpointCreateAgent(res, body)
+      return
+    case "/get-agent":
+      await endpointGetAgent(res, body)
+      return
     case "/answer-action":
       await endpointAnswerAction(res, body)
       return
@@ -773,6 +779,57 @@ async function endpointCreateChat(res: ServerResponse, body: unknown) {
       dialog: safeJson(typed.createChat.dialog ?? null),
     },
   })
+}
+
+async function callBotApi(
+  methodName: string,
+  method: "GET" | "POST",
+  body?: Record<string, unknown>,
+  query?: Record<string, string>,
+): Promise<Record<string, unknown>> {
+  const url = new URL(`/bot/${methodName}`, baseUrl)
+  for (const [key, value] of Object.entries(query ?? {})) url.searchParams.set(key, value)
+  const response = await fetch(url, {
+    method,
+    headers: {
+      authorization: `Bearer ${token}`,
+      ...(body ? { "content-type": "application/json" } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  })
+  const payload = asOptionalRecord(await response.json().catch(() => null))
+  if (!response.ok || payload?.ok !== true) {
+    throw new SidecarError(String(payload?.description ?? `Bot API HTTP ${response.status}`), "unknown")
+  }
+  return asOptionalRecord(payload.result) ?? {}
+}
+
+async function endpointCreateAgent(res: ServerResponse, body: unknown) {
+  const record = asRecord(body)
+  const name = readRequiredString(record, "name")
+  const result = await callBotApi("createAgent", "POST", {
+    name,
+    ...(readOptionalString(record, "handle") ? { handle: readOptionalString(record, "handle") } : {}),
+    ...(readOptionalString(record, "emoji") ? { emoji: readOptionalString(record, "emoji") } : {}),
+    ...(readOptionalString(record, "description") ? { description: readOptionalString(record, "description") } : {}),
+    ...(readOptionalString(record, "skill_key") ? { skill_key: readOptionalString(record, "skill_key") } : {}),
+    ...(readOptionalString(record, "instructions") ? { instructions: readOptionalString(record, "instructions") } : {}),
+  })
+  const agent = asOptionalRecord(result.agent)
+  if (!agent) {
+    throw new SidecarError("create-agent returned no Agent", "unknown")
+  }
+  writeJson(res, 200, { ok: true, result: { agent: safeJson(agent) } })
+}
+
+async function endpointGetAgent(res: ServerResponse, body: unknown) {
+  const record = asRecord(body)
+  const agentId = readRequiredInlineId(record, "agentId")
+  const result = await callBotApi("getAgent", "GET", undefined, { agent_id: String(agentId) })
+  if (!asOptionalRecord(result.agent)) {
+    throw new SidecarError("Agent not found", "not_found")
+  }
+  writeJson(res, 200, { ok: true, result: safeJson(result) })
 }
 
 async function getRawChatSnapshot(chatId: bigint): Promise<{

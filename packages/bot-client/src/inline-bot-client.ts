@@ -5,6 +5,7 @@ import type {
   BotMethodResultByName,
   CreateReplyThreadParams,
   CreateThreadParams,
+  CreateAgentParams,
   AnswerMessageActionParams,
   DeleteReactionParams,
   DeleteWebhookParams,
@@ -15,6 +16,7 @@ import type {
   GetChatParams,
   GetChatParticipantParams,
   GetChatParticipantCountParams,
+  GetAgentParams,
   GetFileParams,
   GetMessagesParams,
   GetUpdatesParams,
@@ -47,11 +49,13 @@ const getMethodNames = new Set<BotMethodName>([
   "getFile",
   "getUpdates",
   "getWebhookInfo",
+  "getAgent",
+  "getMyAgents",
 ])
 
 function isGetMethod(
   method: string,
-): method is "getMe" | "getChat" | "getChatHistory" | "getChatParticipant" | "getChatParticipantCount" | "getMyCommands" | "getFile" | "getUpdates" | "getWebhookInfo" {
+): method is "getMe" | "getChat" | "getChatHistory" | "getChatParticipant" | "getChatParticipantCount" | "getMyCommands" | "getFile" | "getUpdates" | "getWebhookInfo" | "getAgent" | "getMyAgents" {
   return getMethodNames.has(method as BotMethodName)
 }
 
@@ -189,6 +193,18 @@ export class InlineBotClient {
 
   getMe(options?: InlineBotClientMethodOptions) {
     return this.method("getMe", undefined, options)
+  }
+
+  createAgent(params: CreateAgentParams, options?: InlineBotClientMethodOptions) {
+    return this.method("createAgent", params, options)
+  }
+
+  getAgent(params: GetAgentParams, options?: InlineBotClientMethodOptions) {
+    return this.method("getAgent", params, options)
+  }
+
+  getMyAgents(options?: InlineBotClientMethodOptions) {
+    return this.method("getMyAgents", undefined, options)
   }
 
   getChat(params: GetChatParams, options?: InlineBotClientMethodOptions) {

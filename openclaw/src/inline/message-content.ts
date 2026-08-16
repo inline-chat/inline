@@ -102,6 +102,7 @@ export type InlineMessageEntitySummary = {
   length: number
   text?: string
   userId?: string
+  agentId?: string
   url?: string
   language?: string
   chatId?: string
@@ -348,6 +349,10 @@ function messageEntitySummaries(message: Message): InlineMessageEntitySummary[] 
 
     if (entity.entity.oneofKind === "mention") {
       summary.userId = entity.entity.mention.userId.toString()
+      const mention = entity.entity.mention as typeof entity.entity.mention & { agentId?: bigint }
+      if (mention.agentId !== undefined) {
+        summary.agentId = mention.agentId.toString()
+      }
     } else if (entity.entity.oneofKind === "textUrl") {
       const url = entity.entity.textUrl.url?.trim()
       if (url) summary.url = url
@@ -423,7 +428,9 @@ function formatEntitySummary(entity: InlineMessageEntitySummary): string {
 
   switch (entity.type) {
     case "mention":
-      return entity.userId ? `mention${quotedText} -> user:${entity.userId}` : `mention${quotedText}`
+      return entity.userId
+        ? `mention${quotedText} -> user:${entity.userId}${entity.agentId ? ` agent:${entity.agentId}` : ""}`
+        : `mention${quotedText}`
     case "text_link":
       return entity.url ? `text link${quotedText} -> ${entity.url}` : `text link${quotedText}`
     case "thread":
