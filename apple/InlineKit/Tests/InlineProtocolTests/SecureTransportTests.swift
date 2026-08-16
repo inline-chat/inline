@@ -9,10 +9,16 @@ struct SecureTransportTests {
   func sharedVectorCorpus() throws {
     let data = try InlineProtocolVectors.v1JSON()
     #expect(SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-      == "feeb24c984e56423467698c98a013daadeb3824a93ac4d03be4c7aa2e67f7466")
+      == "73fbe70763140f91cd1667c9d714848acfe0234a770ee2dfb891939ac2148893")
     let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
     #expect(object["formatVersion"] as? Int == 1)
     #expect(object["protocol"] as? String == "Inline Protocol v1")
+    let transcripts = try #require(object["handshakeTranscripts"] as? [String: Any])
+    let permanent = try #require(transcripts["permanent"] as? [String: Any])
+    let temporary = try #require(transcripts["temporary"] as? [String: Any])
+    #expect((permanent["requestHex"] as? [String])?.count == 3)
+    #expect((permanent["authKeyHex"] as? String)?.count == 512)
+    #expect(temporary["expiresAt"] as? Int == 1_700_086_400)
   }
 
   @Test("matches the frozen TypeScript and Rust record vector")
