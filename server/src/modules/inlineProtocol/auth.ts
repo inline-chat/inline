@@ -32,6 +32,7 @@ import {
 } from "./authCode"
 import type { InlineProtocolSecretKeyRing } from "./keyCipher"
 import { InlineProtocolChallengeCipher } from "./challengeCipher"
+import { DEMO_CODE, DEMO_CODE2, DEMO_EMAIL, DEMO_EMAIL2 } from "@in/server/env"
 
 const CHALLENGE_TTL_MS = 10 * 60 * 1_000
 const RATE_WINDOW_MS = 10 * 60 * 1_000
@@ -46,6 +47,12 @@ const MAX_VERSION_BYTES = 64
 const MAX_DEVICE_NAME_BYTES = 256
 const MAX_INVITE_CODE_BYTES = 256
 const MAX_TIME_ZONE_BYTES = 64
+
+const configuredDemoCode = (email: string): string | undefined => {
+  if (email === DEMO_EMAIL && DEMO_CODE && /^\d{6}$/.test(DEMO_CODE)) return DEMO_CODE
+  if (email === DEMO_EMAIL2 && DEMO_CODE2 && /^\d{6}$/.test(DEMO_CODE2)) return DEMO_CODE2
+  return undefined
+}
 
 const boundedString = (value: string | undefined, maximumBytes: number): string | undefined => {
   if (value === undefined) return undefined
@@ -116,7 +123,9 @@ export class InlineProtocolAuthOperations {
     const identifier = normalizeIdentifier(request)
     const client = clientRecord(request)
     const challengeId = randomBytes(32)
-    const code = randomInlineProtocolAuthCode()
+    const code = identifier.delivery === "email"
+      ? configuredDemoCode(identifier.value) ?? randomInlineProtocolAuthCode()
+      : randomInlineProtocolAuthCode()
     const pepper = this.activePepper()
     const identifierHash = inlineProtocolKeyedHash(pepper, "identifier", identifier.value)
     const identifierHashes = [...this.pepperRing.keys.values()]

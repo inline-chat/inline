@@ -36,6 +36,7 @@ import {
 import { connectionManager, ConnVersion } from "@in/server/ws/connections"
 import type { RealtimeRequestMetadata } from "@in/server/realtime/types"
 import type { TrustedClientIpHeader } from "./middleware"
+import { Log } from "@in/server/utils/log"
 
 const REALTIME_V3_PATH = "/realtime/v3"
 const PROTOCOL_CLOSE_CODE = 1002
@@ -153,7 +154,13 @@ export const makeInlineProtocolRealtimeTransport = (
   const enqueue = (socket: ServerWebSocket<InlineProtocolWebSocketData>, operation: () => Promise<void>): void => {
     const state = socket.data.state
     if (!state || socket.data.closed) return
-    state.queue = state.queue.then(operation).catch(() => closeProtocol(socket))
+    state.queue = state.queue.then(operation).catch((error) => {
+      Log.shared.debug("Inline Protocol V3 connection failed", {
+        connectionId: socket.data.id,
+        error,
+      })
+      closeProtocol(socket)
+    })
   }
 
   const sendRecord = (socket: ServerWebSocket<InlineProtocolWebSocketData>, record: Uint8Array): void => {

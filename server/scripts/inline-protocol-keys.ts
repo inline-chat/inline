@@ -17,6 +17,7 @@ const USAGE = `Inline Protocol key lifecycle
 Usage:
   inline-protocol-keys init OUT
   inline-protocol-keys status IN
+  inline-protocol-keys export-public-ring IN OUT
   inline-protocol-keys rotate-{rsa,kek,pepper} IN OUT
   inline-protocol-keys retire-{rsa,kek,pepper} IN OUT ID --confirmed-safe
   inline-protocol-keys copy-environment IN
@@ -135,6 +136,16 @@ const printPublicRing = (bundle: KeyBundle): void => {
   console.log(JSON.stringify({ rsaPublicKeyRing: signer.publicKeyRing }, null, 2))
 }
 
+const writePublicRing = async (path: string, bundle: KeyBundle): Promise<void> => {
+  const signer = makeInlineProtocolRsaSigner(JSON.stringify(bundle.rsaPrivateKeys))
+  const target = safeSecretPath(path)
+  await writeFile(target, `${JSON.stringify({ rsaPublicKeyRing: signer.publicKeyRing }, null, 2)}\n`, {
+    mode: 0o644,
+    flag: "wx",
+  })
+  console.log(`Wrote the public Inline Protocol RSA ring to ${target}`)
+}
+
 const printBundleStatus = (bundle: KeyBundle): void => {
   console.log(JSON.stringify({
     rsaKeys: bundle.rsaPrivateKeys.map((key) => ({
@@ -194,6 +205,10 @@ const main = async (): Promise<void> => {
   }
   if (command === "status" && args.length === 1) {
     printBundleStatus(await readBundle(args[0]!))
+    return
+  }
+  if (command === "export-public-ring" && args.length === 2) {
+    await writePublicRing(args[1]!, await readBundle(args[0]!))
     return
   }
   if (command === "run" && args.length >= 3 && args[1] === "--") {
