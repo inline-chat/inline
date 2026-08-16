@@ -470,7 +470,8 @@ describe("Bot HTTP API", () => {
       },
     })
     expect(replyThreadJson.result.chat).not.toHaveProperty("parent_message_id")
-    expect(replyThreadJson.result.chat.parent_message).not.toHaveProperty("chat")
+    expect(replyThreadJson.result.chat.parent_message).toHaveProperty("chat")
+    expect(replyThreadJson.result.chat.parent_message.chat).not.toHaveProperty("parent_message")
     expect(replyThreadJson.result.chat.parent_message).not.toHaveProperty("reply_to_message")
 
     const threadRes = await app.handle(

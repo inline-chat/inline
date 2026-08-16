@@ -458,7 +458,7 @@ const loadBotMessageSummary = async (
   messageId: number,
   chatId: number,
   context: BotOperationContext,
-): Promise<BotChatLastMessage | undefined> => {
+): Promise<BotMessageLite | undefined> => {
   const parentChat = await getChatFn(
     { peerId: makeInputPeer(undefined, chatId) },
     context,
@@ -470,7 +470,12 @@ const loadBotMessageSummary = async (
     ...mentionUserIdsFromEntities(message.entities),
     Number(message.fromId),
   ])
-  return toBotChatLastMessageFromDb(message, usersById)
+  return toBotMessageLiteFromDb(
+    message,
+    makeInputPeer(undefined, chatId),
+    toBotChat(parentChat.chat),
+    usersById,
+  )
 }
 
 const parseBotBoolean = (

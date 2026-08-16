@@ -98,14 +98,13 @@ export const TBotChatLastMessage = t.Object({
   entities: t.Optional(TBotMessageEntitiesOutput),
 })
 
-export const TBotChat = t.Object({
+const TBotChatBase = t.Object({
   chat_id: t.Number(),
   type: t.Optional(t.Union([t.Literal("user"), t.Literal("thread")])),
   title: t.Optional(t.String()),
   space_id: t.Optional(t.Number()),
   is_public: t.Optional(t.Boolean()),
   parent_chat_id: t.Optional(t.Number()),
-  parent_message: t.Optional(TBotChatLastMessage),
   participants: t.Optional(t.Object({ count: t.Number() })),
   last_message_id: t.Optional(t.Number()),
   last_message: t.Optional(TBotChatLastMessage),
@@ -115,7 +114,7 @@ export const TBotChat = t.Object({
 export const TBotMessageLite = t.Object({
   message_id: t.Number(),
   chat_id: t.Number(),
-  chat: TBotChat,
+  chat: TBotChatBase,
   peer: TBotPeer,
   from_id: t.Number(),
   from: TBotUser,
@@ -127,6 +126,11 @@ export const TBotMessageLite = t.Object({
   attachments: t.Optional(t.Array(TBotAttachment)),
   actions: t.Optional(t.Array(t.Array(TBotMessageAction))),
   reactions: t.Optional(t.Array(TBotMessageReaction)),
+})
+
+export const TBotChat = t.Object({
+  ...TBotChatBase.properties,
+  parent_message: t.Optional(TBotMessageLite),
 })
 
 export const TBotMessage = t.Object({

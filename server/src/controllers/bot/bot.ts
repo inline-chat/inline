@@ -303,7 +303,7 @@ const loadBotMessageSummary = async (
   messageId: number,
   chatId: number,
   context: Parameters<typeof getChatFn>[1],
-): Promise<BotChatLastMessage | undefined> => {
+): Promise<BotMessageLite | undefined> => {
   const parentChat = await getChatFn(
     { peerId: makeInputPeer(undefined, chatId) },
     context,
@@ -315,7 +315,12 @@ const loadBotMessageSummary = async (
     ...mentionUserIdsFromEntities(message.entities),
     Number(message.fromId),
   ])
-  return toBotChatLastMessageFromDb(message, usersById)
+  return toBotMessageLiteFromDb(
+    message,
+    makeInputPeer(undefined, chatId),
+    toBotChat(parentChat.chat),
+    usersById,
+  )
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {

@@ -1459,6 +1459,21 @@ describe("Effect Bot routes", () => {
       spec.components.schemas["BotChatLastMessage"],
     ).not.toHaveProperty("properties.reply_to_message")
     expect(
+      spec.components.schemas["BotChat"],
+    ).toHaveProperty(
+      "properties.parent_message.allOf.0.$ref",
+      "#/components/schemas/BotMessageLite",
+    )
+    expect(
+      spec.components.schemas["BotMessageLite"],
+    ).toHaveProperty(
+      "properties.chat.allOf.0.$ref",
+      "#/components/schemas/BotChatBase",
+    )
+    expect(
+      spec.components.schemas["BotChatBase"],
+    ).not.toHaveProperty("properties.parent_message")
+    expect(
       spec.components.schemas["BotMessage"],
     ).toMatchObject({
       properties: {

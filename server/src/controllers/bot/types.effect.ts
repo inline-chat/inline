@@ -278,7 +278,7 @@ export const BotChatLastMessage = Schema.Struct({
     "Compact representation of the most recent message in a chat.",
 })
 
-export const BotChat = Schema.Struct({
+const BotChatBase = Schema.Struct({
   chat_id: ChatId.annotateKey({
     description: "Unique identifier for this chat.",
   }),
@@ -298,12 +298,6 @@ export const BotChat = Schema.Struct({
   }),
   parent_chat_id: OptionalChatId.annotateKey({
     description: "Structural parent for a nested or reply thread.",
-  }),
-  parent_message: Schema.optionalKey(
-    BotChatLastMessage,
-  ).annotateKey({
-    description:
-      "Shallow message anchoring this reply thread. It never contains chat or reply_to_message.",
   }),
   participants: Schema.optionalKey(
     Schema.Struct({
@@ -326,17 +320,9 @@ export const BotChat = Schema.Struct({
     description: "Emoji used as the chat's icon.",
   }),
 }).annotate({
-  identifier: "BotChat",
+  identifier: "BotChatBase",
   description:
-    "Information about an Inline user chat or thread.",
-})
-
-export const BotEventChat = Schema.Struct({
-  ...BotChat.fields,
-  type: BotChatType,
-}).annotate({
-  identifier: "BotEventChat",
-  description: "Chat snapshot embedded in a bot update.",
+    "Non-recursive chat fields used inside an embedded message.",
 })
 
 export const BotFile = Schema.Struct({
@@ -442,7 +428,7 @@ export const BotMessageLite = Schema.Struct({
   chat_id: ChatId.annotateKey({
     description: "Identifier of the chat containing the message.",
   }),
-  chat: BotChat.annotateKey({
+  chat: BotChatBase.annotateKey({
     description: "Information about the containing chat.",
   }),
   peer: BotPeer.annotateKey({
@@ -495,6 +481,28 @@ export const BotMessageLite = Schema.Struct({
   identifier: "BotMessageLite",
   description:
     "A message without its replied-to message attached.",
+})
+
+export const BotChat = Schema.Struct({
+  ...BotChatBase.fields,
+  parent_message: Schema.optionalKey(
+    BotMessageLite,
+  ).annotateKey({
+    description:
+      "Message anchoring this reply thread. Its chat omits parent_message and it has no reply_to_message.",
+  }),
+}).annotate({
+  identifier: "BotChat",
+  description:
+    "Information about an Inline user chat or thread.",
+})
+
+export const BotEventChat = Schema.Struct({
+  ...BotChat.fields,
+  type: BotChatType,
+}).annotate({
+  identifier: "BotEventChat",
+  description: "Chat snapshot embedded in a bot update.",
 })
 
 export const BotMessage = Schema.Struct({

@@ -9,6 +9,9 @@ const chat = {
   parent_chat_id: 9,
   parent_message: {
     message_id: 40,
+    chat_id: 9,
+    chat: { chat_id: 9, type: "thread" },
+    peer: { thread_id: 9 },
     from_id: 7,
     from: { id: 7, is_bot: false, first_name: "Maya" },
     date: 1_785_999_900,
@@ -125,12 +128,13 @@ describe("BotChatParticipant", () => {
     expect(participant.member?.role).toBe("admin")
   })
 
-  it("serializes chat message summaries without recursive chat objects", () => {
+  it("serializes a normal parent message at one bounded level", () => {
     const decoded = Schema.decodeUnknownSync(BotChat)(chat)
     const serialized = JSON.stringify(decoded)
 
     expect(serialized).toContain('"parent_message"')
-    expect(decoded.parent_message).not.toHaveProperty("chat")
+    expect(decoded.parent_message).toHaveProperty("chat")
+    expect(decoded.parent_message?.chat).not.toHaveProperty("parent_message")
     expect(decoded.parent_message).not.toHaveProperty("reply_to_message")
     expect(serialized.length).toBeLessThan(1_000)
   })
