@@ -3,18 +3,36 @@ import type {
   BotMethodName,
   BotMethodParamsByName,
   BotMethodResultByName,
+  CreateReplyThreadParams,
+  CreateThreadParams,
+  AnswerMessageActionParams,
+  DeleteReactionParams,
+  DeleteWebhookParams,
   DeleteMessageParams,
+  ForwardMessageParams,
   EditMessageTextParams,
   GetChatHistoryParams,
   GetChatParams,
+  GetChatParticipantParams,
+  GetChatParticipantCountParams,
+  GetFileParams,
+  GetMessagesParams,
+  GetUpdatesParams,
   InlineBotApiClientOptions,
   InlineBotApiMethodOptions,
   InlineBotApiRequestOptions,
   InlineBotApiResponse,
   SetMyCommandsParams,
-  SetMyCapabilitiesParams,
   SendMessageParams,
   SendReactionParams,
+  SendChatActionParams,
+  PinMessageParams,
+  UnpinMessageParams,
+  SetThreadTitleParams,
+  SearchMessagesParams,
+  SetWebhookParams,
+  UploadFileParams,
+  UploadFileResult,
 } from "./types.js"
 
 const defaultBaseUrl = "https://api.inline.chat"
@@ -23,13 +41,17 @@ const getMethodNames = new Set<BotMethodName>([
   "getMe",
   "getChat",
   "getChatHistory",
+  "getChatParticipant",
+  "getChatParticipantCount",
   "getMyCommands",
-  "getMyCapabilities",
+  "getFile",
+  "getUpdates",
+  "getWebhookInfo",
 ])
 
 function isGetMethod(
   method: string,
-): method is "getMe" | "getChat" | "getChatHistory" | "getMyCommands" | "getMyCapabilities" {
+): method is "getMe" | "getChat" | "getChatHistory" | "getChatParticipant" | "getChatParticipantCount" | "getMyCommands" | "getFile" | "getUpdates" | "getWebhookInfo" {
   return getMethodNames.has(method as BotMethodName)
 }
 
@@ -177,6 +199,22 @@ export class InlineBotApiClient {
     return this.method("getChatHistory", params, options)
   }
 
+  getMessages(params: GetMessagesParams, options?: InlineBotApiMethodOptions) {
+    return this.method("getMessages", params, options)
+  }
+
+  searchMessages(params: SearchMessagesParams, options?: InlineBotApiMethodOptions) {
+    return this.method("searchMessages", params, options)
+  }
+
+  createThread(params: CreateThreadParams, options?: InlineBotApiMethodOptions) {
+    return this.method("createThread", params, options)
+  }
+
+  createReplyThread(params: CreateReplyThreadParams, options?: InlineBotApiMethodOptions) {
+    return this.method("createReplyThread", params, options)
+  }
+
   getMyCommands(options?: InlineBotApiMethodOptions) {
     return this.method("getMyCommands", undefined, options)
   }
@@ -187,18 +225,6 @@ export class InlineBotApiClient {
 
   deleteMyCommands(options?: InlineBotApiMethodOptions) {
     return this.method("deleteMyCommands", undefined, options)
-  }
-
-  getMyCapabilities(options?: InlineBotApiMethodOptions) {
-    return this.method("getMyCapabilities", undefined, options)
-  }
-
-  setMyCapabilities(params: SetMyCapabilitiesParams, options?: InlineBotApiMethodOptions) {
-    return this.method("setMyCapabilities", params, options)
-  }
-
-  deleteMyCapabilities(options?: InlineBotApiMethodOptions) {
-    return this.method("deleteMyCapabilities", undefined, options)
   }
 
   sendMessage(params: SendMessageParams, options?: InlineBotApiMethodOptions) {
@@ -213,7 +239,85 @@ export class InlineBotApiClient {
     return this.method("deleteMessage", params, options)
   }
 
+  forwardMessage(params: ForwardMessageParams, options?: InlineBotApiMethodOptions) {
+    return this.method("forwardMessage", params, options)
+  }
+
+  pinMessage(params: PinMessageParams, options?: InlineBotApiMethodOptions) {
+    return this.method("pinMessage", params, options)
+  }
+
+  unpinMessage(params: UnpinMessageParams, options?: InlineBotApiMethodOptions) {
+    return this.method("unpinMessage", params, options)
+  }
+
+  getChatParticipant(params: GetChatParticipantParams, options?: InlineBotApiMethodOptions) {
+    return this.method("getChatParticipant", params, options)
+  }
+
+  getChatParticipantCount(params: GetChatParticipantCountParams, options?: InlineBotApiMethodOptions) {
+    return this.method("getChatParticipantCount", params, options)
+  }
+
+  setThreadTitle(params: SetThreadTitleParams, options?: InlineBotApiMethodOptions) {
+    return this.method("setThreadTitle", params, options)
+  }
+
   sendReaction(params: SendReactionParams, options?: InlineBotApiMethodOptions) {
     return this.method("sendReaction", params, options)
+  }
+
+  deleteReaction(params: DeleteReactionParams, options?: InlineBotApiMethodOptions) {
+    return this.method("deleteReaction", params, options)
+  }
+
+  answerMessageAction(params: AnswerMessageActionParams, options?: InlineBotApiMethodOptions) {
+    return this.method("answerMessageAction", params, options)
+  }
+
+  sendChatAction(params: SendChatActionParams, options?: InlineBotApiMethodOptions) {
+    return this.method("sendChatAction", params, options)
+  }
+
+  getFile(params: GetFileParams, options?: InlineBotApiMethodOptions) {
+    return this.method("getFile", params, options)
+  }
+
+  async uploadFile(params: UploadFileParams, options?: InlineBotApiMethodOptions): Promise<BotApiEnvelope<UploadFileResult>> {
+    const form = new FormData()
+    form.set("type", params.type)
+    form.set("file", params.file, params.file_name ?? `upload.${params.type === "photo" ? "jpg" : "bin"}`)
+    if (params.thumbnail) form.set("thumbnail", params.thumbnail, params.thumbnail_file_name ?? "thumbnail.jpg")
+    if (params.width !== undefined) form.set("width", String(params.width))
+    if (params.height !== undefined) form.set("height", String(params.height))
+    if (params.duration !== undefined) form.set("duration", String(params.duration))
+    if (params.is_animated !== undefined) form.set("is_animated", String(params.is_animated))
+    if (params.has_audio !== undefined) form.set("has_audio", String(params.has_audio))
+    if (params.waveform_base64 !== undefined) form.set("waveform_base64", params.waveform_base64)
+    const headers = new Headers(options?.headers)
+    this.applyAuth(headers)
+    const response = await this.fetchImpl(new URL(this.methodPath("uploadFile"), this.baseUrl + "/"), {
+      method: "POST",
+      headers,
+      body: form,
+      signal: options?.signal,
+    })
+    return await response.json() as BotApiEnvelope<UploadFileResult>
+  }
+
+  getUpdates(params: GetUpdatesParams = {}, options?: InlineBotApiMethodOptions) {
+    return this.method("getUpdates", params, options)
+  }
+
+  setWebhook(params: SetWebhookParams, options?: InlineBotApiMethodOptions) {
+    return this.method("setWebhook", params, options)
+  }
+
+  deleteWebhook(params: DeleteWebhookParams = {}, options?: InlineBotApiMethodOptions) {
+    return this.method("deleteWebhook", params, options)
+  }
+
+  getWebhookInfo(options?: InlineBotApiMethodOptions) {
+    return this.method("getWebhookInfo", undefined, options)
   }
 }

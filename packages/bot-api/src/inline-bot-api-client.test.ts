@@ -125,6 +125,52 @@ describe("InlineBotApiClient", () => {
     expect(seenUrl).toContain("offset_message_id=5")
   })
 
+  it("uses POST JSON for contextual message and thread methods", async () => {
+    const calls: Array<{ url: string; method: string; body: unknown }> = []
+    const client = new InlineBotApiClient({
+      token: "t",
+      fetch: (async (input, init) => {
+        calls.push({
+          url: String(input),
+          method: init?.method ?? "",
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        })
+        return new Response(JSON.stringify({ ok: true, result: { messages: [], chat: {} } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }) as any,
+    })
+
+    await client.getMessages({ chat_id: 42, message_ids: [7, 8] })
+    await client.searchMessages({ chat_id: 42, query: "incident", limit: 20 })
+    await client.createThread({ title: "Triage", participant_ids: [9] })
+    await client.createReplyThread({ chat_id: 42, message_id: 7, title: "Follow-up" })
+
+    expect(calls).toEqual([
+      {
+        url: "https://api.inline.chat/bot/getMessages",
+        method: "POST",
+        body: { chat_id: 42, message_ids: [7, 8] },
+      },
+      {
+        url: "https://api.inline.chat/bot/searchMessages",
+        method: "POST",
+        body: { chat_id: 42, query: "incident", limit: 20 },
+      },
+      {
+        url: "https://api.inline.chat/bot/createThread",
+        method: "POST",
+        body: { title: "Triage", participant_ids: [9] },
+      },
+      {
+        url: "https://api.inline.chat/bot/createReplyThread",
+        method: "POST",
+        body: { chat_id: 42, message_id: 7, title: "Follow-up" },
+      },
+    ])
+  })
+
   it("uses GET for getChat", async () => {
     let seenUrl = ""
     let seenMethod = ""
@@ -146,6 +192,40 @@ describe("InlineBotApiClient", () => {
     expect(seenMethod).toBe("GET")
     expect(seenUrl).toContain("https://api.inline.chat/bot/getChat?")
     expect(seenUrl).toContain("user_id=7")
+  })
+
+  it("exposes forwarding, pinning, membership, and thread title methods", async () => {
+    const calls: Array<{ url: string; method: string; body?: unknown }> = []
+    const client = new InlineBotApiClient({
+      token: "t",
+      fetch: (async (input, init) => {
+        calls.push({
+          url: String(input),
+          method: init?.method ?? "",
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        })
+        return new Response(JSON.stringify({ ok: true, result: {} }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }) as any,
+    })
+
+    await client.forwardMessage({ chat_id: 9, from_chat_id: 8, message_id: 7 })
+    await client.pinMessage({ chat_id: 9, message_id: 7 })
+    await client.unpinMessage({ chat_id: 9, message_id: 7 })
+    await client.getChatParticipant({ chat_id: 9, user_id: 6 })
+    await client.getChatParticipantCount({ chat_id: 9 })
+    await client.setThreadTitle({ chat_id: 9, title: "Triage" })
+
+    expect(calls.map(({ url, method }) => ({ url, method }))).toEqual([
+      { url: "https://api.inline.chat/bot/forwardMessage", method: "POST" },
+      { url: "https://api.inline.chat/bot/pinMessage", method: "POST" },
+      { url: "https://api.inline.chat/bot/unpinMessage", method: "POST" },
+      { url: "https://api.inline.chat/bot/getChatParticipant?chat_id=9&user_id=6", method: "GET" },
+      { url: "https://api.inline.chat/bot/getChatParticipantCount?chat_id=9", method: "GET" },
+      { url: "https://api.inline.chat/bot/setThreadTitle", method: "POST" },
+    ])
   })
 
   it("requestRaw supports explicit query and body", async () => {
@@ -323,7 +403,7 @@ describe("InlineBotApiClient", () => {
     expect(seenUrl).toBe("https://api.inline.chat/bot/deleteMyCommands")
   })
 
-  it("uses the expected transports for bot capabilities", async () => {
+  it("supports polling, webhook, action, and file transports", async () => {
     const calls: Array<{ url: string; method: string; body: unknown }> = []
     const client = new InlineBotApiClient({
       token: "t",
@@ -333,34 +413,76 @@ describe("InlineBotApiClient", () => {
           method: init?.method ?? "",
           body: init?.body ? JSON.parse(String(init.body)) : undefined,
         })
-        return new Response(JSON.stringify({ ok: true, result: { capabilities: [] } }), {
+        return new Response(JSON.stringify({ ok: true, result: [] }), {
           status: 200,
           headers: { "content-type": "application/json" },
         })
       }) as any,
     })
 
-    await client.getMyCapabilities()
-    await client.setMyCapabilities({ capabilities: [{ kind: "chat_settings", version: 1 }] })
-    await client.deleteMyCapabilities()
+    await client.getUpdates({ timeout: 20, allowed_updates: ["message"] })
+    await client.setWebhook({ url: "https://agent.example/inline", secret_token: "optional" })
+    await client.deleteWebhook({ drop_pending_updates: false })
+    await client.sendChatAction({ chat_id: 42, action: "typing" })
+    await client.answerMessageAction({ interaction_id: 9, text: "Working" })
+    await client.deleteReaction({ chat_id: 42, message_id: 7, emoji: "🔥" })
+    await client.getFile({ file_id: "INV_example" })
+    await client.getWebhookInfo()
 
-    expect(calls).toEqual([
-      {
-        url: "https://api.inline.chat/bot/getMyCapabilities",
-        method: "GET",
-        body: undefined,
-      },
-      {
-        url: "https://api.inline.chat/bot/setMyCapabilities",
-        method: "POST",
-        body: { capabilities: [{ kind: "chat_settings", version: 1 }] },
-      },
-      {
-        url: "https://api.inline.chat/bot/deleteMyCapabilities",
-        method: "POST",
-        body: undefined,
-      },
+    expect(calls.map(({ url, method }) => ({ url, method }))).toEqual([
+      { url: "https://api.inline.chat/bot/getUpdates?timeout=20&allowed_updates=%5B%22message%22%5D", method: "GET" },
+      { url: "https://api.inline.chat/bot/setWebhook", method: "POST" },
+      { url: "https://api.inline.chat/bot/deleteWebhook", method: "POST" },
+      { url: "https://api.inline.chat/bot/sendChatAction", method: "POST" },
+      { url: "https://api.inline.chat/bot/answerMessageAction", method: "POST" },
+      { url: "https://api.inline.chat/bot/deleteReaction", method: "POST" },
+      { url: "https://api.inline.chat/bot/getFile?file_id=INV_example", method: "GET" },
+      { url: "https://api.inline.chat/bot/getWebhookInfo", method: "GET" },
     ])
+  })
+
+  it("uploads bot files through the Bot multipart endpoint", async () => {
+    let seenBody: FormData | undefined
+    let seenAuth: string | null = null
+    let seenUrl = ""
+    const client = new InlineBotApiClient({
+      token: "t",
+      fetch: (async (input, init) => {
+        seenUrl = String(input)
+        seenBody = init?.body as FormData
+        seenAuth = new Headers(init?.headers).get("authorization")
+        return new Response(JSON.stringify({ ok: true, result: { file: { file_id: "INP_example", file_size: 5, mime_type: "image/jpeg" } } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }) as any,
+    })
+    const result = await client.uploadFile({
+      type: "photo",
+      file: new Blob(["photo"], { type: "image/jpeg" }),
+      file_name: "photo.jpg",
+      thumbnail: new Blob(["thumb"], { type: "image/jpeg" }),
+      width: 640,
+      height: 480,
+      duration: 3,
+      is_animated: false,
+      has_audio: true,
+      waveform_base64: "AAE=",
+    })
+    expect(seenAuth).toBe("Bearer t")
+    expect(seenUrl).toBe("https://api.inline.chat/bot/uploadFile")
+    expect(seenBody?.get("type")).toBe("photo")
+    expect(seenBody?.get("is_animated")).toBe("false")
+    expect(seenBody?.get("has_audio")).toBe("true")
+    expect(seenBody?.get("waveform_base64")).toBe("AAE=")
+    expect(result).toEqual({
+      ok: true,
+      result: { file: { file_id: "INP_example", file_size: 5, mime_type: "image/jpeg" } },
+    })
+    await client.uploadFile({
+      type: "document",
+      file: new Blob(["doc"], { type: "application/octet-stream" }),
+    })
   })
 
   it("uses global fetch when no fetch implementation is provided", async () => {
