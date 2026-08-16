@@ -34,6 +34,7 @@ import {
   type InlineProtocolRuntime,
   type InlineProtocolWebSocketData,
 } from "./realtimeV3Host"
+import { InlineProtocolClock } from "@in/server/modules/inlineProtocol/clockHealth"
 
 class MemoryKeys implements ServerAuthorizationKeyRepository {
   readonly values = new Map<string, LoadedServerAuthorizationKey>()
@@ -55,7 +56,10 @@ class MemoryKeys implements ServerAuthorizationKeyRepository {
   async revoke(): Promise<boolean> { return false }
 }
 
-const fixture = (operations: unknown = {}): InlineProtocolRuntime & { clientKey: ReturnType<typeof makeRsaPublicKey> } => {
+const fixture = (
+  operations: unknown = {},
+  clock: Pick<InlineProtocolClock, "assertHealthy" | "nowMilliseconds"> = new InlineProtocolClock(),
+): InlineProtocolRuntime & { clientKey: ReturnType<typeof makeRsaPublicKey> } => {
   const pair = generateKeyPairSync("rsa", { modulusLength: 2048, publicExponent: 65537 })
   const jwk = pair.publicKey.export({ format: "jwk" })
   const clientKey = makeRsaPublicKey(
@@ -79,6 +83,7 @@ const fixture = (operations: unknown = {}): InlineProtocolRuntime & { clientKey:
       forgetAnswer: async () => {},
     } satisfies ServerReplayRepository,
     operations: operations as never,
+    clock,
     close: () => {},
   }
 }
@@ -141,6 +146,23 @@ describe("Inline Protocol WebSocket carrier", () => {
     transport.websocket.open?.(socket)
     await transport.websocket.message(socket, "not binary")
     expect(closes).toEqual([[1002, "Protocol error"]])
+    await transport.shutdown()
+  })
+
+  test("refuses new V3 upgrades after a dangerous server clock step", async () => {
+    let wall = 1_000_000
+    let monotonic = 10_000
+    const runtime = fixture({}, new InlineProtocolClock({
+      wallClock: () => wall,
+      monotonicClock: () => monotonic,
+    }))
+    const transport = makeInlineProtocolRealtimeTransport(runtime)
+
+    wall += 21_000
+    monotonic += 500
+    const request = new Request("http://inline.test/realtime/v3")
+
+    expect(transport.rejectUnsupportedUpgrade(request)?.status).toBe(503)
     await transport.shutdown()
   })
 

@@ -5,6 +5,11 @@ import {
   getServerShutdownState,
   type ShutdownSignal,
 } from "@in/server/lifecycle/shutdownState"
+import {
+  inlineProtocolClock,
+  type InlineProtocolClock,
+  type InlineProtocolClockHealth,
+} from "@in/server/modules/inlineProtocol/clockHealth"
 
 const DEFAULT_DATABASE_HEALTH_TIMEOUT_MS = 2_000
 
@@ -16,6 +21,7 @@ interface CancellableHealthCheck
 export interface HealthDeps {
   readonly checkDatabase: () =>
     CancellableHealthCheck
+  readonly clock?: Pick<InlineProtocolClock, "sample">
   readonly timeoutMs?: number
 }
 
@@ -33,6 +39,7 @@ export interface HealthResponse {
       readonly latencyMs: number
       readonly error?: "database_unavailable"
     }
+    readonly clock: InlineProtocolClockHealth
   }
 }
 
@@ -63,11 +70,12 @@ export interface LivenessHttpResponse {
 
 const defaultHealthDeps: HealthDeps = {
   checkDatabase: checkDatabaseHealth,
+  clock: inlineProtocolClock,
 }
 
 const runBoundedDatabaseCheck = async (
   deps: HealthDeps,
-): Promise<void> => {
+): Promise<unknown> => {
   const query = deps.checkDatabase()
   const timeoutMs =
     deps.timeoutMs ??
@@ -77,7 +85,7 @@ const runBoundedDatabaseCheck = async (
     | undefined
 
   try {
-    await new Promise<void>((resolve, reject) => {
+    return await new Promise<unknown>((resolve, reject) => {
       timeoutId = setTimeout(() => {
         reject(
           new Error(
@@ -91,10 +99,7 @@ const runBoundedDatabaseCheck = async (
         }
       }, timeoutMs)
 
-      void Promise.resolve(query).then(
-        () => resolve(),
-        reject,
-      )
+      void Promise.resolve(query).then(resolve, reject)
     })
   } finally {
     if (timeoutId !== undefined) {
@@ -105,19 +110,39 @@ const runBoundedDatabaseCheck = async (
 
 const checkDatabase = async (
   deps: HealthDeps,
-): Promise<HealthResponse["checks"]["database"]> => {
+): Promise<{
+  readonly health: HealthResponse["checks"]["database"]
+  readonly referenceTimeMillis?: number
+}> => {
   const startedAt = performance.now()
   try {
-    await runBoundedDatabaseCheck(deps)
+    const result = await runBoundedDatabaseCheck(deps)
+    const latencyMs = performance.now() - startedAt
+    const row = Array.isArray(result) ? result[0] : undefined
+    const rawDatabaseTime = row && typeof row === "object"
+      ? (row as Record<string, unknown>)["database_time_millis"]
+      : undefined
+    const databaseTimeMillis = typeof rawDatabaseTime === "number"
+      ? rawDatabaseTime
+      : typeof rawDatabaseTime === "string"
+        ? Number(rawDatabaseTime)
+        : undefined
     return {
-      ok: true,
-      latencyMs: Math.round(performance.now() - startedAt),
+      health: {
+        ok: true,
+        latencyMs: Math.round(latencyMs),
+      },
+      ...(databaseTimeMillis !== undefined && Number.isFinite(databaseTimeMillis)
+        ? { referenceTimeMillis: databaseTimeMillis + latencyMs / 2 }
+        : {}),
     }
   } catch {
     return {
-      ok: false,
-      latencyMs: Math.round(performance.now() - startedAt),
-      error: "database_unavailable",
+      health: {
+        ok: false,
+        latencyMs: Math.round(performance.now() - startedAt),
+        error: "database_unavailable",
+      },
     }
   }
 }
@@ -129,10 +154,13 @@ const resolveHealthDeps = (
 export const runHealthChecks = async (
   deps?: HealthDeps,
 ): Promise<HealthResponse> => {
-  const database = await checkDatabase(
-    resolveHealthDeps(deps),
+  const resolved = resolveHealthDeps(deps)
+  const databaseResult = await checkDatabase(resolved)
+  const database = databaseResult.health
+  const clock = (resolved.clock ?? inlineProtocolClock).sample(
+    databaseResult.referenceTimeMillis,
   )
-  const ok = database.ok
+  const ok = database.ok && clock.ok
 
   return {
     ok,
@@ -140,6 +168,7 @@ export const runHealthChecks = async (
     timestamp: Math.floor(Date.now() / 1000),
     checks: {
       database,
+      clock,
     },
   }
 }

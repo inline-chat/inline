@@ -12,6 +12,20 @@ type KeyBundle = {
   authCodePepperRing: SecretRing
 }
 
+const USAGE = `Inline Protocol key lifecycle
+
+Usage:
+  inline-protocol-keys init OUT
+  inline-protocol-keys status IN
+  inline-protocol-keys rotate-{rsa,kek,pepper} IN OUT
+  inline-protocol-keys retire-{rsa,kek,pepper} IN OUT ID --confirmed-safe
+  inline-protocol-keys copy-environment IN
+  inline-protocol-keys rewrap-auth-keys [LIMIT]
+  inline-protocol-keys check-retirement {kek,pepper} ID
+
+Bundle files are immutable mode-0600 files. Secret values are copied only to
+the clipboard; status output contains public fingerprints and key IDs only.`
+
 const keyId = (prefix: string, now = new Date()): string =>
   `${prefix}_${now.toISOString().slice(0, 10).replaceAll("-", "")}_${randomBytes(3).toString("hex")}`
 
@@ -133,6 +147,10 @@ const printBundleStatus = (bundle: KeyBundle): void => {
 
 const main = async (): Promise<void> => {
   const [command, ...args] = Bun.argv.slice(2)
+  if ((command === "help" || command === "--help" || command === "-h") && args.length === 0) {
+    console.log(USAGE)
+    return
+  }
   if (command === "init" && args.length === 1) {
     const bundle = createInlineProtocolKeyBundle()
     await writeBundle(args[0]!, bundle)
@@ -180,7 +198,9 @@ const main = async (): Promise<void> => {
     const configuration = loadInlineProtocolConfiguration()
     if (!configuration.enabled) throw new Error("Inline Protocol credentials are not configured")
     const repository = new PermanentAuthorizationKeyRepository(makeAuthorizationKeyCipher(configuration.authKeyKekRing))
-    const result = await repository.rewrapBatch(args[0] === undefined ? 100 : Number(args[0]))
+    const limit = args[0] === undefined ? 100 : Number(args[0])
+    if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("Rewrap limit must be a positive integer")
+    const result = await repository.rewrapBatch(limit)
     console.log(JSON.stringify(result))
     return
   }
@@ -205,7 +225,7 @@ const main = async (): Promise<void> => {
     console.log(JSON.stringify({ kind, keyId, blockingRows, safeToRetire: blockingRows === 0 }))
     return
   }
-  throw new Error("Usage: inline-protocol-keys <init OUT | status IN | rotate-{rsa,kek,pepper} IN OUT | retire-{rsa,kek,pepper} IN OUT ID --confirmed-safe | copy-environment IN | rewrap-auth-keys [LIMIT] | check-retirement {kek,pepper} ID>")
+  throw new Error(USAGE)
 }
 
 if (import.meta.main) await main()

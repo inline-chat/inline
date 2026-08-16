@@ -29,6 +29,10 @@ import { InlineProtocolUploadOperations } from "@in/server/modules/inlineProtoco
 import { InlineProtocolOperations } from "@in/server/modules/inlineProtocol/operations"
 import { makeInlineProtocolApplicationDispatcher } from "@in/server/modules/inlineProtocol/application"
 import type { InlineProtocolEnabledConfiguration } from "@in/server/modules/inlineProtocol/config"
+import {
+  inlineProtocolClock,
+  type InlineProtocolClock,
+} from "@in/server/modules/inlineProtocol/clockHealth"
 import { connectionManager, ConnVersion } from "@in/server/ws/connections"
 import type { RealtimeRequestMetadata } from "@in/server/realtime/types"
 import type { TrustedClientIpHeader } from "./middleware"
@@ -43,6 +47,7 @@ export type InlineProtocolRuntime = {
   authorizationKeys: ServerAuthorizationKeyRepository
   replay: ServerReplayRepository
   operations: InlineProtocolOperations
+  clock: Pick<InlineProtocolClock, "assertHealthy" | "nowMilliseconds">
   close: () => void
 }
 
@@ -124,6 +129,7 @@ export const makeInlineProtocolRuntime = (
       new InlineProtocolAuthOperations(configuration.authCodePepperRing),
       uploads,
     ),
+    clock: inlineProtocolClock,
     close: () => temporary.clear(),
   }
 }
@@ -135,6 +141,15 @@ export const makeInlineProtocolRealtimeTransport = (
   const sockets = new Set<ServerWebSocket<InlineProtocolWebSocketData>>()
   let accepting = true
 
+  const clockHealthy = (): boolean => {
+    try {
+      runtime.clock.assertHealthy()
+      return true
+    } catch {
+      return false
+    }
+  }
+
   const enqueue = (socket: ServerWebSocket<InlineProtocolWebSocketData>, operation: () => Promise<void>): void => {
     const state = socket.data.state
     if (!state || socket.data.closed) return
@@ -142,6 +157,7 @@ export const makeInlineProtocolRealtimeTransport = (
   }
 
   const sendRecord = (socket: ServerWebSocket<InlineProtocolWebSocketData>, record: Uint8Array): void => {
+    runtime.clock.assertHealthy()
     const carrier = socket.data.state?.carrier
     if (!carrier || socket.data.closed) throw new RangeError("Inline Protocol carrier is unavailable")
     const frame = carrier.outbound.process(encodeAbridgedPacket(record))
@@ -197,7 +213,7 @@ export const makeInlineProtocolRealtimeTransport = (
         },
       }),
       randomBytes: (length) => Uint8Array.from(randomBytes(length)),
-      nowMilliseconds: Date.now,
+      nowMilliseconds: () => runtime.clock.nowMilliseconds(),
       gunzip: (packed, maximumOutputBytes) => Uint8Array.from(gunzipSync(packed, {
         maxOutputLength: maximumOutputBytes,
       })),
@@ -220,6 +236,7 @@ export const makeInlineProtocolRealtimeTransport = (
     }
     const frame = bytesForFrame(message)
     enqueue(socket, async () => {
+      runtime.clock.assertHealthy()
       const state = socket.data.state
       if (!state) throw new RangeError("Inline Protocol session is unavailable")
       if (!state.carrier) {
@@ -248,7 +265,7 @@ export const makeInlineProtocolRealtimeTransport = (
 
   return {
     tryUpgrade: (request, server) => {
-      if (!accepting || new URL(request.url).pathname !== REALTIME_V3_PATH) return false
+      if (!accepting || new URL(request.url).pathname !== REALTIME_V3_PATH || !clockHealthy()) return false
       return server.upgrade(request, {
         data: {
           protocol: "inline-v3",
@@ -260,6 +277,7 @@ export const makeInlineProtocolRealtimeTransport = (
     },
     rejectUnsupportedUpgrade: (request) => {
       if (new URL(request.url).pathname !== REALTIME_V3_PATH) return undefined
+      if (!clockHealthy()) return new Response("Protocol clock unavailable.", { status: 503 })
       return undefined
     },
     handleHttpUpload: (request, directClientIp) => runtime.operations.uploads.handleHttp(

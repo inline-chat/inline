@@ -14,6 +14,7 @@ import {
 import {
   UnixSeconds,
   WireNonNegativeInteger,
+  WireSafeInteger,
 } from "../core/schema/scalars"
 import type {
   HealthHttpResponse,
@@ -48,6 +49,21 @@ const LifecycleHealth = Schema.Struct({
   identifier: "AuxiliaryLifecycleHealth",
 })
 
+const ClockHealth = Schema.Struct({
+  ok: Schema.Boolean,
+  status: Schema.Literals(["ok", "warning", "degraded"]),
+  offsetMillis: WireSafeInteger,
+  stepMillis: WireSafeInteger,
+  error: Schema.optionalKey(
+    Schema.Literals(["clock_offset_exceeded", "clock_step_detected"]),
+  ),
+  warning: Schema.optionalKey(
+    Schema.Literals(["clock_offset_warning", "clock_step_warning"]),
+  ),
+}).annotate({
+  identifier: "AuxiliaryClockHealth",
+})
+
 export const HealthHttpResponseSchema = Schema.Struct({
   ok: Schema.Boolean,
   status: Schema.Literals(["ok", "degraded"]),
@@ -55,6 +71,7 @@ export const HealthHttpResponseSchema = Schema.Struct({
   draining: Schema.Boolean,
   checks: Schema.Struct({
     database: DatabaseHealth,
+    clock: ClockHealth,
     lifecycle: LifecycleHealth,
   }),
 }).annotate({

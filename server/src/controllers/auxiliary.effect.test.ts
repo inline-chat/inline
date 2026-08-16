@@ -118,6 +118,12 @@ const healthy = (): HealthHttpResponse => ({
       ok: true,
       latencyMs: 2,
     },
+    clock: {
+      ok: true,
+      status: "ok",
+      offsetMillis: 0,
+      stepMillis: 0,
+    },
     lifecycle: {
       ok: true,
     },
@@ -596,6 +602,12 @@ describe("AuxiliaryRouteGroup", () => {
           ok: false,
           latencyMs: 5,
           error: "database_unavailable",
+        },
+        clock: {
+          ok: true,
+          status: "ok",
+          offsetMillis: 0,
+          stepMillis: 0,
         },
         lifecycle: {
           ok: false,

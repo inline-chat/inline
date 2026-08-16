@@ -67,7 +67,9 @@ export const initDb = (databaseUrl: string) => {
 }
 
 export const checkDatabaseHealth = () =>
-  healthQueryClient.unsafe("SELECT 1").execute()
+  healthQueryClient.unsafe(
+    "SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::double precision AS database_time_millis",
+  ).execute()
 
 export const closeDb = async () => {
   await Promise.all([
