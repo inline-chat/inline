@@ -9,6 +9,7 @@ export const portableCoreV1Vector = {
   bodyHex: "a64a7deb03000000",
   paddingHex: "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7",
   msgKeyHex: "0b016bab73824ee1e75f00f0fa824908",
+  quickAckId: 140616213,
   aesKeyHex: "f6f8881739a9306c443a8162093fea43593df09ff28e144c44b032fde4ce6427",
   aesIvHex: "a32285aa1fc31b5b3a6c5e75843de0d48393f2350d23d7ccbbc3cb7b34ce7e6c",
   recordHex: "32d1586ea457dfc80b016bab73824ee1e75f00f0fa824908302fa5dab375c8029b169848525548f61add2955845b9810fe817fcc7581efd11aaac110560a2cc78ae6a20cc6216a0b86fa0d061a57f84bacbf84af84ec31b4",

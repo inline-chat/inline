@@ -22,6 +22,18 @@ struct SecureTransportTests {
       padding: padding
     )
     #expect(record.hex == "32d1586ea457dfc80b016bab73824ee1e75f00f0fa824908302fa5dab375c8029b169848525548f61add2955845b9810fe817fcc7581efd11aaac110560a2cc78ae6a20cc6216a0b86fa0d061a57f84bacbf84af84ec31b4")
+    let plaintext = withUnsafeBytes(of: fields.serverSalt.littleEndian, Array.init)
+      + withUnsafeBytes(of: fields.sessionID.littleEndian, Array.init)
+      + withUnsafeBytes(of: fields.messageID.littleEndian, Array.init)
+      + withUnsafeBytes(of: fields.sequenceNumber.littleEndian, Array.init)
+      + withUnsafeBytes(of: Int32(fields.body.count).littleEndian, Array.init)
+      + fields.body
+      + padding
+    #expect(try InlineSecureTransport.computeV2QuickAckID(
+      authKey: authKey,
+      plaintext: plaintext,
+      direction: .clientToServer
+    ) == 140_616_213)
     #expect(try InlineSecureTransport.decryptRecord(
       record,
       authKey: authKey,
@@ -41,6 +53,24 @@ struct SecureTransportTests {
         validServerSalts: [fields.serverSalt],
         nowSeconds: 1_700_000_000
       )
+    }
+  }
+
+  @Test("matches Telegram abridged quick-ACK framing")
+  func quickAckFraming() throws {
+    let payload: [UInt8] = [1, 2, 3, 4]
+    let packet = try InlineSecureTransport.encodeAbridgedPacket(payload, requestQuickAck: true)
+    #expect(packet == [0x81, 1, 2, 3, 4])
+    #expect(try InlineSecureTransport.decodeAbridgedFrame(packet) == .packet(
+      payload: payload,
+      quickAckRequested: true
+    ))
+    #expect(try InlineSecureTransport.encodeAbridgedQuickAck(0x1234_5678) == [0x92, 0x34, 0x56, 0x78])
+    #expect(try InlineSecureTransport.decodeAbridgedFrame([0x92, 0x34, 0x56, 0x78]) == .quickAck(
+      id: 0x1234_5678
+    ))
+    #expect(throws: (any Error).self) {
+      try InlineSecureTransport.decodeAbridgedFrame([0x80, 0, 0, 0, 0])
     }
   }
 

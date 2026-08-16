@@ -55,6 +55,11 @@ public enum InlineApplicationObject: Equatable, Sendable {
   case update(payload: [UInt8])
 }
 
+public enum InlineAbridgedFrame: Equatable, Sendable {
+  case packet(payload: [UInt8], quickAckRequested: Bool)
+  case quickAck(id: UInt32)
+}
+
 public enum InlineSecureTransport {
   public static let maximumPacketBytes = 16 * 1024 * 1024
   public static let resultConstructor: UInt32 = 0xac3ddc54
@@ -216,6 +221,20 @@ public enum InlineSecureTransport {
     return sha256(Array(authKey[(88 + x)..<(120 + x)]) + plaintext)[8..<24].map(\.self)
   }
 
+  public static func computeV2QuickAckID(
+    authKey: [UInt8],
+    plaintext: [UInt8],
+    direction: InlineProtocolDirection
+  ) throws -> UInt32 {
+    guard authKey.count == 256 else { throw InlineProtocolError.invalidInput }
+    let x = direction.kdfOffset
+    let digest = sha256(Array(authKey[(88 + x)..<(120 + x)]) + plaintext)
+    return (UInt32(digest[0])
+      | UInt32(digest[1]) << 8
+      | UInt32(digest[2]) << 16
+      | UInt32(digest[3]) << 24) & 0x7fff_ffff
+  }
+
   public static func deriveV2AES(
     authKey: [UInt8],
     messageKey: [UInt8],
@@ -330,15 +349,61 @@ public enum InlineSecureTransport {
     }
   }
 
-  public static func encodeAbridgedPacket(_ payload: [UInt8]) throws -> [UInt8] {
+  public static func encodeAbridgedPacket(
+    _ payload: [UInt8],
+    requestQuickAck: Bool = false
+  ) throws -> [UInt8] {
     guard !payload.isEmpty,
           payload.count <= maximumPacketBytes,
           payload.count.isMultiple(of: 4)
     else { throw InlineProtocolError.invalidInput }
     let words = payload.count / 4
-    if words < 127 { return [UInt8(words)] + payload }
+    let quickAckBit: UInt8 = requestQuickAck ? 0x80 : 0
+    if words < 127 { return [UInt8(words) | quickAckBit] + payload }
     guard words <= 0x00ff_ffff else { throw InlineProtocolError.invalidInput }
-    return [0x7f, UInt8(words & 0xff), UInt8((words >> 8) & 0xff), UInt8((words >> 16) & 0xff)] + payload
+    return [0x7f | quickAckBit, UInt8(words & 0xff), UInt8((words >> 8) & 0xff), UInt8((words >> 16) & 0xff)] + payload
+  }
+
+  public static func encodeAbridgedQuickAck(_ id: UInt32) throws -> [UInt8] {
+    guard id <= 0x7fff_ffff else { throw InlineProtocolError.invalidInput }
+    let value = id | 0x8000_0000
+    return [
+      UInt8((value >> 24) & 0xff),
+      UInt8((value >> 16) & 0xff),
+      UInt8((value >> 8) & 0xff),
+      UInt8(value & 0xff),
+    ]
+  }
+
+  public static func decodeAbridgedFrame(_ frame: [UInt8]) throws -> InlineAbridgedFrame {
+    if frame.count == 4, frame[0] & 0x80 != 0 {
+      let value = UInt32(frame[0]) << 24
+        | UInt32(frame[1]) << 16
+        | UInt32(frame[2]) << 8
+        | UInt32(frame[3])
+      return .quickAck(id: value & 0x7fff_ffff)
+    }
+    guard frame.count >= 2 else { throw InlineProtocolError.invalidInput }
+    let marker = frame[0]
+    let quickAckRequested = marker & 0x80 != 0
+    let lengthMarker = marker & 0x7f
+    let headerLength: Int
+    let words: Int
+    if lengthMarker == 0x7f {
+      guard frame.count >= 4 else { throw InlineProtocolError.invalidInput }
+      headerLength = 4
+      words = Int(frame[1]) | Int(frame[2]) << 8 | Int(frame[3]) << 16
+    } else {
+      headerLength = 1
+      words = Int(lengthMarker)
+    }
+    let (length, overflow) = words.multipliedReportingOverflow(by: 4)
+    guard !overflow,
+          words > 0,
+          length <= maximumPacketBytes,
+          frame.count == headerLength + length
+    else { throw InlineProtocolError.invalidInput }
+    return .packet(payload: Array(frame[headerLength...]), quickAckRequested: quickAckRequested)
   }
 
   private static func aesIGE(

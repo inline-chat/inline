@@ -1,5 +1,12 @@
 import { MAX_PACKET_BYTES, concatBytes, equalBytes, int32LE, int64LE, readInt32LE, readInt64LE } from "./bytes.js"
-import { aesIgeDecrypt, aesIgeEncrypt, authKeyId, computeV2MsgKey, deriveV2Aes } from "./crypto.js"
+import {
+  aesIgeDecrypt,
+  aesIgeEncrypt,
+  authKeyId,
+  computeV2MsgKey,
+  computeV2QuickAckId,
+  deriveV2Aes,
+} from "./crypto.js"
 
 export type RecordDirection = "client-to-server" | "server-to-client"
 
@@ -16,6 +23,11 @@ export interface RecordValidation {
   sessionId?: bigint
   validServerSalts: ReadonlySet<bigint>
   nowSeconds: number
+}
+
+export interface DecryptedEncryptedRecord {
+  fields: EncryptedRecordFields
+  quickAckId: number
 }
 
 export class InvalidEncryptedRecord extends Error {
@@ -49,11 +61,11 @@ export const encryptRecord = (
   return concatBytes(authKeyId(authKey), msgKey, aesIgeEncrypt(plaintext, key, iv))
 }
 
-export const decryptRecord = (
+export const decryptRecordWithMetadata = (
   record: Uint8Array,
   authKey: Uint8Array,
   validation: RecordValidation,
-): EncryptedRecordFields => {
+): DecryptedEncryptedRecord => {
   try {
     if (record.length < 24 + 48 || record.length > MAX_PACKET_BYTES || (record.length - 24) % 16 !== 0) throw new InvalidEncryptedRecord()
     const receivedKeyId = record.slice(0, 8)
@@ -83,9 +95,18 @@ export const decryptRecord = (
     if (messageSeconds > validation.nowSeconds + 30) throw new RecoverableEncryptedRecordError(17, fields)
     if (messageSeconds < validation.nowSeconds - 300) throw new RecoverableEncryptedRecordError(20, fields)
     if (!validation.validServerSalts.has(serverSalt)) throw new RecoverableEncryptedRecordError(48, fields)
-    return fields
+    return {
+      fields,
+      quickAckId: computeV2QuickAckId(authKey, plaintext, validation.direction),
+    }
   } catch (error) {
     if (error instanceof InvalidEncryptedRecord || error instanceof RecoverableEncryptedRecordError) throw error
     throw new InvalidEncryptedRecord()
   }
 }
+
+export const decryptRecord = (
+  record: Uint8Array,
+  authKey: Uint8Array,
+  validation: RecordValidation,
+): EncryptedRecordFields => decryptRecordWithMetadata(record, authKey, validation).fields

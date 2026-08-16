@@ -22,12 +22,15 @@ import {
   bytesToHex,
   createObfuscatedClientHeader,
   createTemporaryKeyBindingProof,
+  decodeAbridgedFrame,
   decodeAbridgedPacket,
   decryptRecord,
+  decryptRecordWithMetadata,
   deriveV2Aes,
   decryptDhInner,
   deriveTemporaryAes,
   encodeAbridgedPacket,
+  encodeAbridgedQuickAck,
   decodeInlineApplicationObject,
   decodeServerDhParams,
   encodeInlineInvoke,
@@ -92,6 +95,24 @@ describe("TL and abridged framing", () => {
       const payload = Uint8Array.from({ length }, (_, index) => index)
       expect(decodeAbridgedPacket(encodeAbridgedPacket(payload))).toEqual(payload)
     }
+  })
+
+  test("matches Telegram abridged quick-ACK request and response framing", () => {
+    const shortPayload = Uint8Array.of(1, 2, 3, 4)
+    expect(encodeAbridgedPacket(shortPayload, true)).toEqual(Uint8Array.of(0x81, 1, 2, 3, 4))
+    expect(decodeAbridgedFrame(encodeAbridgedPacket(shortPayload, true))).toEqual({
+      kind: "packet",
+      payload: shortPayload,
+      quickAckRequested: true,
+    })
+    const longPayload = new Uint8Array(508)
+    expect(encodeAbridgedPacket(longPayload, true).slice(0, 4)).toEqual(Uint8Array.of(0xff, 0x7f, 0, 0))
+    expect(decodeAbridgedFrame(encodeAbridgedQuickAck(0x12345678))).toEqual({
+      kind: "quickAck",
+      quickAckId: 0x12345678,
+    })
+    expect(() => decodeAbridgedPacket(encodeAbridgedQuickAck(1))).toThrow()
+    expect(() => decodeAbridgedFrame(Uint8Array.of(0x80, 0, 0, 0, 0))).toThrow()
   })
 
   test("matches all three Inline application constructors", () => {
@@ -301,6 +322,12 @@ describe("encrypted records", () => {
     const record = encryptRecord(authKey, "client-to-server", fields, padding)
     expect(bytesToHex(record)).toBe(portableCoreV1Vector.recordHex)
     expect(bytesToHex(record.slice(8, 24))).toBe(portableCoreV1Vector.msgKeyHex)
+    expect(decryptRecordWithMetadata(record, authKey, {
+      direction: "client-to-server",
+      sessionId: fields.sessionId,
+      validServerSalts: new Set([fields.serverSalt]),
+      nowSeconds: 1700000000,
+    }).quickAckId).toBe(portableCoreV1Vector.quickAckId)
     const derived = deriveV2Aes(authKey, record.slice(8, 24), "client-to-server")
     expect(bytesToHex(derived.key)).toBe(portableCoreV1Vector.aesKeyHex)
     expect(bytesToHex(derived.iv)).toBe(portableCoreV1Vector.aesIvHex)
