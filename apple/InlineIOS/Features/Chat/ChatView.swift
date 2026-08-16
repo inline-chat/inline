@@ -858,9 +858,20 @@ private struct ChatToolbarMoreMenu: View {
         .disabled(transcriptTask != nil)
       }
 
-      if let nextPinnedState {
+      if nextFollowedState != nil || nextPinnedState != nil {
         Divider()
+      }
 
+      if let nextFollowedState {
+        Button(
+          nextFollowedState ? "Follow" : "Unfollow",
+          systemImage: nextFollowedState ? "eye" : "eye.slash"
+        ) {
+          updateFollowed(nextFollowedState)
+        }
+      }
+
+      if let nextPinnedState {
         Button(
           nextPinnedState ? "Pin" : "Unpin",
           systemImage: nextPinnedState ? "pin" : "pin.slash"
@@ -981,6 +992,11 @@ private struct ChatToolbarMoreMenu: View {
     return isInboxEligible ? true : nil
   }
 
+  private var nextFollowedState: Bool? {
+    guard peer.asUserId() == nil, let dialog else { return nil }
+    return dialog.followMode != .following
+  }
+
   private var shouldOfferAddToInbox: Bool {
     dialog?.open != true
       || dialog?.archived == true
@@ -1074,6 +1090,34 @@ private struct ChatToolbarMoreMenu: View {
           "Could not update pin",
           type: .error,
           systemImage: "exclamationmark.triangle"
+        )
+      }
+    }
+  }
+
+  private func updateFollowed(_ followed: Bool) {
+    Task(priority: .userInitiated) {
+      do {
+        _ = try await realtimeV2.send(.updateDialogFollowMode(
+          peerId: peer,
+          selection: followed ? .following : .unfollowed
+        ))
+        ToastManager.shared.showToast(
+          followed ? "Following" : "Unfollowed",
+          description: followed
+            ? "New messages will appear in Open Chats."
+            : "Only mentions and replies can bring this chat back.",
+          type: .success,
+          systemImage: followed ? "eye.fill" : "eye.slash.fill"
+        )
+      } catch is CancellationError {
+        return
+      } catch {
+        Log.shared.error("Failed to update follow state", error: error)
+        ToastManager.shared.showToast(
+          "Could not update follow state",
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
         )
       }
     }

@@ -83,14 +83,14 @@ struct InlineSearchResultsList: View {
       chatPreview(for: result)
     }
     .swipeActions(edge: .leading, allowsFullSwipe: false) {
-      pinSwipeButton(for: result)
+      if result.peer.asUserId() == nil {
+        followSwipeButton(for: result)
+      }
     }
 
     row.swipeActions(edge: .trailing, allowsFullSwipe: true) {
       openSwipeButton(for: result)
-      if result.peer.asUserId() == nil {
-        followSwipeButton(for: result)
-      }
+      pinSwipeButton(for: result)
     }
   }
 

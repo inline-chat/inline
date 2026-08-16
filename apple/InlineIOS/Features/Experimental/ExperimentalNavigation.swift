@@ -746,6 +746,7 @@ private struct ExperimentalChatListView: View {
     } else if mode == .allChats {
       contextMenuOpenButton(for: item)
       contextMenuReadUnreadButton(for: item)
+      contextMenuPinButton(for: item)
       Divider()
       contextMenuArchiveButton(for: item)
     } else if mode == .archived {
@@ -851,8 +852,8 @@ private struct ExperimentalChatListView: View {
   @ViewBuilder
   private func leadingSwipeActions(for item: ChatListItemSnapshot) -> some View {
     readUnreadButton(for: item)
-    if mode == .inbox {
-      pinButton(for: item)
+    if item.peer.asUserId() == nil {
+      followButton(for: item)
     }
   }
 
@@ -866,8 +867,8 @@ private struct ExperimentalChatListView: View {
     } else if mode == .archived {
       unarchiveButton(for: item)
     }
-    if item.peer.asUserId() == nil {
-      followButton(for: item)
+    if mode == .inbox || mode == .allChats {
+      pinButton(for: item)
     }
   }
 
