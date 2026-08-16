@@ -20,6 +20,7 @@ Usage:
   inline-protocol-keys rotate-{rsa,kek,pepper} IN OUT
   inline-protocol-keys retire-{rsa,kek,pepper} IN OUT ID --confirmed-safe
   inline-protocol-keys copy-environment IN
+  inline-protocol-keys run IN -- COMMAND [ARG...]
   inline-protocol-keys rewrap-auth-keys [LIMIT]
   inline-protocol-keys check-retirement {kek,pepper} ID
 
@@ -123,6 +124,12 @@ const environmentPayload = (bundle: KeyBundle): string => [
   `INLINE_PROTOCOL_AUTH_CODE_PEPPER_RING_JSON=${JSON.stringify(bundle.authCodePepperRing)}`,
 ].join("\n")
 
+const environmentVariables = (bundle: KeyBundle): Record<string, string> => ({
+  INLINE_PROTOCOL_RSA_PRIVATE_KEYS_JSON: JSON.stringify(bundle.rsaPrivateKeys),
+  INLINE_PROTOCOL_AUTH_KEY_KEK_RING_JSON: JSON.stringify(bundle.authKeyKekRing),
+  INLINE_PROTOCOL_AUTH_CODE_PEPPER_RING_JSON: JSON.stringify(bundle.authCodePepperRing),
+})
+
 const printPublicRing = (bundle: KeyBundle): void => {
   const signer = makeInlineProtocolRsaSigner(JSON.stringify(bundle.rsaPrivateKeys))
   console.log(JSON.stringify({ rsaPublicKeyRing: signer.publicKeyRing }, null, 2))
@@ -187,6 +194,19 @@ const main = async (): Promise<void> => {
   }
   if (command === "status" && args.length === 1) {
     printBundleStatus(await readBundle(args[0]!))
+    return
+  }
+  if (command === "run" && args.length >= 3 && args[1] === "--") {
+    const bundle = await readBundle(args[0]!)
+    const child = Bun.spawn(args.slice(2), {
+      cwd: process.cwd(),
+      env: { ...process.env, ...environmentVariables(bundle) },
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+    })
+    const exitCode = await child.exited
+    if (exitCode !== 0) process.exit(exitCode)
     return
   }
   if (command === "rewrap-auth-keys" && args.length <= 1) {
