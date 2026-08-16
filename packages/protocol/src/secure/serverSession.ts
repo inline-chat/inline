@@ -54,6 +54,7 @@ import {
   decodeMsgCopy,
   decodeMsgResendReq,
   decodeMsgsAck,
+  decodeMsgsAllInfo,
   decodeMsgsStateReq,
   decodeRpcDropAnswer,
   encodeBadMsgNotification,
@@ -83,6 +84,8 @@ const NON_CONTENT_CONSTRUCTORS = new Set<number>([
   ServiceConstructor.msgsStateReq,
   ServiceConstructor.msgsStateInfo,
   ServiceConstructor.msgsAllInfo,
+  ServiceConstructor.msgDetailedInfo,
+  ServiceConstructor.msgNewDetailedInfo,
   ServiceConstructor.ping,
   ServiceConstructor.pingDelayDisconnect,
   ServiceConstructor.pong,
@@ -492,19 +495,36 @@ export class InlineProtocolServerSession {
       case ServiceConstructor.msgsAck:
         this.#pending.acknowledge(decodeMsgsAck(message.body))
         return []
-      case ServiceConstructor.msgResendReq:
-        return this.#pending.resend(decodeMsgResendReq(message.body)).map((pending) =>
-          this.#encryptOutgoing(
-            pending.body,
-            pending.sequenceNumber % 2 === 1,
+      case ServiceConstructor.msgResendReq: {
+        const messageIds = decodeMsgResendReq(message.body)
+        const pendingMessages = this.#pending.resend(messageIds)
+        if (pendingMessages.length !== messageIds.length) {
+          return [this.#encryptOutgoing(
+            encodeMsgsStateInfo(message.messageId, this.#pending.state(messageIds)),
+            false,
             1,
-            pending.messageId,
-            pending.sequenceNumber,
-          ))
+          )]
+        }
+        return pendingMessages.map((pending) => this.#encryptOutgoing(
+          pending.body,
+          pending.sequenceNumber % 2 === 1,
+          1,
+          pending.messageId,
+          pending.sequenceNumber,
+        ))
+      }
       case ServiceConstructor.msgsStateReq: {
         const ids = decodeMsgsStateReq(message.body)
         const states = Uint8Array.from(ids, (id) => this.#receivedIds.has(id) ? 0x04 : 0x01)
         return [this.#encryptOutgoing(encodeMsgsStateInfo(message.messageId, states), false, 1)]
+      }
+      case ServiceConstructor.msgsAllInfo: {
+        const { messageIds, states } = decodeMsgsAllInfo(message.body)
+        this.#pending.acknowledge(messageIds.filter((_, index) => {
+          const state = states[index]!
+          return (state & 0x07) === 0x04 || (state & 0x80) !== 0
+        }))
+        return []
       }
       case ServiceConstructor.ping:
       case ServiceConstructor.pingDelayDisconnect: {

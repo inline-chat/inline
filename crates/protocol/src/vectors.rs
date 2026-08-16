@@ -12,7 +12,7 @@ mod tests {
     fn corpus_contains_the_portable_record_and_application_vectors() {
         assert_eq!(
             hex::encode(Sha256::digest(INLINE_PROTOCOL_V1_JSON.as_bytes())),
-            "95a0c56e90ea6f91eaa67c2cc5a0072b820f6e1d960265366757a40fbb7b11e9"
+            "feeb24c984e56423467698c98a013daadeb3824a93ac4d03be4c7aa2e67f7466"
         );
         let corpus: serde_json::Value = serde_json::from_str(INLINE_PROTOCOL_V1_JSON).unwrap();
         assert_eq!(corpus["formatVersion"], 1);

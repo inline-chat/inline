@@ -69,6 +69,9 @@
     "rpcAnswerUnknownHex": "6ed32a5e",
     "rpcAnswerDroppedRunningHex": "86e578cd",
     "rpcAnswerDroppedHex": "b7d83aa410000000000000000300000040000000",
-    "httpWaitHex": "9f35999264000000c80000002c010000"
+    "httpWaitHex": "9f35999264000000c80000002c010000",
+    "msgsStateInfoHex": "7db5de040c0000000000000003010484",
+    "msgDetailedInfoHex": "c63e6d270c0000000000000010000000000000004000000000000000",
+    "msgNewDetailedInfoHex": "dfb69d8014000000000000008000000000000000"
   }
 }
