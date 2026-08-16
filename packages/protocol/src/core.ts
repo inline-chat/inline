@@ -8737,6 +8737,356 @@ export interface BotChatSettingsItemInvoked {
      */
     documentRevision: string;
 }
+// --- Realtime V3 application envelope ---
+// Inline Protocol owns transport IDs, sequencing, acknowledgements, pings,
+// replay handling, and authentication. These messages carry only the Inline
+// Schema application contract inside inline.invoke/result/update.
+
+/**
+ * @generated from protobuf message RealtimeV3Request
+ */
+export interface RealtimeV3Request {
+    /**
+     * @generated from protobuf oneof: body
+     */
+    body: {
+        oneofKind: "rpc";
+        /**
+         * @generated from protobuf field: RpcCall rpc = 1;
+         */
+        rpc: RpcCall;
+    } | {
+        oneofKind: "authBegin";
+        /**
+         * @generated from protobuf field: AuthBeginRequest auth_begin = 2;
+         */
+        authBegin: AuthBeginRequest;
+    } | {
+        oneofKind: "authComplete";
+        /**
+         * @generated from protobuf field: AuthCompleteRequest auth_complete = 3;
+         */
+        authComplete: AuthCompleteRequest;
+    } | {
+        oneofKind: "createHttpUpload";
+        /**
+         * @generated from protobuf field: CreateHttpUploadRequest create_http_upload = 4;
+         */
+        createHttpUpload: CreateHttpUploadRequest;
+    } | {
+        oneofKind: "finishHttpUpload";
+        /**
+         * @generated from protobuf field: FinishHttpUploadRequest finish_http_upload = 5;
+         */
+        finishHttpUpload: FinishHttpUploadRequest;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
+ * @generated from protobuf message RealtimeV3Response
+ */
+export interface RealtimeV3Response {
+    /**
+     * @generated from protobuf oneof: body
+     */
+    body: {
+        oneofKind: "rpcResult";
+        /**
+         * @generated from protobuf field: RpcResult rpc_result = 1;
+         */
+        rpcResult: RpcResult;
+    } | {
+        oneofKind: "rpcError";
+        /**
+         * @generated from protobuf field: RpcError rpc_error = 2;
+         */
+        rpcError: RpcError;
+    } | {
+        oneofKind: "authBegin";
+        /**
+         * @generated from protobuf field: AuthBeginResult auth_begin = 3;
+         */
+        authBegin: AuthBeginResult;
+    } | {
+        oneofKind: "authComplete";
+        /**
+         * @generated from protobuf field: AuthCompleteResult auth_complete = 4;
+         */
+        authComplete: AuthCompleteResult;
+    } | {
+        oneofKind: "createHttpUpload";
+        /**
+         * @generated from protobuf field: CreateHttpUploadResult create_http_upload = 5;
+         */
+        createHttpUpload: CreateHttpUploadResult;
+    } | {
+        oneofKind: "finishHttpUpload";
+        /**
+         * @generated from protobuf field: FinishHttpUploadResult finish_http_upload = 6;
+         */
+        finishHttpUpload: FinishHttpUploadResult;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
+ * @generated from protobuf message RealtimeV3Update
+ */
+export interface RealtimeV3Update {
+    /**
+     * @generated from protobuf field: ServerMessage message = 1;
+     */
+    message?: ServerMessage;
+}
+/**
+ * @generated from protobuf message ClientInfo
+ */
+export interface ClientInfo {
+    /**
+     * @generated from protobuf field: optional string device_id = 1;
+     */
+    deviceId?: string;
+    /**
+     * @generated from protobuf field: optional string client_type = 2;
+     */
+    clientType?: string;
+    /**
+     * @generated from protobuf field: optional string client_version = 3;
+     */
+    clientVersion?: string;
+    /**
+     * @generated from protobuf field: optional string os_version = 4;
+     */
+    osVersion?: string;
+    /**
+     * @generated from protobuf field: optional string device_name = 5;
+     */
+    deviceName?: string;
+}
+/**
+ * @generated from protobuf message AuthBeginRequest
+ */
+export interface AuthBeginRequest {
+    /**
+     * @generated from protobuf oneof: identifier
+     */
+    identifier: {
+        oneofKind: "email";
+        /**
+         * @generated from protobuf field: string email = 1;
+         */
+        email: string;
+    } | {
+        oneofKind: "phoneNumber";
+        /**
+         * @generated from protobuf field: string phone_number = 2;
+         */
+        phoneNumber: string;
+    } | {
+        oneofKind: undefined;
+    };
+    /**
+     * @generated from protobuf field: ClientInfo client = 3;
+     */
+    client?: ClientInfo;
+}
+/**
+ * @generated from protobuf message AuthBeginResult
+ */
+export interface AuthBeginResult {
+    /**
+     * @generated from protobuf field: bytes challenge_id = 1;
+     */
+    challengeId: Uint8Array;
+    /**
+     * @generated from protobuf field: AuthBeginResult.Delivery delivery = 2;
+     */
+    delivery: AuthBeginResult_Delivery;
+    /**
+     * @generated from protobuf field: int64 expires_at = 3;
+     */
+    expiresAt: bigint;
+    /**
+     * @generated from protobuf field: uint32 retry_after_seconds = 4;
+     */
+    retryAfterSeconds: number;
+}
+/**
+ * @generated from protobuf enum AuthBeginResult.Delivery
+ */
+export enum AuthBeginResult_Delivery {
+    /**
+     * @generated from protobuf enum value: DELIVERY_UNSPECIFIED = 0;
+     */
+    DELIVERY_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: EMAIL = 1;
+     */
+    EMAIL = 1,
+    /**
+     * @generated from protobuf enum value: SMS = 2;
+     */
+    SMS = 2
+}
+/**
+ * @generated from protobuf message AuthCompleteRequest
+ */
+export interface AuthCompleteRequest {
+    /**
+     * @generated from protobuf field: bytes challenge_id = 1;
+     */
+    challengeId: Uint8Array;
+    /**
+     * @generated from protobuf field: string code = 2;
+     */
+    code: string;
+    /**
+     * @generated from protobuf field: optional string invite_code = 3;
+     */
+    inviteCode?: string;
+    /**
+     * @generated from protobuf field: optional string time_zone = 4;
+     */
+    timeZone?: string;
+}
+/**
+ * @generated from protobuf message AuthAuthorized
+ */
+export interface AuthAuthorized {
+    /**
+     * @generated from protobuf field: User user = 1;
+     */
+    user?: User;
+    /**
+     * @generated from protobuf field: int64 account_session_id = 2;
+     */
+    accountSessionId: bigint;
+}
+/**
+ * @generated from protobuf message AuthInviteRequired
+ */
+export interface AuthInviteRequired {
+}
+/**
+ * @generated from protobuf message AuthCompleteResult
+ */
+export interface AuthCompleteResult {
+    /**
+     * @generated from protobuf oneof: state
+     */
+    state: {
+        oneofKind: "authorized";
+        /**
+         * @generated from protobuf field: AuthAuthorized authorized = 1;
+         */
+        authorized: AuthAuthorized;
+    } | {
+        oneofKind: "inviteRequired";
+        /**
+         * @generated from protobuf field: AuthInviteRequired invite_required = 2;
+         */
+        inviteRequired: AuthInviteRequired;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
+ * @generated from protobuf message CreateHttpUploadRequest
+ */
+export interface CreateHttpUploadRequest {
+    /**
+     * @generated from protobuf field: string file_name = 1;
+     */
+    fileName: string;
+    /**
+     * @generated from protobuf field: string mime_type = 2;
+     */
+    mimeType: string;
+    /**
+     * @generated from protobuf field: uint64 byte_count = 3;
+     */
+    byteCount: bigint;
+    /**
+     * @generated from protobuf field: bytes sha256 = 4;
+     */
+    sha256: Uint8Array;
+    /**
+     * @generated from protobuf field: HttpUploadKind kind = 5;
+     */
+    kind: HttpUploadKind;
+}
+/**
+ * @generated from protobuf message CreateHttpUploadResult
+ */
+export interface CreateHttpUploadResult {
+    /**
+     * @generated from protobuf field: bytes upload_id = 1;
+     */
+    uploadId: Uint8Array;
+    /**
+     * @generated from protobuf field: string upload_url = 2;
+     */
+    uploadUrl: string;
+    /**
+     * @generated from protobuf field: bytes capability = 3;
+     */
+    capability: Uint8Array;
+    /**
+     * @generated from protobuf field: int64 expires_at = 4;
+     */
+    expiresAt: bigint;
+}
+/**
+ * @generated from protobuf message FinishHttpUploadRequest
+ */
+export interface FinishHttpUploadRequest {
+    /**
+     * @generated from protobuf field: bytes upload_id = 1;
+     */
+    uploadId: Uint8Array;
+}
+/**
+ * @generated from protobuf message HttpUploadPending
+ */
+export interface HttpUploadPending {
+    /**
+     * @generated from protobuf field: uint32 retry_after_seconds = 1;
+     */
+    retryAfterSeconds: number;
+}
+/**
+ * @generated from protobuf message HttpUploadComplete
+ */
+export interface HttpUploadComplete {
+    /**
+     * @generated from protobuf field: string file_unique_id = 1;
+     */
+    fileUniqueId: string;
+}
+/**
+ * @generated from protobuf message FinishHttpUploadResult
+ */
+export interface FinishHttpUploadResult {
+    /**
+     * @generated from protobuf oneof: state
+     */
+    state: {
+        oneofKind: "pending";
+        /**
+         * @generated from protobuf field: HttpUploadPending pending = 1;
+         */
+        pending: HttpUploadPending;
+    } | {
+        oneofKind: "complete";
+        /**
+         * @generated from protobuf field: HttpUploadComplete complete = 2;
+         */
+        complete: HttpUploadComplete;
+    } | {
+        oneofKind: undefined;
+    };
+}
 /**
  * @generated from protobuf enum DialogFollowMode
  */
@@ -9330,6 +9680,31 @@ export enum SearchMessagesFilter {
      * @generated from protobuf enum value: FILTER_VOICE_MEMOS = 6;
      */
     FILTER_VOICE_MEMOS = 6
+}
+/**
+ * @generated from protobuf enum HttpUploadKind
+ */
+export enum HttpUploadKind {
+    /**
+     * @generated from protobuf enum value: HTTP_UPLOAD_KIND_UNSPECIFIED = 0;
+     */
+    HTTP_UPLOAD_KIND_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: PHOTO = 1;
+     */
+    PHOTO = 1,
+    /**
+     * @generated from protobuf enum value: VIDEO = 2;
+     */
+    VIDEO = 2,
+    /**
+     * @generated from protobuf enum value: DOCUMENT = 3;
+     */
+    DOCUMENT = 3,
+    /**
+     * @generated from protobuf enum value: VOICE = 4;
+     */
+    VOICE = 4
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class ClientMessage$Type extends MessageType<ClientMessage> {
@@ -33102,3 +33477,1010 @@ class BotChatSettingsItemInvoked$Type extends MessageType<BotChatSettingsItemInv
  * @generated MessageType for protobuf message BotChatSettingsItemInvoked
  */
 export const BotChatSettingsItemInvoked = new BotChatSettingsItemInvoked$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RealtimeV3Request$Type extends MessageType<RealtimeV3Request> {
+    constructor() {
+        super("RealtimeV3Request", [
+            { no: 1, name: "rpc", kind: "message", oneof: "body", T: () => RpcCall },
+            { no: 2, name: "auth_begin", kind: "message", oneof: "body", T: () => AuthBeginRequest },
+            { no: 3, name: "auth_complete", kind: "message", oneof: "body", T: () => AuthCompleteRequest },
+            { no: 4, name: "create_http_upload", kind: "message", oneof: "body", T: () => CreateHttpUploadRequest },
+            { no: 5, name: "finish_http_upload", kind: "message", oneof: "body", T: () => FinishHttpUploadRequest }
+        ]);
+    }
+    create(value?: PartialMessage<RealtimeV3Request>): RealtimeV3Request {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.body = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<RealtimeV3Request>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RealtimeV3Request): RealtimeV3Request {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* RpcCall rpc */ 1:
+                    message.body = {
+                        oneofKind: "rpc",
+                        rpc: RpcCall.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).rpc)
+                    };
+                    break;
+                case /* AuthBeginRequest auth_begin */ 2:
+                    message.body = {
+                        oneofKind: "authBegin",
+                        authBegin: AuthBeginRequest.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).authBegin)
+                    };
+                    break;
+                case /* AuthCompleteRequest auth_complete */ 3:
+                    message.body = {
+                        oneofKind: "authComplete",
+                        authComplete: AuthCompleteRequest.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).authComplete)
+                    };
+                    break;
+                case /* CreateHttpUploadRequest create_http_upload */ 4:
+                    message.body = {
+                        oneofKind: "createHttpUpload",
+                        createHttpUpload: CreateHttpUploadRequest.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).createHttpUpload)
+                    };
+                    break;
+                case /* FinishHttpUploadRequest finish_http_upload */ 5:
+                    message.body = {
+                        oneofKind: "finishHttpUpload",
+                        finishHttpUpload: FinishHttpUploadRequest.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).finishHttpUpload)
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RealtimeV3Request, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* RpcCall rpc = 1; */
+        if (message.body.oneofKind === "rpc")
+            RpcCall.internalBinaryWrite(message.body.rpc, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* AuthBeginRequest auth_begin = 2; */
+        if (message.body.oneofKind === "authBegin")
+            AuthBeginRequest.internalBinaryWrite(message.body.authBegin, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* AuthCompleteRequest auth_complete = 3; */
+        if (message.body.oneofKind === "authComplete")
+            AuthCompleteRequest.internalBinaryWrite(message.body.authComplete, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* CreateHttpUploadRequest create_http_upload = 4; */
+        if (message.body.oneofKind === "createHttpUpload")
+            CreateHttpUploadRequest.internalBinaryWrite(message.body.createHttpUpload, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* FinishHttpUploadRequest finish_http_upload = 5; */
+        if (message.body.oneofKind === "finishHttpUpload")
+            FinishHttpUploadRequest.internalBinaryWrite(message.body.finishHttpUpload, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RealtimeV3Request
+ */
+export const RealtimeV3Request = new RealtimeV3Request$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RealtimeV3Response$Type extends MessageType<RealtimeV3Response> {
+    constructor() {
+        super("RealtimeV3Response", [
+            { no: 1, name: "rpc_result", kind: "message", oneof: "body", T: () => RpcResult },
+            { no: 2, name: "rpc_error", kind: "message", oneof: "body", T: () => RpcError },
+            { no: 3, name: "auth_begin", kind: "message", oneof: "body", T: () => AuthBeginResult },
+            { no: 4, name: "auth_complete", kind: "message", oneof: "body", T: () => AuthCompleteResult },
+            { no: 5, name: "create_http_upload", kind: "message", oneof: "body", T: () => CreateHttpUploadResult },
+            { no: 6, name: "finish_http_upload", kind: "message", oneof: "body", T: () => FinishHttpUploadResult }
+        ]);
+    }
+    create(value?: PartialMessage<RealtimeV3Response>): RealtimeV3Response {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.body = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<RealtimeV3Response>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RealtimeV3Response): RealtimeV3Response {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* RpcResult rpc_result */ 1:
+                    message.body = {
+                        oneofKind: "rpcResult",
+                        rpcResult: RpcResult.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).rpcResult)
+                    };
+                    break;
+                case /* RpcError rpc_error */ 2:
+                    message.body = {
+                        oneofKind: "rpcError",
+                        rpcError: RpcError.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).rpcError)
+                    };
+                    break;
+                case /* AuthBeginResult auth_begin */ 3:
+                    message.body = {
+                        oneofKind: "authBegin",
+                        authBegin: AuthBeginResult.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).authBegin)
+                    };
+                    break;
+                case /* AuthCompleteResult auth_complete */ 4:
+                    message.body = {
+                        oneofKind: "authComplete",
+                        authComplete: AuthCompleteResult.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).authComplete)
+                    };
+                    break;
+                case /* CreateHttpUploadResult create_http_upload */ 5:
+                    message.body = {
+                        oneofKind: "createHttpUpload",
+                        createHttpUpload: CreateHttpUploadResult.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).createHttpUpload)
+                    };
+                    break;
+                case /* FinishHttpUploadResult finish_http_upload */ 6:
+                    message.body = {
+                        oneofKind: "finishHttpUpload",
+                        finishHttpUpload: FinishHttpUploadResult.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).finishHttpUpload)
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RealtimeV3Response, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* RpcResult rpc_result = 1; */
+        if (message.body.oneofKind === "rpcResult")
+            RpcResult.internalBinaryWrite(message.body.rpcResult, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* RpcError rpc_error = 2; */
+        if (message.body.oneofKind === "rpcError")
+            RpcError.internalBinaryWrite(message.body.rpcError, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* AuthBeginResult auth_begin = 3; */
+        if (message.body.oneofKind === "authBegin")
+            AuthBeginResult.internalBinaryWrite(message.body.authBegin, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* AuthCompleteResult auth_complete = 4; */
+        if (message.body.oneofKind === "authComplete")
+            AuthCompleteResult.internalBinaryWrite(message.body.authComplete, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* CreateHttpUploadResult create_http_upload = 5; */
+        if (message.body.oneofKind === "createHttpUpload")
+            CreateHttpUploadResult.internalBinaryWrite(message.body.createHttpUpload, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        /* FinishHttpUploadResult finish_http_upload = 6; */
+        if (message.body.oneofKind === "finishHttpUpload")
+            FinishHttpUploadResult.internalBinaryWrite(message.body.finishHttpUpload, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RealtimeV3Response
+ */
+export const RealtimeV3Response = new RealtimeV3Response$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RealtimeV3Update$Type extends MessageType<RealtimeV3Update> {
+    constructor() {
+        super("RealtimeV3Update", [
+            { no: 1, name: "message", kind: "message", T: () => ServerMessage }
+        ]);
+    }
+    create(value?: PartialMessage<RealtimeV3Update>): RealtimeV3Update {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<RealtimeV3Update>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RealtimeV3Update): RealtimeV3Update {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* ServerMessage message */ 1:
+                    message.message = ServerMessage.internalBinaryRead(reader, reader.uint32(), options, message.message);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RealtimeV3Update, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* ServerMessage message = 1; */
+        if (message.message)
+            ServerMessage.internalBinaryWrite(message.message, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RealtimeV3Update
+ */
+export const RealtimeV3Update = new RealtimeV3Update$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ClientInfo$Type extends MessageType<ClientInfo> {
+    constructor() {
+        super("ClientInfo", [
+            { no: 1, name: "device_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "client_type", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "client_version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "os_version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "device_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ClientInfo>): ClientInfo {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<ClientInfo>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ClientInfo): ClientInfo {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional string device_id */ 1:
+                    message.deviceId = reader.string();
+                    break;
+                case /* optional string client_type */ 2:
+                    message.clientType = reader.string();
+                    break;
+                case /* optional string client_version */ 3:
+                    message.clientVersion = reader.string();
+                    break;
+                case /* optional string os_version */ 4:
+                    message.osVersion = reader.string();
+                    break;
+                case /* optional string device_name */ 5:
+                    message.deviceName = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ClientInfo, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional string device_id = 1; */
+        if (message.deviceId !== undefined)
+            writer.tag(1, WireType.LengthDelimited).string(message.deviceId);
+        /* optional string client_type = 2; */
+        if (message.clientType !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.clientType);
+        /* optional string client_version = 3; */
+        if (message.clientVersion !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.clientVersion);
+        /* optional string os_version = 4; */
+        if (message.osVersion !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.osVersion);
+        /* optional string device_name = 5; */
+        if (message.deviceName !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.deviceName);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ClientInfo
+ */
+export const ClientInfo = new ClientInfo$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AuthBeginRequest$Type extends MessageType<AuthBeginRequest> {
+    constructor() {
+        super("AuthBeginRequest", [
+            { no: 1, name: "email", kind: "scalar", oneof: "identifier", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "phone_number", kind: "scalar", oneof: "identifier", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "client", kind: "message", T: () => ClientInfo }
+        ]);
+    }
+    create(value?: PartialMessage<AuthBeginRequest>): AuthBeginRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.identifier = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<AuthBeginRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuthBeginRequest): AuthBeginRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string email */ 1:
+                    message.identifier = {
+                        oneofKind: "email",
+                        email: reader.string()
+                    };
+                    break;
+                case /* string phone_number */ 2:
+                    message.identifier = {
+                        oneofKind: "phoneNumber",
+                        phoneNumber: reader.string()
+                    };
+                    break;
+                case /* ClientInfo client */ 3:
+                    message.client = ClientInfo.internalBinaryRead(reader, reader.uint32(), options, message.client);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AuthBeginRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string email = 1; */
+        if (message.identifier.oneofKind === "email")
+            writer.tag(1, WireType.LengthDelimited).string(message.identifier.email);
+        /* string phone_number = 2; */
+        if (message.identifier.oneofKind === "phoneNumber")
+            writer.tag(2, WireType.LengthDelimited).string(message.identifier.phoneNumber);
+        /* ClientInfo client = 3; */
+        if (message.client)
+            ClientInfo.internalBinaryWrite(message.client, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AuthBeginRequest
+ */
+export const AuthBeginRequest = new AuthBeginRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AuthBeginResult$Type extends MessageType<AuthBeginResult> {
+    constructor() {
+        super("AuthBeginResult", [
+            { no: 1, name: "challenge_id", kind: "scalar", T: 12 /*ScalarType.BYTES*/ },
+            { no: 2, name: "delivery", kind: "enum", T: () => ["AuthBeginResult.Delivery", AuthBeginResult_Delivery] },
+            { no: 3, name: "expires_at", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "retry_after_seconds", kind: "scalar", T: 13 /*ScalarType.UINT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AuthBeginResult>): AuthBeginResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.challengeId = new Uint8Array(0);
+        message.delivery = 0;
+        message.expiresAt = 0n;
+        message.retryAfterSeconds = 0;
+        if (value !== undefined)
+            reflectionMergePartial<AuthBeginResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuthBeginResult): AuthBeginResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bytes challenge_id */ 1:
+                    message.challengeId = reader.bytes();
+                    break;
+                case /* AuthBeginResult.Delivery delivery */ 2:
+                    message.delivery = reader.int32();
+                    break;
+                case /* int64 expires_at */ 3:
+                    message.expiresAt = reader.int64().toBigInt();
+                    break;
+                case /* uint32 retry_after_seconds */ 4:
+                    message.retryAfterSeconds = reader.uint32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AuthBeginResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bytes challenge_id = 1; */
+        if (message.challengeId.length)
+            writer.tag(1, WireType.LengthDelimited).bytes(message.challengeId);
+        /* AuthBeginResult.Delivery delivery = 2; */
+        if (message.delivery !== 0)
+            writer.tag(2, WireType.Varint).int32(message.delivery);
+        /* int64 expires_at = 3; */
+        if (message.expiresAt !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.expiresAt);
+        /* uint32 retry_after_seconds = 4; */
+        if (message.retryAfterSeconds !== 0)
+            writer.tag(4, WireType.Varint).uint32(message.retryAfterSeconds);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AuthBeginResult
+ */
+export const AuthBeginResult = new AuthBeginResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AuthCompleteRequest$Type extends MessageType<AuthCompleteRequest> {
+    constructor() {
+        super("AuthCompleteRequest", [
+            { no: 1, name: "challenge_id", kind: "scalar", T: 12 /*ScalarType.BYTES*/ },
+            { no: 2, name: "code", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "invite_code", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "time_zone", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AuthCompleteRequest>): AuthCompleteRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.challengeId = new Uint8Array(0);
+        message.code = "";
+        if (value !== undefined)
+            reflectionMergePartial<AuthCompleteRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuthCompleteRequest): AuthCompleteRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bytes challenge_id */ 1:
+                    message.challengeId = reader.bytes();
+                    break;
+                case /* string code */ 2:
+                    message.code = reader.string();
+                    break;
+                case /* optional string invite_code */ 3:
+                    message.inviteCode = reader.string();
+                    break;
+                case /* optional string time_zone */ 4:
+                    message.timeZone = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AuthCompleteRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bytes challenge_id = 1; */
+        if (message.challengeId.length)
+            writer.tag(1, WireType.LengthDelimited).bytes(message.challengeId);
+        /* string code = 2; */
+        if (message.code !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.code);
+        /* optional string invite_code = 3; */
+        if (message.inviteCode !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.inviteCode);
+        /* optional string time_zone = 4; */
+        if (message.timeZone !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.timeZone);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AuthCompleteRequest
+ */
+export const AuthCompleteRequest = new AuthCompleteRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AuthAuthorized$Type extends MessageType<AuthAuthorized> {
+    constructor() {
+        super("AuthAuthorized", [
+            { no: 1, name: "user", kind: "message", T: () => User },
+            { no: 2, name: "account_session_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AuthAuthorized>): AuthAuthorized {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.accountSessionId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<AuthAuthorized>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuthAuthorized): AuthAuthorized {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* User user */ 1:
+                    message.user = User.internalBinaryRead(reader, reader.uint32(), options, message.user);
+                    break;
+                case /* int64 account_session_id */ 2:
+                    message.accountSessionId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AuthAuthorized, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* User user = 1; */
+        if (message.user)
+            User.internalBinaryWrite(message.user, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* int64 account_session_id = 2; */
+        if (message.accountSessionId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.accountSessionId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AuthAuthorized
+ */
+export const AuthAuthorized = new AuthAuthorized$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AuthInviteRequired$Type extends MessageType<AuthInviteRequired> {
+    constructor() {
+        super("AuthInviteRequired", []);
+    }
+    create(value?: PartialMessage<AuthInviteRequired>): AuthInviteRequired {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<AuthInviteRequired>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuthInviteRequired): AuthInviteRequired {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: AuthInviteRequired, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AuthInviteRequired
+ */
+export const AuthInviteRequired = new AuthInviteRequired$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AuthCompleteResult$Type extends MessageType<AuthCompleteResult> {
+    constructor() {
+        super("AuthCompleteResult", [
+            { no: 1, name: "authorized", kind: "message", oneof: "state", T: () => AuthAuthorized },
+            { no: 2, name: "invite_required", kind: "message", oneof: "state", T: () => AuthInviteRequired }
+        ]);
+    }
+    create(value?: PartialMessage<AuthCompleteResult>): AuthCompleteResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.state = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<AuthCompleteResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuthCompleteResult): AuthCompleteResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* AuthAuthorized authorized */ 1:
+                    message.state = {
+                        oneofKind: "authorized",
+                        authorized: AuthAuthorized.internalBinaryRead(reader, reader.uint32(), options, (message.state as any).authorized)
+                    };
+                    break;
+                case /* AuthInviteRequired invite_required */ 2:
+                    message.state = {
+                        oneofKind: "inviteRequired",
+                        inviteRequired: AuthInviteRequired.internalBinaryRead(reader, reader.uint32(), options, (message.state as any).inviteRequired)
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AuthCompleteResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* AuthAuthorized authorized = 1; */
+        if (message.state.oneofKind === "authorized")
+            AuthAuthorized.internalBinaryWrite(message.state.authorized, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* AuthInviteRequired invite_required = 2; */
+        if (message.state.oneofKind === "inviteRequired")
+            AuthInviteRequired.internalBinaryWrite(message.state.inviteRequired, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AuthCompleteResult
+ */
+export const AuthCompleteResult = new AuthCompleteResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CreateHttpUploadRequest$Type extends MessageType<CreateHttpUploadRequest> {
+    constructor() {
+        super("CreateHttpUploadRequest", [
+            { no: 1, name: "file_name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "mime_type", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "byte_count", kind: "scalar", T: 4 /*ScalarType.UINT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "sha256", kind: "scalar", T: 12 /*ScalarType.BYTES*/ },
+            { no: 5, name: "kind", kind: "enum", T: () => ["HttpUploadKind", HttpUploadKind] }
+        ]);
+    }
+    create(value?: PartialMessage<CreateHttpUploadRequest>): CreateHttpUploadRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.fileName = "";
+        message.mimeType = "";
+        message.byteCount = 0n;
+        message.sha256 = new Uint8Array(0);
+        message.kind = 0;
+        if (value !== undefined)
+            reflectionMergePartial<CreateHttpUploadRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CreateHttpUploadRequest): CreateHttpUploadRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string file_name */ 1:
+                    message.fileName = reader.string();
+                    break;
+                case /* string mime_type */ 2:
+                    message.mimeType = reader.string();
+                    break;
+                case /* uint64 byte_count */ 3:
+                    message.byteCount = reader.uint64().toBigInt();
+                    break;
+                case /* bytes sha256 */ 4:
+                    message.sha256 = reader.bytes();
+                    break;
+                case /* HttpUploadKind kind */ 5:
+                    message.kind = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CreateHttpUploadRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string file_name = 1; */
+        if (message.fileName !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.fileName);
+        /* string mime_type = 2; */
+        if (message.mimeType !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.mimeType);
+        /* uint64 byte_count = 3; */
+        if (message.byteCount !== 0n)
+            writer.tag(3, WireType.Varint).uint64(message.byteCount);
+        /* bytes sha256 = 4; */
+        if (message.sha256.length)
+            writer.tag(4, WireType.LengthDelimited).bytes(message.sha256);
+        /* HttpUploadKind kind = 5; */
+        if (message.kind !== 0)
+            writer.tag(5, WireType.Varint).int32(message.kind);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message CreateHttpUploadRequest
+ */
+export const CreateHttpUploadRequest = new CreateHttpUploadRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CreateHttpUploadResult$Type extends MessageType<CreateHttpUploadResult> {
+    constructor() {
+        super("CreateHttpUploadResult", [
+            { no: 1, name: "upload_id", kind: "scalar", T: 12 /*ScalarType.BYTES*/ },
+            { no: 2, name: "upload_url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "capability", kind: "scalar", T: 12 /*ScalarType.BYTES*/ },
+            { no: 4, name: "expires_at", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<CreateHttpUploadResult>): CreateHttpUploadResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.uploadId = new Uint8Array(0);
+        message.uploadUrl = "";
+        message.capability = new Uint8Array(0);
+        message.expiresAt = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<CreateHttpUploadResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CreateHttpUploadResult): CreateHttpUploadResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bytes upload_id */ 1:
+                    message.uploadId = reader.bytes();
+                    break;
+                case /* string upload_url */ 2:
+                    message.uploadUrl = reader.string();
+                    break;
+                case /* bytes capability */ 3:
+                    message.capability = reader.bytes();
+                    break;
+                case /* int64 expires_at */ 4:
+                    message.expiresAt = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CreateHttpUploadResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bytes upload_id = 1; */
+        if (message.uploadId.length)
+            writer.tag(1, WireType.LengthDelimited).bytes(message.uploadId);
+        /* string upload_url = 2; */
+        if (message.uploadUrl !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.uploadUrl);
+        /* bytes capability = 3; */
+        if (message.capability.length)
+            writer.tag(3, WireType.LengthDelimited).bytes(message.capability);
+        /* int64 expires_at = 4; */
+        if (message.expiresAt !== 0n)
+            writer.tag(4, WireType.Varint).int64(message.expiresAt);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message CreateHttpUploadResult
+ */
+export const CreateHttpUploadResult = new CreateHttpUploadResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class FinishHttpUploadRequest$Type extends MessageType<FinishHttpUploadRequest> {
+    constructor() {
+        super("FinishHttpUploadRequest", [
+            { no: 1, name: "upload_id", kind: "scalar", T: 12 /*ScalarType.BYTES*/ }
+        ]);
+    }
+    create(value?: PartialMessage<FinishHttpUploadRequest>): FinishHttpUploadRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.uploadId = new Uint8Array(0);
+        if (value !== undefined)
+            reflectionMergePartial<FinishHttpUploadRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: FinishHttpUploadRequest): FinishHttpUploadRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bytes upload_id */ 1:
+                    message.uploadId = reader.bytes();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: FinishHttpUploadRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bytes upload_id = 1; */
+        if (message.uploadId.length)
+            writer.tag(1, WireType.LengthDelimited).bytes(message.uploadId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message FinishHttpUploadRequest
+ */
+export const FinishHttpUploadRequest = new FinishHttpUploadRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class HttpUploadPending$Type extends MessageType<HttpUploadPending> {
+    constructor() {
+        super("HttpUploadPending", [
+            { no: 1, name: "retry_after_seconds", kind: "scalar", T: 13 /*ScalarType.UINT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<HttpUploadPending>): HttpUploadPending {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.retryAfterSeconds = 0;
+        if (value !== undefined)
+            reflectionMergePartial<HttpUploadPending>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: HttpUploadPending): HttpUploadPending {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* uint32 retry_after_seconds */ 1:
+                    message.retryAfterSeconds = reader.uint32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: HttpUploadPending, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* uint32 retry_after_seconds = 1; */
+        if (message.retryAfterSeconds !== 0)
+            writer.tag(1, WireType.Varint).uint32(message.retryAfterSeconds);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message HttpUploadPending
+ */
+export const HttpUploadPending = new HttpUploadPending$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class HttpUploadComplete$Type extends MessageType<HttpUploadComplete> {
+    constructor() {
+        super("HttpUploadComplete", [
+            { no: 1, name: "file_unique_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<HttpUploadComplete>): HttpUploadComplete {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.fileUniqueId = "";
+        if (value !== undefined)
+            reflectionMergePartial<HttpUploadComplete>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: HttpUploadComplete): HttpUploadComplete {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string file_unique_id */ 1:
+                    message.fileUniqueId = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: HttpUploadComplete, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string file_unique_id = 1; */
+        if (message.fileUniqueId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.fileUniqueId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message HttpUploadComplete
+ */
+export const HttpUploadComplete = new HttpUploadComplete$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class FinishHttpUploadResult$Type extends MessageType<FinishHttpUploadResult> {
+    constructor() {
+        super("FinishHttpUploadResult", [
+            { no: 1, name: "pending", kind: "message", oneof: "state", T: () => HttpUploadPending },
+            { no: 2, name: "complete", kind: "message", oneof: "state", T: () => HttpUploadComplete }
+        ]);
+    }
+    create(value?: PartialMessage<FinishHttpUploadResult>): FinishHttpUploadResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.state = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<FinishHttpUploadResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: FinishHttpUploadResult): FinishHttpUploadResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* HttpUploadPending pending */ 1:
+                    message.state = {
+                        oneofKind: "pending",
+                        pending: HttpUploadPending.internalBinaryRead(reader, reader.uint32(), options, (message.state as any).pending)
+                    };
+                    break;
+                case /* HttpUploadComplete complete */ 2:
+                    message.state = {
+                        oneofKind: "complete",
+                        complete: HttpUploadComplete.internalBinaryRead(reader, reader.uint32(), options, (message.state as any).complete)
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: FinishHttpUploadResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* HttpUploadPending pending = 1; */
+        if (message.state.oneofKind === "pending")
+            HttpUploadPending.internalBinaryWrite(message.state.pending, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* HttpUploadComplete complete = 2; */
+        if (message.state.oneofKind === "complete")
+            HttpUploadComplete.internalBinaryWrite(message.state.complete, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message FinishHttpUploadResult
+ */
+export const FinishHttpUploadResult = new FinishHttpUploadResult$Type();

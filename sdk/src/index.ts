@@ -48,5 +48,18 @@ export { asInlineId } from "./ids.js"
 export type { InlineUnixSeconds, InlineUnixSecondsLike } from "./time.js"
 export { asInlineUnixSeconds } from "./time.js"
 
+export {
+  InlineProtocolV3Connection,
+  InlineProtocolV3Error,
+  type InlineProtocolAuthorization,
+  type InlineProtocolPublicKey,
+  type InlineProtocolV3ConnectionOptions,
+} from "./realtime/v3-connection.js"
+export {
+  InlineRealtimeV3Client,
+  type InlineProtocolV3Credentials,
+  type InlineRealtimeV3ClientOptions,
+} from "./realtime/v3-client.js"
+
 // Re-export the full protocol surface for convenience.
 export * from "@inline-chat/protocol"

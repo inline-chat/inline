@@ -3219,3 +3219,116 @@ message BotChatSettingsItemInvoked {
   optional BotChatSettingsValue value = 6;
   string document_revision = 7;
 }
+
+// --- Realtime V3 application envelope ---
+// Inline Protocol owns transport IDs, sequencing, acknowledgements, pings,
+// replay handling, and authentication. These messages carry only the Inline
+// Schema application contract inside inline.invoke/result/update.
+
+message RealtimeV3Request {
+  oneof body {
+    RpcCall rpc = 1;
+    AuthBeginRequest auth_begin = 2;
+    AuthCompleteRequest auth_complete = 3;
+    CreateHttpUploadRequest create_http_upload = 4;
+    FinishHttpUploadRequest finish_http_upload = 5;
+  }
+}
+
+message RealtimeV3Response {
+  oneof body {
+    RpcResult rpc_result = 1;
+    RpcError rpc_error = 2;
+    AuthBeginResult auth_begin = 3;
+    AuthCompleteResult auth_complete = 4;
+    CreateHttpUploadResult create_http_upload = 5;
+    FinishHttpUploadResult finish_http_upload = 6;
+  }
+}
+
+message RealtimeV3Update { ServerMessage message = 1; }
+
+message ClientInfo {
+  optional string device_id = 1;
+  optional string client_type = 2;
+  optional string client_version = 3;
+  optional string os_version = 4;
+  optional string device_name = 5;
+}
+
+message AuthBeginRequest {
+  oneof identifier {
+    string email = 1;
+    string phone_number = 2;
+  }
+  ClientInfo client = 3;
+}
+
+message AuthBeginResult {
+  bytes challenge_id = 1;
+  enum Delivery {
+    DELIVERY_UNSPECIFIED = 0;
+    EMAIL = 1;
+    SMS = 2;
+  }
+  Delivery delivery = 2;
+  int64 expires_at = 3;
+  uint32 retry_after_seconds = 4;
+}
+
+message AuthCompleteRequest {
+  bytes challenge_id = 1;
+  string code = 2;
+  optional string invite_code = 3;
+  optional string time_zone = 4;
+}
+
+message AuthAuthorized {
+  User user = 1;
+  int64 account_session_id = 2;
+}
+
+message AuthInviteRequired {}
+
+message AuthCompleteResult {
+  oneof state {
+    AuthAuthorized authorized = 1;
+    AuthInviteRequired invite_required = 2;
+  }
+}
+
+enum HttpUploadKind {
+  HTTP_UPLOAD_KIND_UNSPECIFIED = 0;
+  PHOTO = 1;
+  VIDEO = 2;
+  DOCUMENT = 3;
+  VOICE = 4;
+}
+
+message CreateHttpUploadRequest {
+  string file_name = 1;
+  string mime_type = 2;
+  uint64 byte_count = 3;
+  bytes sha256 = 4;
+  HttpUploadKind kind = 5;
+}
+
+message CreateHttpUploadResult {
+  bytes upload_id = 1;
+  string upload_url = 2;
+  bytes capability = 3;
+  int64 expires_at = 4;
+}
+
+message FinishHttpUploadRequest { bytes upload_id = 1; }
+
+message HttpUploadPending { uint32 retry_after_seconds = 1; }
+
+message HttpUploadComplete { string file_unique_id = 1; }
+
+message FinishHttpUploadResult {
+  oneof state {
+    HttpUploadPending pending = 1;
+    HttpUploadComplete complete = 2;
+  }
+}
