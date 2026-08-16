@@ -45,6 +45,8 @@ import {
   decodeDestroySession,
   decodeGetFutureSalts,
   decodeMsgsAck,
+  decodeMsgsStateInfo,
+  decodeDetailedMessageInfo,
   decodeRpcResult,
   decodeRpcDropAnswer,
   decodeRpcDropAnswerResult,
@@ -62,6 +64,8 @@ import {
   encodeInvokeAfterMsg,
   encodeInvokeAfterMsgs,
   encodeMsgsAck,
+  encodeMsgsStateInfo,
+  encodeDetailedMessageInfo,
   encodeRpcResult,
   encodeRpcDropAnswer,
   encodeRpcDropAnswerResult,
@@ -520,5 +524,16 @@ describe("reliability service objects", () => {
       waitAfter: 200,
       maximumWait: 300,
     })
+  })
+
+  test("matches Telegram state and detailed-message constructors", () => {
+    expect(decodeMsgsStateInfo(encodeMsgsStateInfo(12n, Uint8Array.of(1, 4, 132)))).toEqual({
+      requestMessageId: 12n,
+      states: Uint8Array.of(1, 4, 132),
+    })
+    const detailed = { messageId: 12n, answerMessageId: 16n, bytes: 64, status: 0 }
+    expect(decodeDetailedMessageInfo(encodeDetailedMessageInfo(detailed))).toEqual(detailed)
+    const unsolicited = { answerMessageId: 20n, bytes: 128, status: 0 }
+    expect(decodeDetailedMessageInfo(encodeDetailedMessageInfo(unsolicited))).toEqual(unsolicited)
   })
 })

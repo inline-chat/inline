@@ -7,6 +7,7 @@ import {
   encodeBadMsgNotification,
   encodeDestroyAuthKey,
   encodeDestroySession,
+  encodeDetailedMessageInfo,
   encodeDhGen,
   encodeGetFutureSalts,
   encodeHttpWait,
@@ -15,6 +16,7 @@ import {
   encodeInlineUpdate,
   encodeMessageContainer,
   encodeMsgsAck,
+  encodeMsgsStateInfo,
   encodePingDelayDisconnect,
   encodeRpcDropAnswer,
   encodeRpcDropAnswerResult,
@@ -131,6 +133,13 @@ const corpus = {
       kind: "dropped", messageId: 16n, sequenceNumber: 3, bytes: 64,
     })),
     httpWaitHex: bytesToHex(encodeHttpWait({ maximumDelay: 100, waitAfter: 200, maximumWait: 300 })),
+    msgsStateInfoHex: bytesToHex(encodeMsgsStateInfo(12n, Uint8Array.of(1, 4, 132))),
+    msgDetailedInfoHex: bytesToHex(encodeDetailedMessageInfo({
+      messageId: 12n, answerMessageId: 16n, bytes: 64, status: 0,
+    })),
+    msgNewDetailedInfoHex: bytesToHex(encodeDetailedMessageInfo({
+      answerMessageId: 20n, bytes: 128, status: 0,
+    })),
   },
 } as const
 

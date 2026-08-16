@@ -283,6 +283,15 @@ export const encodeMsgsStateInfo = (requestMessageId: bigint, states: Uint8Array
   return fixedBody(ServiceConstructor.msgsStateInfo, int64LE(requestMessageId), encodeTlBytes(states))
 }
 
+export const decodeMsgsStateInfo = (body: Uint8Array): { requestMessageId: bigint; states: Uint8Array } => {
+  const reader = readerFor(body, ServiceConstructor.msgsStateInfo)
+  const requestMessageId = reader.readLong()
+  const states = reader.readBytes()
+  reader.expectEnd()
+  if (states.length > MAX_SERVICE_MESSAGE_IDS) throw new RangeError("Too many message states")
+  return { requestMessageId, states }
+}
+
 export const encodeMsgsAllInfo = (messageIds: readonly bigint[], states: Uint8Array): Uint8Array => {
   if (messageIds.length !== states.length || messageIds.length > MAX_SERVICE_MESSAGE_IDS) {
     throw new RangeError("Message-state cardinality mismatch")
@@ -297,6 +306,50 @@ export const decodeMsgsAllInfo = (body: Uint8Array): { messageIds: bigint[]; sta
   reader.expectEnd()
   if (messageIds.length !== states.length) throw new RangeError("Message-state cardinality mismatch")
   return { messageIds, states }
+}
+
+export type DetailedMessageInfo = {
+  messageId?: bigint
+  answerMessageId: bigint
+  bytes: number
+  status: number
+}
+
+export const encodeDetailedMessageInfo = (info: DetailedMessageInfo): Uint8Array => {
+  if (!Number.isSafeInteger(info.bytes) || info.bytes < 0 || info.bytes > MAX_PACKET_BYTES ||
+      !Number.isSafeInteger(info.status) || info.status < 0) {
+    throw new RangeError("Invalid detailed message information")
+  }
+  return info.messageId === undefined
+    ? fixedBody(
+      ServiceConstructor.msgNewDetailedInfo,
+      int64LE(info.answerMessageId),
+      int32LE(info.bytes),
+      int32LE(info.status),
+    )
+    : fixedBody(
+      ServiceConstructor.msgDetailedInfo,
+      int64LE(info.messageId),
+      int64LE(info.answerMessageId),
+      int32LE(info.bytes),
+      int32LE(info.status),
+    )
+}
+
+export const decodeDetailedMessageInfo = (body: Uint8Array): DetailedMessageInfo => {
+  const id = serviceConstructor(body)
+  const reader = readerFor(body, id)
+  let messageId: bigint | undefined
+  if (id === ServiceConstructor.msgDetailedInfo) messageId = reader.readLong()
+  else if (id !== ServiceConstructor.msgNewDetailedInfo) throw new RangeError("Unexpected detailed-message constructor")
+  const answerMessageId = reader.readLong()
+  const bytes = reader.readInt()
+  const status = reader.readInt()
+  reader.expectEnd()
+  if (bytes < 0 || bytes > MAX_PACKET_BYTES || status < 0) {
+    throw new RangeError("Invalid detailed message information")
+  }
+  return { messageId, answerMessageId, bytes, status }
 }
 
 export const encodeBadMsgNotification = (
