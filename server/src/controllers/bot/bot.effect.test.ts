@@ -1466,13 +1466,7 @@ describe("Effect Bot routes", () => {
     )
     expect(
       spec.components.schemas["BotMessageLite"],
-    ).toHaveProperty(
-      "properties.chat.allOf.0.$ref",
-      "#/components/schemas/BotChatBase",
-    )
-    expect(
-      spec.components.schemas["BotChatBase"],
-    ).not.toHaveProperty("properties.parent_message")
+    ).not.toHaveProperty("properties.chat.properties.parent_message")
     expect(
       spec.components.schemas["BotMessage"],
     ).toMatchObject({

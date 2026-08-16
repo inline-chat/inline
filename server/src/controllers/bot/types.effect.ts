@@ -320,7 +320,6 @@ const BotChatBase = Schema.Struct({
     description: "Emoji used as the chat's icon.",
   }),
 }).annotate({
-  identifier: "BotChatBase",
   description:
     "Non-recursive chat fields used inside an embedded message.",
 })
