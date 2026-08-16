@@ -178,6 +178,8 @@ export class RealtimeRpcError extends Error {
         return RealtimeRpcError.BadRequest()
       case "UNAUTHORIZED":
         return RealtimeRpcError.Unauthenticated()
+      case "FLOOD":
+        return RealtimeRpcError.RateLimit()
       case "INTERNAL":
         return RealtimeRpcError.InternalError()
       case "PEER_INVALID":

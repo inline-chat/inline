@@ -80,7 +80,9 @@ public final class ProviderSignInCoordinator: ObservableObject {
         ticket: ticket,
         codeVerifier: codeVerifier
       )
-      await Auth.shared.saveCredentials(token: result.token, userId: result.userId)
+      if let token = result.token {
+        await Auth.shared.saveCredentials(token: token, userId: result.userId)
+      }
       try await AppDatabase.authenticated()
       _ = try await AppDatabase.shared.dbWriter.write { db in
         try result.user.saveFull(db)

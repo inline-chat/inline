@@ -1,4 +1,32 @@
 import Foundation
+import InlineProtocol
+
+public struct InlineProtocolSessionCredentials: Sendable, Codable, Equatable {
+  public var userId: Int64
+  public var accountSessionId: Int64
+  public var permanent: InlineProtocolAuthorization
+  public var temporary: InlineProtocolAuthorization?
+  public var createdAt: Date
+
+  public init(
+    userId: Int64,
+    accountSessionId: Int64,
+    permanent: InlineProtocolAuthorization,
+    temporary: InlineProtocolAuthorization? = nil,
+    createdAt: Date = Date()
+  ) {
+    self.userId = userId
+    self.accountSessionId = accountSessionId
+    self.permanent = permanent
+    self.temporary = temporary
+    self.createdAt = createdAt
+  }
+}
+
+public enum AuthStorageError: Error, Sendable {
+  case encodingFailed
+  case keychainWriteFailed
+}
 
 public struct AuthCredentials: Sendable, Codable, Equatable {
   public var userId: Int64
@@ -24,14 +52,20 @@ public enum AuthStatus: Sendable, Equatable {
   case reauthRequired(userIdHint: Int64?)
   /// Credentials are present and usable.
   case authenticated(AuthCredentials)
+  /// V3-native account session authenticated by a permanent Inline Protocol authorization key.
+  case authenticatedV3(userId: Int64)
 
   public var isAuthenticated: Bool {
-    if case .authenticated = self { true } else { false }
+    switch self {
+    case .authenticated, .authenticatedV3: true
+    default: false
+    }
   }
 
   public var userId: Int64? {
     switch self {
     case .authenticated(let c): c.userId
+    case .authenticatedV3(let userId): userId
     case .locked(let hint): hint
     case .reauthRequired(let hint): hint
     case .hydrating, .unauthenticated: nil
@@ -41,7 +75,7 @@ public enum AuthStatus: Sendable, Equatable {
   public var token: String? {
     switch self {
     case .authenticated(let c): c.token
-    case .hydrating, .unauthenticated, .locked, .reauthRequired: nil
+    case .hydrating, .unauthenticated, .locked, .reauthRequired, .authenticatedV3: nil
     }
   }
 }
@@ -49,17 +83,24 @@ public enum AuthStatus: Sendable, Equatable {
 public struct AuthSnapshot: Sendable, Equatable {
   public var status: AuthStatus
   public var didHydrate: Bool
+  public var inlineProtocol: InlineProtocolSessionCredentials?
 
-  public init(status: AuthStatus, didHydrate: Bool) {
+  public init(
+    status: AuthStatus,
+    didHydrate: Bool,
+    inlineProtocol: InlineProtocolSessionCredentials? = nil
+  ) {
     self.status = status
     self.didHydrate = didHydrate
+    self.inlineProtocol = inlineProtocol
   }
 
   public var isLoggedIn: Bool { status.isAuthenticated }
   public var currentUserId: Int64? {
     switch status {
     case .authenticated(let c): c.userId
-    default: nil
+    case .authenticatedV3(let userId): userId
+    default: inlineProtocol?.userId
     }
   }
   public var token: String? { status.token }
@@ -67,6 +108,7 @@ public struct AuthSnapshot: Sendable, Equatable {
 
 public enum AuthEvent: Sendable, Equatable {
   case login(userId: Int64, token: String)
+  case loginV3(userId: Int64)
   case logout
 }
 
@@ -88,8 +130,15 @@ public struct AuthHandle: Sendable {
   public func token() -> String? { cache.snapshot().token }
   public func userId() -> Int64? { cache.snapshot().currentUserId }
   public func isLoggedIn() -> Bool { cache.snapshot().isLoggedIn }
+  public func inlineProtocolCredentials() -> InlineProtocolSessionCredentials? {
+    cache.snapshot().inlineProtocol
+  }
 
   public func refreshFromStorage() async {
     await store.refreshFromStorage()
+  }
+
+  public func saveInlineProtocolCredentials(_ credentials: InlineProtocolSessionCredentials) async throws {
+    try await store.saveInlineProtocolCredentials(credentials)
   }
 }

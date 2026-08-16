@@ -170,6 +170,7 @@ let package = Package(
       name: "Auth",
       dependencies: [
         "InlineConfig",
+        "InlineProtocol",
         "Logger",
       ],
       swiftSettings: swiftSettings

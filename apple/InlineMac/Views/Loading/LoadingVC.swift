@@ -22,7 +22,7 @@ private struct LoadingView: View {
       "Unlocking..."
     case .hydrating:
       "Loading..."
-    case .authenticated, .unauthenticated, .reauthRequired:
+    case .authenticated, .authenticatedV3, .unauthenticated, .reauthRequired:
       "Loading..."
     }
   }
@@ -38,4 +38,3 @@ private struct LoadingView: View {
     .background(Color.clear)
   }
 }
-

@@ -166,6 +166,101 @@ struct SecureTransportTests {
     ) == serialized)
   }
 
+  @Test("matches the frozen cross-language permanent client handshake")
+  func clientHandshakeTranscript() throws {
+    let root = try #require(JSONSerialization.jsonObject(with: InlineProtocolVectors.v1JSON()) as? [String: Any])
+    let transcripts = try #require(root["handshakeTranscripts"] as? [String: Any])
+    let transcript = try #require(transcripts["permanent"] as? [String: Any])
+    let calls = try #require(transcript["clientRandomCalls"] as? [[String: Any]])
+    let random = DeterministicHandshakeRandom(calls: try calls.map {
+      bytes(try #require($0["hex"] as? String))
+    })
+    let fingerprintString = try #require(transcript["rsaFingerprint"] as? String)
+    let fingerprint = try #require(Int64(fingerprintString))
+    let key = try InlineProtocolRSAPublicKey(
+      modulus: bytes(try #require(transcript["rsaModulusHex"] as? String)),
+      exponent: bytes(try #require(transcript["rsaExponentHex"] as? String)),
+      fingerprint: fingerprint
+    )
+    let requests = try #require(transcript["requestHex"] as? [String])
+    let responses = try #require(transcript["responseHex"] as? [String])
+    let client = InlineHandshakeClient(rsaKeys: [key], randomBytes: random.bytes)
+    #expect(try client.begin(temporary: false).hex == requests[0])
+    for index in 0..<2 {
+      let transition = try client.receive(bytes(responses[index]))
+      guard case let .request(request) = transition else {
+        Issue.record("handshake completed early")
+        return
+      }
+      #expect(request.hex == requests[index + 1])
+    }
+    let transition = try client.receive(bytes(responses[2]))
+    guard case let .established(authorization, _) = transition else {
+      Issue.record("handshake did not complete")
+      return
+    }
+    #expect(authorization.key.hex == transcript["authKeyHex"] as? String)
+    #expect(authorization.keyID.hex == transcript["authKeyIdHex"] as? String)
+    #expect(String(authorization.serverSalt) == transcript["serverSalt"] as? String)
+    #expect(!authorization.temporary)
+  }
+
+  @Test("completes the opt-in local V3 login, bind, RPC, and reconnect flow")
+  func localV3Integration() async throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard let ringPath = environment["INLINE_V3_PUBLIC_RING"],
+          let urlString = environment["INLINE_V3_URL"],
+          let url = URL(string: urlString),
+          let email = environment["DEMO_EMAIL"],
+          let code = environment["DEMO_CODE"]
+    else { return }
+    let keys = try InlineProtocolTrustRoots.decodeRing(Data(contentsOf: URL(fileURLWithPath: ringPath)))
+    let permanentConnection = try await InlineProtocolV3Connection.connect(.init(
+      url: url,
+      rsaPublicKeys: keys
+    ))
+    var begin = AuthBeginRequest()
+    begin.identifier = .email(email)
+    let challenge = try await permanentConnection.authBegin(begin)
+    var complete = AuthCompleteRequest()
+    complete.challengeID = challenge.challengeID
+    complete.code = code
+    let completed = try await permanentConnection.authComplete(complete)
+    guard case let .authorized(authorized) = completed.state else {
+      Issue.record("local V3 login was not authorized")
+      return
+    }
+    let permanent = await permanentConnection.authorization
+
+    let temporaryConnection = try await InlineProtocolV3Connection.connect(.init(
+      url: url,
+      rsaPublicKeys: keys,
+      temporary: true
+    ))
+    try await temporaryConnection.bindTemporary(to: permanent)
+    let temporary = await temporaryConnection.authorization
+    let first = try await temporaryConnection.callRPC(getMeCall())
+    guard case let .getMe(me) = first.result else {
+      Issue.record("local V3 getMe returned an unexpected result")
+      return
+    }
+    #expect(me.user.id == authorized.user.id)
+    await temporaryConnection.close()
+    await permanentConnection.close()
+
+    let reconnected = try await InlineProtocolV3Connection.connect(.reconnect(
+      url: url,
+      authorization: temporary
+    ))
+    let second = try await reconnected.callRPC(getMeCall())
+    guard case let .getMe(meAfterReconnect) = second.result else {
+      Issue.record("local V3 reconnect getMe returned an unexpected result")
+      return
+    }
+    #expect(meAfterReconnect.user.id == authorized.user.id)
+    await reconnected.close()
+  }
+
   #if !DEBUG
   @Test("accepts an unfamiliar Telegram-valid safe prime with all 64 rounds")
   func unfamiliarSafePrime() throws {
@@ -186,6 +281,31 @@ struct SecureTransportTests {
     }
   }
   #endif
+}
+
+private func getMeCall() -> RpcCall {
+  var call = RpcCall()
+  call.method = .getMe
+  call.input = .getMe(GetMeInput())
+  return call
+}
+
+private final class DeterministicHandshakeRandom: @unchecked Sendable {
+  private let lock = NSLock()
+  private var calls: [[UInt8]]
+
+  init(calls: [[UInt8]]) {
+    self.calls = calls
+  }
+
+  func bytes(count: Int) throws -> [UInt8] {
+    try lock.withLock {
+      guard !calls.isEmpty else { throw InlineProtocolError.invalidInput }
+      let value = calls.removeFirst()
+      guard value.count == count else { throw InlineProtocolError.invalidInput }
+      return value
+    }
+  }
 }
 
 private extension [UInt8] {

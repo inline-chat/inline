@@ -121,7 +121,9 @@ struct OnboardingEnterCode: View {
         }
 
         // Save creds
-        await Auth.shared.saveCredentials(token: result.token, userId: result.userId)
+        if let token = result.token {
+          await Auth.shared.saveCredentials(token: token, userId: result.userId)
+        }
 
         // Register Sentry
         Analytics.identify(

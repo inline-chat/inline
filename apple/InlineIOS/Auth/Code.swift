@@ -102,7 +102,9 @@ extension Code {
           inviteCode: inviteCode
         )
 
-        await auth.saveCredentials(token: result.token, userId: result.userId)
+        if let token = result.token {
+          await auth.saveCredentials(token: token, userId: result.userId)
+        }
 
         do {
           try await AppDatabase.authenticated()

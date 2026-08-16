@@ -114,12 +114,19 @@ public final class Auth: ObservableObject, @unchecked Sendable {
   public func getIsLoggedIn() -> Bool { cache.snapshot().isLoggedIn }
   public func getCurrentUserId() -> Int64? { cache.snapshot().currentUserId }
   public func getStatus() -> AuthStatus { cache.snapshot().status }
+  public func getInlineProtocolCredentials() -> InlineProtocolSessionCredentials? {
+    cache.snapshot().inlineProtocol
+  }
 
   // MARK: - Mutations
 
   public func saveCredentials(token: String, userId: Int64) async {
     log.info("AUTH2 saveCredentials called userId=\(userId)")
     await store.saveCredentials(token: token, userId: userId)
+  }
+
+  public func saveInlineProtocolCredentials(_ credentials: InlineProtocolSessionCredentials) async throws {
+    try await store.saveInlineProtocolCredentials(credentials)
   }
 
   public func logOut() async {

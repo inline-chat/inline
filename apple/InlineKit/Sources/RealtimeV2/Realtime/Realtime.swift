@@ -106,7 +106,7 @@ public actor RealtimeV2 {
     session = ProtocolSession(transport: transport, auth: auth)
     let initialConstraints = ConnectionConstraints(
       // Realtime handshake requires a token; userId alone is not enough.
-      authAvailable: auth.token() != nil,
+      authAvailable: auth.snapshot().isLoggedIn,
       networkAvailable: true,
       appActive: true,
       userWantsConnection: true
@@ -166,7 +166,7 @@ public actor RealtimeV2 {
     await session.start()
     await connectionManager.start()
     authAdapter?.start()
-    if auth.token() != nil {
+    if auth.snapshot().isLoggedIn {
       await connectionManager.setAuthAvailable(true)
       await connectionManager.connectNow()
     }
@@ -420,7 +420,7 @@ public actor RealtimeV2 {
   /// Ensure the transport is started when credentials are available.
   /// This is intentionally light-weight so callers can pre-warm the connection without using transactions.
   public func connectIfNeeded() async {
-    if auth.token() != nil {
+    if auth.snapshot().isLoggedIn {
       await connectionManager.setAuthAvailable(true)
       await startTransport()
     }
@@ -1330,7 +1330,7 @@ public actor RealtimeV2 {
       return true
     case .authenticated(let credentials):
       return credentials.token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    case .hydrating, .unauthenticated, .locked:
+    case .hydrating, .unauthenticated, .locked, .authenticatedV3:
       return false
     }
   }

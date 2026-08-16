@@ -120,6 +120,7 @@ actor AuthStore {
 
   private static let legacyTokenKey = "token"
   private static let credentialsV2Key = "credentials_v2"
+  private static let inlineProtocolCredentialsKey = "inline_protocol_credentials_v1"
 
   private let primaryKeychain: KeychainStore
   private let fallbackKeychain: KeychainStore?
@@ -174,6 +175,9 @@ actor AuthStore {
       // Migrate legacy macOS keychain items (no access-group) to the primary access group.
       Self.migrateKeyIfFoundInFallback(Self.legacyTokenKey, primary: primaryKeychain, fallback: fallback)
       Self.migrateKeyIfFoundInFallback(Self.credentialsV2Key, primary: primaryKeychain, fallback: fallback)
+      Self.migrateKeyIfFoundInFallback(
+        Self.inlineProtocolCredentialsKey, primary: primaryKeychain, fallback: fallback
+      )
     }
 
     if case .locked = initial.status {
@@ -207,7 +211,11 @@ actor AuthStore {
       UserDefaults.standard.set(NSNumber(value: userId), forKey: userDefaultsKey)
 
       log.info("AUTH2_SAVE mocked userId=\(userId)")
-      await update(AuthSnapshot(status: .authenticated(record), didHydrate: true))
+      await update(AuthSnapshot(
+        status: .authenticated(record),
+        didHydrate: true,
+        inlineProtocol: cache.snapshot().inlineProtocol
+      ))
       return
     }
 
@@ -280,14 +288,60 @@ actor AuthStore {
         " v2Fallback=\(v2SavedFallback ? 1 : 0) v2FallbackStatus=\(v2FallbackStatus)"
     )
 
-    let snapshot = AuthSnapshot(status: .authenticated(record), didHydrate: true)
+    let snapshot = AuthSnapshot(
+      status: .authenticated(record),
+      didHydrate: true,
+      inlineProtocol: cache.snapshot().inlineProtocol
+    )
     await update(snapshot)
+  }
+
+  func saveInlineProtocolCredentials(_ credentials: InlineProtocolSessionCredentials) async throws {
+    let data: Data
+    do {
+      data = try JSONEncoder().encode(credentials)
+    } catch {
+      throw AuthStorageError.encodingFailed
+    }
+    let saved: Bool
+    if mocked {
+      AuthKeychainConfig.mockSet(data, forKey: Self.inlineProtocolCredentialsKey, namespace: namespace)
+      saved = true
+    } else {
+      let primarySaved = primaryKeychain.set(
+        data,
+        forKey: Self.inlineProtocolCredentialsKey,
+        withAccess: .accessibleAfterFirstUnlock
+      )
+      let fallbackSaved = if !primarySaved, let fallbackKeychain {
+        fallbackKeychain.set(
+          data,
+          forKey: Self.inlineProtocolCredentialsKey,
+          withAccess: .accessibleAfterFirstUnlock
+        )
+      } else { false }
+      saved = primarySaved || fallbackSaved
+    }
+    guard saved else { throw AuthStorageError.keychainWriteFailed }
+    UserDefaults.standard.set(NSNumber(value: credentials.userId), forKey: userDefaultsKey)
+    let current = cache.snapshot()
+    let status: AuthStatus = if case .authenticated = current.status {
+      current.status
+    } else {
+      .authenticatedV3(userId: credentials.userId)
+    }
+    await update(AuthSnapshot(
+      status: status,
+      didHydrate: true,
+      inlineProtocol: credentials
+    ))
   }
 
   func logOut() async {
     if mocked {
       AuthKeychainConfig.mockDelete(Self.legacyTokenKey, namespace: namespace)
       AuthKeychainConfig.mockDelete(Self.credentialsV2Key, namespace: namespace)
+      AuthKeychainConfig.mockDelete(Self.inlineProtocolCredentialsKey, namespace: namespace)
       UserDefaults.standard.removeObject(forKey: userDefaultsKey)
 
       log.info("AUTH2_LOGOUT mocked")
@@ -297,9 +351,11 @@ actor AuthStore {
 
     _ = primaryKeychain.delete(Self.legacyTokenKey)
     _ = primaryKeychain.delete(Self.credentialsV2Key)
+    _ = primaryKeychain.delete(Self.inlineProtocolCredentialsKey)
     if let fallbackKeychain {
       _ = fallbackKeychain.delete(Self.legacyTokenKey)
       _ = fallbackKeychain.delete(Self.credentialsV2Key)
+      _ = fallbackKeychain.delete(Self.inlineProtocolCredentialsKey)
     }
     UserDefaults.standard.removeObject(forKey: userDefaultsKey)
 
@@ -405,6 +461,8 @@ actor AuthStore {
     case (false, true):
       if case let .authenticated(credentials) = snapshot.status {
         eventBroadcaster.yield(.login(userId: credentials.userId, token: credentials.token))
+      } else if case let .authenticatedV3(userId) = snapshot.status {
+        eventBroadcaster.yield(.loginV3(userId: userId))
       }
     case (true, false):
       eventBroadcaster.yield(.logout)
@@ -483,6 +541,21 @@ actor AuthStore {
     namespace: String?
   ) -> AuthSnapshot {
     let userIdHint = readUserId(key: userDefaultsKey)
+    let inlineProtocolOutcome: KeychainReadOutcome<Data> = if mocked {
+      if let data = AuthKeychainConfig.mockGetData(inlineProtocolCredentialsKey, namespace: namespace) {
+        .success(data, usedFallback: false)
+      } else {
+        .notFound(status: errSecItemNotFound)
+      }
+    } else {
+      AuthKeychainConfig.readData(
+        inlineProtocolCredentialsKey, primary: primaryKeychain, fallback: fallbackKeychain
+      )
+    }
+    let inlineProtocol: InlineProtocolSessionCredentials? = switch inlineProtocolOutcome {
+    case .success(let data, _): try? JSONDecoder().decode(InlineProtocolSessionCredentials.self, from: data)
+    case .notFound, .interactionNotAllowed, .error: nil
+    }
 
     // 1) Try v2 record first.
     let credentialsOutcome: KeychainReadOutcome<Data> = if mocked {
@@ -499,13 +572,13 @@ actor AuthStore {
     case .success(let data, _):
       if let creds = try? JSONDecoder().decode(AuthCredentials.self, from: data) {
         UserDefaults.standard.set(NSNumber(value: creds.userId), forKey: userDefaultsKey)
-        return AuthSnapshot(status: .authenticated(creds), didHydrate: true)
+        return AuthSnapshot(status: .authenticated(creds), didHydrate: true, inlineProtocol: inlineProtocol)
       }
       // Corrupt record; fall back to legacy pieces.
 
     case .interactionNotAllowed:
       // Keychain is currently unavailable (e.g. iOS before first unlock).
-      return AuthSnapshot(status: .locked(userIdHint: userIdHint), didHydrate: true)
+      return AuthSnapshot(status: .locked(userIdHint: userIdHint), didHydrate: true, inlineProtocol: inlineProtocol)
 
     case .notFound, .error:
       break
@@ -536,7 +609,20 @@ actor AuthStore {
     }
 
     if let token, let userId {
-      return AuthSnapshot(status: .authenticated(AuthCredentials(userId: userId, token: token)), didHydrate: true)
+      return AuthSnapshot(
+        status: .authenticated(AuthCredentials(userId: userId, token: token)),
+        didHydrate: true,
+        inlineProtocol: inlineProtocol
+      )
+    }
+
+    if let inlineProtocol {
+      UserDefaults.standard.set(NSNumber(value: inlineProtocol.userId), forKey: userDefaultsKey)
+      return AuthSnapshot(
+        status: .authenticatedV3(userId: inlineProtocol.userId),
+        didHydrate: true,
+        inlineProtocol: inlineProtocol
+      )
     }
 
     if userId != nil, token == nil {
@@ -585,6 +671,7 @@ actor AuthStore {
     case .locked: "locked"
     case .reauthRequired: "reauth_required"
     case .authenticated: "authenticated"
+    case .authenticatedV3: "authenticated_v3"
     }
   }
 }

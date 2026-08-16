@@ -10,7 +10,7 @@ enum TopLevelRoute {
 
   static func initial(for status: AuthStatus) -> TopLevelRoute {
     switch status {
-    case .authenticated:
+    case .authenticated, .authenticatedV3:
       return .main
     case .unauthenticated, .reauthRequired:
       return .onboarding
@@ -65,7 +65,7 @@ class MainWindowViewModel: ObservableObject {
       case .hydrating, .locked:
         break
 
-      case .authenticated:
+      case .authenticated, .authenticatedV3:
         transitionTask?.cancel()
         transitionTask = Task { @MainActor [weak self] in
           _ = await AppDatabase.promoteSharedToPersistentIfPossible()
@@ -89,7 +89,7 @@ class MainWindowViewModel: ObservableObject {
         transitionTask?.cancel()
         transitionTask = nil
         topLevelRoute = .onboarding
-      case .authenticated, .hydrating, .locked:
+      case .authenticated, .authenticatedV3, .hydrating, .locked:
         break
       }
 

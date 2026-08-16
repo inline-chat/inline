@@ -51,7 +51,10 @@ struct StubSyncStorage: SyncStorage {
 public enum Api {
   public static let realtime: RealtimeV2 = {
     let realtime = RealtimeV2(
-      transport: WebSocketTransport2(),
+      transport: NegotiatingRealtimeTransport(
+        auth: Auth.shared.handle,
+        rsaPublicKeys: InlineProtocolTrustRoots.production
+      ),
       auth: Auth.shared.handle,
       applyUpdates: InlineApplyUpdates(),
       syncStorage: GRDBSyncStorage(),

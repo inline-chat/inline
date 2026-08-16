@@ -33,21 +33,24 @@ final class AuthConnectionAdapter {
     // Subscribe before sampling the baseline or scheduling observation. The stream buffers any
     // logout/login transitions that occur before the task gets an opportunity to run.
     let snapshots = auth.snapshots
-    let initialToken = auth.token()
-    let initialAuthAvailable = initialToken != nil
+    let initial = auth.snapshot()
+    let initialToken = initial.token
+    let initialProtocol = initial.inlineProtocol
+    let initialAuthAvailable = initial.isLoggedIn
     log.info("Realtime auth observer started baseline_available=\(initialAuthAvailable ? 1 : 0)")
     task = Task {
       var authAvailable = initialAuthAvailable
       var appliedToken = initialToken
+      var appliedProtocol = initialProtocol
       var sequence: UInt64 = 0
 
       for await snapshot in snapshots {
         guard !Task.isCancelled else { return }
         sequence = sequence &+ 1
         observationProbe.recordObserved(snapshot)
-        let nextAuthAvailable = snapshot.token != nil
+        let nextAuthAvailable = snapshot.isLoggedIn
         let changed = nextAuthAvailable != authAvailable
-        let tokenChanged = snapshot.token != appliedToken
+        let tokenChanged = snapshot.token != appliedToken || snapshot.inlineProtocol != appliedProtocol
         log.info(
           "Realtime auth observer received snapshot sequence=\(sequence)" +
             " status=\(diagnosticName(for: snapshot.status))" +
@@ -71,6 +74,7 @@ final class AuthConnectionAdapter {
         }
         authAvailable = nextAuthAvailable
         appliedToken = snapshot.token
+        appliedProtocol = snapshot.inlineProtocol
         observationProbe.recordApplied(snapshot)
         log.info(
           "Realtime auth observer queued transition sequence=\(sequence)" +
@@ -212,6 +216,7 @@ private func diagnosticName(for status: AuthStatus) -> String {
   case .locked: "locked"
   case .reauthRequired: "reauth_required"
   case .authenticated: "authenticated"
+  case .authenticatedV3: "authenticated_v3"
   }
 }
 

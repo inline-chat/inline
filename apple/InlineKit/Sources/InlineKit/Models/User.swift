@@ -35,6 +35,27 @@ public struct ApiUser: Codable, Hashable, Sendable {
   }
 }
 
+public extension ApiUser {
+  init(from user: InlineProtocol.User) {
+    self.init(
+      id: user.id,
+      email: user.hasEmail ? user.email : nil,
+      firstName: user.hasFirstName ? user.firstName : nil,
+      lastName: user.hasLastName ? user.lastName : nil,
+      bio: user.hasBio ? user.bio : nil,
+      online: user.hasStatus ? user.status.online == .online : nil,
+      pendingSetup: user.hasPendingSetup ? user.pendingSetup : nil,
+      phoneNumber: user.hasPhoneNumber ? user.phoneNumber : nil,
+      lastOnline: user.hasStatus && user.status.hasLastOnline ? Int(user.status.lastOnline.date) : nil,
+      date: Int(Date().timeIntervalSince1970),
+      username: user.hasUsername ? user.username : nil,
+      photo: nil,
+      timeZone: user.hasTimeZone ? user.timeZone : nil,
+      bot: user.hasBot ? user.bot : false
+    )
+  }
+}
+
 public struct User: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable,
   Equatable
 {

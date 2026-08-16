@@ -1028,6 +1028,52 @@ public nonisolated enum ConnectorProvider: SwiftProtobuf.Enum, Swift.CaseIterabl
 
 }
 
+public nonisolated enum HttpUploadKind: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case photo // = 1
+  case video // = 2
+  case document // = 3
+  case voice // = 4
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .photo
+    case 2: self = .video
+    case 3: self = .document
+    case 4: self = .voice
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .photo: return 1
+    case .video: return 2
+    case .document: return 3
+    case .voice: return 4
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [HttpUploadKind] = [
+    .unspecified,
+    .photo,
+    .video,
+    .document,
+    .voice,
+  ]
+
+}
+
 public nonisolated struct ClientMessage: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -15291,6 +15337,530 @@ public nonisolated struct BotChatSettingsItemInvoked: Sendable {
   fileprivate var _value: BotChatSettingsValue? = nil
 }
 
+public nonisolated struct RealtimeV3Request: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var body: RealtimeV3Request.OneOf_Body? = nil
+
+  public var rpc: RpcCall {
+    get {
+      if case .rpc(let v)? = body {return v}
+      return RpcCall()
+    }
+    set {body = .rpc(newValue)}
+  }
+
+  public var authBegin: AuthBeginRequest {
+    get {
+      if case .authBegin(let v)? = body {return v}
+      return AuthBeginRequest()
+    }
+    set {body = .authBegin(newValue)}
+  }
+
+  public var authComplete: AuthCompleteRequest {
+    get {
+      if case .authComplete(let v)? = body {return v}
+      return AuthCompleteRequest()
+    }
+    set {body = .authComplete(newValue)}
+  }
+
+  public var createHTTPUpload: CreateHttpUploadRequest {
+    get {
+      if case .createHTTPUpload(let v)? = body {return v}
+      return CreateHttpUploadRequest()
+    }
+    set {body = .createHTTPUpload(newValue)}
+  }
+
+  public var finishHTTPUpload: FinishHttpUploadRequest {
+    get {
+      if case .finishHTTPUpload(let v)? = body {return v}
+      return FinishHttpUploadRequest()
+    }
+    set {body = .finishHTTPUpload(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum OneOf_Body: Equatable, Sendable {
+    case rpc(RpcCall)
+    case authBegin(AuthBeginRequest)
+    case authComplete(AuthCompleteRequest)
+    case createHTTPUpload(CreateHttpUploadRequest)
+    case finishHTTPUpload(FinishHttpUploadRequest)
+
+  }
+
+  public init() {}
+}
+
+public nonisolated struct RealtimeV3Response: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var body: RealtimeV3Response.OneOf_Body? = nil
+
+  public var rpcResult: RpcResult {
+    get {
+      if case .rpcResult(let v)? = body {return v}
+      return RpcResult()
+    }
+    set {body = .rpcResult(newValue)}
+  }
+
+  public var rpcError: RpcError {
+    get {
+      if case .rpcError(let v)? = body {return v}
+      return RpcError()
+    }
+    set {body = .rpcError(newValue)}
+  }
+
+  public var authBegin: AuthBeginResult {
+    get {
+      if case .authBegin(let v)? = body {return v}
+      return AuthBeginResult()
+    }
+    set {body = .authBegin(newValue)}
+  }
+
+  public var authComplete: AuthCompleteResult {
+    get {
+      if case .authComplete(let v)? = body {return v}
+      return AuthCompleteResult()
+    }
+    set {body = .authComplete(newValue)}
+  }
+
+  public var createHTTPUpload: CreateHttpUploadResult {
+    get {
+      if case .createHTTPUpload(let v)? = body {return v}
+      return CreateHttpUploadResult()
+    }
+    set {body = .createHTTPUpload(newValue)}
+  }
+
+  public var finishHTTPUpload: FinishHttpUploadResult {
+    get {
+      if case .finishHTTPUpload(let v)? = body {return v}
+      return FinishHttpUploadResult()
+    }
+    set {body = .finishHTTPUpload(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum OneOf_Body: Equatable, Sendable {
+    case rpcResult(RpcResult)
+    case rpcError(RpcError)
+    case authBegin(AuthBeginResult)
+    case authComplete(AuthCompleteResult)
+    case createHTTPUpload(CreateHttpUploadResult)
+    case finishHTTPUpload(FinishHttpUploadResult)
+
+  }
+
+  public init() {}
+}
+
+public nonisolated struct RealtimeV3Update: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var message: ServerMessage {
+    get {_message ?? ServerMessage()}
+    set {_message = newValue}
+  }
+  /// Returns true if `message` has been explicitly set.
+  public var hasMessage: Bool {self._message != nil}
+  /// Clears the value of `message`. Subsequent reads from it will return its default value.
+  public mutating func clearMessage() {self._message = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _message: ServerMessage? = nil
+}
+
+public nonisolated struct ClientInfo: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var deviceID: String {
+    get {_deviceID ?? String()}
+    set {_deviceID = newValue}
+  }
+  /// Returns true if `deviceID` has been explicitly set.
+  public var hasDeviceID: Bool {self._deviceID != nil}
+  /// Clears the value of `deviceID`. Subsequent reads from it will return its default value.
+  public mutating func clearDeviceID() {self._deviceID = nil}
+
+  public var clientType: String {
+    get {_clientType ?? String()}
+    set {_clientType = newValue}
+  }
+  /// Returns true if `clientType` has been explicitly set.
+  public var hasClientType: Bool {self._clientType != nil}
+  /// Clears the value of `clientType`. Subsequent reads from it will return its default value.
+  public mutating func clearClientType() {self._clientType = nil}
+
+  public var clientVersion: String {
+    get {_clientVersion ?? String()}
+    set {_clientVersion = newValue}
+  }
+  /// Returns true if `clientVersion` has been explicitly set.
+  public var hasClientVersion: Bool {self._clientVersion != nil}
+  /// Clears the value of `clientVersion`. Subsequent reads from it will return its default value.
+  public mutating func clearClientVersion() {self._clientVersion = nil}
+
+  public var osVersion: String {
+    get {_osVersion ?? String()}
+    set {_osVersion = newValue}
+  }
+  /// Returns true if `osVersion` has been explicitly set.
+  public var hasOsVersion: Bool {self._osVersion != nil}
+  /// Clears the value of `osVersion`. Subsequent reads from it will return its default value.
+  public mutating func clearOsVersion() {self._osVersion = nil}
+
+  public var deviceName: String {
+    get {_deviceName ?? String()}
+    set {_deviceName = newValue}
+  }
+  /// Returns true if `deviceName` has been explicitly set.
+  public var hasDeviceName: Bool {self._deviceName != nil}
+  /// Clears the value of `deviceName`. Subsequent reads from it will return its default value.
+  public mutating func clearDeviceName() {self._deviceName = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _deviceID: String? = nil
+  fileprivate var _clientType: String? = nil
+  fileprivate var _clientVersion: String? = nil
+  fileprivate var _osVersion: String? = nil
+  fileprivate var _deviceName: String? = nil
+}
+
+public nonisolated struct AuthBeginRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var identifier: AuthBeginRequest.OneOf_Identifier? = nil
+
+  public var email: String {
+    get {
+      if case .email(let v)? = identifier {return v}
+      return String()
+    }
+    set {identifier = .email(newValue)}
+  }
+
+  public var phoneNumber: String {
+    get {
+      if case .phoneNumber(let v)? = identifier {return v}
+      return String()
+    }
+    set {identifier = .phoneNumber(newValue)}
+  }
+
+  public var client: ClientInfo {
+    get {_client ?? ClientInfo()}
+    set {_client = newValue}
+  }
+  /// Returns true if `client` has been explicitly set.
+  public var hasClient: Bool {self._client != nil}
+  /// Clears the value of `client`. Subsequent reads from it will return its default value.
+  public mutating func clearClient() {self._client = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum OneOf_Identifier: Equatable, Sendable {
+    case email(String)
+    case phoneNumber(String)
+
+  }
+
+  public init() {}
+
+  fileprivate var _client: ClientInfo? = nil
+}
+
+public nonisolated struct AuthBeginResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var challengeID: Data = Data()
+
+  public var delivery: AuthBeginResult.Delivery = .unspecified
+
+  public var expiresAt: Int64 = 0
+
+  public var retryAfterSeconds: UInt32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum Delivery: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case unspecified // = 0
+    case email // = 1
+    case sms // = 2
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .unspecified
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .unspecified
+      case 1: self = .email
+      case 2: self = .sms
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .unspecified: return 0
+      case .email: return 1
+      case .sms: return 2
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [AuthBeginResult.Delivery] = [
+      .unspecified,
+      .email,
+      .sms,
+    ]
+
+  }
+
+  public init() {}
+}
+
+public nonisolated struct AuthCompleteRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var challengeID: Data = Data()
+
+  public var code: String = String()
+
+  public var inviteCode: String {
+    get {_inviteCode ?? String()}
+    set {_inviteCode = newValue}
+  }
+  /// Returns true if `inviteCode` has been explicitly set.
+  public var hasInviteCode: Bool {self._inviteCode != nil}
+  /// Clears the value of `inviteCode`. Subsequent reads from it will return its default value.
+  public mutating func clearInviteCode() {self._inviteCode = nil}
+
+  public var timeZone: String {
+    get {_timeZone ?? String()}
+    set {_timeZone = newValue}
+  }
+  /// Returns true if `timeZone` has been explicitly set.
+  public var hasTimeZone: Bool {self._timeZone != nil}
+  /// Clears the value of `timeZone`. Subsequent reads from it will return its default value.
+  public mutating func clearTimeZone() {self._timeZone = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _inviteCode: String? = nil
+  fileprivate var _timeZone: String? = nil
+}
+
+public nonisolated struct AuthAuthorized: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var user: User {
+    get {_user ?? User()}
+    set {_user = newValue}
+  }
+  /// Returns true if `user` has been explicitly set.
+  public var hasUser: Bool {self._user != nil}
+  /// Clears the value of `user`. Subsequent reads from it will return its default value.
+  public mutating func clearUser() {self._user = nil}
+
+  public var accountSessionID: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _user: User? = nil
+}
+
+public nonisolated struct AuthInviteRequired: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct AuthCompleteResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var state: AuthCompleteResult.OneOf_State? = nil
+
+  public var authorized: AuthAuthorized {
+    get {
+      if case .authorized(let v)? = state {return v}
+      return AuthAuthorized()
+    }
+    set {state = .authorized(newValue)}
+  }
+
+  public var inviteRequired: AuthInviteRequired {
+    get {
+      if case .inviteRequired(let v)? = state {return v}
+      return AuthInviteRequired()
+    }
+    set {state = .inviteRequired(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum OneOf_State: Equatable, Sendable {
+    case authorized(AuthAuthorized)
+    case inviteRequired(AuthInviteRequired)
+
+  }
+
+  public init() {}
+}
+
+public nonisolated struct CreateHttpUploadRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var fileName: String = String()
+
+  public var mimeType: String = String()
+
+  public var byteCount: UInt64 = 0
+
+  public var sha256: Data = Data()
+
+  public var kind: HttpUploadKind = .unspecified
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct CreateHttpUploadResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var uploadID: Data = Data()
+
+  public var uploadURL: String = String()
+
+  public var capability: Data = Data()
+
+  public var expiresAt: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct FinishHttpUploadRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var uploadID: Data = Data()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct HttpUploadPending: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var retryAfterSeconds: UInt32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct HttpUploadComplete: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var fileUniqueID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct FinishHttpUploadResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var state: FinishHttpUploadResult.OneOf_State? = nil
+
+  public var pending: HttpUploadPending {
+    get {
+      if case .pending(let v)? = state {return v}
+      return HttpUploadPending()
+    }
+    set {state = .pending(newValue)}
+  }
+
+  public var complete: HttpUploadComplete {
+    get {
+      if case .complete(let v)? = state {return v}
+      return HttpUploadComplete()
+    }
+    set {state = .complete(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum OneOf_State: Equatable, Sendable {
+    case pending(HttpUploadPending)
+    case complete(HttpUploadComplete)
+
+  }
+
+  public init() {}
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension DialogFollowMode: SwiftProtobuf._ProtoNameProviding {
@@ -15347,6 +15917,10 @@ nonisolated extension ExternalResourceKind: SwiftProtobuf._ProtoNameProviding {
 
 nonisolated extension ConnectorProvider: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0CONNECTOR_PROVIDER_UNSPECIFIED\0\u{1}CONNECTOR_PROVIDER_NOTION\0\u{1}CONNECTOR_PROVIDER_LINEAR\0\u{1}CONNECTOR_PROVIDER_GITHUB\0")
+}
+
+nonisolated extension HttpUploadKind: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0HTTP_UPLOAD_KIND_UNSPECIFIED\0\u{1}PHOTO\0\u{1}VIDEO\0\u{1}DOCUMENT\0\u{1}VOICE\0")
 }
 
 nonisolated extension ClientMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
@@ -37420,6 +37994,884 @@ nonisolated extension BotChatSettingsItemInvoked: SwiftProtobuf.Message, SwiftPr
     if lhs.itemID != rhs.itemID {return false}
     if lhs._value != rhs._value {return false}
     if lhs.documentRevision != rhs.documentRevision {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension RealtimeV3Request: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "RealtimeV3Request"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}rpc\0\u{3}auth_begin\0\u{3}auth_complete\0\u{3}create_http_upload\0\u{3}finish_http_upload\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: RpcCall?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .rpc(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .rpc(v)
+        }
+      }()
+      case 2: try {
+        var v: AuthBeginRequest?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .authBegin(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .authBegin(v)
+        }
+      }()
+      case 3: try {
+        var v: AuthCompleteRequest?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .authComplete(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .authComplete(v)
+        }
+      }()
+      case 4: try {
+        var v: CreateHttpUploadRequest?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .createHTTPUpload(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .createHTTPUpload(v)
+        }
+      }()
+      case 5: try {
+        var v: FinishHttpUploadRequest?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .finishHTTPUpload(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .finishHTTPUpload(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    switch self.body {
+    case .rpc?: try {
+      guard case .rpc(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    }()
+    case .authBegin?: try {
+      guard case .authBegin(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    }()
+    case .authComplete?: try {
+      guard case .authComplete(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    }()
+    case .createHTTPUpload?: try {
+      guard case .createHTTPUpload(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    }()
+    case .finishHTTPUpload?: try {
+      guard case .finishHTTPUpload(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+    }()
+    case nil: break
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: RealtimeV3Request, rhs: RealtimeV3Request) -> Bool {
+    if lhs.body != rhs.body {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension RealtimeV3Response: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "RealtimeV3Response"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}rpc_result\0\u{3}rpc_error\0\u{3}auth_begin\0\u{3}auth_complete\0\u{3}create_http_upload\0\u{3}finish_http_upload\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: RpcResult?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .rpcResult(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .rpcResult(v)
+        }
+      }()
+      case 2: try {
+        var v: RpcError?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .rpcError(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .rpcError(v)
+        }
+      }()
+      case 3: try {
+        var v: AuthBeginResult?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .authBegin(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .authBegin(v)
+        }
+      }()
+      case 4: try {
+        var v: AuthCompleteResult?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .authComplete(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .authComplete(v)
+        }
+      }()
+      case 5: try {
+        var v: CreateHttpUploadResult?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .createHTTPUpload(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .createHTTPUpload(v)
+        }
+      }()
+      case 6: try {
+        var v: FinishHttpUploadResult?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .finishHTTPUpload(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .finishHTTPUpload(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    switch self.body {
+    case .rpcResult?: try {
+      guard case .rpcResult(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    }()
+    case .rpcError?: try {
+      guard case .rpcError(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    }()
+    case .authBegin?: try {
+      guard case .authBegin(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    }()
+    case .authComplete?: try {
+      guard case .authComplete(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    }()
+    case .createHTTPUpload?: try {
+      guard case .createHTTPUpload(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+    }()
+    case .finishHTTPUpload?: try {
+      guard case .finishHTTPUpload(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+    }()
+    case nil: break
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: RealtimeV3Response, rhs: RealtimeV3Response) -> Bool {
+    if lhs.body != rhs.body {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension RealtimeV3Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "RealtimeV3Update"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}message\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._message) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._message {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: RealtimeV3Update, rhs: RealtimeV3Update) -> Bool {
+    if lhs._message != rhs._message {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension ClientInfo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ClientInfo"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}device_id\0\u{3}client_type\0\u{3}client_version\0\u{3}os_version\0\u{3}device_name\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self._deviceID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._clientType) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._clientVersion) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self._osVersion) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self._deviceName) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._deviceID {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._clientType {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
+    try { if let v = self._clientVersion {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
+    try { if let v = self._osVersion {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 4)
+    } }()
+    try { if let v = self._deviceName {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 5)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ClientInfo, rhs: ClientInfo) -> Bool {
+    if lhs._deviceID != rhs._deviceID {return false}
+    if lhs._clientType != rhs._clientType {return false}
+    if lhs._clientVersion != rhs._clientVersion {return false}
+    if lhs._osVersion != rhs._osVersion {return false}
+    if lhs._deviceName != rhs._deviceName {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AuthBeginRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AuthBeginRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}email\0\u{3}phone_number\0\u{1}client\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: String?
+        try decoder.decodeSingularStringField(value: &v)
+        if let v = v {
+          if self.identifier != nil {try decoder.handleConflictingOneOf()}
+          self.identifier = .email(v)
+        }
+      }()
+      case 2: try {
+        var v: String?
+        try decoder.decodeSingularStringField(value: &v)
+        if let v = v {
+          if self.identifier != nil {try decoder.handleConflictingOneOf()}
+          self.identifier = .phoneNumber(v)
+        }
+      }()
+      case 3: try { try decoder.decodeSingularMessageField(value: &self._client) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    switch self.identifier {
+    case .email?: try {
+      guard case .email(let v)? = self.identifier else { preconditionFailure() }
+      try visitor.visitSingularStringField(value: v, fieldNumber: 1)
+    }()
+    case .phoneNumber?: try {
+      guard case .phoneNumber(let v)? = self.identifier else { preconditionFailure() }
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    }()
+    case nil: break
+    }
+    try { if let v = self._client {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AuthBeginRequest, rhs: AuthBeginRequest) -> Bool {
+    if lhs.identifier != rhs.identifier {return false}
+    if lhs._client != rhs._client {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AuthBeginResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AuthBeginResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}challenge_id\0\u{1}delivery\0\u{3}expires_at\0\u{3}retry_after_seconds\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularBytesField(value: &self.challengeID) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.delivery) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.expiresAt) }()
+      case 4: try { try decoder.decodeSingularUInt32Field(value: &self.retryAfterSeconds) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.challengeID.isEmpty {
+      try visitor.visitSingularBytesField(value: self.challengeID, fieldNumber: 1)
+    }
+    if self.delivery != .unspecified {
+      try visitor.visitSingularEnumField(value: self.delivery, fieldNumber: 2)
+    }
+    if self.expiresAt != 0 {
+      try visitor.visitSingularInt64Field(value: self.expiresAt, fieldNumber: 3)
+    }
+    if self.retryAfterSeconds != 0 {
+      try visitor.visitSingularUInt32Field(value: self.retryAfterSeconds, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AuthBeginResult, rhs: AuthBeginResult) -> Bool {
+    if lhs.challengeID != rhs.challengeID {return false}
+    if lhs.delivery != rhs.delivery {return false}
+    if lhs.expiresAt != rhs.expiresAt {return false}
+    if lhs.retryAfterSeconds != rhs.retryAfterSeconds {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AuthBeginResult.Delivery: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0DELIVERY_UNSPECIFIED\0\u{1}EMAIL\0\u{1}SMS\0")
+}
+
+nonisolated extension AuthCompleteRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AuthCompleteRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}challenge_id\0\u{1}code\0\u{3}invite_code\0\u{3}time_zone\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularBytesField(value: &self.challengeID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.code) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._inviteCode) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self._timeZone) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.challengeID.isEmpty {
+      try visitor.visitSingularBytesField(value: self.challengeID, fieldNumber: 1)
+    }
+    if !self.code.isEmpty {
+      try visitor.visitSingularStringField(value: self.code, fieldNumber: 2)
+    }
+    try { if let v = self._inviteCode {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
+    try { if let v = self._timeZone {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 4)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AuthCompleteRequest, rhs: AuthCompleteRequest) -> Bool {
+    if lhs.challengeID != rhs.challengeID {return false}
+    if lhs.code != rhs.code {return false}
+    if lhs._inviteCode != rhs._inviteCode {return false}
+    if lhs._timeZone != rhs._timeZone {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AuthAuthorized: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AuthAuthorized"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}user\0\u{3}account_session_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._user) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.accountSessionID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._user {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.accountSessionID != 0 {
+      try visitor.visitSingularInt64Field(value: self.accountSessionID, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AuthAuthorized, rhs: AuthAuthorized) -> Bool {
+    if lhs._user != rhs._user {return false}
+    if lhs.accountSessionID != rhs.accountSessionID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AuthInviteRequired: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AuthInviteRequired"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AuthInviteRequired, rhs: AuthInviteRequired) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AuthCompleteResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AuthCompleteResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}authorized\0\u{3}invite_required\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: AuthAuthorized?
+        var hadOneofValue = false
+        if let current = self.state {
+          hadOneofValue = true
+          if case .authorized(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.state = .authorized(v)
+        }
+      }()
+      case 2: try {
+        var v: AuthInviteRequired?
+        var hadOneofValue = false
+        if let current = self.state {
+          hadOneofValue = true
+          if case .inviteRequired(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.state = .inviteRequired(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    switch self.state {
+    case .authorized?: try {
+      guard case .authorized(let v)? = self.state else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    }()
+    case .inviteRequired?: try {
+      guard case .inviteRequired(let v)? = self.state else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    }()
+    case nil: break
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AuthCompleteResult, rhs: AuthCompleteResult) -> Bool {
+    if lhs.state != rhs.state {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension CreateHttpUploadRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "CreateHttpUploadRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}file_name\0\u{3}mime_type\0\u{3}byte_count\0\u{1}sha256\0\u{1}kind\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.fileName) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.mimeType) }()
+      case 3: try { try decoder.decodeSingularUInt64Field(value: &self.byteCount) }()
+      case 4: try { try decoder.decodeSingularBytesField(value: &self.sha256) }()
+      case 5: try { try decoder.decodeSingularEnumField(value: &self.kind) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.fileName.isEmpty {
+      try visitor.visitSingularStringField(value: self.fileName, fieldNumber: 1)
+    }
+    if !self.mimeType.isEmpty {
+      try visitor.visitSingularStringField(value: self.mimeType, fieldNumber: 2)
+    }
+    if self.byteCount != 0 {
+      try visitor.visitSingularUInt64Field(value: self.byteCount, fieldNumber: 3)
+    }
+    if !self.sha256.isEmpty {
+      try visitor.visitSingularBytesField(value: self.sha256, fieldNumber: 4)
+    }
+    if self.kind != .unspecified {
+      try visitor.visitSingularEnumField(value: self.kind, fieldNumber: 5)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: CreateHttpUploadRequest, rhs: CreateHttpUploadRequest) -> Bool {
+    if lhs.fileName != rhs.fileName {return false}
+    if lhs.mimeType != rhs.mimeType {return false}
+    if lhs.byteCount != rhs.byteCount {return false}
+    if lhs.sha256 != rhs.sha256 {return false}
+    if lhs.kind != rhs.kind {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension CreateHttpUploadResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "CreateHttpUploadResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}upload_id\0\u{3}upload_url\0\u{1}capability\0\u{3}expires_at\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularBytesField(value: &self.uploadID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.uploadURL) }()
+      case 3: try { try decoder.decodeSingularBytesField(value: &self.capability) }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self.expiresAt) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.uploadID.isEmpty {
+      try visitor.visitSingularBytesField(value: self.uploadID, fieldNumber: 1)
+    }
+    if !self.uploadURL.isEmpty {
+      try visitor.visitSingularStringField(value: self.uploadURL, fieldNumber: 2)
+    }
+    if !self.capability.isEmpty {
+      try visitor.visitSingularBytesField(value: self.capability, fieldNumber: 3)
+    }
+    if self.expiresAt != 0 {
+      try visitor.visitSingularInt64Field(value: self.expiresAt, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: CreateHttpUploadResult, rhs: CreateHttpUploadResult) -> Bool {
+    if lhs.uploadID != rhs.uploadID {return false}
+    if lhs.uploadURL != rhs.uploadURL {return false}
+    if lhs.capability != rhs.capability {return false}
+    if lhs.expiresAt != rhs.expiresAt {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension FinishHttpUploadRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "FinishHttpUploadRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}upload_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularBytesField(value: &self.uploadID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.uploadID.isEmpty {
+      try visitor.visitSingularBytesField(value: self.uploadID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: FinishHttpUploadRequest, rhs: FinishHttpUploadRequest) -> Bool {
+    if lhs.uploadID != rhs.uploadID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension HttpUploadPending: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "HttpUploadPending"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}retry_after_seconds\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt32Field(value: &self.retryAfterSeconds) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.retryAfterSeconds != 0 {
+      try visitor.visitSingularUInt32Field(value: self.retryAfterSeconds, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: HttpUploadPending, rhs: HttpUploadPending) -> Bool {
+    if lhs.retryAfterSeconds != rhs.retryAfterSeconds {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension HttpUploadComplete: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "HttpUploadComplete"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}file_unique_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.fileUniqueID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.fileUniqueID.isEmpty {
+      try visitor.visitSingularStringField(value: self.fileUniqueID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: HttpUploadComplete, rhs: HttpUploadComplete) -> Bool {
+    if lhs.fileUniqueID != rhs.fileUniqueID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension FinishHttpUploadResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "FinishHttpUploadResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}pending\0\u{1}complete\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: HttpUploadPending?
+        var hadOneofValue = false
+        if let current = self.state {
+          hadOneofValue = true
+          if case .pending(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.state = .pending(v)
+        }
+      }()
+      case 2: try {
+        var v: HttpUploadComplete?
+        var hadOneofValue = false
+        if let current = self.state {
+          hadOneofValue = true
+          if case .complete(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.state = .complete(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    switch self.state {
+    case .pending?: try {
+      guard case .pending(let v)? = self.state else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    }()
+    case .complete?: try {
+      guard case .complete(let v)? = self.state else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    }()
+    case nil: break
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: FinishHttpUploadResult, rhs: FinishHttpUploadResult) -> Bool {
+    if lhs.state != rhs.state {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

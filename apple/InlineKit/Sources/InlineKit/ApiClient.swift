@@ -2,6 +2,7 @@ import Auth
 import Combine
 import Foundation
 import InlineConfig
+import InlineProtocol
 import Logger
 import MultipartFormDataKit
 
@@ -395,7 +396,14 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   // MARK: AUTH
 
   public func sendCode(email: String) async throws -> SendCode {
-    try await postRequest(
+    if InlineProtocolNativeLogin.shared.isAvailable {
+      _ = try await InlineProtocolNativeLogin.shared.beginEmail(
+        email,
+        client: try await Self.inlineProtocolClientInfo()
+      )
+      return SendCode(existingUser: nil, needsInviteCode: nil, challengeToken: nil)
+    }
+    return try await postRequest(
       .sendCode,
       body: ["email": email],
       includeToken: false
@@ -403,7 +411,19 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   }
 
   public func sendSmsCode(phoneNumber: String) async throws -> SendSmsCode {
-    try await postRequest(
+    if InlineProtocolNativeLogin.shared.isAvailable {
+      _ = try await InlineProtocolNativeLogin.shared.beginPhoneNumber(
+        phoneNumber,
+        client: try await Self.inlineProtocolClientInfo()
+      )
+      return SendSmsCode(
+        existingUser: nil,
+        needsInviteCode: nil,
+        phoneNumber: phoneNumber,
+        formattedPhoneNumber: phoneNumber
+      )
+    }
+    return try await postRequest(
       .sendSmsCode,
       body: ["phoneNumber": phoneNumber],
       includeToken: false
@@ -424,6 +444,14 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     challengeToken: String? = nil,
     inviteCode: String? = nil
   ) async throws -> VerifyCode {
+    if InlineProtocolNativeLogin.shared.isAvailable {
+      let result = try await InlineProtocolNativeLogin.shared.complete(
+        code: code,
+        inviteCode: inviteCode,
+        timeZone: TimeZone.current.identifier
+      )
+      return VerifyCode(user: ApiUser(from: result.user))
+    }
     let sessionInfo = await SessionInfo.get()
     let deviceId = try await DeviceIdentifier.shared.getIdentifier()
     let body = Self.makeEmailCodeVerificationBody(
@@ -467,7 +495,26 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     return body
   }
 
+  private static func inlineProtocolClientInfo() async throws -> InlineProtocol.ClientInfo {
+    let sessionInfo = await SessionInfo.get()
+    var client = InlineProtocol.ClientInfo()
+    client.deviceID = try await DeviceIdentifier.shared.getIdentifier()
+    if let value = sessionInfo?.clientType { client.clientType = value }
+    if let value = sessionInfo?.clientVersion { client.clientVersion = value }
+    if let value = sessionInfo?.osVersion { client.osVersion = value }
+    if let value = sessionInfo?.deviceName { client.deviceName = value }
+    return client
+  }
+
   public func verifySmsCode(code: String, phoneNumber: String, inviteCode: String? = nil) async throws -> VerifyCode {
+    if InlineProtocolNativeLogin.shared.isAvailable {
+      let result = try await InlineProtocolNativeLogin.shared.complete(
+        code: code,
+        inviteCode: inviteCode,
+        timeZone: TimeZone.current.identifier
+      )
+      return VerifyCode(user: ApiUser(from: result.user))
+    }
     var body: [String: Any] = [
       "code": code,
       "phoneNumber": phoneNumber,
@@ -1541,8 +1588,14 @@ public struct DisconnectIntegration: Codable, Sendable {
 
 public struct VerifyCode: Codable, Sendable {
   public let userId: Int64
-  public let token: String
+  public let token: String?
   public let user: ApiUser
+
+  public init(user: ApiUser, token: String? = nil) {
+    userId = user.id
+    self.token = token
+    self.user = user
+  }
 }
 
 public struct SendCode: Codable, Sendable {

@@ -37,7 +37,7 @@ public class MainViewRouter: ObservableObject {
 
   private static func initialRoute(for status: AuthStatus) -> MainRoutes {
     switch status {
-    case .authenticated:
+    case .authenticated, .authenticatedV3:
       return .main
     case .hydrating, .locked:
       return .loading
@@ -51,7 +51,7 @@ public class MainViewRouter: ObservableObject {
     switch route {
     case .loading:
       switch status {
-      case .authenticated:
+      case .authenticated, .authenticatedV3:
         transitionTask?.cancel()
         transitionTask = Task { @MainActor [weak self] in
           // Ensure `AppDatabase.shared` isn't stuck on an in-memory fallback from pre-unlock startup.
@@ -76,7 +76,7 @@ public class MainViewRouter: ObservableObject {
         transitionTask?.cancel()
         transitionTask = nil
         route = .onboarding
-      case .authenticated, .hydrating, .locked:
+      case .authenticated, .authenticatedV3, .hydrating, .locked:
         break
       }
 

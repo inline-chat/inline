@@ -183,13 +183,13 @@ actor ProtocolSession: ProtocolSessionType {
       token = auth.token()
     }
 
-    guard let token else {
+    guard token != nil || auth.inlineProtocolCredentials() != nil else {
       log.error("No token available for connection init")
       throw ProtocolSessionError.notAuthorized
     }
 
     let msg = wrapMessage(body: .connectionInit(.with {
-      $0.token = token
+      $0.token = token ?? ""
       $0.buildNumber = getBuildNumber()
       #if os(macOS)
       $0.osVersion = getOSVersion()
