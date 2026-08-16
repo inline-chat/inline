@@ -7926,8 +7926,8 @@
         }
       },
       "foreignKeys": {
-        "provider_auth_attempts_oauth_auth_request_id_oauth_auth_requests_id_fk": {
-          "name": "provider_auth_attempts_oauth_auth_request_id_oauth_auth_requests_id_fk",
+        "provider_auth_attempts_oauth_request_fk": {
+          "name": "provider_auth_attempts_oauth_request_fk",
           "tableFrom": "provider_auth_attempts",
           "tableTo": "oauth_auth_requests",
           "columnsFrom": [
