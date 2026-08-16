@@ -24,13 +24,13 @@ The client uses header authentication by default. Token-in-path mode exists for 
 ## TypeScript Client
 
 ```sh
-npm install @inline-chat/bot-api@^0.1.0
+npm install @inline-chat/bot-client@^0.1.0
 ```
 
 ```ts
-import { InlineBotApiClient } from "@inline-chat/bot-api"
+import { InlineBotClient } from "@inline-chat/bot-client"
 
-const bot = new InlineBotApiClient({ token: process.env.INLINE_BOT_TOKEN! })
+const bot = new InlineBotClient({ token: process.env.INLINE_BOT_TOKEN! })
 const history = await bot.getChatHistory({ chat_id: 42, limit: 50 })
 
 if (history.ok) {
@@ -109,7 +109,7 @@ Error:
 
 ## SDK and Reference
 
-- SDK package: `@inline-chat/bot-api`
+- Client package: `@inline-chat/bot-client`
 - Types package: `@inline-chat/bot-api-types`
 - [Developers overview](https://inline.chat/docs/developers)
 - [Realtime API](https://inline.chat/docs/realtime-api)
