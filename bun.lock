@@ -31,7 +31,7 @@
     },
     "mcp": {
       "name": "@inline-chat/mcp",
-      "version": "0.0.1",
+      "version": "0.1.0",
       "dependencies": {
         "@inline-chat/oauth-core": "workspace:*",
         "@inline-chat/protocol": "workspace:*",
@@ -71,7 +71,7 @@
       "name": "@inline-chat/bot-api",
       "version": "0.0.1",
       "dependencies": {
-        "@inline-chat/bot-api-types": "^0.0.1",
+        "@inline-chat/bot-api-types": "^0.1.0",
       },
       "devDependencies": {
         "@types/node": "^20.11.30",
@@ -82,7 +82,7 @@
     },
     "packages/bot-api-types": {
       "name": "@inline-chat/bot-api-types",
-      "version": "0.0.1",
+      "version": "0.1.0",
       "devDependencies": {
         "@types/node": "^20.11.30",
         "typescript": "^5.8.3",
