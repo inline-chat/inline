@@ -130,8 +130,8 @@ export type BotChat = {
   space_id?: number
   is_public?: boolean
   parent_chat_id?: number
-  /** Shallow anchor summary. It never contains chat or reply_to_message. */
-  parent_message?: BotChatLastMessage
+  /** Parent anchor encoded once; its chat omits parent_message and it has no reply_to_message. */
+  parent_message?: BotMessageLite
   participants?: { count: number }
   last_message_id?: number
   last_message?: BotChatLastMessage
