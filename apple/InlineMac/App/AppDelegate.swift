@@ -36,6 +36,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   @MainActor private var globalHotkeyController: GlobalHotkeyController?
   @MainActor private var terminationTask: Task<Void, Never>?
+  @MainActor private var terminationDeadlineTask: Task<Void, Never>?
+  @MainActor private var didReplyToTermination = false
 
   private let installLocationPrompt = AppInstallLocationPrompt()
   private let launchAtLoginController = LaunchAtLoginController()
@@ -112,10 +114,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       let realtime = dependencies.realtimeV2
       terminationTask = Task { @MainActor in
         await realtime.prepareForTermination()
-        sender.reply(toApplicationShouldTerminate: true)
+        finishTermination(sender)
+      }
+      terminationDeadlineTask = Task { @MainActor in
+        do {
+          try await Task.sleep(for: .milliseconds(250))
+        } catch {
+          return
+        }
+        log.warning("Realtime termination cleanup exceeded deadline; allowing app termination")
+        finishTermination(sender)
       }
       return .terminateLater
     }
+  }
+
+  @MainActor
+  private func finishTermination(_ sender: NSApplication) {
+    guard !didReplyToTermination else { return }
+    didReplyToTermination = true
+    terminationTask?.cancel()
+    terminationDeadlineTask?.cancel()
+    sender.reply(toApplicationShouldTerminate: true)
   }
 
   func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
