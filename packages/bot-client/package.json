@@ -1,16 +1,21 @@
 {
-  "name": "@inline-chat/bot-api",
+  "name": "@inline-chat/bot-client",
   "version": "0.1.0",
   "private": false,
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/inline-chat/inline.git",
-    "directory": "packages/bot-api"
+    "directory": "packages/bot-client"
   },
   "type": "module",
   "files": [
-    "dist"
+    "dist/index.d.ts",
+    "dist/index.js",
+    "dist/inline-bot-client.d.ts",
+    "dist/inline-bot-client.js",
+    "dist/types.d.ts",
+    "dist/types.js"
   ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

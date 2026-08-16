@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest"
-import { InlineBotApiClient } from "./inline-bot-api-client.js"
+import { InlineBotClient } from "./inline-bot-client.js"
 
-describe("InlineBotApiClient", () => {
+describe("InlineBotClient", () => {
   it("defaults to header auth and /bot/<method>", async () => {
     let seenUrl = ""
     let seenAuth: string | null = null
 
-    const client = new InlineBotApiClient({
+    const client = new InlineBotClient({
       token: "123:abc",
       fetch: (async (input, init) => {
         seenUrl = String(input)
@@ -28,7 +28,7 @@ describe("InlineBotApiClient", () => {
     let seenUrl = ""
     let seenAuth: string | null = "not-set"
 
-    const client = new InlineBotApiClient({
+    const client = new InlineBotClient({
       token: "123:abc",
       authMode: "path",
       fetch: (async (input, init) => {
@@ -53,7 +53,7 @@ describe("InlineBotApiClient", () => {
     let seenBody = ""
     let seenContentType: string | null = null
 
-    const client = new InlineBotApiClient({
+    const client = new InlineBotClient({
       token: "t",
       fetch: (async (input, init) => {
         seenMethod = init?.method ?? ""
@@ -79,7 +79,7 @@ describe("InlineBotApiClient", () => {
     let seenUrl = ""
     let seenBody = "unset"
 
-    const client = new InlineBotApiClient({
+    const client = new InlineBotClient({
       token: "t",
       fetch: (async (input, init) => {
         seenUrl = String(input)
@@ -106,7 +106,7 @@ describe("InlineBotApiClient", () => {
   it("sends GET params as query string", async () => {
     let seenUrl = ""
 
-    const client = new InlineBotApiClient({
+    const client = new InlineBotClient({
       token: "t",
       fetch: (async (input) => {
         seenUrl = String(input)
@@ -127,7 +127,7 @@ describe("InlineBotApiClient", () => {
 
   it("uses POST JSON for contextual message and thread methods", async () => {
     const calls: Array<{ url: string; method: string; body: unknown }> = []
-    const client = new InlineBotApiClient({
+    const client = new InlineBotClient({
       token: "t",
       fetch: (async (input, init) => {
         calls.push({
@@ -175,7 +175,7 @@ describe("InlineBotApiClient", () => {
     let seenUrl = ""
     let seenMethod = ""
 
-    const client = new InlineBotApiClient({
+    const client = new InlineBotClient({
       token: "t",
       fetch: (async (input, init) => {
         seenUrl = String(input)
@@ -196,7 +196,7 @@ describe("InlineBotApiClient", () => {
 
   it("exposes forwarding, pinning, participant, and thread title methods", async () => {
     const calls: Array<{ url: string; method: string; body?: unknown }> = []
-    const client = new InlineBotApiClient({
+    const client = new InlineBotClient({
       token: "t",
       fetch: (async (input, init) => {
         calls.push({
@@ -232,7 +232,7 @@ describe("InlineBotApiClient", () => {
     let seenUrl = ""
     let seenBody = ""
 
-    const client = new InlineBotApiClient({
+    const client = new InlineBotClient({
       token: "t",
       fetch: (async (input, init) => {
         seenUrl = String(input)
@@ -260,7 +260,7 @@ describe("InlineBotApiClient", () => {
   it("requestRaw supports text responses and complex query values", async () => {
     let seenUrl = ""
 
-    const client = new InlineBotApiClient({
+    const client = new InlineBotClient({
       token: "t",
       fetch: (async (input) => {
         seenUrl = String(input)
@@ -296,7 +296,7 @@ describe("InlineBotApiClient", () => {
     let seenUrl = ""
     let seenMethod = ""
 
-    const client = new InlineBotApiClient({
+    const client = new InlineBotClient({
       token: "t",
       fetch: (async (input, init) => {
         seenUrl = String(input)
@@ -319,7 +319,7 @@ describe("InlineBotApiClient", () => {
     let seenMethod = ""
     let seenBody = ""
 
-    const client = new InlineBotApiClient({
+    const client = new InlineBotClient({
       token: "t",
       fetch: (async (input, init) => {
         seenUrl = String(input)
@@ -347,7 +347,7 @@ describe("InlineBotApiClient", () => {
   it("uses POST JSON for editMessageText and deleteMessage", async () => {
     const calls: Array<{ url: string; method: string; body: unknown }> = []
 
-    const client = new InlineBotApiClient({
+    const client = new InlineBotClient({
       token: "t",
       fetch: (async (input, init) => {
         calls.push({
@@ -385,7 +385,7 @@ describe("InlineBotApiClient", () => {
     let seenUrl = ""
     let seenMethod = ""
 
-    const client = new InlineBotApiClient({
+    const client = new InlineBotClient({
       token: "t",
       fetch: (async (input, init) => {
         seenUrl = String(input)
@@ -405,7 +405,7 @@ describe("InlineBotApiClient", () => {
 
   it("supports polling, webhook, action, and file transports", async () => {
     const calls: Array<{ url: string; method: string; body: unknown }> = []
-    const client = new InlineBotApiClient({
+    const client = new InlineBotClient({
       token: "t",
       fetch: (async (input, init) => {
         calls.push({
@@ -445,7 +445,7 @@ describe("InlineBotApiClient", () => {
     let seenBody: FormData | undefined
     let seenAuth: string | null = null
     let seenUrl = ""
-    const client = new InlineBotApiClient({
+    const client = new InlineBotClient({
       token: "t",
       fetch: (async (input, init) => {
         seenUrl = String(input)
@@ -496,7 +496,7 @@ describe("InlineBotApiClient", () => {
     const originalFetch = globalThis.fetch
     ;(globalThis as any).fetch = fetchMock
     try {
-      const client = new InlineBotApiClient({ token: "t" })
+      const client = new InlineBotClient({ token: "t" })
       const res = await client.getMe()
       expect(res.ok).toBe(true)
       expect(fetchMock).toHaveBeenCalled()

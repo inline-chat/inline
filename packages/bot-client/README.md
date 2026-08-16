@@ -1,11 +1,11 @@
-# Inline Bot API client
+# Inline Bot Client
 
 Typed HTTP client for serverless Inline bots and agent adapters. It supports contextual reads, search, normal and reply threads, files, message actions, polling, and webhooks without a durable WebSocket process.
 
 ```ts
-import { InlineBotApiClient } from "@inline-chat/bot-api"
+import { InlineBotClient } from "@inline-chat/bot-client"
 
-const bot = new InlineBotApiClient({ token: process.env.INLINE_BOT_TOKEN! })
+const bot = new InlineBotClient({ token: process.env.INLINE_BOT_TOKEN! })
 
 const history = await bot.getChatHistory({ chat_id: 42, limit: 50 })
 if (history.ok) {
@@ -35,7 +35,7 @@ Bots never receive their own messages. Under `mentions`, human DMs, mentions, re
 Header authentication is the default. Telegram-style token-in-path authentication is available when adapting an existing integration:
 
 ```ts
-const bot = new InlineBotApiClient({
+const bot = new InlineBotClient({
   token: process.env.INLINE_BOT_TOKEN!,
   authMode: "path",
 })

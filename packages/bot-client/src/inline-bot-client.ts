@@ -18,10 +18,10 @@ import type {
   GetFileParams,
   GetMessagesParams,
   GetUpdatesParams,
-  InlineBotApiClientOptions,
-  InlineBotApiMethodOptions,
-  InlineBotApiRequestOptions,
-  InlineBotApiResponse,
+  InlineBotClientOptions,
+  InlineBotClientMethodOptions,
+  InlineBotClientRequestOptions,
+  InlineBotClientResponse,
   SetMyCommandsParams,
   SendMessageParams,
   SendReactionParams,
@@ -79,13 +79,13 @@ function setQueryParams(url: URL, query: Record<string, unknown>) {
   }
 }
 
-export class InlineBotApiClient {
+export class InlineBotClient {
   private readonly baseUrl: string
   private readonly token: string
   private readonly authMode: "header" | "path"
   private readonly fetchImpl: typeof fetch
 
-  constructor(options: InlineBotApiClientOptions) {
+  constructor(options: InlineBotClientOptions) {
     this.baseUrl = normalizeBaseUrl(options.baseUrl ?? defaultBaseUrl)
     this.token = options.token
     this.authMode = options.authMode ?? "header"
@@ -106,7 +106,7 @@ export class InlineBotApiClient {
   }
 
   // Low-level escape hatch with auth attached.
-  async requestRaw<T = unknown>(path: string, options?: InlineBotApiRequestOptions): Promise<InlineBotApiResponse<T>> {
+  async requestRaw<T = unknown>(path: string, options?: InlineBotClientRequestOptions): Promise<InlineBotClientResponse<T>> {
     const normalizedPath = path.startsWith("/") ? path : `/${path}`
     const url = new URL(normalizedPath, this.baseUrl + "/")
     const method = options?.method ?? "POST"
@@ -140,19 +140,19 @@ export class InlineBotApiClient {
   async methodRaw<M extends BotMethodName>(
     method: M,
     params: BotMethodParamsByName[M],
-    options?: InlineBotApiMethodOptions,
-  ): Promise<InlineBotApiResponse<BotApiEnvelope<BotMethodResultByName[M]>>>
+    options?: InlineBotClientMethodOptions,
+  ): Promise<InlineBotClientResponse<BotApiEnvelope<BotMethodResultByName[M]>>>
   async methodRaw<T>(
     method: string,
     params?: Record<string, unknown>,
-    options?: InlineBotApiMethodOptions,
-  ): Promise<InlineBotApiResponse<BotApiEnvelope<T>>> {
+    options?: InlineBotClientMethodOptions,
+  ): Promise<InlineBotClientResponse<BotApiEnvelope<T>>> {
     const methodPath = this.methodPath(method)
     const isGet = isGetMethod(method)
     const httpMethod = isGet ? "GET" : "POST"
     const postAs = options?.postAs ?? "json"
 
-    const requestOptions: InlineBotApiRequestOptions = {
+    const requestOptions: InlineBotClientRequestOptions = {
       method: httpMethod,
       headers: options?.headers,
       signal: options?.signal,
@@ -172,118 +172,118 @@ export class InlineBotApiClient {
   async method<M extends BotMethodName>(
     method: M,
     params: BotMethodParamsByName[M],
-    options?: InlineBotApiMethodOptions,
+    options?: InlineBotClientMethodOptions,
   ): Promise<BotApiEnvelope<BotMethodResultByName[M]>>
   async method<T>(
     method: string,
     params?: Record<string, unknown>,
-    options?: InlineBotApiMethodOptions,
+    options?: InlineBotClientMethodOptions,
   ): Promise<BotApiEnvelope<T>> {
     const res = await (this.methodRaw as (
       method: string,
       params?: Record<string, unknown>,
-      options?: InlineBotApiMethodOptions,
-    ) => Promise<InlineBotApiResponse<BotApiEnvelope<T>>>)(method, params, options)
+      options?: InlineBotClientMethodOptions,
+    ) => Promise<InlineBotClientResponse<BotApiEnvelope<T>>>)(method, params, options)
     return res.data as BotApiEnvelope<T>
   }
 
-  getMe(options?: InlineBotApiMethodOptions) {
+  getMe(options?: InlineBotClientMethodOptions) {
     return this.method("getMe", undefined, options)
   }
 
-  getChat(params: GetChatParams, options?: InlineBotApiMethodOptions) {
+  getChat(params: GetChatParams, options?: InlineBotClientMethodOptions) {
     return this.method("getChat", params, options)
   }
 
-  getChatHistory(params: GetChatHistoryParams, options?: InlineBotApiMethodOptions) {
+  getChatHistory(params: GetChatHistoryParams, options?: InlineBotClientMethodOptions) {
     return this.method("getChatHistory", params, options)
   }
 
-  getMessages(params: GetMessagesParams, options?: InlineBotApiMethodOptions) {
+  getMessages(params: GetMessagesParams, options?: InlineBotClientMethodOptions) {
     return this.method("getMessages", params, options)
   }
 
-  searchMessages(params: SearchMessagesParams, options?: InlineBotApiMethodOptions) {
+  searchMessages(params: SearchMessagesParams, options?: InlineBotClientMethodOptions) {
     return this.method("searchMessages", params, options)
   }
 
-  createThread(params: CreateThreadParams, options?: InlineBotApiMethodOptions) {
+  createThread(params: CreateThreadParams, options?: InlineBotClientMethodOptions) {
     return this.method("createThread", params, options)
   }
 
-  createReplyThread(params: CreateReplyThreadParams, options?: InlineBotApiMethodOptions) {
+  createReplyThread(params: CreateReplyThreadParams, options?: InlineBotClientMethodOptions) {
     return this.method("createReplyThread", params, options)
   }
 
-  getMyCommands(options?: InlineBotApiMethodOptions) {
+  getMyCommands(options?: InlineBotClientMethodOptions) {
     return this.method("getMyCommands", undefined, options)
   }
 
-  setMyCommands(params: SetMyCommandsParams, options?: InlineBotApiMethodOptions) {
+  setMyCommands(params: SetMyCommandsParams, options?: InlineBotClientMethodOptions) {
     return this.method("setMyCommands", params, options)
   }
 
-  deleteMyCommands(options?: InlineBotApiMethodOptions) {
+  deleteMyCommands(options?: InlineBotClientMethodOptions) {
     return this.method("deleteMyCommands", undefined, options)
   }
 
-  sendMessage(params: SendMessageParams, options?: InlineBotApiMethodOptions) {
+  sendMessage(params: SendMessageParams, options?: InlineBotClientMethodOptions) {
     return this.method("sendMessage", params, options)
   }
 
-  editMessageText(params: EditMessageTextParams, options?: InlineBotApiMethodOptions) {
+  editMessageText(params: EditMessageTextParams, options?: InlineBotClientMethodOptions) {
     return this.method("editMessageText", params, options)
   }
 
-  deleteMessage(params: DeleteMessageParams, options?: InlineBotApiMethodOptions) {
+  deleteMessage(params: DeleteMessageParams, options?: InlineBotClientMethodOptions) {
     return this.method("deleteMessage", params, options)
   }
 
-  forwardMessage(params: ForwardMessageParams, options?: InlineBotApiMethodOptions) {
+  forwardMessage(params: ForwardMessageParams, options?: InlineBotClientMethodOptions) {
     return this.method("forwardMessage", params, options)
   }
 
-  pinMessage(params: PinMessageParams, options?: InlineBotApiMethodOptions) {
+  pinMessage(params: PinMessageParams, options?: InlineBotClientMethodOptions) {
     return this.method("pinMessage", params, options)
   }
 
-  unpinMessage(params: UnpinMessageParams, options?: InlineBotApiMethodOptions) {
+  unpinMessage(params: UnpinMessageParams, options?: InlineBotClientMethodOptions) {
     return this.method("unpinMessage", params, options)
   }
 
-  getChatParticipant(params: GetChatParticipantParams, options?: InlineBotApiMethodOptions) {
+  getChatParticipant(params: GetChatParticipantParams, options?: InlineBotClientMethodOptions) {
     return this.method("getChatParticipant", params, options)
   }
 
-  getChatParticipantCount(params: GetChatParticipantCountParams, options?: InlineBotApiMethodOptions) {
+  getChatParticipantCount(params: GetChatParticipantCountParams, options?: InlineBotClientMethodOptions) {
     return this.method("getChatParticipantCount", params, options)
   }
 
-  setThreadTitle(params: SetThreadTitleParams, options?: InlineBotApiMethodOptions) {
+  setThreadTitle(params: SetThreadTitleParams, options?: InlineBotClientMethodOptions) {
     return this.method("setThreadTitle", params, options)
   }
 
-  sendReaction(params: SendReactionParams, options?: InlineBotApiMethodOptions) {
+  sendReaction(params: SendReactionParams, options?: InlineBotClientMethodOptions) {
     return this.method("sendReaction", params, options)
   }
 
-  deleteReaction(params: DeleteReactionParams, options?: InlineBotApiMethodOptions) {
+  deleteReaction(params: DeleteReactionParams, options?: InlineBotClientMethodOptions) {
     return this.method("deleteReaction", params, options)
   }
 
-  answerMessageAction(params: AnswerMessageActionParams, options?: InlineBotApiMethodOptions) {
+  answerMessageAction(params: AnswerMessageActionParams, options?: InlineBotClientMethodOptions) {
     return this.method("answerMessageAction", params, options)
   }
 
-  sendChatAction(params: SendChatActionParams, options?: InlineBotApiMethodOptions) {
+  sendChatAction(params: SendChatActionParams, options?: InlineBotClientMethodOptions) {
     return this.method("sendChatAction", params, options)
   }
 
-  getFile(params: GetFileParams, options?: InlineBotApiMethodOptions) {
+  getFile(params: GetFileParams, options?: InlineBotClientMethodOptions) {
     return this.method("getFile", params, options)
   }
 
-  async uploadFile(params: UploadFileParams, options?: InlineBotApiMethodOptions): Promise<BotApiEnvelope<UploadFileResult>> {
+  async uploadFile(params: UploadFileParams, options?: InlineBotClientMethodOptions): Promise<BotApiEnvelope<UploadFileResult>> {
     const form = new FormData()
     form.set("type", params.type)
     form.set("file", params.file, params.file_name ?? `upload.${params.type === "photo" ? "jpg" : "bin"}`)
@@ -305,19 +305,19 @@ export class InlineBotApiClient {
     return await response.json() as BotApiEnvelope<UploadFileResult>
   }
 
-  getUpdates(params: GetUpdatesParams = {}, options?: InlineBotApiMethodOptions) {
+  getUpdates(params: GetUpdatesParams = {}, options?: InlineBotClientMethodOptions) {
     return this.method("getUpdates", params, options)
   }
 
-  setWebhook(params: SetWebhookParams, options?: InlineBotApiMethodOptions) {
+  setWebhook(params: SetWebhookParams, options?: InlineBotClientMethodOptions) {
     return this.method("setWebhook", params, options)
   }
 
-  deleteWebhook(params: DeleteWebhookParams = {}, options?: InlineBotApiMethodOptions) {
+  deleteWebhook(params: DeleteWebhookParams = {}, options?: InlineBotClientMethodOptions) {
     return this.method("deleteWebhook", params, options)
   }
 
-  getWebhookInfo(options?: InlineBotApiMethodOptions) {
+  getWebhookInfo(options?: InlineBotClientMethodOptions) {
     return this.method("getWebhookInfo", undefined, options)
   }
 }

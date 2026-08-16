@@ -12,7 +12,7 @@ Key paths:
 - `packages/protocol/` - synced generated TypeScript protocol package.
 - `packages/bot-api-types/` - synced Bot API types package.
 - `sdk/` - canonical realtime SDK source.
-- `packages/bot-api/` - canonical Bot API client source.
+- `packages/bot-client/` - canonical Bot Client source.
 - `packages/oauth-core/` - canonical shared OAuth helpers.
 - `mcp/` - canonical MCP package.
 - `openclaw/` - canonical OpenClaw plugin.

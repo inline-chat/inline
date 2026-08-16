@@ -15,12 +15,12 @@
     "release:cli": "bun run ./scripts/release-cli.ts",
     "release:npm": "bun run ./scripts/release-npm.ts",
     "check:codex-plugin": "bun run ./scripts/check-codex-plugin.mjs",
-    "build": "bun run --cwd packages/protocol build && bun run --cwd packages/oauth-core build && bun run --cwd sdk build && bun run --cwd packages/bot-api-types build && bun run --cwd packages/bot-api build && bun run --cwd mcp build && bun run --cwd openclaw build && bun run --cwd hermes-agent build",
+    "build": "bun run --cwd packages/protocol build && bun run --cwd packages/oauth-core build && bun run --cwd sdk build && bun run --cwd packages/bot-api-types build && bun run --cwd packages/bot-client build && bun run --cwd mcp build && bun run --cwd openclaw build && bun run --cwd hermes-agent build",
     "ci:cli": "bun run --cwd cli ci",
     "precommit:cli": "bun run --cwd cli precommit",
-    "typecheck": "bun run --cwd packages/protocol build && bun run --cwd packages/oauth-core build && bun run --cwd packages/bot-api-types build && bun run --cwd sdk build && bun run --cwd packages/protocol typecheck && bun run --cwd packages/oauth-core typecheck && bun run --cwd sdk typecheck && bun run --cwd packages/bot-api-types typecheck && bun run --cwd packages/bot-api typecheck && bun run --cwd mcp typecheck && bun run --cwd openclaw typecheck && bun run --cwd hermes-agent typecheck && bun run --cwd cli typecheck",
-    "lint": "bun run --cwd packages/protocol lint && bun run --cwd packages/oauth-core lint && bun run --cwd sdk lint && bun run --cwd packages/bot-api-types lint && bun run --cwd packages/bot-api lint && bun run --cwd mcp lint && bun run --cwd openclaw lint && bun run --cwd hermes-agent lint && bun run --cwd cli lint",
-    "test": "bun run --cwd packages/protocol test && bun run --cwd packages/oauth-core test && bun run --cwd sdk test && bun run --cwd packages/bot-api-types test && bun run --cwd packages/bot-api test && bun run --cwd mcp test && bun run --cwd openclaw test && bun run --cwd hermes-agent test && bun run --cwd cli test"
+    "typecheck": "bun run --cwd packages/protocol build && bun run --cwd packages/oauth-core build && bun run --cwd packages/bot-api-types build && bun run --cwd sdk build && bun run --cwd packages/protocol typecheck && bun run --cwd packages/oauth-core typecheck && bun run --cwd sdk typecheck && bun run --cwd packages/bot-api-types typecheck && bun run --cwd packages/bot-client typecheck && bun run --cwd mcp typecheck && bun run --cwd openclaw typecheck && bun run --cwd hermes-agent typecheck && bun run --cwd cli typecheck",
+    "lint": "bun run --cwd packages/protocol lint && bun run --cwd packages/oauth-core lint && bun run --cwd sdk lint && bun run --cwd packages/bot-api-types lint && bun run --cwd packages/bot-client lint && bun run --cwd mcp lint && bun run --cwd openclaw lint && bun run --cwd hermes-agent lint && bun run --cwd cli lint",
+    "test": "bun run --cwd packages/protocol test && bun run --cwd packages/oauth-core test && bun run --cwd sdk test && bun run --cwd packages/bot-api-types test && bun run --cwd packages/bot-client test && bun run --cwd mcp test && bun run --cwd openclaw test && bun run --cwd hermes-agent test && bun run --cwd cli test"
   },
   "overrides": {
     "@inline-chat/protocol": "workspace:*",

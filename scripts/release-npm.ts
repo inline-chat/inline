@@ -67,10 +67,10 @@ export const PACKAGE_CONFIGS: Readonly<Record<string, PackageConfig>> = {
     directory: "packages/bot-api-types",
     name: "@inline-chat/bot-api-types",
   },
-  "bot-api": {
-    key: "bot-api",
-    directory: "packages/bot-api",
-    name: "@inline-chat/bot-api",
+  "bot-client": {
+    key: "bot-client",
+    directory: "packages/bot-client",
+    name: "@inline-chat/bot-client",
   },
   "realtime-sdk": {
     key: "realtime-sdk",

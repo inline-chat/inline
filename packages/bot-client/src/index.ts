@@ -1,4 +1,4 @@
-export { InlineBotApiClient } from "./inline-bot-api-client.js"
+export { InlineBotClient } from "./inline-bot-client.js"
 export { BOT_DEFAULT_UPDATE_KEYS, BOT_ID_MAX } from "./types.js"
 export type {
   BotActivationReason,
@@ -72,11 +72,11 @@ export type {
   GetUpdatesResult,
   GetWebhookInfoResult,
   GetMyCommandsResult,
-  InlineBotApiClientOptions,
-  InlineBotApiMethodOptions,
-  InlineBotApiPostEncoding,
-  InlineBotApiRequestOptions,
-  InlineBotApiResponse,
+  InlineBotClientOptions,
+  InlineBotClientMethodOptions,
+  InlineBotClientPostEncoding,
+  InlineBotClientRequestOptions,
+  InlineBotClientResponse,
   SetMyCommandsParams,
   SendMessageParams,
   SendMessageResult,

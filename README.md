@@ -101,7 +101,7 @@ Start with the [developer docs](https://inline.chat/docs), or jump directly to a
 | --- | --- | --- |
 | `@inline-chat/cli` / `inline-cli` | Command-line access for people, agents, and automation | [Docs](https://inline.chat/docs/cli) · [Source](cli/) |
 | `@inline-chat/realtime-sdk` | TypeScript SDK for the realtime API | [Docs](https://inline.chat/docs/realtime-api) · [Source](sdk/) |
-| `@inline-chat/bot-api` | TypeScript client for the Bot API | [Docs](https://inline.chat/docs/bot-api) · [Source](packages/bot-api/) |
+| `@inline-chat/bot-client` | TypeScript client for the Bot API | [Docs](https://inline.chat/docs/bot-api) · [Source](packages/bot-client/) |
 | `@inline-chat/mcp` | Hosted MCP server for AI clients | [Docs](https://inline.chat/docs/mcp) · [Source](mcp/) |
 | `@inline-openclaw/inline` | Inline channel plugin for OpenClaw | [Docs](https://inline.chat/docs/openclaw) · [Source](openclaw/) |
 | `@inline-chat/hermes-agent-adapter` | Inline platform adapter for Hermes Agent | [Docs](https://inline.chat/docs/hermes) · [Source](hermes-agent/) |

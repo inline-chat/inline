@@ -89,7 +89,7 @@ export type {
   UploadFileResult,
 } from "@inline-chat/bot-api-types"
 
-export type InlineBotApiClientOptions = {
+export type InlineBotClientOptions = {
   // Defaults to https://api.inline.chat
   baseUrl?: string
   token: string
@@ -99,7 +99,7 @@ export type InlineBotApiClientOptions = {
   fetch?: typeof fetch
 }
 
-export type InlineBotApiRequestOptions = {
+export type InlineBotClientRequestOptions = {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
   headers?: Record<string, string>
   body?: unknown
@@ -107,17 +107,17 @@ export type InlineBotApiRequestOptions = {
   signal?: AbortSignal
 }
 
-export type InlineBotApiResponse<T> = {
+export type InlineBotClientResponse<T> = {
   status: number
   headers: Headers
   data: T
 }
 
-export type InlineBotApiPostEncoding = "json" | "query"
+export type InlineBotClientPostEncoding = "json" | "query"
 
-export type InlineBotApiMethodOptions = {
+export type InlineBotClientMethodOptions = {
   headers?: Record<string, string>
   signal?: AbortSignal
   // For POST methods only. Defaults to "json".
-  postAs?: InlineBotApiPostEncoding
+  postAs?: InlineBotClientPostEncoding
 }

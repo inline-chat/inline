@@ -10,7 +10,7 @@ on:
         options:
           - protocol
           - bot-api-types
-          - bot-api
+          - bot-client
           - realtime-sdk
           - openclaw
           - hermes-agent
@@ -95,9 +95,9 @@ jobs:
               package_dir="packages/bot-api-types"
               package_name="@inline-chat/bot-api-types"
               ;;
-            bot-api)
-              package_dir="packages/bot-api"
-              package_name="@inline-chat/bot-api"
+            bot-client)
+              package_dir="packages/bot-client"
+              package_name="@inline-chat/bot-client"
               ;;
             realtime-sdk)
               package_dir="sdk"
@@ -175,7 +175,7 @@ jobs:
             protocol|realtime-sdk|openclaw)
               bun run --cwd "$PACKAGE_DIR" check
               ;;
-            bot-api-types|bot-api)
+            bot-api-types|bot-client)
               bun run --cwd "$PACKAGE_DIR" build
               bun run --cwd "$PACKAGE_DIR" typecheck
               bun run --cwd "$PACKAGE_DIR" lint

@@ -67,8 +67,8 @@
         "openclaw",
       ],
     },
-    "packages/bot-api": {
-      "name": "@inline-chat/bot-api",
+    "packages/bot-client": {
+      "name": "@inline-chat/bot-client",
       "version": "0.1.0",
       "dependencies": {
         "@inline-chat/bot-api-types": "^0.1.0",
@@ -175,7 +175,7 @@
 
     "@hono/node-server": ["@hono/node-server@1.19.14", "", { "peerDependencies": { "hono": "^4" } }, "sha512-GwtvgtXxnWsucXvbQXkRgqksiH2Qed37H9xHZocE5sA3N8O8O8/8FA3uclQXxXVzc9XBZuEOMK7+r02FmSpHtw=="],
 
-    "@inline-chat/bot-api": ["@inline-chat/bot-api@workspace:packages/bot-api"],
+    "@inline-chat/bot-client": ["@inline-chat/bot-client@workspace:packages/bot-client"],
 
     "@inline-chat/bot-api-types": ["@inline-chat/bot-api-types@workspace:packages/bot-api-types"],
 
