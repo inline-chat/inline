@@ -371,5 +371,7 @@ describe("carrier-independent Inline Protocol server session", () => {
       body: invoke,
     }, randomBytes(paddingFor(invoke.length))))).rejects.toThrow("Authorization key is no longer active")
     expect(dispatches).toBe(1)
+    expect(server.destroyed).toBeTrue()
+    expect(() => server.sendApplicationUpdate(Uint8Array.of(1))).toThrow()
   }, 30_000)
 })

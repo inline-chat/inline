@@ -235,6 +235,7 @@ export const makeInlineProtocolRealtimeTransport = (
         ? { onQuickAck: (quickAckId) => sendQuickAck(socket, quickAckId) }
         : undefined)
       for (const response of responses) sendRecord(socket, response)
+      if (state.session.destroyed && !socket.data.closed) socket.close(1000, "Protocol session closed")
     })
   }
 
