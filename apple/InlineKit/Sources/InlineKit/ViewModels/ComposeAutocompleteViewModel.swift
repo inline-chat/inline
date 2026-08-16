@@ -46,7 +46,7 @@ public struct ComposeAutocompleteItem: Identifiable, Hashable, Sendable {
   public let emoji: String?
   public let avatarUserInfo: UserInfo?
   public let showsAppIcon: Bool
-  public let spaceThreadReference: SpaceThreadReference?
+  public let threadReference: ThreadReference?
   public let payload: Payload
 
   public init(
@@ -58,7 +58,7 @@ public struct ComposeAutocompleteItem: Identifiable, Hashable, Sendable {
     emoji: String? = nil,
     avatarUserInfo: UserInfo? = nil,
     showsAppIcon: Bool = false,
-    spaceThreadReference: SpaceThreadReference? = nil,
+    threadReference: ThreadReference? = nil,
     payload: Payload
   ) {
     self.id = id
@@ -69,7 +69,7 @@ public struct ComposeAutocompleteItem: Identifiable, Hashable, Sendable {
     self.emoji = emoji
     self.avatarUserInfo = avatarUserInfo
     self.showsAppIcon = showsAppIcon
-    self.spaceThreadReference = spaceThreadReference
+    self.threadReference = threadReference
     self.payload = payload
   }
 }
@@ -471,7 +471,7 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
             let chatId = snapshot.peerId.asThreadId(),
             let chat = snapshot.item.chat,
             chat.type == .thread,
-            kind != .threadNumber || chat.spaceThreadReference != nil,
+            kind != .threadNumber || chat.threadReference != nil,
             !snapshot.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       else {
         return nil
@@ -534,7 +534,7 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
       let spaceId = snapshot.item.dialog.spaceId ?? chat.spaceId
       let subtitle = [
         snapshot.parentTitle ?? snapshot.spaceTitle ?? "Thread",
-        chat.spaceThreadReferenceLabel,
+        chat.threadReferenceLabel,
       ]
       .compactMap { $0 }
       .joined(separator: " • ")
@@ -544,7 +544,7 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
         title: title,
         subtitle: subtitle,
         emoji: chat.emoji,
-        spaceThreadReference: chat.spaceThreadReference,
+        threadReference: chat.threadReference,
         payload: .thread(chatId: candidate.chatId, spaceId: spaceId, title: title)
       )
     }

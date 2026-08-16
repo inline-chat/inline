@@ -11,7 +11,7 @@ import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import type { ServerUpdate } from "@in/server/protocol/server"
 import type { FunctionContext } from "@in/server/functions/_types"
-import { allocateSpaceThreadNumber } from "@in/server/modules/threadNumbers"
+import { allocateThreadNumber } from "@in/server/modules/threadNumbers"
 
 const log = new Log("functions.moveThread")
 
@@ -134,9 +134,9 @@ export async function moveThread(
         }
       }
 
-      let nextThreadNumber: number | null = null
+      let nextThreadNumber: number
       if (targetSpaceId !== null) {
-        nextThreadNumber = await allocateSpaceThreadNumber(tx, targetSpaceId)
+        nextThreadNumber = await allocateThreadNumber(tx, { type: "space", id: targetSpaceId })
 
         // v1: keep space title uniqueness behavior consistent with createChat.
         // Home threads are intentionally not unique.
@@ -165,6 +165,15 @@ export async function moveThread(
             )
           }
         }
+      } else {
+        if (chat.createdBy === null) {
+          throw new RealtimeRpcError(
+            RealtimeRpcError.Code.BAD_REQUEST,
+            "Thread has no user scope owner",
+            400,
+          )
+        }
+        nextThreadNumber = await allocateThreadNumber(tx, { type: "user", id: chat.createdBy })
       }
 
       updatePayload = {
@@ -186,7 +195,7 @@ export async function moveThread(
         .update(chats)
         .set({
           spaceId: targetSpaceId,
-          threadNumber: targetSpaceId !== null ? nextThreadNumber : null,
+          threadNumber: nextThreadNumber,
           updateSeq: update.seq,
           lastUpdateDate: update.date,
         })

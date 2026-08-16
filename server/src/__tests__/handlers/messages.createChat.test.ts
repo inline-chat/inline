@@ -184,7 +184,7 @@ describe("messages.createChat", () => {
 
     expect(handlerResult.chat?.isPublic).toBe(false)
     expect(handlerResult.chat?.spaceId).toBeUndefined()
-    expect(handlerResult.chat?.number).toBeUndefined()
+    expect(handlerResult.chat?.number).toBe(1)
 
     const [createdChat] = await db
       .select()
@@ -194,7 +194,7 @@ describe("messages.createChat", () => {
     expect(createdChat?.spaceId).toBeNull()
     expect(createdChat?.createdBy).toBe(currentUser.id)
     expect(createdChat?.publicThread).toBe(false)
-    expect(createdChat?.threadNumber).toBeNull()
+    expect(createdChat?.threadNumber).toBe(1)
 
     const participants = await db
       .select()

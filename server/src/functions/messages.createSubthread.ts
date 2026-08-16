@@ -27,7 +27,7 @@ import type { ServerUpdate } from "@in/server/protocol/server"
 import type { Chat, ChatParticipant, Dialog, Message } from "@inline-chat/protocol/core"
 import type { Transaction } from "@in/server/db/types"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
-import { allocateSpaceThreadNumber } from "@in/server/modules/threadNumbers"
+import { allocateThreadNumber } from "@in/server/modules/threadNumbers"
 import { and, eq, inArray } from "drizzle-orm"
 import { queueReplyThreadGraphMaterialization } from "@in/server/modules/threadGraph"
 
@@ -252,7 +252,10 @@ async function createSubthreadChat(input: {
   try {
     const result = await db.transaction(async (tx): Promise<{ chat: DbChat; participants: InitialParticipant[] }> => {
       const spaceId = input.parentChat.spaceId ?? null
-      const threadNumber = spaceId !== null ? await allocateSpaceThreadNumber(tx, spaceId) : null
+      const threadNumber = await allocateThreadNumber(
+        tx,
+        spaceId !== null ? { type: "space", id: spaceId } : { type: "user", id: input.createdBy },
+      )
 
       const [chat] = await tx
         .insert(chats)

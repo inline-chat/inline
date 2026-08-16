@@ -322,11 +322,17 @@ struct ComposeAutocompleteViewModelTests {
     )
   }
 
-  @Test("numbered space reply thread is searchable by its provisional reference")
-  func numberedSpaceReplyThreadIsSearchableByReference() async throws {
+  @Test("numbered user and space threads are searchable by their provisional reference")
+  func numberedScopedThreadsAreSearchableByReference() async throws {
     let db = AppDatabase.empty()
     try await db.dbWriter.write { sqlDb in
       try Space(id: 7, name: "Engineering", date: Date(timeIntervalSince1970: 1)).insert(sqlDb)
+      try User(
+        id: 99,
+        email: "mo@example.com",
+        firstName: "Mo",
+        username: "mo"
+      ).insert(sqlDb)
       let parent = Chat(
         id: 4_001,
         date: Date(timeIntervalSince1970: 1),
@@ -350,7 +356,8 @@ struct ComposeAutocompleteViewModelTests {
         type: .thread,
         title: "Home notes",
         spaceId: nil,
-        number: 123
+        number: 123,
+        createdBy: 99
       )
       try Self.insertCatalogChat(parent, in: sqlDb)
       try Self.insertCatalogChat(reply, in: sqlDb)
@@ -375,13 +382,9 @@ struct ComposeAutocompleteViewModelTests {
         )
       )
 
-      await waitForItems(viewModel, count: 1)
-      #expect(viewModel.items.first?.title == "Decision follow-up")
-      #expect(viewModel.items.first?.subtitle == "Planning • #123")
-      #expect(
-        viewModel.items.first?.payload
-          == .thread(chatId: 4_002, spaceId: 7, title: "Decision follow-up")
-      )
+      await waitForItems(viewModel, count: 2)
+      #expect(Set(viewModel.items.map(\.title)) == ["Decision follow-up", "Home notes"])
+      #expect(viewModel.items.contains { $0.subtitle == "Planning • #123" })
     }
 
     viewModel.update(
@@ -391,9 +394,12 @@ struct ComposeAutocompleteViewModelTests {
         query: "12"
       )
     )
-    await waitForItems(viewModel, count: 1)
+    await waitForItems(viewModel, count: 2)
     #expect(viewModel.items.first?.kind == .threadNumber)
-    #expect(viewModel.items.first?.spaceThreadReference == SpaceThreadReference(chatId: 4_002, number: 123))
+    #expect(Set(viewModel.items.compactMap(\.threadReference)) == [
+      ThreadReference(chatId: 4_002, number: 123),
+      ThreadReference(chatId: 4_003, number: 123),
+    ])
     #expect(externalCallCount == 0)
 
     try await db.dbWriter.write { sqlDb in
@@ -428,8 +434,8 @@ struct ComposeAutocompleteViewModelTests {
         query: "123"
       )
     )
-    await waitForItems(viewModel, count: 2)
-    #expect(viewModel.items.compactMap(\.spaceThreadReference?.chatId) == [4_002, 4_005])
+    await waitForItems(viewModel, count: 3)
+    #expect(Set(viewModel.items.compactMap(\.threadReference?.chatId)) == [4_002, 4_003, 4_005])
     #expect(externalCallCount == 0)
 
     viewModel.update(
@@ -439,7 +445,7 @@ struct ComposeAutocompleteViewModelTests {
         query: "#123"
       )
     )
-    await waitForItems(viewModel, count: 2)
+    await waitForItems(viewModel, count: 3)
     try await Task.sleep(for: .milliseconds(300))
     #expect(externalCallCount == 0)
   }

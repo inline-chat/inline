@@ -51,6 +51,9 @@ export const users = pgTable(
     shareTimeZone: boolean("share_time_zone").default(true).notNull(),
     appearInGlobalSearch: boolean("appear_in_global_search").default(true).notNull(),
 
+    /** Next monotonic thread number available in this user's scope. */
+    nextThreadNumber: integer("next_thread_number").default(1).notNull(),
+
     // bot
     bot: boolean("bot").default(false),
     botCreatorId: integer("bot_creator_id").references((): AnyPgColumn => users.id),

@@ -74,6 +74,7 @@ const baseUser: DbUser = {
   photoFileId: null,
   pendingSetup: null,
   timeZone: null,
+  nextThreadNumber: 1,
   bot: null,
   botCreatorId: null,
   updateSeq: null,

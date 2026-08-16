@@ -2656,7 +2656,7 @@ extension LegacyComposeAppKit: ComposeAutocompleteMenuDelegate {
     switch item.payload {
       case let .thread(chatId, _, title):
         let result = if match.kind == .threadNumber,
-                        let reference = item.spaceThreadReference {
+                        let reference = item.threadReference {
           threadLinkDetector.replaceThreadNumberReference(
             in: textEditor.attributedString,
             range: match.range,

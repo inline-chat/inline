@@ -103,7 +103,7 @@ struct ChatToolbarLeadingView: View {
     }
 
     let reference = fullChatViewModel.chat?.isReplyThread == true
-      ? fullChatViewModel.chat?.spaceThreadReference
+      ? fullChatViewModel.chat?.threadReference
       : nil
 
     if let toolbarContext, toolbarContext.hasBreadcrumb {
@@ -219,7 +219,7 @@ enum ChatSubtitle: Equatable {
   case connectionState(String)
   case composeAction(ComposeActionPresentation)
   case timezone(String)
-  case breadcrumb(ReplyThreadToolbarContext, reference: SpaceThreadReference?)
+  case breadcrumb(ReplyThreadToolbarContext, reference: ThreadReference?)
   case empty
 
   var transitionID: String {
@@ -444,7 +444,7 @@ private struct ChatToolbarComposeActionIndicator: View {
 
 private struct ChatToolbarBreadcrumbSubtitle: View {
   let context: ReplyThreadToolbarContext
-  let reference: SpaceThreadReference?
+  let reference: ThreadReference?
   let onOpenSpace: (ReplyThreadToolbarContext.SpaceLink) -> Void
   let onOpenParentThread: (ReplyThreadToolbarContext.ParentLink) -> Void
 
@@ -484,8 +484,8 @@ private struct ChatToolbarBreadcrumbSubtitle: View {
     .lineLimit(1)
   }
 
-  private func copyReference(_ reference: SpaceThreadReference) {
-    if SpaceThreadReferencePasteboard.copy(reference) {
+  private func copyReference(_ reference: ThreadReference) {
+    if ThreadReferencePasteboard.copy(reference) {
       ToastManager.shared.showToast("Copied thread link", type: .success, systemImage: "link")
     } else {
       ToastManager.shared.showToast(

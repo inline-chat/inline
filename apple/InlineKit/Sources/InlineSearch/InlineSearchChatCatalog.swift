@@ -313,7 +313,7 @@ public actor InlineSearchChatCatalog {
         email: user?.email,
         chatTitle: snapshot.item.chat?.title,
         spaceTitle: snapshot.spaceTitle,
-        threadReferenceLabel: snapshot.item.chat?.spaceThreadReferenceLabel
+        threadReferenceLabel: snapshot.item.chat?.threadReferenceLabel
       )
       if let previous, previous.searchKey == searchKey {
         fields = previous.fields

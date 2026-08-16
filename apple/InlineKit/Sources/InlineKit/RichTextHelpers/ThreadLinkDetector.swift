@@ -133,7 +133,7 @@ public final class ThreadLinkDetector {
   public func replaceThreadNumberReference(
     in attributedText: NSAttributedString,
     range: NSRange,
-    with reference: SpaceThreadReference,
+    with reference: ThreadReference,
     trailingText: String = " ",
     linkAttributes: [NSAttributedString.Key: Any]? = nil,
     trailingAttributes: [NSAttributedString.Key: Any]? = nil

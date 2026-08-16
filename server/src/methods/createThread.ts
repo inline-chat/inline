@@ -9,7 +9,7 @@ import type { HandlerContext } from "@in/server/controllers/helpers"
 import { TInputId } from "@in/server/types/methods"
 import { ensureCanCreateSpaceThread } from "@in/server/modules/authorization/spaceThreadGuards"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
-import { allocateSpaceThreadNumber } from "@in/server/modules/threadNumbers"
+import { allocateThreadNumber } from "@in/server/modules/threadNumbers"
 
 export const Input = Type.Object({
   title: Type.String(),
@@ -45,7 +45,7 @@ export const handler = async (
     }
 
     const chat = await db.transaction(async (tx) => {
-      const threadNumber = await allocateSpaceThreadNumber(tx, spaceId)
+      const threadNumber = await allocateThreadNumber(tx, { type: "space", id: spaceId })
 
       return tx
         .insert(chats)

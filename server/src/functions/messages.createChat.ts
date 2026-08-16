@@ -23,7 +23,7 @@ import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 import { ensureCanCreateSpaceThread } from "@in/server/modules/authorization/spaceThreadGuards"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import type { Transaction } from "@in/server/db/types"
-import { allocateSpaceThreadNumber } from "@in/server/modules/threadNumbers"
+import { allocateThreadNumber } from "@in/server/modules/threadNumbers"
 
 type InitialParticipant = {
   chatId: number
@@ -151,7 +151,12 @@ export async function createChat(
 
   if (reservedChatId !== undefined) {
     const { chat: createdChat, dialog: createdDialog, participants: createdParticipants } = await db.transaction(async (tx) => {
-      const threadNumber = hasSpaceId ? await allocateSpaceThreadNumber(tx, resolvedSpaceId) : null
+      const threadNumber = await allocateThreadNumber(
+        tx,
+        hasSpaceId
+          ? { type: "space", id: resolvedSpaceId }
+          : { type: "user", id: context.currentUserId },
+      )
 
       const [reservation] = await tx
         .select()
@@ -244,7 +249,12 @@ export async function createChat(
   let createdParticipants: InitialParticipant[] = []
   try {
     ;({ chat: createdChat, dialog: createdDialog, participants: createdParticipants } = await db.transaction(async (tx) => {
-      const threadNumber = hasSpaceId ? await allocateSpaceThreadNumber(tx, resolvedSpaceId) : null
+      const threadNumber = await allocateThreadNumber(
+        tx,
+        hasSpaceId
+          ? { type: "space", id: resolvedSpaceId }
+          : { type: "user", id: context.currentUserId },
+      )
 
       const [chat] = await tx
         .insert(chats)

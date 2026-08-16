@@ -1,4 +1,4 @@
-import { pgTable, varchar, boolean, pgEnum, unique, check, timestamp, index } from "drizzle-orm/pg-core"
+import { pgTable, varchar, boolean, pgEnum, unique, uniqueIndex, check, timestamp, index } from "drizzle-orm/pg-core"
 import { users } from "./users"
 import { spaces } from "./spaces"
 import { sql } from "drizzle-orm"
@@ -70,6 +70,11 @@ export const chats = pgTable(
 
     /** Ensure unique space thread number */
     spaceThreadNumberUniqueContraint: unique("space_thread_number_unique").on(table.spaceId, table.threadNumber),
+
+    /** Ensure unique thread numbers within user scopes. */
+    userThreadNumberUniqueIndex: uniqueIndex("user_thread_number_unique")
+      .on(table.createdBy, table.threadNumber)
+      .where(sql`${table.spaceId} is null and ${table.threadNumber} is not null`),
 
     /** Allow at most one reply-thread subthread per parent message. */
     replyThreadParentUniqueConstraint: unique("reply_thread_parent_unique").on(table.parentChatId, table.parentMessageId),

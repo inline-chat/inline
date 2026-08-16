@@ -362,7 +362,7 @@ class ComposeNSTextView: NSTextView {
       return
     }
 
-    if let reference = SpaceThreadReferencePasteboard.reference() {
+    if let reference = ThreadReferencePasteboard.reference() {
       var attributes = defaultTypingAttributes
       attributes[.foregroundColor] = ComposeTextEditor.linkColor
       attributes[.threadLink] = ThreadLinkTarget.chatId(reference.chatId)

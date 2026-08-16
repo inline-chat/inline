@@ -46,7 +46,7 @@ public struct HomeChatListItemSnapshot: Hashable, Identifiable, Sendable {
         item.user?.user.username,
         item.user?.user.email,
         item.chat?.title,
-        item.chat?.spaceThreadReferenceLabel,
+        item.chat?.threadReferenceLabel,
       ]
       .compactMap { $0 }
       .joined(separator: " ")

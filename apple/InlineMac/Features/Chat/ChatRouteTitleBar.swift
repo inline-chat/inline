@@ -171,7 +171,7 @@ struct ChatRouteTitleBar: View {
 
   private func breadcrumbView(
     _ breadcrumb: ChatRouteToolbarTitleModel.Breadcrumb,
-    reference: SpaceThreadReference?
+    reference: ThreadReference?
   ) -> some View {
     HStack(spacing: 4) {
       if let space = breadcrumb.space {
@@ -218,8 +218,8 @@ struct ChatRouteTitleBar: View {
     .offset(x: -5)
   }
 
-  private func copyReference(_ reference: SpaceThreadReference) {
-    if SpaceThreadReferencePasteboard.copy(reference) {
+  private func copyReference(_ reference: ThreadReference) {
+    if ThreadReferencePasteboard.copy(reference) {
       ToastCenter.shared.showSuccess("Copied thread link")
     } else {
       ToastCenter.shared.showError("Failed to copy thread link")

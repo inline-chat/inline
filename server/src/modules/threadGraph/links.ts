@@ -11,16 +11,7 @@ import { getUpdateGroupFromInputPeer } from "@in/server/modules/updates"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeUpdates } from "@in/server/realtime/message"
-
-type GraphScope =
-  | {
-      type: "space"
-      id: number
-    }
-  | {
-      type: "user"
-      id: number
-    }
+import { scopeFromChat } from "@in/server/modules/scopes"
 
 type SourceChat = Pick<DbChat, "id" | "spaceId" | "createdBy" | "title">
 
@@ -66,18 +57,8 @@ type DeleteBacklinkMessagesOptions = {
   currentUserId?: number
 }
 
-export function graphScopeFromChat(chat: SourceChat): GraphScope | null {
-  if (chat.spaceId !== null) {
-    return { type: "space", id: chat.spaceId }
-  }
-
-  if (chat.createdBy !== null) {
-    return { type: "user", id: chat.createdBy }
-  }
-
-  // Legacy chats can predate both scope columns. Graph projection is optional;
-  // leave those rows untouched until a deliberate backfill exists.
-  return null
+export function graphScopeFromChat(chat: SourceChat) {
+  return scopeFromChat(chat)
 }
 
 export async function replaceMessageThreadLinks(input: ReplaceMessageThreadLinksInput): Promise<DbThreadGraphLink[]> {

@@ -134,7 +134,7 @@ class ComposeTextView: UITextView {
       composeView?.handlePastedImage()
     } else if selectedRange.length > 0, let urlString = pastedLinkURLString(from: .general) {
       applyLink(urlString, to: selectedRange)
-    } else if let reference = SpaceThreadReferencePasteboard.reference() {
+    } else if let reference = ThreadReferencePasteboard.reference() {
       let detector = ThreadLinkDetector()
       var linkAttributes = typingAttributes
       linkAttributes[.foregroundColor] = composeView?.linkColor ?? tintColor ?? UIColor.systemBlue

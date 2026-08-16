@@ -6,7 +6,8 @@ import UIKit
 
 import Foundation
 
-public enum SpaceThreadReferencePasteboard {
+public enum ThreadReferencePasteboard {
+  // Preserve the shipped identifier so existing copied space references remain readable.
   private static let type = "chat.inline.space-thread-reference"
   private static let markdownType = "net.daringfireball.markdown"
 
@@ -19,7 +20,7 @@ public enum SpaceThreadReferencePasteboard {
   }
 
   @discardableResult
-  public static func copy(_ reference: SpaceThreadReference) -> Bool {
+  public static func copy(_ reference: ThreadReference) -> Bool {
     guard let content = content(for: reference) else { return false }
 
     #if os(macOS)
@@ -48,7 +49,7 @@ public enum SpaceThreadReferencePasteboard {
   public static func reference(
     from pasteboard: NSPasteboard = .general,
     database: AppDatabase = .shared
-  ) -> SpaceThreadReference? {
+  ) -> ThreadReference? {
     guard let data = pasteboard.data(forType: NSPasteboard.PasteboardType(type)),
           let reference = decode(data),
           pasteboard.string(forType: .string) == reference.label,
@@ -62,7 +63,7 @@ public enum SpaceThreadReferencePasteboard {
   public static func reference(
     from pasteboard: UIPasteboard = .general,
     database: AppDatabase = .shared
-  ) -> SpaceThreadReference? {
+  ) -> ThreadReference? {
     guard let data = pasteboard.data(forPasteboardType: type),
           let reference = decode(data),
           pasteboard.value(forPasteboardType: "public.utf8-plain-text") as? String == reference.label,
@@ -74,8 +75,8 @@ public enum SpaceThreadReferencePasteboard {
   }
   #endif
 
-  private static func decode(_ data: Data) -> SpaceThreadReference? {
-    guard let reference = try? JSONDecoder().decode(SpaceThreadReference.self, from: data),
+  private static func decode(_ data: Data) -> ThreadReference? {
+    guard let reference = try? JSONDecoder().decode(ThreadReference.self, from: data),
           reference.chatId > 0,
           reference.number > 0
     else {
@@ -84,7 +85,7 @@ public enum SpaceThreadReferencePasteboard {
     return reference
   }
 
-  static func content(for reference: SpaceThreadReference) -> Content? {
+  static func content(for reference: ThreadReference) -> Content? {
     guard reference.chatId > 0,
           reference.number > 0,
           let inlineData = try? JSONEncoder().encode(reference),
@@ -106,9 +107,9 @@ public enum SpaceThreadReferencePasteboard {
     )
   }
 
-  static func isCurrent(_ reference: SpaceThreadReference, database: AppDatabase) -> Bool {
+  static func isCurrent(_ reference: ThreadReference, database: AppDatabase) -> Bool {
     (try? database.reader.read { db in
-      try Chat.fetchOne(db, id: reference.chatId)?.spaceThreadReference == reference
+      try Chat.fetchOne(db, id: reference.chatId)?.threadReference == reference
     }) == true
   }
 }

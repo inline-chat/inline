@@ -154,7 +154,7 @@ struct ThreadLinkDetectorTests {
     let result = detector.replaceThreadNumberReference(
       in: NSAttributedString(string: "Open #12"),
       range: NSRange(location: 5, length: 3),
-      with: SpaceThreadReference(chatId: 42, number: 123)
+      with: ThreadReference(chatId: 42, number: 123)
     )
 
     #expect(result.newAttributedText.string == "Open #123 ")

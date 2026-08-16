@@ -1920,7 +1920,7 @@ private struct QuickSearchRow: View {
   }
 
   private func chatSubtitle(for result: InlineSearchChatResult) -> String? {
-    guard let referenceLabel = result.chat?.spaceThreadReferenceLabel else {
+    guard let referenceLabel = result.chat?.threadReferenceLabel else {
       return result.subtitle
     }
     guard let subtitle = result.subtitle, !subtitle.isEmpty else {

@@ -57,10 +57,10 @@ describe("messages.createSubthread", () => {
 
     expect(result.chat.title).toBe("anchor")
     expect(result.chat.untitled).toBe(true)
-    expect(result.chat.number).toBeUndefined()
+    expect(result.chat.number).toBe(1)
     expect(childChat?.title).toBe("anchor")
     expect(childChat?.isUntitled).toBe(true)
-    expect(childChat?.threadNumber).toBeNull()
+    expect(childChat?.threadNumber).toBe(1)
 
     const graphLink = await waitForReplyThreadGraphLink(childChatId)
     expect(graphLink).toMatchObject({

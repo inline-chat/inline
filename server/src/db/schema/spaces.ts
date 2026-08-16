@@ -15,6 +15,9 @@ export const spaces = pgTable(
     date: creationDate,
     deleted: date,
 
+    /** Next monotonic thread number available in this space's scope. */
+    nextThreadNumber: integer("next_thread_number").default(1).notNull(),
+
     /** Sequence of the updates for the space */
     updateSeq: integer("update_seq").default(0),
 

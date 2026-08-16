@@ -21,6 +21,7 @@ const user: DbUser = {
   timeZone: "Asia/Tehran",
   shareTimeZone: false,
   appearInGlobalSearch: true,
+  nextThreadNumber: 1,
   bot: false,
   botCreatorId: null,
   updateSeq: 0,

@@ -320,8 +320,8 @@ struct InlineSearchViewModelTests {
     ])
   }
 
-  @Test("command bar catalog searches numbered space threads by provisional reference")
-  func commandBarCatalogSearchesSpaceThreadReferences() async throws {
+  @Test("command bar catalog searches numbered user and space threads by provisional reference")
+  func commandBarCatalogSearchesThreadReferences() async throws {
     let (queue, _) = try makeInMemoryDB()
     let numberedThreadId: Int64 = 7_011
     let homeThreadId: Int64 = 7_012
@@ -329,8 +329,9 @@ struct InlineSearchViewModelTests {
 
     try await queue.write { db in
       try seedSpace(db, id: spaceId)
+      try seedUser(db, id: 7_099, firstName: "Mo", lastName: nil, username: "mo")
       try seedThread(db, id: numberedThreadId, title: "Decision follow-up", spaceId: spaceId, number: 130)
-      try seedThread(db, id: homeThreadId, title: "Home notes", spaceId: nil, number: 130)
+      try seedThread(db, id: homeThreadId, title: "Home notes", spaceId: nil, number: 130, createdBy: 7_099)
       try seedThread(db, id: fuzzyDateThreadId, title: "July 13, 2026", spaceId: spaceId)
       try seedDialog(db, chat: try Chat.fetchOne(db, id: numberedThreadId)!)
       try seedDialog(db, chat: try Chat.fetchOne(db, id: homeThreadId)!)
@@ -351,7 +352,10 @@ struct InlineSearchViewModelTests {
       )
 
       #expect(projection.chats.first?.peer == .thread(id: numberedThreadId))
-      #expect(projection.chats.first?.chat?.spaceThreadReferenceLabel == "#130")
+      #expect(projection.chats.first?.chat?.threadReferenceLabel == "#130")
+      #expect(projection.chats.contains { item in
+        item.peer == .thread(id: homeThreadId) && item.chat?.threadReferenceLabel == "#130"
+      })
       #expect(projection.chats.contains { $0.peer == .thread(id: fuzzyDateThreadId) })
     }
   }
@@ -495,6 +499,7 @@ struct InlineSearchViewModelTests {
     title: String,
     spaceId: Int64?,
     number: Int? = nil,
+    createdBy: Int64? = nil,
     parentChatId: Int64? = nil,
     parentMessageId: Int64? = nil
   ) throws {
@@ -505,6 +510,7 @@ struct InlineSearchViewModelTests {
       title: title,
       spaceId: spaceId,
       number: number,
+      createdBy: createdBy,
       parentChatId: parentChatId,
       parentMessageId: parentMessageId
     ).insert(db)

@@ -72,7 +72,7 @@ describe("messages.moveThread", () => {
     const result = await moveThread({ chatId: chat.id, spaceId: null }, makeContext(admin.id))
 
     expect(result.chat.spaceId).toBeNull()
-    expect(result.chat.threadNumber).toBeNull()
+    expect(result.chat.threadNumber).toBe(1)
 
     const dialogs = await db
       .select()
@@ -138,4 +138,3 @@ describe("messages.moveThread", () => {
     })
   })
 })
-
