@@ -18,7 +18,6 @@ export type {
   BotFile,
   BotInputId,
   BotMedia,
-  BotParticipation,
   BotParticipationChange,
   BotMessage,
   BotMessageAction,
