@@ -176,6 +176,54 @@ describe("Bot HTTP API", () => {
     expect(json.result.user.username).toBe("pathbot")
   })
 
+  it("creates, globally gets, and lists a name-only Agent", async () => {
+    const { bot, token } = await createBotSession("agentapibot")
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    }
+
+    const create = await app.handle(new Request("http://localhost/bot/createAgent", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ name: "  Concierge  ", emoji: "👋" }),
+    }))
+    expect(create.status).toBe(200)
+    const created = await create.json()
+    expect(created).toMatchObject({
+      ok: true,
+      result: {
+        agent: { bot_user_id: bot.id, name: "Concierge", emoji: "👋" },
+      },
+    })
+    expect(created.result.agent.skill_key).toBeUndefined()
+    expect(created.result.agent.instructions).toBeUndefined()
+
+    const agentId = created.result.agent.id
+    const get = await app.handle(new Request(
+      `http://localhost/bot/getAgent?agent_id=${agentId}`,
+      { headers },
+    ))
+    expect(get.status).toBe(200)
+    expect(await get.json()).toMatchObject({
+      ok: true,
+      result: {
+        bot: { id: bot.id, is_bot: true },
+        agent: { id: agentId, bot_user_id: bot.id, name: "Concierge" },
+      },
+    })
+
+    const list = await app.handle(new Request(
+      "http://localhost/bot/getMyAgents",
+      { headers },
+    ))
+    expect(list.status).toBe(200)
+    expect(await list.json()).toMatchObject({
+      ok: true,
+      result: { agents: [{ id: agentId, name: "Concierge" }] },
+    })
+  })
+
   it("persists one update stream across polling and webhook settings", async () => {
     const { token } = await createBotSession("deliverybot")
     const auth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }

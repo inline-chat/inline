@@ -92,6 +92,7 @@ export type BotMessageEntityInput = {
   offset: BotInputId
   length: BotInputId
   user_id?: BotInputId
+  agent_id?: BotInputId
   url?: string
   language?: string
   chat_id?: BotInputId
@@ -107,6 +108,7 @@ export type BotMessageEntityOutput = {
   offset: number
   length: number
   user?: BotUser
+  agent_id?: number
   url?: string
   language?: string
   chat_id?: number
@@ -257,6 +259,7 @@ export type BotChatParticipant = {
 type BotUpdateBase = {
   update_id: number
   activation_reason?: BotActivationReason
+  activated_agent?: BotAgent
 }
 
 export type BotUpdate = BotUpdateBase &
@@ -314,6 +317,23 @@ export type BotCommand = {
   description: string
   sort_order?: number
 }
+
+export type BotAgent = {
+  id: number
+  bot_user_id: number
+  name: string
+  handle?: string
+  emoji?: string
+  description?: string
+  skill_key?: string
+  instructions?: string
+}
+
+export type CreateAgentParams = Omit<BotAgent, "id" | "bot_user_id">
+export type GetAgentParams = { agent_id: BotInputId }
+export type CreateAgentResult = { agent: BotAgent }
+export type GetAgentResult = { bot: BotUser; agent: BotAgent }
+export type GetMyAgentsResult = { agents: BotAgent[] }
 
 export type GetMeResult = { user: BotUser }
 export type GetChatResult = { chat: BotChat }
@@ -525,6 +545,9 @@ export type BotMethodName =
   | "setWebhook"
   | "deleteWebhook"
   | "getWebhookInfo"
+  | "createAgent"
+  | "getAgent"
+  | "getMyAgents"
 
 export type BotMethodParamsByName = {
   getMe: undefined
@@ -556,6 +579,9 @@ export type BotMethodParamsByName = {
   setWebhook: SetWebhookParams
   deleteWebhook: DeleteWebhookParams
   getWebhookInfo: undefined
+  createAgent: CreateAgentParams
+  getAgent: GetAgentParams
+  getMyAgents: undefined
 }
 
 export type BotMethodResultByName = {
@@ -588,6 +614,9 @@ export type BotMethodResultByName = {
   setWebhook: SetWebhookResult
   deleteWebhook: DeleteWebhookResult
   getWebhookInfo: GetWebhookInfoResult
+  createAgent: CreateAgentResult
+  getAgent: GetAgentResult
+  getMyAgents: GetMyAgentsResult
 }
 
 export type BotMethodParams<M extends BotMethodName> = BotMethodParamsByName[M]

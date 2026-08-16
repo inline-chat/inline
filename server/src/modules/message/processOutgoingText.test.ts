@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test"
 import { MessageEntity_Type } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { users } from "@in/server/db/schema"
+import { BotAgentsModel } from "@in/server/db/models/botAgents"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
 import { setupTestLifecycle, testUtils } from "@in/server/__tests__/setup"
 import { eq } from "drizzle-orm"
@@ -81,6 +82,74 @@ describe("processOutgoingText", () => {
       throw new Error("Expected mention entity")
     }
     expect(mention.entity.mention.userId).toBe(BigInt(user.id))
+  })
+
+  test("preserves a valid bot and Agent pair in an inline mention", async () => {
+    const bot = await testUtils.createUser(nextEmail("inline-agent-bot"))
+    const agent = await BotAgentsModel.create({
+      botUserId: bot.id,
+      name: "Data Analyst",
+    })
+
+    const result = await processOutgoingText({
+      text: `ask [@Data Analyst](inline://user?id=${bot.id}&agent_id=${agent.id})`,
+      entities: undefined,
+      parseMarkdown: true,
+    })
+
+    const mention = result.entities?.entities[0]
+    expect(mention?.entity.oneofKind).toBe("mention")
+    if (mention?.entity.oneofKind !== "mention") throw new Error("Expected Agent mention")
+    expect(mention.entity.mention).toEqual({
+      userId: BigInt(bot.id),
+      agentId: agent.id,
+    })
+  })
+
+  test("falls back to the bot mention when the Agent belongs to another bot", async () => {
+    const bot = await testUtils.createUser(nextEmail("inline-agent-target"))
+    const otherBot = await testUtils.createUser(nextEmail("inline-agent-owner"))
+    const agent = await BotAgentsModel.create({
+      botUserId: otherBot.id,
+      name: "Data Analyst",
+    })
+
+    const result = await processOutgoingText({
+      text: `ask [@Data Analyst](inline://user?id=${bot.id}&agent_id=${agent.id})`,
+      entities: undefined,
+      parseMarkdown: true,
+    })
+
+    const mention = result.entities?.entities[0]
+    expect(mention?.entity.oneofKind).toBe("mention")
+    if (mention?.entity.oneofKind !== "mention") throw new Error("Expected bot mention")
+    expect(mention.entity.mention).toEqual({ userId: BigInt(bot.id) })
+  })
+
+  test("validates an explicit Bot API Agent mention through the same pair contract", async () => {
+    const bot = await testUtils.createUser(nextEmail("explicit-agent-target"))
+    const otherBot = await testUtils.createUser(nextEmail("explicit-agent-owner"))
+    const agent = await BotAgentsModel.create({ botUserId: otherBot.id, name: "Analyst" })
+
+    const result = await processOutgoingText({
+      text: "@Analyst",
+      entities: {
+        entities: [{
+          type: MessageEntity_Type.MENTION,
+          offset: 0n,
+          length: 8n,
+          entity: {
+            oneofKind: "mention",
+            mention: { userId: BigInt(bot.id), agentId: agent.id },
+          },
+        }],
+      },
+    })
+
+    const mention = result.entities?.entities[0]
+    expect(mention?.entity.oneofKind).toBe("mention")
+    if (mention?.entity.oneofKind !== "mention") throw new Error("Expected bot mention")
+    expect(mention.entity.mention).toEqual({ userId: BigInt(bot.id) })
   })
 
   test("converts markdown inline username links to mention entities", async () => {

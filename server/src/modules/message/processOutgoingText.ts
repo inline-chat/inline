@@ -1,6 +1,6 @@
 import { MessageEntities, MessageEntity_Type, type MessageEntity } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
-import { lower, userNotDeleted, users } from "@in/server/db/schema"
+import { botAgents, lower, userNotDeleted, users } from "@in/server/db/schema"
 import { processMessageText } from "@in/server/modules/message/processText"
 import { and, inArray } from "drizzle-orm"
 
@@ -30,6 +30,7 @@ type InlineMentionLink = {
   entity: MessageEntity
   userId?: number
   username?: string
+  agentId?: number
 }
 
 type InlineThreadLinkTarget =
@@ -211,7 +212,7 @@ const normalizeUsername = (value: string | null): string | null => {
   return username
 }
 
-const parseInlineUserLink = (rawUrl: string): { userId?: number; username?: string } | null => {
+const parseInlineUserLink = (rawUrl: string): { userId?: number; username?: string; agentId?: number } | null => {
   let url: URL
   try {
     url = new URL(rawUrl)
@@ -226,12 +227,13 @@ const parseInlineUserLink = (rawUrl: string): { userId?: number; username?: stri
   const queryUserId = parsePositiveSafeInt(url.searchParams.get("id") ?? url.searchParams.get("user_id"))
   const pathUserId = parsePositiveSafeInt(url.pathname.replace(/^\/+/, ""))
   const username = normalizeUsername(url.searchParams.get("username"))
+  const agentId = parsePositiveSafeInt(url.searchParams.get("agent_id"))
 
   if (queryUserId) {
-    return { userId: queryUserId }
+    return { userId: queryUserId, ...(agentId ? { agentId } : {}) }
   }
   if (pathUserId) {
-    return { userId: pathUserId }
+    return { userId: pathUserId, ...(agentId ? { agentId } : {}) }
   }
   if (username) {
     return { username }
@@ -405,6 +407,7 @@ const resolveInlineMentionLinks = async (
       entity,
       ...(parsed.userId ? { userId: parsed.userId } : {}),
       ...(parsed.username ? { username: parsed.username } : {}),
+      ...(parsed.agentId ? { agentId: parsed.agentId } : {}),
     })
   }
 
@@ -416,7 +419,6 @@ const resolveInlineMentionLinks = async (
   const usernames = [
     ...new Set(links.map((link) => link.username).filter((username): username is string => username !== undefined)),
   ]
-
   const usersById = new Map<number, number>()
   const usersByUsername = new Map<string, number>()
 
@@ -479,6 +481,7 @@ const resolveInlineMentionLinks = async (
         oneofKind: "mention" as const,
         mention: {
           userId: BigInt(userId),
+          ...(link.agentId ? { agentId: BigInt(link.agentId) } : {}),
         },
       },
     }
@@ -490,6 +493,40 @@ const resolveInlineMentionLinks = async (
 
   return {
     entities: resolvedEntities,
+  }
+}
+
+const validateAgentMentions = async (
+  entities: MessageEntities | undefined,
+): Promise<MessageEntities | undefined> => {
+  const agentIds = [...new Set((entities?.entities ?? []).flatMap((entity) =>
+    entity.entity.oneofKind === "mention" && entity.entity.mention.agentId !== undefined
+      ? [Number(entity.entity.mention.agentId)]
+      : [],
+  ))]
+  if (agentIds.length === 0 || !entities) return entities
+
+  const rows = await db
+    .select({ id: botAgents.id, botUserId: botAgents.botUserId })
+    .from(botAgents)
+    .where(inArray(botAgents.id, agentIds))
+  const agentBotById = new Map(rows.map((row) => [row.id, row.botUserId]))
+
+  return {
+    entities: entities.entities.map((entity) => {
+      if (entity.entity.oneofKind !== "mention" || entity.entity.mention.agentId === undefined) {
+        return entity
+      }
+      const mention = entity.entity.mention
+      if (agentBotById.get(Number(mention.agentId)) === Number(mention.userId)) return entity
+      return {
+        ...entity,
+        entity: {
+          oneofKind: "mention" as const,
+          mention: { userId: mention.userId },
+        },
+      }
+    }),
   }
 }
 
@@ -690,6 +727,7 @@ export const processOutgoingText = async (
   }
 
   entities = await resolveInlineMentionLinks(entities)
+  entities = await validateAgentMentions(entities)
   entities = normalizeMentionRanges(text, entities)
   entities = resolveInlineThreadLinks(text, entities)
   entities = parseMissingBotCommandEntities({

@@ -490,7 +490,10 @@ message MessageEntity {
   int64 offset = 2;
   int64 length = 3;
 
-  message MessageEntityMention { int64 user_id = 1; }
+  message MessageEntityMention {
+    int64 user_id = 1;
+    optional int64 agent_id = 2;
+  }
   message MessageEntityGroupMention { int64 group_id = 1; }
   message MessageEntityTextUrl { string url = 1; }
   message MessageEntityPre { string language = 1; }
@@ -1100,6 +1103,9 @@ enum Method {
   SEARCH_USERS = 103;
   INVITE_TO_INLINE = 104;
   RESOLVE_URL_PREVIEW = 105;
+  CREATE_BOT_AGENT = 106;
+  GET_BOT_AGENT = 107;
+  LIST_BOT_AGENTS = 108;
 }
 
 message RpcCall {
@@ -1210,6 +1216,9 @@ message RpcCall {
     SearchUsersInput searchUsers = 104;
     InviteToInlineInput inviteToInline = 105;
     ResolveUrlPreviewInput resolveUrlPreview = 106;
+    CreateBotAgentInput createBotAgent = 107;
+    GetBotAgentInput getBotAgent = 108;
+    ListBotAgentsInput listBotAgents = 109;
   }
 }
 
@@ -1322,6 +1331,9 @@ message RpcResult {
     SearchUsersResult searchUsers = 104;
     InviteToInlineResult inviteToInline = 105;
     ResolveUrlPreviewResult resolveUrlPreview = 106;
+    CreateBotAgentResult createBotAgent = 107;
+    GetBotAgentResult getBotAgent = 108;
+    ListBotAgentsResult listBotAgents = 109;
   }
 }
 
@@ -1805,6 +1817,40 @@ message CreateBotResult {
   // Token to use for the bot
   string token = 2;
 }
+
+message BotAgent {
+  int64 id = 1;
+  int64 bot_user_id = 2;
+  string name = 3;
+  optional string handle = 4;
+  optional string emoji = 5;
+  optional string description = 6;
+  optional string skill_key = 7;
+  optional string instructions = 8;
+}
+
+message CreateBotAgentInput {
+  int64 bot_user_id = 1;
+  string name = 2;
+  optional string handle = 3;
+  optional string emoji = 4;
+  optional string description = 5;
+  optional string skill_key = 6;
+  optional string instructions = 7;
+}
+
+message CreateBotAgentResult { BotAgent agent = 1; }
+
+message GetBotAgentInput { int64 agent_id = 1; }
+
+message GetBotAgentResult {
+  User bot = 1;
+  BotAgent agent = 2;
+}
+
+message ListBotAgentsInput { int64 bot_user_id = 1; }
+
+message ListBotAgentsResult { repeated BotAgent agents = 1; }
 
 message ListBotsInput {}
 

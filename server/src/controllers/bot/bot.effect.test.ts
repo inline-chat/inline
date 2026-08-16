@@ -74,6 +74,13 @@ const botChat = {
   title: "Effect chat",
 } as const
 
+const botAgent = {
+  id: 73,
+  bot_user_id: botUser.id,
+  name: "Data Analyst",
+  emoji: "📊",
+} as const
+
 const botMessage: BotMessage = {
   message_id: 101,
   chat_id: botChat.chat_id,
@@ -101,6 +108,9 @@ const makeOperations = (
   overrides: Partial<BotOperationsShape> = {},
 ): BotOperationsShape => ({
   getMe: () => unused("getMe"),
+  createAgent: () => unused("createAgent"),
+  getAgent: () => unused("getAgent"),
+  getMyAgents: () => unused("getMyAgents"),
   sendMessage: () => unused("sendMessage"),
   getChat: () => unused("getChat"),
   getChatHistory: () => unused("getChatHistory"),
@@ -250,6 +260,12 @@ describe("Effect Bot routes", () => {
     const operations = makeOperations({
       getMe: () =>
         invoked("getMe", { user: botUser }),
+      createAgent: () =>
+        invoked("createAgent", { agent: botAgent }),
+      getAgent: () =>
+        invoked("getAgent", { bot: botUser, agent: botAgent }),
+      getMyAgents: () =>
+        invoked("getMyAgents", { agents: [botAgent] }),
       sendMessage: () =>
         invoked("sendMessage", { message: botMessage }),
       getChat: () =>
@@ -295,6 +311,21 @@ describe("Effect Bot routes", () => {
     const methods = [
       {
         name: "getMe",
+        method: "GET",
+        input: undefined,
+      },
+      {
+        name: "createAgent",
+        method: "POST",
+        input: { name: "Data Analyst", emoji: "📊" },
+      },
+      {
+        name: "getAgent",
+        method: "GET",
+        input: { agent_id: "73" },
+      },
+      {
+        name: "getMyAgents",
         method: "GET",
         input: undefined,
       },
@@ -437,7 +468,7 @@ describe("Effect Bot routes", () => {
         }
       }
 
-      expect(calls).toHaveLength(40)
+      expect(calls).toHaveLength(46)
       for (const method of methods) {
         expect(
           calls.filter((call) => call === method.name),
@@ -1065,10 +1096,13 @@ describe("Effect Bot routes", () => {
     expect(() =>
       assertValidOpenApiDocument(spec),
     ).not.toThrow()
-    expect(Object.keys(spec.paths)).toHaveLength(58)
+    expect(Object.keys(spec.paths)).toHaveLength(64)
 
     const expectedMethods = [
       "getMe",
+      "createAgent",
+      "getAgent",
+      "getMyAgents",
       "sendMessage",
       "getChat",
       "getChatHistory",

@@ -1274,6 +1274,10 @@ export interface MessageEntity_MessageEntityMention {
      * @generated from protobuf field: int64 user_id = 1;
      */
     userId: bigint;
+    /**
+     * @generated from protobuf field: optional int64 agent_id = 2;
+     */
+    agentId?: bigint;
 }
 /**
  * @generated from protobuf message MessageEntity.MessageEntityGroupMention
@@ -3164,6 +3168,24 @@ export interface RpcCall {
          */
         resolveUrlPreview: ResolveUrlPreviewInput;
     } | {
+        oneofKind: "createBotAgent";
+        /**
+         * @generated from protobuf field: CreateBotAgentInput createBotAgent = 107;
+         */
+        createBotAgent: CreateBotAgentInput;
+    } | {
+        oneofKind: "getBotAgent";
+        /**
+         * @generated from protobuf field: GetBotAgentInput getBotAgent = 108;
+         */
+        getBotAgent: GetBotAgentInput;
+    } | {
+        oneofKind: "listBotAgents";
+        /**
+         * @generated from protobuf field: ListBotAgentsInput listBotAgents = 109;
+         */
+        listBotAgents: ListBotAgentsInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -3802,6 +3824,24 @@ export interface RpcResult {
          * @generated from protobuf field: ResolveUrlPreviewResult resolveUrlPreview = 106;
          */
         resolveUrlPreview: ResolveUrlPreviewResult;
+    } | {
+        oneofKind: "createBotAgent";
+        /**
+         * @generated from protobuf field: CreateBotAgentResult createBotAgent = 107;
+         */
+        createBotAgent: CreateBotAgentResult;
+    } | {
+        oneofKind: "getBotAgent";
+        /**
+         * @generated from protobuf field: GetBotAgentResult getBotAgent = 108;
+         */
+        getBotAgent: GetBotAgentResult;
+    } | {
+        oneofKind: "listBotAgents";
+        /**
+         * @generated from protobuf field: ListBotAgentsResult listBotAgents = 109;
+         */
+        listBotAgents: ListBotAgentsResult;
     } | {
         oneofKind: undefined;
     };
@@ -5046,6 +5086,125 @@ export interface CreateBotResult {
      * @generated from protobuf field: string token = 2;
      */
     token: string;
+}
+/**
+ * @generated from protobuf message BotAgent
+ */
+export interface BotAgent {
+    /**
+     * @generated from protobuf field: int64 id = 1;
+     */
+    id: bigint;
+    /**
+     * @generated from protobuf field: int64 bot_user_id = 2;
+     */
+    botUserId: bigint;
+    /**
+     * @generated from protobuf field: string name = 3;
+     */
+    name: string;
+    /**
+     * @generated from protobuf field: optional string handle = 4;
+     */
+    handle?: string;
+    /**
+     * @generated from protobuf field: optional string emoji = 5;
+     */
+    emoji?: string;
+    /**
+     * @generated from protobuf field: optional string description = 6;
+     */
+    description?: string;
+    /**
+     * @generated from protobuf field: optional string skill_key = 7;
+     */
+    skillKey?: string;
+    /**
+     * @generated from protobuf field: optional string instructions = 8;
+     */
+    instructions?: string;
+}
+/**
+ * @generated from protobuf message CreateBotAgentInput
+ */
+export interface CreateBotAgentInput {
+    /**
+     * @generated from protobuf field: int64 bot_user_id = 1;
+     */
+    botUserId: bigint;
+    /**
+     * @generated from protobuf field: string name = 2;
+     */
+    name: string;
+    /**
+     * @generated from protobuf field: optional string handle = 3;
+     */
+    handle?: string;
+    /**
+     * @generated from protobuf field: optional string emoji = 4;
+     */
+    emoji?: string;
+    /**
+     * @generated from protobuf field: optional string description = 5;
+     */
+    description?: string;
+    /**
+     * @generated from protobuf field: optional string skill_key = 6;
+     */
+    skillKey?: string;
+    /**
+     * @generated from protobuf field: optional string instructions = 7;
+     */
+    instructions?: string;
+}
+/**
+ * @generated from protobuf message CreateBotAgentResult
+ */
+export interface CreateBotAgentResult {
+    /**
+     * @generated from protobuf field: BotAgent agent = 1;
+     */
+    agent?: BotAgent;
+}
+/**
+ * @generated from protobuf message GetBotAgentInput
+ */
+export interface GetBotAgentInput {
+    /**
+     * @generated from protobuf field: int64 agent_id = 1;
+     */
+    agentId: bigint;
+}
+/**
+ * @generated from protobuf message GetBotAgentResult
+ */
+export interface GetBotAgentResult {
+    /**
+     * @generated from protobuf field: User bot = 1;
+     */
+    bot?: User;
+    /**
+     * @generated from protobuf field: BotAgent agent = 2;
+     */
+    agent?: BotAgent;
+}
+/**
+ * @generated from protobuf message ListBotAgentsInput
+ */
+export interface ListBotAgentsInput {
+    /**
+     * @generated from protobuf field: int64 bot_user_id = 1;
+     */
+    botUserId: bigint;
+}
+/**
+ * @generated from protobuf message ListBotAgentsResult
+ */
+export interface ListBotAgentsResult {
+    /**
+     * @generated from protobuf field: repeated BotAgent agents = 1;
+     */
+    agents: BotAgent[];
 }
 /**
  * @generated from protobuf message ListBotsInput
@@ -10319,7 +10478,19 @@ export enum Method {
     /**
      * @generated from protobuf enum value: RESOLVE_URL_PREVIEW = 105;
      */
-    RESOLVE_URL_PREVIEW = 105
+    RESOLVE_URL_PREVIEW = 105,
+    /**
+     * @generated from protobuf enum value: CREATE_BOT_AGENT = 106;
+     */
+    CREATE_BOT_AGENT = 106,
+    /**
+     * @generated from protobuf enum value: GET_BOT_AGENT = 107;
+     */
+    GET_BOT_AGENT = 107,
+    /**
+     * @generated from protobuf enum value: LIST_BOT_AGENTS = 108;
+     */
+    LIST_BOT_AGENTS = 108
 }
 /**
  * @generated from protobuf enum GridConnectionUnavailableReason
@@ -13665,7 +13836,8 @@ export const MessageEntity = new MessageEntity$Type();
 class MessageEntity_MessageEntityMention$Type extends MessageType<MessageEntity_MessageEntityMention> {
     constructor() {
         super("MessageEntity.MessageEntityMention", [
-            { no: 1, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 1, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "agent_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<MessageEntity_MessageEntityMention>): MessageEntity_MessageEntityMention {
@@ -13683,6 +13855,9 @@ class MessageEntity_MessageEntityMention$Type extends MessageType<MessageEntity_
                 case /* int64 user_id */ 1:
                     message.userId = reader.int64().toBigInt();
                     break;
+                case /* optional int64 agent_id */ 2:
+                    message.agentId = reader.int64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -13698,6 +13873,9 @@ class MessageEntity_MessageEntityMention$Type extends MessageType<MessageEntity_
         /* int64 user_id = 1; */
         if (message.userId !== 0n)
             writer.tag(1, WireType.Varint).int64(message.userId);
+        /* optional int64 agent_id = 2; */
+        if (message.agentId !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.agentId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -16347,7 +16525,10 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 103, name: "disconnectConnector", kind: "message", oneof: "input", T: () => DisconnectConnectorInput },
             { no: 104, name: "searchUsers", kind: "message", oneof: "input", T: () => SearchUsersInput },
             { no: 105, name: "inviteToInline", kind: "message", oneof: "input", T: () => InviteToInlineInput },
-            { no: 106, name: "resolveUrlPreview", kind: "message", oneof: "input", T: () => ResolveUrlPreviewInput }
+            { no: 106, name: "resolveUrlPreview", kind: "message", oneof: "input", T: () => ResolveUrlPreviewInput },
+            { no: 107, name: "createBotAgent", kind: "message", oneof: "input", T: () => CreateBotAgentInput },
+            { no: 108, name: "getBotAgent", kind: "message", oneof: "input", T: () => GetBotAgentInput },
+            { no: 109, name: "listBotAgents", kind: "message", oneof: "input", T: () => ListBotAgentsInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -16990,6 +17171,24 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         resolveUrlPreview: ResolveUrlPreviewInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).resolveUrlPreview)
                     };
                     break;
+                case /* CreateBotAgentInput createBotAgent */ 107:
+                    message.input = {
+                        oneofKind: "createBotAgent",
+                        createBotAgent: CreateBotAgentInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).createBotAgent)
+                    };
+                    break;
+                case /* GetBotAgentInput getBotAgent */ 108:
+                    message.input = {
+                        oneofKind: "getBotAgent",
+                        getBotAgent: GetBotAgentInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getBotAgent)
+                    };
+                    break;
+                case /* ListBotAgentsInput listBotAgents */ 109:
+                    message.input = {
+                        oneofKind: "listBotAgents",
+                        listBotAgents: ListBotAgentsInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).listBotAgents)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -17317,6 +17516,15 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* ResolveUrlPreviewInput resolveUrlPreview = 106; */
         if (message.input.oneofKind === "resolveUrlPreview")
             ResolveUrlPreviewInput.internalBinaryWrite(message.input.resolveUrlPreview, writer.tag(106, WireType.LengthDelimited).fork(), options).join();
+        /* CreateBotAgentInput createBotAgent = 107; */
+        if (message.input.oneofKind === "createBotAgent")
+            CreateBotAgentInput.internalBinaryWrite(message.input.createBotAgent, writer.tag(107, WireType.LengthDelimited).fork(), options).join();
+        /* GetBotAgentInput getBotAgent = 108; */
+        if (message.input.oneofKind === "getBotAgent")
+            GetBotAgentInput.internalBinaryWrite(message.input.getBotAgent, writer.tag(108, WireType.LengthDelimited).fork(), options).join();
+        /* ListBotAgentsInput listBotAgents = 109; */
+        if (message.input.oneofKind === "listBotAgents")
+            ListBotAgentsInput.internalBinaryWrite(message.input.listBotAgents, writer.tag(109, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -17435,7 +17643,10 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 103, name: "disconnectConnector", kind: "message", oneof: "result", T: () => DisconnectConnectorResult },
             { no: 104, name: "searchUsers", kind: "message", oneof: "result", T: () => SearchUsersResult },
             { no: 105, name: "inviteToInline", kind: "message", oneof: "result", T: () => InviteToInlineResult },
-            { no: 106, name: "resolveUrlPreview", kind: "message", oneof: "result", T: () => ResolveUrlPreviewResult }
+            { no: 106, name: "resolveUrlPreview", kind: "message", oneof: "result", T: () => ResolveUrlPreviewResult },
+            { no: 107, name: "createBotAgent", kind: "message", oneof: "result", T: () => CreateBotAgentResult },
+            { no: 108, name: "getBotAgent", kind: "message", oneof: "result", T: () => GetBotAgentResult },
+            { no: 109, name: "listBotAgents", kind: "message", oneof: "result", T: () => ListBotAgentsResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -18078,6 +18289,24 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         resolveUrlPreview: ResolveUrlPreviewResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).resolveUrlPreview)
                     };
                     break;
+                case /* CreateBotAgentResult createBotAgent */ 107:
+                    message.result = {
+                        oneofKind: "createBotAgent",
+                        createBotAgent: CreateBotAgentResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).createBotAgent)
+                    };
+                    break;
+                case /* GetBotAgentResult getBotAgent */ 108:
+                    message.result = {
+                        oneofKind: "getBotAgent",
+                        getBotAgent: GetBotAgentResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getBotAgent)
+                    };
+                    break;
+                case /* ListBotAgentsResult listBotAgents */ 109:
+                    message.result = {
+                        oneofKind: "listBotAgents",
+                        listBotAgents: ListBotAgentsResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).listBotAgents)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -18405,6 +18634,15 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* ResolveUrlPreviewResult resolveUrlPreview = 106; */
         if (message.result.oneofKind === "resolveUrlPreview")
             ResolveUrlPreviewResult.internalBinaryWrite(message.result.resolveUrlPreview, writer.tag(106, WireType.LengthDelimited).fork(), options).join();
+        /* CreateBotAgentResult createBotAgent = 107; */
+        if (message.result.oneofKind === "createBotAgent")
+            CreateBotAgentResult.internalBinaryWrite(message.result.createBotAgent, writer.tag(107, WireType.LengthDelimited).fork(), options).join();
+        /* GetBotAgentResult getBotAgent = 108; */
+        if (message.result.oneofKind === "getBotAgent")
+            GetBotAgentResult.internalBinaryWrite(message.result.getBotAgent, writer.tag(108, WireType.LengthDelimited).fork(), options).join();
+        /* ListBotAgentsResult listBotAgents = 109; */
+        if (message.result.oneofKind === "listBotAgents")
+            ListBotAgentsResult.internalBinaryWrite(message.result.listBotAgents, writer.tag(109, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -22632,6 +22870,434 @@ class CreateBotResult$Type extends MessageType<CreateBotResult> {
  * @generated MessageType for protobuf message CreateBotResult
  */
 export const CreateBotResult = new CreateBotResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BotAgent$Type extends MessageType<BotAgent> {
+    constructor() {
+        super("BotAgent", [
+            { no: 1, name: "id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "handle", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "emoji", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "description", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "skill_key", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 8, name: "instructions", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BotAgent>): BotAgent {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.id = 0n;
+        message.botUserId = 0n;
+        message.name = "";
+        if (value !== undefined)
+            reflectionMergePartial<BotAgent>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BotAgent): BotAgent {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 id */ 1:
+                    message.id = reader.int64().toBigInt();
+                    break;
+                case /* int64 bot_user_id */ 2:
+                    message.botUserId = reader.int64().toBigInt();
+                    break;
+                case /* string name */ 3:
+                    message.name = reader.string();
+                    break;
+                case /* optional string handle */ 4:
+                    message.handle = reader.string();
+                    break;
+                case /* optional string emoji */ 5:
+                    message.emoji = reader.string();
+                    break;
+                case /* optional string description */ 6:
+                    message.description = reader.string();
+                    break;
+                case /* optional string skill_key */ 7:
+                    message.skillKey = reader.string();
+                    break;
+                case /* optional string instructions */ 8:
+                    message.instructions = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BotAgent, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 id = 1; */
+        if (message.id !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.id);
+        /* int64 bot_user_id = 2; */
+        if (message.botUserId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.botUserId);
+        /* string name = 3; */
+        if (message.name !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.name);
+        /* optional string handle = 4; */
+        if (message.handle !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.handle);
+        /* optional string emoji = 5; */
+        if (message.emoji !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.emoji);
+        /* optional string description = 6; */
+        if (message.description !== undefined)
+            writer.tag(6, WireType.LengthDelimited).string(message.description);
+        /* optional string skill_key = 7; */
+        if (message.skillKey !== undefined)
+            writer.tag(7, WireType.LengthDelimited).string(message.skillKey);
+        /* optional string instructions = 8; */
+        if (message.instructions !== undefined)
+            writer.tag(8, WireType.LengthDelimited).string(message.instructions);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BotAgent
+ */
+export const BotAgent = new BotAgent$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CreateBotAgentInput$Type extends MessageType<CreateBotAgentInput> {
+    constructor() {
+        super("CreateBotAgentInput", [
+            { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "handle", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "emoji", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "description", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "skill_key", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "instructions", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<CreateBotAgentInput>): CreateBotAgentInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.botUserId = 0n;
+        message.name = "";
+        if (value !== undefined)
+            reflectionMergePartial<CreateBotAgentInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CreateBotAgentInput): CreateBotAgentInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 bot_user_id */ 1:
+                    message.botUserId = reader.int64().toBigInt();
+                    break;
+                case /* string name */ 2:
+                    message.name = reader.string();
+                    break;
+                case /* optional string handle */ 3:
+                    message.handle = reader.string();
+                    break;
+                case /* optional string emoji */ 4:
+                    message.emoji = reader.string();
+                    break;
+                case /* optional string description */ 5:
+                    message.description = reader.string();
+                    break;
+                case /* optional string skill_key */ 6:
+                    message.skillKey = reader.string();
+                    break;
+                case /* optional string instructions */ 7:
+                    message.instructions = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CreateBotAgentInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 bot_user_id = 1; */
+        if (message.botUserId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.botUserId);
+        /* string name = 2; */
+        if (message.name !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.name);
+        /* optional string handle = 3; */
+        if (message.handle !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.handle);
+        /* optional string emoji = 4; */
+        if (message.emoji !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.emoji);
+        /* optional string description = 5; */
+        if (message.description !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.description);
+        /* optional string skill_key = 6; */
+        if (message.skillKey !== undefined)
+            writer.tag(6, WireType.LengthDelimited).string(message.skillKey);
+        /* optional string instructions = 7; */
+        if (message.instructions !== undefined)
+            writer.tag(7, WireType.LengthDelimited).string(message.instructions);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message CreateBotAgentInput
+ */
+export const CreateBotAgentInput = new CreateBotAgentInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CreateBotAgentResult$Type extends MessageType<CreateBotAgentResult> {
+    constructor() {
+        super("CreateBotAgentResult", [
+            { no: 1, name: "agent", kind: "message", T: () => BotAgent }
+        ]);
+    }
+    create(value?: PartialMessage<CreateBotAgentResult>): CreateBotAgentResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<CreateBotAgentResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CreateBotAgentResult): CreateBotAgentResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* BotAgent agent */ 1:
+                    message.agent = BotAgent.internalBinaryRead(reader, reader.uint32(), options, message.agent);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CreateBotAgentResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* BotAgent agent = 1; */
+        if (message.agent)
+            BotAgent.internalBinaryWrite(message.agent, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message CreateBotAgentResult
+ */
+export const CreateBotAgentResult = new CreateBotAgentResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetBotAgentInput$Type extends MessageType<GetBotAgentInput> {
+    constructor() {
+        super("GetBotAgentInput", [
+            { no: 1, name: "agent_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetBotAgentInput>): GetBotAgentInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.agentId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<GetBotAgentInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetBotAgentInput): GetBotAgentInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 agent_id */ 1:
+                    message.agentId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetBotAgentInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 agent_id = 1; */
+        if (message.agentId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.agentId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetBotAgentInput
+ */
+export const GetBotAgentInput = new GetBotAgentInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetBotAgentResult$Type extends MessageType<GetBotAgentResult> {
+    constructor() {
+        super("GetBotAgentResult", [
+            { no: 1, name: "bot", kind: "message", T: () => User },
+            { no: 2, name: "agent", kind: "message", T: () => BotAgent }
+        ]);
+    }
+    create(value?: PartialMessage<GetBotAgentResult>): GetBotAgentResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<GetBotAgentResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetBotAgentResult): GetBotAgentResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* User bot */ 1:
+                    message.bot = User.internalBinaryRead(reader, reader.uint32(), options, message.bot);
+                    break;
+                case /* BotAgent agent */ 2:
+                    message.agent = BotAgent.internalBinaryRead(reader, reader.uint32(), options, message.agent);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetBotAgentResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* User bot = 1; */
+        if (message.bot)
+            User.internalBinaryWrite(message.bot, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* BotAgent agent = 2; */
+        if (message.agent)
+            BotAgent.internalBinaryWrite(message.agent, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetBotAgentResult
+ */
+export const GetBotAgentResult = new GetBotAgentResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ListBotAgentsInput$Type extends MessageType<ListBotAgentsInput> {
+    constructor() {
+        super("ListBotAgentsInput", [
+            { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ListBotAgentsInput>): ListBotAgentsInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.botUserId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ListBotAgentsInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ListBotAgentsInput): ListBotAgentsInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 bot_user_id */ 1:
+                    message.botUserId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ListBotAgentsInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 bot_user_id = 1; */
+        if (message.botUserId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.botUserId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ListBotAgentsInput
+ */
+export const ListBotAgentsInput = new ListBotAgentsInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ListBotAgentsResult$Type extends MessageType<ListBotAgentsResult> {
+    constructor() {
+        super("ListBotAgentsResult", [
+            { no: 1, name: "agents", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => BotAgent }
+        ]);
+    }
+    create(value?: PartialMessage<ListBotAgentsResult>): ListBotAgentsResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.agents = [];
+        if (value !== undefined)
+            reflectionMergePartial<ListBotAgentsResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ListBotAgentsResult): ListBotAgentsResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated BotAgent agents */ 1:
+                    message.agents.push(BotAgent.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ListBotAgentsResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated BotAgent agents = 1; */
+        for (let i = 0; i < message.agents.length; i++)
+            BotAgent.internalBinaryWrite(message.agents[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ListBotAgentsResult
+ */
+export const ListBotAgentsResult = new ListBotAgentsResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ListBotsInput$Type extends MessageType<ListBotsInput> {
     constructor() {

@@ -54,6 +54,7 @@ import { updateBotProfile } from "./bot.updateProfile"
 import { setBotAvatar } from "./bot.setAvatar"
 import { clearBotAvatar } from "./bot.clearAvatar"
 import { getBotPresence } from "./bot.getPresence"
+import { createBotAgent, getBotAgent, listBotAgents } from "./bot.agents"
 import { setBotPresenceStateFn } from "./bot.setPresenceState"
 import { deleteMember } from "@in/server/functions/space.deleteMember"
 import { getUpdatesState } from "./updates.getUpdatesState"
@@ -157,6 +158,9 @@ export const Functions = {
     setBotAvatar: setBotAvatar,
     clearBotAvatar: clearBotAvatar,
     getPresence: getBotPresence,
+    createAgent: createBotAgent,
+    getAgent: getBotAgent,
+    listAgents: listBotAgents,
     setPresenceState: setBotPresenceStateFn,
   },
   updates: {

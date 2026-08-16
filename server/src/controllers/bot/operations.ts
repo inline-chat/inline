@@ -7,6 +7,9 @@ import type {
   BotPeer,
   BotTargetInput,
   BotUser,
+  BotAgent,
+  CreateAgentParams,
+  GetAgentParams,
   CreateReplyThreadParams,
   CreateThreadParams,
   AnswerMessageActionParams,
@@ -75,8 +78,10 @@ import { getChatParticipants as getChatParticipantsFn } from "@in/server/functio
 import { updateChatInfo as updateChatInfoFn } from "@in/server/functions/messages.updateChatInfo"
 import { uploadFileOperation, type UploadFileOperationInput } from "@in/server/methods/uploadFileOperation"
 import { handler as getMeHandler } from "@in/server/methods/getMe"
+import { createBotAgent, getBotAgent, listBotAgents } from "@in/server/functions/bot.agents"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { InlineError } from "@in/server/types/errors"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { chats, documents, photoSizes, videos, voices } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
 import { getSignedMediaFileProxyUrl } from "@in/server/modules/files/path"
@@ -816,6 +821,44 @@ const getMe = async (context: BotOperationContext) => {
   }
 }
 
+const toBotAgent = (agent: import("@inline-chat/protocol/core").BotAgent): BotAgent => ({
+  id: Number(agent.id),
+  bot_user_id: Number(agent.botUserId),
+  name: agent.name,
+  handle: agent.handle,
+  emoji: agent.emoji,
+  description: agent.description,
+  skill_key: agent.skillKey,
+  instructions: agent.instructions,
+})
+
+const createAgent = async (input: CreateAgentParams, context: BotOperationContext) => {
+  const result = await createBotAgent({
+    botUserId: BigInt(context.currentUserId),
+    name: input.name,
+    handle: input.handle,
+    emoji: input.emoji,
+    description: input.description,
+    skillKey: input.skill_key,
+    instructions: input.instructions,
+  }, context)
+  if (!result.agent) throw RealtimeRpcError.InternalError()
+  return { agent: toBotAgent(result.agent) }
+}
+
+const getAgent = async (input: GetAgentParams, context: BotOperationContext) => {
+  const agentId = normalizeInputId(input.agent_id)
+  if (!agentId || agentId <= 0) throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  const result = await getBotAgent({ agentId: BigInt(agentId) }, context)
+  if (!result.bot || !result.agent) throw RealtimeRpcError.InternalError()
+  return { bot: toBotUser(result.bot, { isBot: true }), agent: toBotAgent(result.agent) }
+}
+
+const getMyAgents = async (context: BotOperationContext) => {
+  const result = await listBotAgents({ botUserId: BigInt(context.currentUserId) }, context)
+  return { agents: result.agents.map(toBotAgent) }
+}
+
 const sendMessage = async (
   input: SendMessageParams,
   context: BotOperationContext,
@@ -1474,6 +1517,9 @@ const deleteMyCommands = async (
 
 export const botOperationHandlers: BotOperationHandlers = {
   getMe,
+  createAgent,
+  getAgent,
+  getMyAgents,
   sendMessage,
   getChat,
   getChatHistory,

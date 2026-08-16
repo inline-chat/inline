@@ -114,6 +114,11 @@ import {
 import { searchUsersHandler } from "@in/server/realtime/handlers/users.search"
 import { inviteToInline } from "@in/server/functions/user.inviteToInline"
 import { resolveUrlPreviewHandler } from "@in/server/realtime/handlers/urlPreview.resolve"
+import {
+  createBotAgentHandler,
+  getBotAgentHandler,
+  listBotAgentsHandler,
+} from "@in/server/realtime/handlers/bot.agents"
 
 const log = new Log("rpc")
 
@@ -804,6 +809,24 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       const result = await resolveUrlPreviewHandler(call.input.resolveUrlPreview, handlerContext)
       return { oneofKind: "resolveUrlPreview", resolveUrlPreview: result }
+    }
+
+    case Method.CREATE_BOT_AGENT: {
+      if (call.input.oneofKind !== "createBotAgent") throw RealtimeRpcError.BadRequest()
+      const result = await createBotAgentHandler(call.input.createBotAgent, handlerContext)
+      return { oneofKind: "createBotAgent", createBotAgent: result }
+    }
+
+    case Method.GET_BOT_AGENT: {
+      if (call.input.oneofKind !== "getBotAgent") throw RealtimeRpcError.BadRequest()
+      const result = await getBotAgentHandler(call.input.getBotAgent, handlerContext)
+      return { oneofKind: "getBotAgent", getBotAgent: result }
+    }
+
+    case Method.LIST_BOT_AGENTS: {
+      if (call.input.oneofKind !== "listBotAgents") throw RealtimeRpcError.BadRequest()
+      const result = await listBotAgentsHandler(call.input.listBotAgents, handlerContext)
+      return { oneofKind: "listBotAgents", listBotAgents: result }
     }
 
     case Method.UPDATE_PUSH_NOTIFICATION_DETAILS: {

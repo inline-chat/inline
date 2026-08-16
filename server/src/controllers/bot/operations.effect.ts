@@ -19,6 +19,11 @@ import type {
   GetFileParams,
   GetFileResult,
   GetMeResult,
+  CreateAgentParams,
+  CreateAgentResult,
+  GetAgentParams,
+  GetAgentResult,
+  GetMyAgentsResult,
   GetMessagesParams,
   GetMessagesResult,
   GetUpdatesParams,
@@ -56,6 +61,9 @@ import { InlineError } from "@in/server/types/errors"
 
 export type BotOperation =
   | "getMe"
+  | "createAgent"
+  | "getAgent"
+  | "getMyAgents"
   | "sendMessage"
   | "getChat"
   | "getChatHistory"
@@ -117,6 +125,9 @@ export interface BotOperationsShape {
   readonly getMe: (
     context: BotOperationContext,
   ) => Effect.Effect<GetMeResult, BotOperationError>
+  readonly createAgent: (input: CreateAgentParams, context: BotOperationContext) => Effect.Effect<CreateAgentResult, BotOperationError>
+  readonly getAgent: (input: GetAgentParams, context: BotOperationContext) => Effect.Effect<GetAgentResult, BotOperationError>
+  readonly getMyAgents: (context: BotOperationContext) => Effect.Effect<GetMyAgentsResult, BotOperationError>
   readonly sendMessage: (
     input: SendMessageParams,
     context: BotOperationContext,
@@ -193,6 +204,9 @@ export interface BotOperationHandlers {
   readonly getMe: (
     context: BotOperationContext,
   ) => Promise<GetMeResult>
+  readonly createAgent: (input: CreateAgentParams, context: BotOperationContext) => Promise<CreateAgentResult>
+  readonly getAgent: (input: GetAgentParams, context: BotOperationContext) => Promise<GetAgentResult>
+  readonly getMyAgents: (context: BotOperationContext) => Promise<GetMyAgentsResult>
   readonly sendMessage: (
     input: SendMessageParams,
     context: BotOperationContext,
@@ -353,6 +367,9 @@ export const makeBotOperations = (
 ): BotOperationsShape => ({
   getMe: (context) =>
     adapt("getMe", () => handlers.getMe(context)),
+  createAgent: (input, context) => adapt("createAgent", () => handlers.createAgent(input, context)),
+  getAgent: (input, context) => adapt("getAgent", () => handlers.getAgent(input, context)),
+  getMyAgents: (context) => adapt("getMyAgents", () => handlers.getMyAgents(context)),
   sendMessage: (input, context) =>
     adapt("sendMessage", () =>
       handlers.sendMessage(input, context),
