@@ -194,7 +194,7 @@ describe("InlineBotApiClient", () => {
     expect(seenUrl).toContain("user_id=7")
   })
 
-  it("exposes forwarding, pinning, membership, and thread title methods", async () => {
+  it("exposes forwarding, pinning, participant, and thread title methods", async () => {
     const calls: Array<{ url: string; method: string; body?: unknown }> = []
     const client = new InlineBotApiClient({
       token: "t",
