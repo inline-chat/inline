@@ -208,6 +208,29 @@ describe("authorization-key cryptography", () => {
     expect(() => validateDhPublicValue(middle, TELEGRAM_DH_PRIME)).not.toThrow()
   })
 
+  test("accepts an unfamiliar Telegram-valid safe prime and generator", () => {
+    const rfc3526Group14 = hexToBytes(
+      "ffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd129024e088a67cc74" +
+      "020bbea63b139b22514a08798e3404ddef9519b3cd3a431b302b0a6df25f1437" +
+      "4fe1356d6d51c245e485b576625e7ec6f44c42e9a637ed6b0bff5cb6f406b7ed" +
+      "ee386bfb5a899fa5ae9f24117c4b1fe649286651ece45b3dc2007cb8a163bf05" +
+      "98da48361c55d39a69163fa8fd24cf5f83655d23dca3ad961c62f356208552bb" +
+      "9ed529077096966d670c354e4abc9804f1746c08ca18217c32905e462e36ce3b" +
+      "e39e772c180e86039b2783a2ec07a28fb5c55df06f4c52c9de2bcbf695581718" +
+      "3995497cea956ae515d2261898fa051015728e5a8aacaa68ffffffffffffffff",
+    )
+    let round = 0
+    const deterministicRandom = (length: number): Uint8Array => {
+      const bytes = new Uint8Array(length).fill(round)
+      round = (round + 1) & 0xff
+      return bytes
+    }
+    // Exercise the unfamiliar-prime path at its allowed test minimum; production uses the 64-round default.
+    expect(() => validateDhParameters(rfc3526Group14, 2, deterministicRandom, 15)).not.toThrow()
+    expect(round).toBe(30)
+    expect(() => validateDhParameters(rfc3526Group14, 8, () => new Uint8Array(256))).toThrow()
+  }, 15_000)
+
   test("authenticates the exact server DH failure constructor", () => {
     const nonce = Uint8Array.from({ length: 16 }, (_, index) => index)
     const serverNonce = Uint8Array.from({ length: 16 }, (_, index) => 0x80 + index)

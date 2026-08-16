@@ -193,16 +193,117 @@ pub fn derive_auth_key(
     .map_err(|_| InvalidEncryptedRecord)
 }
 
-/// Validates the built-in safe-prime/generator pair and generator congruence.
-/// Unfamiliar primes require the caller's full probabilistic primality path.
+fn generator_matches_prime(prime: &BigUint, generator: u32) -> bool {
+    let remainder = |modulus: u32| -> u32 {
+        (prime % BigUint::from(modulus))
+            .to_u32_digits()
+            .first()
+            .copied()
+            .unwrap_or(0)
+    };
+    match generator {
+        2 => remainder(8) == 7,
+        3 => remainder(3) == 2,
+        4 => true,
+        5 => matches!(remainder(5), 1 | 4),
+        6 => matches!(remainder(24), 19 | 23),
+        7 => matches!(remainder(7), 3 | 5 | 6),
+        _ => false,
+    }
+}
+
+fn is_probable_prime<F>(
+    value: &BigUint,
+    random_bytes: &mut F,
+    rounds: usize,
+) -> Result<bool, InvalidEncryptedRecord>
+where
+    F: FnMut(&mut [u8]) -> Result<(), InvalidEncryptedRecord>,
+{
+    let one = BigUint::from(1_u8);
+    let two = BigUint::from(2_u8);
+    if value < &two || (value & &one) == BigUint::from(0_u8) {
+        return Ok(value == &two);
+    }
+
+    let value_minus_one = value - &one;
+    let mut odd = value_minus_one.clone();
+    let mut power = 0_u32;
+    while (&odd & &one) == BigUint::from(0_u8) {
+        odd >>= 1;
+        power += 1;
+    }
+
+    let base_range = value - BigUint::from(3_u8);
+    let mut random = [0_u8; 256];
+    for _ in 0..rounds {
+        let candidate = loop {
+            random_bytes(&mut random)?;
+            let candidate = BigUint::from_bytes_be(&random);
+            if candidate < base_range {
+                break candidate;
+            }
+        };
+        let base = candidate + &two;
+        let mut witness = base.modpow(&odd, value);
+        if witness == one || witness == value_minus_one {
+            continue;
+        }
+        let mut composite = true;
+        for _ in 1..power {
+            witness = (&witness * &witness) % value;
+            if witness == value_minus_one {
+                composite = false;
+                break;
+            }
+        }
+        if composite {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Validates Telegram's 2048-bit safe-prime and generator rules.
+///
+/// The built-in Telegram prime is accepted without repeating primality work.
+/// For any unfamiliar prime, `random_bytes` must fill its argument from a CSPRNG;
+/// it is used for 64 Miller-Rabin rounds for both `p` and `(p - 1) / 2`.
+pub fn validate_dh_parameters<F>(
+    prime_bytes: &[u8],
+    generator: u32,
+    mut random_bytes: F,
+) -> Result<(), InvalidEncryptedRecord>
+where
+    F: FnMut(&mut [u8]) -> Result<(), InvalidEncryptedRecord>,
+{
+    if prime_bytes.len() != 256 || prime_bytes[0] & 0x80 == 0 || !(2..=7).contains(&generator) {
+        return Err(InvalidEncryptedRecord);
+    }
+    let prime = BigUint::from_bytes_be(prime_bytes);
+    if !generator_matches_prime(&prime, generator) {
+        return Err(InvalidEncryptedRecord);
+    }
+    if prime_bytes != TELEGRAM_DH_PRIME {
+        let half = (&prime - BigUint::from(1_u8)) >> 1;
+        if !is_probable_prime(&prime, &mut random_bytes, 64)?
+            || !is_probable_prime(&half, &mut random_bytes, 64)?
+        {
+            return Err(InvalidEncryptedRecord);
+        }
+    }
+    Ok(())
+}
+
+/// Backward-compatible built-in-prime validator.
 pub fn validate_builtin_dh_parameters(
     prime_bytes: &[u8],
     generator: u32,
 ) -> Result<(), InvalidEncryptedRecord> {
-    if prime_bytes != TELEGRAM_DH_PRIME || generator != 3 {
+    if prime_bytes != TELEGRAM_DH_PRIME {
         return Err(InvalidEncryptedRecord);
     }
-    Ok(())
+    validate_dh_parameters(prime_bytes, generator, |_| Err(InvalidEncryptedRecord))
 }
 
 /// Enforces Telegram's recommended 64-bit-margin DH public-value bounds.
@@ -267,5 +368,42 @@ mod tests {
             decrypt_dh_inner(&encrypted, serialized.len(), &new_nonce, &server_nonce).unwrap(),
             serialized
         );
+    }
+
+    #[test]
+    fn accepts_an_unfamiliar_telegram_valid_safe_prime() {
+        // RFC 3526 group 14 is an independent 2048-bit safe prime with g = 2.
+        let prime = hex::decode(
+            "ffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd129024e088a67cc74\
+             020bbea63b139b22514a08798e3404ddef9519b3cd3a431b302b0a6df25f1437\
+             4fe1356d6d51c245e485b576625e7ec6f44c42e9a637ed6b0bff5cb6f406b7ed\
+             ee386bfb5a899fa5ae9f24117c4b1fe649286651ece45b3dc2007cb8a163bf05\
+             98da48361c55d39a69163fa8fd24cf5f83655d23dca3ad961c62f356208552bb\
+             9ed529077096966d670c354e4abc9804f1746c08ca18217c32905e462e36ce3b\
+             e39e772c180e86039b2783a2ec07a28fb5c55df06f4c52c9de2bcbf695581718\
+             3995497cea956ae515d2261898fa051015728e5a8aacaa68ffffffffffffffff",
+        )
+        .unwrap();
+        let mut round = 0_u8;
+        validate_dh_parameters(&prime, 2, |bytes| {
+            bytes.fill(round);
+            round = round.wrapping_add(1);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(round, 128);
+    }
+
+    #[test]
+    fn rejects_bad_generator_congruence_before_primality_work() {
+        let mut called = false;
+        assert!(
+            validate_dh_parameters(&TELEGRAM_DH_PRIME, 2, |_| {
+                called = true;
+                Ok(())
+            })
+            .is_err()
+        );
+        assert!(!called);
     }
 }
