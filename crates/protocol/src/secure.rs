@@ -61,6 +61,20 @@ pub struct RecordFields {
     pub body: Vec<u8>,
 }
 
+/// One decoded abridged carrier frame.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AbridgedFrame {
+    /// A normal packet and whether the sender requested a quick acknowledgement.
+    Packet {
+        /// Exact MTProto packet payload.
+        payload: Vec<u8>,
+        /// Whether bit 7 of the abridged length marker was set.
+        quick_ack_requested: bool,
+    },
+    /// A server quick-acknowledgement token with the marker bit removed.
+    QuickAck(u32),
+}
+
 /// Uniform externally visible encrypted-record failure.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct InvalidEncryptedRecord;
@@ -232,6 +246,24 @@ pub fn compute_v2_msg_key(
     Ok(sha256(&[&auth_key[88 + x..120 + x], plaintext])[8..24]
         .try_into()
         .expect("fixed SHA-256 slice"))
+}
+
+/// Computes MTProto v2's 31-bit quick-acknowledgement identifier.
+pub fn compute_v2_quick_ack_id(
+    auth_key: &[u8],
+    plaintext: &[u8],
+    direction: Direction,
+) -> Result<u32, InvalidEncryptedRecord> {
+    if auth_key.len() != 256 {
+        return Err(InvalidEncryptedRecord);
+    }
+    let x = if direction == Direction::ClientToServer {
+        0
+    } else {
+        8
+    };
+    let digest = sha256(&[&auth_key[88 + x..120 + x], plaintext]);
+    Ok(u32::from_le_bytes(digest[..4].try_into().expect("fixed SHA-256 slice")) & 0x7fff_ffff)
 }
 
 /// Derives the MTProto v2 AES-256 key and IGE IV.
@@ -427,22 +459,77 @@ pub fn decrypt_record(
     })
 }
 
-/// Encodes one complete abridged transport packet.
+/// Encodes one complete abridged transport packet without requesting a quick ACK.
 pub fn encode_abridged_packet(payload: &[u8]) -> Result<Vec<u8>, InvalidEncryptedRecord> {
+    encode_abridged_packet_with_quick_ack(payload, false)
+}
+
+/// Encodes one complete abridged packet and optionally requests a quick ACK.
+pub fn encode_abridged_packet_with_quick_ack(
+    payload: &[u8],
+    quick_ack_requested: bool,
+) -> Result<Vec<u8>, InvalidEncryptedRecord> {
     if payload.is_empty() || payload.len() > MAX_PACKET_BYTES || payload.len() % 4 != 0 {
         return Err(InvalidEncryptedRecord);
     }
     let words = payload.len() / 4;
     let mut output = Vec::with_capacity(payload.len() + 4);
+    let quick_ack_bit = if quick_ack_requested { 0x80 } else { 0 };
     if words < 127 {
-        output.push(words as u8);
+        output.push(words as u8 | quick_ack_bit);
     } else if words <= 0x00ff_ffff {
-        output.extend_from_slice(&[0x7f, words as u8, (words >> 8) as u8, (words >> 16) as u8]);
+        output.extend_from_slice(&[
+            0x7f | quick_ack_bit,
+            words as u8,
+            (words >> 8) as u8,
+            (words >> 16) as u8,
+        ]);
     } else {
         return Err(InvalidEncryptedRecord);
     }
     output.extend_from_slice(payload);
     Ok(output)
+}
+
+/// Encodes the special four-byte abridged quick-ACK response in network byte order.
+pub fn encode_abridged_quick_ack(quick_ack_id: u32) -> Result<[u8; 4], InvalidEncryptedRecord> {
+    if quick_ack_id > 0x7fff_ffff {
+        return Err(InvalidEncryptedRecord);
+    }
+    Ok((quick_ack_id | 0x8000_0000).to_be_bytes())
+}
+
+/// Decodes exactly one complete abridged packet or quick-ACK frame.
+pub fn decode_abridged_frame(frame: &[u8]) -> Result<AbridgedFrame, InvalidEncryptedRecord> {
+    if frame.len() == 4 && frame[0] & 0x80 != 0 {
+        let value = u32::from_be_bytes(frame.try_into().map_err(|_| InvalidEncryptedRecord)?);
+        return Ok(AbridgedFrame::QuickAck(value & 0x7fff_ffff));
+    }
+    if frame.len() < 2 {
+        return Err(InvalidEncryptedRecord);
+    }
+    let marker = frame[0];
+    let quick_ack_requested = marker & 0x80 != 0;
+    let length_marker = marker & 0x7f;
+    let (words, header_length) = if length_marker == 0x7f {
+        if frame.len() < 4 {
+            return Err(InvalidEncryptedRecord);
+        }
+        (
+            usize::from(frame[1]) | usize::from(frame[2]) << 8 | usize::from(frame[3]) << 16,
+            4,
+        )
+    } else {
+        (usize::from(length_marker), 1)
+    };
+    let length = words.checked_mul(4).ok_or(InvalidEncryptedRecord)?;
+    if words == 0 || length > MAX_PACKET_BYTES || frame.len() != header_length + length {
+        return Err(InvalidEncryptedRecord);
+    }
+    Ok(AbridgedFrame::Packet {
+        payload: frame[header_length..].to_vec(),
+        quick_ack_requested,
+    })
 }
 
 /// Bounded 1,000-ID-compatible receive window that permits unseen out-of-order IDs.
@@ -507,6 +594,18 @@ mod tests {
             hex(&record),
             "32d1586ea457dfc80b016bab73824ee1e75f00f0fa824908302fa5dab375c8029b169848525548f61add2955845b9810fe817fcc7581efd11aaac110560a2cc78ae6a20cc6216a0b86fa0d061a57f84bacbf84af84ec31b4"
         );
+        let mut plaintext = Vec::new();
+        plaintext.extend_from_slice(&fields.server_salt.to_le_bytes());
+        plaintext.extend_from_slice(&fields.session_id.to_le_bytes());
+        plaintext.extend_from_slice(&fields.message_id.to_le_bytes());
+        plaintext.extend_from_slice(&fields.sequence_number.to_le_bytes());
+        plaintext.extend_from_slice(&(fields.body.len() as i32).to_le_bytes());
+        plaintext.extend_from_slice(&fields.body);
+        plaintext.extend_from_slice(&padding);
+        assert_eq!(
+            compute_v2_quick_ack_id(&auth_key, &plaintext, Direction::ClientToServer),
+            Ok(140_616_213)
+        );
         assert_eq!(
             decrypt_record(
                 &record,
@@ -520,14 +619,40 @@ mod tests {
         );
         let mut tampered = record.clone();
         tampered[40] ^= 1;
-        assert!(decrypt_record(
-            &tampered,
-            &auth_key,
-            Direction::ClientToServer,
-            fields.session_id,
-            &BTreeSet::from([fields.server_salt]),
-            1_700_000_000,
-        ).is_err());
+        assert!(
+            decrypt_record(
+                &tampered,
+                &auth_key,
+                Direction::ClientToServer,
+                fields.session_id,
+                &BTreeSet::from([fields.server_salt]),
+                1_700_000_000,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn matches_telegram_abridged_quick_ack_framing() {
+        let payload = [1, 2, 3, 4];
+        let encoded = encode_abridged_packet_with_quick_ack(&payload, true).unwrap();
+        assert_eq!(encoded, [0x81, 1, 2, 3, 4]);
+        assert_eq!(
+            decode_abridged_frame(&encoded),
+            Ok(AbridgedFrame::Packet {
+                payload: payload.to_vec(),
+                quick_ack_requested: true,
+            })
+        );
+        assert_eq!(
+            encode_abridged_quick_ack(0x1234_5678),
+            Ok([0x92, 0x34, 0x56, 0x78])
+        );
+        assert_eq!(
+            decode_abridged_frame(&[0x92, 0x34, 0x56, 0x78]),
+            Ok(AbridgedFrame::QuickAck(0x1234_5678))
+        );
+        assert!(decode_abridged_frame(&[0x80, 0, 0, 0, 0]).is_err());
     }
 
     #[test]

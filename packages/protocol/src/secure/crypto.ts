@@ -44,6 +44,17 @@ export const computeV2MsgKey = (
   return sha256Digest(authKey.slice(88 + x, 120 + x), plaintext).slice(8, 24)
 }
 
+export const computeV2QuickAckId = (
+  authKey: Uint8Array,
+  plaintext: Uint8Array,
+  direction: "client-to-server" | "server-to-client",
+): number => {
+  assertLength("auth_key", authKey, 256)
+  const x = direction === "client-to-server" ? 0 : 8
+  const digest = sha256Digest(authKey.slice(88 + x, 120 + x), plaintext)
+  return new DataView(digest.buffer, digest.byteOffset, 4).getUint32(0, true) & 0x7fffffff
+}
+
 export const aesIgeEncrypt = (plaintext: Uint8Array, key: Uint8Array, iv: Uint8Array): Uint8Array => {
   assertLength("AES-256 key", key, 32)
   assertLength("AES-IGE IV", iv, 32)

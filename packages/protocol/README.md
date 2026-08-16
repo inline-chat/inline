@@ -18,14 +18,11 @@ bun add @inline-chat/protocol
 
 ## Exports
 
-- `@inline-chat/protocol`
-- `@inline-chat/protocol/core`
-- `@inline-chat/protocol/client`
-- `@inline-chat/protocol/server`
-- `@inline-chat/protocol/carrier`
-- `@inline-chat/protocol/schema`
-- `@inline-chat/protocol/secure`
-- `@inline-chat/protocol/vectors`
+- `@inline-chat/protocol`, `/core`, `/client`, and `/schema` preserve the generated Inline Schema compatibility surface. The generator owns `src/client.ts`; secure transport must never reuse that path.
+- `@inline-chat/protocol/secure` exposes the portable cryptographic, carrier, handshake, reliability, and session primitives.
+- `@inline-chat/protocol/carrier` is the client/server-neutral obfuscated abridged carrier surface, including Telegram-compatible quick ACK framing.
+- `@inline-chat/protocol/server` exposes the server handshake and session engine.
+- `@inline-chat/protocol/vectors` contains frozen cross-language conformance vectors.
 
 ## Regenerate
 

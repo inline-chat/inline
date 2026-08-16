@@ -12,6 +12,7 @@ import {
   decodeRpcResult,
   decodeUnencryptedRecord,
   decryptRecord,
+  decryptRecordWithMetadata,
   encodeInlineInvoke,
   encodeBindTempAuthKey,
   encodeUnencryptedRecord,
@@ -183,7 +184,25 @@ describe("carrier-independent Inline Protocol server session", () => {
       body: applicationBody,
     }, randomBytes(paddingFor(applicationBody.length)))
 
-    const firstOutputs = await server.receive(encrypted)
+    const invalidQuickAcks: number[] = []
+    const tampered = encrypted.slice()
+    tampered[tampered.length - 1] ^= 1
+    await expect(server.receive(tampered, {
+      onQuickAck: (quickAckId) => invalidQuickAcks.push(quickAckId),
+    })).rejects.toThrow()
+    expect(invalidQuickAcks).toEqual([])
+
+    const expectedQuickAck = decryptRecordWithMetadata(encrypted, established!.key, {
+      direction: "client-to-server",
+      sessionId,
+      validServerSalts: new Set([established!.serverSalt]),
+      nowSeconds: nowMilliseconds / 1_000,
+    }).quickAckId
+    const quickAcks: number[] = []
+    const firstOutputs = await server.receive(encrypted, {
+      onQuickAck: (quickAckId) => quickAcks.push(quickAckId),
+    })
+    expect(quickAcks).toEqual([expectedQuickAck])
     const firstBodies = firstOutputs.map((output) => decryptRecord(output, established!.key, {
       direction: "server-to-client",
       sessionId,

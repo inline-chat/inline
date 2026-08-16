@@ -29,8 +29,9 @@ import {
 import {
   InvalidEncryptedRecord,
   RecoverableEncryptedRecordError,
-  decryptRecord,
+  decryptRecordWithMetadata,
   encryptRecord,
+  type EncryptedRecordFields,
 } from "./record.js"
 import {
   AcknowledgementQueue,
@@ -181,6 +182,10 @@ export interface InlineProtocolServerSessionOptions {
   dc?: number
 }
 
+export interface InlineProtocolServerReceiveOptions {
+  onQuickAck?: (quickAckId: number) => void
+}
+
 export class InlineProtocolServerSession {
   readonly #messageIds = new MessageIdGenerator()
   readonly #sequenceNumbers = new SequenceNumberGenerator()
@@ -205,11 +210,14 @@ export class InlineProtocolServerSession {
     })
   }
 
-  async receive(payload: Uint8Array): Promise<Uint8Array[]> {
+  async receive(
+    payload: Uint8Array,
+    receiveOptions: InlineProtocolServerReceiveOptions = {},
+  ): Promise<Uint8Array[]> {
     if (this.#destroyed) throw new InvalidEncryptedRecord()
     if (payload.length < 8 || payload.length > MAX_PACKET_BYTES) throw new InvalidEncryptedRecord()
     if (payload.slice(0, 8).every((byte) => byte === 0)) return [await this.#receiveHandshake(payload)]
-    return this.#receiveEncrypted(payload)
+    return this.#receiveEncrypted(payload, receiveOptions)
   }
 
   sendApplicationUpdate(payload: Uint8Array): Uint8Array {
@@ -235,7 +243,10 @@ export class InlineProtocolServerSession {
     return encodeUnencryptedRecord(this.#nextServerMessageId(1), result.response)
   }
 
-  async #receiveEncrypted(payload: Uint8Array): Promise<Uint8Array[]> {
+  async #receiveEncrypted(
+    payload: Uint8Array,
+    receiveOptions: InlineProtocolServerReceiveOptions,
+  ): Promise<Uint8Array[]> {
     const authKeyId = payload.slice(0, 8)
     if (!this.#authorization || bytesToHex(this.#authorization.keyId) !== bytesToHex(authKeyId)) {
       const loaded = await this.options.authorizationKeys.load(authKeyId)
@@ -244,9 +255,10 @@ export class InlineProtocolServerSession {
       this.#sessionId = undefined
     }
     const authorization = this.#authorization
-    let fields
+    let fields: EncryptedRecordFields
+    let quickAckId: number
     try {
-      fields = decryptRecord(payload, authorization.key, {
+      const decrypted = decryptRecordWithMetadata(payload, authorization.key, {
         direction: "client-to-server",
         sessionId: this.#sessionId,
         validServerSalts: new Set([
@@ -255,6 +267,8 @@ export class InlineProtocolServerSession {
         ]),
         nowSeconds: Math.floor(this.options.nowMilliseconds() / 1000),
       })
+      fields = decrypted.fields
+      quickAckId = decrypted.quickAckId
     } catch (error) {
       if (error instanceof RecoverableEncryptedRecordError &&
           (this.#sessionId === undefined || this.#sessionId === error.fields.sessionId)) {
@@ -308,6 +322,8 @@ export class InlineProtocolServerSession {
       }
       prepared.push({ message, constructor, contentRelated, duplicate })
     }
+
+    receiveOptions.onQuickAck?.(quickAckId)
 
     const outputs: Uint8Array[] = []
     if (newSession) {
