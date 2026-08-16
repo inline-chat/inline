@@ -1,0 +1,18 @@
+export {
+  AuthenticatedServerClock,
+  BadMessageRecovery,
+  InlineHandshakeClient,
+  MessageIdGenerator,
+  PendingMessageCache,
+  SequenceNumberGenerator,
+  createObfuscatedClientHeader,
+  decodeAbridgedPacket,
+  encodeAbridgedPacket,
+  isValidObfuscatedHeader,
+  createTemporaryKeyBindingProof,
+  decryptRecord,
+  encryptRecord,
+  type EstablishedAuthorizationKey,
+  type HandshakeRsaPublicKey,
+  type ObfuscatedClientHeader,
+} from "./secure/index.js"

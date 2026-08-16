@@ -1,0 +1,271 @@
+//! Exact MTProto authorization-key cryptographic constructions.
+
+use super::{InvalidEncryptedRecord, aes_ige_decrypt, aes_ige_encrypt};
+use num_bigint::BigUint;
+use sha1::Sha1;
+use sha2::{Digest, Sha256};
+
+/// Telegram's built-in 2048-bit safe prime used by Inline Protocol v1.
+pub const TELEGRAM_DH_PRIME: [u8; 256] = hex_literal::hex!(
+    "c71caeb9c6b1c9048e6c522f70f13f73980d40238e3e21c14934d037563d930f
+     48198a0aa7c14058229493d22530f4dbfa336f6e0ac925139543aed44cce7c372
+     0fd51f69458705ac68cd4fe6b6b13abdc9746512969328454f18faf8c595f642
+     477fe96bb2a941d5bcd1d4ac8cc49880708fa9b378e3c4f3a9060bee67cf9a4a
+     4a695811051907e162753b56b0f6b410dba74d8a84b2a14b3144e0ef1284754f
+     d17ed950d5965b4b9dd46582db1178d169c6bc465b0d6ff9ca3928fef5b9ae4e
+     418fc15e83ebea0f87fa9ff5eed70050ded2849f47bf959d956850ce929851f0d
+     8115f635b105ee2e4e15d04b2454bf6f4fadf034b10403119cd8e3b92fcc5b"
+);
+
+/// Intermediate values frozen by the cross-language RSA_PAD vectors.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RsaPadIntermediate {
+    /// Exact unreversed 192-byte inner data and padding.
+    pub data_with_padding: Vec<u8>,
+    /// Reversed padded data followed by the SHA-256 confirmation.
+    pub data_with_hash: Vec<u8>,
+    /// AES-256-IGE ciphertext.
+    pub aes_encrypted: Vec<u8>,
+    /// XOR-adjusted temporary key followed by ciphertext.
+    pub key_aes_encrypted: Vec<u8>,
+    /// Raw 256-byte RSA result.
+    pub encrypted_data: Vec<u8>,
+}
+
+fn sha1(parts: &[&[u8]]) -> [u8; 20] {
+    let mut hash = Sha1::new();
+    for part in parts {
+        hash.update(part);
+    }
+    hash.finalize().into()
+}
+
+fn sha256(parts: &[&[u8]]) -> [u8; 32] {
+    let mut hash = Sha256::new();
+    for part in parts {
+        hash.update(part);
+    }
+    hash.finalize().into()
+}
+
+fn fixed_width(value: &BigUint, length: usize) -> Result<Vec<u8>, InvalidEncryptedRecord> {
+    let bytes = value.to_bytes_be();
+    if bytes.len() > length {
+        return Err(InvalidEncryptedRecord);
+    }
+    let mut output = vec![0; length - bytes.len()];
+    output.extend_from_slice(&bytes);
+    Ok(output)
+}
+
+/// Performs one exact RSA_PAD attempt with fixed randomness.
+pub fn rsa_pad_attempt(
+    serialized_inner: &[u8],
+    random_padding: &[u8],
+    temp_key: &[u8],
+    modulus_bytes: &[u8],
+    exponent_bytes: &[u8],
+) -> Result<RsaPadIntermediate, InvalidEncryptedRecord> {
+    if serialized_inner.len() > 144
+        || serialized_inner.len() + random_padding.len() != 192
+        || temp_key.len() != 32
+        || modulus_bytes.len() != 256
+        || exponent_bytes.is_empty()
+    {
+        return Err(InvalidEncryptedRecord);
+    }
+    let mut data_with_padding = serialized_inner.to_vec();
+    data_with_padding.extend_from_slice(random_padding);
+    let mut data_with_hash = data_with_padding.iter().rev().copied().collect::<Vec<_>>();
+    data_with_hash.extend_from_slice(&sha256(&[temp_key, &data_with_padding]));
+    let key: [u8; 32] = temp_key.try_into().map_err(|_| InvalidEncryptedRecord)?;
+    let aes_encrypted = aes_ige_encrypt(&data_with_hash, &key, &[0; 32])?;
+    let aes_hash = sha256(&[&aes_encrypted]);
+    let mut key_aes_encrypted = temp_key
+        .iter()
+        .zip(aes_hash)
+        .map(|(left, right)| left ^ right)
+        .collect::<Vec<_>>();
+    key_aes_encrypted.extend_from_slice(&aes_encrypted);
+    let candidate = BigUint::from_bytes_be(&key_aes_encrypted);
+    let modulus = BigUint::from_bytes_be(modulus_bytes);
+    if candidate >= modulus {
+        return Err(InvalidEncryptedRecord);
+    }
+    let encrypted = candidate.modpow(&BigUint::from_bytes_be(exponent_bytes), &modulus);
+    Ok(RsaPadIntermediate {
+        data_with_padding,
+        data_with_hash,
+        aes_encrypted,
+        key_aes_encrypted,
+        encrypted_data: fixed_width(&encrypted, 256)?,
+    })
+}
+
+/// Derives the temporary AES key and IV used by both DH inner records.
+pub fn derive_temporary_aes(
+    new_nonce: &[u8],
+    server_nonce: &[u8],
+) -> Result<([u8; 32], [u8; 32]), InvalidEncryptedRecord> {
+    if new_nonce.len() != 32 || server_nonce.len() != 16 {
+        return Err(InvalidEncryptedRecord);
+    }
+    let nonce_server = sha1(&[new_nonce, server_nonce]);
+    let server_nonce_hash = sha1(&[server_nonce, new_nonce]);
+    let key: Vec<u8> = nonce_server
+        .iter()
+        .chain(&server_nonce_hash[..12])
+        .copied()
+        .collect();
+    let nonce_twice = sha1(&[new_nonce, new_nonce]);
+    let iv: Vec<u8> = server_nonce_hash[12..]
+        .iter()
+        .chain(nonce_twice.iter())
+        .chain(&new_nonce[..4])
+        .copied()
+        .collect();
+    Ok((
+        key.try_into().map_err(|_| InvalidEncryptedRecord)?,
+        iv.try_into().map_err(|_| InvalidEncryptedRecord)?,
+    ))
+}
+
+/// Encrypts one SHA-1-prefixed serialized DH constructor with exact padding.
+pub fn encrypt_dh_inner(
+    serialized: &[u8],
+    padding: &[u8],
+    new_nonce: &[u8],
+    server_nonce: &[u8],
+) -> Result<Vec<u8>, InvalidEncryptedRecord> {
+    if padding.len() > 15 || !(20 + serialized.len() + padding.len()).is_multiple_of(16) {
+        return Err(InvalidEncryptedRecord);
+    }
+    let (key, iv) = derive_temporary_aes(new_nonce, server_nonce)?;
+    let mut plaintext = sha1(&[serialized]).to_vec();
+    plaintext.extend_from_slice(serialized);
+    plaintext.extend_from_slice(padding);
+    aes_ige_encrypt(&plaintext, &key, &iv)
+}
+
+/// Decrypts and verifies exactly one serialized DH constructor.
+pub fn decrypt_dh_inner(
+    encrypted: &[u8],
+    serialized_length: usize,
+    new_nonce: &[u8],
+    server_nonce: &[u8],
+) -> Result<Vec<u8>, InvalidEncryptedRecord> {
+    if encrypted.is_empty() || !encrypted.len().is_multiple_of(16) || serialized_length < 4 {
+        return Err(InvalidEncryptedRecord);
+    }
+    let (key, iv) = derive_temporary_aes(new_nonce, server_nonce)?;
+    let plaintext = aes_ige_decrypt(encrypted, &key, &iv)?;
+    let padding_length = plaintext
+        .len()
+        .checked_sub(20 + serialized_length)
+        .ok_or(InvalidEncryptedRecord)?;
+    if padding_length > 15 {
+        return Err(InvalidEncryptedRecord);
+    }
+    let serialized = &plaintext[20..20 + serialized_length];
+    if plaintext[..20] != sha1(&[serialized]) {
+        return Err(InvalidEncryptedRecord);
+    }
+    Ok(serialized.to_vec())
+}
+
+/// Computes a 256-byte shared authorization key using finite-field DH.
+pub fn derive_auth_key(
+    public_value: &[u8],
+    secret_exponent: &[u8],
+    prime_bytes: &[u8],
+) -> Result<[u8; 256], InvalidEncryptedRecord> {
+    if secret_exponent.len() != 256 || prime_bytes.len() != 256 {
+        return Err(InvalidEncryptedRecord);
+    }
+    fixed_width(
+        &BigUint::from_bytes_be(public_value).modpow(
+            &BigUint::from_bytes_be(secret_exponent),
+            &BigUint::from_bytes_be(prime_bytes),
+        ),
+        256,
+    )?
+    .try_into()
+    .map_err(|_| InvalidEncryptedRecord)
+}
+
+/// Validates the built-in safe-prime/generator pair and generator congruence.
+/// Unfamiliar primes require the caller's full probabilistic primality path.
+pub fn validate_builtin_dh_parameters(
+    prime_bytes: &[u8],
+    generator: u32,
+) -> Result<(), InvalidEncryptedRecord> {
+    if prime_bytes != TELEGRAM_DH_PRIME || generator != 3 {
+        return Err(InvalidEncryptedRecord);
+    }
+    Ok(())
+}
+
+/// Enforces Telegram's recommended 64-bit-margin DH public-value bounds.
+pub fn validate_dh_public_value(
+    value_bytes: &[u8],
+    prime_bytes: &[u8],
+) -> Result<(), InvalidEncryptedRecord> {
+    if value_bytes.is_empty() || value_bytes.len() > 256 || prime_bytes.len() != 256 {
+        return Err(InvalidEncryptedRecord);
+    }
+    let value = BigUint::from_bytes_be(value_bytes);
+    let prime = BigUint::from_bytes_be(prime_bytes);
+    let margin = BigUint::from(1_u8) << (2048 - 64);
+    if value < margin || value > prime - &margin {
+        return Err(InvalidEncryptedRecord);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    #[test]
+    fn matches_frozen_rsa_pad_and_temporary_aes_vectors() {
+        let modulus = hex::decode("f0d6060f41eb501851051808d4900eb0d044accfe02afbfe3821b6afecf92ffb1c7c8bfbff72e60287f06fe71d03dbf8867c7bd17f7de8bceac32c68543ce43568d6d47c2fd348527a860260cb162c05a8563ca85a62adb9ef469c70449ca31a28b22ccf7e9189d9d75f2998d4f085b2730058fe485f1922ca84ee3913fe3fba65f2a9ca922f105f9c3af8ddca7b4fc039c581796511fc71af021923a889ba42c4bacdd2599d3e97ff00cb390bd09bce84ec14228058cfb9675876b9a1ddc7576a90e7b563d2e018deb0f2dde0282817521a24e8da2f28700856e8667b31c4f304169fc2d575b23b78b050063788e9b4b8b17a43d290e9afde6e3e4a52c94ed1").unwrap();
+        let result = rsa_pad_attempt(
+            &(0_u8..64).collect::<Vec<_>>(),
+            &(0x80_u8..=0xff).collect::<Vec<_>>(),
+            &(0x20_u8..0x40).collect::<Vec<_>>(),
+            &modulus,
+            &[1, 0, 1],
+        )
+        .unwrap();
+        assert_eq!(
+            hex(&result.encrypted_data),
+            "05a08c73f3cd8e128b23dcdc75d247d723d35436f7716ca13b9b050bf0684bfd6b4915d8679e59f8c28a9ec4e161ad75b74bbdee9e5e480e3178b6edac3c10cc80cde9872cf1213be099e6d6bea74a8d231f36c569e5fba8818a4282191537946e6ad46526249bc4600f960868af9872e4463f7154ac56b00f38c2c028043314d016dda7e0b5b65ea3b211d509c39f17b18d3850a2629dfd1aa3ef129b1d5b8d26bc8b001e5f6134c3f3acefe5974a0072a488e8449ce61fbfc481739948bcead7594d23ffbbc2a9a9ebb168ee707a8567ad28d525cefab2aae6e0d4eb279fe1768a9e6277a53e18e996bc74846cb11ffeb981015a595980b420dc02d124eedd"
+        );
+
+        let new_nonce = (0_u8..32).collect::<Vec<_>>();
+        let server_nonce = (0xf0_u8..=0xff).collect::<Vec<_>>();
+        let (key, iv) = derive_temporary_aes(&new_nonce, &server_nonce).unwrap();
+        assert_eq!(
+            hex(&key),
+            "5f243f0afc16828a28a81163dcf0e3c45e744029e5f224b6de5d8a708e3ead3b"
+        );
+        assert_eq!(
+            hex(&iv),
+            "7ddc813131e5cbaae864070e166e6218f6783e8511471a5ab7802cf200010203"
+        );
+        let serialized = (0x40_u8..0x6b).collect::<Vec<_>>();
+        let encrypted = encrypt_dh_inner(&serialized, &[0xaa], &new_nonce, &server_nonce).unwrap();
+        assert_eq!(
+            hex(&encrypted),
+            "f4b876fcb58c64e1d91c8561498104ca5f7cba9c8dae72b335bd6544259c2d54a361efc08a3a19cd6078ac480135a38b73dfba32c4d424659c49f23871107bc4"
+        );
+        assert_eq!(
+            decrypt_dh_inner(&encrypted, serialized.len(), &new_nonce, &server_nonce).unwrap(),
+            serialized
+        );
+    }
+}

@@ -6,19 +6,28 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Generated public protocol types for Inline."
+description = "Inline Protocol secure transport and generated Inline Schema types."
 readme = "README.md"
 build = "build.rs"
-keywords = ["inline", "chat", "protobuf", "protocol"]
-categories = ["api-bindings"]
+keywords = ["inline", "chat", "protobuf", "protocol", "cryptography"]
+categories = ["api-bindings", "cryptography"]
 documentation = "https://docs.rs/inline-protocol"
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
+aes = "0.8.4"
+cipher = "0.4.4"
+hex-literal = "0.4.1"
+num-bigint = "0.4.6"
 prost.workspace = true
 serde.workspace = true
+sha1 = "0.10.6"
+sha2 = "0.10.8"
+
+[dev-dependencies]
+hex = "0.4.3"
 
 [build-dependencies]
 prost-build.workspace = true
