@@ -99,6 +99,23 @@ struct SecureTransportTests {
     ) == .invoke(layer: 3, payload: payload))
   }
 
+  @Test("matches Telegram invoke-after constructors")
+  func invokeAfterConstructors() throws {
+    let query = try InlineSecureTransport.encodeInlineInvoke(payload: [1, 2, 3])
+    let single = try InlineSecureTransport.encodeInvokeAfterMessage(messageID: 4, query: query)
+    #expect(single.hex.hasPrefix("2d379fcb"))
+    #expect(try InlineSecureTransport.decodeInvokeAfter(single) == InlineInvokeAfter(
+      messageIDs: [4],
+      query: query
+    ))
+    let multiple = try InlineSecureTransport.encodeInvokeAfterMessages(messageIDs: [4, 8], query: query)
+    #expect(multiple.hex.hasPrefix("f0b4c43d"))
+    #expect(try InlineSecureTransport.decodeInvokeAfter(multiple) == InlineInvokeAfter(
+      messageIDs: [4, 8],
+      query: query
+    ))
+  }
+
   @Test("matches the frozen RSA_PAD and temporary-DH vectors")
   func handshakeVectors() throws {
     let modulus = bytes("f0d6060f41eb501851051808d4900eb0d044accfe02afbfe3821b6afecf92ffb1c7c8bfbff72e60287f06fe71d03dbf8867c7bd17f7de8bceac32c68543ce43568d6d47c2fd348527a860260cb162c05a8563ca85a62adb9ef469c70449ca31a28b22ccf7e9189d9d75f2998d4f085b2730058fe485f1922ca84ee3913fe3fba65f2a9ca922f105f9c3af8ddca7b4fc039c581796511fc71af021923a889ba42c4bacdd2599d3e97ff00cb390bd09bce84ec14228058cfb9675876b9a1ddc7576a90e7b563d2e018deb0f2dde0282817521a24e8da2f28700856e8667b31c4f304169fc2d575b23b78b050063788e9b4b8b17a43d290e9afde6e3e4a52c94ed1")

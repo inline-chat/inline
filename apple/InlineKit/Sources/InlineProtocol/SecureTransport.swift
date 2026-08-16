@@ -60,11 +60,25 @@ public enum InlineAbridgedFrame: Equatable, Sendable {
   case quickAck(id: UInt32)
 }
 
+public struct InlineInvokeAfter: Equatable, Sendable {
+  public let messageIDs: [Int64]
+  public let query: [UInt8]
+
+  public init(messageIDs: [Int64], query: [UInt8]) {
+    self.messageIDs = messageIDs
+    self.query = query
+  }
+}
+
 public enum InlineSecureTransport {
   public static let maximumPacketBytes = 16 * 1024 * 1024
   public static let resultConstructor: UInt32 = 0xac3ddc54
   public static let updateConstructor: UInt32 = 0xdc412c98
   public static let invokeConstructor: UInt32 = 0xeb7d4aa6
+  public static let invokeAfterMessageConstructor: UInt32 = 0xcb9f372d
+  public static let invokeAfterMessagesConstructor: UInt32 = 0x3dc4b4f0
+  private static let vectorConstructor: UInt32 = 0x1cb5c415
+  private static let maximumInvokeAfterDependencies = 8_192
   public static let realtimeLayer: Int32 = 3
   public static let telegramDHPrime: [UInt8] = hexBytes(
     "c71caeb9c6b1c9048e6c522f70f13f73980d40238e3e21c14934d037563d930f" +
@@ -204,6 +218,58 @@ public enum InlineSecureTransport {
     case updateConstructor: return .update(payload: decoded.value)
     default: throw InlineProtocolError.invalidInput
     }
+  }
+
+  public static func encodeInvokeAfterMessage(messageID: Int64, query: [UInt8]) throws -> [UInt8] {
+    try validateTLQuery(query)
+    return littleEndian(invokeAfterMessageConstructor) + littleEndian(messageID) + query
+  }
+
+  public static func encodeInvokeAfterMessages(messageIDs: [Int64], query: [UInt8]) throws -> [UInt8] {
+    guard messageIDs.count <= maximumInvokeAfterDependencies else { throw InlineProtocolError.invalidInput }
+    try validateTLQuery(query)
+    return littleEndian(invokeAfterMessagesConstructor)
+      + littleEndian(vectorConstructor)
+      + littleEndian(Int32(messageIDs.count))
+      + messageIDs.flatMap(littleEndian)
+      + query
+  }
+
+  public static func decodeInvokeAfter(_ bytes: [UInt8]) throws -> InlineInvokeAfter {
+    guard bytes.count >= 12,
+          bytes.count <= maximumPacketBytes,
+          bytes.count.isMultiple(of: 4)
+    else { throw InlineProtocolError.invalidInput }
+    let constructor = try readUInt32(bytes, at: 0)
+    let messageIDs: [Int64]
+    let queryOffset: Int
+    switch constructor {
+    case invokeAfterMessageConstructor:
+      messageIDs = [try readInt64(bytes, at: 4)]
+      queryOffset = 12
+    case invokeAfterMessagesConstructor:
+      guard try readUInt32(bytes, at: 4) == vectorConstructor else {
+        throw InlineProtocolError.invalidInput
+      }
+      let count = Int(try readInt32(bytes, at: 8))
+      guard (0...maximumInvokeAfterDependencies).contains(count),
+            count <= (bytes.count - 12) / 8
+      else { throw InlineProtocolError.invalidInput }
+      messageIDs = try (0..<count).map { try readInt64(bytes, at: 12 + $0 * 8) }
+      queryOffset = 12 + count * 8
+    default:
+      throw InlineProtocolError.invalidInput
+    }
+    let query = Array(bytes[queryOffset...])
+    try validateTLQuery(query)
+    return InlineInvokeAfter(messageIDs: messageIDs, query: query)
+  }
+
+  private static func validateTLQuery(_ query: [UInt8]) throws {
+    guard query.count >= 4,
+          query.count <= maximumPacketBytes,
+          query.count.isMultiple(of: 4)
+    else { throw InlineProtocolError.invalidInput }
   }
 
   public static func authKeyID(_ authKey: [UInt8]) throws -> [UInt8] {
