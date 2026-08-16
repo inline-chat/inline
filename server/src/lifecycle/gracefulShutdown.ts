@@ -5,6 +5,7 @@ import { stopUserSettingsCacheCleanup } from "@in/server/modules/cache/userSetti
 import { stopDatabaseHealthMonitor } from "@in/server/modules/monitoring/databaseHealthMonitor"
 import { stopGridProviderEffectWorker } from "@in/server/modules/grid/providerEffects"
 import { shutdownBotChatSettingsBroker } from "@in/server/modules/botChatSettings/broker"
+import { stopBotWebhookDeliveryWorker } from "@in/server/modules/botUpdates/delivery"
 import { Log } from "@in/server/utils/log"
 import { connectionManager } from "@in/server/ws/connections"
 import { presenceManager } from "@in/server/ws/presence"
@@ -23,6 +24,7 @@ type ClearTimeoutFn = (timeoutId: ReturnType<typeof setTimeout>) => void
 export type GracefulShutdownDeps = {
   markShuttingDown: (signal: ShutdownSignal) => void
   stopDatabaseMonitor: Step
+  stopBotWebhookDeliveryWorker: Step
   stopUserSettingsCleanup: Step
   stopGridProviderEffects: Step
   stopBotChatSettings: Step
@@ -65,6 +67,7 @@ const readShutdownTimeoutMs = (): number => {
 const createDefaultDeps = (): GracefulShutdownDeps => ({
   markShuttingDown: markServerShuttingDown,
   stopDatabaseMonitor: () => stopDatabaseHealthMonitor(),
+  stopBotWebhookDeliveryWorker: () => stopBotWebhookDeliveryWorker(),
   stopUserSettingsCleanup: () => stopUserSettingsCacheCleanup(),
   stopGridProviderEffects: () => stopGridProviderEffectWorker(),
   stopBotChatSettings: () => shutdownBotChatSettingsBroker(),
@@ -143,6 +146,7 @@ export const createGracefulShutdownManager = ({
       let hasErrors = false
 
       hasErrors = !(await runStep("stop_database_monitor", runtime.stopDatabaseMonitor)) || hasErrors
+      hasErrors = !(await runStep("stop_bot_webhook_delivery_worker", runtime.stopBotWebhookDeliveryWorker)) || hasErrors
       hasErrors = !(await runStep("stop_user_settings_cleanup", runtime.stopUserSettingsCleanup)) || hasErrors
       hasErrors = !(await runStep("stop_grid_provider_effects", runtime.stopGridProviderEffects)) || hasErrors
       hasErrors = !(await runStep("stop_bot_chat_settings", runtime.stopBotChatSettings)) || hasErrors

@@ -31,6 +31,7 @@ import {
   loadActiveGroupMemberIds,
   loadGroupsByIdsWithUsers,
 } from "@in/server/modules/userGroups"
+import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
 
 type AddChatParticipantOutput = {
   participant?: ChatParticipant
@@ -181,6 +182,8 @@ export async function addChatParticipant(
         update: result.update,
       })
       pushChatPermissionUpdates(result.permissionUpdates)
+      const [chat] = await db.select().from(chats).where(eq(chats.id, input.chatId)).limit(1)
+      if (chat) BotUpdateProjector.membershipChanged({ botUserId: userId, chat, actorUserId: context.currentUserId, added: true })
     }
 
     return { participant: result.participant, users: [] }

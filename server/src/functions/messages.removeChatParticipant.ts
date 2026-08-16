@@ -23,6 +23,7 @@ import {
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { ensureCanManageChatParticipants } from "@in/server/modules/authorization/spaceThreadGuards"
 import { ensureGroupCanParticipateInChat, loadActiveGroupMemberIds } from "@in/server/modules/userGroups"
+import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
 
 export async function removeChatParticipant(
   input: {
@@ -134,6 +135,8 @@ export async function removeChatParticipant(
       update,
     })
     pushChatPermissionUpdates(permissionUpdates)
+    const [chat] = await db.select().from(chats).where(eq(chats.id, input.chatId)).limit(1)
+    if (chat) BotUpdateProjector.membershipChanged({ botUserId: userId, chat, actorUserId: context.currentUserId, added: false })
   } catch (error) {
     Log.shared.error(`Failed to remove participant from chat ${input.chatId}: ${error}`)
     if (error instanceof RealtimeRpcError) {

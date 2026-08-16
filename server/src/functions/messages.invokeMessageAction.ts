@@ -9,6 +9,7 @@ import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { RealtimeUpdates } from "@in/server/realtime/message"
+import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
 
 type Input = {
   peerId: InputPeer
@@ -77,6 +78,11 @@ export const invokeMessageAction = async (input: Input, context: FunctionContext
   }
 
   RealtimeUpdates.pushToUser(sender.id, [realtimeUpdate])
+
+  BotUpdateProjector.actionInvoked({
+    botUserId: sender.id, chat, messageId, actorUserId: context.currentUserId,
+    actionId, interactionId: BigInt(userUpdate.seq), data: callback.data,
+  })
 
   return {
     interactionId: BigInt(userUpdate.seq),

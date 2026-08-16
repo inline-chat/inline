@@ -75,6 +75,7 @@ import { resolveThreadTitleLinks } from "@in/server/modules/message/resolveThrea
 import { resolveMentionedGroupUserIds } from "@in/server/modules/userGroups"
 import { resolveThreadAutoFollowUserIds } from "@in/server/modules/threadAutoFollow"
 import { resolveBotCommandTargets } from "@in/server/modules/message/resolveBotCommandTargets"
+import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
 
 type Input = {
   peerId: InputPeer
@@ -398,6 +399,8 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     publishToSelfSession: currentUserLayer < 2 || hasAttachments,
     updateGroup,
   })
+
+  BotUpdateProjector.messageCreated({ chat, messageId: newMessage.messageId, updateGroup })
 
   // Start after the new-message update is pushed so attachment updates cannot race ahead of the message.
   if (previewRoutes.length > 0) {

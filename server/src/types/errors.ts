@@ -59,6 +59,10 @@ export const ApiError = {
   // 403 FORBIDDEN
   FORBIDDEN: ["FORBIDDEN", 403, "Forbidden"],
 
+  // 409 CONFLICT
+  POLL_CONFLICT: ["POLL_CONFLICT", 409, "Another getUpdates request is active for this bot"],
+  WEBHOOK_ACTIVE: ["WEBHOOK_ACTIVE", 409, "Disable the webhook before using getUpdates"],
+
   // 500 SERVER_ERROR
   INTERNAL: ["INTERNAL", 500, "Internal server error happened"],
 

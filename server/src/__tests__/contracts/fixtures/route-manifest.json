@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "count": 202,
+  "count": 234,
   "methodCounts": {
     "ALL": 3,
-    "GET": 87,
+    "GET": 95,
     "OPTIONS": 18,
-    "POST": 93,
+    "POST": 117,
     "WS": 1
   },
-  "sha256": "2e9c99f8735ca9a8a9e1c64e3f942f22a83d01b01937050c5f9111bf4c0b1a65",
+  "sha256": "aa8e2ad20c524ed1dcec8feb0807bd670d4a42eae4edeade8d6ddcf4b7e004be",
   "routes": [
     {
       "method": "ALL",
@@ -100,15 +100,31 @@
     },
     {
       "method": "GET",
+      "path": "/bot/getChatParticipant"
+    },
+    {
+      "method": "GET",
+      "path": "/bot/getChatParticipantCount"
+    },
+    {
+      "method": "GET",
+      "path": "/bot/getFile"
+    },
+    {
+      "method": "GET",
       "path": "/bot/getMe"
     },
     {
       "method": "GET",
-      "path": "/bot/getMyCapabilities"
+      "path": "/bot/getMyCommands"
     },
     {
       "method": "GET",
-      "path": "/bot/getMyCommands"
+      "path": "/bot/getUpdates"
+    },
+    {
+      "method": "GET",
+      "path": "/bot/getWebhookInfo"
     },
     {
       "method": "GET",
@@ -120,15 +136,31 @@
     },
     {
       "method": "GET",
+      "path": "/bot:token/getChatParticipant"
+    },
+    {
+      "method": "GET",
+      "path": "/bot:token/getChatParticipantCount"
+    },
+    {
+      "method": "GET",
+      "path": "/bot:token/getFile"
+    },
+    {
+      "method": "GET",
       "path": "/bot:token/getMe"
     },
     {
       "method": "GET",
-      "path": "/bot:token/getMyCapabilities"
+      "path": "/bot:token/getMyCommands"
     },
     {
       "method": "GET",
-      "path": "/bot:token/getMyCommands"
+      "path": "/bot:token/getUpdates"
+    },
+    {
+      "method": "GET",
+      "path": "/bot:token/getWebhookInfo"
     },
     {
       "method": "GET",
@@ -492,11 +524,19 @@
     },
     {
       "method": "POST",
-      "path": "/bot/deleteMessage"
+      "path": "/bot/answerMessageAction"
     },
     {
       "method": "POST",
-      "path": "/bot/deleteMyCapabilities"
+      "path": "/bot/createReplyThread"
+    },
+    {
+      "method": "POST",
+      "path": "/bot/createThread"
+    },
+    {
+      "method": "POST",
+      "path": "/bot/deleteMessage"
     },
     {
       "method": "POST",
@@ -504,7 +544,35 @@
     },
     {
       "method": "POST",
+      "path": "/bot/deleteReaction"
+    },
+    {
+      "method": "POST",
+      "path": "/bot/deleteWebhook"
+    },
+    {
+      "method": "POST",
       "path": "/bot/editMessageText"
+    },
+    {
+      "method": "POST",
+      "path": "/bot/forwardMessage"
+    },
+    {
+      "method": "POST",
+      "path": "/bot/getMessages"
+    },
+    {
+      "method": "POST",
+      "path": "/bot/pinMessage"
+    },
+    {
+      "method": "POST",
+      "path": "/bot/searchMessages"
+    },
+    {
+      "method": "POST",
+      "path": "/bot/sendChatAction"
     },
     {
       "method": "POST",
@@ -516,11 +584,35 @@
     },
     {
       "method": "POST",
-      "path": "/bot/setMyCapabilities"
+      "path": "/bot/setMyCommands"
     },
     {
       "method": "POST",
-      "path": "/bot/setMyCommands"
+      "path": "/bot/setThreadTitle"
+    },
+    {
+      "method": "POST",
+      "path": "/bot/setWebhook"
+    },
+    {
+      "method": "POST",
+      "path": "/bot/unpinMessage"
+    },
+    {
+      "method": "POST",
+      "path": "/bot/uploadFile"
+    },
+    {
+      "method": "POST",
+      "path": "/bot:token/answerMessageAction"
+    },
+    {
+      "method": "POST",
+      "path": "/bot:token/createReplyThread"
+    },
+    {
+      "method": "POST",
+      "path": "/bot:token/createThread"
     },
     {
       "method": "POST",
@@ -528,15 +620,39 @@
     },
     {
       "method": "POST",
-      "path": "/bot:token/deleteMyCapabilities"
-    },
-    {
-      "method": "POST",
       "path": "/bot:token/deleteMyCommands"
     },
     {
       "method": "POST",
+      "path": "/bot:token/deleteReaction"
+    },
+    {
+      "method": "POST",
+      "path": "/bot:token/deleteWebhook"
+    },
+    {
+      "method": "POST",
       "path": "/bot:token/editMessageText"
+    },
+    {
+      "method": "POST",
+      "path": "/bot:token/forwardMessage"
+    },
+    {
+      "method": "POST",
+      "path": "/bot:token/getMessages"
+    },
+    {
+      "method": "POST",
+      "path": "/bot:token/pinMessage"
+    },
+    {
+      "method": "POST",
+      "path": "/bot:token/searchMessages"
+    },
+    {
+      "method": "POST",
+      "path": "/bot:token/sendChatAction"
     },
     {
       "method": "POST",
@@ -548,11 +664,23 @@
     },
     {
       "method": "POST",
-      "path": "/bot:token/setMyCapabilities"
+      "path": "/bot:token/setMyCommands"
     },
     {
       "method": "POST",
-      "path": "/bot:token/setMyCommands"
+      "path": "/bot:token/setThreadTitle"
+    },
+    {
+      "method": "POST",
+      "path": "/bot:token/setWebhook"
+    },
+    {
+      "method": "POST",
+      "path": "/bot:token/unpinMessage"
+    },
+    {
+      "method": "POST",
+      "path": "/bot:token/uploadFile"
     },
     {
       "method": "POST",

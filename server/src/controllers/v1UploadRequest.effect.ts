@@ -19,10 +19,13 @@ import {
 const metadataFields = new Set([
   "duration",
   "hasAudio",
+  "has_audio",
   "height",
   "isAnimated",
+  "is_animated",
   "type",
   "waveform",
+  "waveform_base64",
   "width",
 ])
 const fileFields = new Set([

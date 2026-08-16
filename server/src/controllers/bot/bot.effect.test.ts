@@ -16,6 +16,7 @@ import type {
   BotMethodName,
   GetChatHistoryParams,
   GetChatParams,
+  GetUpdatesParams,
   SendMessageParams,
   SendReactionParams,
   SetMyCommandsParams,
@@ -103,15 +104,31 @@ const makeOperations = (
   sendMessage: () => unused("sendMessage"),
   getChat: () => unused("getChat"),
   getChatHistory: () => unused("getChatHistory"),
+  getMessages: () => unused("getMessages"),
+  searchMessages: () => unused("searchMessages"),
+  createThread: () => unused("createThread"),
+  createReplyThread: () => unused("createReplyThread"),
   editMessageText: () => unused("editMessageText"),
   deleteMessage: () => unused("deleteMessage"),
   sendReaction: () => unused("sendReaction"),
+  deleteReaction: () => unused("deleteReaction"),
+  answerMessageAction: () => unused("answerMessageAction"),
+  sendChatAction: () => unused("sendChatAction"),
+  getFile: () => unused("getFile"),
+  getUpdates: () => unused("getUpdates"),
+  setWebhook: () => unused("setWebhook"),
+  deleteWebhook: () => unused("deleteWebhook"),
+  getWebhookInfo: () => unused("getWebhookInfo"),
   getMyCommands: () => unused("getMyCommands"),
   setMyCommands: () => unused("setMyCommands"),
   deleteMyCommands: () => unused("deleteMyCommands"),
-  getMyCapabilities: () => unused("getMyCapabilities"),
-  setMyCapabilities: () => unused("setMyCapabilities"),
-  deleteMyCapabilities: () => unused("deleteMyCapabilities"),
+  forwardMessage: () => unused("forwardMessage"),
+  pinMessage: () => unused("pinMessage"),
+  unpinMessage: () => unused("unpinMessage"),
+  getChatParticipant: () => unused("getChatParticipant"),
+  getChatParticipantCount: () => unused("getChatParticipantCount"),
+  setThreadTitle: () => unused("setThreadTitle"),
+  uploadFile: () => unused("uploadFile"),
   ...overrides,
 })
 
@@ -220,7 +237,7 @@ const jsonRequest = (
   })
 
 describe("Effect Bot routes", () => {
-  it("serves all thirteen methods through both header and path-token forms", async () => {
+  it("serves every Bot method through both header and path-token forms", async () => {
     const calls: BotMethodName[] = []
     const invoked = <A>(
       operation: BotMethodName,
@@ -241,6 +258,10 @@ describe("Effect Bot routes", () => {
         invoked("getChatHistory", {
           messages: [botMessage],
         }),
+      getMessages: () => invoked("getMessages", { messages: [botMessage] }),
+      searchMessages: () => invoked("searchMessages", { messages: [botMessage] }),
+      createThread: () => invoked("createThread", { chat: botChat }),
+      createReplyThread: () => invoked("createReplyThread", { chat: botChat }),
       editMessageText: () =>
         invoked("editMessageText", {
           message: botMessage,
@@ -263,20 +284,12 @@ describe("Effect Bot routes", () => {
         invoked("setMyCommands", {}),
       deleteMyCommands: () =>
         invoked("deleteMyCommands", {}),
-      getMyCapabilities: () =>
-        invoked("getMyCapabilities", {
-          capabilities: [
-            { kind: "chat_settings", version: 1 },
-          ],
-        }),
-      setMyCapabilities: () =>
-        invoked("setMyCapabilities", {
-          capabilities: [
-            { kind: "chat_settings", version: 1 },
-          ],
-        }),
-      deleteMyCapabilities: () =>
-        invoked("deleteMyCapabilities", {}),
+      forwardMessage: () => invoked("forwardMessage", { message: botMessage }),
+      pinMessage: () => invoked("pinMessage", {}),
+      unpinMessage: () => invoked("unpinMessage", {}),
+      getChatParticipant: () => invoked("getChatParticipant", { participant: { user: botUser } }),
+      getChatParticipantCount: () => invoked("getChatParticipantCount", { count: 2 }),
+      setThreadTitle: () => invoked("setThreadTitle", {}),
     })
     const kernel = makeKernel({ operations })
     const methods = [
@@ -299,6 +312,26 @@ describe("Effect Bot routes", () => {
         name: "getChatHistory",
         method: "GET",
         input: { chat_id: "99", limit: "10" },
+      },
+      {
+        name: "getMessages",
+        method: "POST",
+        input: { chat_id: 99, message_ids: [101] },
+      },
+      {
+        name: "searchMessages",
+        method: "POST",
+        input: { chat_id: 99, query: "deploy" },
+      },
+      {
+        name: "createThread",
+        method: "POST",
+        input: { title: "Deployments", participant_ids: [7] },
+      },
+      {
+        name: "createReplyThread",
+        method: "POST",
+        input: { chat_id: 99, message_id: 101 },
       },
       {
         name: "editMessageText",
@@ -345,25 +378,12 @@ describe("Effect Bot routes", () => {
         method: "POST",
         input: {},
       },
-      {
-        name: "getMyCapabilities",
-        method: "GET",
-        input: undefined,
-      },
-      {
-        name: "setMyCapabilities",
-        method: "POST",
-        input: {
-          capabilities: [
-            { kind: "chat_settings", version: 1 },
-          ],
-        },
-      },
-      {
-        name: "deleteMyCapabilities",
-        method: "POST",
-        input: {},
-      },
+      { name: "forwardMessage", method: "POST", input: { chat_id: 99, from_chat_id: 98, message_id: 101 } },
+      { name: "pinMessage", method: "POST", input: { chat_id: 99, message_id: 101 } },
+      { name: "unpinMessage", method: "POST", input: { chat_id: 99, message_id: 101 } },
+      { name: "getChatParticipant", method: "GET", input: { chat_id: "99", user_id: "42" } },
+      { name: "getChatParticipantCount", method: "GET", input: { chat_id: "99" } },
+      { name: "setThreadTitle", method: "POST", input: { chat_id: 99, title: "Renamed" } },
     ] as const
 
     try {
@@ -407,7 +427,7 @@ describe("Effect Bot routes", () => {
           )
           const response = await kernel.handler(request)
 
-          expect(response.status).toBe(200)
+          expect(response.status, `${authForm}:${method.name}`).toBe(200)
           expect(
             response.headers.get("content-type"),
           ).toContain("application/json")
@@ -417,12 +437,50 @@ describe("Effect Bot routes", () => {
         }
       }
 
-      expect(calls).toHaveLength(26)
+      expect(calls).toHaveLength(40)
       for (const method of methods) {
         expect(
           calls.filter((call) => call === method.name),
         ).toHaveLength(2)
       }
+    } finally {
+      await kernel.dispose()
+    }
+  })
+
+  it("authenticates and parses Bot multipart uploads", async () => {
+    let uploaded: { type?: string; fileName?: string } = {}
+    const kernel = makeKernel({
+      operations: makeOperations({
+        uploadFile: (input) => {
+          uploaded = { type: input.type, fileName: input.file?.name }
+          return Effect.succeed({
+            file: {
+              file_id: "INP_example",
+              file_name: input.file?.name,
+              file_size: input.file?.size,
+            },
+          })
+        },
+      }),
+    })
+
+    try {
+      const form = new FormData()
+      form.set("type", "photo")
+      form.set("file", new Blob(["image"], { type: "image/jpeg" }), "photo.jpg")
+      const response = await kernel.handler(new Request("http://inline.test/bot/uploadFile", {
+        method: "POST",
+        headers: { authorization: "Bearer 42:HEADER" },
+        body: form,
+      }))
+
+      expect(response.status).toBe(200)
+      expect(uploaded).toEqual({ type: "photo", fileName: "photo.jpg" })
+      expect(await response.json()).toEqual({
+        ok: true,
+        result: { file: { file_id: "INP_example", file_name: "photo.jpg", file_size: 5 } },
+      })
     } finally {
       await kernel.dispose()
     }
@@ -1007,7 +1065,7 @@ describe("Effect Bot routes", () => {
     expect(() =>
       assertValidOpenApiDocument(spec),
     ).not.toThrow()
-    expect(Object.keys(spec.paths)).toHaveLength(26)
+    expect(Object.keys(spec.paths)).toHaveLength(58)
 
     const expectedMethods = [
       "getMe",
@@ -1020,9 +1078,13 @@ describe("Effect Bot routes", () => {
       "getMyCommands",
       "setMyCommands",
       "deleteMyCommands",
-      "getMyCapabilities",
-      "setMyCapabilities",
-      "deleteMyCapabilities",
+      "forwardMessage",
+      "pinMessage",
+      "unpinMessage",
+      "getChatParticipant",
+      "getChatParticipantCount",
+      "setThreadTitle",
+      "uploadFile",
     ]
     for (const method of expectedMethods) {
       expect(spec.paths[`/bot/${method}`]).toBeDefined()
@@ -1380,6 +1442,34 @@ describe("Effect Bot routes", () => {
         },
       },
     })
+    expect(
+      spec.components.schemas["BotChat"],
+    ).toMatchObject({
+      properties: {
+        type: {},
+        parent_chat_id: {},
+        parent_message_id: {},
+        participants: {},
+      },
+    })
+    expect(
+      spec.components.schemas["BotMessage"],
+    ).toMatchObject({
+      properties: {
+        edit_date: {},
+        media: {},
+        attachments: {},
+        actions: {},
+        reactions: {},
+      },
+    })
+    expect(
+      spec.components.schemas["BotBadRequestError"],
+    ).toMatchObject({
+      properties: {
+        parameters: {},
+      },
+    })
 
     const text = JSON.stringify(spec)
     expect(text).toContain("chat_id")
@@ -1446,6 +1536,7 @@ describe("Effect Bot routes", () => {
   it("passes decoded GET query values to the operation boundary", async () => {
     let chatInput: GetChatParams | undefined
     let historyInput: GetChatHistoryParams | undefined
+    let updatesInput: GetUpdatesParams | undefined
     const kernel = makeKernel({
       operations: makeOperations({
         getChat: (value) => {
@@ -1455,6 +1546,10 @@ describe("Effect Bot routes", () => {
         getChatHistory: (value) => {
           historyInput = value
           return Effect.succeed({ messages: [] })
+        },
+        getUpdates: (value) => {
+          updatesInput = value
+          return Effect.succeed([])
         },
       }),
     })
@@ -1480,14 +1575,25 @@ describe("Effect Bot routes", () => {
           },
         ),
       )
+      const updatesResponse = await kernel.handler(
+        new Request(
+          "http://inline.test/bot/getUpdates?timeout=0&allowed_updates=%5B%22message%22%2C%22bot_membership%22%5D",
+          { headers: { authorization: "Bearer 42:HEADER" } },
+        ),
+      )
 
       expect(chatResponse.status).toBe(200)
       expect(historyResponse.status).toBe(200)
+      expect(updatesResponse.status).toBe(200)
       expect(chatInput).toEqual({ user_id: 7 })
       expect(historyInput).toEqual({
         chat_id: 99,
         limit: 10,
         offset_message_id: 101,
+      })
+      expect(updatesInput).toEqual({
+        timeout: 0,
+        allowed_updates: ["message", "bot_membership"],
       })
     } finally {
       await kernel.dispose()

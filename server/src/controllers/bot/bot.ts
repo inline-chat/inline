@@ -6,20 +6,34 @@ import { TApiEnvelope, normalizeInputId } from "./helpers"
 import {
   TBotChat,
   TBotCommand,
-  TBotCapability,
+  TBotChatParticipant,
+  TBotFile,
   TBotMessage,
   TBotUser,
   TDeleteMessageInput,
   TEditMessageTextInput,
   TGetChatHistoryInput,
   TGetChatInput,
+  TGetMessagesInput,
+  TSearchMessagesInput,
+  TCreateThreadInput,
+  TCreateReplyThreadInput,
   TSetMyCommandsInput,
-  TSetMyCapabilitiesInput,
+  TForwardMessageInput,
+  TPinMessageInput,
+  TGetChatParticipantInput,
+  TGetChatParticipantCountInput,
+  TSetThreadTitleInput,
+  TBotUploadFileInput,
   TSendMessageInput,
   TSendReactionInput,
+  TAnswerMessageActionInput,
+  TSendChatActionInput,
+  TGetFileInput,
+  TSetWebhookInput,
+  TDeleteWebhookInput,
 } from "./types"
 import { handler as getMeHandler } from "@in/server/methods/getMe"
-import { sendMessage as sendMessageFn } from "@in/server/functions/messages.sendMessage"
 import type { InputPeer, Peer } from "@inline-chat/protocol/core"
 import { getChat as getChatFn } from "@in/server/functions/messages.getChat"
 import { getChatHistory as getChatHistoryFn } from "@in/server/functions/messages.getChatHistory"
@@ -34,7 +48,7 @@ import { ModelError } from "@in/server/db/models/_errors"
 import { encodeBotEntities, parseBotEntities, type BotUserJson } from "./entities"
 import { UsersModel } from "@in/server/db/models/users"
 import { BotCommandsModel } from "@in/server/db/models/botCommands"
-import { BotCapabilitiesModel } from "@in/server/db/models/botCapabilities"
+import { botOperationHandlers } from "./operations"
 import type {
   BotChat,
   BotChatLastMessage,
@@ -43,6 +57,10 @@ import type {
   BotPeer,
   BotTargetInput,
   BotUser,
+  CreateReplyThreadParams,
+  CreateThreadParams,
+  GetMessagesParams,
+  SearchMessagesParams,
 } from "@inline-chat/bot-api-types"
 
 const toBotUser = (user: any, options?: { isBot?: boolean }): BotUser => {
@@ -252,9 +270,17 @@ const toBotChat = (chat: any): BotChat => {
   const chatId = typeof chat.id === "bigint" ? Number(chat.id) : Number(chat.id)
   return {
     chat_id: chatId,
+    type:
+      chat.type === "private" || chat.peerId?.type?.oneofKind === "user"
+        ? "direct"
+        : chat.type === "thread" || chat.peerId?.type?.oneofKind === "chat"
+          ? "thread"
+          : undefined,
     title: chat.title ? String(chat.title) : undefined,
     space_id: chat.spaceId ? Number(chat.spaceId) : undefined,
     is_public: typeof chat.isPublic === "boolean" ? chat.isPublic : undefined,
+    parent_chat_id: chat.parentChatId ? Number(chat.parentChatId) : undefined,
+    parent_message_id: chat.parentMessageId ? Number(chat.parentMessageId) : undefined,
     last_message_id: chat.lastMsgId ? Number(chat.lastMsgId) : undefined,
     emoji: chat.emoji ?? undefined,
   }
@@ -355,6 +381,7 @@ const toBotMessageLiteFromProto = (
     from_id: fromId,
     from: usersById?.get(fromId) ?? minimalUnknownUser(fromId),
     date: Number(message.date),
+    edit_date: message.editDate ? Number(message.editDate) : undefined,
     text: message.message ?? undefined,
     entities: encodeBotEntities(message.entities, { usersById }),
   }
@@ -368,6 +395,12 @@ const toBotMessageLiteFromDb = (
 ): BotMessageLite => {
   const dateSeconds =
     message.date instanceof Date ? Math.floor(message.date.getTime() / 1000) : Number(message.date ?? 0)
+  const editDateSeconds =
+    message.editDate instanceof Date
+      ? Math.floor(message.editDate.getTime() / 1000)
+      : message.editDate != null
+        ? Number(message.editDate)
+        : undefined
 
   const fromId = Number(message.fromId)
   return {
@@ -378,6 +411,7 @@ const toBotMessageLiteFromDb = (
     from_id: fromId,
     from: usersById?.get(fromId) ?? minimalUnknownUser(fromId),
     date: dateSeconds,
+    edit_date: editDateSeconds,
     text: message.text ?? undefined,
     entities: encodeBotEntities(message.entities, { usersById }),
   }
@@ -395,16 +429,6 @@ const toBotMessageFromDb = (
       ? toBotMessageLiteFromDb(options.replyMessage, inputPeer, botChat, options?.usersById)
       : undefined,
   }
-}
-
-const randomId64 = (): bigint => {
-  // Signed 63-bit random id for idempotency + fetch-after-send (fits Postgres BIGINT).
-  const buf = crypto.getRandomValues(new Uint8Array(8))
-  buf[0] = buf[0]! & 0x7f
-  let hex = ""
-  for (const b of buf) hex += b.toString(16).padStart(2, "0")
-  const id = BigInt("0x" + hex)
-  return id === 0n ? 1n : id
 }
 
 const jsonBodyDoc = (schema: TSchema) => ({
@@ -509,54 +533,12 @@ const botMethods = (authPlugin: any): any => {
     "/sendMessage",
     async ({ body, query, store }: any) => {
       try {
-        const input = mergePostInput(body, query)
-        const text = input["text"]
-        if (typeof text !== "string") {
-          throw new InlineError(InlineError.ApiError.BAD_REQUEST)
-        }
-
-        const replyToMessageId = normalizeInputId(input["reply_to_message_id"] as any)
-        const entities = parseBotEntities(parseMaybeJsonValue(input["entities"]))
-        const parseMarkdown = parseBotParseMarkdown(input)
-        const inputPeer = await makeInputPeerFromBotTarget(input, store.currentUserId)
-        const chatResult = await getChatFn({ peerId: inputPeer }, ctxFromStore(store))
-        const chatId = Number(chatResult.chat.id)
-        const botChat = toBotChat(chatResult.chat)
-
-        const randomId = randomId64()
-        await sendMessageFn(
-          {
-            peerId: inputPeer,
-            message: text,
-            replyToMessageId: replyToMessageId ? BigInt(replyToMessageId) : undefined,
-            entities,
-            parseMarkdown: parseMarkdown ?? true,
-            randomId,
-          },
-          ctxFromStore(store),
-        )
-
-        const sent = await MessageModel.getMessageByRandomId(randomId, store.currentUserId)
-        const full = await MessageModel.getMessage(sent.messageId, chatId)
-        const reply =
-          full.replyToMsgId && Number.isFinite(full.replyToMsgId)
-            ? await MessageModel.getMessage(full.replyToMsgId, chatId).catch(() => null)
-            : null
-
-        const mentionIds = [
-          ...mentionUserIdsFromEntities(full.entities),
-          ...mentionUserIdsFromEntities(reply?.entities),
-        ]
-        const fromIds = [
-          Number(full.fromId),
-          reply ? Number(reply.fromId) : undefined,
-        ].filter((id): id is number => typeof id === "number" && Number.isFinite(id) && id > 0)
-
-        const usersById = await loadUsersByIds([...mentionIds, ...fromIds])
-
         return {
           ok: true,
-          result: { message: toBotMessageFromDb(full, inputPeer, botChat, { usersById, replyMessage: reply }) },
+          result: await botOperationHandlers.sendMessage(
+            mergePostInput(body, query) as any,
+            ctxFromStore(store),
+          ),
         }
       } catch (error) {
         throwInlineFromUnknown(error)
@@ -671,6 +653,70 @@ const botMethods = (authPlugin: any): any => {
     {
       detail: queryDoc(TGetChatHistoryInput),
       response: TApiEnvelope(t.Object({ messages: t.Array(TBotMessage) })),
+    },
+  )
+
+  app.post(
+    "/getMessages",
+    async ({ body, query, store }: any) => {
+      try {
+        const input = mergePostInput(body, query) as GetMessagesParams
+        return { ok: true, result: await botOperationHandlers.getMessages(input, ctxFromStore(store)) }
+      } catch (error) {
+        throwInlineFromUnknown(error)
+      }
+    },
+    {
+      detail: jsonBodyDoc(TGetMessagesInput),
+      response: TApiEnvelope(t.Object({ messages: t.Array(TBotMessage) })),
+    },
+  )
+
+  app.post(
+    "/searchMessages",
+    async ({ body, query, store }: any) => {
+      try {
+        const input = mergePostInput(body, query) as SearchMessagesParams
+        return { ok: true, result: await botOperationHandlers.searchMessages(input, ctxFromStore(store)) }
+      } catch (error) {
+        throwInlineFromUnknown(error)
+      }
+    },
+    {
+      detail: jsonBodyDoc(TSearchMessagesInput),
+      response: TApiEnvelope(t.Object({ messages: t.Array(TBotMessage) })),
+    },
+  )
+
+  app.post(
+    "/createThread",
+    async ({ body, query, store }: any) => {
+      try {
+        const input = mergePostInput(body, query) as CreateThreadParams
+        return { ok: true, result: await botOperationHandlers.createThread(input, ctxFromStore(store)) }
+      } catch (error) {
+        throwInlineFromUnknown(error)
+      }
+    },
+    {
+      detail: jsonBodyDoc(TCreateThreadInput),
+      response: TApiEnvelope(t.Object({ chat: TBotChat })),
+    },
+  )
+
+  app.post(
+    "/createReplyThread",
+    async ({ body, query, store }: any) => {
+      try {
+        const input = mergePostInput(body, query) as CreateReplyThreadParams
+        return { ok: true, result: await botOperationHandlers.createReplyThread(input, ctxFromStore(store)) }
+      } catch (error) {
+        throwInlineFromUnknown(error)
+      }
+    },
+    {
+      detail: jsonBodyDoc(TCreateReplyThreadInput),
+      response: TApiEnvelope(t.Object({ chat: TBotChat })),
     },
   )
 
@@ -805,6 +851,51 @@ const botMethods = (authPlugin: any): any => {
     },
   )
 
+  app.post("/deleteReaction", async ({ body, query, store }: any) => ({
+    ok: true,
+    result: await botOperationHandlers.deleteReaction(mergePostInput(body, query) as any, ctxFromStore(store)),
+  }), { detail: jsonBodyDoc(TSendReactionInput), response: TApiEnvelope(t.Object({})) })
+
+  app.post("/answerMessageAction", async ({ body, query, store }: any) => ({
+    ok: true,
+    result: await botOperationHandlers.answerMessageAction(mergePostInput(body, query) as any, ctxFromStore(store)),
+  }), { detail: jsonBodyDoc(TAnswerMessageActionInput), response: TApiEnvelope(t.Object({})) })
+
+  app.post("/sendChatAction", async ({ body, query, store }: any) => ({
+    ok: true,
+    result: await botOperationHandlers.sendChatAction(mergePostInput(body, query) as any, ctxFromStore(store)),
+  }), { detail: jsonBodyDoc(TSendChatActionInput), response: TApiEnvelope(t.Object({})) })
+
+  app.get("/getFile", async ({ query, store }: any) => ({
+    ok: true,
+    result: await botOperationHandlers.getFile(query as any, ctxFromStore(store)),
+  }), { query: TGetFileInput, response: TApiEnvelope(t.Any()) })
+
+  app.get("/getUpdates", async ({ query, store }: any) => {
+    const input = { ...query }
+    if (typeof input["allowed_updates"] === "string") input["allowed_updates"] = parseMaybeJsonValue(input["allowed_updates"])
+    if (typeof input["limit"] === "string") input["limit"] = Number(input["limit"])
+    if (typeof input["timeout"] === "string") input["timeout"] = Number(input["timeout"])
+    if (typeof input["offset"] === "string") input["offset"] = Number(input["offset"])
+    return { ok: true, result: await botOperationHandlers.getUpdates(input as any, ctxFromStore(store)) }
+  }, { response: TApiEnvelope(t.Array(t.Any())) })
+
+  app.post("/setWebhook", async ({ body, query, store }: any) => {
+    const input = mergePostInput(body, query)
+    if (typeof input["allowed_updates"] === "string") input["allowed_updates"] = parseMaybeJsonValue(input["allowed_updates"])
+    return { ok: true, result: await botOperationHandlers.setWebhook(input as any, ctxFromStore(store)) }
+  }, { detail: jsonBodyDoc(TSetWebhookInput), response: TApiEnvelope(t.Literal(true)) })
+
+  app.post("/deleteWebhook", async ({ body, query, store }: any) => ({
+    ok: true,
+    result: await botOperationHandlers.deleteWebhook(mergePostInput(body, query) as any, ctxFromStore(store)),
+  }), { detail: jsonBodyDoc(TDeleteWebhookInput), response: TApiEnvelope(t.Literal(true)) })
+
+  app.get("/getWebhookInfo", async ({ store }: any) => ({
+    ok: true,
+    result: await botOperationHandlers.getWebhookInfo(ctxFromStore(store)),
+  }), { response: TApiEnvelope(t.Any()) })
+
   app.get(
     "/getMyCommands",
     async ({ store }: any) => {
@@ -869,51 +960,49 @@ const botMethods = (authPlugin: any): any => {
     },
   )
 
-  app.get(
-    "/getMyCapabilities",
-    async ({ store }: any) => ({
-      ok: true,
-      result: {
-        capabilities: (await BotCapabilitiesModel.getForBotUserId(store.currentUserId))
-          .filter((row) => row.kind === "chat_settings" && row.version === 1)
-          .map(() => ({ kind: "chat_settings" as const, version: 1 as const })),
-      },
-    }),
-    { response: TApiEnvelope(t.Object({ capabilities: t.Array(TBotCapability) })) },
-  )
+  app.post("/forwardMessage", async ({ body, query, store }: any) => ({
+    ok: true,
+    result: await botOperationHandlers.forwardMessage(mergePostInput(body, query) as any, ctxFromStore(store)),
+  }), { detail: jsonBodyDoc(TForwardMessageInput), response: TApiEnvelope(t.Object({ message: TBotMessage })) })
 
-  app.post(
-    "/setMyCapabilities",
-    async ({ body, query, store }: any) => {
-      const input = mergePostInput(body, query)
-      const raw = parseMaybeJsonValue(input["capabilities"])
-      if (!Array.isArray(raw) || raw.length > 100 || raw.some((item) =>
-        typeof item !== "object" || item === null || item.kind !== "chat_settings" || item.version !== 1
-      ) || new Set(raw.map((item) => item.kind)).size !== raw.length) {
-        throw new InlineError(InlineError.ApiError.BAD_REQUEST)
-      }
-      const capabilities = await BotCapabilitiesModel.replaceForBotUserId(store.currentUserId, raw)
-      return {
-        ok: true,
-        result: {
-          capabilities: capabilities.map(() => ({ kind: "chat_settings" as const, version: 1 as const })),
-        },
-      }
-    },
-    {
-      detail: jsonBodyDoc(TSetMyCapabilitiesInput),
-      response: TApiEnvelope(t.Object({ capabilities: t.Array(TBotCapability) })),
-    },
-  )
+  app.post("/pinMessage", async ({ body, query, store }: any) => ({
+    ok: true,
+    result: await botOperationHandlers.pinMessage(mergePostInput(body, query) as any, ctxFromStore(store)),
+  }), { detail: jsonBodyDoc(TPinMessageInput), response: TApiEnvelope(t.Object({})) })
 
-  app.post(
-    "/deleteMyCapabilities",
-    async ({ store }: any) => {
-      await BotCapabilitiesModel.replaceForBotUserId(store.currentUserId, [])
-      return { ok: true, result: {} }
-    },
-    { response: TApiEnvelope(t.Object({})) },
-  )
+  app.post("/unpinMessage", async ({ body, query, store }: any) => ({
+    ok: true,
+    result: await botOperationHandlers.unpinMessage(mergePostInput(body, query) as any, ctxFromStore(store)),
+  }), { detail: jsonBodyDoc(TPinMessageInput), response: TApiEnvelope(t.Object({})) })
+
+  app.get("/getChatParticipant", async ({ query, store }: any) => ({
+    ok: true,
+    result: await botOperationHandlers.getChatParticipant(query as any, ctxFromStore(store)),
+  }), { query: TGetChatParticipantInput, response: TApiEnvelope(t.Object({ participant: TBotChatParticipant })) })
+
+  app.get("/getChatParticipantCount", async ({ query, store }: any) => ({
+    ok: true,
+    result: await botOperationHandlers.getChatParticipantCount(query as any, ctxFromStore(store)),
+  }), { query: TGetChatParticipantCountInput, response: TApiEnvelope(t.Object({ count: t.Number() })) })
+
+  app.post("/setThreadTitle", async ({ body, query, store }: any) => ({
+    ok: true,
+    result: await botOperationHandlers.setThreadTitle(mergePostInput(body, query) as any, ctxFromStore(store)),
+  }), { detail: jsonBodyDoc(TSetThreadTitleInput), response: TApiEnvelope(t.Object({})) })
+
+  app.post("/uploadFile", async ({ body, store }: any) => ({
+    ok: true,
+    result: await botOperationHandlers.uploadFile({
+      ...body,
+      isAnimated: body.is_animated,
+      hasAudio: body.has_audio,
+      waveform: body.waveform_base64,
+    }, ctxFromStore(store)),
+  }), {
+    type: "multipart/form-data",
+    body: TBotUploadFileInput,
+    response: TApiEnvelope(t.Object({ file: TBotFile })),
+  })
 
   // Unknown methods should respond with a structured error envelope.
   // Note: bot docs live at `/bot-api-reference`, outside the `/bot/*` namespace, so this is safe.

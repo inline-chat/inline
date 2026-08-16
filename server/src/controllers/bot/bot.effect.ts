@@ -1,13 +1,32 @@
 import type {
+  CreateReplyThreadParams,
+  CreateThreadParams,
+  AnswerMessageActionParams,
+  DeleteReactionParams,
+  DeleteWebhookParams,
   DeleteMessageParams,
   EditMessageTextParams,
   GetChatHistoryParams,
+  GetChatParticipantCountParams,
+  GetChatParticipantParams,
   GetChatParams,
+  GetFileParams,
+  GetMessagesParams,
+  GetUpdatesParams,
+  ForwardMessageParams,
+  PinMessageParams,
   SendMessageParams,
   SendReactionParams,
-  SetMyCapabilitiesParams,
+  SendChatActionParams,
+  SearchMessagesParams,
   SetMyCommandsParams,
+  SetThreadTitleParams,
+  SetWebhookParams,
+  UnpinMessageParams,
 } from "@inline-chat/bot-api-types"
+import type { UploadFileOperationInput } from "@in/server/methods/uploadFileOperation"
+import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
+import * as BunPath from "@effect/platform-bun/BunPath"
 import {
   Cause,
   Data,
@@ -59,27 +78,53 @@ import {
 } from "./operations.effect"
 import {
   BotEmptySuccess,
+  BotUploadFilePayload,
   BotEmptyRuntimeSuccess,
   BotGetChatHistorySuccess,
   BotGetChatHistoryRuntimeSuccess,
   BotGetChatSuccess,
+  BotCreateThreadSuccess,
   BotGetMyCommandsSuccess,
-  BotGetMyCapabilitiesSuccess,
+  BotGetChatParticipantSuccess,
+  BotGetChatParticipantCountSuccess,
+  BotGetFileSuccess,
+  BotGetUpdatesSuccess,
+  BotWebhookInfoSuccess,
+  BotTrueSuccess,
   BotMessageSuccess,
   BotMessageRuntimeSuccess,
+  BotMessagesRuntimeSuccess,
+  BotMessagesSuccess,
+  CreateReplyThreadInput,
+  CreateThreadInput,
+  AnswerMessageActionInput,
+  DeleteReactionInput,
+  DeleteWebhookInput,
   DeleteMessageInput,
   EditMessageTextInput,
   GetChatHistoryInput,
   GetChatInput,
+  GetFileInput,
+  GetMessagesInput,
+  GetUpdatesInput,
+  SearchMessagesInput,
   SendMessageInput,
   SendReactionInput,
+  SendChatActionInput,
+  SetWebhookInput,
   SetMyCommandsInput,
-  SetMyCapabilitiesInput,
+  ForwardMessageInput,
+  PinMessageInput,
+  GetChatParticipantInput,
+  GetChatParticipantCountInput,
+  SetThreadTitleInput,
   botTargetFieldDescriptions,
   botApiErrorAt,
   botApiErrors,
   getChatHistoryFieldDescriptions,
 } from "./types.effect"
+import { UploadFileInput as UploadFileRequestInput } from "../v1UploadSchemas.effect"
+import { parseV1UploadRequest } from "../v1UploadRequest.effect"
 import {
   BotGetMeSuccess,
 } from "../../core/schema/bot"
@@ -131,7 +176,8 @@ const botOperationParameters = (options: {
           parameter.in === "query"
         ) {
           parameter.description ??=
-            options.queryDescriptions?.[parameter.name]
+            options.queryDescriptions?.[parameter.name] ??
+            "Bot method parameter."
         }
         if (
           options.authorizationHeader ===
@@ -174,6 +220,22 @@ const BotMethodDocumentation = {
     description:
       "Returns a page of messages from a private conversation or chat. Supply exactly one of user_id or chat_id, and use offset_message_id to request older messages.",
   },
+  getMessages: {
+    summary: "Get exact messages",
+    description: "Returns up to 100 requested messages from one accessible chat, in request order.",
+  },
+  searchMessages: {
+    summary: "Search one chat",
+    description: "Searches messages within exactly one accessible chat, newest first.",
+  },
+  createThread: {
+    summary: "Create a thread",
+    description: "Creates a normal home or space thread using Inline's existing access rules.",
+  },
+  createReplyThread: {
+    summary: "Create a reply thread",
+    description: "Creates or returns the reply thread anchored to one message.",
+  },
   editMessageText: {
     summary: "Edit message text",
     description:
@@ -189,6 +251,14 @@ const BotMethodDocumentation = {
     description:
       "Adds the bot's emoji reaction to a message. Returns an empty result when the reaction is applied.",
   },
+  deleteReaction: { summary: "Delete a reaction", description: "Removes the bot's emoji reaction from one message." },
+  answerMessageAction: { summary: "Answer a message action", description: "Acknowledges an action interaction and optionally shows a short toast." },
+  sendChatAction: { summary: "Send a chat action", description: "Publishes a short-lived typing or upload indicator." },
+  getFile: { summary: "Get a file", description: "Returns metadata and a short-lived download URL for a bot-owned file." },
+  getUpdates: { summary: "Get updates", description: "Long-polls the authenticated bot's durable ordered update stream." },
+  setWebhook: { summary: "Set webhook", description: "Enables or replaces webhook delivery for the same durable update stream." },
+  deleteWebhook: { summary: "Delete webhook", description: "Disables webhook delivery while preserving pending updates unless explicitly dropped." },
+  getWebhookInfo: { summary: "Get webhook info", description: "Returns effective delivery settings and pending/error counters without exposing the secret." },
   getMyCommands: {
     summary: "Get bot commands",
     description:
@@ -204,18 +274,13 @@ const BotMethodDocumentation = {
     description:
       "Deletes every command published by the authenticated bot. Returns an empty result when the command list is cleared.",
   },
-  getMyCapabilities: {
-    summary: "Get bot capabilities",
-    description: "Returns the capabilities currently advertised by the authenticated bot.",
-  },
-  setMyCapabilities: {
-    summary: "Replace bot capabilities",
-    description: "Replaces the authenticated bot's complete capability list.",
-  },
-  deleteMyCapabilities: {
-    summary: "Delete bot capabilities",
-    description: "Clears every capability advertised by the authenticated bot.",
-  },
+  forwardMessage: { summary: "Forward a message", description: "Forwards one accessible message into another accessible chat." },
+  pinMessage: { summary: "Pin a message", description: "Pins one message in a chat." },
+  unpinMessage: { summary: "Unpin a message", description: "Unpins one message in a chat." },
+  getChatParticipant: { summary: "Get a chat participant", description: "Returns one participant of an accessible chat, with space membership when applicable." },
+  getChatParticipantCount: { summary: "Get chat participant count", description: "Returns the number of participants in an accessible chat." },
+  setThreadTitle: { summary: "Set thread title", description: "Changes the title of a thread. Direct-message chats are not threads and cannot be renamed." },
+  uploadFile: { summary: "Upload a file", description: "Uploads bot media using multipart/form-data and returns a reusable bot file." },
 } satisfies Readonly<
   Record<BotOperation, BotEndpointDocumentation>
 >
@@ -392,6 +457,30 @@ const HeaderBotEndpoints = {
       success: BotGetChatHistorySuccess,
     },
   ),
+  getMessages: headerPost(
+    "headerGetMessages",
+    "/bot/getMessages",
+    BotMethodDocumentation.getMessages,
+    { payload: GetMessagesInput, success: BotMessagesSuccess },
+  ),
+  searchMessages: headerPost(
+    "headerSearchMessages",
+    "/bot/searchMessages",
+    BotMethodDocumentation.searchMessages,
+    { payload: SearchMessagesInput, success: BotMessagesSuccess },
+  ),
+  createThread: headerPost(
+    "headerCreateThread",
+    "/bot/createThread",
+    BotMethodDocumentation.createThread,
+    { payload: CreateThreadInput, success: BotCreateThreadSuccess },
+  ),
+  createReplyThread: headerPost(
+    "headerCreateReplyThread",
+    "/bot/createReplyThread",
+    BotMethodDocumentation.createReplyThread,
+    { payload: CreateReplyThreadInput, success: BotCreateThreadSuccess },
+  ),
   editMessageText: headerPost(
     "headerEditMessageText",
     "/bot/editMessageText",
@@ -419,6 +508,14 @@ const HeaderBotEndpoints = {
       success: BotEmptySuccess,
     },
   ),
+  deleteReaction: headerPost("headerDeleteReaction", "/bot/deleteReaction", BotMethodDocumentation.deleteReaction, { payload: DeleteReactionInput, success: BotEmptySuccess }),
+  answerMessageAction: headerPost("headerAnswerMessageAction", "/bot/answerMessageAction", BotMethodDocumentation.answerMessageAction, { payload: AnswerMessageActionInput, success: BotEmptySuccess }),
+  sendChatAction: headerPost("headerSendChatAction", "/bot/sendChatAction", BotMethodDocumentation.sendChatAction, { payload: SendChatActionInput, success: BotEmptySuccess }),
+  getFile: headerGet("headerGetFile", "/bot/getFile", BotMethodDocumentation.getFile, { query: GetFileInput.fields, success: BotGetFileSuccess }),
+  getUpdates: headerGet("headerGetUpdates", "/bot/getUpdates", BotMethodDocumentation.getUpdates, { query: GetUpdatesInput.fields, success: BotGetUpdatesSuccess }),
+  setWebhook: headerPost("headerSetWebhook", "/bot/setWebhook", BotMethodDocumentation.setWebhook, { payload: SetWebhookInput, success: BotTrueSuccess }),
+  deleteWebhook: headerPost("headerDeleteWebhook", "/bot/deleteWebhook", BotMethodDocumentation.deleteWebhook, { payload: DeleteWebhookInput, success: BotTrueSuccess }),
+  getWebhookInfo: headerGet("headerGetWebhookInfo", "/bot/getWebhookInfo", BotMethodDocumentation.getWebhookInfo, { query: {}, success: BotWebhookInfoSuccess }),
   getMyCommands: headerGet(
     "headerGetMyCommands",
     "/bot/getMyCommands",
@@ -443,24 +540,13 @@ const HeaderBotEndpoints = {
     BotMethodDocumentation.deleteMyCommands,
     { success: BotEmptySuccess },
   ),
-  getMyCapabilities: headerGet(
-    "headerGetMyCapabilities",
-    "/bot/getMyCapabilities",
-    BotMethodDocumentation.getMyCapabilities,
-    { query: {}, success: BotGetMyCapabilitiesSuccess },
-  ),
-  setMyCapabilities: headerPost(
-    "headerSetMyCapabilities",
-    "/bot/setMyCapabilities",
-    BotMethodDocumentation.setMyCapabilities,
-    { payload: SetMyCapabilitiesInput, success: BotGetMyCapabilitiesSuccess },
-  ),
-  deleteMyCapabilities: headerPost(
-    "headerDeleteMyCapabilities",
-    "/bot/deleteMyCapabilities",
-    BotMethodDocumentation.deleteMyCapabilities,
-    { success: BotEmptySuccess },
-  ),
+  forwardMessage: headerPost("headerForwardMessage", "/bot/forwardMessage", BotMethodDocumentation.forwardMessage, { payload: ForwardMessageInput, success: BotMessageSuccess }),
+  pinMessage: headerPost("headerPinMessage", "/bot/pinMessage", BotMethodDocumentation.pinMessage, { payload: PinMessageInput, success: BotEmptySuccess }),
+  unpinMessage: headerPost("headerUnpinMessage", "/bot/unpinMessage", BotMethodDocumentation.unpinMessage, { payload: PinMessageInput, success: BotEmptySuccess }),
+  getChatParticipant: headerGet("headerGetChatParticipant", "/bot/getChatParticipant", BotMethodDocumentation.getChatParticipant, { query: GetChatParticipantInput.fields, success: BotGetChatParticipantSuccess }),
+  getChatParticipantCount: headerGet("headerGetChatParticipantCount", "/bot/getChatParticipantCount", BotMethodDocumentation.getChatParticipantCount, { query: GetChatParticipantCountInput.fields, success: BotGetChatParticipantCountSuccess }),
+  setThreadTitle: headerPost("headerSetThreadTitle", "/bot/setThreadTitle", BotMethodDocumentation.setThreadTitle, { payload: SetThreadTitleInput, success: BotEmptySuccess }),
+  uploadFile: headerPost("headerUploadFile", "/bot/uploadFile", BotMethodDocumentation.uploadFile, { payload: BotUploadFilePayload, success: BotGetFileSuccess }),
 } as const
 
 const PathBotEndpoints = {
@@ -503,6 +589,30 @@ const PathBotEndpoints = {
       success: BotGetChatHistorySuccess,
     },
   ),
+  getMessages: pathPost(
+    "pathGetMessages",
+    "/bot:token/getMessages",
+    BotMethodDocumentation.getMessages,
+    { payload: GetMessagesInput, success: BotMessagesSuccess },
+  ),
+  searchMessages: pathPost(
+    "pathSearchMessages",
+    "/bot:token/searchMessages",
+    BotMethodDocumentation.searchMessages,
+    { payload: SearchMessagesInput, success: BotMessagesSuccess },
+  ),
+  createThread: pathPost(
+    "pathCreateThread",
+    "/bot:token/createThread",
+    BotMethodDocumentation.createThread,
+    { payload: CreateThreadInput, success: BotCreateThreadSuccess },
+  ),
+  createReplyThread: pathPost(
+    "pathCreateReplyThread",
+    "/bot:token/createReplyThread",
+    BotMethodDocumentation.createReplyThread,
+    { payload: CreateReplyThreadInput, success: BotCreateThreadSuccess },
+  ),
   editMessageText: pathPost(
     "pathEditMessageText",
     "/bot:token/editMessageText",
@@ -530,6 +640,14 @@ const PathBotEndpoints = {
       success: BotEmptySuccess,
     },
   ),
+  deleteReaction: pathPost("pathDeleteReaction", "/bot:token/deleteReaction", BotMethodDocumentation.deleteReaction, { payload: DeleteReactionInput, success: BotEmptySuccess }),
+  answerMessageAction: pathPost("pathAnswerMessageAction", "/bot:token/answerMessageAction", BotMethodDocumentation.answerMessageAction, { payload: AnswerMessageActionInput, success: BotEmptySuccess }),
+  sendChatAction: pathPost("pathSendChatAction", "/bot:token/sendChatAction", BotMethodDocumentation.sendChatAction, { payload: SendChatActionInput, success: BotEmptySuccess }),
+  getFile: pathGet("pathGetFile", "/bot:token/getFile", BotMethodDocumentation.getFile, { query: GetFileInput.fields, success: BotGetFileSuccess }),
+  getUpdates: pathGet("pathGetUpdates", "/bot:token/getUpdates", BotMethodDocumentation.getUpdates, { query: GetUpdatesInput.fields, success: BotGetUpdatesSuccess }),
+  setWebhook: pathPost("pathSetWebhook", "/bot:token/setWebhook", BotMethodDocumentation.setWebhook, { payload: SetWebhookInput, success: BotTrueSuccess }),
+  deleteWebhook: pathPost("pathDeleteWebhook", "/bot:token/deleteWebhook", BotMethodDocumentation.deleteWebhook, { payload: DeleteWebhookInput, success: BotTrueSuccess }),
+  getWebhookInfo: pathGet("pathGetWebhookInfo", "/bot:token/getWebhookInfo", BotMethodDocumentation.getWebhookInfo, { query: {}, success: BotWebhookInfoSuccess }),
   getMyCommands: pathGet(
     "pathGetMyCommands",
     "/bot:token/getMyCommands",
@@ -554,24 +672,13 @@ const PathBotEndpoints = {
     BotMethodDocumentation.deleteMyCommands,
     { success: BotEmptySuccess },
   ),
-  getMyCapabilities: pathGet(
-    "pathGetMyCapabilities",
-    "/bot:token/getMyCapabilities",
-    BotMethodDocumentation.getMyCapabilities,
-    { query: {}, success: BotGetMyCapabilitiesSuccess },
-  ),
-  setMyCapabilities: pathPost(
-    "pathSetMyCapabilities",
-    "/bot:token/setMyCapabilities",
-    BotMethodDocumentation.setMyCapabilities,
-    { payload: SetMyCapabilitiesInput, success: BotGetMyCapabilitiesSuccess },
-  ),
-  deleteMyCapabilities: pathPost(
-    "pathDeleteMyCapabilities",
-    "/bot:token/deleteMyCapabilities",
-    BotMethodDocumentation.deleteMyCapabilities,
-    { success: BotEmptySuccess },
-  ),
+  forwardMessage: pathPost("pathForwardMessage", "/bot:token/forwardMessage", BotMethodDocumentation.forwardMessage, { payload: ForwardMessageInput, success: BotMessageSuccess }),
+  pinMessage: pathPost("pathPinMessage", "/bot:token/pinMessage", BotMethodDocumentation.pinMessage, { payload: PinMessageInput, success: BotEmptySuccess }),
+  unpinMessage: pathPost("pathUnpinMessage", "/bot:token/unpinMessage", BotMethodDocumentation.unpinMessage, { payload: PinMessageInput, success: BotEmptySuccess }),
+  getChatParticipant: pathGet("pathGetChatParticipant", "/bot:token/getChatParticipant", BotMethodDocumentation.getChatParticipant, { query: GetChatParticipantInput.fields, success: BotGetChatParticipantSuccess }),
+  getChatParticipantCount: pathGet("pathGetChatParticipantCount", "/bot:token/getChatParticipantCount", BotMethodDocumentation.getChatParticipantCount, { query: GetChatParticipantCountInput.fields, success: BotGetChatParticipantCountSuccess }),
+  setThreadTitle: pathPost("pathSetThreadTitle", "/bot:token/setThreadTitle", BotMethodDocumentation.setThreadTitle, { payload: SetThreadTitleInput, success: BotEmptySuccess }),
+  uploadFile: pathPost("pathUploadFile", "/bot:token/uploadFile", BotMethodDocumentation.uploadFile, { payload: BotUploadFilePayload, success: BotGetFileSuccess }),
 } as const
 
 const BotMethodNotFound =
@@ -739,28 +846,60 @@ export const BotApiGroup = HttpApiGroup.make("bot")
     HeaderBotEndpoints.sendMessage,
     HeaderBotEndpoints.getChat,
     HeaderBotEndpoints.getChatHistory,
+    HeaderBotEndpoints.getMessages,
+    HeaderBotEndpoints.searchMessages,
+    HeaderBotEndpoints.createThread,
+    HeaderBotEndpoints.createReplyThread,
     HeaderBotEndpoints.editMessageText,
     HeaderBotEndpoints.deleteMessage,
     HeaderBotEndpoints.sendReaction,
+    HeaderBotEndpoints.deleteReaction,
+    HeaderBotEndpoints.answerMessageAction,
+    HeaderBotEndpoints.sendChatAction,
+    HeaderBotEndpoints.getFile,
+    HeaderBotEndpoints.getUpdates,
+    HeaderBotEndpoints.setWebhook,
+    HeaderBotEndpoints.deleteWebhook,
+    HeaderBotEndpoints.getWebhookInfo,
     HeaderBotEndpoints.getMyCommands,
     HeaderBotEndpoints.setMyCommands,
     HeaderBotEndpoints.deleteMyCommands,
-    HeaderBotEndpoints.getMyCapabilities,
-    HeaderBotEndpoints.setMyCapabilities,
-    HeaderBotEndpoints.deleteMyCapabilities,
+    HeaderBotEndpoints.forwardMessage,
+    HeaderBotEndpoints.pinMessage,
+    HeaderBotEndpoints.unpinMessage,
+    HeaderBotEndpoints.getChatParticipant,
+    HeaderBotEndpoints.getChatParticipantCount,
+    HeaderBotEndpoints.setThreadTitle,
+    HeaderBotEndpoints.uploadFile,
     PathBotEndpoints.getMe,
     PathBotEndpoints.sendMessage,
     PathBotEndpoints.getChat,
     PathBotEndpoints.getChatHistory,
+    PathBotEndpoints.getMessages,
+    PathBotEndpoints.searchMessages,
+    PathBotEndpoints.createThread,
+    PathBotEndpoints.createReplyThread,
     PathBotEndpoints.editMessageText,
     PathBotEndpoints.deleteMessage,
     PathBotEndpoints.sendReaction,
+    PathBotEndpoints.deleteReaction,
+    PathBotEndpoints.answerMessageAction,
+    PathBotEndpoints.sendChatAction,
+    PathBotEndpoints.getFile,
+    PathBotEndpoints.getUpdates,
+    PathBotEndpoints.setWebhook,
+    PathBotEndpoints.deleteWebhook,
+    PathBotEndpoints.getWebhookInfo,
     PathBotEndpoints.getMyCommands,
     PathBotEndpoints.setMyCommands,
     PathBotEndpoints.deleteMyCommands,
-    PathBotEndpoints.getMyCapabilities,
-    PathBotEndpoints.setMyCapabilities,
-    PathBotEndpoints.deleteMyCapabilities,
+    PathBotEndpoints.forwardMessage,
+    PathBotEndpoints.pinMessage,
+    PathBotEndpoints.unpinMessage,
+    PathBotEndpoints.getChatParticipant,
+    PathBotEndpoints.getChatParticipantCount,
+    PathBotEndpoints.setThreadTitle,
+    PathBotEndpoints.uploadFile,
     HeaderFallbackEndpoints.get,
     HeaderFallbackEndpoints.post,
     HeaderFallbackEndpoints.put,
@@ -986,14 +1125,19 @@ const normalizeInputForSchema = (
   // Bot clients use canonical numeric IDs and compatibility telemetry is quiet.
   const usesQueryIdCodecs =
     operation === "getChat" ||
-    operation === "getChatHistory"
+    operation === "getChatHistory" ||
+    operation === "getUpdates" ||
+    operation === "getChatParticipant" ||
+    operation === "getChatParticipantCount"
   const normalized = usesQueryIdCodecs
     ? { ...input }
     : normalizeIntegerFields(input, [
         "user_id",
         "chat_id",
+        "from_chat_id",
         "message_id",
         "reply_to_message_id",
+        "interaction_id",
       ])
   if (
     operation === "sendMessage" ||
@@ -1015,6 +1159,35 @@ const normalizeInputForSchema = (
         booleanForValidation(parseMarkdown)
     }
   }
+  if (operation === "getMessages") {
+    const ids = parseCompatibilityJson(normalized["message_ids"])
+    normalized["message_ids"] = Array.isArray(ids)
+      ? ids.map(integerForValidation)
+      : ids
+  }
+  if (operation === "searchMessages") {
+    if ("offset_message_id" in normalized) {
+      normalized["offset_message_id"] = integerForValidation(
+        normalized["offset_message_id"],
+      )
+    }
+  }
+  if (operation === "createThread" || operation === "createReplyThread") {
+    if ("participant_ids" in normalized) {
+      const ids = parseCompatibilityJson(normalized["participant_ids"])
+      normalized["participant_ids"] = Array.isArray(ids)
+        ? ids.map(integerForValidation)
+        : ids
+    }
+    if (operation === "createThread") {
+      if ("space_id" in normalized) {
+        normalized["space_id"] = integerForValidation(normalized["space_id"])
+      }
+      if ("is_public" in normalized) {
+        normalized["is_public"] = booleanForValidation(normalized["is_public"])
+      }
+    }
+  }
   if (operation === "setMyCommands") {
     const commands = parseCompatibilityJson(
       normalized["commands"],
@@ -1023,8 +1196,26 @@ const normalizeInputForSchema = (
       ? commands.map(normalizeBotCommandForSchema)
       : commands
   }
-  if (operation === "setMyCapabilities") {
-    normalized["capabilities"] = parseCompatibilityJson(normalized["capabilities"])
+  if (operation === "getUpdates" || operation === "setWebhook") {
+    if ("allowed_updates" in normalized) {
+      normalized["allowed_updates"] = parseCompatibilityJson(normalized["allowed_updates"])
+    }
+  }
+  if (operation === "uploadFile") {
+    if (normalized["is_animated"] !== undefined) {
+      normalized["isAnimated"] = normalized["is_animated"]
+    }
+    if (normalized["has_audio"] !== undefined) {
+      normalized["hasAudio"] = normalized["has_audio"]
+    }
+    if (normalized["waveform_base64"] !== undefined) {
+      normalized["waveform"] = normalized["waveform_base64"]
+    }
+  }
+  if (operation === "setWebhook" || operation === "deleteWebhook") {
+    if ("drop_pending_updates" in normalized) {
+      normalized["drop_pending_updates"] = booleanForValidation(normalized["drop_pending_updates"])
+    }
   }
   return normalized
 }
@@ -1043,8 +1234,7 @@ const validateInput = (
       case "getMe":
       case "getMyCommands":
       case "deleteMyCommands":
-      case "getMyCapabilities":
-      case "deleteMyCapabilities":
+      case "getWebhookInfo":
         return Effect.succeed(value)
       case "sendMessage":
         return Schema.decodeUnknownEffect(SendMessageInput)(value)
@@ -1054,6 +1244,14 @@ const validateInput = (
         return Schema.decodeUnknownEffect(
           GetChatHistoryInput,
         )(value)
+      case "getMessages":
+        return Schema.decodeUnknownEffect(GetMessagesInput)(value)
+      case "searchMessages":
+        return Schema.decodeUnknownEffect(SearchMessagesInput)(value)
+      case "createThread":
+        return Schema.decodeUnknownEffect(CreateThreadInput)(value)
+      case "createReplyThread":
+        return Schema.decodeUnknownEffect(CreateReplyThreadInput)(value)
       case "editMessageText":
         return Schema.decodeUnknownEffect(
           EditMessageTextInput,
@@ -1066,12 +1264,24 @@ const validateInput = (
         return Schema.decodeUnknownEffect(
           SendReactionInput,
         )(value)
+      case "deleteReaction": return Schema.decodeUnknownEffect(DeleteReactionInput)(value)
+      case "answerMessageAction": return Schema.decodeUnknownEffect(AnswerMessageActionInput)(value)
+      case "sendChatAction": return Schema.decodeUnknownEffect(SendChatActionInput)(value)
+      case "getFile": return Schema.decodeUnknownEffect(GetFileInput)(value)
+      case "getUpdates": return Schema.decodeUnknownEffect(GetUpdatesInput)(value)
+      case "setWebhook": return Schema.decodeUnknownEffect(SetWebhookInput)(value)
+      case "deleteWebhook": return Schema.decodeUnknownEffect(DeleteWebhookInput)(value)
       case "setMyCommands":
         return Schema.decodeUnknownEffect(
           SetMyCommandsInput,
         )(value)
-      case "setMyCapabilities":
-        return Schema.decodeUnknownEffect(SetMyCapabilitiesInput)(value)
+      case "forwardMessage": return Schema.decodeUnknownEffect(ForwardMessageInput)(value)
+      case "pinMessage":
+      case "unpinMessage": return Schema.decodeUnknownEffect(PinMessageInput)(value)
+      case "getChatParticipant": return Schema.decodeUnknownEffect(GetChatParticipantInput)(value)
+      case "getChatParticipantCount": return Schema.decodeUnknownEffect(GetChatParticipantCountInput)(value)
+      case "setThreadTitle": return Schema.decodeUnknownEffect(SetThreadTitleInput)(value)
+      case "uploadFile": return Schema.decodeUnknownEffect(UploadFileRequestInput)(value)
     }
   }
 
@@ -1097,8 +1307,7 @@ const prepareInput = (
     operation === "getMe" ||
     operation === "getMyCommands" ||
     operation === "deleteMyCommands"
-    || operation === "getMyCapabilities"
-    || operation === "deleteMyCapabilities"
+    || operation === "getWebhookInfo"
   ) {
     return Effect.succeed({})
   }
@@ -1148,6 +1357,14 @@ const runOperation = (
           input as GetChatHistoryParams,
           context,
         )
+      case "getMessages":
+        return operations.getMessages(input as GetMessagesParams, context)
+      case "searchMessages":
+        return operations.searchMessages(input as SearchMessagesParams, context)
+      case "createThread":
+        return operations.createThread(input as CreateThreadParams, context)
+      case "createReplyThread":
+        return operations.createReplyThread(input as CreateReplyThreadParams, context)
       case "editMessageText":
         return operations.editMessageText(
           input as EditMessageTextParams,
@@ -1163,6 +1380,14 @@ const runOperation = (
           input as SendReactionParams,
           context,
         )
+      case "deleteReaction": return operations.deleteReaction(input as DeleteReactionParams, context)
+      case "answerMessageAction": return operations.answerMessageAction(input as AnswerMessageActionParams, context)
+      case "sendChatAction": return operations.sendChatAction(input as SendChatActionParams, context)
+      case "getFile": return operations.getFile(input as GetFileParams, context)
+      case "getUpdates": return operations.getUpdates(input as GetUpdatesParams, context)
+      case "setWebhook": return operations.setWebhook(input as SetWebhookParams, context)
+      case "deleteWebhook": return operations.deleteWebhook(input as DeleteWebhookParams, context)
+      case "getWebhookInfo": return operations.getWebhookInfo(context)
       case "getMyCommands":
         return operations.getMyCommands(context)
       case "setMyCommands":
@@ -1172,12 +1397,13 @@ const runOperation = (
         )
       case "deleteMyCommands":
         return operations.deleteMyCommands(context)
-      case "getMyCapabilities":
-        return operations.getMyCapabilities(context)
-      case "setMyCapabilities":
-        return operations.setMyCapabilities(input as SetMyCapabilitiesParams, context)
-      case "deleteMyCapabilities":
-        return operations.deleteMyCapabilities(context)
+      case "forwardMessage": return operations.forwardMessage(input as ForwardMessageParams, context)
+      case "pinMessage": return operations.pinMessage(input as PinMessageParams, context)
+      case "unpinMessage": return operations.unpinMessage(input as UnpinMessageParams, context)
+      case "getChatParticipant": return operations.getChatParticipant(input as GetChatParticipantParams, context)
+      case "getChatParticipantCount": return operations.getChatParticipantCount(input as GetChatParticipantCountParams, context)
+      case "setThreadTitle": return operations.setThreadTitle(input as SetThreadTitleParams, context)
+      case "uploadFile": return operations.uploadFile(input as unknown as UploadFileOperationInput, context)
     }
   })
 
@@ -1197,6 +1423,7 @@ const validateSuccessEnvelope = (
         )(envelope)
       case "sendMessage":
       case "editMessageText":
+      case "forwardMessage":
         return Schema.decodeUnknownEffect(
           BotMessageRuntimeSuccess,
         )(envelope)
@@ -1208,18 +1435,34 @@ const validateSuccessEnvelope = (
         return Schema.decodeUnknownEffect(
           BotGetChatHistoryRuntimeSuccess,
         )(envelope)
+      case "getMessages":
+      case "searchMessages":
+        return Schema.decodeUnknownEffect(BotMessagesRuntimeSuccess)(envelope)
+      case "createThread":
+      case "createReplyThread":
+        return Schema.decodeUnknownEffect(BotCreateThreadSuccess)(envelope)
+      case "getFile":
+      case "uploadFile": return Schema.decodeUnknownEffect(BotGetFileSuccess)(envelope)
+      case "getUpdates": return Schema.decodeUnknownEffect(BotGetUpdatesSuccess)(envelope)
+      case "setWebhook":
+      case "deleteWebhook": return Schema.decodeUnknownEffect(BotTrueSuccess)(envelope)
+      case "getWebhookInfo": return Schema.decodeUnknownEffect(BotWebhookInfoSuccess)(envelope)
       case "getMyCommands":
         return Schema.decodeUnknownEffect(
           BotGetMyCommandsSuccess,
         )(envelope)
-      case "getMyCapabilities":
-      case "setMyCapabilities":
-        return Schema.decodeUnknownEffect(BotGetMyCapabilitiesSuccess)(envelope)
+      case "getChatParticipant": return Schema.decodeUnknownEffect(BotGetChatParticipantSuccess)(envelope)
+      case "getChatParticipantCount": return Schema.decodeUnknownEffect(BotGetChatParticipantCountSuccess)(envelope)
       case "deleteMessage":
       case "sendReaction":
+      case "deleteReaction":
+      case "answerMessageAction":
+      case "sendChatAction":
       case "setMyCommands":
       case "deleteMyCommands":
-      case "deleteMyCapabilities":
+      case "pinMessage":
+      case "unpinMessage":
+      case "setThreadTitle":
         return Schema.decodeUnknownEffect(
           BotEmptyRuntimeSuccess,
         )(envelope)
@@ -1272,14 +1515,17 @@ export const executeBotOperation = (
 ) =>
   Effect.gen(function* () {
     const webRequest = yield* HttpServerRequest.toWeb(request)
-    const input = yield* prepareInput(
-      operation,
-      webRequest,
-    )
-    const identity = yield* authenticateBotRequest(
-      webRequest,
-      pathToken,
-    )
+    const uploadIdentity = operation === "uploadFile"
+      ? yield* authenticateBotRequest(webRequest, pathToken)
+      : undefined
+    const input = operation === "uploadFile"
+      ? yield* parseV1UploadRequest(request).pipe(
+        Effect.mapError(() => new InvalidBotPayload({ reason: "parse" })),
+        Effect.provide(BunFileSystem.layer),
+        Effect.provide(BunPath.layer),
+      )
+      : yield* prepareInput(operation, webRequest)
+    const identity = uploadIdentity ?? (yield* authenticateBotRequest(webRequest, pathToken))
     const validatedInput = yield* validateInput(
       operation,
       input,
@@ -1537,6 +1783,14 @@ export const makeBotRouteGroup = () => {
                 undefined,
               ),
           )
+          .handleRaw("headerGetMessages", ({ request }) =>
+            execute("getMessages", request, undefined))
+          .handleRaw("headerSearchMessages", ({ request }) =>
+            execute("searchMessages", request, undefined))
+          .handleRaw("headerCreateThread", ({ request }) =>
+            execute("createThread", request, undefined))
+          .handleRaw("headerCreateReplyThread", ({ request }) =>
+            execute("createReplyThread", request, undefined))
           .handleRaw(
             "headerEditMessageText",
             ({ request }) =>
@@ -1564,6 +1818,14 @@ export const makeBotRouteGroup = () => {
                 undefined,
               ),
           )
+          .handleRaw("headerDeleteReaction", ({ request }) => execute("deleteReaction", request, undefined))
+          .handleRaw("headerAnswerMessageAction", ({ request }) => execute("answerMessageAction", request, undefined))
+          .handleRaw("headerSendChatAction", ({ request }) => execute("sendChatAction", request, undefined))
+          .handleRaw("headerGetFile", ({ request }) => execute("getFile", request, undefined))
+          .handleRaw("headerGetUpdates", ({ request }) => execute("getUpdates", request, undefined))
+          .handleRaw("headerSetWebhook", ({ request }) => execute("setWebhook", request, undefined))
+          .handleRaw("headerDeleteWebhook", ({ request }) => execute("deleteWebhook", request, undefined))
+          .handleRaw("headerGetWebhookInfo", ({ request }) => execute("getWebhookInfo", request, undefined))
           .handleRaw(
             "headerGetMyCommands",
             ({ request }) =>
@@ -1591,18 +1853,13 @@ export const makeBotRouteGroup = () => {
                 undefined,
               ),
           )
-          .handleRaw(
-            "headerGetMyCapabilities",
-            ({ request }) => execute("getMyCapabilities", request, undefined),
-          )
-          .handleRaw(
-            "headerSetMyCapabilities",
-            ({ request }) => execute("setMyCapabilities", request, undefined),
-          )
-          .handleRaw(
-            "headerDeleteMyCapabilities",
-            ({ request }) => execute("deleteMyCapabilities", request, undefined),
-          )
+          .handleRaw("headerForwardMessage", ({ request }) => execute("forwardMessage", request, undefined))
+          .handleRaw("headerPinMessage", ({ request }) => execute("pinMessage", request, undefined))
+          .handleRaw("headerUnpinMessage", ({ request }) => execute("unpinMessage", request, undefined))
+          .handleRaw("headerGetChatParticipant", ({ request }) => execute("getChatParticipant", request, undefined))
+          .handleRaw("headerGetChatParticipantCount", ({ request }) => execute("getChatParticipantCount", request, undefined))
+          .handleRaw("headerSetThreadTitle", ({ request }) => execute("setThreadTitle", request, undefined))
+          .handleRaw("headerUploadFile", ({ request }) => execute("uploadFile", request, undefined))
           .handleRaw(
             "pathGetMe",
             ({ params, request }) =>
@@ -1631,6 +1888,14 @@ export const makeBotRouteGroup = () => {
                 params.token,
               ),
           )
+          .handleRaw("pathGetMessages", ({ params, request }) =>
+            execute("getMessages", request, params.token))
+          .handleRaw("pathSearchMessages", ({ params, request }) =>
+            execute("searchMessages", request, params.token))
+          .handleRaw("pathCreateThread", ({ params, request }) =>
+            execute("createThread", request, params.token))
+          .handleRaw("pathCreateReplyThread", ({ params, request }) =>
+            execute("createReplyThread", request, params.token))
           .handleRaw(
             "pathEditMessageText",
             ({ params, request }) =>
@@ -1658,6 +1923,14 @@ export const makeBotRouteGroup = () => {
                 params.token,
               ),
           )
+          .handleRaw("pathDeleteReaction", ({ params, request }) => execute("deleteReaction", request, params.token))
+          .handleRaw("pathAnswerMessageAction", ({ params, request }) => execute("answerMessageAction", request, params.token))
+          .handleRaw("pathSendChatAction", ({ params, request }) => execute("sendChatAction", request, params.token))
+          .handleRaw("pathGetFile", ({ params, request }) => execute("getFile", request, params.token))
+          .handleRaw("pathGetUpdates", ({ params, request }) => execute("getUpdates", request, params.token))
+          .handleRaw("pathSetWebhook", ({ params, request }) => execute("setWebhook", request, params.token))
+          .handleRaw("pathDeleteWebhook", ({ params, request }) => execute("deleteWebhook", request, params.token))
+          .handleRaw("pathGetWebhookInfo", ({ params, request }) => execute("getWebhookInfo", request, params.token))
           .handleRaw(
             "pathGetMyCommands",
             ({ params, request }) =>
@@ -1685,18 +1958,13 @@ export const makeBotRouteGroup = () => {
                 params.token,
               ),
           )
-          .handleRaw(
-            "pathGetMyCapabilities",
-            ({ params, request }) => execute("getMyCapabilities", request, params.token),
-          )
-          .handleRaw(
-            "pathSetMyCapabilities",
-            ({ params, request }) => execute("setMyCapabilities", request, params.token),
-          )
-          .handleRaw(
-            "pathDeleteMyCapabilities",
-            ({ params, request }) => execute("deleteMyCapabilities", request, params.token),
-          )
+          .handleRaw("pathForwardMessage", ({ params, request }) => execute("forwardMessage", request, params.token))
+          .handleRaw("pathPinMessage", ({ params, request }) => execute("pinMessage", request, params.token))
+          .handleRaw("pathUnpinMessage", ({ params, request }) => execute("unpinMessage", request, params.token))
+          .handleRaw("pathGetChatParticipant", ({ params, request }) => execute("getChatParticipant", request, params.token))
+          .handleRaw("pathGetChatParticipantCount", ({ params, request }) => execute("getChatParticipantCount", request, params.token))
+          .handleRaw("pathSetThreadTitle", ({ params, request }) => execute("setThreadTitle", request, params.token))
+          .handleRaw("pathUploadFile", ({ params, request }) => execute("uploadFile", request, params.token))
           .handleRaw(
             "headerFallbackGet",
             ({ request }) =>

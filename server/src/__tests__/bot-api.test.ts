@@ -176,6 +176,37 @@ describe("Bot HTTP API", () => {
     expect(json.result.user.username).toBe("pathbot")
   })
 
+  it("persists one update stream across polling and webhook settings", async () => {
+    const { token } = await createBotSession("deliverybot")
+    const auth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
+
+    const updates = await app.handle(new Request(
+      "http://localhost/bot/getUpdates?timeout=0&allowed_updates=%5B%22message%22%2C%22bot_membership%22%5D",
+      { headers: auth },
+    ))
+    expect(updates.status).toBe(200)
+    expect(await updates.json()).toEqual({ ok: true, result: [] })
+
+    const set = await app.handle(new Request("http://localhost/bot/setWebhook", {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ url: "", message_trigger: "all" }),
+    }))
+    expect(await set.json()).toEqual({ ok: true, result: true })
+
+    const info = await app.handle(new Request("http://localhost/bot/getWebhookInfo", { headers: auth }))
+    expect(await info.json()).toMatchObject({
+      ok: true,
+      result: {
+        url: "",
+        pending_update_count: 0,
+        message_trigger: "all",
+        allowed_updates: ["message", "bot_membership"],
+        dropped_update_count: 0,
+      },
+    })
+  })
+
   it("supports URL-encoded token-in-path auth", async () => {
     const [bot] = await db
       .insert(users)
@@ -388,6 +419,71 @@ describe("Bot HTTP API", () => {
     expect(histJson.ok).toBe(true)
     expect(Array.isArray(histJson.result.messages)).toBe(true)
     expect(histJson.result.messages[0].message_id).toBe(messageId)
+
+    const exactRes = await app.handle(
+      new Request("http://localhost/bot/getMessages", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ chat_id: chatId, message_ids: [messageId] }),
+      }),
+    )
+    expect(exactRes.status).toBe(200)
+    const exactJson = await exactRes.json()
+    expect(exactJson.result.messages.map((message: any) => message.message_id)).toEqual([messageId])
+    expect(exactJson.result.messages[0].edit_date).toBeNumber()
+    expect(exactJson.result.messages[0].chat.type).toBe("direct")
+
+    const searchRes = await app.handle(
+      new Request("http://localhost/bot/searchMessages", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ chat_id: chatId, query: "edited" }),
+      }),
+    )
+    expect(searchRes.status).toBe(200)
+    const searchJson = await searchRes.json()
+    expect(searchJson.result.messages[0].message_id).toBe(messageId)
+
+    const replyThreadRes = await app.handle(
+      new Request("http://localhost/bot/createReplyThread", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ chat_id: chatId, message_id: messageId }),
+      }),
+    )
+    expect(replyThreadRes.status).toBe(200)
+    const replyThreadJson = await replyThreadRes.json()
+    expect(replyThreadJson.result.chat).toMatchObject({
+      type: "thread",
+      parent_chat_id: chatId,
+      parent_message_id: messageId,
+    })
+
+    const threadRes = await app.handle(
+      new Request("http://localhost/bot/createThread", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title: "Bot context thread",
+          participant_ids: [human!.id],
+        }),
+      }),
+    )
+    expect(threadRes.status).toBe(200)
+    const threadJson = await threadRes.json()
+    expect(threadJson.result.chat.type).toBe("thread")
 
     // Delete the message (chat_id target)
     const delRes = await app.handle(

@@ -22,6 +22,7 @@ type Input = {
 
 type Output = {
   updates: Update[]
+  messageIds: number[]
 }
 
 const normalizeForwardPeer = (peer: InputPeer, currentUserId: number): InputPeer => {
@@ -124,6 +125,7 @@ export const forwardMessages = async (input: Input, context: FunctionContext): P
 
   const normalizedFromPeer = normalizeForwardPeer(input.fromPeerId, currentUserId)
   const updates: Update[] = []
+  const messageIds: number[] = []
 
   log.debug("forwardMessages start", {
     fromPeerId: input.fromPeerId.type.oneofKind,
@@ -236,9 +238,16 @@ export const forwardMessages = async (input: Input, context: FunctionContext): P
     )
 
     updates.push(...result.updates)
+    const sentMessageId = result.updates.find(
+      (candidate) => candidate.update.oneofKind === "updateMessageId",
+    )?.update
+    if (sentMessageId?.oneofKind !== "updateMessageId") {
+      throw RealtimeRpcError.InternalError()
+    }
+    messageIds.push(Number(sentMessageId.updateMessageId.messageId))
   }
 
   log.debug("forwardMessages complete", { updateCount: updates.length, currentUserId })
 
-  return { updates }
+  return { updates, messageIds }
 }

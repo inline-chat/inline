@@ -1,13 +1,18 @@
 import type {
+  BotAttachment as NeutralBotAttachment,
   BotChat as NeutralBotChat,
-  BotCapability as NeutralBotCapability,
   BotCommand as NeutralBotCommand,
+  BotFile as NeutralBotFile,
+  BotMedia as NeutralBotMedia,
   BotMessage as NeutralBotMessage,
+  BotMessageAction as NeutralBotMessageAction,
   BotMessageEntityOutput as NeutralBotMessageEntityOutput,
   BotMessageLite as NeutralBotMessageLite,
+  BotMessageReaction as NeutralBotMessageReaction,
   BotPeer as NeutralBotPeer,
 } from "@inline-chat/bot-api-types"
 import { Schema } from "effect"
+import { Multipart } from "effect/unstable/http"
 import { HttpApiSchema } from "effect/unstable/httpapi"
 import {
   BotApiError,
@@ -25,6 +30,7 @@ import {
 } from "../../core/schema/identifiers"
 import {
   WireNonNegativeInteger,
+  WirePositiveInteger,
   WireSafeInteger,
   WireSafeIntegerFromString,
 } from "../../core/schema/scalars"
@@ -235,12 +241,12 @@ export const BotCommand = Schema.Struct({
   description: "A command advertised by the bot.",
 })
 
-export const BotCapability = Schema.Struct({
-  kind: Schema.Literal("chat_settings"),
-  version: Schema.Literal(1),
-}).annotate({
-  identifier: "BotCapability",
-  description: "A versioned capability advertised by the bot.",
+export const BotChatType = Schema.Literals([
+  "direct",
+  "thread",
+]).annotate({
+  identifier: "BotChatType",
+  description: "Public conversation kind.",
 })
 
 export const BotChatLastMessage = Schema.Struct({
@@ -276,6 +282,9 @@ export const BotChat = Schema.Struct({
   chat_id: ChatId.annotateKey({
     description: "Unique identifier for this chat.",
   }),
+  type: Schema.optionalKey(BotChatType).annotateKey({
+    description: "Conversation kind. Required in update payloads.",
+  }),
   title: OptionalString.annotateKey({
     description: "Display title of the chat.",
   }),
@@ -286,6 +295,19 @@ export const BotChat = Schema.Struct({
     Schema.Boolean,
   ).annotateKey({
     description: "Whether the chat is public.",
+  }),
+  parent_chat_id: OptionalChatId.annotateKey({
+    description: "Structural parent for a nested or reply thread.",
+  }),
+  parent_message_id: OptionalMessageId.annotateKey({
+    description: "Parent message anchoring this reply thread.",
+  }),
+  participants: Schema.optionalKey(
+    Schema.Struct({
+      count: WireNonNegativeInteger,
+    }),
+  ).annotateKey({
+    description: "Safe aggregate participant information.",
   }),
   last_message_id: OptionalMessageId.annotateKey({
     description:
@@ -303,7 +325,111 @@ export const BotChat = Schema.Struct({
 }).annotate({
   identifier: "BotChat",
   description:
-    "Information about an Inline private conversation, group, or thread.",
+    "Information about an Inline direct conversation or thread.",
+})
+
+export const BotEventChat = Schema.Struct({
+  ...BotChat.fields,
+  type: BotChatType,
+}).annotate({
+  identifier: "BotEventChat",
+  description: "Chat snapshot embedded in a bot update.",
+})
+
+export const BotFile = Schema.Struct({
+  file_id: Schema.String,
+  file_name: OptionalString,
+  mime_type: OptionalString,
+  file_size: Schema.optionalKey(WireNonNegativeInteger),
+  width: Schema.optionalKey(WireNonNegativeInteger),
+  height: Schema.optionalKey(WireNonNegativeInteger),
+  duration: Schema.optionalKey(WireNonNegativeInteger),
+  download_url: OptionalString,
+  download_url_expires_at: Schema.optionalKey(WireNonNegativeInteger),
+}).annotate({
+  identifier: "BotFile",
+  description: "Reusable file metadata. File identifiers and URLs are opaque.",
+})
+
+export const BotMedia = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("photo"), file: BotFile }),
+  Schema.Struct({
+    type: Schema.Literal("video"),
+    file: BotFile,
+    thumbnail: Schema.optionalKey(BotFile),
+    is_animated: Schema.optionalKey(Schema.Boolean),
+    has_audio: Schema.optionalKey(Schema.Boolean),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("document"),
+    file: BotFile,
+    thumbnail: Schema.optionalKey(BotFile),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("voice"),
+    file: BotFile,
+    waveform_base64: OptionalString,
+  }),
+  Schema.Struct({ type: Schema.Literal("nudge") }),
+]).annotate({
+  identifier: "BotMedia",
+  description: "One media item attached to a message.",
+})
+
+export const BotMessageAction = Schema.Union([
+  Schema.Struct({
+    action_id: Schema.String,
+    text: Schema.String,
+    type: Schema.Literal("callback"),
+    callback_data: Schema.String,
+    callback_data_base64: Schema.optionalKey(Schema.Never),
+  }),
+  Schema.Struct({
+    action_id: Schema.String,
+    text: Schema.String,
+    type: Schema.Literal("callback"),
+    callback_data: Schema.optionalKey(Schema.Never),
+    callback_data_base64: Schema.String,
+  }),
+  Schema.Struct({
+    action_id: Schema.String,
+    text: Schema.String,
+    type: Schema.Literal("callback"),
+    callback_data: Schema.optionalKey(Schema.Never),
+    callback_data_base64: Schema.optionalKey(Schema.Never),
+  }),
+  Schema.Struct({
+    action_id: Schema.String,
+    text: Schema.String,
+    type: Schema.Literal("copy_text"),
+    copy_text: Schema.String,
+    callback_data: Schema.optionalKey(Schema.Never),
+    callback_data_base64: Schema.optionalKey(Schema.Never),
+  }),
+]).annotate({
+  identifier: "BotMessageAction",
+  description: "Interactive message action.",
+})
+
+export const BotReaction = Schema.Struct({
+  emoji: Schema.String,
+}).annotate({ identifier: "BotReaction" })
+
+export const BotMessageReaction = Schema.Struct({
+  ...BotReaction.fields,
+  count: WireNonNegativeInteger,
+  chosen: Schema.Boolean,
+}).annotate({ identifier: "BotMessageReaction" })
+
+export const BotAttachment = Schema.Struct({
+  type: Schema.Literal("url_preview"),
+  url: Schema.String,
+  title: OptionalString,
+  description: OptionalString,
+  image: Schema.optionalKey(BotFile),
+}).annotate({
+  identifier: "BotAttachment",
+  description: "Structured attachment shown with a message.",
 })
 
 export const BotMessageLite = Schema.Struct({
@@ -330,6 +456,9 @@ export const BotMessageLite = Schema.Struct({
     description:
       "Time the message was sent, as Unix time in seconds.",
   }),
+  edit_date: Schema.optionalKey(WireNonNegativeInteger).annotateKey({
+    description: "Time of the latest edit, as Unix time in seconds.",
+  }),
   text: OptionalString.annotateKey({
     description: "Text of the message, when present.",
   }),
@@ -338,6 +467,26 @@ export const BotMessageLite = Schema.Struct({
   ).annotateKey({
     description:
       "Formatting and semantic entities found in the message text.",
+  }),
+  media: Schema.optionalKey(BotMedia).annotateKey({
+    description: "Media attached to the message.",
+  }),
+  attachments: Schema.optionalKey(
+    Schema.mutable(Schema.Array(BotAttachment)),
+  ).annotateKey({
+    description: "Structured attachments associated with the message.",
+  }),
+  actions: Schema.optionalKey(
+    Schema.mutable(
+      Schema.Array(Schema.mutable(Schema.Array(BotMessageAction))),
+    ),
+  ).annotateKey({
+    description: "Rows of interactive message actions.",
+  }),
+  reactions: Schema.optionalKey(
+    Schema.mutable(Schema.Array(BotMessageReaction)),
+  ).annotateKey({
+    description: "Aggregated reactions on the message.",
   }),
 }).annotate({
   identifier: "BotMessageLite",
@@ -358,6 +507,115 @@ export const BotMessage = Schema.Struct({
   description: "A message returned by the Inline Bot API.",
 })
 
+export const BotEventMessage = Schema.Struct({
+  ...BotMessage.fields,
+  chat: BotEventChat,
+}).annotate({
+  identifier: "BotEventMessage",
+  description: "Message snapshot embedded in a bot update.",
+})
+
+export const BotActivationReason = Schema.Literals([
+  "direct",
+  "all",
+  "mention",
+  "reply",
+  "command",
+  "action",
+]).annotate({ identifier: "BotActivationReason" })
+
+export const BotUpdateKey = Schema.Literals([
+  "message",
+  "edited_message",
+  "deleted_messages",
+  "message_reaction",
+  "message_action",
+  "bot_membership",
+]).annotate({ identifier: "BotUpdateKey" })
+
+export const BotMessageTrigger = Schema.Literals([
+  "all",
+  "mentions",
+]).annotate({ identifier: "BotMessageTrigger" })
+
+export const BotMembership = Schema.Struct({
+  status: Schema.Literals(["member", "removed"]),
+}).annotate({ identifier: "BotMembership" })
+
+export const BotMembershipChange = Schema.Struct({
+  chat: BotEventChat,
+  actor: Schema.optionalKey(BotUser),
+  date: WireNonNegativeInteger,
+  old_membership: BotMembership,
+  new_membership: BotMembership,
+}).annotate({ identifier: "BotMembershipChange" })
+
+const BotUpdateBaseFields = {
+  update_id: WirePositiveInteger,
+  activation_reason: Schema.optionalKey(BotActivationReason),
+} as const
+
+const BotActionInvocation = Schema.Union([
+  Schema.Struct({
+    action_id: Schema.String,
+    callback_data: Schema.String,
+    callback_data_base64: Schema.optionalKey(Schema.Never),
+  }),
+  Schema.Struct({
+    action_id: Schema.String,
+    callback_data: Schema.optionalKey(Schema.Never),
+    callback_data_base64: Schema.String,
+  }),
+  Schema.Struct({
+    action_id: Schema.String,
+    callback_data: Schema.optionalKey(Schema.Never),
+    callback_data_base64: Schema.optionalKey(Schema.Never),
+  }),
+])
+
+export const BotUpdate = Schema.Union([
+  Schema.Struct({ ...BotUpdateBaseFields, message: BotEventMessage }),
+  Schema.Struct({ ...BotUpdateBaseFields, edited_message: BotEventMessage }),
+  Schema.Struct({
+    ...BotUpdateBaseFields,
+    deleted_messages: Schema.Struct({
+      chat: BotEventChat,
+      message_ids: Schema.mutable(Schema.Array(MessageId)),
+      actor: Schema.optionalKey(BotUser),
+      date: WireNonNegativeInteger,
+    }),
+  }),
+  Schema.Struct({
+    ...BotUpdateBaseFields,
+    message_reaction: Schema.Struct({
+      chat: BotEventChat,
+      message_id: MessageId,
+      actor: BotUser,
+      date: WireNonNegativeInteger,
+      old_reaction: Schema.mutable(Schema.Array(BotReaction)),
+      new_reaction: Schema.mutable(Schema.Array(BotReaction)),
+    }),
+  }),
+  Schema.Struct({
+    ...BotUpdateBaseFields,
+    message_action: Schema.Struct({
+      interaction_id: WirePositiveInteger,
+      chat: BotEventChat,
+      message_id: MessageId,
+      actor: BotUser,
+      date: WireNonNegativeInteger,
+      action: BotActionInvocation,
+    }),
+  }),
+  Schema.Struct({
+    ...BotUpdateBaseFields,
+    bot_membership: BotMembershipChange,
+  }),
+], { mode: "oneOf" }).annotate({
+  identifier: "BotUpdate",
+  description: "One durable event from the authenticated bot's update stream.",
+})
+
 export const BotMessageLiteCompatibility = Schema.Struct({
   ...BotMessageLite.fields,
   peer: BotPeerCompatibility,
@@ -372,7 +630,7 @@ export const BotMessageCompatibility = Schema.Struct({
 
 export const SendMessageInput = Schema.Struct({
   ...BotTargetFields,
-  text: Schema.String.annotateKey({
+  text: Schema.optionalKey(Schema.String).annotateKey({
     description: "Text of the message to send.",
   }),
   reply_to_message_id: Schema.optionalKey(
@@ -393,6 +651,17 @@ export const SendMessageInput = Schema.Struct({
     description:
       "Parse supported Markdown formatting from text.",
   }),
+  media: Schema.optionalKey(Schema.Union([
+    Schema.Struct({ type: Schema.Literal("nudge") }),
+    Schema.Struct({
+      type: Schema.Literals(["photo", "video", "document", "voice"]),
+      file_id: Schema.String.check(Schema.isMinLength(1)),
+    }),
+  ], { mode: "oneOf" })),
+  actions: Schema.optionalKey(
+    Schema.Array(Schema.Array(BotMessageAction).check(Schema.isMaxLength(8))).check(Schema.isMaxLength(8)),
+  ),
+  silent: Schema.optionalKey(Schema.Boolean),
 }).annotate({
   identifier: "SendMessageInput",
   description:
@@ -426,6 +695,65 @@ export const GetChatHistoryInput = Schema.Struct({
     "Selects a conversation and an optional page of older messages.",
 })
 
+export const GetMessagesInput = Schema.Struct({
+  ...BotTargetFields,
+  message_ids: Schema.Array(MessageId).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(100),
+  ),
+}).annotate({
+  identifier: "GetMessagesInput",
+  description: "Selects up to 100 exact messages in one conversation.",
+})
+
+export const BotSearchFilter = Schema.Literals([
+  "photo",
+  "video",
+  "photo_video",
+  "document",
+  "link",
+  "voice",
+]).annotate({ identifier: "BotSearchFilter" })
+
+export const SearchMessagesInput = Schema.Struct({
+  ...BotTargetFields,
+  query: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
+  filter: Schema.optionalKey(BotSearchFilter),
+  offset_message_id: OptionalMessageId,
+  limit: Schema.optionalKey(
+    WireSafeInteger.check(Schema.isBetween({ minimum: 1, maximum: 100 })),
+  ),
+}).annotate({
+  identifier: "SearchMessagesInput",
+  description: "Searches messages within exactly one accessible chat.",
+})
+
+const OptionalParticipantIds = Schema.optionalKey(
+  Schema.Array(UserId).check(Schema.isMaxLength(50)),
+)
+
+export const CreateThreadInput = Schema.Struct({
+  title: OptionalString,
+  emoji: OptionalString,
+  space_id: OptionalSpaceId,
+  is_public: Schema.optionalKey(Schema.Boolean),
+  participant_ids: OptionalParticipantIds,
+}).annotate({
+  identifier: "CreateThreadInput",
+  description: "Creates a normal Inline thread using existing access rules.",
+})
+
+export const CreateReplyThreadInput = Schema.Struct({
+  chat_id: ChatId,
+  message_id: MessageId,
+  title: OptionalString,
+  emoji: OptionalString,
+  participant_ids: OptionalParticipantIds,
+}).annotate({
+  identifier: "CreateReplyThreadInput",
+  description: "Creates or returns the reply thread anchored to a message.",
+})
+
 export const EditMessageTextInput = Schema.Struct({
   ...BotTargetFields,
   message_id: MessageId.annotateKey({
@@ -446,6 +774,9 @@ export const EditMessageTextInput = Schema.Struct({
     description:
       "Parse supported Markdown formatting from the new text.",
   }),
+  actions: Schema.optionalKey(
+    Schema.Array(Schema.Array(BotMessageAction).check(Schema.isMaxLength(8))).check(Schema.isMaxLength(8)),
+  ),
 }).annotate({
   identifier: "EditMessageTextInput",
   description:
@@ -477,6 +808,56 @@ export const SendReactionInput = Schema.Struct({
     "Parameters for reacting to a message. Exactly one target field is required.",
 })
 
+export const DeleteReactionInput = SendReactionInput.annotate({
+  identifier: "DeleteReactionInput",
+  description: "Removes the bot's own reaction from a message.",
+})
+
+export const AnswerMessageActionInput = Schema.Struct({
+  interaction_id: MessageId,
+  text: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
+}).annotate({ identifier: "AnswerMessageActionInput" })
+
+export const BotChatAction = Schema.Literals([
+  "typing",
+  "upload_photo",
+  "upload_video",
+  "upload_document",
+  "record_voice",
+  "cancel",
+]).annotate({ identifier: "BotChatAction" })
+
+export const SendChatActionInput = Schema.Struct({
+  ...BotTargetFields,
+  action: BotChatAction,
+}).annotate({ identifier: "SendChatActionInput" })
+
+export const GetFileInput = Schema.Struct({
+  file_id: Schema.String.check(Schema.isMinLength(1)),
+}).annotate({ identifier: "GetFileInput" })
+
+export const GetUpdatesInput = Schema.Struct({
+  offset: Schema.optionalKey(MessageIdFromString),
+  limit: Schema.optionalKey(WireSafeIntegerFromString),
+  timeout: Schema.optionalKey(WireSafeIntegerFromString),
+  message_trigger: Schema.optionalKey(BotMessageTrigger),
+  allowed_updates: Schema.optionalKey(Schema.Union([Schema.String, Schema.Array(BotUpdateKey)])),
+}).annotate({ identifier: "GetUpdatesInput" })
+
+export const SetWebhookInput = Schema.Struct({
+  url: Schema.String,
+  secret_token: Schema.optionalKey(
+    Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
+  ),
+  message_trigger: Schema.optionalKey(BotMessageTrigger),
+  allowed_updates: Schema.optionalKey(Schema.Array(BotUpdateKey)),
+  drop_pending_updates: Schema.optionalKey(Schema.Boolean),
+}).annotate({ identifier: "SetWebhookInput" })
+
+export const DeleteWebhookInput = Schema.Struct({
+  drop_pending_updates: Schema.optionalKey(Schema.Boolean),
+}).annotate({ identifier: "DeleteWebhookInput" })
+
 export const SetMyCommandsInput = Schema.Struct({
   commands: Schema.Array(BotCommand).check(
     Schema.isMaxLength(100),
@@ -489,12 +870,56 @@ export const SetMyCommandsInput = Schema.Struct({
   description: "Commands to publish for the authenticated bot.",
 })
 
-export const SetMyCapabilitiesInput = Schema.Struct({
-  capabilities: Schema.Array(BotCapability).check(Schema.isMaxLength(100)),
-}).annotate({
-  identifier: "SetMyCapabilitiesInput",
-  description: "Complete capability list for the authenticated bot.",
-})
+export const ForwardMessageInput = Schema.Struct({
+  chat_id: ChatId,
+  from_chat_id: ChatId,
+  message_id: MessageId,
+}).annotate({ identifier: "ForwardMessageInput" })
+
+export const PinMessageInput = Schema.Struct({
+  chat_id: ChatId,
+  message_id: MessageId,
+}).annotate({ identifier: "PinMessageInput" })
+
+export const GetChatParticipantInput = Schema.Struct({
+  chat_id: ChatIdFromString,
+  user_id: UserIdFromString,
+}).annotate({ identifier: "GetChatParticipantInput" })
+
+export const GetChatParticipantCountInput = Schema.Struct({
+  chat_id: ChatIdFromString,
+}).annotate({ identifier: "GetChatParticipantCountInput" })
+
+export const SetThreadTitleInput = Schema.Struct({
+  chat_id: ChatId,
+  title: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
+}).annotate({ identifier: "SetThreadTitleInput" })
+
+export const BotSpaceMember = Schema.Struct({
+  id: WirePositiveInteger,
+  space_id: SpaceId,
+  user_id: UserId,
+  role: Schema.optionalKey(Schema.Literals(["owner", "admin", "member"])),
+  date: WireNonNegativeInteger,
+  can_access_public_chats: Schema.Boolean,
+}).annotate({ identifier: "BotSpaceMember" })
+
+export const BotChatParticipant = Schema.Struct({
+  user: BotUser,
+  member: Schema.optionalKey(BotSpaceMember),
+}).annotate({ identifier: "BotChatParticipant" })
+
+export const BotUploadFilePayload = Schema.Struct({
+  type: Schema.Literals(["photo", "video", "document", "voice"]),
+  file: Multipart.SingleFileSchema,
+  thumbnail: Schema.optional(Multipart.SingleFileSchema),
+  width: Schema.optionalKey(Schema.String),
+  height: Schema.optionalKey(Schema.String),
+  duration: Schema.optionalKey(Schema.String),
+  is_animated: Schema.optionalKey(Schema.String),
+  has_audio: Schema.optionalKey(Schema.String),
+  waveform_base64: Schema.optionalKey(Schema.String),
+}).pipe(HttpApiSchema.asMultipart()).annotate({ identifier: "BotUploadFilePayload" })
 
 export const BotEmptyResult = Schema.Record(
   Schema.String,
@@ -531,6 +956,36 @@ export const BotGetChatHistoryRuntimeResult = Schema.Struct({
     Schema.Array(BotMessageCompatibility),
   ),
 })
+export const BotMessagesResult = Schema.Struct({
+  messages: Schema.mutable(Schema.Array(BotMessage)),
+}).annotate({
+  identifier: "BotMessagesResult",
+  description: "Messages returned by an exact read or search.",
+})
+export const BotMessagesRuntimeResult = Schema.Struct({
+  messages: Schema.mutable(Schema.Array(BotMessageCompatibility)),
+})
+export const BotCreateThreadResult = Schema.Struct({
+  chat: BotChat,
+}).annotate({
+  identifier: "BotCreateThreadResult",
+  description: "The created or existing thread.",
+})
+export const BotGetFileResult = Schema.Struct({ file: BotFile }).annotate({
+  identifier: "BotGetFileResult",
+})
+export const BotGetUpdatesResult = Schema.mutable(Schema.Array(BotUpdate)).annotate({
+  identifier: "BotGetUpdatesResult",
+})
+export const BotWebhookInfo = Schema.Struct({
+  url: Schema.String,
+  pending_update_count: WireNonNegativeInteger,
+  allowed_updates: Schema.mutable(Schema.Array(BotUpdateKey)),
+  message_trigger: BotMessageTrigger,
+  last_error_date: Schema.optionalKey(WireNonNegativeInteger),
+  last_error_message: OptionalString,
+  dropped_update_count: WireNonNegativeInteger,
+}).annotate({ identifier: "BotWebhookInfo" })
 export const BotMessageResult = Schema.Struct({
   message: BotMessage.annotateKey({
     description: "The sent or updated message.",
@@ -554,12 +1009,8 @@ export const BotGetMyCommandsResult = Schema.Struct({
   description: "The authenticated bot's command list.",
 })
 
-export const BotGetMyCapabilitiesResult = Schema.Struct({
-  capabilities: Schema.mutable(Schema.Array(BotCapability)),
-}).annotate({
-  identifier: "BotGetMyCapabilitiesResult",
-  description: "The authenticated bot's capability list.",
-})
+export const BotGetChatParticipantResult = Schema.Struct({ participant: BotChatParticipant }).annotate({ identifier: "BotGetChatParticipantResult" })
+export const BotGetChatParticipantCountResult = Schema.Struct({ count: WireNonNegativeInteger }).annotate({ identifier: "BotGetChatParticipantCountResult" })
 
 const exampleBotUserId = UserId.make(284_901)
 const exampleMemberId = UserId.make(391_204)
@@ -691,6 +1142,27 @@ export const BotMessageRuntimeSuccess = botApiSuccess(
 export const BotGetChatHistoryRuntimeSuccess = botApiSuccess(
   BotGetChatHistoryRuntimeResult,
 )
+export const BotMessagesSuccess = botApiSuccess(BotMessagesResult).annotate({
+  identifier: "BotMessagesSuccess",
+  description: "Successful exact-message read or search response.",
+})
+export const BotMessagesRuntimeSuccess = botApiSuccess(BotMessagesRuntimeResult)
+export const BotCreateThreadSuccess = botApiSuccess(BotCreateThreadResult).annotate({
+  identifier: "BotCreateThreadSuccess",
+  description: "Successful normal or reply-thread creation response.",
+})
+export const BotGetFileSuccess = botApiSuccess(BotGetFileResult).annotate({
+  identifier: "BotGetFileSuccess",
+})
+export const BotGetUpdatesSuccess = botApiSuccess(BotGetUpdatesResult).annotate({
+  identifier: "BotGetUpdatesSuccess",
+})
+export const BotWebhookInfoSuccess = botApiSuccess(BotWebhookInfo).annotate({
+  identifier: "BotWebhookInfoSuccess",
+})
+export const BotTrueSuccess = botApiSuccess(Schema.Literal(true)).annotate({
+  identifier: "BotTrueSuccess",
+})
 export const BotGetMyCommandsSuccess = botApiSuccess(
   BotGetMyCommandsResult,
 ).annotate({
@@ -716,13 +1188,8 @@ export const BotGetMyCommandsSuccess = botApiSuccess(
     },
   ],
 })
-export const BotGetMyCapabilitiesSuccess = botApiSuccess(
-  BotGetMyCapabilitiesResult,
-).annotate({
-  identifier: "BotGetMyCapabilitiesSuccess",
-  description: "Successful bot capability response.",
-  examples: [{ ok: true, result: { capabilities: [{ kind: "chat_settings", version: 1 }] } }],
-})
+export const BotGetChatParticipantSuccess = botApiSuccess(BotGetChatParticipantResult).annotate({ identifier: "BotGetChatParticipantSuccess" })
+export const BotGetChatParticipantCountSuccess = botApiSuccess(BotGetChatParticipantCountResult).annotate({ identifier: "BotGetChatParticipantCountSuccess" })
 export const BotEmptySuccess = botApiSuccess(
   BotEmptyResult,
 ).annotate({
@@ -828,14 +1295,26 @@ type _BotPeerMatchesNeutral = Assert<
 type _BotCommandMatchesNeutral = Assert<
   Extends<typeof BotCommand.Type, NeutralBotCommand>
 >
-type _BotCapabilityMatchesNeutral = Assert<
-  Extends<typeof BotCapability.Type, NeutralBotCapability>
->
 type _BotEntityMatchesNeutral = Assert<
   Extends<
     typeof BotMessageEntityOutput.Type,
     NeutralBotMessageEntityOutput
   >
+>
+type _BotFileMatchesNeutral = Assert<
+  Extends<typeof BotFile.Type, NeutralBotFile>
+>
+type _BotMediaMatchesNeutral = Assert<
+  Extends<typeof BotMedia.Type, NeutralBotMedia>
+>
+type _BotActionMatchesNeutral = Assert<
+  Extends<typeof BotMessageAction.Type, NeutralBotMessageAction>
+>
+type _BotReactionMatchesNeutral = Assert<
+  Extends<typeof BotMessageReaction.Type, NeutralBotMessageReaction>
+>
+type _BotAttachmentMatchesNeutral = Assert<
+  Extends<typeof BotAttachment.Type, NeutralBotAttachment>
 >
 type _BotChatMatchesNeutral = Assert<
   Extends<typeof BotChat.Type, NeutralBotChat>

@@ -15,6 +15,7 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { queueMessageThreadLinkMaterialization } from "@in/server/modules/threadGraph"
 import { resolveThreadTitleLinks } from "@in/server/modules/message/resolveThreadTitleLinks"
 import { resolveBotCommandTargets } from "@in/server/modules/message/resolveBotCommandTargets"
+import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
 
 type Input = {
   messageId: bigint
@@ -102,6 +103,11 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
     currentUserId,
     update,
     actionsOverride: normalizedActions,
+  })
+
+  BotUpdateProjector.messageEdited({
+    chat,
+    messageId: Number(input.messageId),
   })
 
   return { updates: selfUpdates }

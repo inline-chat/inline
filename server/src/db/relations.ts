@@ -29,6 +29,9 @@ export const relations = defineRelations(
     spaceSettings: schema.spaceSettings,
     updates: schema.updates,
     botCommands: schema.botCommands,
+    botUpdateStreams: schema.botUpdateStreams,
+    botUpdates: schema.botUpdates,
+    botMessageRoutes: schema.botMessageRoutes,
     spaceUrlPreviewExclusions: schema.spaceUrlPreviewExclusions,
     userGroups: schema.userGroups,
     userGroupMembers: schema.userGroupMembers,
@@ -48,6 +51,13 @@ export const relations = defineRelations(
         optional: true,
       }),
       botCommands: r.many.botCommands(),
+      botUpdateStream: r.one.botUpdateStreams({
+        from: r.users.id,
+        to: r.botUpdateStreams.botUserId,
+        optional: true,
+      }),
+      botUpdates: r.many.botUpdates(),
+      botMessageRoutes: r.many.botMessageRoutes(),
       chatIdReservations: r.many.chatIdReservations(),
       userGroupMemberships: r.many.userGroupMembers(),
     },
@@ -62,6 +72,27 @@ export const relations = defineRelations(
     botCommands: {
       botUser: r.one.users({
         from: r.botCommands.botUserId,
+        to: r.users.id,
+      }),
+    },
+
+    botUpdateStreams: {
+      botUser: r.one.users({
+        from: r.botUpdateStreams.botUserId,
+        to: r.users.id,
+      }),
+    },
+
+    botUpdates: {
+      botUser: r.one.users({
+        from: r.botUpdates.botUserId,
+        to: r.users.id,
+      }),
+    },
+
+    botMessageRoutes: {
+      botUser: r.one.users({
+        from: r.botMessageRoutes.botUserId,
         to: r.users.id,
       }),
     },

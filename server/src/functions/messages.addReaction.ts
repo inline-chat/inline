@@ -4,6 +4,7 @@ import type { FunctionContext } from "@in/server/functions/_types"
 import { Updates } from "@in/server/modules/updates/updates"
 import { ReactionModel } from "../db/models/reactions"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
+import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
 
 type Input = {
   emoji: string
@@ -16,9 +17,10 @@ type Output = {
 }
 
 export const addReaction = async (input: Input, context: FunctionContext): Promise<Output> => {
-  const chatId = await ChatModel.getChatIdFromInputPeer(input.peer, context)
+  const chat = await ChatModel.getChatFromInputPeer(input.peer, context)
+  const chatId = chat.id
 
-  const reactions = await ReactionModel.insertReaction({
+  const _reactions = await ReactionModel.insertReaction({
     messageId: Number(input.messageId),
     chatId: chatId,
     userId: context.currentUserId,
@@ -42,6 +44,8 @@ export const addReaction = async (input: Input, context: FunctionContext): Promi
   }
 
   Updates.shared.pushUpdate([update], { peerId: input.peer, currentUserId: context.currentUserId })
+
+  BotUpdateProjector.reactionChanged({ chat, messageId: Number(input.messageId), actorUserId: context.currentUserId, emoji: input.emoji, added: true })
 
   return { updates: [update] }
 }

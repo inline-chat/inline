@@ -1,20 +1,49 @@
 import type {
+  CreateReplyThreadParams,
+  CreateReplyThreadResult,
+  CreateThreadParams,
+  CreateThreadResult,
+  AnswerMessageActionParams,
+  DeleteReactionParams,
+  DeleteWebhookParams,
+  DeleteWebhookResult,
   DeleteMessageParams,
   EditMessageTextParams,
   EmptyResult,
+  ForwardMessageParams,
+  ForwardMessageResult,
   GetChatHistoryParams,
   GetChatHistoryResult,
   GetChatParams,
   GetChatResult,
+  GetFileParams,
+  GetFileResult,
   GetMeResult,
+  GetMessagesParams,
+  GetMessagesResult,
+  GetUpdatesParams,
+  GetUpdatesResult,
+  GetWebhookInfoResult,
   GetMyCommandsResult,
-  GetMyCapabilitiesResult,
+  GetChatParticipantParams,
+  GetChatParticipantResult,
+  GetChatParticipantCountParams,
+  GetChatParticipantCountResult,
+  PinMessageParams,
   SendMessageParams,
   SendMessageResult,
   SendReactionParams,
+  SendChatActionParams,
+  SearchMessagesParams,
+  SearchMessagesResult,
   SetMyCommandsParams,
-  SetMyCapabilitiesParams,
+  SetThreadTitleParams,
+  SetWebhookParams,
+  SetWebhookResult,
+  UnpinMessageParams,
+  UploadFileResult,
 } from "@inline-chat/bot-api-types"
+import type { UploadFileOperationInput } from "@in/server/methods/uploadFileOperation"
 import {
   Context,
   Data,
@@ -30,15 +59,31 @@ export type BotOperation =
   | "sendMessage"
   | "getChat"
   | "getChatHistory"
+  | "getMessages"
+  | "searchMessages"
+  | "createThread"
+  | "createReplyThread"
   | "editMessageText"
   | "deleteMessage"
   | "sendReaction"
+  | "deleteReaction"
+  | "answerMessageAction"
+  | "sendChatAction"
+  | "getFile"
+  | "getUpdates"
+  | "setWebhook"
+  | "deleteWebhook"
+  | "getWebhookInfo"
   | "getMyCommands"
   | "setMyCommands"
   | "deleteMyCommands"
-  | "getMyCapabilities"
-  | "setMyCapabilities"
-  | "deleteMyCapabilities"
+  | "forwardMessage"
+  | "pinMessage"
+  | "unpinMessage"
+  | "getChatParticipant"
+  | "getChatParticipantCount"
+  | "setThreadTitle"
+  | "uploadFile"
 
 export interface BotOperationContext {
   readonly currentUserId: number
@@ -84,6 +129,22 @@ export interface BotOperationsShape {
     input: GetChatHistoryParams,
     context: BotOperationContext,
   ) => Effect.Effect<GetChatHistoryResult, BotOperationError>
+  readonly getMessages: (
+    input: GetMessagesParams,
+    context: BotOperationContext,
+  ) => Effect.Effect<GetMessagesResult, BotOperationError>
+  readonly searchMessages: (
+    input: SearchMessagesParams,
+    context: BotOperationContext,
+  ) => Effect.Effect<SearchMessagesResult, BotOperationError>
+  readonly createThread: (
+    input: CreateThreadParams,
+    context: BotOperationContext,
+  ) => Effect.Effect<CreateThreadResult, BotOperationError>
+  readonly createReplyThread: (
+    input: CreateReplyThreadParams,
+    context: BotOperationContext,
+  ) => Effect.Effect<CreateReplyThreadResult, BotOperationError>
   readonly editMessageText: (
     input: EditMessageTextParams,
     context: BotOperationContext,
@@ -96,6 +157,14 @@ export interface BotOperationsShape {
     input: SendReactionParams,
     context: BotOperationContext,
   ) => Effect.Effect<EmptyResult, BotOperationError>
+  readonly deleteReaction: (input: DeleteReactionParams, context: BotOperationContext) => Effect.Effect<EmptyResult, BotOperationError>
+  readonly answerMessageAction: (input: AnswerMessageActionParams, context: BotOperationContext) => Effect.Effect<EmptyResult, BotOperationError>
+  readonly sendChatAction: (input: SendChatActionParams, context: BotOperationContext) => Effect.Effect<EmptyResult, BotOperationError>
+  readonly getFile: (input: GetFileParams, context: BotOperationContext) => Effect.Effect<GetFileResult, BotOperationError>
+  readonly getUpdates: (input: GetUpdatesParams, context: BotOperationContext) => Effect.Effect<GetUpdatesResult, BotOperationError>
+  readonly setWebhook: (input: SetWebhookParams, context: BotOperationContext) => Effect.Effect<SetWebhookResult, BotOperationError>
+  readonly deleteWebhook: (input: DeleteWebhookParams, context: BotOperationContext) => Effect.Effect<DeleteWebhookResult, BotOperationError>
+  readonly getWebhookInfo: (context: BotOperationContext) => Effect.Effect<GetWebhookInfoResult, BotOperationError>
   readonly getMyCommands: (
     context: BotOperationContext,
   ) => Effect.Effect<GetMyCommandsResult, BotOperationError>
@@ -106,16 +175,13 @@ export interface BotOperationsShape {
   readonly deleteMyCommands: (
     context: BotOperationContext,
   ) => Effect.Effect<EmptyResult, BotOperationError>
-  readonly getMyCapabilities: (
-    context: BotOperationContext,
-  ) => Effect.Effect<GetMyCapabilitiesResult, BotOperationError>
-  readonly setMyCapabilities: (
-    input: SetMyCapabilitiesParams,
-    context: BotOperationContext,
-  ) => Effect.Effect<GetMyCapabilitiesResult, BotOperationError>
-  readonly deleteMyCapabilities: (
-    context: BotOperationContext,
-  ) => Effect.Effect<EmptyResult, BotOperationError>
+  readonly forwardMessage: (input: ForwardMessageParams, context: BotOperationContext) => Effect.Effect<ForwardMessageResult, BotOperationError>
+  readonly pinMessage: (input: PinMessageParams, context: BotOperationContext) => Effect.Effect<EmptyResult, BotOperationError>
+  readonly unpinMessage: (input: UnpinMessageParams, context: BotOperationContext) => Effect.Effect<EmptyResult, BotOperationError>
+  readonly getChatParticipant: (input: GetChatParticipantParams, context: BotOperationContext) => Effect.Effect<GetChatParticipantResult, BotOperationError>
+  readonly getChatParticipantCount: (input: GetChatParticipantCountParams, context: BotOperationContext) => Effect.Effect<GetChatParticipantCountResult, BotOperationError>
+  readonly setThreadTitle: (input: SetThreadTitleParams, context: BotOperationContext) => Effect.Effect<EmptyResult, BotOperationError>
+  readonly uploadFile: (input: UploadFileOperationInput, context: BotOperationContext) => Effect.Effect<UploadFileResult, BotOperationError>
 }
 
 export class BotOperations extends Context.Service<
@@ -139,6 +205,22 @@ export interface BotOperationHandlers {
     input: GetChatHistoryParams,
     context: BotOperationContext,
   ) => Promise<GetChatHistoryResult>
+  readonly getMessages: (
+    input: GetMessagesParams,
+    context: BotOperationContext,
+  ) => Promise<GetMessagesResult>
+  readonly searchMessages: (
+    input: SearchMessagesParams,
+    context: BotOperationContext,
+  ) => Promise<SearchMessagesResult>
+  readonly createThread: (
+    input: CreateThreadParams,
+    context: BotOperationContext,
+  ) => Promise<CreateThreadResult>
+  readonly createReplyThread: (
+    input: CreateReplyThreadParams,
+    context: BotOperationContext,
+  ) => Promise<CreateReplyThreadResult>
   readonly editMessageText: (
     input: EditMessageTextParams,
     context: BotOperationContext,
@@ -151,6 +233,14 @@ export interface BotOperationHandlers {
     input: SendReactionParams,
     context: BotOperationContext,
   ) => Promise<EmptyResult>
+  readonly deleteReaction: (input: DeleteReactionParams, context: BotOperationContext) => Promise<EmptyResult>
+  readonly answerMessageAction: (input: AnswerMessageActionParams, context: BotOperationContext) => Promise<EmptyResult>
+  readonly sendChatAction: (input: SendChatActionParams, context: BotOperationContext) => Promise<EmptyResult>
+  readonly getFile: (input: GetFileParams, context: BotOperationContext) => Promise<GetFileResult>
+  readonly getUpdates: (input: GetUpdatesParams, context: BotOperationContext) => Promise<GetUpdatesResult>
+  readonly setWebhook: (input: SetWebhookParams, context: BotOperationContext) => Promise<SetWebhookResult>
+  readonly deleteWebhook: (input: DeleteWebhookParams, context: BotOperationContext) => Promise<DeleteWebhookResult>
+  readonly getWebhookInfo: (context: BotOperationContext) => Promise<GetWebhookInfoResult>
   readonly getMyCommands: (
     context: BotOperationContext,
   ) => Promise<GetMyCommandsResult>
@@ -161,16 +251,13 @@ export interface BotOperationHandlers {
   readonly deleteMyCommands: (
     context: BotOperationContext,
   ) => Promise<EmptyResult>
-  readonly getMyCapabilities: (
-    context: BotOperationContext,
-  ) => Promise<GetMyCapabilitiesResult>
-  readonly setMyCapabilities: (
-    input: SetMyCapabilitiesParams,
-    context: BotOperationContext,
-  ) => Promise<GetMyCapabilitiesResult>
-  readonly deleteMyCapabilities: (
-    context: BotOperationContext,
-  ) => Promise<EmptyResult>
+  readonly forwardMessage: (input: ForwardMessageParams, context: BotOperationContext) => Promise<ForwardMessageResult>
+  readonly pinMessage: (input: PinMessageParams, context: BotOperationContext) => Promise<EmptyResult>
+  readonly unpinMessage: (input: UnpinMessageParams, context: BotOperationContext) => Promise<EmptyResult>
+  readonly getChatParticipant: (input: GetChatParticipantParams, context: BotOperationContext) => Promise<GetChatParticipantResult>
+  readonly getChatParticipantCount: (input: GetChatParticipantCountParams, context: BotOperationContext) => Promise<GetChatParticipantCountResult>
+  readonly setThreadTitle: (input: SetThreadTitleParams, context: BotOperationContext) => Promise<EmptyResult>
+  readonly uploadFile: (input: UploadFileOperationInput, context: BotOperationContext) => Promise<UploadFileResult>
 }
 
 const publicError = (
@@ -278,6 +365,14 @@ export const makeBotOperations = (
     adapt("getChatHistory", () =>
       handlers.getChatHistory(input, context),
     ),
+  getMessages: (input, context) =>
+    adapt("getMessages", () => handlers.getMessages(input, context)),
+  searchMessages: (input, context) =>
+    adapt("searchMessages", () => handlers.searchMessages(input, context)),
+  createThread: (input, context) =>
+    adapt("createThread", () => handlers.createThread(input, context)),
+  createReplyThread: (input, context) =>
+    adapt("createReplyThread", () => handlers.createReplyThread(input, context)),
   editMessageText: (input, context) =>
     adapt("editMessageText", () =>
       handlers.editMessageText(input, context),
@@ -290,6 +385,14 @@ export const makeBotOperations = (
     adapt("sendReaction", () =>
       handlers.sendReaction(input, context),
     ),
+  deleteReaction: (input, context) => adapt("deleteReaction", () => handlers.deleteReaction(input, context)),
+  answerMessageAction: (input, context) => adapt("answerMessageAction", () => handlers.answerMessageAction(input, context)),
+  sendChatAction: (input, context) => adapt("sendChatAction", () => handlers.sendChatAction(input, context)),
+  getFile: (input, context) => adapt("getFile", () => handlers.getFile(input, context)),
+  getUpdates: (input, context) => adapt("getUpdates", () => handlers.getUpdates(input, context)),
+  setWebhook: (input, context) => adapt("setWebhook", () => handlers.setWebhook(input, context)),
+  deleteWebhook: (input, context) => adapt("deleteWebhook", () => handlers.deleteWebhook(input, context)),
+  getWebhookInfo: (context) => adapt("getWebhookInfo", () => handlers.getWebhookInfo(context)),
   getMyCommands: (context) =>
     adapt("getMyCommands", () =>
       handlers.getMyCommands(context),
@@ -302,16 +405,11 @@ export const makeBotOperations = (
     adapt("deleteMyCommands", () =>
       handlers.deleteMyCommands(context),
     ),
-  getMyCapabilities: (context) =>
-    adapt("getMyCapabilities", () =>
-      handlers.getMyCapabilities(context),
-    ),
-  setMyCapabilities: (input, context) =>
-    adapt("setMyCapabilities", () =>
-      handlers.setMyCapabilities(input, context),
-    ),
-  deleteMyCapabilities: (context) =>
-    adapt("deleteMyCapabilities", () =>
-      handlers.deleteMyCapabilities(context),
-    ),
+  forwardMessage: (input, context) => adapt("forwardMessage", () => handlers.forwardMessage(input, context)),
+  pinMessage: (input, context) => adapt("pinMessage", () => handlers.pinMessage(input, context)),
+  unpinMessage: (input, context) => adapt("unpinMessage", () => handlers.unpinMessage(input, context)),
+  getChatParticipant: (input, context) => adapt("getChatParticipant", () => handlers.getChatParticipant(input, context)),
+  getChatParticipantCount: (input, context) => adapt("getChatParticipantCount", () => handlers.getChatParticipantCount(input, context)),
+  setThreadTitle: (input, context) => adapt("setThreadTitle", () => handlers.setThreadTitle(input, context)),
+  uploadFile: (input, context) => adapt("uploadFile", () => handlers.uploadFile(input, context)),
 })

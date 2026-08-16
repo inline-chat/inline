@@ -17,6 +17,7 @@ import { db } from "@in/server/db"
 import { members, messages, type DbChat } from "@in/server/db/schema"
 import { and, eq, inArray } from "drizzle-orm"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
 
 type Input = {
   messageIds: bigint[]
@@ -53,6 +54,8 @@ export const deleteMessage = async (input: Input, context: FunctionContext): Pro
     currentUserId: context.currentUserId,
     update,
   })
+
+  BotUpdateProjector.messagesDeleted({ chat, messageIds: input.messageIds, actorUserId: context.currentUserId })
 
   const { selfUpdates: metadataSelfUpdates } = await pushChatMetadataUpdates({
     currentUserId: context.currentUserId,

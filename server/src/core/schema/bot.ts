@@ -7,7 +7,7 @@ import type {
 } from "@inline-chat/bot-api-types"
 import { Schema } from "effect"
 import { UserId } from "./identifiers"
-import { HttpStatusCode } from "./scalars"
+import { HttpStatusCode, WireNonNegativeInteger } from "./scalars"
 
 /**
  * Canonical Bot API user wire shape.
@@ -59,6 +59,13 @@ export const BotApiError = Schema.Struct({
   }),
   description: Schema.String.annotateKey({
     description: "Human-readable explanation of the error.",
+  }),
+  parameters: Schema.optionalKey(
+    Schema.Struct({
+      retry_after: Schema.optionalKey(WireNonNegativeInteger),
+    }),
+  ).annotateKey({
+    description: "Optional structured recovery information.",
   }),
 }).annotate({
   identifier: "BotApiError",
