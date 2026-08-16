@@ -20,6 +20,12 @@ pub const INLINE_UPDATE_CONSTRUCTOR: u32 = 0xdc412c98;
 pub const INLINE_INVOKE_CONSTRUCTOR: u32 = 0xeb7d4aa6;
 /// Realtime V3 application layer.
 pub const INLINE_REALTIME_LAYER: i32 = 3;
+/// Telegram `invokeAfterMsg` TL constructor.
+pub const INVOKE_AFTER_MSG_CONSTRUCTOR: u32 = 0xcb9f372d;
+/// Telegram `invokeAfterMsgs` TL constructor.
+pub const INVOKE_AFTER_MSGS_CONSTRUCTOR: u32 = 0x3dc4b4f0;
+const TL_VECTOR_CONSTRUCTOR: u32 = 0x1cb5c415;
+const MAX_INVOKE_AFTER_DEPENDENCIES: usize = 8_192;
 
 /// A decoded Inline-specific TL application constructor.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -35,6 +41,15 @@ pub enum InlineApplicationObject {
     Result(Vec<u8>),
     /// Unsolicited update payload.
     Update(Vec<u8>),
+}
+
+/// One decoded Telegram invoke-after query wrapper.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InvokeAfter {
+    /// Message IDs which must complete first.
+    pub message_ids: Vec<i64>,
+    /// Exact inner TL query bytes.
+    pub query: Vec<u8>,
 }
 
 /// Direction used by the MTProto v2 record KDF.
@@ -199,6 +214,102 @@ pub fn decode_inline_application_object(
         INLINE_UPDATE_CONSTRUCTOR => Ok(InlineApplicationObject::Update(payload.to_vec())),
         _ => Err(InvalidEncryptedRecord),
     }
+}
+
+fn valid_tl_query(query: &[u8]) -> bool {
+    query.len() >= 4 && query.len() <= MAX_PACKET_BYTES && query.len().is_multiple_of(4)
+}
+
+/// Encodes Telegram's exact single-dependency invoke-after wrapper.
+pub fn encode_invoke_after_msg(
+    message_id: i64,
+    query: &[u8],
+) -> Result<Vec<u8>, InvalidEncryptedRecord> {
+    if !valid_tl_query(query) {
+        return Err(InvalidEncryptedRecord);
+    }
+    Ok(concat(&[
+        &INVOKE_AFTER_MSG_CONSTRUCTOR.to_le_bytes(),
+        &message_id.to_le_bytes(),
+        query,
+    ]))
+}
+
+/// Encodes Telegram's exact vector-dependency invoke-after wrapper.
+pub fn encode_invoke_after_msgs(
+    message_ids: &[i64],
+    query: &[u8],
+) -> Result<Vec<u8>, InvalidEncryptedRecord> {
+    if message_ids.len() > MAX_INVOKE_AFTER_DEPENDENCIES || !valid_tl_query(query) {
+        return Err(InvalidEncryptedRecord);
+    }
+    let count = i32::try_from(message_ids.len()).map_err(|_| InvalidEncryptedRecord)?;
+    let mut output = Vec::with_capacity(12 + message_ids.len() * 8 + query.len());
+    output.extend_from_slice(&INVOKE_AFTER_MSGS_CONSTRUCTOR.to_le_bytes());
+    output.extend_from_slice(&TL_VECTOR_CONSTRUCTOR.to_le_bytes());
+    output.extend_from_slice(&count.to_le_bytes());
+    for message_id in message_ids {
+        output.extend_from_slice(&message_id.to_le_bytes());
+    }
+    output.extend_from_slice(query);
+    Ok(output)
+}
+
+/// Decodes exactly one Telegram invoke-after wrapper.
+pub fn decode_invoke_after(bytes: &[u8]) -> Result<InvokeAfter, InvalidEncryptedRecord> {
+    if bytes.len() < 12 || bytes.len() > MAX_PACKET_BYTES || !bytes.len().is_multiple_of(4) {
+        return Err(InvalidEncryptedRecord);
+    }
+    let constructor =
+        u32::from_le_bytes(bytes[..4].try_into().map_err(|_| InvalidEncryptedRecord)?);
+    let (message_ids, query_offset) = if constructor == INVOKE_AFTER_MSG_CONSTRUCTOR {
+        (
+            vec![i64::from_le_bytes(
+                bytes[4..12]
+                    .try_into()
+                    .map_err(|_| InvalidEncryptedRecord)?,
+            )],
+            12,
+        )
+    } else if constructor == INVOKE_AFTER_MSGS_CONSTRUCTOR {
+        if u32::from_le_bytes(bytes[4..8].try_into().map_err(|_| InvalidEncryptedRecord)?)
+            != TL_VECTOR_CONSTRUCTOR
+        {
+            return Err(InvalidEncryptedRecord);
+        }
+        let count = i32::from_le_bytes(
+            bytes[8..12]
+                .try_into()
+                .map_err(|_| InvalidEncryptedRecord)?,
+        );
+        let count = usize::try_from(count).map_err(|_| InvalidEncryptedRecord)?;
+        if count > MAX_INVOKE_AFTER_DEPENDENCIES {
+            return Err(InvalidEncryptedRecord);
+        }
+        let query_offset = 12_usize
+            .checked_add(count.checked_mul(8).ok_or(InvalidEncryptedRecord)?)
+            .ok_or(InvalidEncryptedRecord)?;
+        if query_offset > bytes.len() {
+            return Err(InvalidEncryptedRecord);
+        }
+        let mut ids = Vec::with_capacity(count);
+        for chunk in bytes[12..query_offset].chunks_exact(8) {
+            ids.push(i64::from_le_bytes(
+                chunk.try_into().map_err(|_| InvalidEncryptedRecord)?,
+            ));
+        }
+        (ids, query_offset)
+    } else {
+        return Err(InvalidEncryptedRecord);
+    };
+    let query = &bytes[query_offset..];
+    if !valid_tl_query(query) {
+        return Err(InvalidEncryptedRecord);
+    }
+    Ok(InvokeAfter {
+        message_ids,
+        query: query.to_vec(),
+    })
 }
 
 fn sha256(parts: &[&[u8]]) -> [u8; 32] {
@@ -688,6 +799,29 @@ mod tests {
             Ok(InlineApplicationObject::Invoke {
                 layer: 3,
                 payload: payload.to_vec()
+            })
+        );
+    }
+
+    #[test]
+    fn matches_telegram_invoke_after_vectors() {
+        let query = encode_inline_invoke(&[1, 2, 3], INLINE_REALTIME_LAYER).unwrap();
+        let single = encode_invoke_after_msg(4, &query).unwrap();
+        assert_eq!(&hex(&single)[..8], "2d379fcb");
+        assert_eq!(
+            decode_invoke_after(&single),
+            Ok(InvokeAfter {
+                message_ids: vec![4],
+                query: query.clone()
+            })
+        );
+        let multiple = encode_invoke_after_msgs(&[4, 8], &query).unwrap();
+        assert_eq!(&hex(&multiple)[..8], "f0b4c43d");
+        assert_eq!(
+            decode_invoke_after(&multiple),
+            Ok(InvokeAfter {
+                message_ids: vec![4, 8],
+                query
             })
         );
     }
