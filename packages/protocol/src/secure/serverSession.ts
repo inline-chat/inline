@@ -218,6 +218,8 @@ export class InlineProtocolServerSession {
     })
   }
 
+  get destroyed(): boolean { return this.#destroyed }
+
   async receive(
     payload: Uint8Array,
     receiveOptions: InlineProtocolServerReceiveOptions = {},
@@ -229,6 +231,7 @@ export class InlineProtocolServerSession {
   }
 
   sendApplicationUpdate(payload: Uint8Array): Uint8Array {
+    if (this.#destroyed) throw new InvalidEncryptedRecord()
     return this.#encryptOutgoing(encodeInlineUpdate(payload), true, 3)
   }
 
