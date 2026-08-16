@@ -272,7 +272,7 @@ const toBotChat = (chat: any): BotChat => {
     chat_id: chatId,
     type:
       chat.type === "private" || chat.peerId?.type?.oneofKind === "user"
-        ? "direct"
+        ? "user"
         : chat.type === "thread" || chat.peerId?.type?.oneofKind === "chat"
           ? "thread"
           : undefined,

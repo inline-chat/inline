@@ -91,7 +91,7 @@ export const TBotAttachment = t.Object({
 
 export const TBotChat = t.Object({
   chat_id: t.Number(),
-  type: t.Optional(t.Union([t.Literal("direct"), t.Literal("thread")])),
+  type: t.Optional(t.Union([t.Literal("user"), t.Literal("thread")])),
   title: t.Optional(t.String()),
   space_id: t.Optional(t.Number()),
   is_public: t.Optional(t.Boolean()),

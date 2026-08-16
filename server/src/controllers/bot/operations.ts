@@ -405,11 +405,11 @@ const toBotChat = (chat: BotChatSource): BotChat => ({
   chat_id: Number(chat.id),
   type:
     chat.type === "private"
-      ? "direct"
+      ? "user"
       : chat.type === "thread"
         ? "thread"
         : chat.peerId?.type?.oneofKind === "user"
-          ? "direct"
+          ? "user"
           : chat.peerId?.type?.oneofKind === "chat"
             ? "thread"
             : undefined,

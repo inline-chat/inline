@@ -200,12 +200,12 @@ export const BotMessageEntityOutput = Schema.Struct({
 export const BotPeer = Schema.Struct({
   user_id: OptionalUserId.annotateKey({
     description:
-      "The other user in a private conversation. Group chats do not include this field.",
+      "The other user in a user chat. Threads do not include this field.",
   }),
 }).annotate({
   identifier: "BotPeer",
   description:
-    "Additional peer information retained for private-chat compatibility. Prefer message.chat_id as the conversation identifier.",
+    "Additional peer information retained for user-chat compatibility. Prefer message.chat_id as the conversation identifier.",
 })
 
 // TODO(effect-cutover): remove `thread_id` after production telemetry shows no
@@ -242,7 +242,7 @@ export const BotCommand = Schema.Struct({
 })
 
 export const BotChatType = Schema.Literals([
-  "direct",
+  "user",
   "thread",
 ]).annotate({
   identifier: "BotChatType",
@@ -325,7 +325,7 @@ export const BotChat = Schema.Struct({
 }).annotate({
   identifier: "BotChat",
   description:
-    "Information about an Inline direct conversation or thread.",
+    "Information about an Inline user chat or thread.",
 })
 
 export const BotEventChat = Schema.Struct({

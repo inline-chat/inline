@@ -76,7 +76,7 @@ export type BotUser = {
   last_name?: string
 }
 
-export type BotChatType = "direct" | "thread"
+export type BotChatType = "user" | "thread"
 
 export type BotPeer = {
   user_id?: number

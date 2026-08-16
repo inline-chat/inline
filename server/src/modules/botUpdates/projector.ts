@@ -32,7 +32,7 @@ const toUser = (user: DbUser | BotUserJson): BotUser => ({
 
 const toEventChat = (chat: DbChat): BotEventChat => ({
   chat_id: chat.id,
-  type: chat.type === "private" ? "direct" : "thread",
+  type: chat.type === "private" ? "user" : "thread",
   title: chat.title ?? undefined,
   space_id: chat.spaceId ?? undefined,
   is_public: chat.publicThread ?? undefined,
@@ -130,7 +130,7 @@ const messageLite = (
   message_id: message.messageId,
   chat_id: message.chatId,
   chat,
-  peer: chat.type === "direct" ? {} : { thread_id: chat.chat_id },
+  peer: chat.type === "user" ? {} : { thread_id: chat.chat_id },
   from_id: message.fromId,
   from: toUser(users.get(message.fromId) ?? message.from),
   date: unixSeconds(message.date),
