@@ -1,6 +1,7 @@
 import AppKit
 import InlineKit
 import InlineMacUI
+import InlineProtocol
 import TextProcessing
 
 protocol ComposeTextViewDelegate: NSTextViewDelegate {
@@ -33,6 +34,11 @@ class ComposeNSTextView: NSTextView {
   private let italicUndoActionName = "Italic"
   private let inlineCodeUndoActionName = "Inline Code"
   private let linkUndoActionName = "Make Link"
+  var smartLinkPeer: InlineKit.Peer?
+  var smartLinkEscapeAvailabilityDidChange: ((Bool) -> Void)?
+  private var smartLinkOccurrence: SmartLinkOccurrence?
+  private var smartLinkResolutionTask: Task<Void, Never>?
+  private var isApplyingSmartLinkChange = false
 
   override func keyDown(with event: NSEvent) {
     let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -146,6 +152,9 @@ class ComposeNSTextView: NSTextView {
   }
 
   override func deleteBackward(_ sender: Any?) {
+    if revertSmartLinkAtCaret() {
+      return
+    }
     guard let replacement = ComposeAutoPairEditing.deletionReplacement(
       in: string,
       selectedRange: selectedRange()
@@ -199,6 +208,21 @@ class ComposeNSTextView: NSTextView {
   override func didChangeText() {
     super.didChangeText()
     stripEmailLinkAttributes()
+    validateSmartLinkOccurrence()
+  }
+
+  override func shouldChangeText(in affectedCharRange: NSRange, replacementString: String?) -> Bool {
+    guard super.shouldChangeText(in: affectedCharRange, replacementString: replacementString) else {
+      return false
+    }
+
+    if !isApplyingSmartLinkChange {
+      updateSmartLinkOccurrence(
+        for: affectedCharRange,
+        replacementLength: (replacementString ?? "").utf16.count
+      )
+    }
+    return true
   }
 
   @discardableResult
@@ -376,12 +400,252 @@ class ComposeNSTextView: NSTextView {
     // Note(@Mo) Important: Temporarily disable rich-text paste entirely. We still rely on AppKit's native
     // plain-text paste pipeline for correct undo/redo, IME behavior, and selection handling, but we do not
     // allow any clipboard-provided styling to enter the compose view while we stabilize edge cases.
+    let smartLinkCandidate = smartLinkPasteCandidate()
+    let beforeRange = clampedRange(selectedRange())
+    let beforeLength = (string as NSString).length
+
     resetTypingAttributesToDefault()
     super.pasteAsPlainText(sender)
     resetTypingAttributesToDefault()
+    if let smartLinkCandidate {
+      beginSmartLinkResolutionIfEligible(
+        url: smartLinkCandidate,
+        replacedRange: beforeRange,
+        previousLength: beforeLength
+      )
+    }
     DispatchQueue.main.async { [weak self] in
       self?.resetTypingAttributesToDefault()
     }
+  }
+
+  private func smartLinkPasteCandidate() -> String? {
+    guard INUserSettings.current.compose.replacePastedLinksWithTitles else { return nil }
+    return Self.linkURLString(from: .general)
+  }
+
+  private func beginSmartLinkResolutionIfEligible(
+    url: String,
+    replacedRange: NSRange,
+    previousLength: Int
+  ) {
+    guard let smartLinkPeer, let textStorage else { return }
+
+    let currentLength = (string as NSString).length
+    let insertedLength = currentLength - (previousLength - replacedRange.length)
+    guard insertedLength > 0 else { return }
+    let insertedRange = NSRange(location: replacedRange.location, length: insertedLength)
+    guard NSMaxRange(insertedRange) <= currentLength
+    else { return }
+    let insertedText = (string as NSString).substring(with: insertedRange)
+    guard ComposeLinkPaste.normalizedURLString(from: insertedText) == url else { return }
+
+    smartLinkResolutionTask?.cancel()
+    let occurrence = SmartLinkOccurrence(
+      id: UUID(),
+      originalURL: insertedText,
+      originalAttributedText: textStorage.attributedSubstring(from: insertedRange),
+      targetURL: url,
+      range: insertedRange,
+      state: .pending,
+      substitutedTitle: nil
+    )
+    setSmartLinkOccurrence(occurrence)
+
+    smartLinkResolutionTask = Task { @MainActor [weak self] in
+      do {
+        let response = try await Api.realtime.send(.resolveURLPreview(peer: smartLinkPeer, url: url))
+        guard !Task.isCancelled,
+              case let .resolveURLPreview(result) = response
+        else { return }
+        self?.applyResolvedSmartLink(result, occurrenceID: occurrence.id)
+      } catch {
+        // Unavailable, excluded, sensitive, unauthorized, and network failures all keep the literal URL.
+        self?.finishPendingSmartLink(occurrenceID: occurrence.id)
+      }
+    }
+  }
+
+  private func applyResolvedSmartLink(
+    _ result: InlineProtocol.ResolveUrlPreviewResult,
+    occurrenceID: UUID
+  ) {
+    guard var occurrence = smartLinkOccurrence,
+          occurrence.id == occurrenceID,
+          occurrence.state == .pending
+    else { return }
+
+    guard result.canSubstitute,
+          NSMaxRange(occurrence.range) <= (string as NSString).length,
+          (string as NSString).substring(with: occurrence.range) == occurrence.originalURL,
+          let textStorage
+    else {
+      finishPendingSmartLink(occurrenceID: occurrenceID)
+      return
+    }
+
+    let title = smartLinkLabel(for: result.urlPreview)
+    guard !title.isEmpty else {
+      finishPendingSmartLink(occurrenceID: occurrenceID)
+      return
+    }
+
+    breakUndoCoalescing()
+    isApplyingSmartLinkChange = true
+    defer { isApplyingSmartLinkChange = false }
+    guard shouldChangeText(in: occurrence.range, replacementString: title) else {
+      finishPendingSmartLink(occurrenceID: occurrenceID)
+      return
+    }
+
+    let previousSelection = selectedRange()
+    let previousRange = occurrence.range
+    let attributedTitle = NSAttributedString(
+      string: title,
+      attributes: defaultTypingAttributes.merging(linkAttributes(urlString: occurrence.targetURL)) { _, new in new }
+    )
+    textStorage.replaceCharacters(in: occurrence.range, with: attributedTitle)
+    occurrence.range.length = (title as NSString).length
+    occurrence.state = .applied
+    occurrence.substitutedTitle = title
+    setSmartLinkOccurrence(occurrence)
+    setSelectedRange(
+      selectionAfterSmartLinkReplacement(
+        previousSelection,
+        replacedRange: previousRange,
+        replacementLength: occurrence.range.length
+      )
+    )
+    resetTypingAttributesToDefault()
+    didChangeText()
+    smartLinkResolutionTask = nil
+    undoManager?.setActionName("Replace Link")
+    breakUndoCoalescing()
+  }
+
+  private func selectionAfterSmartLinkReplacement(
+    _ selection: NSRange,
+    replacedRange: NSRange,
+    replacementLength: Int
+  ) -> NSRange {
+    let delta = replacementLength - replacedRange.length
+    if selection.location >= NSMaxRange(replacedRange) {
+      return NSRange(location: selection.location + delta, length: selection.length)
+    }
+    if NSMaxRange(selection) <= replacedRange.location {
+      return selection
+    }
+    return NSRange(location: replacedRange.location + replacementLength, length: 0)
+  }
+
+  private func updateSmartLinkOccurrence(for changedRange: NSRange, replacementLength: Int) {
+    guard var occurrence = smartLinkOccurrence,
+          occurrence.state == .pending || occurrence.state == .applied
+    else { return }
+
+    let occurrenceEnd = NSMaxRange(occurrence.range)
+    let changedEnd = NSMaxRange(changedRange)
+    if changedEnd <= occurrence.range.location {
+      occurrence.range.location += replacementLength - changedRange.length
+      setSmartLinkOccurrence(occurrence)
+      return
+    }
+    if changedRange.location >= occurrenceEnd {
+      return
+    }
+
+    occurrence.state = .edited
+    setSmartLinkOccurrence(occurrence)
+    smartLinkResolutionTask?.cancel()
+    smartLinkResolutionTask = nil
+  }
+
+  @discardableResult
+  func revertLatestSmartLink() -> Bool {
+    if smartLinkOccurrence?.state == .pending {
+      smartLinkResolutionTask?.cancel()
+      smartLinkResolutionTask = nil
+      smartLinkOccurrence?.state = .reverted
+      smartLinkEscapeAvailabilityDidChange?(false)
+      return true
+    }
+    return restoreAppliedSmartLink()
+  }
+
+  private func revertSmartLinkAtCaret() -> Bool {
+    guard let occurrence = smartLinkOccurrence,
+          occurrence.state == .applied,
+          selectedRange() == NSRange(location: NSMaxRange(occurrence.range), length: 0)
+    else { return false }
+    return restoreAppliedSmartLink()
+  }
+
+  private func restoreAppliedSmartLink() -> Bool {
+    guard var occurrence = smartLinkOccurrence,
+          occurrence.state == .applied,
+          let substitutedTitle = occurrence.substitutedTitle,
+          NSMaxRange(occurrence.range) <= (string as NSString).length,
+          (string as NSString).substring(with: occurrence.range) == substitutedTitle,
+          let textStorage
+    else { return false }
+
+    breakUndoCoalescing()
+    isApplyingSmartLinkChange = true
+    defer { isApplyingSmartLinkChange = false }
+    guard shouldChangeText(in: occurrence.range, replacementString: occurrence.originalURL) else { return false }
+
+    textStorage.replaceCharacters(in: occurrence.range, with: occurrence.originalAttributedText)
+    occurrence.range.length = occurrence.originalAttributedText.length
+    occurrence.state = .reverted
+    setSmartLinkOccurrence(occurrence)
+    setSelectedRange(NSRange(location: NSMaxRange(occurrence.range), length: 0))
+    resetTypingAttributesToDefault()
+    didChangeText()
+    undoManager?.setActionName("Restore Link")
+    breakUndoCoalescing()
+    return true
+  }
+
+  private func setSmartLinkOccurrence(_ occurrence: SmartLinkOccurrence?) {
+    smartLinkOccurrence = occurrence
+    let available = occurrence?.state == .pending || occurrence?.state == .applied
+    smartLinkEscapeAvailabilityDidChange?(available)
+  }
+
+  private func finishPendingSmartLink(occurrenceID: UUID) {
+    guard var occurrence = smartLinkOccurrence,
+          occurrence.id == occurrenceID,
+          occurrence.state == .pending
+    else { return }
+
+    occurrence.state = .reverted
+    setSmartLinkOccurrence(occurrence)
+    smartLinkResolutionTask = nil
+  }
+
+  private func validateSmartLinkOccurrence() {
+    guard !isApplyingSmartLinkChange,
+          var occurrence = smartLinkOccurrence,
+          occurrence.state == .pending || occurrence.state == .applied
+    else { return }
+
+    let expected = occurrence.state == .pending ? occurrence.originalURL : occurrence.substitutedTitle
+    guard let expected,
+          NSMaxRange(occurrence.range) <= (string as NSString).length,
+          (string as NSString).substring(with: occurrence.range) == expected
+    else {
+      occurrence.state = .edited
+      setSmartLinkOccurrence(occurrence)
+      smartLinkResolutionTask?.cancel()
+      smartLinkResolutionTask = nil
+      return
+    }
+  }
+
+  private func smartLinkLabel(for preview: InlineProtocol.UrlPreview) -> String {
+    let title = preview.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    let emoji = preview.iconEmoji.trimmingCharacters(in: .whitespacesAndNewlines)
+    return emoji.isEmpty ? title : "\(emoji) \(title)"
   }
 
   override func menu(for event: NSEvent) -> NSMenu? {
@@ -1124,4 +1388,21 @@ private struct FormattingSnapshot {
   let selectedRange: NSRange
   let typingAttributes: [NSAttributedString.Key: Any]
   let actionName: String
+}
+
+private struct SmartLinkOccurrence {
+  enum State {
+    case pending
+    case applied
+    case edited
+    case reverted
+  }
+
+  let id: UUID
+  let originalURL: String
+  let originalAttributedText: NSAttributedString
+  let targetURL: String
+  var range: NSRange
+  var state: State
+  var substitutedTitle: String?
 }

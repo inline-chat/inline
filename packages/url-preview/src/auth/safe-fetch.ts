@@ -17,6 +17,8 @@ export class ProviderFetchError extends UrlPreviewError {
 export type ProviderJsonFetchOptions = AuthPreviewOptions & {
   allowedHosts: readonly string[]
   headers?: Record<string, string>
+  method?: "GET" | "POST"
+  body?: string
   maxRedirects?: number
 }
 
@@ -64,6 +66,8 @@ export async function fetchProviderJson(input: string, options: ProviderJsonFetc
 
     try {
       return await fetchImpl(targetUrl, {
+        method: fetchOptions.method,
+        body: fetchOptions.body,
         redirect: "manual",
         signal: controller.signal,
         headers: {

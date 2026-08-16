@@ -21,6 +21,14 @@ export { extractPreviewRoutes, routePreviewUrl } from "./router.js"
 export { extractPreviewTargets } from "./auth/index.js"
 export { cleanField as cleanPreviewText, cleanMultilineField as cleanMultilinePreviewText } from "./text.js"
 export {
+  fetchLinearPreview,
+  parseLinearUrl,
+} from "./auth/providers/linear/index.js"
+export type {
+  LinearParsedUrl,
+  LinearPreviewResourceType,
+} from "./auth/providers/linear/index.js"
+export {
   fetchNotionPreview,
   isNotionWebHost,
   parseNotionUrl,

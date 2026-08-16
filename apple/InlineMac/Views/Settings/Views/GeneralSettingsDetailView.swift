@@ -1,7 +1,9 @@
+import InlineKit
 import SwiftUI
 
 struct GeneralSettingsDetailView: View {
   @StateObject private var appSettings = AppSettings.shared
+  @ObservedObject private var composeSettings = INUserSettings.current.compose
 
   var body: some View {
     Form {
@@ -35,6 +37,13 @@ struct GeneralSettingsDetailView: View {
           SettingsRowLabel(
             "Check Spelling While Typing",
             description: "Underline misspelled words while composing messages."
+          )
+        }
+
+        Toggle(isOn: $composeSettings.replacePastedLinksWithTitles) {
+          SettingsRowLabel(
+            "Shorten Supported Links",
+            description: "Turn supported pasted links into compact text links. Press Escape, Undo, or Backspace to restore the URL."
           )
         }
 

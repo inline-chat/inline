@@ -83,6 +83,8 @@ public enum RealtimeErrorPresentation {
       String(localized: "That username is already taken.")
     case .firstNameInvalid:
       String(localized: "Enter a valid first name.")
+    case .urlPreviewUnavailable:
+      String(localized: "This link can’t be previewed.")
     case .unknown, .UNRECOGNIZED:
       statusFallback(statusCode)
     }

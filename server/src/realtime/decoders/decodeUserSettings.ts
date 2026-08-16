@@ -9,7 +9,8 @@ export const decodeUserSettings = (userSettings?: UserSettings): UserSettingsGen
 
   const notificationSettings = userSettings.notificationSettings
   const privacySettings = userSettings.privacySettings
-  if (!notificationSettings && !privacySettings) {
+  const composeSettings = userSettings.composeSettings
+  if (!notificationSettings && !privacySettings && !composeSettings) {
     return undefined
   }
 
@@ -30,6 +31,11 @@ export const decodeUserSettings = (userSettings?: UserSettings): UserSettingsGen
       ? {
           shareTimeZone: privacySettings.shareTimeZone ?? true,
           appearInGlobalSearch: privacySettings.appearInGlobalSearch ?? true,
+        }
+      : undefined,
+    compose: composeSettings
+      ? {
+          replacePastedLinksWithTitles: composeSettings.replacePastedLinksWithTitles ?? false,
         }
       : undefined,
   }

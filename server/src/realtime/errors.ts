@@ -147,6 +147,14 @@ export class RealtimeRpcError extends Error {
       RealtimeRpcError.FirstNameInvalid,
     )
   }
+  public static UrlPreviewUnavailable() {
+    return RealtimeRpcError.create(
+      RpcError_Code.URL_PREVIEW_UNAVAILABLE,
+      "URL preview unavailable",
+      400,
+      RealtimeRpcError.UrlPreviewUnavailable,
+    )
+  }
   public static SpaceAdminRequired() {
     return RealtimeRpcError.create(
       RpcError_Code.SPACE_ADMIN_REQUIRED,

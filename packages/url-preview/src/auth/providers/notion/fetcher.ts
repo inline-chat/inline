@@ -87,6 +87,7 @@ function buildPagePreview(
     providerResourceType: "notion.page",
     title,
     description,
+    iconEmoji: pageIconEmoji(page),
     mediaType: hasFiles ? "document" : "article",
     options,
   })
@@ -164,6 +165,7 @@ function basePreview(
     providerResourceType: NotionPreviewResourceType
     title?: string | null
     description?: string | null
+    iconEmoji?: string | null
     mediaType: "article" | "image" | "video" | "document"
     options: AuthPreviewOptions
   },
@@ -177,9 +179,15 @@ function basePreview(
     siteName: cleanField("Notion", input.options.maxSiteNameLength ?? DEFAULT_SITE_NAME_LENGTH) ?? "Notion",
     title: cleanField(input.title, input.options.maxTitleLength ?? DEFAULT_TITLE_LENGTH) ?? undefined,
     description: cleanField(input.description, input.options.maxDescriptionLength ?? DEFAULT_DESCRIPTION_LENGTH) ?? undefined,
+    iconEmoji: cleanField(input.iconEmoji, 16) ?? undefined,
     mediaType: input.mediaType,
     provider: "notion",
   }
+}
+
+function pageIconEmoji(page: Record<string, unknown>): string | null {
+  const icon = asRecord(page["icon"])
+  return icon && stringValue(icon["type"]) === "emoji" ? stringValue(icon["emoji"]) ?? null : null
 }
 
 function pageTitle(page: Record<string, unknown>): string | null {

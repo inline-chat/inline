@@ -113,6 +113,7 @@ import {
 } from "@in/server/functions/connectors"
 import { searchUsersHandler } from "@in/server/realtime/handlers/users.search"
 import { inviteToInline } from "@in/server/functions/user.inviteToInline"
+import { resolveUrlPreviewHandler } from "@in/server/realtime/handlers/urlPreview.resolve"
 
 const log = new Log("rpc")
 
@@ -795,6 +796,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
         currentSessionId: handlerContext.sessionId,
       })
       return { oneofKind: "inviteToInline", inviteToInline: result }
+    }
+
+    case Method.RESOLVE_URL_PREVIEW: {
+      if (call.input.oneofKind !== "resolveUrlPreview") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await resolveUrlPreviewHandler(call.input.resolveUrlPreview, handlerContext)
+      return { oneofKind: "resolveUrlPreview", resolveUrlPreview: result }
     }
 
     case Method.UPDATE_PUSH_NOTIFICATION_DETAILS: {

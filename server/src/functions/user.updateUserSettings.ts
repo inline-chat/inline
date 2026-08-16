@@ -3,6 +3,7 @@ import { getCachedUserSettings, invalidateUserSettingsCache } from "@in/server/m
 import type { FunctionContext } from "@in/server/functions/_types"
 import type { UserSettingsGeneral, UserSettingsGeneralInput } from "@in/server/db/models/userSettings/types"
 import {
+  defaultComposeSettings,
   defaultNotificationSettings,
   defaultPrivacySettings,
   UserSettingsGeneralSchema,
@@ -31,6 +32,10 @@ function normalizedGeneral(current: UserSettingsGeneral | null, input: UserSetti
       privacy: {
         ...(current?.privacy ?? defaultPrivacySettings),
         ...input.privacy,
+      },
+      compose: {
+        ...(current?.compose ?? defaultComposeSettings),
+        ...input.compose,
       },
     }),
   )

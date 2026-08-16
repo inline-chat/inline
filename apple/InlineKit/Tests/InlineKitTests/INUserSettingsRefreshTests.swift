@@ -45,6 +45,20 @@ struct INUserSettingsRefreshTests {
     }
     #expect(input.userSettings.hasNotificationSettings)
     #expect(!input.userSettings.hasPrivacySettings)
+    #expect(!input.userSettings.hasComposeSettings)
+  }
+
+  @Test("saves compose edits through the shared user-settings lane")
+  func savesComposeEdits() async throws {
+    let harness = try makeHarness(controlledSaves: true)
+    defer { harness.removeUserDefaults() }
+
+    harness.settings.compose.replacePastedLinksWithTitles = true
+
+    await harness.saver.waitForCalls(1)
+    let savedValues = await harness.saver.savedValues
+    #expect(savedValues.last?.replacePastedLinksWithTitles == true)
+    await harness.saver.succeed()
   }
 
   @Test("coalesces concurrent refreshes for the same account")

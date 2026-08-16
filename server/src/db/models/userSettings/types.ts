@@ -19,6 +19,10 @@ export const defaultPrivacySettings = {
   appearInGlobalSearch: true,
 } as const
 
+export const defaultComposeSettings = {
+  replacePastedLinksWithTitles: false,
+} as const
+
 export const UserSettingsGeneralSchema = z.object({
   /** Default notifications for all of your chats */
   notifications: z
@@ -41,6 +45,15 @@ export const UserSettingsGeneralSchema = z.object({
     })
     .optional()
     .default(defaultPrivacySettings),
+  compose: z
+    .object({
+      replacePastedLinksWithTitles: z
+        .boolean()
+        .optional()
+        .default(defaultComposeSettings.replacePastedLinksWithTitles),
+    })
+    .optional()
+    .default(defaultComposeSettings),
 })
 
 export type UserSettingsGeneralInput = z.input<typeof UserSettingsGeneralSchema>

@@ -5828,6 +5828,10 @@ export interface ResolveUrlPreviewResult {
      * @generated from protobuf field: UrlPreview url_preview = 1;
      */
     urlPreview?: UrlPreview;
+    /**
+     * @generated from protobuf field: bool can_substitute = 2;
+     */
+    canSubstitute: boolean;
 }
 /**
  * @generated from protobuf message UpdateDialogNotificationSettingsInput
@@ -25490,11 +25494,13 @@ export const ResolveUrlPreviewInput = new ResolveUrlPreviewInput$Type();
 class ResolveUrlPreviewResult$Type extends MessageType<ResolveUrlPreviewResult> {
     constructor() {
         super("ResolveUrlPreviewResult", [
-            { no: 1, name: "url_preview", kind: "message", T: () => UrlPreview }
+            { no: 1, name: "url_preview", kind: "message", T: () => UrlPreview },
+            { no: 2, name: "can_substitute", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<ResolveUrlPreviewResult>): ResolveUrlPreviewResult {
         const message = globalThis.Object.create((this.messagePrototype!));
+        message.canSubstitute = false;
         if (value !== undefined)
             reflectionMergePartial<ResolveUrlPreviewResult>(this, message, value);
         return message;
@@ -25506,6 +25512,9 @@ class ResolveUrlPreviewResult$Type extends MessageType<ResolveUrlPreviewResult> 
             switch (fieldNo) {
                 case /* UrlPreview url_preview */ 1:
                     message.urlPreview = UrlPreview.internalBinaryRead(reader, reader.uint32(), options, message.urlPreview);
+                    break;
+                case /* bool can_substitute */ 2:
+                    message.canSubstitute = reader.bool();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -25522,6 +25531,9 @@ class ResolveUrlPreviewResult$Type extends MessageType<ResolveUrlPreviewResult> 
         /* UrlPreview url_preview = 1; */
         if (message.urlPreview)
             UrlPreview.internalBinaryWrite(message.urlPreview, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* bool can_substitute = 2; */
+        if (message.canSubstitute !== false)
+            writer.tag(2, WireType.Varint).bool(message.canSubstitute);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

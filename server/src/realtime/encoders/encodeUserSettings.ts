@@ -1,5 +1,6 @@
 import type { UserSettings, NotificationSettings } from "@inline-chat/protocol/core"
 import {
+  defaultComposeSettings,
   defaultPrivacySettings,
   type UserSettingsGeneral,
 } from "@in/server/db/models/userSettings/types"
@@ -27,6 +28,10 @@ export const encodeUserSettings = ({ general }: { general?: UserSettingsGeneral 
       shareTimeZone: general?.privacy.shareTimeZone ?? defaultPrivacySettings.shareTimeZone,
       appearInGlobalSearch:
         general?.privacy.appearInGlobalSearch ?? defaultPrivacySettings.appearInGlobalSearch,
+    },
+    composeSettings: {
+      replacePastedLinksWithTitles:
+        general?.compose.replacePastedLinksWithTitles ?? defaultComposeSettings.replacePastedLinksWithTitles,
     },
   }
 }

@@ -1,4 +1,4 @@
-export type PreviewProvider = "generic" | "loom" | "youtube" | "notion" | "x" | (string & {})
+export type PreviewProvider = "generic" | "linear" | "loom" | "youtube" | "notion" | "x" | (string & {})
 export type PreviewMediaType = "article" | "image" | "video" | "document" | "embed"
 
 /** Source media detected by the URL preview fetch pipeline. */
@@ -129,6 +129,9 @@ export type UrlPreviewResult = {
 
   /** Author, channel, account, or publisher avatar URL when known. */
   authorPhotoUrl?: string
+
+  /** Native emoji used by the destination as its page icon when known. */
+  iconEmoji?: string
 
   /** Typed primary media source for the preview. */
   media?: PreviewMedia

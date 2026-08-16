@@ -34,6 +34,16 @@ describe("notion authenticated preview provider", () => {
       normalizedUrl: "https://app.notion.com/p/example/Example-Design-System-11111111111141118111111111111111",
     })
 
+    const copiedPage = parseNotionUrl(
+      "https://app.notion.com/p/example/Example-Project-44444444444444448444444444444444?source=copy_link",
+    )
+    expect(copiedPage).toMatchObject({
+      provider: "notion",
+      resourceType: "unknown",
+      resourceId: "44444444-4444-4444-8444-444444444444",
+      normalizedUrl: "https://app.notion.com/p/example/Example-Project-44444444444444448444444444444444",
+    })
+
     const futureHostPage = parseNotionUrl(
       "https://future.notion.com/p/example/Example-Design-System-11111111111141118111111111111111?source=copy_link",
     )
@@ -157,6 +167,7 @@ describe("notion authenticated preview provider", () => {
       return new Response(
         JSON.stringify({
           object: "page",
+          icon: { type: "emoji", emoji: "🚀" },
           properties: {
             Name: {
               type: "title",
@@ -183,6 +194,7 @@ describe("notion authenticated preview provider", () => {
       providerResourceType: "notion.page",
       title: "Q3 planning",
       description: "Planning notes and launch scope.",
+      iconEmoji: "🚀",
       mediaType: "document",
     })
     expect(preview?.description).not.toContain("Files")

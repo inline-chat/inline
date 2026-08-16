@@ -385,6 +385,10 @@ class LegacyComposeAppKit: NSView {
     self.dialog = dialog
 
     super.init(frame: .zero)
+    textEditor.textView.smartLinkPeer = peerId
+    textEditor.textView.smartLinkEscapeAvailabilityDidChange = { [weak self] available in
+      self?.setSmartLinkEscapeHandlerEnabled(available)
+    }
     draftAttachmentObserverCancel = drafts2.observeAttachmentResults(peer: peerId) { [weak self] result in
       self?.handleDraftAttachmentResult(result)
     }
@@ -1935,6 +1939,21 @@ class LegacyComposeAppKit: NSView {
 
   private var keyMonitorUnsubscribe: (() -> Void)?
   private var keyMonitorPasteUnsubscribe: (() -> Void)?
+  private var smartLinkEscapeKeyUnsubscribe: (() -> Void)?
+
+  private func setSmartLinkEscapeHandlerEnabled(_ enabled: Bool) {
+    smartLinkEscapeKeyUnsubscribe?()
+    smartLinkEscapeKeyUnsubscribe = nil
+    guard enabled else { return }
+
+    smartLinkEscapeKeyUnsubscribe = dependencies.keyMonitor?.addHandler(
+      for: .escape,
+      key: "compose_smart_link_\(peerId)",
+      handler: { [weak self] _ in
+        self?.textEditor.textView.revertLatestSmartLink()
+      }
+    )
+  }
 
   private func setupKeyDownHandler() {
     keyMonitorUnsubscribe = dependencies.keyMonitor?.addHandler(
@@ -2007,6 +2026,8 @@ class LegacyComposeAppKit: NSView {
     keyMonitorUnsubscribe = nil
     keyMonitorPasteUnsubscribe?()
     keyMonitorPasteUnsubscribe = nil
+    smartLinkEscapeKeyUnsubscribe?()
+    smartLinkEscapeKeyUnsubscribe = nil
     removeVoiceKeyHandlers()
 
     // Clean up mention resources

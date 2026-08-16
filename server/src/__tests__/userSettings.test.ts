@@ -37,6 +37,32 @@ describe("User Settings RPC", () => {
     expect(result.userSettings?.notificationSettings).toBeUndefined()
     expect(result.userSettings?.privacySettings?.shareTimeZone).toBe(true)
     expect(result.userSettings?.privacySettings?.appearInGlobalSearch).toBe(true)
+    expect(result.userSettings?.composeSettings?.replacePastedLinksWithTitles).toBe(false)
+  })
+
+  test("updates compose settings without changing other settings", async () => {
+    const context = {
+      userId,
+      sessionId: 1,
+      connectionId: "test",
+      sendRaw: () => {},
+      sendRpcReply: () => {},
+    }
+
+    await updateUserSettingsHandler(
+      {
+        userSettings: {
+          composeSettings: {
+            replacePastedLinksWithTitles: true,
+          },
+        },
+      },
+      context,
+    )
+
+    const result = await getUserSettingsHandler({}, context)
+    expect(result.userSettings?.composeSettings?.replacePastedLinksWithTitles).toBe(true)
+    expect(result.userSettings?.privacySettings?.shareTimeZone).toBe(true)
   })
 
   test("updates privacy settings and their user-row projections", async () => {

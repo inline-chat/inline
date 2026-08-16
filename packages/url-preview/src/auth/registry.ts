@@ -1,3 +1,4 @@
+import { linearProvider } from "./providers/linear/index.js"
 import { notionProvider } from "./providers/notion/index.js"
 import type {
   AuthenticatedPreviewProvider,
@@ -8,6 +9,7 @@ import type {
 } from "./types.js"
 
 export const authenticatedPreviewProviders: readonly AuthenticatedPreviewProvider[] = [
+  linearProvider as AuthenticatedPreviewProvider,
   notionProvider as AuthenticatedPreviewProvider,
 ]
 

@@ -1352,7 +1352,8 @@ public actor RealtimeV2 {
          .spaceOwnerRequired,
          .usernameInvalid,
          .usernameTaken,
-         .firstNameInvalid:
+         .firstNameInvalid,
+         .urlPreviewUnavailable:
       return true
     case .unknown,
          .unauthenticated,

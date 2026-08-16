@@ -11,6 +11,7 @@ import {
   normalizePreviewUrl,
   resolvePreviewLayout,
   type PreviewRoute,
+  type AuthenticatedPreviewResult,
   type UrlPreviewResult,
 } from "@inline-chat/url-preview"
 import {
@@ -80,6 +81,19 @@ type ProcessUrlPreviewInput = {
 type InsertPreviewOutput = {
   attachmentId: number
   update: UpdateSeqAndDate
+}
+
+export type ResolvedUrlPreview = {
+  metadata: UrlPreviewResult & Pick<AuthenticatedPreviewResult, "providerResourceType">
+  photoId: number | null
+  authorPhotoId: number | null
+}
+
+export type ResolveUrlPreviewInput = {
+  url: string
+  chatId: number
+  spaceId?: number | null
+  currentUserId: number
 }
 
 type PreviewMediaKind = NonNullable<UrlPreviewResult["media"]>["kind"] | "video"
@@ -173,6 +187,80 @@ export function getPreviewUrlsFromMessage(text: string, entities?: MessageEntiti
 
 export function getPreviewRoutesFromMessage(text: string, entities?: MessageEntities | null): PreviewRoute[] {
   return extractPreviewRoutes(text, collectEntityUrls(text, entities), { limit: urlPreviewCandidatePolicy.maxUrls })
+}
+
+/**
+ * Resolves generic preview metadata without creating a message attachment.
+ * Authenticated provider results intentionally bypass the shared URL cache so
+ * private metadata cannot cross user or chat boundaries.
+ */
+export async function resolveUrlPreview(input: ResolveUrlPreviewInput): Promise<ResolvedUrlPreview | null> {
+  const previewRoute = extractPreviewRoutes(input.url, [], { limit: 1 })[0]
+  if (!previewRoute || (await isSpaceUrlPreviewExcluded({ spaceId: input.spaceId, url: previewRouteUrl(previewRoute) }))) {
+    return null
+  }
+
+  const releaseSlot = await acquireStandalonePreviewSlot(previewRoute)
+  if (!releaseSlot) {
+    return null
+  }
+
+  try {
+    if (previewRoute.kind === "authenticated") {
+      const authCandidates = await resolvePreviewAuthCandidates({
+        provider: previewRoute.parsedUrl.provider,
+        currentUserId: input.currentUserId,
+        chatId: input.chatId,
+      })
+      for (const auth of authCandidates) {
+        const metadata = await fetchAuthenticatedUrlPreview(previewRoute.parsedUrl, auth, {
+          maxDescriptionLength,
+          maxTitleLength,
+          maxSiteNameLength,
+        })
+        if (metadata) {
+          return hydrateResolvedPreview(metadata, input.currentUserId)
+        }
+      }
+      return null
+    }
+
+    const cached = await getFreshPreviewCache(previewRoute.url).catch(() => null)
+    if (cached && !shouldRefetchCachedPreview(cached, previewRoute.url)) {
+      void touchPreviewCache(cached.id).catch(() => undefined)
+      return resolvedPreviewFromCache(cached, previewRoute.url)
+    }
+
+    const metadata = await fetchUrlPreview(previewRoute.url, {
+      maxDescriptionLength,
+      maxTitleLength,
+      maxSiteNameLength,
+    }).catch(() => null)
+    if (!metadata) {
+      return cached ? resolvedPreviewFromCache(cached, previewRoute.url) : null
+    }
+
+    const resolved = await hydrateResolvedPreview(metadata, input.currentUserId)
+    if (cached && shouldKeepCachedAuthorImageFallback(cached, resolved.photoId, resolved.authorPhotoId)) {
+      return resolvedPreviewFromCache(cached, previewRoute.url)
+    }
+
+    void upsertPreviewCache({
+      metadata: resolved.metadata,
+      photoId: resolved.photoId,
+      authorPhotoId: resolved.authorPhotoId,
+    }).catch(() => undefined)
+    return withResolvedLayout(resolved, previewRoute.url)
+  } catch (error) {
+    log.warn("Failed to resolve URL preview", {
+      error,
+      host: previewLogHost(previewRouteUrl(previewRoute)),
+      chatId: input.chatId,
+    })
+    return null
+  } finally {
+    releaseSlot()
+  }
 }
 
 export async function processUrlPreviews(
@@ -468,8 +556,136 @@ async function processAuthenticatedUrlPreview(
   await pushInsertedPreviewAttachment(input, inserted)
 }
 
+async function hydrateResolvedPreview(
+  metadata: UrlPreviewResult & Pick<AuthenticatedPreviewResult, "providerResourceType">,
+  currentUserId: number,
+): Promise<ResolvedUrlPreview> {
+  const resolvedImage = await resolvePreviewImage(metadata, currentUserId)
+  const authorPhotoId = metadata.authorPhotoUrl
+    ? await getOrSavePreviewImage(metadata.authorPhotoUrl, currentUserId)
+    : null
+
+  return {
+    metadata: resolvedImage.metadata,
+    photoId: resolvedImage.photoId,
+    authorPhotoId,
+  }
+}
+
+function resolvedPreviewFromCache(cache: DbUrlPreviewCache, requestedUrl: string): ResolvedUrlPreview {
+  const source = previewSourceFromCache(cache)
+  const url = decryptCacheValue(source.url, source.urlIv, source.urlTag) ?? requestedUrl
+  const imageUrl = decryptCacheValue(cache.imageUrl, cache.imageUrlIv, cache.imageUrlTag)
+  const externalUrl = decryptCacheValue(source.externalUrl, source.externalUrlIv, source.externalUrlTag)
+  const embedUrl = decryptCacheValue(source.embedUrl, source.embedUrlIv, source.embedUrlTag)
+  const media = cachedPreviewMedia(source, imageUrl, externalUrl, embedUrl)
+  const metadata: UrlPreviewResult = {
+    url,
+    finalUrl: url,
+    siteName: source.siteName ?? undefined,
+    title: decryptCacheValue(source.title, source.titleIv, source.titleTag) ?? undefined,
+    description: decryptCacheValue(source.description, source.descriptionIv, source.descriptionTag) ?? undefined,
+    imageUrl: imageUrl ?? undefined,
+    duration: source.duration ?? undefined,
+    mediaType: source.mediaType ?? undefined,
+    provider: source.provider,
+    author: decryptCacheValue(source.author, source.authorIv, source.authorTag) ?? undefined,
+    media,
+    layout:
+      source.hasLargeMedia == null && source.showLargeMedia == null
+        ? undefined
+        : {
+            hasLargeMedia: source.hasLargeMedia ?? false,
+            showLargeMedia: source.showLargeMedia ?? false,
+          },
+  }
+
+  return withResolvedLayout(
+    {
+      metadata,
+      photoId: source.photoId,
+      authorPhotoId: source.authorPhotoId,
+    },
+    requestedUrl,
+  )
+}
+
+function cachedPreviewMedia(
+  source: PreviewAttachmentSource,
+  imageUrl: string | null,
+  externalUrl: string | null,
+  embedUrl: string | null,
+): UrlPreviewResult["media"] {
+  switch (source.mediaKind) {
+    case "photo":
+      return imageUrl ? { kind: "photo", url: imageUrl } : undefined
+    case "external_video":
+      return externalUrl
+        ? {
+            kind: "external_video",
+            url: externalUrl,
+            mimeType: source.externalMimeType ?? undefined,
+            width: source.externalWidth ?? undefined,
+            height: source.externalHeight ?? undefined,
+            duration: source.externalDuration ?? undefined,
+          }
+        : undefined
+    case "embed":
+      return embedUrl
+        ? {
+            kind: "embed",
+            url: embedUrl,
+            embedType: source.embedType ?? undefined,
+            width: source.embedWidth ?? undefined,
+            height: source.embedHeight ?? undefined,
+            duration: source.embedDuration ?? undefined,
+          }
+        : undefined
+    default:
+      return undefined
+  }
+}
+
+function withResolvedLayout(resolved: ResolvedUrlPreview, requestedUrl: string): ResolvedUrlPreview {
+  const mediaKind = resolved.metadata.media?.kind ?? (resolved.photoId ? "photo" : null)
+  const layout = resolvePreviewLayout({
+    url: requestedUrl,
+    finalUrl: resolved.metadata.finalUrl,
+    provider: resolved.metadata.provider,
+    mediaType: resolved.metadata.mediaType,
+    mediaKind,
+    hasCardContent: resolved.metadata.description != null,
+    hasPhoto: resolved.photoId != null,
+    hasLargeMedia: resolved.metadata.layout?.hasLargeMedia,
+    showLargeMedia: resolved.metadata.layout?.showLargeMedia,
+    urlCount: 1,
+  })
+
+  return {
+    ...resolved,
+    metadata: {
+      ...resolved.metadata,
+      layout:
+        layout.hasLargeMedia == null && layout.showLargeMedia == null
+          ? undefined
+          : {
+              hasLargeMedia: layout.hasLargeMedia ?? false,
+              showLargeMedia: layout.showLargeMedia ?? false,
+            },
+    },
+  }
+}
+
 function previewRouteUrl(route: PreviewRoute): string {
   return route.kind === "general" ? route.url : route.parsedUrl.normalizedUrl
+}
+
+function previewLogHost(url: string): string | undefined {
+  try {
+    return new URL(url).hostname.toLowerCase()
+  } catch {
+    return undefined
+  }
 }
 
 function collectEntityUrls(text: string, entities?: MessageEntities | null): string[] {
@@ -1057,6 +1273,28 @@ async function acquirePreviewSlot(input: ProcessUrlPreviewInput): Promise<(() =>
       url: input.previewRoute ? previewRouteUrl(input.previewRoute) : input.previewUrl,
       messageId: input.message.messageId,
       chatId: input.chatId,
+      activePreviewJobs,
+      queuedPreviewJobs: queuedPreviewJobs.length,
+    })
+    return null
+  }
+
+  await new Promise<void>((resolve) => {
+    queuedPreviewJobs.push(resolve)
+  })
+
+  return releasePreviewSlot
+}
+
+async function acquireStandalonePreviewSlot(previewRoute: PreviewRoute): Promise<(() => void) | null> {
+  if (activePreviewJobs < maxConcurrentPreviewJobs) {
+    activePreviewJobs += 1
+    return releasePreviewSlot
+  }
+
+  if (queuedPreviewJobs.length >= maxQueuedPreviewJobs) {
+    log.warn("Dropping URL preview resolution because the preview queue is full", {
+      host: previewLogHost(previewRouteUrl(previewRoute)),
       activePreviewJobs,
       queuedPreviewJobs: queuedPreviewJobs.length,
     })
