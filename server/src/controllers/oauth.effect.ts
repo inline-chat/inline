@@ -32,6 +32,10 @@ import {
   UnixSeconds,
   WireNonNegativeInteger,
 } from "../core/schema/scalars"
+import {
+  LoginSessionResult,
+  identitySuccess,
+} from "../modules/auth/identitySchemas.effect"
 
 const OptionalString = Schema.optionalKey(Schema.String)
 
@@ -99,6 +103,31 @@ const OAuthVerificationPayload = Schema.Struct({
   code: OptionalString,
 }).annotate({
   identifier: "OAuthEmailVerificationForm",
+})
+
+const ProviderContinuationPayload = Schema.Struct({
+  attempt_id: OptionalString,
+  continuation: OptionalString,
+  invite_code: OptionalString,
+  email: OptionalString,
+  code: OptionalString,
+}).annotate({ identifier: "ProviderAuthContinuationForm" })
+
+const ProviderAppleCallbackPayload = Schema.Struct({
+  state: OptionalString,
+  code: OptionalString,
+  id_token: OptionalString,
+  user: OptionalString,
+  error: OptionalString,
+}).annotate({ identifier: "ProviderAppleCallbackForm" })
+
+const ProviderRedeemPayload = Schema.Struct({
+  ticket: OptionalString,
+  code_verifier: OptionalString,
+}).annotate({ identifier: "ProviderAuthRedeemInput" })
+
+const ProviderRedeemSuccess = identitySuccess(LoginSessionResult).annotate({
+  identifier: "ProviderAuthRedeemSuccess",
 })
 
 const OAuthConsentPayload = Schema.Struct({
@@ -238,6 +267,7 @@ const oauthHtmlErrors = [
   htmlAt(429),
   htmlAt(500),
   htmlAt(502),
+  htmlAt(503),
 ] as const
 
 const cacheControlHeader = {
@@ -306,6 +336,66 @@ const oauthOperationDocs = ({
   })
 
 const OAuthEndpointGroup = HttpApiGroup.make("oauth")
+  .add(
+    HttpApiEndpoint.get("providerStart", "/v1/auth/provider/start", {
+      query: {
+        provider: OptionalString,
+        purpose: OptionalString,
+        callback_scheme: OptionalString,
+        code_challenge: OptionalString,
+        client_type: OptionalString,
+        device_id: OptionalString,
+        client_version: OptionalString,
+        os_version: OptionalString,
+        device_name: OptionalString,
+        timezone: OptionalString,
+      },
+      success: OAuthRedirect,
+      error: oauthHtmlErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.get("providerCallbackGoogle", "/v1/auth/provider/callback/google", {
+      query: { state: OptionalString, code: OptionalString, error: OptionalString },
+      success: [OAuthHtml, OAuthRedirect],
+      error: oauthHtmlErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("providerCallbackApple", "/v1/auth/provider/callback/apple", {
+      payload: oauthPayloads(ProviderAppleCallbackPayload),
+      success: [OAuthHtml, OAuthRedirect],
+      error: oauthHtmlErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("providerContinueInvite", "/v1/auth/provider/continue-invite", {
+      payload: oauthPayloads(ProviderContinuationPayload),
+      success: [OAuthHtml, OAuthRedirect],
+      error: oauthHtmlErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("providerSendEmailCode", "/v1/auth/provider/send-email-code", {
+      payload: oauthPayloads(ProviderContinuationPayload),
+      success: OAuthHtml,
+      error: oauthHtmlErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("providerVerifyEmailCode", "/v1/auth/provider/verify-email-code", {
+      payload: oauthPayloads(ProviderContinuationPayload),
+      success: [OAuthHtml, OAuthRedirect],
+      error: oauthHtmlErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("providerRedeem", "/v1/auth/provider/redeem", {
+      payload: oauthPayloads(ProviderRedeemPayload),
+      success: ProviderRedeemSuccess,
+      error: oauthEndpointErrors,
+    }),
+  )
   .add(
     HttpApiEndpoint.get(
       "oauthMetadata",
@@ -665,6 +755,7 @@ const oauthHtmlErrorVariants = [
   htmlVariant(429, ["retry-after"]),
   htmlVariant(500),
   htmlVariant(502),
+  htmlVariant(503),
 ] as const
 
 const oauthResponseContracts: Readonly<
@@ -673,6 +764,41 @@ const oauthResponseContracts: Readonly<
     ReadonlyArray<OAuthResponseVariant>
   >
 > = {
+  providerStart: [
+    { status: 302, mediaType: "none", requiredHeaders: ["location", "cache-control"] },
+    ...oauthHtmlErrorVariants,
+  ],
+  providerCallbackGoogle: [
+    htmlVariant(200),
+    { status: 302, mediaType: "none", requiredHeaders: ["location", "cache-control"] },
+    ...oauthHtmlErrorVariants,
+  ],
+  providerCallbackApple: [
+    htmlVariant(200),
+    { status: 302, mediaType: "none", requiredHeaders: ["location", "cache-control"] },
+    badRequestVariant,
+    ...oauthHtmlErrorVariants,
+  ],
+  providerContinueInvite: [
+    { status: 302, mediaType: "none", requiredHeaders: ["location", "cache-control"] },
+    badRequestVariant,
+    ...oauthHtmlErrorVariants,
+  ],
+  providerSendEmailCode: [
+    htmlVariant(200, ["cache-control"]),
+    badRequestVariant,
+    ...oauthHtmlErrorVariants,
+  ],
+  providerVerifyEmailCode: [
+    { status: 302, mediaType: "none", requiredHeaders: ["location", "cache-control"] },
+    badRequestVariant,
+    ...oauthHtmlErrorVariants,
+  ],
+  providerRedeem: [
+    jsonVariant(200, ProviderRedeemSuccess),
+    badRequestVariant,
+    ...oauthErrorVariants,
+  ],
   metadata: [
     jsonVariant(200, OAuthMetadata),
   ],

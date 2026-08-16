@@ -7,6 +7,12 @@ import {
   handleAuthorizeVerifyEmailCode,
   handleAuthorizeVerifySmsCode,
   handleIntrospect,
+  handleProviderCallback,
+  handleProviderContinueInvite,
+  handleProviderRedeem,
+  handleProviderSendEmailCode,
+  handleProviderStart,
+  handleProviderVerifyEmailCode,
   handleRegister,
   handleRevoke,
   handleToken,
@@ -45,6 +51,27 @@ const legacyOAuthClientIp = (
 }
 
 export const oauth = new Elysia({ name: "oauth" })
+  .get("/v1/auth/provider/start", ({ request }) =>
+    executeLegacyOAuth(() => handleProviderStart(request)),
+  )
+  .get("/v1/auth/provider/callback/google", ({ request }) =>
+    executeLegacyOAuth(() => handleProviderCallback("google", request)),
+  )
+  .post("/v1/auth/provider/callback/apple", ({ request, body }) =>
+    executeLegacyOAuth(() => handleProviderCallback("apple", request, body)),
+  )
+  .post("/v1/auth/provider/continue-invite", ({ body }) =>
+    executeLegacyOAuth(() => handleProviderContinueInvite(body)),
+  )
+  .post("/v1/auth/provider/send-email-code", ({ request, body }) =>
+    executeLegacyOAuth(() => handleProviderSendEmailCode(body, legacyOAuthClientIp(request))),
+  )
+  .post("/v1/auth/provider/verify-email-code", ({ request, body }) =>
+    executeLegacyOAuth(() => handleProviderVerifyEmailCode(body, legacyOAuthClientIp(request))),
+  )
+  .post("/v1/auth/provider/redeem", ({ body }) =>
+    executeLegacyOAuth(() => handleProviderRedeem(body)),
+  )
   .get("/.well-known/oauth-authorization-server", () =>
     executeLegacyOAuth(() =>
       handleAuthorizationServerMetadata(),

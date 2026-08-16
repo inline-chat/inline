@@ -46,6 +46,13 @@ const makeOAuthHandlers = (
   token: async () => unused("token"),
   revoke: async () => unused("revoke"),
   introspect: async () => unused("introspect"),
+  providerStart: async () => unused("providerStart"),
+  providerCallbackGoogle: async () => unused("providerCallbackGoogle"),
+  providerCallbackApple: async () => unused("providerCallbackApple"),
+  providerContinueInvite: async () => unused("providerContinueInvite"),
+  providerSendEmailCode: async () => unused("providerSendEmailCode"),
+  providerVerifyEmailCode: async () => unused("providerVerifyEmailCode"),
+  providerRedeem: async () => unused("providerRedeem"),
   ...overrides,
 })
 

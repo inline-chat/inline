@@ -653,6 +653,13 @@ describe("Effect OAuth routes", () => {
           return response()
         },
         introspect: async () => response(),
+        providerStart: async () => response(),
+        providerCallbackGoogle: async () => response(),
+        providerCallbackApple: async () => response(),
+        providerContinueInvite: async () => response(),
+        providerSendEmailCode: async () => response(),
+        providerVerifyEmailCode: async () => response(),
+        providerRedeem: async () => response(),
       }
       const kernel = makeKernel({
         oauth: makeOAuthHttpService(handlers),
@@ -723,6 +730,13 @@ describe("Effect OAuth routes", () => {
       "/register",
       "/revoke",
       "/token",
+      "/v1/auth/provider/callback/apple",
+      "/v1/auth/provider/callback/google",
+      "/v1/auth/provider/continue-invite",
+      "/v1/auth/provider/redeem",
+      "/v1/auth/provider/send-email-code",
+      "/v1/auth/provider/start",
+      "/v1/auth/provider/verify-email-code",
       "/v1/checkInviteCode",
       "/v1/logout",
       "/v1/sendEmailCode",

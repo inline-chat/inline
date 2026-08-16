@@ -16,6 +16,13 @@ export type OAuthHttpOperation =
   | "token"
   | "revoke"
   | "introspect"
+  | "providerStart"
+  | "providerCallbackGoogle"
+  | "providerCallbackApple"
+  | "providerContinueInvite"
+  | "providerSendEmailCode"
+  | "providerVerifyEmailCode"
+  | "providerRedeem"
 
 export interface OAuthHttpInput {
   readonly request: Request

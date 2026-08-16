@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "count": 195,
+  "count": 202,
   "methodCounts": {
     "ALL": 3,
-    "GET": 85,
+    "GET": 87,
     "OPTIONS": 18,
-    "POST": 88,
+    "POST": 93,
     "WS": 1
   },
-  "sha256": "fe313106d408c77f2614111be0bc73f1154ce2db9124146f94a15304f5079de2",
+  "sha256": "2e9c99f8735ca9a8a9e1c64e3f942f22a83d01b01937050c5f9111bf4c0b1a65",
   "routes": [
     {
       "method": "ALL",
@@ -332,6 +332,14 @@
     },
     {
       "method": "GET",
+      "path": "/v1/auth/provider/callback/google"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/auth/provider/start"
+    },
+    {
+      "method": "GET",
       "path": "/v1/checkInviteCode"
     },
     {
@@ -601,6 +609,26 @@
     {
       "method": "POST",
       "path": "/v1/addReaction"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/provider/callback/apple"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/provider/continue-invite"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/provider/redeem"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/provider/send-email-code"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/provider/verify-email-code"
     },
     {
       "method": "POST",

@@ -93,11 +93,14 @@ describe("OAuth controller", () => {
     expect(authorizeRes.status).toBe(200)
 
     const cookie = extractSetCookieValue(authorizeRes.headers.get("set-cookie"))
+    expect(authorizeRes.headers.get("set-cookie")).toContain("Path=/;")
     const authorizeHtml = await authorizeRes.text()
     const csrf = extractHidden(authorizeHtml, "csrf")
 
     expect(authorizeHtml).toContain("Use the email address or phone number linked to your Inline account.")
     expect(authorizeHtml).toContain('action="/oauth/authorize/send-sms-code"')
+    expect(authorizeHtml).toContain("provider=google&amp;purpose=mcp_oauth")
+    expect(authorizeHtml).toContain("provider=apple&amp;purpose=mcp_oauth")
     expect(authorizeHtml).toContain('class="brand"')
     expect(authorizeHtml).not.toContain("<script")
     expect(authorizeHtml).not.toContain("https://")

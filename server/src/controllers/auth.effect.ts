@@ -51,6 +51,13 @@ export const AuthApiGroup = HttpApiGroup.make("auth").add(
   IdentityEndpoints.getLogout,
   IdentityEndpoints.getLogoutWithToken,
   IdentityEndpoints.postLogout,
+  OAuthEndpoints.providerStart,
+  OAuthEndpoints.providerCallbackGoogle,
+  OAuthEndpoints.providerCallbackApple,
+  OAuthEndpoints.providerContinueInvite,
+  OAuthEndpoints.providerSendEmailCode,
+  OAuthEndpoints.providerVerifyEmailCode,
+  OAuthEndpoints.providerRedeem,
   OAuthEndpoints.oauthMetadata,
   OAuthEndpoints.oauthRegister,
   OAuthEndpoints.oauthRegisterAlias,
@@ -193,6 +200,27 @@ export const makeAuthRouteGroup = () => {
               undefined,
             ),
           ),
+        )
+        .handleRaw("providerStart", ({ request }) =>
+          execute(executeOAuth("providerStart", request)),
+        )
+        .handleRaw("providerCallbackGoogle", ({ request }) =>
+          execute(executeOAuth("providerCallbackGoogle", request)),
+        )
+        .handleRaw("providerCallbackApple", ({ request }) =>
+          execute(executeOAuth("providerCallbackApple", request)),
+        )
+        .handleRaw("providerContinueInvite", ({ request }) =>
+          execute(executeOAuth("providerContinueInvite", request)),
+        )
+        .handleRaw("providerSendEmailCode", ({ request }) =>
+          execute(executeOAuth("providerSendEmailCode", request)),
+        )
+        .handleRaw("providerVerifyEmailCode", ({ request }) =>
+          execute(executeOAuth("providerVerifyEmailCode", request)),
+        )
+        .handleRaw("providerRedeem", ({ request }) =>
+          execute(executeOAuth("providerRedeem", request)),
         )
         .handleRaw("oauthMetadata", ({ request }) =>
           execute(

@@ -53,6 +53,13 @@ export interface OAuthHttpHandlers {
     request: Request,
     body: unknown,
   ) => Promise<Response>
+  readonly providerStart: (request: Request) => Promise<Response>
+  readonly providerCallbackGoogle: (request: Request) => Promise<Response>
+  readonly providerCallbackApple: (request: Request, body: unknown) => Promise<Response>
+  readonly providerContinueInvite: (body: unknown) => Promise<Response>
+  readonly providerSendEmailCode: (body: unknown, clientIp?: string) => Promise<Response>
+  readonly providerVerifyEmailCode: (body: unknown, clientIp?: string) => Promise<Response>
+  readonly providerRedeem: (body: unknown) => Promise<Response>
 }
 
 const badRequest = (): Response =>
@@ -76,6 +83,12 @@ const execute = async (
   }
   if (operation === "authorize") {
     return handlers.authorize(request)
+  }
+  if (operation === "providerStart") {
+    return handlers.providerStart(request)
+  }
+  if (operation === "providerCallbackGoogle") {
+    return handlers.providerCallbackGoogle(request)
   }
 
   let body: unknown
@@ -111,6 +124,16 @@ const execute = async (
       return handlers.revoke(body)
     case "introspect":
       return handlers.introspect(request, body)
+    case "providerCallbackApple":
+      return handlers.providerCallbackApple(request, body)
+    case "providerContinueInvite":
+      return handlers.providerContinueInvite(body)
+    case "providerSendEmailCode":
+      return handlers.providerSendEmailCode(body, clientIp)
+    case "providerVerifyEmailCode":
+      return handlers.providerVerifyEmailCode(body, clientIp)
+    case "providerRedeem":
+      return handlers.providerRedeem(body)
   }
 }
 

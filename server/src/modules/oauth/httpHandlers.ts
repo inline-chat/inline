@@ -44,6 +44,22 @@ import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { OAuthHandlerFailure } from "./httpHandlerFailure"
 import parsePhoneNumber from "libphonenumber-js"
+import { db } from "@in/server/db"
+import { users, type DbProviderAuthAttempt } from "@in/server/db/schema"
+import { eq } from "drizzle-orm"
+import { ProviderAuthModel } from "@in/server/db/models/providerAuth"
+import {
+  attachProviderAfterEmailVerification,
+  beginProviderAuth,
+  completeProviderCallback,
+  continueProviderWithInvite,
+  issueAppTicket,
+  redeemProviderTicket,
+  requireProviderEmailAttempt,
+  supportedAppCallbackScheme,
+  type ProviderLoginResult,
+} from "@in/server/modules/auth/provider/service"
+import { isValidAppCodeChallenge } from "@in/server/modules/auth/provider/appHandoff"
 
 const config = oauthConfig()
 // TODO(effect-cutover): remove this oracle-only limiter with legacyServer.ts
@@ -51,7 +67,9 @@ const config = oauthConfig()
 // scoped limiter through its Effect Layer.
 const legacyRateLimiter = new InMemoryRateLimiter()
 
-const AUTH_REQUEST_COOKIE_PATH = "/oauth"
+// The same opaque authorization-request cookie starts email/phone consent under /oauth
+// and provider sign-in under /v1/auth/provider. It contains no session or provider token.
+const AUTH_REQUEST_COOKIE_PATH = "/"
 
 function authRequestCookieName(): string {
   return `${config.cookiePrefix}_ar`
@@ -100,6 +118,13 @@ function renderPage(title: string, body: string): string {
     button { width: 100%; min-height: 46px; margin-top: 20px; padding: 11px 16px; border-radius: 11px; border: 1px solid #171717; background: #171717; color: #fff; font: inherit; font-size: 14px; font-weight: 650; cursor: pointer; transition: background 120ms ease, transform 120ms ease; }
     button:hover { background: #30302d; }
     button:active { transform: translateY(1px); }
+    .provider-methods { display: grid; gap: 9px; margin-bottom: 20px; }
+    .provider-button { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 46px; padding: 11px 16px; border: 1px solid #cececa; border-radius: 11px; background: #fff; color: #171717; font-size: 14px; font-weight: 650; text-decoration: none; }
+    .provider-button:hover { background: #f5f5f2; }
+    .provider-mark { display: inline-grid; width: 18px; height: 18px; place-items: center; font-size: 18px; line-height: 1; text-align: center; }
+    .provider-mark svg { display: block; width: 18px; height: 18px; }
+    .divider { display: flex; align-items: center; gap: 10px; margin: 18px 0; color: #8a8a84; font-size: 12px; }
+    .divider::before, .divider::after { content: ""; height: 1px; flex: 1; background: #e5e5e1; }
     .muted { color: #777771; font-size: 12px; line-height: 1.45; margin-top: 11px; }
     .error { padding: 12px 14px; border: 1px solid #edc9c5; border-radius: 10px; background: #fff6f5; color: #9d2d23; font-size: 14px; line-height: 1.45; }
     .method-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; margin-bottom: 20px; border-radius: 11px; background: #f0f0ed; }
@@ -126,6 +151,9 @@ function renderPage(title: string, body: string): string {
       input[type="email"]:focus, input[type="tel"]:focus, input[name="code"]:focus { border-color: #d0d0ca; box-shadow: 0 0 0 3px rgba(240, 240, 235, 0.1); }
       button { border-color: #f1f1ed; background: #f1f1ed; color: #181916; }
       button:hover { background: #dcdcd7; }
+      .provider-button { border-color: #464742; background: #22231f; color: #f3f3f0; }
+      .provider-button:hover { background: #30312d; }
+      .divider::before, .divider::after { background: #363732; }
       .method-tabs { background: #252622; }
       .method-tabs label { color: #a1a29b; }
       .method-tabs label:has(input:checked) { background: #3a3b36; color: #f3f3f0; box-shadow: none; }
@@ -302,10 +330,10 @@ async function getSpacesForToken(token: string): Promise<Array<{ id: number; nam
   return spaces.spaces.map((space) => ({ id: space.id, name: space.name }))
 }
 
-async function completeAuthorizeSignIn(
+export async function completeAuthorizeSignIn(
   authRequest: OauthAuthRequest,
   verifyResult: unknown,
-  method: "email" | "phone",
+  method: "email" | "phone" | "google" | "apple",
 ): Promise<Response> {
   const token = String((verifyResult as Record<string, unknown>)["token"] ?? "")
   const userId = Number((verifyResult as Record<string, unknown>)["userId"] ?? 0)
@@ -499,6 +527,11 @@ export async function handleAuthorizeGet(url: URL): Promise<Response> {
       "Sign in to Inline",
       `
 <p class="intro">${signInDescription}</p>
+<div class="provider-methods">
+  <a class="provider-button" href="/v1/auth/provider/start?provider=google&amp;purpose=mcp_oauth"><span class="provider-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path fill="#4285F4" d="M21.6 12.23c0-.71-.06-1.4-.18-2.07H12v3.91h5.38a4.6 4.6 0 0 1-2 3.02v2.54h3.24c1.9-1.75 2.98-4.33 2.98-7.4z"/><path fill="#34A853" d="M12 22c2.7 0 4.97-.9 6.62-2.43l-3.24-2.54c-.9.6-2.05.96-3.38.96-2.61 0-4.82-1.76-5.61-4.13H3.04v2.62A10 10 0 0 0 12 22z"/><path fill="#FBBC05" d="M6.39 13.86A6 6 0 0 1 6.08 12c0-.65.11-1.28.31-1.86V7.52H3.04A10 10 0 0 0 2 12c0 1.61.38 3.13 1.04 4.48l3.35-2.62z"/><path fill="#EA4335" d="M12 6.01c1.47 0 2.79.51 3.83 1.5l2.87-2.88A9.64 9.64 0 0 0 12 2a10 10 0 0 0-8.96 5.52l3.35 2.62C7.18 7.77 9.39 6.01 12 6.01z"/></svg></span><span>Continue with Google</span></a>
+  <a class="provider-button" href="/v1/auth/provider/start?provider=apple&amp;purpose=mcp_oauth"><span class="provider-mark" aria-hidden="true"></span><span>Continue with Apple</span></a>
+</div>
+<div class="divider">or</div>
 <div class="method-tabs" role="radiogroup" aria-label="Sign-in method">
   <label><input id="method-email" type="radio" name="sign-in-method" checked />Email</label>
   <label><input id="method-phone" type="radio" name="sign-in-method" />Phone</label>
@@ -1212,6 +1245,215 @@ export async function handleIntrospect(req: Request, body: unknown): Promise<Res
     allow_home_threads: result.grant.allowHomeThreads,
     inline_token: inlineToken,
   })
+}
+
+export async function handleProviderStart(request: Request): Promise<Response> {
+  void ProviderAuthModel.cleanupExpired().catch((cause) => {
+    Log.shared.warn("Provider auth cleanup failed", { cause })
+  })
+  const url = new URL(request.url)
+  const provider = url.searchParams.get("provider")
+  const purpose = url.searchParams.get("purpose")
+  if ((provider !== "google" && provider !== "apple") || (purpose !== "app" && purpose !== "mcp_oauth")) {
+    return html(400, renderPage("Sign-in error", `<div class="error">Invalid sign-in request.</div>`))
+  }
+
+  try {
+    if (purpose === "mcp_oauth") {
+      const authRequest = await getAuthRequestFromCookie(request)
+      if (!authRequest) {
+        return html(400, renderPage("Sign-in expired", `<div class="error">Start the connected-app sign-in again.</div>`))
+      }
+      const providerUrl = await beginProviderAuth({
+        provider,
+        purpose,
+        oauthAuthRequestId: authRequest.id,
+        client: { clientType: "web", deviceId: authRequest.deviceId, deviceName: "OAuth" },
+      })
+      return new Response(null, { status: 302, headers: { location: providerUrl.toString(), "cache-control": "no-store" } })
+    }
+
+    const callbackScheme = url.searchParams.get("callback_scheme")
+    if (!supportedAppCallbackScheme(callbackScheme)) {
+      return html(400, renderPage("Sign-in error", `<div class="error">This Inline app callback is not allowed.</div>`))
+    }
+    const clientType = url.searchParams.get("client_type")
+    if (clientType !== "ios" && clientType !== "macos") {
+      return html(400, renderPage("Sign-in error", `<div class="error">This client is not supported.</div>`))
+    }
+    const appCodeChallenge = url.searchParams.get("code_challenge")
+    if (!isValidAppCodeChallenge(appCodeChallenge)) {
+      return html(400, renderPage("Sign-in error", `<div class="error">This sign-in request is not securely bound to the app.</div>`))
+    }
+    const providerUrl = await beginProviderAuth({
+      provider,
+      purpose,
+      appCallbackScheme: callbackScheme,
+      appCodeChallenge,
+      client: {
+        clientType,
+        deviceId: url.searchParams.get("device_id") || undefined,
+        clientVersion: url.searchParams.get("client_version") || undefined,
+        osVersion: url.searchParams.get("os_version") || undefined,
+        deviceName: url.searchParams.get("device_name") || undefined,
+        timezone: url.searchParams.get("timezone") || undefined,
+      },
+    })
+    return new Response(null, { status: 302, headers: { location: providerUrl.toString(), "cache-control": "no-store" } })
+  } catch (cause) {
+    Log.shared.error("Failed to begin provider sign-in", { provider, purpose, cause })
+    return html(503, renderPage("Sign-in unavailable", `<div class="error">This sign-in method is not available right now.</div>`))
+  }
+}
+
+export async function handleProviderCallback(
+  provider: "google" | "apple",
+  request: Request,
+  body?: unknown,
+): Promise<Response> {
+  const url = new URL(request.url)
+  const state = provider === "google" ? url.searchParams.get("state") ?? "" : readParam(body, "state")
+  const code = provider === "google" ? url.searchParams.get("code") ?? "" : readParam(body, "code")
+  const error = provider === "google" ? url.searchParams.get("error") : readParam(body, "error")
+  if (error) {
+    return html(400, renderPage("Sign-in cancelled", `<div class="error">The provider did not complete sign-in.</div>`))
+  }
+  if (!state || !code) {
+    return html(400, renderPage("Sign-in error", `<div class="error">The provider response is incomplete.</div>`))
+  }
+
+  try {
+    const outcome = await completeProviderCallback({
+      provider,
+      state,
+      code,
+      idTokenFromAuthorization: provider === "apple" ? readParam(body, "id_token") : undefined,
+      appleUserJson: provider === "apple" ? readParam(body, "user") : undefined,
+    })
+    if (outcome.kind === "login") {
+      return finishProviderBrowserLogin(outcome.attempt, outcome.result)
+    }
+    if (outcome.kind === "invite") {
+      return html(200, renderPage("Enter your invite code", `
+<p class="intro">Your provider account is verified. Enter an Inline invite code to create your account.</p>
+<form method="post" action="/v1/auth/provider/continue-invite">
+  <input type="hidden" name="attempt_id" value="${escapeHtml(outcome.attempt.id)}" />
+  <input type="hidden" name="continuation" value="${escapeHtml(outcome.continuation)}" />
+  <label>Invite code<input name="invite_code" autocomplete="one-time-code" required autofocus /></label>
+  <button type="submit">Continue</button>
+</form>`), { "cache-control": "no-store" })
+    }
+    return html(200, renderPage("Confirm your Inline email", `
+<p class="intro">Google cannot confirm continued ownership of this address. Use an existing Inline email to attach this Google account.</p>
+<form method="post" action="/v1/auth/provider/send-email-code">
+  <input type="hidden" name="attempt_id" value="${escapeHtml(outcome.attempt.id)}" />
+  <input type="hidden" name="continuation" value="${escapeHtml(outcome.continuation)}" />
+  <label>Existing Inline email<input name="email" type="email" autocomplete="email" required autofocus /></label>
+  <button type="submit">Send verification code</button>
+</form>`), { "cache-control": "no-store" })
+  } catch (cause) {
+    Log.shared.error("Provider callback failed", { provider, cause })
+    return html(400, renderPage("Sign-in failed", `<div class="error">We could not verify this provider sign-in. Please try again.</div>`))
+  }
+}
+
+export async function handleProviderContinueInvite(body: unknown): Promise<Response> {
+  try {
+    const outcome = await continueProviderWithInvite({
+      attemptId: readParam(body, "attempt_id"),
+      continuation: readParam(body, "continuation"),
+      inviteCode: readParam(body, "invite_code"),
+    })
+    return finishProviderBrowserLogin(outcome.attempt, outcome.result)
+  } catch (cause) {
+    const description = cause instanceof InlineError ? cause.description : "The invite code could not be accepted."
+    return html(400, renderPage("Invite code error", `<div class="error">${escapeHtml(description ?? "Invalid invite code.")}</div>`))
+  }
+}
+
+export async function handleProviderSendEmailCode(body: unknown, clientIp?: string): Promise<Response> {
+  const attemptId = readParam(body, "attempt_id")
+  const continuation = readParam(body, "continuation")
+  const email = normalizeEmail(readParam(body, "email"))
+  try {
+    const attempt = await requireProviderEmailAttempt(attemptId, continuation)
+    const [existing] = await db.select().from(users).where(eq(users.email, email)).limit(1)
+    if (!existing || existing.deleted === true) {
+      return html(400, renderPage("Email not found", `<div class="error">Use an existing Inline account email.</div>`))
+    }
+    const sent = await sendEmailCodeHandler({
+      email,
+      deviceId: attempt.client.deviceId,
+      clientType: attempt.client.clientType,
+      clientVersion: attempt.client.clientVersion,
+      osVersion: attempt.client.osVersion,
+      deviceName: attempt.client.deviceName,
+    }, { ip: clientIp, source: "/v1/auth/provider/send-email-code" })
+    if (!sent.challengeToken) throw new Error("Email challenge is unavailable")
+    await ProviderAuthModel.update(attempt.id, { confirmationEmail: email, challengeToken: sent.challengeToken })
+    return html(200, renderPage("Check your email", `
+<p class="intro">Enter the verification code sent to <strong>${escapeHtml(email)}</strong>.</p>
+<form method="post" action="/v1/auth/provider/verify-email-code">
+  <input type="hidden" name="attempt_id" value="${escapeHtml(attempt.id)}" />
+  <input type="hidden" name="continuation" value="${escapeHtml(continuation)}" />
+  <label>Verification code<input name="code" inputmode="numeric" autocomplete="one-time-code" minlength="6" required autofocus /></label>
+  <button type="submit">Verify and continue</button>
+</form>`), { "cache-control": "no-store" })
+  } catch (cause) {
+    Log.shared.error("Provider email challenge failed", { cause })
+    return html(400, renderPage("Email verification failed", `<div class="error">We could not send that verification code.</div>`))
+  }
+}
+
+export async function handleProviderVerifyEmailCode(body: unknown, clientIp?: string): Promise<Response> {
+  const attemptId = readParam(body, "attempt_id")
+  const continuation = readParam(body, "continuation")
+  try {
+    const attempt = await requireProviderEmailAttempt(attemptId, continuation)
+    if (!attempt.confirmationEmail || !attempt.challengeToken) throw new Error("Email challenge is missing")
+    const result = await verifyEmailCodeHandler({
+      email: attempt.confirmationEmail,
+      code: readParam(body, "code"),
+      challengeToken: attempt.challengeToken,
+      deviceId: attempt.client.deviceId,
+      clientType: attempt.client.clientType,
+      clientVersion: attempt.client.clientVersion,
+      osVersion: attempt.client.osVersion,
+      deviceName: attempt.client.deviceName,
+      timezone: attempt.client.timezone,
+    }, { ip: clientIp, source: "/v1/auth/provider/verify-email-code" }) as ProviderLoginResult
+    const completed = await attachProviderAfterEmailVerification({ attempt, result })
+    return finishProviderBrowserLogin(completed, result)
+  } catch (cause) {
+    Log.shared.error("Provider email verification failed", { cause })
+    return html(401, renderPage("Verification failed", `<div class="error">That verification code is invalid or expired.</div>`))
+  }
+}
+
+export async function handleProviderRedeem(body: unknown): Promise<Response> {
+  const ticket = readParam(body, "ticket")
+  const codeVerifier = readParam(body, "code_verifier")
+  if (!ticket || !codeVerifier) {
+    return json(400, { error: "invalid_ticket", error_description: "Ticket and verifier are required." })
+  }
+  const result = await redeemProviderTicket(ticket, codeVerifier)
+  if (!result) return json(401, { error: "invalid_ticket", error_description: "Ticket is invalid or expired." })
+  return json(200, { ok: true, result })
+}
+
+async function finishProviderBrowserLogin(
+  attempt: DbProviderAuthAttempt,
+  result: ProviderLoginResult,
+): Promise<Response> {
+  if (attempt.purpose === "app") {
+    const ticket = await issueAppTicket(attempt)
+    const location = `${attempt.appCallbackScheme}://auth/provider?ticket=${encodeURIComponent(ticket)}`
+    return new Response(null, { status: 302, headers: { location, "cache-control": "no-store" } })
+  }
+  if (!attempt.oauthAuthRequestId) throw new Error("Connected-app authorization request is missing")
+  const authRequest = await OauthModel.getAuthRequest(attempt.oauthAuthRequestId, Date.now())
+  if (!authRequest) throw new Error("Connected-app authorization request expired")
+  return completeAuthorizeSignIn(authRequest, result, attempt.provider)
 }
 
 export function handleAuthorizationServerMetadata(): Response {
