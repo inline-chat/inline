@@ -27,6 +27,8 @@ struct OnboardingView: View {
               PhoneNumber(prevPhoneNumber: prevPhoneNumber)
             case let .phoneNumberCode(phoneNumber, inviteCode):
               PhoneNumberCode(phoneNumber: phoneNumber, inviteCode: inviteCode)
+            case let .provider(provider):
+              ProviderSignInProgress(provider: provider)
           }
         }
     }

@@ -10,6 +10,7 @@ enum OnboardingStep: Identifiable, Hashable {
   case main
   case phoneNumber(prevPhoneNumber: String? = nil)
   case phoneNumberCode(phoneNumber: String, inviteCode: String? = nil)
+  case provider(ProviderSignInProvider)
 
   var id: String {
     switch self {
@@ -22,6 +23,7 @@ enum OnboardingStep: Identifiable, Hashable {
       case .main: "main"
       case let .phoneNumber(prevPhoneNumber): "phoneNumber-\(prevPhoneNumber ?? "")"
       case let .phoneNumberCode(phoneNumber, inviteCode): "phoneNumberCode-\(phoneNumber)-\(inviteCode ?? "")"
+      case let .provider(provider): "provider-\(provider.rawValue)"
     }
   }
 }

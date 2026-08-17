@@ -42,6 +42,8 @@ struct Onboarding: View {
         OnboardingWelcome().transition(routeTransition)
       case .getStarted:
         OnboardingGetStarted().transition(routeTransition)
+      case let .provider(provider):
+        OnboardingProviderSignIn(provider: provider).transition(routeTransition)
       case .enterPhone:
         OnboardingEnterPhone().transition(routeTransition)
       case .enterEmail:
@@ -115,7 +117,7 @@ struct Onboarding: View {
   }
 }
 
-enum OnboardingRoute {
+enum OnboardingRoute: Hashable {
   case welcome
   case getStarted
   case enterPhone
@@ -125,6 +127,7 @@ enum OnboardingRoute {
   case profile
   case username
   case appearance
+  case provider(ProviderSignInProvider)
 }
 
 @MainActor

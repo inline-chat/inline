@@ -1,14 +1,9 @@
 import InlineKit
 import SwiftUI
-import UIKit
 
 struct Welcome: View {
   @State private var isVisible = false
   @EnvironmentObject var nav: OnboardingNavigation
-  @EnvironmentObject private var mainViewRouter: MainViewRouter
-  @ObservedObject private var providerSignIn = ProviderSignInCoordinator.shared
-  @State private var startingProvider: ProviderSignInProvider?
-  @State private var providerError: String?
 
   var animation: Animation {
     .easeOut(duration: 0.25)
@@ -65,18 +60,6 @@ struct Welcome: View {
         .offset(y: isVisible ? 0 : 20)
         .animation(animation.delay(0.35), value: isVisible)
 
-        if providerSignIn.isRedeeming || startingProvider != nil {
-          ProgressView()
-            .padding(.top, 4)
-        }
-
-        if let providerError = providerError ?? providerSignIn.errorMessage {
-          Text(providerError)
-            .font(.footnote)
-            .foregroundStyle(.red)
-            .multilineTextAlignment(.center)
-            .padding(.top, 4)
-        }
       }
       // .padding(.horizontal, OnboardingUtils.shared.hPadding)
       .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
@@ -90,22 +73,13 @@ struct Welcome: View {
     .onAppear {
       isVisible = true
     }
-    .onChange(of: providerSignIn.completion?.id) { _, _ in
-      guard let completion = providerSignIn.completion else { return }
-      if completion.pendingSetup {
-        nav.push(.profile)
-      } else {
-        nav.reset()
-        mainViewRouter.setRoute(route: .main)
-      }
-    }
     .navigationBarBackButtonHidden()
   }
 
   @ViewBuilder
   private func providerButton(_ provider: ProviderSignInProvider) -> some View {
     Button {
-      start(provider)
+      nav.push(.provider(provider))
     } label: {
       HStack(spacing: 10) {
         if provider == .google {
@@ -127,28 +101,9 @@ struct Welcome: View {
     }
     .buttonStyle(SimpleWhiteButtonStyle())
     .frame(maxWidth: .infinity)
-    .disabled(startingProvider != nil || providerSignIn.isRedeeming)
     .opacity(isVisible ? 1 : 0)
     .offset(y: isVisible ? 0 : 20)
     .animation(animation.delay(provider == .google ? 0.3 : 0.33), value: isVisible)
-  }
-
-  private func start(_ provider: ProviderSignInProvider) {
-    providerError = nil
-    providerSignIn.clearError()
-    startingProvider = provider
-    Task {
-      do {
-        let url = try await providerSignIn.startURL(for: provider)
-        guard await UIApplication.shared.open(url) else {
-          throw APIError.invalidURL
-        }
-      } catch {
-        providerSignIn.cancelPendingAttempt()
-        providerError = error.localizedDescription
-      }
-      startingProvider = nil
-    }
   }
 
   struct Footer: View {

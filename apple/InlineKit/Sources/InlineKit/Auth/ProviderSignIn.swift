@@ -4,7 +4,7 @@ import CryptoKit
 import Foundation
 import Logger
 
-public enum ProviderSignInProvider: String, Sendable {
+public enum ProviderSignInProvider: String, Hashable, Sendable {
   case google
   case apple
 }
@@ -29,6 +29,8 @@ public final class ProviderSignInCoordinator: ObservableObject {
   private init() {}
 
   public func startURL(for provider: ProviderSignInProvider) async throws -> URL {
+    completion = nil
+    errorMessage = nil
     let codeVerifier = Self.randomCodeVerifier()
     pendingCodeVerifier = codeVerifier
     let sessionInfo = SessionInfo.get()
@@ -59,15 +61,22 @@ public final class ProviderSignInCoordinator: ObservableObject {
 
   public func handleCallback(_ url: URL) async {
     guard canHandle(url), !isRedeeming else { return }
-    guard let ticket = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-      .queryItems?.first(where: { $0.name == "ticket" })?.value,
+    let queryItems = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+    if let callbackError = queryItems?.first(where: { $0.name == "error" })?.value {
+      pendingCodeVerifier = nil
+      errorMessage = callbackError == "cancelled"
+        ? String(localized: "Sign-in was cancelled. No changes were made.")
+        : String(localized: "Inline could not finish signing you in. Please try again.")
+      return
+    }
+    guard let ticket = queryItems?.first(where: { $0.name == "ticket" })?.value,
       !ticket.isEmpty
     else {
-      errorMessage = String(localized: "Provider sign-in did not return a valid ticket.")
+      errorMessage = String(localized: "Sign-in could not finish. Return to Inline and try again.")
       return
     }
     guard let codeVerifier = pendingCodeVerifier else {
-      errorMessage = String(localized: "This provider sign-in was not started by this app.")
+      errorMessage = String(localized: "This sign-in is no longer active. Please try again.")
       return
     }
     pendingCodeVerifier = nil
@@ -100,8 +109,14 @@ public final class ProviderSignInCoordinator: ObservableObject {
       )
     } catch {
       log.error("Failed to redeem provider sign-in", error: error)
-      errorMessage = error.localizedDescription
+      errorMessage = Self.userFacingMessage(for: error)
     }
+  }
+
+  public func recordStartFailure(_ error: Error) {
+    log.error("Failed to start provider sign-in", error: error)
+    pendingCodeVerifier = nil
+    errorMessage = Self.userFacingMessage(for: error)
   }
 
   public func clearError() {
@@ -110,6 +125,17 @@ public final class ProviderSignInCoordinator: ObservableObject {
 
   public func cancelPendingAttempt() {
     pendingCodeVerifier = nil
+  }
+
+  private static func userFacingMessage(for error: Error) -> String {
+    switch error {
+      case APIError.rateLimited:
+        String(localized: "Too many sign-in attempts. Wait a moment and try again.")
+      case APIError.networkError:
+        String(localized: "Inline could not connect. Check your connection and try again.")
+      default:
+        String(localized: "Inline could not finish signing you in. Please try again.")
+    }
   }
 
   private static func randomCodeVerifier() -> String {
