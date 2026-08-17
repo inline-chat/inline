@@ -385,6 +385,15 @@ struct SidebarView: View {
       ))
     } else {
       rows.append(.sectionHeader(.content, isExpanded: contentExpanded))
+      if settings.sidebarAsInbox,
+         isArchiveVisible == false,
+         openChatPlacement == .top {
+        rows.append(SidebarCollectionRow(
+          id: .newThread,
+          kind: .newThread,
+          height: chatRowHeight
+        ))
+      }
     }
     if contentExpanded, isAllChatsMode == false {
       if isArchiveVisible, shouldShowEmptyState {
@@ -398,7 +407,8 @@ struct SidebarView: View {
       }
     }
 
-    if settings.sidebarAsInbox {
+    if settings.sidebarAsInbox,
+       isArchiveVisible || openChatPlacement == .bottom {
       rows.append(SidebarCollectionRow(
         id: .newThread,
         kind: .newThread,
@@ -672,6 +682,10 @@ struct SidebarView: View {
         chatRows(for: visiblePinnedItems, lane: .pinned)
       }
 
+      if openChatPlacement == .top, isArchiveVisible == false {
+        newThreadRow
+      }
+
       if normalItems.isEmpty == false {
         chatRows(for: visibleNormalSourceItems, lane: .normal, showsTopSeparator: pinnedItems.isEmpty == false)
       }
@@ -680,7 +694,9 @@ struct SidebarView: View {
     }
 
     if settings.sidebarAsInbox {
-      newThreadRow
+      if openChatPlacement == .bottom || isArchiveVisible {
+        newThreadRow
+      }
     } else if shouldShowEmptyState {
       emptyStateRow
     } else if !isArchiveVisible, visibleItems.isEmpty == false {
@@ -1096,7 +1112,16 @@ struct SidebarView: View {
   }
 
   private var visibleNormalSourceItems: [SidebarViewModel.Item] {
-    visibleNormalItems + visibleTemporaryItems
+    switch openChatPlacement {
+    case .top:
+      visibleTemporaryItems + visibleNormalItems
+    case .bottom:
+      visibleNormalItems + visibleTemporaryItems
+    }
+  }
+
+  private var openChatPlacement: DialogOpenPlacement {
+    .defaultValue
   }
 
   private var sidebarOrderedItems: [SidebarViewModel.Item] {

@@ -27,12 +27,13 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
     peerId: Peer,
     open: Bool,
     order: String? = nil,
+    placement: DialogOpenPlacement = .defaultValue,
     requiresChatCreated: Bool = false
   ) {
     context = Context(
       peerId: peerId,
       open: open,
-      order: order ?? Self.initialOrder(open: open),
+      order: order ?? Self.initialOrder(open: open, placement: placement),
       intentId: UUID().uuidString,
       requiresChatCreated: requiresChatCreated
     )
@@ -226,12 +227,24 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
     }
   }
 
-  private static func initialOrder(open: Bool) -> String? {
+  private static func initialOrder(
+    open: Bool,
+    placement: DialogOpenPlacement
+  ) -> String? {
     guard open else { return nil }
 
     return (try? AppDatabase.shared.reader.read { db in
-      try Dialog.nextSidebarOrder(db)
-    }) ?? FractionalIndex.after(nil)
+      try Dialog.sidebarOrder(db, placement: placement)
+    }) ?? fallbackOrder(placement: placement)
+  }
+
+  private static func fallbackOrder(placement: DialogOpenPlacement) -> String {
+    switch placement {
+    case .top:
+      FractionalIndex.before(nil)
+    case .bottom:
+      FractionalIndex.after(nil)
+    }
   }
 }
 
@@ -240,12 +253,14 @@ public extension Transaction2 where Self == UpdateDialogOpenTransaction {
     peerId: Peer,
     open: Bool,
     order: String? = nil,
+    placement: DialogOpenPlacement = .defaultValue,
     requiresChatCreated: Bool = false
   ) -> UpdateDialogOpenTransaction {
     UpdateDialogOpenTransaction(
       peerId: peerId,
       open: open,
       order: order,
+      placement: placement,
       requiresChatCreated: requiresChatCreated
     )
   }

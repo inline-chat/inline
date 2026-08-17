@@ -20,7 +20,11 @@ import { TPeerInfo } from "@in/server/api-types"
 import { ModelError } from "@in/server/db/models/_errors"
 import type { InputPeer } from "@inline-chat/protocol/core"
 import { Log } from "@in/server/utils/log"
-import { dialogOpenDefaultsForChat, nextDialogOrder } from "@in/server/modules/dialogOpen"
+import {
+  defaultDialogOpenPlacement,
+  dialogOpenDefaultsForChat,
+  dialogOrderForPlacement,
+} from "@in/server/modules/dialogOpen"
 
 const log = new Log("chats")
 
@@ -88,7 +92,10 @@ async function createUserChatAndDialog(input: {
 
     if (!dialog) {
       const openDefaults = dialogOpenDefaultsForChat(chat)
-      const order = openDefaults.open === true ? await nextDialogOrder(tx, input.currentUserId) : undefined
+      const order =
+        openDefaults.open === true
+          ? await dialogOrderForPlacement(tx, input.currentUserId, defaultDialogOpenPlacement)
+          : undefined
       ;[dialog] = await tx
         .insert(dialogs)
         .values({

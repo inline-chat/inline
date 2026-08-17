@@ -2,8 +2,13 @@ import { db } from "@in/server/db"
 import { UsersModel } from "@in/server/db/models/users"
 import type { Transaction } from "@in/server/db/types"
 import { chats, dialogs, type DbChat, type DbDialog, type DbNewDialog } from "@in/server/db/schema"
-import { and, desc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm"
 import { FractionalIndex } from "@in/server/modules/fractionalIndex"
+
+export type DialogOpenPlacement = "top" | "bottom"
+
+// Product default. Keep aligned with DialogOpenPlacement.defaultValue in InlineKit.
+export const defaultDialogOpenPlacement: DialogOpenPlacement = "top"
 
 type ChatForDialogOpen = Pick<
   DbChat,
@@ -55,7 +60,10 @@ export function dialogOpenFieldsForOpen(
     return { open: true }
   }
 
-  return { open: true, order: order ?? dialog?.order ?? FractionalIndex.after(null) }
+  return {
+    open: true,
+    order: order ?? dialog?.order ?? dialogOrderAtPlacement(null, defaultDialogOpenPlacement),
+  }
 }
 
 export async function nextDialogOrder(
@@ -63,19 +71,44 @@ export async function nextDialogOrder(
   userId: number,
   lane: "sidebar" | "pinned" = "sidebar",
 ): Promise<string> {
+  return dialogOrderForPlacement(tx, userId, "bottom", lane)
+}
+
+export async function dialogOrderForPlacement(
+  tx: Transaction,
+  userId: number,
+  placement: DialogOpenPlacement,
+  lane: "sidebar" | "pinned" = "sidebar",
+  preferredOrder?: string | null,
+): Promise<string> {
   const column = lane === "pinned" ? dialogs.pinnedOrder : dialogs.order
   const laneFilter =
     lane === "pinned"
       ? eq(dialogs.pinned, true)
       : and(eq(dialogs.open, true), or(isNull(dialogs.pinned), eq(dialogs.pinned, false)))
-  const [lastDialog] = await tx
+  const [edgeDialog] = await tx
     .select({ order: column })
     .from(dialogs)
     .where(and(eq(dialogs.userId, userId), isNotNull(column), laneFilter))
-    .orderBy(desc(column))
+    .orderBy(placement === "top" ? asc(column) : desc(column))
     .limit(1)
 
-  return FractionalIndex.after(lastDialog?.order ?? null)
+  return dialogOrderAtPlacement(edgeDialog?.order, placement, preferredOrder)
+}
+
+export function dialogOrderAtPlacement(
+  edgeOrder: string | null | undefined,
+  placement: DialogOpenPlacement,
+  preferredOrder?: string | null,
+): string {
+  const preferredOrderIsAtEdge =
+    preferredOrder != null &&
+    (edgeOrder == null || (placement === "top" ? preferredOrder < edgeOrder : preferredOrder > edgeOrder))
+  if (preferredOrderIsAtEdge) {
+    return preferredOrder
+  }
+
+  return placement === "top" ? FractionalIndex.before(edgeOrder) : FractionalIndex.after(edgeOrder)
 }
 
 export async function openPrimarySpaceChatForUser(input: {
@@ -127,6 +160,7 @@ export async function setDialogOpenForUsers(input: {
   userIds: number[]
   open: boolean
   order?: string | null
+  openPlacementByUserId?: ReadonlyMap<number, DialogOpenPlacement>
   showInChatList?: boolean
 }): Promise<{ dialogs: DbDialog[]; changedDialogs: DbDialog[] }> {
   const userIds = await UsersModel.getActiveUserIds(uniqueUserIds(input.userIds))
@@ -155,10 +189,11 @@ export async function setDialogOpenForUsers(input: {
       const missingUserIds = userIds.filter((userId) => !existingUserIds.has(userId))
 
       for (const dialog of dialogsToOpen) {
+        const placement = input.openPlacementByUserId?.get(dialog.userId) ?? defaultDialogOpenPlacement
         const order =
           dialog.open === true && dialog.order
             ? undefined
-            : await orderForUser(tx, dialog.userId, userIds.length, input.order)
+            : await orderForUser(tx, dialog.userId, userIds.length, input.order, placement)
 
         await tx
           .update(dialogs)
@@ -175,12 +210,16 @@ export async function setDialogOpenForUsers(input: {
         const rows: DbNewDialog[] = []
 
         for (const userId of missingUserIds) {
+          const placement = input.openPlacementByUserId?.get(userId) ?? defaultDialogOpenPlacement
           rows.push({
             chatId: input.chat.id,
             userId,
             peerUserId: peerUserIdFor(input.chat, userId),
             spaceId: input.chat.spaceId ?? null,
-            ...dialogOpenFieldsForOpen(undefined, await orderForUser(tx, userId, userIds.length, input.order)),
+            ...dialogOpenFieldsForOpen(
+              undefined,
+              await orderForUser(tx, userId, userIds.length, input.order, placement),
+            ),
             archived: false,
             ...chatListVisibilityFieldsForOpen(input.chat, showInChatList),
           })
@@ -248,12 +287,15 @@ async function orderForUser(
   userId: number,
   userCount: number,
   preferredOrder?: string | null,
+  placement: DialogOpenPlacement = defaultDialogOpenPlacement,
 ): Promise<string> {
-  if (userCount === 1 && preferredOrder) {
-    return preferredOrder
-  }
-
-  return nextDialogOrder(tx, userId)
+  return dialogOrderForPlacement(
+    tx,
+    userId,
+    placement,
+    "sidebar",
+    userCount === 1 ? preferredOrder : undefined,
+  )
 }
 
 function uniqueUserIds(userIds: number[]): number[] {

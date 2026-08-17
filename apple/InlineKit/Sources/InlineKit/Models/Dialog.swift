@@ -494,39 +494,60 @@ public extension Dialog {
   """
 
   static func nextSidebarOrder(_ db: Database) throws -> String {
-    try nextOrder(
+    try sidebarOrder(db, placement: .bottom)
+  }
+
+  static func sidebarOrder(
+    _ db: Database,
+    placement: DialogOpenPlacement
+  ) throws -> String {
+    try edgeOrder(
       db,
       column: "order",
       filter: """
       AND "open" = 1
       AND ("pinned" IS NULL OR "pinned" = 0)
-      """
+      """,
+      placement: placement
     )
   }
 
   static func nextPinnedOrder(_ db: Database) throws -> String {
-    try nextOrder(
+    try edgeOrder(
       db,
       column: "pinnedOrder",
       filter: """
       AND "pinned" = 1
-      """
+      """,
+      placement: .bottom
     )
   }
 
-  private static func nextOrder(_ db: Database, column: String, filter: String) throws -> String {
+  private static func edgeOrder(
+    _ db: Database,
+    column: String,
+    filter: String,
+    placement: DialogOpenPlacement
+  ) throws -> String {
+    let direction = placement == .top ? "ASC" : "DESC"
     let request = SQLRequest<String>(
       sql: """
       SELECT "\(column)"
       FROM "dialog"
       WHERE "\(column)" IS NOT NULL
       \(filter)
-      ORDER BY "\(column)" DESC
+      ORDER BY "\(column)" \(direction)
       LIMIT 1
       """
     )
 
-    return FractionalIndex.after(try request.fetchOne(db))
+    let edge = try request.fetchOne(db)
+    switch placement {
+    case .top:
+      return FractionalIndex.before(edge)
+    case .bottom:
+      return FractionalIndex.after(edge)
+    }
   }
 
   static func applyingChatListVisibilityFilter<T: DerivableRequest>(_ request: T) -> T {

@@ -127,6 +127,24 @@ struct DialogChatListVisibilityTests {
     }
   }
 
+  @Test("dialog open placement allocates both normal-lane edges")
+  func dialogOpenPlacementAllocatesBothEdges() throws {
+    let dbQueue = try makeInMemoryDB()
+
+    try dbQueue.write { db in
+      try seedDialog(db, chatId: 26, chatListHidden: nil, open: true, order: "U")
+      try seedDialog(db, chatId: 27, chatListHidden: nil, open: true, order: "k")
+
+      let top = try Dialog.sidebarOrder(db, placement: .top)
+      let bottom = try Dialog.sidebarOrder(db, placement: .bottom)
+
+      #expect(DialogOpenPlacement.defaultValue == .top)
+      #expect(top < "U")
+      #expect(bottom > "k")
+      #expect(try Dialog.nextSidebarOrder(db) == bottom)
+    }
+  }
+
   @Test("dialog open transaction refreshes opened date")
   func updateDialogOpenRefreshesOpenedDate() throws {
     let dbQueue = try makeInMemoryDB()
@@ -423,6 +441,7 @@ struct DialogChatListVisibilityTests {
     let dbQueue = try makeInMemoryDB()
 
     try dbQueue.write { db in
+      try seedDialog(db, chatId: 20, chatListHidden: nil, open: true, order: "U")
       try seedDialog(db, chatId: 24, chatListHidden: true)
 
       var saved = try #require(try Dialog.get(peerId: .thread(id: 24)).fetchOne(db))
@@ -435,9 +454,9 @@ struct DialogChatListVisibilityTests {
       #expect(saved.open == true)
       #expect(saved.archived == false)
       #expect(saved.chatListHidden == nil)
-      #expect(saved.order != nil)
+      let openedOrder = try #require(saved.order)
+      #expect(openedOrder < "U")
 
-      let order = saved.order
       saved.followMode = nil
       try saved.save(db)
 
@@ -446,7 +465,7 @@ struct DialogChatListVisibilityTests {
       #expect(saved.followMode == nil)
       #expect(saved.open == true)
       #expect(saved.chatListHidden == nil)
-      #expect(saved.order == order)
+      #expect(saved.order == openedOrder)
     }
   }
 
@@ -514,6 +533,7 @@ struct DialogChatListVisibilityTests {
     chatListHidden: Bool?,
     pinned: Bool = false,
     open: Bool = false,
+    order: String? = nil,
     followMode: InlineProtocol.DialogFollowMode? = nil
   ) throws {
     try Chat(
@@ -540,6 +560,7 @@ struct DialogChatListVisibilityTests {
       notificationSettings: nil,
       open: open,
       openedDate: open ? Date(timeIntervalSince1970: TimeInterval(chatId)) : nil,
+      order: order,
       chatListHidden: chatListHidden,
       followMode: followMode
     ).insert(db)

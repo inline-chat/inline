@@ -81,7 +81,7 @@ public struct UpdateDialogFollowModeTransaction: Transaction2 {
 
   static func applyManualFollowOpenState(_ dialog: inout Dialog, db: Database) throws {
     if dialog.open == false || dialog.order == nil {
-      dialog.order = try Dialog.nextSidebarOrder(db)
+      dialog.order = try Dialog.sidebarOrder(db, placement: .defaultValue)
     }
     dialog.open = true
     dialog.archived = false
