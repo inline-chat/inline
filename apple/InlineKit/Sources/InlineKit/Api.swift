@@ -63,7 +63,7 @@ public enum Api {
     )
 
     Task(priority: .utility) {
-      guard Auth.shared.handle.token() != nil else { return }
+      guard Auth.shared.handle.isLoggedIn() else { return }
       try? await ReservedChatIDPool.shared.refillIfNeeded(realtimeV2: realtime)
     }
 

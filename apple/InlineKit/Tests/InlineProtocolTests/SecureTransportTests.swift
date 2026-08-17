@@ -261,6 +261,16 @@ struct SecureTransportTests {
     await reconnected.close()
   }
 
+  #if INLINE_PROTOCOL_PRODUCTION_CANARY
+  @Test("pins the overlapping production canary ring")
+  func productionCanaryRing() {
+    #expect(InlineProtocolTrustRoots.production.map(\.fingerprint) == [
+      -8_339_382_514_522_710_386,
+      -3_957_383_261_870_667_958,
+    ])
+  }
+  #endif
+
   #if !DEBUG
   @Test("accepts an unfamiliar Telegram-valid safe prime with all 64 rounds")
   func unfamiliarSafePrime() throws {

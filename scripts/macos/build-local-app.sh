@@ -159,7 +159,7 @@ if [[ ! -d "${SPARKLE_FRAMEWORK_PATH}" ]]; then
 fi
 
 set +e
-swift_conditions='$(inherited) SPARKLE DEBUG_BUILD'
+swift_conditions='$(inherited) SPARKLE DEBUG_BUILD INLINE_PROTOCOL_PRODUCTION_CANARY'
 
 xcodebuild_args=(
   -project "${ROOT_DIR}/apple/Inline.xcodeproj"
