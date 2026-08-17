@@ -1,4 +1,4 @@
-import type { Chat, Dialog, InputPeer, Message } from "@inline-chat/protocol/core"
+import type { Chat, Dialog, InputPeer, Message, User } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { UsersModel } from "@in/server/db/models/users"
 import { DialogsModel } from "@in/server/db/models/dialogs"
@@ -22,6 +22,7 @@ type Output = {
   dialog?: Dialog
   pinnedMessageIds: bigint[]
   anchorMessage?: Message
+  user?: User
 }
 
 const log = new Log("functions.getChat")
@@ -208,9 +209,10 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
 
   let chat: DbChat
   let dialog: DbDialog | undefined
+  let peerUserId: number | undefined
 
   if (inputPeer.type.oneofKind === "user") {
-    const peerUserId = Number(inputPeer.type.user.userId)
+    peerUserId = Number(inputPeer.type.user.userId)
 
     if (!peerUserId || peerUserId <= 0) {
       throw RealtimeRpcError.UserIdInvalid()
@@ -230,6 +232,7 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
     chat = result.chat
     dialog = result.dialog
   } else if (inputPeer.type.oneofKind === "self") {
+    peerUserId = currentUserId
     const result = await getChatAndDialogForDM(currentUserId, currentUserId)
     chat = result.chat
     dialog = result.dialog
@@ -267,11 +270,13 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
     .orderBy(desc(messages.pinnedAt), desc(messages.messageId))
 
   const pinnedMessageIds = pinnedRows.map((row) => BigInt(row.messageId))
+  const peerUser = peerUserId ? await UsersModel.getUserById(peerUserId) : undefined
 
   return {
     chat: encodedChat,
     dialog: encodedDialog,
     pinnedMessageIds,
     anchorMessage: encodedAnchorMessage,
+    user: peerUser ? Encoders.user({ user: peerUser, viewerUserId: currentUserId }) : undefined,
   }
 }

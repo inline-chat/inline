@@ -23,5 +23,6 @@ export const getChat = async (input: GetChatInput, handlerContext: HandlerContex
     dialog: result.dialog,
     pinnedMessageIds: result.pinnedMessageIds,
     anchorMessage: result.anchorMessage,
+    user: result.user,
   }
 }

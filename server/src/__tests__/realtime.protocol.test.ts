@@ -610,10 +610,10 @@ describe("realtime protocol safety", () => {
       body: {
         oneofKind: "rpcCall",
         rpcCall: {
-          method: Method.UPDATE_PUSH_NOTIFICATION_DETAILS,
+          method: Method.REGISTER_DEVICE,
           input: {
-            oneofKind: "updatePushNotificationDetails",
-            updatePushNotificationDetails: {
+            oneofKind: "registerDevice",
+            registerDevice: {
               applePushToken: "",
               notificationMethod: {
                 provider: PushNotificationProvider.APNS,
@@ -640,7 +640,7 @@ describe("realtime protocol safety", () => {
     expect(response.body.oneofKind).toBe("rpcResult")
     if (response.body.oneofKind === "rpcResult") {
       expect(response.body.rpcResult.reqMsgId).toBe(500n)
-      expect(response.body.rpcResult.result.oneofKind).toBe("updatePushNotificationDetails")
+      expect(response.body.rpcResult.result.oneofKind).toBe("registerDevice")
     }
 
     const session = await db
@@ -678,10 +678,10 @@ describe("realtime protocol safety", () => {
       body: {
         oneofKind: "rpcCall",
         rpcCall: {
-          method: Method.UPDATE_PUSH_NOTIFICATION_DETAILS,
+          method: Method.REGISTER_DEVICE,
           input: {
-            oneofKind: "updatePushNotificationDetails",
-            updatePushNotificationDetails: {
+            oneofKind: "registerDevice",
+            registerDevice: {
               applePushToken: "",
               notificationMethod: {
                 provider: PushNotificationProvider.EXPO_ANDROID,
@@ -702,7 +702,7 @@ describe("realtime protocol safety", () => {
     expect(response.body.oneofKind).toBe("rpcResult")
     if (response.body.oneofKind === "rpcResult") {
       expect(response.body.rpcResult.reqMsgId).toBe(504n)
-      expect(response.body.rpcResult.result.oneofKind).toBe("updatePushNotificationDetails")
+      expect(response.body.rpcResult.result.oneofKind).toBe("registerDevice")
     }
 
     const session = await db
@@ -736,10 +736,10 @@ describe("realtime protocol safety", () => {
       body: {
         oneofKind: "rpcCall",
         rpcCall: {
-          method: Method.UPDATE_PUSH_NOTIFICATION_DETAILS,
+          method: Method.REGISTER_DEVICE,
           input: {
-            oneofKind: "updatePushNotificationDetails",
-            updatePushNotificationDetails: {
+            oneofKind: "registerDevice",
+            registerDevice: {
               applePushToken: "ExponentPushToken[legacy-rpc-android-token]",
             },
           },
@@ -751,7 +751,7 @@ describe("realtime protocol safety", () => {
     expect(response.body.oneofKind).toBe("rpcResult")
     if (response.body.oneofKind === "rpcResult") {
       expect(response.body.rpcResult.reqMsgId).toBe(506n)
-      expect(response.body.rpcResult.result.oneofKind).toBe("updatePushNotificationDetails")
+      expect(response.body.rpcResult.result.oneofKind).toBe("registerDevice")
     }
 
     const session = await db
@@ -1192,10 +1192,10 @@ describe("realtime protocol safety", () => {
       body: {
         oneofKind: "rpcCall",
         rpcCall: {
-          method: Method.UPDATE_PUSH_NOTIFICATION_DETAILS,
+          method: Method.REGISTER_DEVICE,
           input: {
-            oneofKind: "updatePushNotificationDetails",
-            updatePushNotificationDetails: {
+            oneofKind: "registerDevice",
+            registerDevice: {
               applePushToken: "apn-rpc-token",
               pushContentEncryptionKey: {
                 publicKey: new Uint8Array([1, 2, 3]),
@@ -1227,10 +1227,10 @@ describe("realtime protocol safety", () => {
       body: {
         oneofKind: "rpcCall",
         rpcCall: {
-          method: Method.UPDATE_PUSH_NOTIFICATION_DETAILS,
+          method: Method.REGISTER_DEVICE,
           input: {
-            oneofKind: "updatePushNotificationDetails",
-            updatePushNotificationDetails: {
+            oneofKind: "registerDevice",
+            registerDevice: {
               applePushToken: "",
               notificationMethod: {
                 provider: PushNotificationProvider.EXPO_ANDROID,
@@ -1272,10 +1272,10 @@ describe("realtime protocol safety", () => {
       body: {
         oneofKind: "rpcCall",
         rpcCall: {
-          method: Method.UPDATE_PUSH_NOTIFICATION_DETAILS,
+          method: Method.REGISTER_DEVICE,
           input: {
-            oneofKind: "updatePushNotificationDetails",
-            updatePushNotificationDetails: {
+            oneofKind: "registerDevice",
+            registerDevice: {
               applePushToken: "",
               notificationMethod: {
                 provider: PushNotificationProvider.APNS,
@@ -1310,10 +1310,10 @@ describe("realtime protocol safety", () => {
       body: {
         oneofKind: "rpcCall",
         rpcCall: {
-          method: Method.UPDATE_PUSH_NOTIFICATION_DETAILS,
+          method: Method.REGISTER_DEVICE,
           input: {
-            oneofKind: "updatePushNotificationDetails",
-            updatePushNotificationDetails: {
+            oneofKind: "registerDevice",
+            registerDevice: {
               applePushToken: "",
               notificationMethod: {
                 provider: PushNotificationProvider.APNS,
@@ -1334,7 +1334,7 @@ describe("realtime protocol safety", () => {
     expect(secondResponse.body.oneofKind).toBe("rpcResult")
     if (secondResponse.body.oneofKind === "rpcResult") {
       expect(secondResponse.body.rpcResult.reqMsgId).toBe(503n)
-      expect(secondResponse.body.rpcResult.result.oneofKind).toBe("updatePushNotificationDetails")
+      expect(secondResponse.body.rpcResult.result.oneofKind).toBe("registerDevice")
     }
 
     const session = await db

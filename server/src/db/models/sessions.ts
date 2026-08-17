@@ -48,6 +48,13 @@ export interface UpdatePushNotificationDetailsData {
   pushContentVersion?: number | undefined
 }
 
+export interface UpdateSessionMetadataData {
+  timezone?: string | undefined
+  deviceName?: string | undefined
+  clientVersion?: string | undefined
+  osVersion?: string | undefined
+}
+
 // Interface for session with decrypted data
 export interface SessionWithDecryptedData
   extends Omit<
@@ -279,6 +286,35 @@ export class SessionsModel {
         pushContentVersion: null,
       })
       .where(eq(sessions.id, id))
+  }
+
+  static async updateMetadata(
+    id: number,
+    userId: number,
+    data: UpdateSessionMetadataData,
+  ): Promise<SessionWithDecryptedData> {
+    const current = await this.getById(id)
+    if (current.userId !== userId || current.revoked) throw new Error("Session not found")
+
+    const personalData = {
+      ...current.personalData,
+      ...(data.timezone !== undefined ? { timezone: data.timezone } : {}),
+      ...(data.deviceName !== undefined ? { deviceName: data.deviceName } : {}),
+    }
+    const encryptedPersonalData = encrypt(JSON.stringify(personalData))
+    const [updated] = await db
+      .update(sessions)
+      .set({
+        personalDataEncrypted: encryptedPersonalData.encrypted,
+        personalDataIv: encryptedPersonalData.iv,
+        personalDataTag: encryptedPersonalData.authTag,
+        ...(data.clientVersion !== undefined ? { clientVersion: data.clientVersion } : {}),
+        ...(data.osVersion !== undefined ? { osVersion: data.osVersion } : {}),
+      })
+      .where(and(eq(sessions.id, id), eq(sessions.userId, userId), isNull(sessions.revoked)))
+      .returning()
+    if (!updated) throw new Error("Session not found")
+    return this.decryptSessionData(updated)
   }
 
   // Revoke a session

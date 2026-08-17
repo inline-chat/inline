@@ -1,8 +1,13 @@
 {
   "name": "@inline-chat/protocol",
-  "version": "0.0.5",
+  "version": "0.0.7",
   "private": false,
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/inline-chat/inline.git",
+    "directory": "packages/protocol"
+  },
   "type": "module",
   "files": [
     "dist/core.d.ts",
@@ -17,9 +22,12 @@
     "dist/schema.js",
     "dist/vectors.d.ts",
     "dist/vectors.js",
+    "dist/uploads.d.ts",
+    "dist/uploads.js",
     "dist/index.d.ts",
     "dist/index.js",
     "vectors/inline-protocol-v1.json",
+    "docs",
     "dist/secure",
     "README.md"
   ],
@@ -58,14 +66,21 @@
       "types": "./dist/vectors.d.ts",
       "default": "./dist/vectors.js"
     },
+    "./uploads": {
+      "types": "./dist/uploads.d.ts",
+      "default": "./dist/uploads.js"
+    },
     "./vectors/inline-protocol-v1.json": "./vectors/inline-protocol-v1.json"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "check": "bun run build && bun run typecheck && bun run lint && bun run test",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "oxlint --ignore-path ../../.oxlintignore src",
+    "lint": "bunx oxlint --ignore-path ../../.oxlintignore src",
     "test": "bun test",
-    "generate:vectors": "bun scripts/generate-vectors.ts"
+    "generate:vectors": "bun scripts/generate-vectors.ts",
+    "prepack": "bun run build",
+    "release:preflight": "npm publish --dry-run --access public"
   },
   "dependencies": {
     "@noble/ciphers": "^1.3.0",
@@ -73,8 +88,7 @@
     "@protobuf-ts/runtime": "^2.11.1"
   },
   "devDependencies": {
-    "oxlint": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "^5.8.3"
   },
   "publishConfig": {
     "access": "public"

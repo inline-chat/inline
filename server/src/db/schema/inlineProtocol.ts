@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm"
 import {
   bigint,
+  boolean,
   check,
   index,
   integer,
@@ -180,8 +181,122 @@ export const inlineProtocolUploads = pgTable(
   }),
 )
 
+export const inlineUploads = pgTable(
+  "inline_uploads",
+  {
+    id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
+    uploadId: bytea("upload_id").notNull(),
+    clientUploadId: bytea("client_upload_id").notNull(),
+    permanentAuthKeyId: bytea("permanent_auth_key_id")
+      .notNull()
+      .references(() => inlineProtocolAuthKeys.authKeyId, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accountSessionId: integer("account_session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    fileName: text("file_name").notNull(),
+    mimeType: varchar("mime_type", { length: 255 }).notNull(),
+    byteCount: bigint("byte_count", { mode: "bigint" }).notNull(),
+    sha256: bytea("sha256").notNull(),
+    kind: varchar("kind", { length: 16 }).notNull(),
+    thumbnailFileUniqueId: varchar("thumbnail_file_unique_id", { length: 128 }),
+    videoWidth: integer("video_width"),
+    videoHeight: integer("video_height"),
+    duration: integer("duration"),
+    isAnimated: boolean("is_animated"),
+    hasAudio: boolean("has_audio"),
+    waveform: bytea("waveform"),
+    partSize: integer("part_size").notNull(),
+    partCount: integer("part_count").notNull(),
+    status: varchar("status", { length: 16 }).default("uploading").notNull(),
+    failureCode: varchar("failure_code", { length: 32 }),
+    failureRetryable: boolean("failure_retryable"),
+    lockToken: bytea("lock_token"),
+    lockedAt: protocolTimestamp("locked_at"),
+    resultFileUniqueId: varchar("result_file_unique_id", { length: 128 }),
+    resultMediaId: bigint("result_media_id", { mode: "number" }),
+    createdAt: protocolTimestamp("created_at").defaultNow().notNull(),
+    lastPartAt: protocolTimestamp("last_part_at"),
+    expiresAt: protocolTimestamp("expires_at").notNull(),
+    hardExpiresAt: protocolTimestamp("hard_expires_at").notNull(),
+    completedAt: protocolTimestamp("completed_at"),
+    canceledAt: protocolTimestamp("canceled_at"),
+  },
+  (table) => ({
+    uploadIdLength: check("inline_uploads_id_length", sql`octet_length(${table.uploadId}) = 16`),
+    clientUploadIdLength: check(
+      "inline_uploads_client_id_length",
+      sql`octet_length(${table.clientUploadId}) = 16`,
+    ),
+    permanentKeyLength: check(
+      "inline_uploads_permanent_key_length",
+      sql`octet_length(${table.permanentAuthKeyId}) = 8`,
+    ),
+    shaLength: check("inline_uploads_sha_length", sql`octet_length(${table.sha256}) = 32`),
+    byteCountPositive: check("inline_uploads_byte_count_positive", sql`${table.byteCount} > 0`),
+    partSizeValid: check(
+      "inline_uploads_part_size_valid",
+      sql`${table.partSize} = 524288`,
+    ),
+    partCountValid: check(
+      "inline_uploads_part_count_valid",
+      sql`${table.partCount} between 1 and 1000`,
+    ),
+    kindValid: check(
+      "inline_uploads_kind_valid",
+      sql`${table.kind} in ('photo', 'video', 'document', 'voice')`,
+    ),
+    statusValid: check(
+      "inline_uploads_status_valid",
+      sql`${table.status} in ('uploading', 'processing', 'complete', 'failed', 'canceled')`,
+    ),
+    uploadIdUnique: uniqueIndex("inline_uploads_upload_id_unique").on(table.uploadId),
+    clientIdUnique: uniqueIndex("inline_uploads_session_client_id_unique").on(
+      table.accountSessionId,
+      table.clientUploadId,
+    ),
+    permanentKeyIndex: index("inline_uploads_permanent_key_idx").on(table.permanentAuthKeyId),
+    userStatusIndex: index("inline_uploads_user_status_idx").on(table.userId, table.status),
+    sessionCreatedIndex: index("inline_uploads_session_created_idx").on(
+      table.accountSessionId,
+      table.createdAt,
+    ),
+    expiryIndex: index("inline_uploads_expiry_idx").on(table.status, table.expiresAt),
+  }),
+)
+
+export const inlineUploadParts = pgTable(
+  "inline_upload_parts",
+  {
+    uploadDbId: bigint("upload_id", { mode: "number" })
+      .notNull()
+      .references(() => inlineUploads.id, { onDelete: "cascade" }),
+    partIndex: integer("part_index").notNull(),
+    byteCount: integer("byte_count").notNull(),
+    sha256: bytea("sha256").notNull(),
+    objectKey: text("object_key").notNull(),
+    acceptedAt: protocolTimestamp("accepted_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    identity: primaryKey({
+      name: "inline_upload_parts_pk",
+      columns: [table.uploadDbId, table.partIndex],
+    }),
+    partIndexValid: check("inline_upload_parts_index_valid", sql`${table.partIndex} >= 0`),
+    byteCountValid: check(
+      "inline_upload_parts_byte_count_valid",
+      sql`${table.byteCount} between 1 and 524288`,
+    ),
+    shaLength: check("inline_upload_parts_sha_length", sql`octet_length(${table.sha256}) = 32`),
+  }),
+)
+
 export type DbInlineProtocolAuthKey = typeof inlineProtocolAuthKeys.$inferSelect
 export type DbNewInlineProtocolAuthKey = typeof inlineProtocolAuthKeys.$inferInsert
 export type DbInlineProtocolRequest = typeof inlineProtocolRequests.$inferSelect
 export type DbInlineProtocolAuthChallenge = typeof inlineProtocolAuthChallenges.$inferSelect
 export type DbInlineProtocolUpload = typeof inlineProtocolUploads.$inferSelect
+export type DbInlineUpload = typeof inlineUploads.$inferSelect
+export type DbInlineUploadPart = typeof inlineUploadParts.$inferSelect

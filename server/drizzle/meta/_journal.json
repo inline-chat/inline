@@ -855,6 +855,13 @@
       "when": 1786912944049,
       "tag": "0121_inline-protocol-timestamptz",
       "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "7",
+      "when": 1786969312599,
+      "tag": "0122_inline-native-uploads",
+      "breakpoints": true
     }
   ]
 }

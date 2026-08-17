@@ -7,10 +7,6 @@ import {
   type AuthBeginResult,
   type AuthCompleteRequest,
   type AuthCompleteResult,
-  type CreateHttpUploadRequest,
-  type CreateHttpUploadResult,
-  type FinishHttpUploadRequest,
-  type FinishHttpUploadResult,
   type ServerProtocolMessage,
 } from "@inline-chat/protocol/core"
 import type {
@@ -30,14 +26,6 @@ export type InlineProtocolApplicationContext = {
 export interface InlineProtocolApplicationOperations {
   authBegin(input: AuthBeginRequest, context: InlineProtocolApplicationContext): Promise<AuthBeginResult>
   authComplete(input: AuthCompleteRequest, context: InlineProtocolApplicationContext): Promise<AuthCompleteResult>
-  createHttpUpload(
-    input: CreateHttpUploadRequest,
-    context: InlineProtocolApplicationContext,
-  ): Promise<CreateHttpUploadResult>
-  finishHttpUpload(
-    input: FinishHttpUploadRequest,
-    context: InlineProtocolApplicationContext,
-  ): Promise<FinishHttpUploadResult>
 }
 
 const unauthorizedResponse = (): Uint8Array => RealtimeV3Response.toBinary({
@@ -128,6 +116,9 @@ export const makeInlineProtocolApplicationDispatcher = (input: {
           connectionId: input.connectionId,
           sendRaw: (message) => sendV3Update(message, sendUpdate),
           sendRpcReply: () => {},
+          inlineProtocol: authorization.permanentAuthKeyId
+            ? { permanentAuthKeyId: authorization.permanentAuthKeyId }
+            : undefined,
         })
         return {
           kind: "result",
@@ -136,24 +127,6 @@ export const makeInlineProtocolApplicationDispatcher = (input: {
               oneofKind: "rpcResult",
               rpcResult: { reqMsgId: 0n, result },
             },
-          }),
-        }
-      }
-      if (request.body.oneofKind === "createHttpUpload") {
-        const result = await input.operations.createHttpUpload(request.body.createHttpUpload, context)
-        return {
-          kind: "result",
-          payload: RealtimeV3Response.toBinary({
-            body: { oneofKind: "createHttpUpload", createHttpUpload: result },
-          }),
-        }
-      }
-      if (request.body.oneofKind === "finishHttpUpload") {
-        const result = await input.operations.finishHttpUpload(request.body.finishHttpUpload, context)
-        return {
-          kind: "result",
-          payload: RealtimeV3Response.toBinary({
-            body: { oneofKind: "finishHttpUpload", finishHttpUpload: result },
           }),
         }
       }

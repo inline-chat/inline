@@ -119,6 +119,19 @@ import {
   getBotAgentHandler,
   listBotAgentsHandler,
 } from "@in/server/realtime/handlers/bot.agents"
+import { nativeUploadOperations } from "@in/server/modules/uploads/operations"
+import {
+  createExternalTaskV3,
+  createSpaceV3,
+  deleteSpaceV3,
+  getConnectorConfigV3,
+  leaveSpaceV3,
+  logOutV3,
+  setConnectorConfigV3,
+  unregisterDeviceV3,
+  updateDialogArchivedV3,
+  updateSessionV3,
+} from "@in/server/realtime/handlers/v3Migration"
 
 const log = new Log("rpc")
 
@@ -829,12 +842,12 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       return { oneofKind: "listBotAgents", listBotAgents: result }
     }
 
-    case Method.UPDATE_PUSH_NOTIFICATION_DETAILS: {
-      if (call.input.oneofKind !== "updatePushNotificationDetails") {
+    case Method.REGISTER_DEVICE: {
+      if (call.input.oneofKind !== "registerDevice") {
         throw RealtimeRpcError.BadRequest()
       }
-      let result = await updatePushNotificationDetailsHandler(call.input.updatePushNotificationDetails, handlerContext)
-      return { oneofKind: "updatePushNotificationDetails", updatePushNotificationDetails: result }
+      const result = await updatePushNotificationDetailsHandler(call.input.registerDevice, handlerContext)
+      return { oneofKind: "registerDevice", registerDevice: result }
     }
 
     case Method.CREATE_SUBTHREAD: {
@@ -949,6 +962,83 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       const result = await getExternalProfilePhotoHandler(call.input.getExternalProfilePhoto, handlerContext)
       return { oneofKind: "getExternalProfilePhoto", getExternalProfilePhoto: result }
+    }
+    case Method.CREATE_SPACE: {
+      if (call.input.oneofKind !== "createSpace") throw RealtimeRpcError.BadRequest()
+      return { oneofKind: "createSpace", createSpace: await createSpaceV3(call.input.createSpace, handlerContext) }
+    }
+    case Method.DELETE_SPACE: {
+      if (call.input.oneofKind !== "deleteSpace") throw RealtimeRpcError.BadRequest()
+      return { oneofKind: "deleteSpace", deleteSpace: await deleteSpaceV3(call.input.deleteSpace, handlerContext) }
+    }
+    case Method.LEAVE_SPACE: {
+      if (call.input.oneofKind !== "leaveSpace") throw RealtimeRpcError.BadRequest()
+      return { oneofKind: "leaveSpace", leaveSpace: await leaveSpaceV3(call.input.leaveSpace, handlerContext) }
+    }
+    case Method.GET_CONNECTOR_CONFIG: {
+      if (call.input.oneofKind !== "getConnectorConfig") throw RealtimeRpcError.BadRequest()
+      return {
+        oneofKind: "getConnectorConfig",
+        getConnectorConfig: await getConnectorConfigV3(call.input.getConnectorConfig, handlerContext),
+      }
+    }
+    case Method.SET_CONNECTOR_CONFIG: {
+      if (call.input.oneofKind !== "setConnectorConfig") throw RealtimeRpcError.BadRequest()
+      return {
+        oneofKind: "setConnectorConfig",
+        setConnectorConfig: await setConnectorConfigV3(call.input.setConnectorConfig, handlerContext),
+      }
+    }
+    case Method.CREATE_EXTERNAL_TASK: {
+      if (call.input.oneofKind !== "createExternalTask") throw RealtimeRpcError.BadRequest()
+      return {
+        oneofKind: "createExternalTask",
+        createExternalTask: await createExternalTaskV3(call.input.createExternalTask, handlerContext),
+      }
+    }
+    case Method.UNREGISTER_DEVICE: {
+      if (call.input.oneofKind !== "unregisterDevice") throw RealtimeRpcError.BadRequest()
+      return { oneofKind: "unregisterDevice", unregisterDevice: await unregisterDeviceV3(handlerContext) }
+    }
+    case Method.LOG_OUT: {
+      if (call.input.oneofKind !== "logOut") throw RealtimeRpcError.BadRequest()
+      return { oneofKind: "logOut", logOut: await logOutV3(handlerContext) }
+    }
+    case Method.CREATE_UPLOAD: {
+      if (call.input.oneofKind !== "createUpload") throw RealtimeRpcError.BadRequest()
+      const result = await nativeUploadOperations.create(call.input.createUpload, handlerContext)
+      return { oneofKind: "createUpload", createUpload: result }
+    }
+    case Method.SAVE_UPLOAD_PART: {
+      if (call.input.oneofKind !== "saveUploadPart") throw RealtimeRpcError.BadRequest()
+      const result = await nativeUploadOperations.savePart(call.input.saveUploadPart, handlerContext)
+      return { oneofKind: "saveUploadPart", saveUploadPart: result }
+    }
+    case Method.GET_UPLOAD_STATE: {
+      if (call.input.oneofKind !== "getUploadState") throw RealtimeRpcError.BadRequest()
+      const result = await nativeUploadOperations.state(call.input.getUploadState, handlerContext)
+      return { oneofKind: "getUploadState", getUploadState: result }
+    }
+    case Method.FINISH_UPLOAD: {
+      if (call.input.oneofKind !== "finishUpload") throw RealtimeRpcError.BadRequest()
+      const result = await nativeUploadOperations.finish(call.input.finishUpload, handlerContext)
+      return { oneofKind: "finishUpload", finishUpload: result }
+    }
+    case Method.CANCEL_UPLOAD: {
+      if (call.input.oneofKind !== "cancelUpload") throw RealtimeRpcError.BadRequest()
+      const result = await nativeUploadOperations.cancel(call.input.cancelUpload, handlerContext)
+      return { oneofKind: "cancelUpload", cancelUpload: result }
+    }
+    case Method.UPDATE_SESSION: {
+      if (call.input.oneofKind !== "updateSession") throw RealtimeRpcError.BadRequest()
+      return { oneofKind: "updateSession", updateSession: await updateSessionV3(call.input.updateSession, handlerContext) }
+    }
+    case Method.UPDATE_DIALOG_ARCHIVED: {
+      if (call.input.oneofKind !== "updateDialogArchived") throw RealtimeRpcError.BadRequest()
+      return {
+        oneofKind: "updateDialogArchived",
+        updateDialogArchived: await updateDialogArchivedV3(call.input.updateDialogArchived, handlerContext),
+      }
     }
     default:
       throw RealtimeRpcError.UnsupportedRpcMethod(call.method)

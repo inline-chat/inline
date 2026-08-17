@@ -18,14 +18,12 @@ import { gunzipSync } from "node:zlib"
 import { isIP } from "node:net"
 import { randomBytes } from "node:crypto"
 import { PermanentAuthorizationKeyRepository } from "@in/server/db/models/inlineProtocol"
-import { InlineProtocolUploadRepository } from "@in/server/db/models/inlineProtocolUploads"
 import { makeAuthorizationKeyCipher } from "@in/server/modules/inlineProtocol/keyCipher"
 import { InlineProtocolAuthorizationKeys } from "@in/server/modules/inlineProtocol/authorizationKeys"
 import { TemporaryAuthorizationKeyStore } from "@in/server/modules/inlineProtocol/temporaryKeys"
 import { makeInlineProtocolReplayRepository } from "@in/server/modules/inlineProtocol/replay"
 import { makeInlineProtocolRsaSigner } from "@in/server/modules/inlineProtocol/rsaSigner"
 import { InlineProtocolAuthOperations } from "@in/server/modules/inlineProtocol/auth"
-import { InlineProtocolUploadOperations } from "@in/server/modules/inlineProtocol/uploads"
 import { InlineProtocolOperations } from "@in/server/modules/inlineProtocol/operations"
 import { makeInlineProtocolApplicationDispatcher } from "@in/server/modules/inlineProtocol/application"
 import type { InlineProtocolEnabledConfiguration } from "@in/server/modules/inlineProtocol/config"
@@ -72,7 +70,6 @@ export interface InlineProtocolRealtimeTransport {
   readonly handleVerification: (request: Request) => Response | undefined
   readonly tryUpgrade: (request: Request, server: Server<InlineProtocolWebSocketData>) => boolean
   readonly rejectUnsupportedUpgrade: (request: Request) => Response | undefined
-  readonly handleHttpUpload: (request: Request, directClientIp?: string) => Promise<Response | undefined>
   readonly websocket: Bun.WebSocketHandler<InlineProtocolWebSocketData>
   readonly shutdown: () => Promise<void>
 }
@@ -98,15 +95,6 @@ const requestMetadata = (
   return Object.values(value).some((entry) => entry !== undefined) ? value : undefined
 }
 
-const trustedClientIp = (
-  request: Request,
-  directClientIp: string | undefined,
-  trustedHeader: TrustedClientIpHeader | undefined,
-): string | undefined => {
-  const forwarded = trustedHeader ? metadataValue(request.headers.get(trustedHeader)) : undefined
-  return forwarded && isIP(forwarded) !== 0 ? forwarded : directClientIp
-}
-
 const bytesForFrame = (message: Buffer<ArrayBuffer>): Uint8Array =>
   new Uint8Array(message.buffer, message.byteOffset, message.byteLength)
 
@@ -123,14 +111,12 @@ export const makeInlineProtocolRuntime = (
     makeAuthorizationKeyCipher(configuration.authKeyKekRing),
   )
   const temporary = new TemporaryAuthorizationKeyStore(nowSeconds)
-  const uploads = new InlineProtocolUploadOperations(new InlineProtocolUploadRepository())
   return {
     rsaKeys: signer.handshakeKeys,
     authorizationKeys: new InlineProtocolAuthorizationKeys(permanent, temporary),
     replay: makeInlineProtocolReplayRepository(),
     operations: new InlineProtocolOperations(
       new InlineProtocolAuthOperations(configuration.authCodePepperRing),
-      uploads,
     ),
     clock: inlineProtocolClock,
     close: () => temporary.clear(),
@@ -320,10 +306,6 @@ export const makeInlineProtocolRealtimeTransport = (
       if (!clockHealthy()) return new Response("Protocol clock unavailable.", { status: 503 })
       return undefined
     },
-    handleHttpUpload: (request, directClientIp) => runtime.operations.uploads.handleHttp(
-      request,
-      trustedClientIp(request, directClientIp, clientIpHeader),
-    ),
     websocket: {
       backpressureLimit: BACKPRESSURE_LIMIT,
       closeOnBackpressureLimit: true,

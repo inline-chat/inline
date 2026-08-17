@@ -155,27 +155,6 @@ describe("Inline Protocol WebSocket carrier", () => {
     await transport.shutdown()
   })
 
-  test("uses only the configured trusted proxy header for HTTP upload client identity", async () => {
-    const observed: Array<string | undefined> = []
-    const runtime = fixture({
-      uploads: {
-        handleHttp: async (_request: Request, clientIp?: string) => {
-          observed.push(clientIp)
-          return new Response(null, { status: 204 })
-        },
-      },
-    })
-    const transport = makeInlineProtocolRealtimeTransport(runtime, { clientIpHeader: "x-real-ip" })
-    await transport.handleHttpUpload(new Request("https://api.inline.test/v3/uploads/id", {
-      headers: {
-        "x-forwarded-for": "198.51.100.200",
-        "x-real-ip": "203.0.113.20",
-      },
-    }), "192.0.2.10")
-    expect(observed).toEqual(["203.0.113.20"])
-    await transport.shutdown()
-  })
-
   test("never negotiates WebSocket compression and closes malformed traffic without an oracle", async () => {
     const transport = makeInlineProtocolRealtimeTransport(fixture())
     const offeredCompression = new Request("http://inline.test/realtime/v3", {

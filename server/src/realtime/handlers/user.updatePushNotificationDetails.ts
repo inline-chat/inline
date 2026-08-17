@@ -1,8 +1,8 @@
 import {
   PushNotificationProvider,
   PushContentEncryptionKey_Algorithm,
-  type UpdatePushNotificationDetailsInput,
-  type UpdatePushNotificationDetailsResult,
+  type RegisterDeviceInput,
+  type RegisterDeviceResult,
 } from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -10,9 +10,9 @@ import { updatePushNotificationDetails as updatePushNotificationDetailsFunction 
 import type { SessionPushNotificationProvider } from "@in/server/db/models/sessions"
 
 export const updatePushNotificationDetailsHandler = async (
-  input: UpdatePushNotificationDetailsInput,
+  input: RegisterDeviceInput,
   handlerContext: HandlerContext,
-): Promise<UpdatePushNotificationDetailsResult> => {
+): Promise<RegisterDeviceResult> => {
   const legacyToken = input.applePushToken?.trim()
   let pushToken = legacyToken
   let pushNotificationProvider: SessionPushNotificationProvider | undefined

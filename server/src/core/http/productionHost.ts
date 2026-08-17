@@ -421,33 +421,6 @@ export const startCoreProductionServer = async <
 
         const completeRequest =
           httpDrain.enter()
-        const v3Upload =
-          realtimeV3
-            ?.handleHttpUpload(
-              request,
-              bunServer.requestIP(request)
-                ?.address,
-            )
-        if (v3Upload !== undefined) {
-          return v3Upload.then(
-            (response) => {
-              if (response === undefined) {
-                return httpHandler(
-                  request,
-                  bunServer.requestIP(request)
-                    ?.address,
-                  completeRequest,
-                )
-              }
-              completeRequest()
-              return response
-            },
-            (cause) => {
-              completeRequest()
-              throw cause
-            },
-          )
-        }
         return httpHandler(
           request,
           bunServer.requestIP(request)

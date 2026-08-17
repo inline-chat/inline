@@ -24,4 +24,7 @@ export type HandlerContext = {
   connectionId: string
   sendRaw: (message: ServerProtocolMessage) => void
   sendRpcReply: (result: RpcResult["result"]) => void
+  inlineProtocol?: {
+    permanentAuthKeyId: Uint8Array
+  }
 }

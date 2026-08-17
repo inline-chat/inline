@@ -46,9 +46,10 @@ export const isInviteCodeRequired = async (user: DbUser | undefined): Promise<bo
 export const getOrCreateUserByEmailForSignup = async (
   email: string,
   inviteCode?: string,
+  database: Database = db,
 ): Promise<{ user: DbUser; created: boolean }> => {
   const signupMode = await getSignupMode()
-  return await db.transaction(async (tx) => {
+  const operation = async (tx: Database) => {
     const codesRequired = signupMode === "invite_only"
     const user = (await tx.select().from(users).where(eq(users.email, email)).limit(1))[0]
 
@@ -100,15 +101,17 @@ export const getOrCreateUserByEmailForSignup = async (
     )[0]
 
     return { user: updated ?? user, created: false }
-  })
+  }
+  return database === db ? db.transaction(operation) : operation(database)
 }
 
 export const getOrCreateUserByPhoneForSignup = async (
   phoneNumber: string,
   inviteCode?: string,
+  database: Database = db,
 ): Promise<{ user: DbUser; created: boolean }> => {
   const signupMode = await getSignupMode()
-  return await db.transaction(async (tx) => {
+  const operation = async (tx: Database) => {
     const codesRequired = signupMode === "invite_only"
     const user = (await tx.select().from(users).where(eq(users.phoneNumber, phoneNumber)).limit(1))[0]
 
@@ -160,7 +163,8 @@ export const getOrCreateUserByPhoneForSignup = async (
     )[0]
 
     return { user: updated ?? user, created: false }
-  })
+  }
+  return database === db ? db.transaction(operation) : operation(database)
 }
 
 const hasSpaceMembership = async (userId: number, database: Database): Promise<boolean> => {

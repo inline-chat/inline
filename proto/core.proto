@@ -30,6 +30,13 @@ message ConnectionInit {
 
   // OS version (semver)
   optional string os_version = 5;
+
+  // Stable installation/device identifier. Realtime V3 authenticates the
+  // enclosing request from the bound authorization key, not `token`.
+  optional string device_id = 6;
+  optional string device_name = 7;
+  optional string client_type = 8;
+  optional string time_zone = 9;
 }
 
 message ServerProtocolMessage {
@@ -1038,7 +1045,7 @@ enum Method {
   GET_MESSAGES = 38;
   UPDATE_DIALOG_NOTIFICATION_SETTINGS = 39;
   READ_MESSAGES = 40;
-  UPDATE_PUSH_NOTIFICATION_DETAILS = 41;
+  REGISTER_DEVICE = 41;
   CREATE_SUBTHREAD = 42;
   GET_BOT_COMMANDS = 43;
   SET_BOT_COMMANDS = 44;
@@ -1106,6 +1113,21 @@ enum Method {
   CREATE_BOT_AGENT = 106;
   GET_BOT_AGENT = 107;
   LIST_BOT_AGENTS = 108;
+  CREATE_SPACE = 109;
+  DELETE_SPACE = 110;
+  LEAVE_SPACE = 111;
+  GET_CONNECTOR_CONFIG = 112;
+  SET_CONNECTOR_CONFIG = 113;
+  CREATE_EXTERNAL_TASK = 114;
+  UNREGISTER_DEVICE = 115;
+  LOG_OUT = 116;
+  CREATE_UPLOAD = 117;
+  SAVE_UPLOAD_PART = 118;
+  GET_UPLOAD_STATE = 119;
+  FINISH_UPLOAD = 120;
+  CANCEL_UPLOAD = 121;
+  UPDATE_SESSION = 122;
+  UPDATE_DIALOG_ARCHIVED = 123;
 }
 
 message RpcCall {
@@ -1152,7 +1174,7 @@ message RpcCall {
     GetMessagesInput getMessages = 39;
     UpdateDialogNotificationSettingsInput updateDialogNotificationSettings = 40;
     ReadMessagesInput readMessages = 41;
-    UpdatePushNotificationDetailsInput updatePushNotificationDetails = 42;
+    RegisterDeviceInput registerDevice = 42;
     CreateSubthreadInput createSubthread = 43;
     GetBotCommandsInput getBotCommands = 44;
     SetBotCommandsInput setBotCommands = 45;
@@ -1219,6 +1241,21 @@ message RpcCall {
     CreateBotAgentInput createBotAgent = 107;
     GetBotAgentInput getBotAgent = 108;
     ListBotAgentsInput listBotAgents = 109;
+    CreateSpaceInput createSpace = 110;
+    DeleteSpaceInput deleteSpace = 111;
+    LeaveSpaceInput leaveSpace = 112;
+    GetConnectorConfigInput getConnectorConfig = 113;
+    SetConnectorConfigInput setConnectorConfig = 114;
+    CreateExternalTaskInput createExternalTask = 115;
+    UnregisterDeviceInput unregisterDevice = 116;
+    LogOutInput logOut = 117;
+    CreateUploadInput createUpload = 118;
+    SaveUploadPartInput saveUploadPart = 119;
+    GetUploadStateInput getUploadState = 120;
+    FinishUploadInput finishUpload = 121;
+    CancelUploadInput cancelUpload = 122;
+    UpdateSessionInput updateSession = 123;
+    UpdateDialogArchivedInput updateDialogArchived = 124;
   }
 }
 
@@ -1267,7 +1304,7 @@ message RpcResult {
     GetMessagesResult getMessages = 39;
     UpdateDialogNotificationSettingsResult updateDialogNotificationSettings = 40;
     ReadMessagesResult readMessages = 41;
-    UpdatePushNotificationDetailsResult updatePushNotificationDetails = 42;
+    RegisterDeviceResult registerDevice = 42;
     CreateSubthreadResult createSubthread = 43;
     GetBotCommandsResult getBotCommands = 44;
     SetBotCommandsResult setBotCommands = 45;
@@ -1334,6 +1371,21 @@ message RpcResult {
     CreateBotAgentResult createBotAgent = 107;
     GetBotAgentResult getBotAgent = 108;
     ListBotAgentsResult listBotAgents = 109;
+    CreateSpaceResult createSpace = 110;
+    DeleteSpaceResult deleteSpace = 111;
+    LeaveSpaceResult leaveSpace = 112;
+    GetConnectorConfigResult getConnectorConfig = 113;
+    SetConnectorConfigResult setConnectorConfig = 114;
+    CreateExternalTaskResult createExternalTask = 115;
+    UnregisterDeviceResult unregisterDevice = 116;
+    LogOutResult logOut = 117;
+    CreateUploadResult createUpload = 118;
+    SaveUploadPartResult saveUploadPart = 119;
+    GetUploadStateResult getUploadState = 120;
+    FinishUploadResult finishUpload = 121;
+    CancelUploadResult cancelUpload = 122;
+    UpdateSessionResult updateSession = 123;
+    UpdateDialogArchivedResult updateDialogArchived = 124;
   }
 }
 
@@ -1711,6 +1763,7 @@ message GetChatResult {
   Dialog dialog = 2;
   repeated int64 pinned_message_ids = 3;
   Message anchor_message = 4;
+  optional User user = 5;
 }
 
 message ShowInChatListInput {
@@ -2206,7 +2259,7 @@ message PushNotificationMethod {
 }
 
 // Register/update push notification details for the current session.
-message UpdatePushNotificationDetailsInput {
+message RegisterDeviceInput {
   // Legacy APNs token for old clients. Kept for gradual migration/fallback.
   string apple_push_token = 1 [deprecated = true];
 
@@ -2220,7 +2273,33 @@ message UpdatePushNotificationDetailsInput {
   optional PushNotificationMethod notification_method = 4;
 }
 
-message UpdatePushNotificationDetailsResult {}
+message RegisterDeviceResult {}
+
+message UnregisterDeviceInput {}
+
+message UnregisterDeviceResult {}
+
+message LogOutInput {}
+
+message LogOutResult { bool logged_out = 1; }
+
+// Updates metadata owned by the authenticated current account session.
+message UpdateSessionInput {
+  optional string time_zone = 1;
+  optional string device_name = 2;
+  optional string client_version = 3;
+  optional string os_version = 4;
+}
+
+message UpdateSessionResult { AccountSession session = 1; }
+
+// Archive is an Inline dialog property, not a general-purpose folder model.
+message UpdateDialogArchivedInput {
+  InputPeer peer_id = 1;
+  bool archived = 2;
+}
+
+message UpdateDialogArchivedResult { repeated Update updates = 1; }
 
 message GetChatsInput {}
 
@@ -2702,6 +2781,59 @@ message DisconnectConnectorInput {
 }
 
 message DisconnectConnectorResult {}
+
+message ConnectorConfigOption {
+  string id = 1;
+  string title = 2;
+  optional string subtitle = 3;
+}
+
+message GetConnectorConfigInput {
+  ConnectorProvider provider = 1;
+  InputScope scope = 2;
+}
+
+message GetConnectorConfigResult {
+  repeated ConnectorConfigOption options = 1;
+  optional string selected_id = 2;
+}
+
+message SetConnectorConfigInput {
+  ConnectorProvider provider = 1;
+  InputScope scope = 2;
+  string selected_id = 3;
+}
+
+message SetConnectorConfigResult {}
+
+message CreateExternalTaskInput {
+  ConnectorProvider provider = 1;
+  InputScope scope = 2;
+  InputPeer peer_id = 3;
+  int64 message_id = 4;
+}
+
+message CreateExternalTaskResult {
+  string url = 1;
+  MessageAttachment attachment = 2;
+}
+
+message CreateSpaceInput { string name = 1; }
+
+message CreateSpaceResult {
+  Space space = 1;
+  Member member = 2;
+  Chat chat = 3;
+  Dialog dialog = 4;
+}
+
+message DeleteSpaceInput { int64 space_id = 1; }
+
+message DeleteSpaceResult {}
+
+message LeaveSpaceInput { int64 space_id = 1; }
+
+message LeaveSpaceResult {}
 
 message InputChatParticipant {
   optional int64 user_id = 1;
@@ -3556,8 +3688,9 @@ message RealtimeV3Request {
     RpcCall rpc = 1;
     AuthBeginRequest auth_begin = 2;
     AuthCompleteRequest auth_complete = 3;
-    CreateHttpUploadRequest create_http_upload = 4;
-    FinishHttpUploadRequest finish_http_upload = 5;
+    CreateHttpUploadRequest create_http_upload = 4 [deprecated = true];
+    FinishHttpUploadRequest finish_http_upload = 5 [deprecated = true];
+    ConnectionInit connection_init = 6;
   }
 }
 
@@ -3567,8 +3700,8 @@ message RealtimeV3Response {
     RpcError rpc_error = 2;
     AuthBeginResult auth_begin = 3;
     AuthCompleteResult auth_complete = 4;
-    CreateHttpUploadResult create_http_upload = 5;
-    FinishHttpUploadResult finish_http_upload = 6;
+    CreateHttpUploadResult create_http_upload = 5 [deprecated = true];
+    FinishHttpUploadResult finish_http_upload = 6 [deprecated = true];
   }
 }
 
@@ -3657,4 +3790,121 @@ message FinishHttpUploadResult {
     HttpUploadPending pending = 1;
     HttpUploadComplete complete = 2;
   }
+}
+
+// --- Native resumable uploads ---
+// These are ordinary RpcCall methods and may be carried by Realtime V2 or V3.
+
+enum UploadKind {
+  UPLOAD_KIND_UNSPECIFIED = 0;
+  UPLOAD_KIND_PHOTO = 1;
+  UPLOAD_KIND_VIDEO = 2;
+  UPLOAD_KIND_DOCUMENT = 3;
+  UPLOAD_KIND_VOICE = 4;
+}
+
+enum UploadStatus {
+  UPLOAD_STATUS_UNSPECIFIED = 0;
+  UPLOAD_STATUS_UPLOADING = 1;
+  UPLOAD_STATUS_PROCESSING = 2;
+  UPLOAD_STATUS_COMPLETE = 3;
+  UPLOAD_STATUS_FAILED = 4;
+  UPLOAD_STATUS_CANCELED = 5;
+  UPLOAD_STATUS_EXPIRED = 6;
+}
+
+message UploadVideoMetadata {
+  uint32 width = 1;
+  uint32 height = 2;
+  uint32 duration = 3;
+  bool is_animated = 4;
+  optional bool has_audio = 5;
+}
+
+message UploadVoiceMetadata {
+  uint32 duration = 1;
+  bytes waveform = 2;
+}
+
+message CreateUploadInput {
+  bytes client_upload_id = 1;
+  string file_name = 2;
+  string mime_type = 3;
+  uint64 byte_count = 4;
+  bytes sha256 = 5;
+  UploadKind kind = 6;
+  optional string thumbnail_file_unique_id = 7;
+  oneof metadata {
+    UploadVideoMetadata video = 8;
+    UploadVoiceMetadata voice = 9;
+  }
+}
+
+message CreateUploadResult {
+  bytes upload_id = 1;
+  uint32 part_size = 2;
+  uint32 part_count = 3;
+  int64 expires_at = 4;
+  repeated uint32 accepted_parts = 5;
+}
+
+message SaveUploadPartInput {
+  bytes upload_id = 1;
+  uint32 part_index = 2;
+  bytes data = 3;
+}
+
+message SaveUploadPartResult { bool already_present = 1; }
+
+message GetUploadStateInput { bytes upload_id = 1; }
+
+message UploadComplete {
+  string file_unique_id = 1;
+  oneof media {
+    Photo photo = 2;
+    Video video = 3;
+    Document document = 4;
+    Voice voice = 5;
+  }
+}
+
+message UploadFailure {
+  enum Code {
+    UPLOAD_FAILURE_CODE_UNSPECIFIED = 0;
+    UPLOAD_FAILURE_INTEGRITY = 1;
+    UPLOAD_FAILURE_INVALID_MEDIA = 2;
+    UPLOAD_FAILURE_PROCESSING = 3;
+    UPLOAD_FAILURE_STORAGE = 4;
+  }
+  Code code = 1;
+  bool retryable = 2;
+}
+
+message GetUploadStateResult {
+  UploadStatus status = 1;
+  repeated uint32 accepted_parts = 2;
+  optional UploadComplete complete = 3;
+  optional UploadFailure failure = 4;
+}
+
+message FinishUploadInput { bytes upload_id = 1; }
+
+message UploadMissingParts { repeated uint32 part_indices = 1; }
+
+message UploadProcessing { uint32 retry_after_seconds = 1; }
+
+message FinishUploadResult {
+  oneof state {
+    UploadMissingParts missing = 1;
+    UploadProcessing processing = 2;
+    UploadComplete complete = 3;
+    UploadFailure failed = 4;
+  }
+}
+
+message CancelUploadInput { bytes upload_id = 1; }
+
+message CancelUploadResult {
+  bool canceled = 1;
+  bool already_terminal = 2;
 }

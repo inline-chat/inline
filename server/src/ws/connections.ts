@@ -19,6 +19,7 @@ const CLOSE_UNAUTHENTICATED_TIMEOUT = 20_000
 export enum ConnVersion {
   BASIC_V1 = 1,
   REALTIME_V1 = 2,
+  REALTIME_V3 = 3,
 }
 
 type WS = ElysiaWS<any, any>

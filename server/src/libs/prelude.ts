@@ -13,6 +13,13 @@ export async function sendCode(phoneNumber: string) {
   return verification
 }
 
+export async function sendCustomCode(phoneNumber: string, code: string) {
+  return client.verification.create({
+    target: { type: "phone_number", value: phoneNumber },
+    options: { custom_code: code },
+  })
+}
+
 export async function checkCode(phoneNumber: string, code: string) {
   const verification = await client.verification.check({
     target: { type: "phone_number", value: phoneNumber },
@@ -24,5 +31,6 @@ export async function checkCode(phoneNumber: string, code: string) {
 
 export const prelude = {
   sendCode,
+  sendCustomCode,
   checkCode,
 }

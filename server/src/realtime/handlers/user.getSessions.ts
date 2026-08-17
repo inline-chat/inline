@@ -16,7 +16,7 @@ export const getSessionsHandler = async (
   }
 }
 
-function encodeSession(session: SessionWithDecryptedData, currentSessionId: number): AccountSession {
+export function encodeSession(session: SessionWithDecryptedData, currentSessionId: number): AccountSession {
   return {
     id: BigInt(session.id),
     clientType: session.clientType ?? "unknown",
