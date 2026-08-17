@@ -9,7 +9,7 @@
     "web/packages/*",
     "landing",
     "mobile",
-    "packages/bot-api",
+    "packages/bot-client",
     "packages/bot-api-types",
     "packages/mcp",
     "packages/oauth-core",

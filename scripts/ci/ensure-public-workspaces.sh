@@ -21,7 +21,7 @@ fi
 
 default_required_manifest_paths=(
   "cli/package.json"
-  "packages/bot-api/package.json"
+  "packages/bot-client/package.json"
   "packages/mcp/package.json"
   "packages/oauth-core/package.json"
   "packages/openclaw/package.json"
