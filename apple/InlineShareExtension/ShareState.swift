@@ -8,6 +8,7 @@ import InlineProtocol
 import Logger
 import MultipartFormDataKit
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 struct SendableItemProvider: @unchecked Sendable {
@@ -323,8 +324,32 @@ class ShareState: ObservableObject {
     return "\(safeStem).jpg"
   }
 
+  private nonisolated func imageFileName(
+    from fileName: String?,
+    typeIdentifier: String
+  ) -> String {
+    let baseName = (fileName ?? "shared_image") as NSString
+    let stem = baseName.deletingPathExtension
+    let safeStem = stem.isEmpty ? "shared_image" : stem
+    guard let fileExtension = preferredFileExtension(for: typeIdentifier) else {
+      return safeStem
+    }
+    return "\(safeStem).\(fileExtension)"
+  }
+
   private nonisolated func imageSourceReadOptions() -> CFDictionary {
     [kCGImageSourceShouldCache: false] as CFDictionary
+  }
+
+  private nonisolated func imageTypeIdentifier(for data: Data) -> String? {
+    guard let source = CGImageSourceCreateWithData(data as CFData, imageSourceReadOptions()),
+          let sourceType = CGImageSourceGetType(source)
+    else {
+      return nil
+    }
+    let identifier = sourceType as String
+    guard UTType(identifier)?.conforms(to: .image) == true else { return nil }
+    return identifier
   }
 
   private nonisolated func writeThumbnailJpeg(from source: CGImageSource, to destinationURL: URL) -> Bool {
@@ -995,26 +1020,34 @@ class ShareState: ObservableObject {
         typeIdentifier: typeIdentifier,
         stagedFile: stagedFile
       )
-    } catch {
-      if stagedFile.fileType == .photo || stagedFile.fileType == .video {
+    } catch let fileRepresentationError {
+      log.warning(tagged(
+        "File representation unavailable; trying data representation " +
+          "type=\(stagedFile.fileType) uti=\(typeIdentifier) " +
+          "error=\(fileRepresentationError.localizedDescription)"
+      ))
+      do {
+        return try await loadDataRepresentationTemporaryFile(
+          from: itemProvider,
+          typeIdentifier: typeIdentifier,
+          stagedFile: stagedFile
+        )
+      } catch let dataRepresentationError {
+        let nsError = dataRepresentationError as NSError
+        if nsError.domain == "ShareError", nsError.code == 3 {
+          throw dataRepresentationError
+        }
         log.warning(tagged(
-          "File representation unavailable for media; refusing decoded fallback " +
-            "type=\(stagedFile.fileType) uti=\(typeIdentifier) error=\(error.localizedDescription)"
+          "Data representation unavailable; falling back to item payload " +
+            "type=\(stagedFile.fileType) uti=\(typeIdentifier) " +
+            "error=\(dataRepresentationError.localizedDescription)"
         ))
-        throw shareError(
-          code: 16,
-          message: "Inline could not access the shared media file. Try saving it to Files and sharing again."
+        return try await loadItemTemporaryFile(
+          from: itemProvider,
+          typeIdentifier: typeIdentifier,
+          stagedFile: stagedFile
         )
       }
-      log.warning(tagged(
-        "File representation unavailable; falling back to item load " +
-          "type=\(stagedFile.fileType) uti=\(typeIdentifier) error=\(error.localizedDescription)"
-      ))
-      return try await loadItemTemporaryFile(
-        from: itemProvider,
-        typeIdentifier: typeIdentifier,
-        stagedFile: stagedFile
-      )
     }
   }
 
@@ -1114,6 +1147,43 @@ class ShareState: ObservableObject {
     }
   }
 
+  private nonisolated func loadDataRepresentationTemporaryFile(
+    from itemProvider: SendableItemProvider,
+    typeIdentifier: String,
+    stagedFile: SharedFile
+  ) async throws -> TemporarySharedFile {
+    try await withCheckedThrowingContinuation { continuation in
+      itemProvider.provider.loadDataRepresentation(forTypeIdentifier: typeIdentifier) { [weak self] data, error in
+        guard let self else {
+          continuation.resume(throwing: NSError(
+            domain: "ShareError",
+            code: 16,
+            userInfo: [NSLocalizedDescriptionKey: "Inline stopped preparing the shared file."]
+          ))
+          return
+        }
+        if let error {
+          continuation.resume(throwing: error)
+          return
+        }
+        guard let data else {
+          continuation.resume(throwing: shareError(code: 16, message: "Unable to read shared file data."))
+          return
+        }
+
+        do {
+          continuation.resume(returning: try temporaryFile(
+            fromLoadedItem: data as NSData,
+            typeIdentifier: typeIdentifier,
+            stagedFile: stagedFile
+          ))
+        } catch {
+          continuation.resume(throwing: error)
+        }
+      }
+    }
+  }
+
   private nonisolated func temporaryFile(
     fromLoadedItem item: NSSecureCoding?,
     typeIdentifier: String,
@@ -1164,10 +1234,32 @@ class ShareState: ObservableObject {
         )
       }
 
-      if stagedFile.fileType == .photo || stagedFile.fileType == .video {
+      guard Int64(data.count) <= Self.maxFileSizeBytes else {
         throw shareError(
-          code: 16,
-          message: "Inline could not access the shared media as a file."
+          code: 3,
+          message: "\(stagedFile.fileName) is too large. Maximum size is \(Self.maxFileSizeDisplay(for: Self.maxFileSizeBytes))."
+        )
+      }
+
+      if stagedFile.fileType == .photo {
+        guard let imageTypeIdentifier = imageTypeIdentifier(for: data) else {
+          throw shareError(code: 16, message: "The shared image data is invalid.")
+        }
+        let fileName = imageFileName(
+          from: stagedFile.fileName,
+          typeIdentifier: imageTypeIdentifier
+        )
+        let tempURL = try writeDataToTemporaryLocation(
+          data,
+          suggestedName: fileName,
+          typeIdentifier: imageTypeIdentifier
+        )
+        return TemporarySharedFile(
+          url: tempURL,
+          fileName: fileName,
+          typeIdentifier: imageTypeIdentifier,
+          fileType: .photo,
+          cleanupURLs: [tempURL]
         )
       }
 
@@ -1182,6 +1274,17 @@ class ShareState: ObservableObject {
         typeIdentifier: typeIdentifier,
         fileType: stagedFile.fileType,
         cleanupURLs: [tempURL]
+      )
+    }
+
+    if let image = item as? UIImage, stagedFile.fileType == .photo {
+      guard let data = image.pngData() else {
+        throw shareError(code: 16, message: "Unable to encode the shared image.")
+      }
+      return try temporaryFile(
+        fromLoadedItem: data as NSData,
+        typeIdentifier: UTType.png.identifier,
+        stagedFile: stagedFile
       )
     }
 
