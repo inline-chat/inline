@@ -18,7 +18,7 @@ import { sessions } from "./sessions"
 import { users } from "./users"
 
 const protocolTimestamp = (name: string) =>
-  timestamp(name, { mode: "date", precision: 3 })
+  timestamp(name, { mode: "date", precision: 3, withTimezone: true })
 
 export const inlineProtocolAuthKeys = pgTable(
   "inline_protocol_auth_keys",
