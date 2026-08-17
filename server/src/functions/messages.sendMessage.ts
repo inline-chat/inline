@@ -35,7 +35,7 @@ import { normalizeGlobalNotificationMode } from "@in/server/modules/notification
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
-import { connectionManager } from "@in/server/ws/connections"
+import { connectionManager, ConnVersion } from "@in/server/ws/connections"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { getCachedUserProfilePhotoUrl } from "@in/server/modules/cache/userPhotos"
 import { processAttachments } from "@in/server/db/models/messages"
@@ -113,6 +113,16 @@ type Output = {
 const log = new Log("functions.sendMessage")
 const URGENT_NUDGE_TEXT = "🚨"
 
+export const shouldPublishSendMessageToCurrentSession = ({
+  isRealtimeV3Session,
+  currentUserLayer,
+  hasAttachments,
+}: {
+  isRealtimeV3Session: boolean
+  currentUserLayer: number
+  hasAttachments: boolean
+}): boolean => !isRealtimeV3Session && (currentUserLayer < 2 || hasAttachments)
+
 export const sendMessage = async (input: Input, context: FunctionContext): Promise<Output> => {
   // input data
   const date = input.sendDate ? new Date(input.sendDate * 1000) : new Date()
@@ -124,8 +134,16 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   await ensurePrivatePeerCanReceiveMessages(chat, currentUserId)
   const chatId = chat.id
   const replyToMsgIdNumber = input.replyToMessageId ? Number(input.replyToMessageId) : null
-  // FIXME: create a helper function to get the layer
-  const currentUserLayer = connectionManager.getConnectionBySession(currentUserId, context.currentSessionId)?.layer ?? 0
+  const currentSessionConnections = connectionManager
+    .getUserConnections(currentUserId)
+    .filter(({ sessionId }) => sessionId === context.currentSessionId)
+  const currentUserLayer = currentSessionConnections.reduce(
+    (layer, connection) => Math.max(layer, connection.layer ?? 0),
+    0,
+  )
+  const isRealtimeV3Session = currentSessionConnections.some(
+    ({ version }) => version === ConnVersion.REALTIME_V3,
+  )
 
   const outgoingText = input.message
     ? await processOutgoingText({
@@ -396,7 +414,11 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     currentUserId,
     update,
     currentSessionId: context.currentSessionId,
-    publishToSelfSession: currentUserLayer < 2 || hasAttachments,
+    publishToSelfSession: shouldPublishSendMessageToCurrentSession({
+      isRealtimeV3Session,
+      currentUserLayer,
+      hasAttachments,
+    }),
     updateGroup,
   })
 
