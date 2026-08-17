@@ -187,7 +187,7 @@ struct IntegrationCard: View {
 
     Task {
       do {
-        _ = try await ApiClient.shared.disconnectIntegration(spaceId: spaceId, provider: provider)
+        try await InlineRPCClient.shared.disconnect(provider: provider, spaceID: spaceId)
         await MainActor.run {
           isConnected = false
           isConnecting = false

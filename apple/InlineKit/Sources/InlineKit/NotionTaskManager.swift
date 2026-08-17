@@ -85,9 +85,9 @@ public class NotionTaskManager: @unchecked Sendable {
       let resolvedIntegrations = if let integrations {
         integrations
       } else {
-        try await ApiClient.shared.getIntegrations(
-          userId: Auth.shared.getCurrentUserId() ?? 0,
-          spaceId: peerId.isThread ? spaceId : nil
+        try await InlineRPCClient.shared.integrations(
+          userID: Auth.shared.getCurrentUserId() ?? 0,
+          spaceID: peerId.isThread ? spaceId : nil
         )
       }
 
@@ -132,9 +132,9 @@ public class NotionTaskManager: @unchecked Sendable {
   private func handleWillDoForSpace(message: Message, spaceId: Int64) async {
     do {
       // Check if user has access to integration
-      let integrations = try await ApiClient.shared.getIntegrations(
-        userId: Auth.shared.getCurrentUserId() ?? 0,
-        spaceId: spaceId
+      let integrations = try await InlineRPCClient.shared.integrations(
+        userID: Auth.shared.getCurrentUserId() ?? 0,
+        spaceID: spaceId
       )
 
       guard integrations.hasNotionConnected else {
@@ -158,9 +158,9 @@ public class NotionTaskManager: @unchecked Sendable {
   private func handleWillDoForDM(message: Message) async {
     do {
       // Get all accessible integrations for DMs
-      let integrations = try await ApiClient.shared.getIntegrations(
-        userId: Auth.shared.getCurrentUserId() ?? 0,
-        spaceId: nil
+      let integrations = try await InlineRPCClient.shared.integrations(
+        userID: Auth.shared.getCurrentUserId() ?? 0,
+        spaceID: nil
       )
 
       guard integrations.hasNotionConnected else {
@@ -206,11 +206,10 @@ public class NotionTaskManager: @unchecked Sendable {
     }
 
     do {
-      let result = try await ApiClient.shared.createNotionTask(
-        spaceId: spaceId,
-        messageId: message.messageId,
-        chatId: message.chatId,
-        peerId: message.peerId
+      let result = try await InlineRPCClient.shared.createNotionTask(
+        spaceID: spaceId,
+        messageID: message.messageId,
+        peerID: message.peerId
       )
 
       // Stop progress tracking

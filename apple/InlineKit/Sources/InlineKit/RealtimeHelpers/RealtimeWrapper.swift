@@ -25,7 +25,6 @@ public final actor Realtime: Sendable {
   private var started = false
   private var automaticStartsSuspended = false
 
-  @MainActor private var cancellable: AnyCancellable? = nil
   @MainActor public let apiStatePublisher = CurrentValueSubject<RealtimeAPIState, Never>(
     .connecting
   )
@@ -35,26 +34,6 @@ public final actor Realtime: Sendable {
 
   private init() {
     api = RealtimeAPI()
-
-    Task {
-      if Auth.shared.getIsLoggedIn() {
-        await ensureStarted()
-      }
-    }
-
-    Task { @MainActor [self] in
-      cancellable = Auth.shared.$isLoggedIn.sink { [weak self] isLoggedIn in
-        guard let self else { return }
-        if isLoggedIn {
-          DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            Task {
-              self?.log.info("User logged in, starting realtime")
-              await self?.resumeForAuthenticatedSession()
-            }
-          }
-        }
-      }
-    }
   }
 
   /// Apply updates as a result of an operation
@@ -66,7 +45,7 @@ public final actor Realtime: Sendable {
   }
 
   private func ensureStarted() {
-    if started || automaticStartsSuspended {
+    if started || automaticStartsSuspended || Auth.shared.getToken() == nil {
       return
     }
     started = true
@@ -74,11 +53,10 @@ public final actor Realtime: Sendable {
   }
 
   public func start() {
-    automaticStartsSuspended = false
-    ensureStarted()
-  }
-
-  private func resumeForAuthenticatedSession() {
+    guard Auth.shared.getToken() != nil else {
+      log.info("Legacy realtime start skipped because no legacy bearer credential is active")
+      return
+    }
     automaticStartsSuspended = false
     ensureStarted()
   }
@@ -118,9 +96,9 @@ public final actor Realtime: Sendable {
         }
 
         // Retry after delay if still logged in
-        if Auth.shared.getIsLoggedIn() {
+        if Auth.shared.getToken() != nil {
           try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
-          if started, !automaticStartsSuspended, Auth.shared.getIsLoggedIn() {
+          if started, !automaticStartsSuspended, Auth.shared.getToken() != nil {
             startConnection()
           }
         }

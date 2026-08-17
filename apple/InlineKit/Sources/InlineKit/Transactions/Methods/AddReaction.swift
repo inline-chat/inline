@@ -50,8 +50,8 @@ public struct TransactionAddReaction: Transaction {
   }
 
   public func execute() async throws -> [InlineProtocol.Update] {
-    let result = try await Realtime.shared.invoke(
-      .addReaction,
+    let result = try await Api.realtime.callRpcDirect(
+      method: .addReaction,
       input: .addReaction(AddReactionInput.with {
         $0.peerID = peerId.toInputPeer()
         $0.messageID = message.messageId
@@ -72,7 +72,7 @@ public struct TransactionAddReaction: Transaction {
   }
 
   public func didSucceed(result: [InlineProtocol.Update]) async {
-    await Realtime.shared.applyUpdates(result)
+    await Api.realtime.applyUpdates(result)
   }
 
   public func didFail(error: Error?) async {

@@ -2,6 +2,7 @@ import Auth
 import Foundation
 import InlineConfig
 import InlineProtocol
+import Logger
 
 public enum InlineProtocolNativeLoginError: Error, Sendable {
   case unavailable
@@ -25,6 +26,7 @@ public actor InlineProtocolNativeLogin {
   }
 
   private let auth: AuthHandle
+  private let log = Log.scoped("InlineProtocol.Login")
   private let url: URL
   private let rsaPublicKeys: [InlineProtocolRSAPublicKey]
   private var pending: Pending?
@@ -62,6 +64,7 @@ public actor InlineProtocolNativeLogin {
     timeZone: String? = nil
   ) async throws -> InlineProtocolNativeLoginResult {
     guard let pending else { throw InlineProtocolNativeLoginError.noPendingChallenge }
+    log.info("Native login challenge completion started")
     var request = AuthCompleteRequest()
     request.challengeID = pending.challengeID
     request.code = code
@@ -71,7 +74,9 @@ public actor InlineProtocolNativeLogin {
     guard case let .authorized(authorized) = result.state else {
       throw InlineProtocolNativeLoginError.inviteRequired
     }
+    log.info("Native login challenge authorized")
     let permanent = await pending.connection.authorization
+    log.info("Creating temporary application authorization")
     let temporaryConnection = try await InlineProtocolV3Connection.connect(.init(
       url: url,
       rsaPublicKeys: rsaPublicKeys,
@@ -79,6 +84,7 @@ public actor InlineProtocolNativeLogin {
     ))
     do {
       try await temporaryConnection.bindTemporary(to: permanent)
+      log.info("Temporary application authorization bound")
       let temporary = await temporaryConnection.authorization
       try await auth.saveInlineProtocolCredentials(.init(
         userId: authorized.user.id,
@@ -86,21 +92,25 @@ public actor InlineProtocolNativeLogin {
         permanent: permanent,
         temporary: temporary
       ))
+      log.info("Native login credentials stored")
       await temporaryConnection.close()
       await pending.connection.close()
       self.pending = nil
+      log.info("Native login connections closed")
       return InlineProtocolNativeLoginResult(
         user: authorized.user,
         userId: authorized.user.id,
         accountSessionId: authorized.accountSessionID
       )
     } catch {
+      log.error("Native login credential setup failed", error: error)
       await temporaryConnection.close()
       throw error
     }
   }
 
   public func cancel() async {
+    log.info("Native login cancellation requested")
     if let pending { await pending.connection.close() }
     pending = nil
   }
@@ -111,18 +121,22 @@ public actor InlineProtocolNativeLogin {
   ) async throws -> AuthBeginResult {
     guard !rsaPublicKeys.isEmpty else { throw InlineProtocolNativeLoginError.unavailable }
     await cancel()
+    log.info("Native login permanent authorization handshake started")
     let connection = try await InlineProtocolV3Connection.connect(.init(
       url: url,
       rsaPublicKeys: rsaPublicKeys
     ))
+    log.info("Native login permanent authorization handshake completed")
     do {
       var request = AuthBeginRequest()
       request.identifier = identifier
       request.client = client
       let result = try await connection.authBegin(request)
       pending = Pending(challengeID: result.challengeID, connection: connection)
+      log.info("Native login challenge accepted")
       return result
     } catch {
+      log.error("Native login challenge start failed", error: error)
       await connection.close()
       throw error
     }

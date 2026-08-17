@@ -111,7 +111,7 @@ final class LinearIssueCoordinator: ObservableObject {
 
     do {
       let userId = Auth.shared.getCurrentUserId() ?? 0
-      let integrations = try await ApiClient.shared.getIntegrations(userId: userId, spaceId: nil)
+      let integrations = try await InlineRPCClient.shared.integrations(userID: userId, spaceID: nil)
 
       guard integrations.hasLinearConnected else {
         ToastCenter.shared.showError("No Linear integration found. Connect Linear in one of your spaces.")
@@ -163,7 +163,7 @@ final class LinearIssueCoordinator: ObservableObject {
 
     do {
       let userId = Auth.shared.getCurrentUserId() ?? 0
-      let integrations = try await ApiClient.shared.getIntegrations(userId: userId, spaceId: spaceId)
+      let integrations = try await InlineRPCClient.shared.integrations(userID: userId, spaceID: spaceId)
 
       guard integrations.hasLinearConnected else {
         hideLoadingToast()
@@ -177,13 +177,10 @@ final class LinearIssueCoordinator: ObservableObject {
         return
       }
 
-      let result = try await ApiClient.shared.createLinearIssue(
-        text: text,
-        messageId: message.messageId,
-        peerId: message.peerId,
-        chatId: message.chatId,
-        fromId: userId,
-        spaceId: spaceId
+      let result = try await InlineRPCClient.shared.createLinearIssue(
+        spaceID: spaceId,
+        messageID: message.messageId,
+        peerID: message.peerId
       )
 
       hideLoadingToast()

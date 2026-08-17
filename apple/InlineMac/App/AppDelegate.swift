@@ -837,7 +837,7 @@ extension AppDelegate {
     MainWindowOpenCoordinator.shared.openOnboarding()
 
     if notifyServer {
-      _ = try? await ApiClient.shared.logout()
+      try? await InlineRPCClient.shared.logout()
     }
 
     Analytics.logout()

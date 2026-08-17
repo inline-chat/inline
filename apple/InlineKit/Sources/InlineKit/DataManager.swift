@@ -28,10 +28,10 @@ public class DataManager: ObservableObject {
   public func fetchMe() async throws -> User {
     log.trace("fetchMe")
     do {
-      let result = try await ApiClient.shared.getMe()
+      let result = try await InlineRPCClient.shared.getMe()
 
       let user = try await database.dbWriter.write { db in
-        try result.user.saveFull(db)
+        try User.save(db, user: result.user)
       }
 
       return user
@@ -44,7 +44,7 @@ public class DataManager: ObservableObject {
   public func createSpace(name: String) async throws -> Int64? {
     log.trace("createSpace")
     do {
-      let result = try await ApiClient.shared.createSpace(name: name)
+      let result = try await InlineRPCClient.shared.createSpace(name: name)
       let space = Space(from: result.space)
       let log = self.log
       try await database.dbWriter.write { db in
@@ -59,9 +59,8 @@ public class DataManager: ObservableObject {
           log.error("Failed to save member", error: error)
         }
         do {
-          try result.chats.forEach { chat in
-            _ = try Chat(from: chat).saveFull(db)
-          }
+          _ = try Chat(from: result.chat).saveFull(db)
+          try Dialog(from: result.dialog).save(db, onConflict: .replace)
         } catch {
           log.error("Failed to save chat", error: error)
         }
@@ -76,7 +75,7 @@ public class DataManager: ObservableObject {
   public func createThread(spaceId: Int64, title: String, emoji: String? = nil) async throws -> Int64? {
     log.trace("createThread")
     do {
-      let result = try await ApiClient.shared.createThread(title: title, spaceId: spaceId, emoji: emoji)
+      let result = try await InlineRPCClient.shared.createThread(title: title, spaceID: spaceId, emoji: emoji)
       // Create the chat
       let chat = Chat(from: result.chat)
       try await database.dbWriter.write { db in
@@ -93,18 +92,20 @@ public class DataManager: ObservableObject {
   public func createPrivateChat(userId: Int64) async throws -> Peer {
     log.trace("createPrivateChat")
     do {
-      let result = try await ApiClient.shared.createPrivateChat(userId: userId)
+      let result = try await InlineRPCClient.shared.createPrivateChat(userID: userId)
+      let chatState = try await InlineRPCClient.shared.getChat(peerID: .user(id: userId))
+      guard chatState.hasUser else { throw InlineRPCClientError.unexpectedResponse }
 
       try await database.dbWriter.write { db in
-        try result.user.saveFull(db)
+        _ = try User.save(db, user: chatState.user)
 
         var chat = Chat(from: result.chat)
         try chat.saveWithValidLastMsg(db)
 
-        try result.dialog.saveFull(db)
+        try Dialog(from: result.dialog).save(db, onConflict: .replace)
       }
 
-      return Peer.user(id: result.user.id)
+      return Peer.user(id: userId)
     } catch {
       log.error("Failed to create private chat", error: error)
       throw error
@@ -129,10 +130,8 @@ public class DataManager: ObservableObject {
     // Task { @MainActor in
     do {
       // Remote call
-      let result = try await ApiClient.shared.createPrivateChat(userId: userId)
+      let result = try await InlineRPCClient.shared.createPrivateChat(userID: userId)
       try await database.dbWriter.write { db in
-        try result.user.saveFull(db)
-
         var chat = Chat(from: result.chat)
         try chat.saveWithValidLastMsg(db)
 
@@ -152,7 +151,15 @@ public class DataManager: ObservableObject {
   public func getSpaces() async throws -> [Space] {
     log.trace("getSpaces")
     do {
-      let result = try await ApiClient.shared.getSpaces()
+      let result = try await InlineRPCClient.shared.getChats()
+      let memberResults = try await withThrowingTaskGroup(of: InlineProtocol.GetSpaceMembersResult.self) { group in
+        for space in result.spaces {
+          group.addTask { try await InlineRPCClient.shared.getSpaceMembers(spaceID: space.id) }
+        }
+        var values: [InlineProtocol.GetSpaceMembersResult] = []
+        for try await value in group { values.append(value) }
+        return values
+      }
 
       let spaces = try await database.dbWriter.write { db in
         let spaces = result.spaces.map { space in
@@ -162,9 +169,9 @@ public class DataManager: ObservableObject {
           try space.save(db)
         }
 
-        for member in result.members {
-          let member = Member(from: member)
-          try member.save(db)
+        for result in memberResults {
+          for user in result.users { _ = try User.save(db, user: user) }
+          for member in result.members { try Member(from: member).save(db, onConflict: .replace) }
         }
         return spaces
       }
@@ -179,10 +186,11 @@ public class DataManager: ObservableObject {
   public func getUser(id: Int64) async throws {
     log.trace("getUser")
     do {
-      let result = try await ApiClient.shared.getUser(userId: id)
+      let result = try await InlineRPCClient.shared.getChat(peerID: .user(id: id))
+      guard result.hasUser else { throw InlineRPCClientError.unexpectedResponse }
 
       let _ = try await database.dbWriter.write { db in
-        try result.user.saveFull(db)
+        try User.save(db, user: result.user)
       }
     } catch {
       throw error
@@ -207,7 +215,7 @@ public class DataManager: ObservableObject {
           .deleteAll(db)
       }
 
-      let _ = try await ApiClient.shared.deleteSpace(spaceId: spaceId)
+      try await InlineRPCClient.shared.deleteSpace(spaceID: spaceId)
 
     } catch {
       log.error("Failed to delete space", error: error)
@@ -230,7 +238,7 @@ public class DataManager: ObservableObject {
           .deleteAll(db)
       }
 
-      let _ = try await ApiClient.shared.leaveSpace(spaceId: spaceId)
+      try await InlineRPCClient.shared.leaveSpace(spaceID: spaceId)
     } catch {
       log.error("Failed to leave space", error: error)
       throw error
@@ -241,16 +249,20 @@ public class DataManager: ObservableObject {
   public func getPrivateChats() async throws -> [Chat] {
     log.trace("getPrivateChats")
     do {
-      let result = try await ApiClient.shared.getPrivateChats()
+      let result = try await InlineRPCClient.shared.getChats()
 
       let chats = try await database.dbWriter.write { db in
         // First save peer users if they exist
-        try result.peerUsers.forEach { apiUser in
-          try apiUser.saveFull(db)
+        try result.users.forEach { user in
+          _ = try User.save(db, user: user)
         }
 
         // Then save chats with lastMsgId set to nil
-        let chats = result.chats.map { chat in
+        let privateChats = result.chats.filter {
+          if case .user? = $0.peerID.type { return true }
+          return false
+        }
+        let chats = privateChats.map { chat in
           var chat = Chat(from: chat)
           chat.lastMsgId = nil
           return chat
@@ -262,19 +274,23 @@ public class DataManager: ObservableObject {
 
         // Save messages
         try result.messages.forEach { message in
-          let _ = try message.saveFullMessage(db, publishChanges: false)
+          var message = Message(from: message)
+          try message.saveMessage(db)
         }
 
         // TODO: Optimize
         // Update chat's last message ids now
-        let chats_ = result.chats.map { chat in Chat(from: chat) }
+        let chats_ = privateChats.map { chat in Chat(from: chat) }
         try chats_.forEach { chat in
           var chat = chat
           try chat.saveWithValidLastMsg(db)
         }
 
-        try result.dialogs.forEach { dialog in
-          try dialog.saveFull(db)
+        try result.dialogs.filter {
+          if case .user? = $0.peer.type { return true }
+          return false
+        }.forEach { dialog in
+          try Dialog(from: dialog).save(db, onConflict: .replace)
         }
 
         return chats
@@ -291,7 +307,7 @@ public class DataManager: ObservableObject {
     log.trace("get dialogs")
     do {
       // Fetch
-      let result = try await ApiClient.shared.getDialogs(spaceId: spaceId)
+      let result = try await InlineRPCClient.shared.getChats()
 
       // log.debug("fetched dialogs \(result)")
 
@@ -299,11 +315,12 @@ public class DataManager: ObservableObject {
       try await database.dbWriter.write { db in
         // Save users
         try result.users.forEach { user in
-          try user.saveFull(db)
+          _ = try User.save(db, user: user)
         }
 
         // Save chats
-        let chats = result.chats.map { chat in
+        let spaceChats = result.chats.filter { $0.hasSpaceID && $0.spaceID == spaceId }
+        let chats = spaceChats.map { chat in
 
           var chat = Chat(from: chat)
           // to avoid foriegn key constraint
@@ -326,7 +343,7 @@ public class DataManager: ObservableObject {
         }
 
         // Set last messages
-        let chats_ = result.chats.map { chat in
+        let chats_ = spaceChats.map { chat in
           let chat = Chat(from: chat)
 
           return chat
@@ -337,8 +354,8 @@ public class DataManager: ObservableObject {
         }
 
         // Save dialogs (merge with existing local-only fields such as drafts/settings).
-        try result.dialogs.forEach { dialog in
-          try dialog.saveFull(db)
+        try result.dialogs.filter { $0.hasSpaceID && $0.spaceID == spaceId }.forEach { dialog in
+          try Dialog(from: dialog).save(db, onConflict: .replace)
         }
       }
 
@@ -387,18 +404,16 @@ public class DataManager: ObservableObject {
       "getChatHistory with peerUserId: \(String(describing: finalPeerUserId)), peerThreadId: \(String(describing: finalPeerThreadId))"
     )
 
-    let result = try await ApiClient.shared.getChatHistory(
-      peerUserId: finalPeerUserId,
-      peerThreadId: finalPeerThreadId
-    )
+    let result = try await InlineRPCClient.shared.getChatHistory(peerID: peerId_)
 
     try await database.dbWriter.write { db in
-      for apiMessage in result.messages {
+      for protocolMessage in result {
         do {
-          let _ = try apiMessage.saveFullMessage(db, publishChanges: false)
+          var message = Message(from: protocolMessage)
+          try message.saveMessage(db)
         } catch {
           Task {
-            await self.log.error("failed to save message  from: \(apiMessage)", error: error)
+            await self.log.error("failed to save history message", error: error)
           }
         }
       }
@@ -412,19 +427,18 @@ public class DataManager: ObservableObject {
   }
 
   public func addReaction(messageId: Int64, chatId: Int64, emoji: String) async throws {
-    let result = try await ApiClient.shared.addReaction(
-      messageId: messageId, chatId: chatId, emoji: emoji
-    )
-
-    try await database.dbWriter.write { db in
-      let reaction = Reaction(from: result.reaction)
-      try Reaction.save(db, reaction: reaction)
+    let peerID = try await database.reader.read { db -> Peer in
+      guard let chat = try Chat.fetchOne(db, key: chatId) else {
+        throw InlineRPCClientError.unexpectedResponse
+      }
+      return chat.peerId.toPeer()
     }
+    try await InlineRPCClient.shared.addReaction(peerID: peerID, messageID: messageId, emoji: emoji)
   }
 
+  @available(*, unavailable, message: "Presence is owned by the realtime connection lifecycle")
   public func updateStatus(online: Bool) async throws {
     log.trace("updateStatus: \(online)")
-    let _ = try await ApiClient.shared.updateStatus(online: online)
   }
 
   public func updateDialog(
@@ -528,22 +542,19 @@ public class DataManager: ObservableObject {
     }
 
     do {
-      let updatedDialog = try await database.reader.read { db in
-        try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
+      if let archived {
+        try await InlineRPCClient.shared.updateDialogArchived(peerID: peerId, archived: archived)
       }
-      if updatedDialog == nil {
-        log.error("Failed to update dialog")
-      }
-      let archivedValue = archived ?? updatedDialog?.archived
-      let response = try await ApiClient.shared.updateDialog(
-        peerId: peerId,
-        pinned: pinned,
-        archived: archivedValue,
-        order: requestOrder.order,
-        pinnedOrder: requestOrder.pinnedOrder
-      )
-      try await database.dbWriter.write { db in
-        _ = try response.dialog.saveFull(db)
+      if pinned != nil || requestOrder.order != nil || requestOrder.pinnedOrder != nil {
+        let response = try await InlineRPCClient.shared.updateDialogOrder(
+          peerID: peerId,
+          pinned: pinned,
+          order: requestOrder.order,
+          pinnedOrder: requestOrder.pinnedOrder
+        )
+        try await database.dbWriter.write { db in
+          try Dialog(from: response.dialog).save(db, onConflict: .replace)
+        }
       }
     } catch {
       await rollbackDialogUpdate(
@@ -674,9 +685,12 @@ public class DataManager: ObservableObject {
   }
 
   public func getSpace(spaceId: Int64) async throws {
-    let result = try await ApiClient.shared.getSpace(spaceId: spaceId)
+    let result = try await InlineRPCClient.shared.getChats()
+    guard let protocolSpace = result.spaces.first(where: { $0.id == spaceId }) else {
+      throw InlineRPCClientError.unexpectedResponse
+    }
     try await database.dbWriter.write { db in
-      let space = Space(from: result.space)
+      let space = Space(from: protocolSpace)
       try space.save(db, onConflict: .replace)
 
 //      do {
@@ -702,17 +716,18 @@ public class DataManager: ObservableObject {
   }
 
   public func addMember(spaceId: Int64, userId: Int64) async throws {
-    let result = try await ApiClient.shared.addMember(spaceId: spaceId, userId: userId)
+    let result = try await InlineRPCClient.shared.inviteToSpace(spaceID: spaceId, userID: userId)
     try await database.dbWriter.write { db in
       let member = Member(from: result.member)
       try member.save(db, onConflict: .replace)
+      if result.hasUser { _ = try User.save(db, user: result.user) }
     }
   }
 
   public func deleteMessage(
     messageId: Int64, chatId: Int64, peerId: Peer
   ) async throws {
-    let _ = try await ApiClient.shared.deleteMessage(messageId: messageId, chatId: chatId, peerId: peerId)
+    try await InlineRPCClient.shared.deleteMessage(peerID: peerId, messageID: messageId)
 
     try await database.dbWriter.write { db in
 
@@ -746,17 +761,7 @@ public class DataManager: ObservableObject {
 
     do {
       // Update on server
-      let result = try await ApiClient.shared.updateProfile(
-        firstName: nil,
-        lastName: nil,
-        username: nil,
-        timeZone: timeZone
-      )
-
-      // Update local database
-      _ = try await database.dbWriter.write { db in
-        try result.user.saveFull(db)
-      }
+      _ = try await InlineRPCClient.shared.updateSession(timeZone: timeZone)
     } catch {
       log.error("Failed to update timezone", error: error)
       throw error
@@ -768,7 +773,7 @@ public class DataManager: ObservableObject {
     messageId: Int64,
     chatId: Int64
   ) async throws {
-    guard let externalTaskId = externalTask.id, let taskId = externalTask.taskId else {
+    guard let externalTaskId = externalTask.id else {
       let message = "Missing required data for attachment deletion"
       log.error(message)
       throw NSError(domain: "InlineKit.DataManager", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
@@ -778,12 +783,31 @@ public class DataManager: ObservableObject {
       "deleteAttachment requested (externalTaskId: \(externalTaskId), application: \(externalTask.application), messageId: \(messageId), chatId: \(chatId))"
     )
 
-    // Rely on realtime updates to remove the attachment locally.
-    _ = try await ApiClient.shared.deleteAttachment(
-      externalTaskId: externalTaskId,
-      pageId: taskId,
-      messageId: messageId,
-      chatId: chatId
+    let target = try await database.reader.read { db -> (Peer, Int64)? in
+      guard let message = try Message
+        .filter(Column("chatId") == chatId)
+        .filter(Column("messageId") == messageId)
+        .fetchOne(db),
+        let attachment = try Attachment
+          .filter(Column("messageId") == message.globalId)
+          .filter(Column("externalTaskId") == externalTaskId)
+          .fetchOne(db),
+        let attachmentID = attachment.attachmentId
+      else { return nil }
+      return (message.peerId, attachmentID)
+    }
+    guard let (peerID, attachmentID) = target else {
+      throw NSError(
+        domain: "InlineKit.DataManager",
+        code: 2,
+        userInfo: [NSLocalizedDescriptionKey: "Attachment identity is unavailable"]
+      )
+    }
+
+    try await InlineRPCClient.shared.deleteMessageAttachment(
+      peerID: peerID,
+      messageID: messageId,
+      attachmentID: attachmentID
     )
   }
 }

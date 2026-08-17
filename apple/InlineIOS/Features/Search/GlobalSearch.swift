@@ -62,7 +62,7 @@ class GlobalSearch: ObservableObject {
       guard !Task.isCancelled else { return }
 
       do {
-        let result = try await ApiClient.shared.searchContacts(query: query)
+        let result = try await InlineRPCClient.shared.searchContacts(query: query)
 
         // Check if cancelled before updating UI
         guard !Task.isCancelled else { return }

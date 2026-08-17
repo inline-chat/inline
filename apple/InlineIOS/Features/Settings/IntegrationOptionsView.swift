@@ -147,7 +147,7 @@ struct IntegrationOptionsView: View {
     await MainActor.run { isLoading = true }
     defer { Task { @MainActor in isLoading = false } }
     do {
-      let fetchedDatabases = try await ApiClient.shared.getNotionDatabases(spaceId: spaceId)
+      let fetchedDatabases = try await InlineRPCClient.shared.notionDatabases(spaceID: spaceId)
 
       if !areDatabasesEqual(fetchedDatabases, databases) {
         if let encodedData = try? JSONEncoder().encode(fetchedDatabases) {
@@ -167,7 +167,7 @@ struct IntegrationOptionsView: View {
     await MainActor.run { isLoading = true }
     defer { Task { @MainActor in isLoading = false } }
     do {
-      let fetchedTeams = try await ApiClient.shared.getLinearTeams(spaceId: spaceId)
+      let fetchedTeams = try await InlineRPCClient.shared.linearTeams(spaceID: spaceId)
       if let encodedData = try? JSONEncoder().encode(fetchedTeams) {
         UserDefaults.standard.set(encodedData, forKey: teamsCacheKey)
       }
@@ -179,9 +179,9 @@ struct IntegrationOptionsView: View {
 
   private func fetchCurrentSelection() async {
     do {
-      let integrations = try await ApiClient.shared.getIntegrations(
-        userId: Auth.shared.getCurrentUserId() ?? 0,
-        spaceId: spaceId
+      let integrations = try await InlineRPCClient.shared.integrations(
+        userID: Auth.shared.getCurrentUserId() ?? 0,
+        spaceID: spaceId
       )
 
       await MainActor.run {
@@ -211,7 +211,7 @@ struct IntegrationOptionsView: View {
 
   private func saveNotionDatabase(_ databaseID: String) async {
     do {
-      _ = try await ApiClient.shared.saveNotionDatabaseId(spaceId: spaceId, databaseId: databaseID)
+      try await InlineRPCClient.shared.setNotionDatabase(spaceID: spaceId, databaseID: databaseID)
       await MainActor.run {
         errorMessage = nil
         NotificationCenter.default.post(name: .connectorConfigurationUpdated, object: nil)
@@ -229,7 +229,7 @@ struct IntegrationOptionsView: View {
 
   private func saveLinearTeam(_ teamID: String) async {
     do {
-      _ = try await ApiClient.shared.saveLinearTeamId(spaceId: spaceId, teamId: teamID)
+      try await InlineRPCClient.shared.setLinearTeam(spaceID: spaceId, teamID: teamID)
       await MainActor.run {
         errorMessage = nil
         NotificationCenter.default.post(name: .connectorConfigurationUpdated, object: nil)

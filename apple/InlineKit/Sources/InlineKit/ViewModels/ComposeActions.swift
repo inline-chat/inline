@@ -284,10 +284,14 @@ public class ComposeActions: ObservableObject {
 
   // Sending side
   private func sendComposeAction(for peerId: Peer, action: ApiComposeAction?) async throws {
-    let _ = try await InlineKit.Realtime.shared.invoke(.sendComposeAction, input: .sendComposeAction(.with {
-      $0.peerID = peerId.toInputPeer()
-      $0.action = action?.toProtocolComposeAction() ?? .none
-    }))
+    _ = try await Api.realtime.callRpcDirect(
+      method: .sendComposeAction,
+      input: .sendComposeAction(.with {
+        $0.peerID = peerId.toInputPeer()
+        $0.action = action?.toProtocolComposeAction() ?? .none
+      }),
+      timeout: .seconds(3)
+    )
   }
 
   public func startedTyping(for peerId: Peer) async {

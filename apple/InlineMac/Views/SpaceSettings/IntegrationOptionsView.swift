@@ -211,7 +211,7 @@ struct IntegrationOptionsView: View {
   private func saveNotionSelection(_ newValue: String) {
     enqueueSave {
       do {
-        _ = try await ApiClient.shared.saveNotionDatabaseId(spaceId: spaceId, databaseId: newValue)
+        try await InlineRPCClient.shared.setNotionDatabase(spaceID: spaceId, databaseID: newValue)
         await MainActor.run {
           NotificationCenter.default.post(name: .connectorConfigurationUpdated, object: nil)
         }
@@ -234,7 +234,7 @@ struct IntegrationOptionsView: View {
   private func saveLinearSelection(_ newValue: String) {
     enqueueSave {
       do {
-        _ = try await ApiClient.shared.saveLinearTeamId(spaceId: spaceId, teamId: newValue)
+        try await InlineRPCClient.shared.setLinearTeam(spaceID: spaceId, teamID: newValue)
         await MainActor.run {
           NotificationCenter.default.post(name: .connectorConfigurationUpdated, object: nil)
         }
@@ -292,7 +292,7 @@ struct IntegrationOptionsView: View {
   private func fetchDatabases() async {
     await MainActor.run { isLoading = true }
     do {
-      let fetched = try await ApiClient.shared.getNotionDatabases(spaceId: spaceId)
+      let fetched = try await InlineRPCClient.shared.notionDatabases(spaceID: spaceId)
       if let encoded = try? JSONEncoder().encode(fetched) {
         UserDefaults.standard.set(encoded, forKey: databasesCacheKey)
       }
@@ -310,9 +310,9 @@ struct IntegrationOptionsView: View {
 
   private func fetchCurrentNotionSelection() async {
     do {
-      let integrations = try await ApiClient.shared.getIntegrations(
-        userId: Auth.shared.getCurrentUserId() ?? 0,
-        spaceId: spaceId
+      let integrations = try await InlineRPCClient.shared.integrations(
+        userID: Auth.shared.getCurrentUserId() ?? 0,
+        spaceID: spaceId
       )
       await MainActor.run {
         hadStaleNotionSelection = false
@@ -335,7 +335,7 @@ struct IntegrationOptionsView: View {
   private func fetchTeams() async {
     await MainActor.run { isLoading = true }
     do {
-      let fetched = try await ApiClient.shared.getLinearTeams(spaceId: spaceId)
+      let fetched = try await InlineRPCClient.shared.linearTeams(spaceID: spaceId)
       if let encoded = try? JSONEncoder().encode(fetched) {
         UserDefaults.standard.set(encoded, forKey: teamsCacheKey)
       }
@@ -353,9 +353,9 @@ struct IntegrationOptionsView: View {
 
   private func fetchCurrentLinearSelection() async {
     do {
-      let integrations = try await ApiClient.shared.getIntegrations(
-        userId: Auth.shared.getCurrentUserId() ?? 0,
-        spaceId: spaceId
+      let integrations = try await InlineRPCClient.shared.integrations(
+        userID: Auth.shared.getCurrentUserId() ?? 0,
+        spaceID: spaceId
       )
       await MainActor.run {
         hadStaleCachedSelection = false

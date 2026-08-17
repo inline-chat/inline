@@ -58,19 +58,13 @@ public final class UnreadManager: Sendable {
 
   private init() {}
 
-  private let apiClient = ApiClient.shared
   private let db = AppDatabase.shared
 
   private func sendReadMessagesToServer(peerId: Peer, maxId: Int64?) async {
     do {
       _ = try await Api.realtime.send(.readMessages(peerId: peerId, maxId: maxId))
     } catch {
-      log.error("Realtime readMessages failed, falling back to HTTP route", error: error)
-      do {
-        _ = try await apiClient.readMessages(peerId: peerId, maxId: maxId)
-      } catch {
-        log.error("Failed to update remote server", error: error)
-      }
+      log.error("Realtime readMessages failed", error: error)
     }
   }
 

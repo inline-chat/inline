@@ -74,7 +74,7 @@ enum LogoutPerformer {
     do {
       try await withThrowingTaskGroup(of: Void.self) { group in
         group.addTask {
-          _ = try await ApiClient.shared.logout()
+          try await InlineRPCClient.shared.logout()
         }
 
         group.addTask {

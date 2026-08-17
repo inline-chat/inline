@@ -30,12 +30,21 @@ public actor InlineProtocolV3Transport: Transport {
 
   public func start() async {
     guard connection == nil else { return }
+    log.info("Inline Protocol transport start requested")
     await channel.send(.connecting)
     do {
       guard var credentials = auth.inlineProtocolCredentials() else {
         throw InlineProtocolV3ConnectionError.invalidKey
       }
-      if !rsaPublicKeys.isEmpty {
+      if let temporary = credentials.temporary,
+         (temporary.expiresAt ?? 0) > Int32(Date().timeIntervalSince1970) + 60 {
+        log.info("Reconnecting with stored temporary authorization")
+        connection = try await InlineProtocolV3Connection.connect(.reconnect(
+          url: url, authorization: temporary
+        ))
+        log.info("Stored temporary authorization reconnected")
+      } else if !rsaPublicKeys.isEmpty {
+        log.info("Creating replacement temporary authorization")
         let temporary = try await InlineProtocolV3Connection.connect(.init(
           url: url,
           rsaPublicKeys: rsaPublicKeys,
@@ -46,17 +55,14 @@ public actor InlineProtocolV3Transport: Transport {
         credentials.temporary = authorization
         try await auth.saveInlineProtocolCredentials(credentials)
         connection = temporary
-      } else if let temporary = credentials.temporary,
-                (temporary.expiresAt ?? 0) > Int32(Date().timeIntervalSince1970) + 60 {
-        connection = try await InlineProtocolV3Connection.connect(.reconnect(
-          url: url, authorization: temporary
-        ))
+        log.info("Replacement temporary authorization bound and stored")
       } else {
         // Application traffic must never fall back to the permanent authorization key. A client
         // without a usable temporary key must have pinned roots available to create and bind one.
         throw InlineProtocolV3ConnectionError.invalidKey
       }
       if let connection { startUpdates(connection) }
+      log.info("Inline Protocol transport connected")
       await channel.send(.connected)
     } catch {
       log.error("Inline Protocol connection failed", error: error)
@@ -66,11 +72,13 @@ public actor InlineProtocolV3Transport: Transport {
   }
 
   public func stop() async {
+    log.info("Inline Protocol transport stop requested")
     updatesTask?.cancel()
     updatesTask = nil
     if let connection { await connection.close() }
     connection = nil
     await channel.send(.disconnected(errorDescription: "stopped"))
+    log.info("Inline Protocol transport stopped")
   }
 
   public func send(_ message: ClientMessage) async throws {
@@ -130,6 +138,7 @@ public actor InlineProtocolV3Transport: Transport {
 
   private func connectionEnded() async {
     guard connection != nil else { return }
+    log.warning("Inline Protocol transport receive loop ended")
     connection = nil
     await channel.send(.disconnected(errorDescription: "connection_closed"))
   }
@@ -142,6 +151,7 @@ public actor NegotiatingRealtimeTransport: Transport {
   }
 
   private let auth: AuthHandle
+  private let log = Log.scoped("Realtime.TransportSelection")
   private let rsaPublicKeys: [InlineProtocolRSAPublicKey]
   private let channel = AsyncChannel<TransportEvent>()
   private var active: Active?
@@ -157,11 +167,13 @@ public actor NegotiatingRealtimeTransport: Transport {
   public func start() async {
     guard active == nil else { return }
     if auth.inlineProtocolCredentials() != nil {
+      log.info("Selected Inline Protocol transport")
       let transport = InlineProtocolV3Transport(auth: auth, rsaPublicKeys: rsaPublicKeys)
       active = .v3(transport)
       forward(transport.events)
       await transport.start()
     } else {
+      log.info("Selected legacy Realtime V2 transport")
       let transport = WebSocketTransport()
       active = .v2(transport)
       forward(transport.events)

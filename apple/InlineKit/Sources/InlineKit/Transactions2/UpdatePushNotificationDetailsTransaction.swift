@@ -16,7 +16,7 @@ public struct PushContentEncryptionKeyMetadata: Sendable, Codable {
 }
 
 public struct UpdatePushNotificationDetailsTransaction: Transaction2 {
-  public var method: InlineProtocol.Method = .updatePushNotificationDetails
+  public var method: InlineProtocol.Method = .registerDevice
   public var context: Context
   public var type: TransactionKindType = .mutation()
 
@@ -45,7 +45,7 @@ public struct UpdatePushNotificationDetailsTransaction: Transaction2 {
   }
 
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
-    .updatePushNotificationDetails(.with {
+    .registerDevice(.with {
       $0.applePushToken = context.applePushToken
       $0.notificationMethod = .with {
         $0.provider = .apns
@@ -74,7 +74,7 @@ public struct UpdatePushNotificationDetailsTransaction: Transaction2 {
   }
 
   public func apply(_ rpcResult: RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {
-    guard case .updatePushNotificationDetails = rpcResult else {
+    guard case .registerDevice = rpcResult else {
       throw TransactionExecutionError.invalid
     }
 

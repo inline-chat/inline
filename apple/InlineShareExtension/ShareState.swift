@@ -7,6 +7,7 @@ import InlineKit
 import InlineProtocol
 import Logger
 import MultipartFormDataKit
+import RealtimeV2
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
@@ -1615,27 +1616,132 @@ class ShareState: ObservableObject {
     }
   }
 
+  private func uploadPreparedFile(
+    _ file: PreparedSharedFile,
+    progress: @escaping @Sendable (ApiClient.UploadTransferProgress) -> Void
+  ) async throws -> InlineKit.UploadFileResult {
+    guard file.fileType != .voice else {
+      throw NSError(
+        domain: "ShareError",
+        code: 13,
+        userInfo: [NSLocalizedDescriptionKey: "Voice messages are not supported from the share extension."]
+      )
+    }
+
+    var thumbnailURL: URL?
+    defer {
+      if let thumbnailURL { try? FileManager.default.removeItem(at: thumbnailURL) }
+    }
+    var thumbnailFileUniqueID: String?
+    var metadata: CreateUploadInput.OneOf_Metadata?
+
+    let thumbnailData: Data?
+    let thumbnailMimeType: String
+    switch file.fileType {
+    case .document:
+      thumbnailData = await DocumentThumbnailIntegration.generate(at: file.url)?.jpegData
+      thumbnailMimeType = "image/jpeg"
+    case .video:
+      let videoMetadata = if let prepared = file.videoMetadata {
+        prepared
+      } else {
+        try await buildVideoMetadata(from: file.url)
+      }
+      thumbnailData = videoMetadata.thumbnail
+      thumbnailMimeType = videoMetadata.thumbnailMimeType?.text ?? "image/jpeg"
+      var video = UploadVideoMetadata()
+      video.width = UInt32(videoMetadata.width)
+      video.height = UInt32(videoMetadata.height)
+      video.duration = UInt32(videoMetadata.duration)
+      video.isAnimated = videoMetadata.isAnimated
+      if let hasAudio = videoMetadata.hasAudio { video.hasAudio_p = hasAudio }
+      metadata = .video(video)
+    case .photo:
+      thumbnailData = nil
+      thumbnailMimeType = "image/jpeg"
+    case .voice:
+      preconditionFailure("Voice uploads are rejected above")
+    }
+
+    if let thumbnailData {
+      let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("inline-share-thumbnail-\(UUID().uuidString)")
+      try thumbnailData.write(to: url, options: .atomic)
+      thumbnailURL = url
+      let complete = try await DurableUploadCoordinator.shared.upload(
+        NativeMediaUploadRequest(
+          logicalID: UUID().uuidString,
+          fileURL: url,
+          fileName: "thumbnail.jpg",
+          mimeType: thumbnailMimeType,
+          kind: .photo
+        ),
+        progress: { _, _ in }
+      )
+      thumbnailFileUniqueID = complete.fileUniqueID
+    }
+
+    let kind: UploadKind = switch file.fileType {
+    case .photo: .photo
+    case .video: .video
+    case .document: .document
+    case .voice: .voice
+    }
+    let complete = try await DurableUploadCoordinator.shared.upload(
+      NativeMediaUploadRequest(
+        logicalID: UUID().uuidString,
+        fileURL: file.url,
+        fileName: file.fileName,
+        mimeType: file.mimeType.text,
+        kind: kind,
+        thumbnailFileUniqueID: thumbnailFileUniqueID,
+        metadata: metadata
+      ),
+      progress: { sent, total in
+        progress(
+          ApiClient.UploadTransferProgress(
+            bytesSent: sent,
+            totalBytes: total,
+            fractionCompleted: total > 0 ? Double(sent) / Double(total) : 0
+          )
+        )
+      }
+    )
+    switch complete.media {
+    case let .photo(photo):
+      return InlineKit.UploadFileResult(fileUniqueId: complete.fileUniqueID, photoId: photo.id)
+    case let .video(video):
+      return InlineKit.UploadFileResult(fileUniqueId: complete.fileUniqueID, videoId: video.id)
+    case let .document(document):
+      return InlineKit.UploadFileResult(fileUniqueId: complete.fileUniqueID, documentId: document.id)
+    case let .voice(voice):
+      return InlineKit.UploadFileResult(fileUniqueId: complete.fileUniqueID, voiceId: voice.id)
+    case nil:
+      throw NativeMediaUploadError.unexpectedResponse
+    }
+  }
+
   @MainActor
   private func startRealtimeIfNeeded() async {
     guard !hasStartedRealtime else { return }
     hasStartedRealtime = true
-    if Auth.shared.getToken() == nil {
+    if !Auth.shared.getIsLoggedIn() {
       await Auth.shared.refreshFromStorage()
     }
-    guard Auth.shared.getToken() != nil else {
-      log.warning(tagged("Realtime start skipped (missing auth token)"))
+    guard Auth.shared.getIsLoggedIn() else {
+      log.warning(tagged("Realtime start skipped (missing authentication)"))
       hasStartedRealtime = false
       return
     }
-    await Realtime.shared.start()
+    await Api.realtime.connectIfNeeded()
   }
 
   private nonisolated func waitForRealtimeConnected(maxSeconds: TimeInterval) async -> Bool {
     let start = Date()
-    var lastState: RealtimeAPIState?
+    var lastState: RealtimeConnectionState?
 
     while Date().timeIntervalSince(start) < maxSeconds {
-      let state = await MainActor.run { Realtime.shared.apiState }
+      let state = await MainActor.run { Api.realtime.stateObject.connectionState }
       if state != lastState {
         log.debug(tagged("Realtime state: \(state)"))
         lastState = state
@@ -1664,10 +1770,10 @@ class ShareState: ObservableObject {
       // The caller retries with the same random ID, so a late first invocation is deduplicated.
       Task {
         do {
-          let result = try await Realtime.shared.invoke(
-            .sendMessage,
+          let result = try await Api.realtime.callRpcDirect(
+            method: .sendMessage,
             input: .sendMessage(input),
-            discardIfNotConnected: false
+            timeout: .seconds(timeoutSeconds)
           )
           gate.resume(with: .success(result))
         } catch {
@@ -1846,7 +1952,7 @@ class ShareState: ObservableObject {
   func finishSession() async {
     guard hasStartedRealtime else { return }
     hasStartedRealtime = false
-    await Realtime.shared.suspendForSessionEnd()
+    await Api.realtime.prepareForTermination()
   }
 
   func loadSharedContent(from extensionItems: [NSExtensionItem]) {
@@ -2014,7 +2120,6 @@ class ShareState: ObservableObject {
       guard let self else { return }
       var didSendAnyMessage = false
       do {
-        let apiClient = ApiClient.shared
         let sendStart = Date()
         let totalMediaItems = content.mediaCount
         let totalUploadItems = max(totalMediaItems, 1)
@@ -2071,7 +2176,6 @@ class ShareState: ObservableObject {
             )
           }
 
-          let uploadResult: InlineKit.UploadFileResult
           let itemIndex = uploadedItems
           let uploadDetail = progressDetail(
             for: preparedFile.fileType,
@@ -2090,54 +2194,10 @@ class ShareState: ObservableObject {
               )
             }
           }
-          switch preparedFile.fileType {
-          case .photo:
-            uploadResult = try await apiClient.uploadFile(
-              type: .photo,
-              fileURL: preparedFile.url,
-              filename: preparedFile.fileName,
-              mimeType: preparedFile.mimeType,
-              progress: progressHandler
-            )
-          case .document:
-            let thumbnail = await DocumentThumbnailIntegration.generate(at: preparedFile.url)
-            uploadResult = try await apiClient.uploadFile(
-              type: .document,
-              fileURL: preparedFile.url,
-              filename: preparedFile.fileName,
-              mimeType: preparedFile.mimeType,
-              thumbnailMetadata: thumbnail.map {
-                ApiClient.ThumbnailUploadMetadata(
-                  data: $0.jpegData,
-                  mimeType: MIMEType(text: "image/jpeg")
-                )
-              },
-              progress: progressHandler
-            )
-          case .video:
-            let videoMetadata: ApiClient.VideoUploadMetadata
-            if let preparedMetadata = preparedFile.videoMetadata {
-              videoMetadata = preparedMetadata
-            } else {
-              videoMetadata = try await buildVideoMetadata(from: preparedFile.url)
-            }
-            uploadResult = try await apiClient.uploadFile(
-              type: .video,
-              fileURL: preparedFile.url,
-              filename: preparedFile.fileName,
-              mimeType: preparedFile.mimeType,
-              videoMetadata: videoMetadata,
-              progress: progressHandler
-            )
-          case .voice:
-            throw NSError(
-              domain: "ShareError",
-              code: 13,
-              userInfo: [
-                NSLocalizedDescriptionKey: "Voice messages are not supported from the share extension."
-              ]
-            )
-          }
+          let uploadResult = try await uploadPreparedFile(
+            preparedFile,
+            progress: progressHandler
+          )
 
           self.log.info(self.tagged(
             "Upload completed type=\(preparedFile.fileType) result=\(self.uploadResultLogValue(uploadResult))"

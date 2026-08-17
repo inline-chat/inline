@@ -699,28 +699,125 @@ public actor FileUploader {
       logicalTotalBytes: uploadSizeBytes
     )
 
-    // Multipart staging copies the source file before the request's first
-    // suspension. Keep that work off this actor so cancel()/cancelAll() can
-    // enter promptly, and explicitly propagate cancellation to the worker.
+    var thumbnailFileUniqueID: String?
+    let thumbnailData = resolvedThumbnailMetadata?.data ?? resolvedVideoMetadata?.thumbnail
+    let thumbnailMimeType = resolvedThumbnailMetadata?.mimeType.text ??
+      resolvedVideoMetadata?.thumbnailMimeType?.text ?? "image/jpeg"
+    if let thumbnailData {
+      let thumbnailURL = FileHelpers.getTrueTemporaryDirectory()
+        .appendingPathComponent("inline-upload-thumbnail-\(UUID().uuidString)")
+      try thumbnailData.write(to: thumbnailURL, options: .atomic)
+      temporaryArtifacts.append(thumbnailURL)
+      let thumbnail = try await DurableUploadCoordinator.shared.upload(
+        NativeMediaUploadRequest(
+          logicalID: "\(uploadId):thumbnail",
+          fileURL: thumbnailURL,
+          fileName: "thumbnail.jpg",
+          mimeType: thumbnailMimeType,
+          kind: .photo
+        ),
+        progress: { _, _ in }
+      )
+      thumbnailFileUniqueID = thumbnail.fileUniqueID
+    }
+
+    let kind: InlineProtocol.UploadKind
+    let nativeMetadata: CreateUploadInput.OneOf_Metadata?
+    switch type {
+    case .photo:
+      kind = .photo
+      nativeMetadata = nil
+    case .document:
+      kind = .document
+      nativeMetadata = nil
+    case .video:
+      guard let metadata = resolvedVideoMetadata else {
+        throw FileUploadError.invalidVideoMetadata
+      }
+      var video = UploadVideoMetadata()
+      video.width = UInt32(metadata.width)
+      video.height = UInt32(metadata.height)
+      video.duration = UInt32(metadata.duration)
+      video.isAnimated = metadata.isAnimated
+      if let hasAudio = metadata.hasAudio { video.hasAudio_p = hasAudio }
+      kind = .video
+      nativeMetadata = .video(video)
+    case .voice:
+      guard let metadata = resolvedVoiceMetadata else { throw FileUploadError.invalidVoice }
+      var voice = UploadVoiceMetadata()
+      voice.duration = UInt32(max(0, metadata.duration))
+      voice.waveform = metadata.waveform
+      kind = .voice
+      nativeMetadata = .voice(voice)
+    }
+
     let transferTask = Task.detached(priority: .userInitiated) {
-      try await ApiClient.shared.uploadFile(
-        type: type,
-        fileURL: uploadUrl,
-        filename: uploadFileName,
-        mimeType: MIMEType(text: uploadMimeType),
-        videoMetadata: resolvedVideoMetadata,
-        thumbnailMetadata: resolvedThumbnailMetadata,
-        voiceMetadata: resolvedVoiceMetadata,
-        progress: progressHandler
+      try await DurableUploadCoordinator.shared.upload(
+        NativeMediaUploadRequest(
+          logicalID: uploadId,
+          fileURL: uploadUrl,
+          fileName: uploadFileName,
+          mimeType: uploadMimeType,
+          kind: kind,
+          thumbnailFileUniqueID: thumbnailFileUniqueID,
+          metadata: nativeMetadata
+        ),
+        progress: { sent, total in
+          progressHandler(
+            ApiClient.UploadTransferProgress(
+              bytesSent: sent,
+              totalBytes: total,
+              fractionCompleted: total > 0 ? Double(sent) / Double(total) : 0
+            )
+          )
+        }
       )
     }
-    let result = try await withTaskCancellationHandler {
+    let complete = try await withTaskCancellationHandler {
       try await transferTask.value
     } onCancel: {
       transferTask.cancel()
     }
     try Task.checkCancellation()
     try ensureActiveUpload(uploadId: uploadId, token: token)
+
+    let result: UploadFileResult
+    switch complete.media {
+    case let .photo(photo):
+      result = UploadFileResult(
+        fileUniqueId: complete.fileUniqueID,
+        photoId: photo.id,
+        videoId: nil,
+        documentId: nil,
+        voiceId: nil
+      )
+    case let .video(video):
+      result = UploadFileResult(
+        fileUniqueId: complete.fileUniqueID,
+        photoId: nil,
+        videoId: video.id,
+        documentId: nil,
+        voiceId: nil
+      )
+    case let .document(document):
+      result = UploadFileResult(
+        fileUniqueId: complete.fileUniqueID,
+        photoId: nil,
+        videoId: nil,
+        documentId: document.id,
+        voiceId: nil
+      )
+    case let .voice(voice):
+      result = UploadFileResult(
+        fileUniqueId: complete.fileUniqueID,
+        photoId: nil,
+        videoId: nil,
+        documentId: nil,
+        voiceId: voice.id
+      )
+    case nil:
+      throw NativeMediaUploadError.unexpectedResponse
+    }
 
     // TODO: Set compressed file in db if it was created
 

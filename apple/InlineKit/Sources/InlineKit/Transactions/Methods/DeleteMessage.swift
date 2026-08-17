@@ -42,8 +42,8 @@ public struct TransactionDeleteMessage: Transaction {
   }
 
   public func execute() async throws -> [InlineProtocol.Update] {
-    let result = try await Realtime.shared.invoke(
-      .deleteMessages,
+    let result = try await Api.realtime.callRpcDirect(
+      method: .deleteMessages,
       input: .deleteMessages(DeleteMessagesInput.with {
         $0.peerID = peerId.toInputPeer()
         $0.messageIds = messageIds
@@ -77,7 +77,7 @@ public struct TransactionDeleteMessage: Transaction {
   }
 
   public func didSucceed(result: [InlineProtocol.Update]) async {
-    await Realtime.shared.applyUpdates(result)
+    await Api.realtime.applyUpdates(result)
   }
 
   public func didFail(error: Error?) async {

@@ -1,4 +1,5 @@
 import SwiftUI
+import InlineKit
 
 enum OnboardingStep: Identifiable, Hashable {
   case welcome

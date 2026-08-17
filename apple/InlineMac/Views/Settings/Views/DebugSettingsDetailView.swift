@@ -7,6 +7,7 @@ struct DebugSettingsDetailView: View {
   @Environment(\.dependencies) private var dependencies
   @State private var showSyncStats = false
   @State private var showPermissions = false
+  @State private var showConnectionSecurity = false
   @State private var confirmDeleteDatabase = false
   @State private var isDeletingDatabase = false
   @State private var databaseErrorMessage = ""
@@ -44,6 +45,17 @@ struct DebugSettingsDetailView: View {
           SettingsRowLabel(
             "App Permissions",
             description: "Check notification, microphone, and local permission state."
+          )
+        }
+
+        LabeledContent {
+          Button("Open") {
+            showConnectionSecurity = true
+          }
+        } label: {
+          SettingsRowLabel(
+            "Connection Security",
+            description: "Verify the active realtime protocol and authentication lifecycle."
           )
         }
 
@@ -203,6 +215,9 @@ struct DebugSettingsDetailView: View {
     }
     .sheet(isPresented: $showPermissions) {
       PermissionsDebugSheet()
+    }
+    .sheet(isPresented: $showConnectionSecurity) {
+      ConnectionSecurityDebugSheet()
     }
 #if DEBUG || DEBUG_BUILD
     .sheet(isPresented: $showThemeWorkshop) {

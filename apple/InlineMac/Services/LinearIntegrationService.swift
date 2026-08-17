@@ -30,9 +30,9 @@ final class LinearIntegrationService {
     Task {
       defer { Task { @MainActor in self.inflight.remove(spaceId) } }
       do {
-        let integrations = try await ApiClient.shared.getIntegrations(
-          userId: Auth.shared.getCurrentUserId() ?? 0,
-          spaceId: spaceId
+        let integrations = try await InlineRPCClient.shared.integrations(
+          userID: Auth.shared.getCurrentUserId() ?? 0,
+          spaceID: spaceId
         )
         await MainActor.run {
           self.cache[spaceId] = integrations.hasLinearConnected
@@ -53,9 +53,9 @@ final class LinearIntegrationService {
     Task {
       defer { Task { @MainActor in self.anySpaceInflight = false } }
       do {
-        let integrations = try await ApiClient.shared.getIntegrations(
-          userId: Auth.shared.getCurrentUserId() ?? 0,
-          spaceId: nil
+        let integrations = try await InlineRPCClient.shared.integrations(
+          userID: Auth.shared.getCurrentUserId() ?? 0,
+          spaceID: nil
         )
         let hasLinearSpaces = integrations.linearSpaces?.isEmpty == false
         await MainActor.run {

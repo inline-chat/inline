@@ -1184,6 +1184,21 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     voiceMetadata: VoiceUploadMetadata? = nil,
     progress: @escaping @Sendable (UploadTransferProgress) -> Void
   ) async throws -> UploadFileResult {
+    let sourceURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("inline-native-upload-source-\(UUID().uuidString)")
+    try data.write(to: sourceURL, options: .atomic)
+    defer { try? FileManager.default.removeItem(at: sourceURL) }
+    return try await nativeUploadFile(
+      type: type,
+      fileURL: sourceURL,
+      filename: filename,
+      mimeType: mimeType,
+      videoMetadata: videoMetadata,
+      thumbnailMetadata: thumbnailMetadata,
+      voiceMetadata: voiceMetadata,
+      progress: progress
+    )
+    /* Legacy multipart implementation retained temporarily for source compatibility.
     guard let url = URL(string: "\(baseURL)/uploadFile") else {
       throw APIError.invalidURL
     }
@@ -1326,6 +1341,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     } catch {
       throw Self.normalizeTransportError(error)
     }
+    */
   }
 
   public func uploadFile(
@@ -1338,6 +1354,17 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     voiceMetadata: VoiceUploadMetadata? = nil,
     progress: @escaping @Sendable (UploadTransferProgress) -> Void
   ) async throws -> UploadFileResult {
+    return try await nativeUploadFile(
+      type: type,
+      fileURL: fileURL,
+      filename: filename,
+      mimeType: mimeType,
+      videoMetadata: videoMetadata,
+      thumbnailMetadata: thumbnailMetadata,
+      voiceMetadata: voiceMetadata,
+      progress: progress
+    )
+    /* Legacy multipart implementation retained temporarily for source compatibility.
     guard let url = URL(string: "\(baseURL)/uploadFile") else {
       throw APIError.invalidURL
     }
@@ -1361,6 +1388,103 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       throw apiError
     } catch let urlError as URLError {
       throw Self.normalizeTransportError(urlError)
+    }
+    */
+  }
+
+  private func nativeUploadFile(
+    type: MessageFileType,
+    fileURL: URL,
+    filename: String,
+    mimeType: MIMEType,
+    videoMetadata: VideoUploadMetadata?,
+    thumbnailMetadata: ThumbnailUploadMetadata?,
+    voiceMetadata: VoiceUploadMetadata?,
+    progress: @escaping @Sendable (UploadTransferProgress) -> Void
+  ) async throws -> UploadFileResult {
+    let resolvedThumbnail = thumbnailMetadata ?? videoMetadata.flatMap { metadata in
+      guard let data = metadata.thumbnail, let mimeType = metadata.thumbnailMimeType else { return nil }
+      return ThumbnailUploadMetadata(data: data, mimeType: mimeType)
+    }
+    var thumbnailURL: URL?
+    defer {
+      if let thumbnailURL { try? FileManager.default.removeItem(at: thumbnailURL) }
+    }
+    var thumbnailFileUniqueID: String?
+    if let resolvedThumbnail {
+      let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("inline-native-upload-thumbnail-\(UUID().uuidString)")
+      try resolvedThumbnail.data.write(to: url, options: .atomic)
+      thumbnailURL = url
+      let thumbnail = try await DurableUploadCoordinator.shared.upload(
+        NativeMediaUploadRequest(
+          logicalID: UUID().uuidString,
+          fileURL: url,
+          fileName: thumbnailFilename(for: resolvedThumbnail.mimeType),
+          mimeType: resolvedThumbnail.mimeType.text,
+          kind: .photo
+        ),
+        progress: { _, _ in }
+      )
+      thumbnailFileUniqueID = thumbnail.fileUniqueID
+    }
+
+    let kind: UploadKind
+    let metadata: CreateUploadInput.OneOf_Metadata?
+    switch type {
+    case .photo:
+      kind = .photo
+      metadata = nil
+    case .document:
+      kind = .document
+      metadata = nil
+    case .video:
+      guard let videoMetadata else { throw APIError.invalidResponse }
+      var value = UploadVideoMetadata()
+      value.width = UInt32(videoMetadata.width)
+      value.height = UInt32(videoMetadata.height)
+      value.duration = UInt32(videoMetadata.duration)
+      value.isAnimated = videoMetadata.isAnimated
+      if let hasAudio = videoMetadata.hasAudio { value.hasAudio_p = hasAudio }
+      kind = .video
+      metadata = .video(value)
+    case .voice:
+      guard let voiceMetadata else { throw APIError.invalidResponse }
+      var value = UploadVoiceMetadata()
+      value.duration = UInt32(max(0, voiceMetadata.duration))
+      value.waveform = voiceMetadata.waveform
+      kind = .voice
+      metadata = .voice(value)
+    }
+    let complete = try await DurableUploadCoordinator.shared.upload(
+      NativeMediaUploadRequest(
+        logicalID: UUID().uuidString,
+        fileURL: fileURL,
+        fileName: filename,
+        mimeType: mimeType.text,
+        kind: kind,
+        thumbnailFileUniqueID: thumbnailFileUniqueID,
+        metadata: metadata
+      ),
+      progress: { sent, total in
+        progress(UploadTransferProgress(
+          bytesSent: sent,
+          totalBytes: total,
+          fractionCompleted: total > 0 ? Double(sent) / Double(total) : 0
+        ))
+      }
+    )
+    switch complete.media {
+    case let .photo(photo):
+      return UploadFileResult(fileUniqueId: complete.fileUniqueID, photoId: photo.id)
+    case let .video(video):
+      return UploadFileResult(fileUniqueId: complete.fileUniqueID, videoId: video.id)
+    case let .document(document):
+      return UploadFileResult(fileUniqueId: complete.fileUniqueID, documentId: document.id)
+    case let .voice(voice):
+      return UploadFileResult(fileUniqueId: complete.fileUniqueID, voiceId: voice.id)
+    case nil:
+      throw NativeMediaUploadError.unexpectedResponse
     }
   }
 
@@ -1717,6 +1841,20 @@ public struct UploadFileResult: Codable, Sendable {
   public let videoId: Int64?
   public let documentId: Int64?
   public let voiceId: Int64?
+
+  public init(
+    fileUniqueId: String,
+    photoId: Int64? = nil,
+    videoId: Int64? = nil,
+    documentId: Int64? = nil,
+    voiceId: Int64? = nil
+  ) {
+    self.fileUniqueId = fileUniqueId
+    self.photoId = photoId
+    self.videoId = videoId
+    self.documentId = documentId
+    self.voiceId = voiceId
+  }
 }
 
 public struct GetSpace: Codable, Sendable {

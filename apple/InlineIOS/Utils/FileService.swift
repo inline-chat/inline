@@ -103,7 +103,7 @@ final class FileService {
         progress: { _ in }
       )
         
-    let result2 = try await ApiClient.shared.updateProfilePhoto(fileUniqueId: result.fileUniqueId)
+    let result2 = try await InlineRPCClient.shared.setProfilePhoto(fileUniqueID: result.fileUniqueId)
         
     _ = try await AppDatabase.shared.dbWriter.write { db in
       try result2.user.saveFull(db)

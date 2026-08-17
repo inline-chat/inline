@@ -75,13 +75,12 @@ struct CreateSpaceSwiftUI: View {
     Task { @MainActor in
       do {
         formState.startLoading()
-        let result = try await ApiClient.shared.createSpace(name: name)
+        let result = try await InlineRPCClient.shared.createSpace(name: name)
         try await db.dbWriter.write { db in
           try Space(from: result.space).save(db)
           try Member(from: result.member).save(db)
-          try result.chats.forEach { chat in
-            _ = try Chat(from: chat).saveFull(db)
-          }
+          _ = try Chat(from: result.chat).saveFull(db)
+          try Dialog(from: result.dialog).save(db, onConflict: .replace)
           // ... save more stuff
         }
         formState.succeeded()

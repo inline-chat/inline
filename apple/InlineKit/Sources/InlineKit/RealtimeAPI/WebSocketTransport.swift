@@ -253,15 +253,9 @@ actor WebSocketTransport: NSObject, Sendable {
   }
 
   deinit {
-    // Remove notification observers
     #if os(iOS)
     NotificationCenter.default.removeObserver(self)
     #endif
-
-    // Create a detached task to ensure stop() is called
-    Task.detached { [self] in
-      await self.stopAndReset()
-    }
   }
 
   // MARK: - Connection Management

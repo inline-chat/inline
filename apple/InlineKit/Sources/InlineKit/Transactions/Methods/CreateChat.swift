@@ -30,8 +30,8 @@ public struct TransactionCreateChat: Transaction {
   }
 
   public func execute() async throws -> CreateChatResult {
-    let result = try await Realtime.shared.invoke(
-      .createChat,
+    let result = try await Api.realtime.callRpcDirect(
+      method: .createChat,
       input: .createChat(
         CreateChatInput.with {
           $0.title = title

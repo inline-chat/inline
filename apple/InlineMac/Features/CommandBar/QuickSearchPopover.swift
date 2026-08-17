@@ -840,7 +840,7 @@ final class QuickSearchViewModel {
       try? await Task.sleep(for: .milliseconds(250))
       guard Task.isCancelled == false else { return }
       do {
-        let users = try await ApiClient.shared.searchContacts(query: query).users
+        let users = try await InlineRPCClient.shared.searchContacts(query: query).users
         let rankedUsers = await Task.detached(priority: .userInitiated) {
           Self.rankGlobalUsers(users, query: preparedQuery)
         }.value

@@ -47,9 +47,9 @@ public class NotionTaskService: ObservableObject {
     let sessionGeneration = sessionGeneration
 
     do {
-      let result = try await ApiClient.shared.getIntegrations(
-        userId: userId,
-        spaceId: peerId.isThread ? spaceId : nil
+      let result = try await InlineRPCClient.shared.integrations(
+        userID: userId,
+        spaceID: peerId.isThread ? spaceId : nil
       )
       try Task.checkCancellation()
       guard sessionGeneration == self.sessionGeneration,
@@ -103,7 +103,7 @@ public class NotionTaskService: ObservableObject {
     }
 
     do {
-      let result = try await ApiClient.shared.getIntegrations(userId: userId, spaceId: nil)
+      let result = try await InlineRPCClient.shared.integrations(userID: userId, spaceID: nil)
 
       guard result.hasIntegrationAccess && result.hasNotionConnected else {
         throw NotionTaskError.noIntegrationAccess
@@ -123,11 +123,10 @@ public class NotionTaskService: ObservableObject {
 
   public func createTask(message: Message, spaceId: Int64) async throws -> String {
     do {
-      let result = try await ApiClient.shared.createNotionTask(
-        spaceId: spaceId,
-        messageId: message.messageId,
-        chatId: message.chatId,
-        peerId: message.peerId
+      let result = try await InlineRPCClient.shared.createNotionTask(
+        spaceID: spaceId,
+        messageID: message.messageId,
+        peerID: message.peerId
       )
       return result.url
     } catch {

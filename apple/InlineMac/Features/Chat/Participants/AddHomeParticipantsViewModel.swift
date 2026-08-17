@@ -115,7 +115,7 @@ final class AddHomeParticipantsViewModel: ObservableObject {
       guard !Task.isCancelled else { return }
 
       do {
-        let result = try await ApiClient.shared.searchContacts(query: query)
+        let result = try await InlineRPCClient.shared.searchContacts(query: query)
         guard !Task.isCancelled else { return }
 
         let ids = result.users.map(\.id)
