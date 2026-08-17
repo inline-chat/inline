@@ -196,10 +196,16 @@ const main = async (): Promise<void> => {
   }
   if (command === "copy-environment" && args.length === 1) {
     const payload = environmentPayload(await readBundle(args[0]!))
-    const process = Bun.spawn(["pbcopy"], { stdin: "pipe", stdout: "ignore", stderr: "inherit" })
-    process.stdin.write(payload)
-    process.stdin.end()
-    if (await process.exited !== 0) throw new Error("pbcopy failed")
+    const clipboard = Bun.spawn([
+      "osascript",
+      "-e",
+      "set the clipboard to (system attribute \"INLINE_PROTOCOL_CLIPBOARD_PAYLOAD\")",
+    ], {
+      env: { ...process.env, INLINE_PROTOCOL_CLIPBOARD_PAYLOAD: payload },
+      stdout: "ignore",
+      stderr: "inherit",
+    })
+    if (await clipboard.exited !== 0) throw new Error("macOS clipboard update failed")
     console.log("Copied three Inline Protocol credential values to the clipboard without printing them")
     return
   }
