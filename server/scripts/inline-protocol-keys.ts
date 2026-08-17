@@ -21,6 +21,7 @@ Usage:
   inline-protocol-keys rotate-{rsa,kek,pepper} IN OUT
   inline-protocol-keys retire-{rsa,kek,pepper} IN OUT ID --confirmed-safe
   inline-protocol-keys copy-environment IN
+  inline-protocol-keys copy-environment-value IN {rsa|kek|pepper}
   inline-protocol-keys run IN -- COMMAND [ARG...]
   inline-protocol-keys rewrap-auth-keys [LIMIT]
   inline-protocol-keys check-retirement {kek,pepper} ID
@@ -131,6 +132,19 @@ const environmentVariables = (bundle: KeyBundle): Record<string, string> => ({
   INLINE_PROTOCOL_AUTH_CODE_PEPPER_RING_JSON: JSON.stringify(bundle.authCodePepperRing),
 })
 
+const copyToMacOSClipboard = async (payload: string): Promise<void> => {
+  const clipboard = Bun.spawn([
+    "osascript",
+    "-e",
+    "set the clipboard to (system attribute \"INLINE_PROTOCOL_CLIPBOARD_PAYLOAD\")",
+  ], {
+    env: { ...process.env, INLINE_PROTOCOL_CLIPBOARD_PAYLOAD: payload },
+    stdout: "ignore",
+    stderr: "inherit",
+  })
+  if (await clipboard.exited !== 0) throw new Error("macOS clipboard update failed")
+}
+
 const printPublicRing = (bundle: KeyBundle): void => {
   const signer = makeInlineProtocolRsaSigner(JSON.stringify(bundle.rsaPrivateKeys))
   console.log(JSON.stringify({ rsaPublicKeyRing: signer.publicKeyRing }, null, 2))
@@ -196,17 +210,22 @@ const main = async (): Promise<void> => {
   }
   if (command === "copy-environment" && args.length === 1) {
     const payload = environmentPayload(await readBundle(args[0]!))
-    const clipboard = Bun.spawn([
-      "osascript",
-      "-e",
-      "set the clipboard to (system attribute \"INLINE_PROTOCOL_CLIPBOARD_PAYLOAD\")",
-    ], {
-      env: { ...process.env, INLINE_PROTOCOL_CLIPBOARD_PAYLOAD: payload },
-      stdout: "ignore",
-      stderr: "inherit",
-    })
-    if (await clipboard.exited !== 0) throw new Error("macOS clipboard update failed")
+    await copyToMacOSClipboard(payload)
     console.log("Copied three Inline Protocol credential values to the clipboard without printing them")
+    return
+  }
+  if (command === "copy-environment-value" && args.length === 2) {
+    const bundle = await readBundle(args[0]!)
+    const values = {
+      rsa: JSON.stringify(bundle.rsaPrivateKeys),
+      kek: JSON.stringify(bundle.authKeyKekRing),
+      pepper: JSON.stringify(bundle.authCodePepperRing),
+    }
+    const kind = args[1] as keyof typeof values
+    const value = values[kind]
+    if (value === undefined) throw new Error("Credential kind must be rsa, kek, or pepper")
+    await copyToMacOSClipboard(value)
+    console.log(`Copied only the ${kind} credential value to the clipboard without printing it`)
     return
   }
   if (command === "status" && args.length === 1) {
