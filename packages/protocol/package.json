@@ -22,10 +22,13 @@
     "dist/schema.js",
     "dist/vectors.d.ts",
     "dist/vectors.js",
-    "dist/secure",
+    "dist/uploads.d.ts",
+    "dist/uploads.js",
     "dist/index.d.ts",
     "dist/index.js",
     "vectors/inline-protocol-v1.json",
+    "docs",
+    "dist/secure",
     "README.md"
   ],
   "main": "./dist/index.js",
@@ -62,6 +65,10 @@
     "./vectors": {
       "types": "./dist/vectors.d.ts",
       "default": "./dist/vectors.js"
+    },
+    "./uploads": {
+      "types": "./dist/uploads.d.ts",
+      "default": "./dist/uploads.js"
     },
     "./vectors/inline-protocol-v1.json": "./vectors/inline-protocol-v1.json"
   },

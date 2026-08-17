@@ -9,6 +9,7 @@ Inline Protocol v1 is inspired by and byte-compatible with MTProto 2.0 at the se
 - Proto definitions live in `proto/` at the repo root.
 - `core.ts` is generated from those proto files.
 - `secure/` owns the audited carrier, handshake, encrypted-record, key-binding, reliability, clock, and server-session primitives.
+- [`docs/realtime-v3.md`](docs/realtime-v3.md) is the discoverable normative overview for the current security, authentication, reliability, native-upload, storage, compatibility, conformance, and versioning choices.
 
 ## Install
 

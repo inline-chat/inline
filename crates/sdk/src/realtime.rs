@@ -1310,11 +1310,11 @@ rpc_requests!(
         ReadMessages
     ),
     (
-        UpdatePushNotificationDetailsInput,
-        UpdatePushNotificationDetails,
-        UpdatePushNotificationDetails,
-        UpdatePushNotificationDetailsResult,
-        UpdatePushNotificationDetails
+        RegisterDeviceInput,
+        RegisterDevice,
+        RegisterDevice,
+        RegisterDeviceResult,
+        RegisterDevice
     ),
     (
         CreateSubthreadInput,
@@ -1653,6 +1653,41 @@ rpc_requests!(
         GetThreadSubthreadsResult,
         GetThreadSubthreads
     ),
+    (
+        CreateUploadInput,
+        CreateUpload,
+        CreateUpload,
+        CreateUploadResult,
+        CreateUpload
+    ),
+    (
+        SaveUploadPartInput,
+        SaveUploadPart,
+        SaveUploadPart,
+        SaveUploadPartResult,
+        SaveUploadPart
+    ),
+    (
+        GetUploadStateInput,
+        GetUploadState,
+        GetUploadState,
+        GetUploadStateResult,
+        GetUploadState
+    ),
+    (
+        FinishUploadInput,
+        FinishUpload,
+        FinishUpload,
+        FinishUploadResult,
+        FinishUpload
+    ),
+    (
+        CancelUploadInput,
+        CancelUpload,
+        CancelUpload,
+        CancelUploadResult,
+        CancelUpload
+    ),
 );
 
 fn connection_init_for_token(token: &str, identity: &ClientIdentity) -> proto::ConnectionInit {
@@ -1662,6 +1697,10 @@ fn connection_init_for_token(token: &str, identity: &ClientIdentity) -> proto::C
         layer: None,
         client_version: Some(identity.client_version().to_string()),
         os_version: client_info::current_os_version(),
+        device_id: None,
+        device_name: None,
+        client_type: None,
+        time_zone: None,
     }
 }
 

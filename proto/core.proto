@@ -30,6 +30,13 @@ message ConnectionInit {
 
   // OS version (semver)
   optional string os_version = 5;
+
+  // Stable installation/device identifier. Realtime V3 authenticates the
+  // enclosing request from the bound authorization key, not `token`.
+  optional string device_id = 6;
+  optional string device_name = 7;
+  optional string client_type = 8;
+  optional string time_zone = 9;
 }
 
 message ServerProtocolMessage {
@@ -116,6 +123,30 @@ message Peer {
 message PeerChat { int64 chat_id = 1; }
 
 message PeerUser { int64 user_id = 1; }
+
+// A caller-selected user or space boundary for scoped resources.
+message InputScope {
+  oneof type {
+    InputScopeUser user = 1;
+    InputScopeSpace space = 2;
+  }
+}
+
+message InputScopeUser { int64 user_id = 1; }
+
+message InputScopeSpace { int64 space_id = 1; }
+
+// The resolved user or space boundary returned to clients.
+message Scope {
+  oneof type {
+    ScopeUser user = 1;
+    ScopeSpace space = 2;
+  }
+}
+
+message ScopeUser { User user = 1; }
+
+message ScopeSpace { Space space = 1; }
 
 message BotAvatar {
   enum Kind {
@@ -216,6 +247,8 @@ message Dialog {
   optional string pinned_order = 15;
   // Reply-thread automatic surfacing policy.
   optional DialogFollowMode follow_mode = 16;
+  // Personal history-collapse boundary; messages at or below this ID stay hidden.
+  optional int64 collapsed_max_id = 17;
 }
 
 enum DialogFollowMode {
@@ -279,6 +312,9 @@ message Chat {
 
   // Effective permissions for the user this chat was encoded for.
   optional ChatPermissions permissions = 15;
+
+  // Current sequence of this chat's update bucket.
+  optional int32 seq = 16;
 }
 
 message MessageReplies {
@@ -461,7 +497,10 @@ message MessageEntity {
   int64 offset = 2;
   int64 length = 3;
 
-  message MessageEntityMention { int64 user_id = 1; }
+  message MessageEntityMention {
+    int64 user_id = 1;
+    optional int64 agent_id = 2;
+  }
   message MessageEntityGroupMention { int64 group_id = 1; }
   message MessageEntityTextUrl { string url = 1; }
   message MessageEntityPre { string language = 1; }
@@ -539,6 +578,23 @@ message Space {
 
   // Whether this is a public community space with stricter member privacy.
   optional bool is_public = 5;
+
+  // Public, case-insensitive address used for joining and links.
+  optional string handle = 6;
+
+  // Current sequence of this space's update bucket.
+  optional int32 seq = 7;
+}
+
+message JoinPublicSpaceInput {
+  // Public space handle, with or without a leading @.
+  string handle = 1;
+}
+
+message JoinPublicSpaceResult {
+  Space space = 1;
+  Member member = 2;
+  bool already_member = 3;
 }
 
 message UserGroup {
@@ -654,6 +710,9 @@ message UrlPreview {
 
   // Author, channel, account, or publisher avatar, separate from primary media.
   optional Photo author_photo = 14;
+
+  // Native emoji used by the destination as its page icon, when provided.
+  optional string icon_emoji = 15;
 }
 
 // Typed media attached to a URL preview.
@@ -940,6 +999,7 @@ message RpcError {
     USERNAME_INVALID = 15;
     USERNAME_TAKEN = 16;
     FIRST_NAME_INVALID = 17;
+    URL_PREVIEW_UNAVAILABLE = 18;
   }
 }
 
@@ -985,7 +1045,7 @@ enum Method {
   GET_MESSAGES = 38;
   UPDATE_DIALOG_NOTIFICATION_SETTINGS = 39;
   READ_MESSAGES = 40;
-  UPDATE_PUSH_NOTIFICATION_DETAILS = 41;
+  REGISTER_DEVICE = 41;
   CREATE_SUBTHREAD = 42;
   GET_BOT_COMMANDS = 43;
   SET_BOT_COMMANDS = 44;
@@ -1040,6 +1100,34 @@ enum Method {
   CREATE_CLI_SESSION = 93;
   SET_PROFILE_PHOTO = 94;
   GET_EXTERNAL_PROFILE_PHOTO = 95;
+  GET_CHAT_TRANSCRIPT = 96;
+  SEARCH_EXTERNAL_RESOURCES = 97;
+  JOIN_PUBLIC_SPACE = 98;
+  COLLAPSE_HISTORY = 99;
+  LIST_CONNECTORS = 100;
+  PREPARE_CONNECTOR_OAUTH = 101;
+  DISCONNECT_CONNECTOR = 102;
+  SEARCH_USERS = 103;
+  INVITE_TO_INLINE = 104;
+  RESOLVE_URL_PREVIEW = 105;
+  CREATE_BOT_AGENT = 106;
+  GET_BOT_AGENT = 107;
+  LIST_BOT_AGENTS = 108;
+  CREATE_SPACE = 109;
+  DELETE_SPACE = 110;
+  LEAVE_SPACE = 111;
+  GET_CONNECTOR_CONFIG = 112;
+  SET_CONNECTOR_CONFIG = 113;
+  CREATE_EXTERNAL_TASK = 114;
+  UNREGISTER_DEVICE = 115;
+  LOG_OUT = 116;
+  CREATE_UPLOAD = 117;
+  SAVE_UPLOAD_PART = 118;
+  GET_UPLOAD_STATE = 119;
+  FINISH_UPLOAD = 120;
+  CANCEL_UPLOAD = 121;
+  UPDATE_SESSION = 122;
+  UPDATE_DIALOG_ARCHIVED = 123;
 }
 
 message RpcCall {
@@ -1086,7 +1174,7 @@ message RpcCall {
     GetMessagesInput getMessages = 39;
     UpdateDialogNotificationSettingsInput updateDialogNotificationSettings = 40;
     ReadMessagesInput readMessages = 41;
-    UpdatePushNotificationDetailsInput updatePushNotificationDetails = 42;
+    RegisterDeviceInput registerDevice = 42;
     CreateSubthreadInput createSubthread = 43;
     GetBotCommandsInput getBotCommands = 44;
     SetBotCommandsInput setBotCommands = 45;
@@ -1140,6 +1228,34 @@ message RpcCall {
     CreateCliSessionInput createCliSession = 94;
     SetProfilePhotoInput setProfilePhoto = 95;
     GetExternalProfilePhotoInput getExternalProfilePhoto = 96;
+    GetChatTranscriptInput getChatTranscript = 97;
+    SearchExternalResourcesInput searchExternalResources = 98;
+    JoinPublicSpaceInput joinPublicSpace = 99;
+    CollapseHistoryInput collapseHistory = 100;
+    ListConnectorsInput listConnectors = 101;
+    PrepareConnectorOAuthInput prepareConnectorOAuth = 102;
+    DisconnectConnectorInput disconnectConnector = 103;
+    SearchUsersInput searchUsers = 104;
+    InviteToInlineInput inviteToInline = 105;
+    ResolveUrlPreviewInput resolveUrlPreview = 106;
+    CreateBotAgentInput createBotAgent = 107;
+    GetBotAgentInput getBotAgent = 108;
+    ListBotAgentsInput listBotAgents = 109;
+    CreateSpaceInput createSpace = 110;
+    DeleteSpaceInput deleteSpace = 111;
+    LeaveSpaceInput leaveSpace = 112;
+    GetConnectorConfigInput getConnectorConfig = 113;
+    SetConnectorConfigInput setConnectorConfig = 114;
+    CreateExternalTaskInput createExternalTask = 115;
+    UnregisterDeviceInput unregisterDevice = 116;
+    LogOutInput logOut = 117;
+    CreateUploadInput createUpload = 118;
+    SaveUploadPartInput saveUploadPart = 119;
+    GetUploadStateInput getUploadState = 120;
+    FinishUploadInput finishUpload = 121;
+    CancelUploadInput cancelUpload = 122;
+    UpdateSessionInput updateSession = 123;
+    UpdateDialogArchivedInput updateDialogArchived = 124;
   }
 }
 
@@ -1188,7 +1304,7 @@ message RpcResult {
     GetMessagesResult getMessages = 39;
     UpdateDialogNotificationSettingsResult updateDialogNotificationSettings = 40;
     ReadMessagesResult readMessages = 41;
-    UpdatePushNotificationDetailsResult updatePushNotificationDetails = 42;
+    RegisterDeviceResult registerDevice = 42;
     CreateSubthreadResult createSubthread = 43;
     GetBotCommandsResult getBotCommands = 44;
     SetBotCommandsResult setBotCommands = 45;
@@ -1242,6 +1358,34 @@ message RpcResult {
     CreateCliSessionResult createCliSession = 94;
     SetProfilePhotoResult setProfilePhoto = 95;
     GetExternalProfilePhotoResult getExternalProfilePhoto = 96;
+    GetChatTranscriptResult getChatTranscript = 97;
+    SearchExternalResourcesResult searchExternalResources = 98;
+    JoinPublicSpaceResult joinPublicSpace = 99;
+    CollapseHistoryResult collapseHistory = 100;
+    ListConnectorsResult listConnectors = 101;
+    PrepareConnectorOAuthResult prepareConnectorOAuth = 102;
+    DisconnectConnectorResult disconnectConnector = 103;
+    SearchUsersResult searchUsers = 104;
+    InviteToInlineResult inviteToInline = 105;
+    ResolveUrlPreviewResult resolveUrlPreview = 106;
+    CreateBotAgentResult createBotAgent = 107;
+    GetBotAgentResult getBotAgent = 108;
+    ListBotAgentsResult listBotAgents = 109;
+    CreateSpaceResult createSpace = 110;
+    DeleteSpaceResult deleteSpace = 111;
+    LeaveSpaceResult leaveSpace = 112;
+    GetConnectorConfigResult getConnectorConfig = 113;
+    SetConnectorConfigResult setConnectorConfig = 114;
+    CreateExternalTaskResult createExternalTask = 115;
+    UnregisterDeviceResult unregisterDevice = 116;
+    LogOutResult logOut = 117;
+    CreateUploadResult createUpload = 118;
+    SaveUploadPartResult saveUploadPart = 119;
+    GetUploadStateResult getUploadState = 120;
+    FinishUploadResult finishUpload = 121;
+    CancelUploadResult cancelUpload = 122;
+    UpdateSessionResult updateSession = 123;
+    UpdateDialogArchivedResult updateDialogArchived = 124;
   }
 }
 
@@ -1591,8 +1735,8 @@ message GetUpdatesStateInput {
   reserved 3;
   reserved "core_sync_schema_revision";
 
-  // Local date of state
-  int64 date = 2;
+  // Local discovery date. Absent when requesting a fresh current checkpoint.
+  optional int64 date = 2;
 }
 
 message GetUpdatesStateResult {
@@ -1604,6 +1748,9 @@ message GetUpdatesStateResult {
 
   // Set by newer servers to tell clients whether discovery found any bucket work.
   optional bool updates_found = 2;
+
+  // Current sequence of the user's update bucket.
+  optional int32 seq = 4;
 }
 
 message GetChatInput {
@@ -1616,6 +1763,7 @@ message GetChatResult {
   Dialog dialog = 2;
   repeated int64 pinned_message_ids = 3;
   Message anchor_message = 4;
+  optional User user = 5;
 }
 
 message ShowInChatListInput {
@@ -1677,6 +1825,14 @@ message UpdateDialogFollowModeInput {
 
 message UpdateDialogFollowModeResult { repeated Update updates = 1; }
 
+message CollapseHistoryInput {
+  InputPeer peer_id = 1;
+  // Unset removes the personal collapse boundary.
+  optional int64 max_id = 2;
+}
+
+message CollapseHistoryResult { repeated Update updates = 1; }
+
 // Mark dialog as unread
 message MarkAsUnreadInput {
   // Peer ID to mark as unread
@@ -1714,6 +1870,40 @@ message CreateBotResult {
   // Token to use for the bot
   string token = 2;
 }
+
+message BotAgent {
+  int64 id = 1;
+  int64 bot_user_id = 2;
+  string name = 3;
+  optional string handle = 4;
+  optional string emoji = 5;
+  optional string description = 6;
+  optional string skill_key = 7;
+  optional string instructions = 8;
+}
+
+message CreateBotAgentInput {
+  int64 bot_user_id = 1;
+  string name = 2;
+  optional string handle = 3;
+  optional string emoji = 4;
+  optional string description = 5;
+  optional string skill_key = 6;
+  optional string instructions = 7;
+}
+
+message CreateBotAgentResult { BotAgent agent = 1; }
+
+message GetBotAgentInput { int64 agent_id = 1; }
+
+message GetBotAgentResult {
+  User bot = 1;
+  BotAgent agent = 2;
+}
+
+message ListBotAgentsInput { int64 bot_user_id = 1; }
+
+message ListBotAgentsResult { repeated BotAgent agents = 1; }
 
 message ListBotsInput {}
 
@@ -1935,6 +2125,21 @@ message GetUserSettingsResult { UserSettings user_settings = 1; }
 
 message UserSettings {
   optional NotificationSettings notification_settings = 1;
+  optional PrivacySettings privacy_settings = 2;
+  optional ComposeSettings compose_settings = 3;
+}
+
+message ComposeSettings {
+  // If true, eligible pasted URLs may be replaced with titled text links.
+  optional bool replace_pasted_links_with_titles = 1;
+}
+
+message PrivacySettings {
+  // If true, the user's time zone may be shared with other users.
+  optional bool share_time_zone = 1;
+
+  // If true, the user may appear in global user search results.
+  optional bool appear_in_global_search = 2;
 }
 
 message NotificationSettings {
@@ -1979,6 +2184,16 @@ message DialogNotificationSettings {
 message UpdateUserSettingsInput { UserSettings user_settings = 1; }
 
 message UpdateUserSettingsResult { repeated Update updates = 1; }
+
+message ResolveUrlPreviewInput {
+  InputPeer peer_id = 1;
+  string url = 2;
+}
+
+message ResolveUrlPreviewResult {
+  UrlPreview url_preview = 1;
+  bool can_substitute = 2;
+}
 
 message UpdateDialogNotificationSettingsInput {
   // Peer to update settings for
@@ -2044,7 +2259,7 @@ message PushNotificationMethod {
 }
 
 // Register/update push notification details for the current session.
-message UpdatePushNotificationDetailsInput {
+message RegisterDeviceInput {
   // Legacy APNs token for old clients. Kept for gradual migration/fallback.
   string apple_push_token = 1 [deprecated = true];
 
@@ -2058,7 +2273,33 @@ message UpdatePushNotificationDetailsInput {
   optional PushNotificationMethod notification_method = 4;
 }
 
-message UpdatePushNotificationDetailsResult {}
+message RegisterDeviceResult {}
+
+message UnregisterDeviceInput {}
+
+message UnregisterDeviceResult {}
+
+message LogOutInput {}
+
+message LogOutResult { bool logged_out = 1; }
+
+// Updates metadata owned by the authenticated current account session.
+message UpdateSessionInput {
+  optional string time_zone = 1;
+  optional string device_name = 2;
+  optional string client_version = 3;
+  optional string os_version = 4;
+}
+
+message UpdateSessionResult { AccountSession session = 1; }
+
+// Archive is an Inline dialog property, not a general-purpose folder model.
+message UpdateDialogArchivedInput {
+  InputPeer peer_id = 1;
+  bool archived = 2;
+}
+
+message UpdateDialogArchivedResult { repeated Update updates = 1; }
 
 message GetChatsInput {}
 
@@ -2317,6 +2558,54 @@ message GetChatHistoryInput {
 
 message GetChatHistoryResult { repeated Message messages = 1; }
 
+message GetChatTranscriptInput {
+  enum Mode {
+    MODE_UNSPECIFIED = 0;
+    MODE_HUMAN_READABLE = 1;
+  }
+
+  enum Length {
+    LENGTH_UNSPECIFIED = 0;
+    LENGTH_CONCISE = 1;
+  }
+
+  enum Media {
+    MEDIA_UNSPECIFIED = 0;
+    MEDIA_INCLUDED = 1;
+    MEDIA_EXCLUDED = 2;
+  }
+
+  InputPeer peer_id = 1;
+  optional Mode mode = 2;
+  optional Length length = 3;
+  optional Media media = 4;
+
+  // Exclusive upper boundary. Omit to start from the latest message.
+  optional int64 before_message_id = 5;
+
+  // Requested message ceiling. Defaults to 500 and is capped at 500 in V1.
+  optional int32 limit = 6;
+}
+
+message GetChatTranscriptResult {
+  enum StopReason {
+    STOP_REASON_UNSPECIFIED = 0;
+    STOP_REASON_COMPLETE = 1;
+    STOP_REASON_MESSAGE_LIMIT = 2;
+    STOP_REASON_OUTPUT_LIMIT = 3;
+  }
+
+  string markdown = 1;
+  int32 message_count = 2;
+  optional int64 from_message_id = 3;
+  optional int64 to_message_id = 4;
+  bool has_more = 5;
+  StopReason stop_reason = 6;
+
+  // Earliest expiry of any signed media URL in markdown, in Unix seconds.
+  optional int64 expires_at = 7;
+}
+
 message GetMessagesInput {
   InputPeer peer_id = 1;
 
@@ -2404,6 +2693,147 @@ message SearchMessagesInput {
 }
 
 message SearchMessagesResult { repeated Message messages = 1; }
+
+enum ExternalResourceProvider {
+  EXTERNAL_RESOURCE_PROVIDER_UNSPECIFIED = 0;
+  NOTION = 1;
+  LINEAR = 2;
+  GITHUB = 3;
+}
+
+enum ExternalResourceKind {
+  EXTERNAL_RESOURCE_KIND_UNSPECIFIED = 0;
+  PAGE = 1;
+  DATABASE = 2;
+  ISSUE = 3;
+  PULL_REQUEST = 4;
+  REPOSITORY = 5;
+  OTHER = 6;
+}
+
+// Provider-neutral autocomplete result. V1 inserts this as a TEXT_URL entity;
+// this metadata is intentionally not persisted into the message yet.
+message ExternalResource {
+  string id = 1;
+  ExternalResourceProvider provider = 2;
+  ExternalResourceKind kind = 3;
+  string title = 4;
+  string url = 5;
+  optional string subtitle = 6;
+  optional string emoji = 7;
+}
+
+message SearchExternalResourcesInput {
+  InputPeer peer_id = 1;
+  string query = 2;
+  optional int32 limit = 3;
+}
+
+message SearchExternalResourcesResult { repeated ExternalResource resources = 1; }
+
+enum ConnectorProvider {
+  CONNECTOR_PROVIDER_UNSPECIFIED = 0;
+  CONNECTOR_PROVIDER_NOTION = 1;
+  CONNECTOR_PROVIDER_LINEAR = 2;
+  CONNECTOR_PROVIDER_GITHUB = 3;
+}
+
+message ConnectorScope {
+  Scope scope = 1;
+  bool can_manage = 2;
+  optional bool allows_connections = 3;
+}
+
+message ConnectorProviderInfo {
+  ConnectorProvider provider = 1;
+  bool available = 2;
+  bool supports_user_scope = 3;
+  bool supports_space_scope = 4;
+}
+
+message ConnectorConnection {
+  ConnectorProvider provider = 1;
+  Scope scope = 2;
+  int64 connected_at = 3;
+  User connected_by = 4;
+  bool needs_configuration = 5;
+}
+
+message ListConnectorsInput {}
+
+message ListConnectorsResult {
+  repeated ConnectorProviderInfo providers = 1;
+  repeated ConnectorScope scopes = 2;
+  repeated ConnectorConnection connections = 3;
+}
+
+message PrepareConnectorOAuthInput {
+  ConnectorProvider provider = 1;
+  InputScope scope = 2;
+  string callback_scheme = 3;
+}
+
+message PrepareConnectorOAuthResult { string authorization_url = 1; }
+
+message DisconnectConnectorInput {
+  ConnectorProvider provider = 1;
+  InputScope scope = 2;
+}
+
+message DisconnectConnectorResult {}
+
+message ConnectorConfigOption {
+  string id = 1;
+  string title = 2;
+  optional string subtitle = 3;
+}
+
+message GetConnectorConfigInput {
+  ConnectorProvider provider = 1;
+  InputScope scope = 2;
+}
+
+message GetConnectorConfigResult {
+  repeated ConnectorConfigOption options = 1;
+  optional string selected_id = 2;
+}
+
+message SetConnectorConfigInput {
+  ConnectorProvider provider = 1;
+  InputScope scope = 2;
+  string selected_id = 3;
+}
+
+message SetConnectorConfigResult {}
+
+message CreateExternalTaskInput {
+  ConnectorProvider provider = 1;
+  InputScope scope = 2;
+  InputPeer peer_id = 3;
+  int64 message_id = 4;
+}
+
+message CreateExternalTaskResult {
+  string url = 1;
+  MessageAttachment attachment = 2;
+}
+
+message CreateSpaceInput { string name = 1; }
+
+message CreateSpaceResult {
+  Space space = 1;
+  Member member = 2;
+  Chat chat = 3;
+  Dialog dialog = 4;
+}
+
+message DeleteSpaceInput { int64 space_id = 1; }
+
+message DeleteSpaceResult {}
+
+message LeaveSpaceInput { int64 space_id = 1; }
+
+message LeaveSpaceResult {}
 
 message InputChatParticipant {
   optional int64 user_id = 1;
@@ -2565,6 +2995,7 @@ message Update {
     UpdateChatParticipantGroupDelete participant_group_delete = 42;
     UpdateSpaceSettings space_settings = 43;
     UpdateChatPermissions chat_permissions = 44;
+    UpdateDialogCollapsedMaxId dialog_collapsed_max_id = 45;
   }
 }
 
@@ -2734,6 +3165,12 @@ message UpdateDialogFollowMode {
 
   // If unset, the reply thread uses default relevance mode.
   optional DialogFollowMode follow_mode = 2;
+}
+
+message UpdateDialogCollapsedMaxId {
+  Peer peer_id = 1;
+  // Unset removes the personal collapse boundary.
+  optional int64 max_id = 2;
 }
 
 // Update when a new chat is created either in space or a private chat
@@ -2958,6 +3395,27 @@ message InviteToSpaceResult {
   Member member = 2;
   Chat chat = 3;
   Dialog dialog = 4;
+}
+
+message SearchUsersInput {
+  string query = 1;
+  optional int32 limit = 2;
+}
+
+message SearchUsersResult { repeated User users = 1; }
+
+message InviteToInlineInput {
+  oneof via {
+    int64 user_id = 1;
+    string email = 2;
+    string phone_number = 3;
+  }
+}
+
+message InviteToInlineResult {
+  User user = 1;
+  Chat chat = 2;
+  Dialog dialog = 3;
 }
 
 message GetChatParticipantsInput { int64 chat_id = 1; }
@@ -3230,8 +3688,9 @@ message RealtimeV3Request {
     RpcCall rpc = 1;
     AuthBeginRequest auth_begin = 2;
     AuthCompleteRequest auth_complete = 3;
-    CreateHttpUploadRequest create_http_upload = 4;
-    FinishHttpUploadRequest finish_http_upload = 5;
+    CreateHttpUploadRequest create_http_upload = 4 [deprecated = true];
+    FinishHttpUploadRequest finish_http_upload = 5 [deprecated = true];
+    ConnectionInit connection_init = 6;
   }
 }
 
@@ -3241,8 +3700,8 @@ message RealtimeV3Response {
     RpcError rpc_error = 2;
     AuthBeginResult auth_begin = 3;
     AuthCompleteResult auth_complete = 4;
-    CreateHttpUploadResult create_http_upload = 5;
-    FinishHttpUploadResult finish_http_upload = 6;
+    CreateHttpUploadResult create_http_upload = 5 [deprecated = true];
+    FinishHttpUploadResult finish_http_upload = 6 [deprecated = true];
   }
 }
 
@@ -3331,4 +3790,121 @@ message FinishHttpUploadResult {
     HttpUploadPending pending = 1;
     HttpUploadComplete complete = 2;
   }
+}
+
+// --- Native resumable uploads ---
+// These are ordinary RpcCall methods and may be carried by Realtime V2 or V3.
+
+enum UploadKind {
+  UPLOAD_KIND_UNSPECIFIED = 0;
+  UPLOAD_KIND_PHOTO = 1;
+  UPLOAD_KIND_VIDEO = 2;
+  UPLOAD_KIND_DOCUMENT = 3;
+  UPLOAD_KIND_VOICE = 4;
+}
+
+enum UploadStatus {
+  UPLOAD_STATUS_UNSPECIFIED = 0;
+  UPLOAD_STATUS_UPLOADING = 1;
+  UPLOAD_STATUS_PROCESSING = 2;
+  UPLOAD_STATUS_COMPLETE = 3;
+  UPLOAD_STATUS_FAILED = 4;
+  UPLOAD_STATUS_CANCELED = 5;
+  UPLOAD_STATUS_EXPIRED = 6;
+}
+
+message UploadVideoMetadata {
+  uint32 width = 1;
+  uint32 height = 2;
+  uint32 duration = 3;
+  bool is_animated = 4;
+  optional bool has_audio = 5;
+}
+
+message UploadVoiceMetadata {
+  uint32 duration = 1;
+  bytes waveform = 2;
+}
+
+message CreateUploadInput {
+  bytes client_upload_id = 1;
+  string file_name = 2;
+  string mime_type = 3;
+  uint64 byte_count = 4;
+  bytes sha256 = 5;
+  UploadKind kind = 6;
+  optional string thumbnail_file_unique_id = 7;
+  oneof metadata {
+    UploadVideoMetadata video = 8;
+    UploadVoiceMetadata voice = 9;
+  }
+}
+
+message CreateUploadResult {
+  bytes upload_id = 1;
+  uint32 part_size = 2;
+  uint32 part_count = 3;
+  int64 expires_at = 4;
+  repeated uint32 accepted_parts = 5;
+}
+
+message SaveUploadPartInput {
+  bytes upload_id = 1;
+  uint32 part_index = 2;
+  bytes data = 3;
+}
+
+message SaveUploadPartResult { bool already_present = 1; }
+
+message GetUploadStateInput { bytes upload_id = 1; }
+
+message UploadComplete {
+  string file_unique_id = 1;
+  oneof media {
+    Photo photo = 2;
+    Video video = 3;
+    Document document = 4;
+    Voice voice = 5;
+  }
+}
+
+message UploadFailure {
+  enum Code {
+    UPLOAD_FAILURE_CODE_UNSPECIFIED = 0;
+    UPLOAD_FAILURE_INTEGRITY = 1;
+    UPLOAD_FAILURE_INVALID_MEDIA = 2;
+    UPLOAD_FAILURE_PROCESSING = 3;
+    UPLOAD_FAILURE_STORAGE = 4;
+  }
+  Code code = 1;
+  bool retryable = 2;
+}
+
+message GetUploadStateResult {
+  UploadStatus status = 1;
+  repeated uint32 accepted_parts = 2;
+  optional UploadComplete complete = 3;
+  optional UploadFailure failure = 4;
+}
+
+message FinishUploadInput { bytes upload_id = 1; }
+
+message UploadMissingParts { repeated uint32 part_indices = 1; }
+
+message UploadProcessing { uint32 retry_after_seconds = 1; }
+
+message FinishUploadResult {
+  oneof state {
+    UploadMissingParts missing = 1;
+    UploadProcessing processing = 2;
+    UploadComplete complete = 3;
+    UploadFailure failed = 4;
+  }
+}
+
+message CancelUploadInput { bytes upload_id = 1; }
+
+message CancelUploadResult {
+  bool canceled = 1;
+  bool already_terminal = 2;
 }

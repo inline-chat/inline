@@ -36,6 +36,7 @@
 
 pub mod api;
 pub mod client_info;
+pub mod native_upload;
 pub mod realtime;
 pub mod realtime_v3;
 
@@ -48,6 +49,10 @@ pub use api::{
 };
 pub use client_info::{AuthMetadata, ClientIdentity, ClientIdentityError};
 pub use inline_protocol::proto;
+pub use native_upload::{
+    NativeUploadError, NativeUploadInput, NativeUploadProgress, upload_file_session,
+    upload_file_v2, upload_file_v3,
+};
 pub use realtime::{
     DEFAULT_CONNECT_TIMEOUT, DEFAULT_HEARTBEAT_INTERVAL, DEFAULT_HEARTBEAT_TIMEOUT,
     DEFAULT_RPC_TIMEOUT, DEFAULT_SESSION_COMMAND_CAPACITY, DEFAULT_SESSION_EVENT_CAPACITY,
@@ -67,10 +72,12 @@ pub mod prelude {
         CreateNotionTaskResult, CreatePrivateChatResult, DEFAULT_API_TIMEOUT,
         DEFAULT_CONNECT_TIMEOUT, DEFAULT_HEARTBEAT_INTERVAL, DEFAULT_HEARTBEAT_TIMEOUT,
         DEFAULT_RPC_TIMEOUT, DEFAULT_SESSION_COMMAND_CAPACITY, DEFAULT_SESSION_EVENT_CAPACITY,
-        DEFAULT_SESSION_MAX_IN_FLIGHT_RPCS, PeerId, ReadMessagesInput, ReadMessagesResult,
-        RealtimeClient, RealtimeClientBuilder, RealtimeError, RealtimeEvent, RealtimeEventReceiver,
+        DEFAULT_SESSION_MAX_IN_FLIGHT_RPCS, NativeUploadError, NativeUploadInput,
+        NativeUploadProgress, PeerId, ReadMessagesInput, ReadMessagesResult, RealtimeClient,
+        RealtimeClientBuilder, RealtimeError, RealtimeEvent, RealtimeEventReceiver,
         RealtimeSession, RpcRequest, SendCodeResult, UploadFileBytesInput, UploadFileInput,
         UploadFileResult, UploadFileType, UploadFileTypeParseError, UploadThumbnailBytesInput,
-        UploadVideoMetadata, VerifyCodeResult, proto,
+        UploadVideoMetadata, VerifyCodeResult, proto, upload_file_session, upload_file_v2,
+        upload_file_v3,
     };
 }

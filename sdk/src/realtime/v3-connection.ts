@@ -30,6 +30,11 @@ import {
   type ObfuscatedClientHeader,
 } from "@inline-chat/protocol/secure"
 import {
+  NativeUploadClient,
+  rpcUploadTransport,
+  type NativeUploadInput,
+} from "@inline-chat/protocol/uploads"
+import {
   RealtimeV3Request,
   RealtimeV3Response,
   RealtimeV3Update,
@@ -190,6 +195,7 @@ export class InlineProtocolV3Connection {
   })
   readonly #sessionId: bigint
   readonly #rsaKeys: HandshakeRsaPublicKey[]
+  readonly #uploads: NativeUploadClient
   #socket: WebSocket | undefined
   #carrier: ObfuscatedClientHeader | undefined
   #authorization: InlineProtocolAuthorization | undefined
@@ -201,6 +207,9 @@ export class InlineProtocolV3Connection {
     this.#sessionId = randomInt64(this.#random)
     this.#authorization = options.authorization ? cloneAuthorization(options.authorization) : undefined
     this.#rsaKeys = options.authorization ? [] : decodePublicKeys(options.rsaPublicKeys)
+    this.#uploads = new NativeUploadClient(rpcUploadTransport(
+      (method, input) => this.callRpc({ method, input }),
+    ))
   }
 
   static async connect(
@@ -268,6 +277,10 @@ export class InlineProtocolV3Connection {
     if (response.body.oneofKind === "rpcError") throw new InlineProtocolV3Error("protocol", response.body.rpcError.message)
     if (response.body.oneofKind !== "rpcResult") throw new InlineProtocolV3Error("protocol", "Unexpected RPC response")
     return response.body.rpcResult.result
+  }
+
+  async upload(input: NativeUploadInput) {
+    return await this.#uploads.upload(input)
   }
 
   async createHttpUpload(request: CreateHttpUploadRequest): Promise<CreateHttpUploadResult> {

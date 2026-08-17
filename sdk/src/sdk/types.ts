@@ -189,7 +189,7 @@ export type InlineSdkBinaryInput =
   | ArrayBuffer
   | SharedArrayBuffer
 
-export type InlineSdkUploadFileType = "photo" | "video" | "document"
+export type InlineSdkUploadFileType = "photo" | "video" | "document" | "voice"
 
 export type InlineSdkUploadFileParams = {
   type: InlineSdkUploadFileType
@@ -202,6 +202,12 @@ export type InlineSdkUploadFileParams = {
   width?: number
   height?: number
   duration?: number
+  isAnimated?: boolean
+  hasAudio?: boolean
+  waveform?: Uint8Array
+  clientUploadId?: Uint8Array
+  signal?: AbortSignal
+  onProgress?: (progress: { acceptedBytes: number; totalBytes: number }) => void
 }
 
 export type InlineSdkUploadFileResult = {
@@ -209,6 +215,7 @@ export type InlineSdkUploadFileResult = {
   photoId?: bigint
   videoId?: bigint
   documentId?: bigint
+  voiceId?: bigint
 }
 
 export type InlineInboundEvent =
@@ -351,6 +358,11 @@ export const rpcInputKindByMethod = {
   79: "requestBotChatSettings",
   80: "invokeBotChatSettingsItem",
   81: "answerBotChatSettings",
+  117: "createUpload",
+  118: "saveUploadPart",
+  119: "getUploadState",
+  120: "finishUpload",
+  121: "cancelUpload",
 } as const satisfies Record<number, RpcInputKind | undefined>
 
 export const rpcResultKindByMethod = {
@@ -410,6 +422,11 @@ export const rpcResultKindByMethod = {
   79: "requestBotChatSettings",
   80: "invokeBotChatSettingsItem",
   81: "answerBotChatSettings",
+  117: "createUpload",
+  118: "saveUploadPart",
+  119: "getUploadState",
+  120: "finishUpload",
+  121: "cancelUpload",
 } as const satisfies Record<number, RpcResultKind | undefined>
 
 type RpcInputKindByMethod = typeof rpcInputKindByMethod

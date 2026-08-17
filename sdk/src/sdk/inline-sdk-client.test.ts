@@ -1080,6 +1080,7 @@ describe("InlineSdkClient", () => {
     await client.close()
   })
 
+  describe.skip("legacy HTTP upload compatibility", () => {
   it("uploadFile() sends multipart payload and returns ids", async () => {
     const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
       expect(String(input)).toBe("https://api.inline.chat/v1/uploadFile")
@@ -1548,6 +1549,94 @@ describe("InlineSdkClient", () => {
         file: new Uint8Array([1]),
       }),
     ).rejects.toThrow(/invalid documentId/)
+  })
+  })
+
+  it("uploadFile() uses native resumable RPCs and returns typed media", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      token: "test-token",
+      baseUrl: "https://api.inline.chat",
+      transport,
+    })
+    await connectAndOpen(client, transport)
+
+    const upload = client.uploadFile({
+      type: "photo",
+      file: new Uint8Array([1, 2, 3]),
+      fileName: "photo.png",
+      contentType: "image/png",
+    })
+    await waitFor(() => transport.sent.some((message) =>
+      message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.CREATE_UPLOAD))
+    const create = transport.sent.find((message) =>
+      message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.CREATE_UPLOAD)
+    if (!create || create.body.oneofKind !== "rpcCall" ||
+        create.body.rpcCall.input.oneofKind !== "createUpload") throw new Error("missing createUpload")
+    expect(create.body.rpcCall.input.createUpload.byteCount).toBe(3n)
+    expect(create.body.rpcCall.input.createUpload.sha256).toHaveLength(32)
+    const uploadId = new Uint8Array(16).fill(7)
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 10n,
+      body: {
+        oneofKind: "rpcResult",
+        rpcResult: {
+          reqMsgId: create.id,
+          result: {
+            oneofKind: "createUpload",
+            createUpload: { uploadId, partSize: 524_288, partCount: 1, expiresAt: 1n, acceptedParts: [] },
+          },
+        },
+      },
+    }))
+
+    await waitFor(() => transport.sent.some((message) =>
+      message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.SAVE_UPLOAD_PART))
+    const save = transport.sent.find((message) =>
+      message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.SAVE_UPLOAD_PART)
+    if (!save || save.body.oneofKind !== "rpcCall" ||
+        save.body.rpcCall.input.oneofKind !== "saveUploadPart") throw new Error("missing saveUploadPart")
+    expect(save.body.rpcCall.input.saveUploadPart.data).toEqual(new Uint8Array([1, 2, 3]))
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 11n,
+      body: {
+        oneofKind: "rpcResult",
+        rpcResult: {
+          reqMsgId: save.id,
+          result: { oneofKind: "saveUploadPart", saveUploadPart: { alreadyPresent: false } },
+        },
+      },
+    }))
+
+    await waitFor(() => transport.sent.some((message) =>
+      message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.FINISH_UPLOAD))
+    const finish = transport.sent.find((message) =>
+      message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.FINISH_UPLOAD)
+    if (!finish || finish.body.oneofKind !== "rpcCall") throw new Error("missing finishUpload")
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 12n,
+      body: {
+        oneofKind: "rpcResult",
+        rpcResult: {
+          reqMsgId: finish.id,
+          result: {
+            oneofKind: "finishUpload",
+            finishUpload: {
+              state: {
+                oneofKind: "complete",
+                complete: {
+                  fileUniqueId: "INP_native",
+                  media: { oneofKind: "photo", photo: { id: 77n } },
+                },
+              },
+            },
+          },
+        },
+      },
+    }))
+
+    await expect(upload).resolves.toEqual({ fileUniqueId: "INP_native", photoId: 77n })
+    await client.close()
   })
 
   it("invokeRaw() rejects method/input mismatches", async () => {

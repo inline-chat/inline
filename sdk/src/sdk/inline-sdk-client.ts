@@ -20,7 +20,14 @@ import {
   type Update,
   UpdateBucket,
   UpdateComposeAction_ComposeAction,
+  UploadKind,
 } from "@inline-chat/protocol/core"
+import {
+  NativeUploadClient,
+  rpcUploadTransport,
+  uploadByteSource,
+  type UploadByteSource,
+} from "@inline-chat/protocol/uploads"
 import { asInlineId, type InlineIdLike } from "../ids.js"
 import { AsyncChannel } from "../utils/async-channel.js"
 import { ProtocolClient } from "../realtime/protocol-client.js"
@@ -103,6 +110,7 @@ export class InlineSdkClient {
 
   private readonly transport: Transport
   private readonly protocol: ProtocolClient
+  private readonly uploads: NativeUploadClient
   private readonly eventStream = new AsyncChannel<InlineInboundEvent>()
 
   private started = false
@@ -145,6 +153,9 @@ export class InlineSdkClient {
       logger: options.logger,
       defaultRpcTimeoutMs: options.rpcTimeoutMs,
     })
+    this.uploads = new NativeUploadClient(rpcUploadTransport(
+      (method, input) => this.invokeUncheckedRaw(method, input),
+    ))
 
     void this.startListeners()
   }
@@ -360,105 +371,59 @@ export class InlineSdkClient {
   }
 
   async uploadFile(params: InlineSdkUploadFileParams): Promise<InlineSdkUploadFileResult> {
-    const form = new FormData()
-    form.set("type", params.type)
-
     const fileName = normalizeUploadFileName(params.fileName, params.type)
     const fileContentType = resolveUploadContentType(params.type, params.contentType)
-    form.set("file", toUploadMultipartFile(params.file, fileName, fileContentType), fileName)
-    const fileSize = getBinaryInputSize(params.file)
-
-    let thumbnailName: string | undefined
-    let thumbnailContentType: string | undefined
-    let thumbnailSize: number | undefined
+    let thumbnailFileUniqueId: string | undefined
     if (params.thumbnail != null) {
-      thumbnailName = normalizeUploadFileName(
-        params.thumbnailFileName,
-        "photo",
-      )
-      thumbnailContentType = resolveUploadContentType(
-        "photo",
-        params.thumbnailContentType,
-      )
-      thumbnailSize = getBinaryInputSize(params.thumbnail)
-      form.set(
-        "thumbnail",
-        toUploadMultipartFile(params.thumbnail, thumbnailName, thumbnailContentType),
-        thumbnailName,
-      )
+      if (params.type !== "video" && params.type !== "document") {
+        throw new Error("uploadFile: thumbnails are only valid for video or document uploads")
+      }
+      const thumbnail = await this.uploads.upload({
+        source: toUploadSource(params.thumbnail),
+        fileName: normalizeUploadFileName(params.thumbnailFileName, "photo"),
+        mimeType: resolveUploadContentType("photo", params.thumbnailContentType),
+        kind: UploadKind.PHOTO,
+        signal: params.signal,
+      })
+      thumbnailFileUniqueId = thumbnail.fileUniqueId
     }
-
-    if (params.type === "video") {
-      const width = normalizePositiveInt(params.width, "width") ?? defaultVideoWidth
-      const height = normalizePositiveInt(params.height, "height") ?? defaultVideoHeight
-      const duration = normalizePositiveInt(params.duration, "duration") ?? defaultVideoDuration
-      form.set("width", String(width))
-      form.set("height", String(height))
-      form.set("duration", String(duration))
-    }
-
-    const uploadUrl = resolveUploadFileUrl(this.httpBaseUrl)
-    const requestContext = describeUploadContext({
-      type: params.type,
-      fileName,
-      fileContentType,
-      fileSize,
-      ...(thumbnailName ? { thumbnailName } : {}),
-      ...(thumbnailContentType ? { thumbnailContentType } : {}),
-      ...(thumbnailSize != null ? { thumbnailSize } : {}),
-      ...(params.type === "video"
+    const metadata = params.type === "video"
+      ? {
+          kind: "video" as const,
+          value: {
+            width: normalizePositiveInt(params.width, "width") ?? defaultVideoWidth,
+            height: normalizePositiveInt(params.height, "height") ?? defaultVideoHeight,
+            duration: normalizePositiveInt(params.duration, "duration") ?? defaultVideoDuration,
+            isAnimated: params.isAnimated ?? false,
+            hasAudio: params.hasAudio,
+          },
+        }
+      : params.type === "voice"
         ? {
-            width: params.width ?? defaultVideoWidth,
-            height: params.height ?? defaultVideoHeight,
-            duration: params.duration ?? defaultVideoDuration,
+            kind: "voice" as const,
+            value: {
+              duration: normalizePositiveInt(params.duration, "duration") ?? 0,
+              waveform: params.waveform?.slice() ?? new Uint8Array(),
+            },
           }
-        : {}),
-      uploadUrl: uploadUrl.toString(),
+        : undefined
+    const complete = await this.uploads.upload({
+      source: toUploadSource(params.file),
+      fileName,
+      mimeType: fileContentType,
+      kind: uploadKind(params.type),
+      metadata,
+      thumbnailFileUniqueId,
+      clientUploadId: params.clientUploadId,
+      signal: params.signal,
+      onProgress: params.onProgress,
     })
-    let response: Response
-    try {
-      response = await this.fetchImpl(uploadUrl, {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${this.options.token}`,
-        },
-        body: form,
-      })
-    } catch (error) {
-      const detail = extractErrorMessage(error)
-      throw new Error(`uploadFile: network request failed (${detail}; ${requestContext})`, {
-        cause: error as Error,
-      })
-    }
-
-    const payload = await parseJsonResponse(response)
-    if (!response.ok) {
-      const detail = describeUploadFailure(payload)
-      throw new Error(
-        `uploadFile: request failed with status ${response.status}${detail ? ` (${detail})` : ""}; ${requestContext}`,
-      )
-    }
-    if (!isRecord(payload) || payload.ok !== true) {
-      const detail = describeUploadFailure(payload)
-      throw new Error(`uploadFile: API error${detail ? ` (${detail})` : ""}; ${requestContext}`)
-    }
-    const result = payload.result
-    if (!isRecord(result)) {
-      throw new Error(`uploadFile: malformed success payload; ${requestContext}`)
-    }
-    const fileUniqueId = typeof result.fileUniqueId === "string" ? result.fileUniqueId.trim() : ""
-    if (!fileUniqueId) {
-      throw new Error(`uploadFile: response missing fileUniqueId; ${requestContext}`)
-    }
-    const photoId = parseOptionalBigInt(result.photoId, "photoId")
-    const videoId = parseOptionalBigInt(result.videoId, "videoId")
-    const documentId = parseOptionalBigInt(result.documentId, "documentId")
-
-    return {
-      fileUniqueId,
-      ...(photoId != null ? { photoId } : {}),
-      ...(videoId != null ? { videoId } : {}),
-      ...(documentId != null ? { documentId } : {}),
+    switch (complete.media.oneofKind) {
+      case "photo": return { fileUniqueId: complete.fileUniqueId, photoId: complete.media.photo.id }
+      case "video": return { fileUniqueId: complete.fileUniqueId, videoId: complete.media.video.id }
+      case "document": return { fileUniqueId: complete.fileUniqueId, documentId: complete.media.document.id }
+      case "voice": return { fileUniqueId: complete.fileUniqueId, voiceId: complete.media.voice.id }
+      default: throw new Error("uploadFile: server returned no typed media result")
     }
   }
 
@@ -1555,7 +1520,7 @@ function normalizeHttpBaseUrl(baseUrl: string): string {
   return url.toString().replace(/\/$/, "")
 }
 
-function normalizeUploadFileName(raw: string | undefined, type: "photo" | "video" | "document"): string {
+function normalizeUploadFileName(raw: string | undefined, type: "photo" | "video" | "document" | "voice"): string {
   const trimmed = sanitizeUploadFileName(raw)
   if (trimmed) return trimmed
   switch (type) {
@@ -1565,10 +1530,12 @@ function normalizeUploadFileName(raw: string | undefined, type: "photo" | "video
       return "video.mp4"
     case "document":
       return "document.bin"
+    case "voice":
+      return "voice.ogg"
   }
 }
 
-function resolveUploadContentType(type: "photo" | "video" | "document", explicit: string | undefined): string {
+function resolveUploadContentType(type: "photo" | "video" | "document" | "voice", explicit: string | undefined): string {
   const trimmed = explicit?.trim()
   if (trimmed) return trimmed
   switch (type) {
@@ -1578,7 +1545,25 @@ function resolveUploadContentType(type: "photo" | "video" | "document", explicit
       return "video/mp4"
     case "document":
       return "application/octet-stream"
+    case "voice":
+      return "audio/ogg"
   }
+}
+
+function uploadKind(type: "photo" | "video" | "document" | "voice"): UploadKind {
+  switch (type) {
+    case "photo": return UploadKind.PHOTO
+    case "video": return UploadKind.VIDEO
+    case "document": return UploadKind.DOCUMENT
+    case "voice": return UploadKind.VOICE
+  }
+}
+
+function toUploadSource(input: InlineSdkUploadFileParams["file"]): UploadByteSource {
+  if (typeof SharedArrayBuffer !== "undefined" && input instanceof SharedArrayBuffer) {
+    return uploadByteSource(new Uint8Array(input))
+  }
+  return uploadByteSource(input as Blob | Uint8Array | ArrayBuffer)
 }
 
 function toBlob(input: InlineSdkUploadFileParams["file"], type: string): Blob {

@@ -1318,6 +1318,7 @@ mod tests {
                 state: proto::GetUpdatesStateResult {
                     date: 100,
                     updates_found: Some(true),
+                    seq: None,
                 },
                 responses: Arc::new(Mutex::new(
                     responses.into_iter().map(Ok).collect::<VecDeque<_>>(),

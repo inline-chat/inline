@@ -18,9 +18,10 @@ use std::{
 
 use futures_util::future::BoxFuture;
 use inline_sdk::{
-    ApiClient, ApiError, AuthMetadata, ClientIdentity, RealtimeError, RealtimeEvent,
-    RealtimeEventReceiver, RealtimeSession, RpcRequest, UploadFileBytesInput, UploadFileResult,
-    UploadFileType, UploadThumbnailBytesInput, UploadVideoMetadata, proto,
+    ApiClient, ApiError, AuthMetadata, ClientIdentity, NativeUploadError, NativeUploadInput,
+    RealtimeError, RealtimeEvent, RealtimeEventReceiver, RealtimeSession, RpcRequest,
+    UploadFileBytesInput, UploadFileResult, UploadFileType, UploadThumbnailBytesInput,
+    UploadVideoMetadata, proto, upload_file_session,
 };
 use serde_json::Value;
 use tokio::sync::{Mutex, Notify};
@@ -1472,16 +1473,18 @@ impl ClientBackend for SdkBackend {
                     .map_err(store_error_to_backend)?;
             }
 
-            let upload_file_type = upload_file_type_for_request(&request);
-            let upload_input = upload_input_for_request(&request, bytes, thumbnail);
-            let upload = match backend
-                .api
-                .upload_file_bytes(session.auth.access_token().expose_secret(), upload_input)
-                .await
-            {
+            let realtime = backend.ensure_realtime(&session).await?;
+            let upload = match upload_native_media(
+                &realtime,
+                &request,
+                bytes,
+                thumbnail,
+                random_id,
+            )
+            .await {
                 Ok(upload) => upload,
                 Err(error) => {
-                    let backend_error = api_error_to_backend(error);
+                    let backend_error = native_upload_error_to_backend(error);
                     backend
                         .record_transaction_error(
                             identity,
@@ -1493,7 +1496,7 @@ impl ClientBackend for SdkBackend {
                     return Err(backend_error);
                 }
             };
-            let media = match input_media_from_upload(&upload, upload_file_type) {
+            let media = match input_media_from_complete(upload) {
                 Ok(media) => media,
                 Err(error) => {
                     backend
@@ -2163,7 +2166,7 @@ impl SyncHost for SdkBackend {
         Box::pin(async move {
             let session = backend.require_session().await?;
             backend
-                .call_realtime(&session, proto::GetUpdatesStateInput { date })
+                .call_realtime(&session, proto::GetUpdatesStateInput { date: Some(date) })
                 .await
         })
     }
@@ -3647,6 +3650,7 @@ fn update_kind(update: &proto::update::Update) -> &'static str {
         Update::ParticipantGroupDelete(_) => "participant_group_delete",
         Update::SpaceSettings(_) => "space_settings",
         Update::ChatPermissions(_) => "chat_permissions",
+        Update::DialogCollapsedMaxId(_) => "dialog_collapsed_max_id",
     }
 }
 
@@ -4538,6 +4542,7 @@ fn random_id_for_upload_request(request: &UploadRequest, size_bytes: usize) -> R
     RandomId::new((stable_hash(&seed) & 0x7fff_ffff_ffff_ffff) as i64)
 }
 
+#[allow(dead_code)] // Retained only to decode historical HTTP-upload fixtures during migration.
 fn upload_input_for_request(
     request: &UploadRequest,
     bytes: Vec<u8>,
@@ -4575,6 +4580,187 @@ fn upload_input_for_request(
     input
 }
 
+async fn upload_native_media(
+    realtime: &RealtimeSession,
+    request: &UploadRequest,
+    bytes: Vec<u8>,
+    thumbnail: Option<UploadThumbnail>,
+    random_id: RandomId,
+) -> Result<proto::UploadComplete, NativeUploadError> {
+    let base = format!(
+        "inline-native-upload-{}-{}",
+        std::process::id(),
+        random_id.get().unsigned_abs(),
+    );
+    let source_path = std::env::temp_dir().join(format!("{base}.body"));
+    tokio::fs::write(&source_path, &bytes).await?;
+
+    let thumbnail_result: Result<Option<String>, NativeUploadError> = async {
+        let Some(thumbnail) = thumbnail else { return Ok(None) };
+        let thumbnail_path = std::env::temp_dir().join(format!("{base}.thumbnail"));
+        if let Err(error) = tokio::fs::write(&thumbnail_path, &thumbnail.bytes).await {
+            let _ = tokio::fs::remove_file(&thumbnail_path).await;
+            return Err(error.into());
+        }
+        let mut thumbnail_id = native_upload_client_id(request, random_id);
+        thumbnail_id[0] ^= 0xff;
+        let result = upload_file_session(
+            realtime,
+            NativeUploadInput {
+                path: thumbnail_path.clone(),
+                file_name: thumbnail.file_name,
+                mime_type: thumbnail.mime_type,
+                kind: proto::UploadKind::Photo,
+                client_upload_id: Some(thumbnail_id),
+                thumbnail_file_unique_id: None,
+                video: None,
+                voice: None,
+            },
+            |_| {},
+        )
+        .await;
+        let _ = tokio::fs::remove_file(thumbnail_path).await;
+        Ok(Some(result?.file_unique_id))
+    }
+    .await;
+    let thumbnail_file_unique_id = match thumbnail_result {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = tokio::fs::remove_file(source_path).await;
+            return Err(error);
+        }
+    };
+
+    let file_name = request
+        .file_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| default_upload_file_name(request));
+    let mime_type = request
+        .mime_type
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| match request.kind {
+            MediaKind::Photo => "image/jpeg",
+            MediaKind::Video => "video/mp4",
+            MediaKind::Voice => "audio/ogg",
+            MediaKind::Document => "application/octet-stream",
+        })
+        .to_owned();
+    let video = if matches!(request.kind, MediaKind::Video) {
+        upload_video_metadata_for_request(request).map(|metadata| proto::UploadVideoMetadata {
+            width: metadata.width as u32,
+            height: metadata.height as u32,
+            duration: metadata.duration as u32,
+            is_animated: false,
+            has_audio: None,
+        })
+    } else {
+        None
+    };
+    let (kind, voice) = match request.kind {
+        MediaKind::Photo => (proto::UploadKind::Photo, None),
+        MediaKind::Video if video.is_some() => (proto::UploadKind::Video, None),
+        MediaKind::Video | MediaKind::Document => (proto::UploadKind::Document, None),
+        MediaKind::Voice => (
+            proto::UploadKind::Voice,
+            Some(proto::UploadVoiceMetadata {
+                duration: request
+                    .duration_ms
+                    .and_then(duration_ms_to_seconds_i32)
+                    .unwrap_or(0) as u32,
+                waveform: vec![],
+            }),
+        ),
+    };
+    let result = upload_file_session(
+        realtime,
+        NativeUploadInput {
+            path: source_path.clone(),
+            file_name,
+            mime_type,
+            kind,
+            client_upload_id: Some(native_upload_client_id(request, random_id)),
+            thumbnail_file_unique_id,
+            video,
+            voice,
+        },
+        |_| {},
+    )
+    .await;
+    let _ = tokio::fs::remove_file(source_path).await;
+    result
+}
+
+fn native_upload_client_id(request: &UploadRequest, random_id: RandomId) -> [u8; 16] {
+    let mut value = [0_u8; 16];
+    value[..8].copy_from_slice(&random_id.get().to_le_bytes());
+    let identity = format!(
+        "{:?}:{}:{}",
+        request.kind,
+        request.file_name.as_deref().unwrap_or_default(),
+        request.external_id.as_ref().map_or("", |value| value.id()),
+    );
+    value[8..].copy_from_slice(&stable_hash(&identity).to_le_bytes());
+    value
+}
+
+fn input_media_from_complete(upload: proto::UploadComplete) -> BackendResult<proto::InputMedia> {
+    let media = match upload.media {
+        Some(proto::upload_complete::Media::Photo(photo)) => {
+            proto::input_media::Media::Photo(proto::InputMediaPhoto { photo_id: photo.id })
+        }
+        Some(proto::upload_complete::Media::Video(video)) => {
+            proto::input_media::Media::Video(proto::InputMediaVideo { video_id: video.id })
+        }
+        Some(proto::upload_complete::Media::Document(document)) => {
+            proto::input_media::Media::Document(proto::InputMediaDocument {
+                document_id: document.id,
+            })
+        }
+        Some(proto::upload_complete::Media::Voice(voice)) => {
+            proto::input_media::Media::Voice(proto::InputMediaVoice { voice_id: voice.id })
+        }
+        None => {
+            return Err(BackendError::new(
+                ClientErrorCategory::ProtocolMismatch,
+                "native upload returned no media result",
+            ));
+        }
+    };
+    Ok(proto::InputMedia { media: Some(media) })
+}
+
+fn native_upload_error_to_backend(error: NativeUploadError) -> BackendError {
+    match error {
+        NativeUploadError::V2(error) => realtime_error_to_backend(error),
+        NativeUploadError::Source(error) => {
+            BackendError::new(ClientErrorCategory::InvalidInput, error.to_string())
+        }
+        NativeUploadError::V3(error) => {
+            BackendError::new(ClientErrorCategory::ProtocolMismatch, error.to_string())
+        }
+        NativeUploadError::Protocol => BackendError::new(
+            ClientErrorCategory::ProtocolMismatch,
+            NativeUploadError::Protocol.to_string(),
+        ),
+        error @ NativeUploadError::Rejected { retryable: true, .. } => {
+            BackendError::new(ClientErrorCategory::Network, error.to_string())
+        }
+        error @ NativeUploadError::Rejected { retryable: false, .. } => {
+            BackendError::new(ClientErrorCategory::InvalidInput, error.to_string())
+        }
+        _ => BackendError::new(
+            ClientErrorCategory::ProtocolMismatch,
+            "unknown native upload failure",
+        ),
+    }
+}
+
+#[allow(dead_code)] // Retained only to decode historical HTTP-upload fixtures during migration.
 fn upload_file_type_for_request(request: &UploadRequest) -> UploadFileType {
     match request.kind {
         MediaKind::Photo => UploadFileType::Photo,
@@ -4631,6 +4817,7 @@ fn extension_for_mime(mime_type: Option<&str>, fallback: &'static str) -> &'stat
     }
 }
 
+#[allow(dead_code)] // Retained only to decode historical HTTP-upload fixtures during migration.
 fn input_media_from_upload(
     upload: &UploadFileResult,
     expected_type: UploadFileType,
@@ -5340,7 +5527,10 @@ mod tests {
                     offset: 0,
                     length: 6,
                     entity: Some(proto::message_entity::Entity::Mention(
-                        proto::message_entity::MessageEntityMention { user_id: 15100 },
+                        proto::message_entity::MessageEntityMention {
+                            user_id: 15100,
+                            agent_id: None,
+                        },
                     )),
                 }],
             }),
@@ -5995,6 +6185,7 @@ mod tests {
                     proto::rpc_result::Result::GetUpdatesState(proto::GetUpdatesStateResult {
                         date: 100,
                         updates_found: Some(false),
+                        seq: None,
                     }),
                 ),
             )
@@ -6633,6 +6824,7 @@ mod tests {
                     proto::rpc_result::Result::GetUpdatesState(proto::GetUpdatesStateResult {
                         date: 100,
                         updates_found: Some(true),
+                        seq: None,
                     }),
                 ),
             )
@@ -6807,6 +6999,7 @@ mod tests {
                     proto::rpc_result::Result::GetUpdatesState(proto::GetUpdatesStateResult {
                         date: 100,
                         updates_found: Some(true),
+                        seq: None,
                     }),
                 ),
             )
@@ -6905,6 +7098,7 @@ mod tests {
                         }),
                         pinned_message_ids: vec![11],
                         anchor_message: None,
+                        user: None,
                     }),
                 ),
             )
@@ -8267,6 +8461,8 @@ mod tests {
                         creator: true,
                         date: 100,
                         is_public: Some(false),
+                        handle: None,
+                        seq: None,
                     }),
                     member: Some(member(2)),
                 })),
@@ -8303,6 +8499,8 @@ mod tests {
                                 silent: Some(true),
                                 ..Default::default()
                             }),
+                            privacy_settings: None,
+                            compose_settings: None,
                         }),
                     },
                 )),

@@ -5,6 +5,7 @@ use std::{fs, io};
 use crate::errors::CliError;
 use crate::output::format_bytes;
 use inline_protocol::proto;
+use inline_sdk::NativeUploadInput;
 use inline_sdk::api::{UploadFileInput, UploadFileResult, UploadFileType, UploadVideoMetadata};
 
 pub(crate) const MAX_ATTACHMENT_BYTES: u64 = 200 * 1024 * 1024;
@@ -23,6 +24,7 @@ pub(crate) struct PreparedAttachment {
 }
 
 impl PreparedAttachment {
+    #[allow(dead_code)] // Retained until the public HTTP API compatibility surface is deprecated.
     pub(crate) fn to_upload_input(&self) -> UploadFileInput {
         let mut input = UploadFileInput::new(
             self.upload_path.clone(),
@@ -35,6 +37,33 @@ impl PreparedAttachment {
         if let Some(metadata) = self.video_metadata {
             input = input.with_video_metadata(metadata);
         }
+        input
+    }
+
+    pub(crate) fn to_native_upload_input(&self) -> NativeUploadInput {
+        let kind = match self.file_type {
+            UploadFileType::Photo => proto::UploadKind::Photo,
+            UploadFileType::Video => proto::UploadKind::Video,
+            UploadFileType::Document => proto::UploadKind::Document,
+            _ => proto::UploadKind::Document,
+        };
+        let mut input = NativeUploadInput::new(
+            self.upload_path.clone(),
+            self.file_name.clone(),
+            self.mime_type
+                .clone()
+                .unwrap_or_else(|| "application/octet-stream".to_string()),
+            kind,
+        );
+        input.video = self
+            .video_metadata
+            .map(|metadata| proto::UploadVideoMetadata {
+                width: metadata.width.max(0) as u32,
+                height: metadata.height.max(0) as u32,
+                duration: metadata.duration.max(0) as u32,
+                is_animated: false,
+                has_audio: None,
+            });
         input
     }
 }
@@ -83,6 +112,7 @@ pub(crate) fn prepare_attachments(
     Ok(prepared)
 }
 
+#[allow(dead_code)] // Retained for callers still decoding the public HTTP upload response.
 pub(crate) fn input_media_from_upload(
     upload: &UploadFileResult,
 ) -> Result<proto::InputMedia, Box<dyn std::error::Error>> {
@@ -108,6 +138,31 @@ pub(crate) fn input_media_from_upload(
         });
     }
     Err(CliError::unexpected_api_response("uploadFile", "missing media id").into())
+}
+
+pub(crate) fn input_media_from_native_upload(
+    upload: &proto::UploadComplete,
+) -> Result<proto::InputMedia, Box<dyn std::error::Error>> {
+    let media = match upload.media.as_ref() {
+        Some(proto::upload_complete::Media::Photo(photo)) => {
+            proto::input_media::Media::Photo(proto::InputMediaPhoto { photo_id: photo.id })
+        }
+        Some(proto::upload_complete::Media::Video(video)) => {
+            proto::input_media::Media::Video(proto::InputMediaVideo { video_id: video.id })
+        }
+        Some(proto::upload_complete::Media::Document(document)) => {
+            proto::input_media::Media::Document(proto::InputMediaDocument {
+                document_id: document.id,
+            })
+        }
+        Some(proto::upload_complete::Media::Voice(voice)) => {
+            proto::input_media::Media::Voice(proto::InputMediaVoice { voice_id: voice.id })
+        }
+        None => {
+            return Err(CliError::unexpected_api_response("finishUpload", "missing media").into());
+        }
+    };
+    Ok(proto::InputMedia { media: Some(media) })
 }
 
 fn prepare_directory_attachment(
@@ -321,6 +376,7 @@ struct FfprobeStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use inline_sdk::api::UploadFileResult;
 
     #[test]
     fn upload_response_without_media_id_is_structured() {

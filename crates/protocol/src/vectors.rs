@@ -21,9 +21,27 @@ mod tests {
             corpus["encryptedRecords"]["clientToServer"]["recordHex"],
             "32d1586ea457dfc80b016bab73824ee1e75f00f0fa824908302fa5dab375c8029b169848525548f61add2955845b9810fe817fcc7581efd11aaac110560a2cc78ae6a20cc6216a0b86fa0d061a57f84bacbf84af84ec31b4"
         );
-        assert_eq!(corpus["applicationObjects"]["invokeHex"], "a64a7deb0300000003089601");
-        assert_eq!(corpus["handshakeTranscripts"]["permanent"]["requestHex"].as_array().unwrap().len(), 3);
-        assert_eq!(corpus["handshakeTranscripts"]["permanent"]["authKeyHex"].as_str().unwrap().len(), 512);
-        assert_eq!(corpus["handshakeTranscripts"]["temporary"]["expiresAt"], 1_700_086_400);
+        assert_eq!(
+            corpus["applicationObjects"]["invokeHex"],
+            "a64a7deb0300000003089601"
+        );
+        assert_eq!(
+            corpus["handshakeTranscripts"]["permanent"]["requestHex"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+        assert_eq!(
+            corpus["handshakeTranscripts"]["permanent"]["authKeyHex"]
+                .as_str()
+                .unwrap()
+                .len(),
+            512
+        );
+        assert_eq!(
+            corpus["handshakeTranscripts"]["temporary"]["expiresAt"],
+            1_700_086_400
+        );
     }
 }

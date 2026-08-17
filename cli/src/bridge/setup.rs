@@ -418,17 +418,25 @@ pub(super) async fn provision_dev_bot(
                 .and_then(|saved| saved.managed_avatar_digest.as_deref())
                 != Some(profile_digest.as_str()));
     let (managed_avatar_digest, managed_avatar_file_unique_id) = if should_apply_default_avatar {
-        let api = inline_sdk::api::ApiClient::try_new(&config.api_base_url)?;
-        let upload = api
-            .upload_file_bytes(
-                owner_token,
-                inline_sdk::UploadFileBytesInput::photo(
-                    profile_asset.bytes.to_vec(),
-                    profile_asset.file_name,
-                )
-                .with_mime_type(profile_asset.mime_type),
-            )
-            .await?;
+        let source_path = std::env::temp_dir().join(format!(
+            "inline-bridge-avatar-{}-{}",
+            std::process::id(),
+            provider.provider_id,
+        ));
+        tokio::fs::write(&source_path, profile_asset.bytes).await?;
+        let upload = inline_sdk::upload_file_v2(
+            &mut owner,
+            inline_sdk::NativeUploadInput::new(
+                &source_path,
+                profile_asset.file_name,
+                profile_asset.mime_type,
+                proto::UploadKind::Photo,
+            ),
+            |_| {},
+        )
+        .await;
+        let _ = tokio::fs::remove_file(source_path).await;
+        let upload = upload?;
         bot = owner
             .call(proto::UpdateBotProfileInput {
                 bot_user_id: bot.id,

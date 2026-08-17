@@ -37,7 +37,7 @@ use std::time::{Duration, Instant};
 use std::{env, fs, io};
 
 use crate::attachments::{
-    MAX_ATTACHMENT_BYTES, PreparedAttachment, input_media_from_upload, prepare_attachments,
+    MAX_ATTACHMENT_BYTES, PreparedAttachment, input_media_from_native_upload, prepare_attachments,
 };
 use crate::auth::AuthStore;
 use crate::auth_flow::{
@@ -83,10 +83,10 @@ use crate::validation::{
     validate_positive_ids_arg, validate_table_only_list_flags,
 };
 use inline_protocol::proto;
-use inline_sdk::RealtimeClient;
 use inline_sdk::api::{
     ApiClient, CreateLinearIssueInput, CreateNotionTaskInput, PeerId, ReadMessagesInput,
 };
+use inline_sdk::{InlineProtocolV3Connection, RealtimeClient, upload_file_v2, upload_file_v3};
 
 #[derive(Clone, Copy)]
 struct DetectedGlobalFlags {
@@ -3023,11 +3023,28 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             println!("Message sent (updates: {}).", payload.updates.len());
                         }
                     } else {
+                        let mut upload_realtime = if let Some(authorization) =
+                            auth_store.load_inline_protocol_temporary()?
+                        {
+                            let url = format!("{}/v3", config.realtime_url.trim_end_matches('/'));
+                            match identity::reconnect_inline_protocol(&url, authorization).await {
+                                Ok(connection) => Some(connection),
+                                Err(error) => {
+                                    if !cli.json {
+                                        eprintln!(
+                                            "Secure upload connection unavailable; using typed Realtime V2 RPCs: {error}"
+                                        );
+                                    }
+                                    None
+                                }
+                            }
+                        } else {
+                            None
+                        };
                         let peer_summary = peer_summary_from_input(&peer);
                         let output = send_messages_with_attachments(
-                            &api,
                             &mut realtime,
-                            &token,
+                            upload_realtime.as_mut(),
                             &peer,
                             caption,
                             reply_to,
@@ -3494,6 +3511,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     };
                     let user_settings = proto::UserSettings {
                         notification_settings: Some(notification_settings),
+                        privacy_settings: None,
+                        compose_settings: None,
                     };
                     let input = proto::UpdateUserSettingsInput {
                         user_settings: Some(user_settings),
@@ -3682,9 +3701,8 @@ async fn send_message(
 
 #[allow(clippy::too_many_arguments)]
 async fn send_messages_with_attachments(
-    api: &ApiClient,
     realtime: &mut RealtimeClient,
-    token: &str,
+    mut upload_realtime: Option<&mut InlineProtocolV3Connection>,
     peer: &proto::InputPeer,
     caption: Option<String>,
     reply_to_msg_id: Option<i64>,
@@ -3706,9 +3724,14 @@ async fn send_messages_with_attachments(
             println!("{progress}");
         }
 
-        let upload = api.upload_file(token, attachment.to_upload_input()).await?;
+        let input = attachment.to_native_upload_input();
+        let upload = if let Some(connection) = upload_realtime.as_deref_mut() {
+            upload_file_v3(connection, input, |_| {}).await?
+        } else {
+            upload_file_v2(realtime, input, |_| {}).await?
+        };
 
-        let media = input_media_from_upload(&upload)?;
+        let media = input_media_from_native_upload(&upload)?;
         let send = send_message(
             realtime,
             peer,
@@ -4452,7 +4475,10 @@ fn parse_mention_entities(
             offset,
             length,
             entity: Some(proto::message_entity::Entity::Mention(
-                proto::message_entity::MessageEntityMention { user_id },
+                proto::message_entity::MessageEntityMention {
+                    user_id,
+                    agent_id: None,
+                },
             )),
         });
     }
