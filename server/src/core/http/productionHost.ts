@@ -387,6 +387,13 @@ export const startCoreProductionServer = async <
             { status: 503 },
           )
         }
+        const inlineProtocolVerification =
+          realtimeV3?.handleVerification(
+            request,
+          )
+        if (inlineProtocolVerification !== undefined) {
+          return inlineProtocolVerification
+        }
         const unsupportedV3 =
           realtimeV3
             ?.rejectUnsupportedUpgrade(

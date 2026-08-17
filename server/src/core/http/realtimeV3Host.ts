@@ -39,6 +39,7 @@ import type { TrustedClientIpHeader } from "./middleware"
 import { Log } from "@in/server/utils/log"
 
 const REALTIME_V3_PATH = "/realtime/v3"
+const INLINE_PROTOCOL_VERIFICATION_PATH = "/.well-known/inline-protocol"
 const PROTOCOL_CLOSE_CODE = 1002
 const PROTOCOL_CLOSE_REASON = "Protocol error"
 const BACKPRESSURE_LIMIT = 16 * 1024 * 1024
@@ -68,6 +69,7 @@ type InlineProtocolConnectionState = {
 }
 
 export interface InlineProtocolRealtimeTransport {
+  readonly handleVerification: (request: Request) => Response | undefined
   readonly tryUpgrade: (request: Request, server: Server<InlineProtocolWebSocketData>) => boolean
   readonly rejectUnsupportedUpgrade: (request: Request) => Response | undefined
   readonly handleHttpUpload: (request: Request, directClientIp?: string) => Promise<Response | undefined>
@@ -271,6 +273,37 @@ export const makeInlineProtocolRealtimeTransport = (
   }
 
   return {
+    handleVerification: (request) => {
+      const url = new URL(request.url)
+      if (request.method !== "GET" || url.pathname !== INLINE_PROTOCOL_VERIFICATION_PATH) return undefined
+      let serverTime: number | undefined
+      try {
+        serverTime = Math.floor(runtime.clock.nowMilliseconds() / 1_000)
+      } catch {
+        serverTime = undefined
+      }
+      const ready = serverTime !== undefined
+      return Response.json({
+        protocol: "Inline Protocol",
+        protocolVersion: 1,
+        applicationContract: "Realtime V3",
+        applicationContractVersion: 3,
+        status: ready ? "ready" : "degraded",
+        ...(serverTime === undefined ? {} : { serverTime }),
+        websocketPath: REALTIME_V3_PATH,
+        rsaPublicKeyRing: runtime.rsaKeys.map((key) => ({
+          modulus: Buffer.from(key.modulus).toString("base64url"),
+          exponent: Buffer.from(key.exponent).toString("base64url"),
+          fingerprint: key.fingerprint.toString(),
+        })),
+      }, {
+        status: ready ? 200 : 503,
+        headers: {
+          "access-control-allow-origin": "*",
+          "cache-control": "no-store",
+        },
+      })
+    },
     tryUpgrade: (request, server) => {
       if (!accepting || new URL(request.url).pathname !== REALTIME_V3_PATH || !clockHealthy()) return false
       return server.upgrade(request, {

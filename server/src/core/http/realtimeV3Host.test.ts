@@ -108,6 +108,53 @@ const upgrade = (
 }
 
 describe("Inline Protocol WebSocket carrier", () => {
+  test("publishes only the safe public verification contract", async () => {
+    const runtime = fixture()
+    const transport = makeInlineProtocolRealtimeTransport(runtime)
+    const response = transport.handleVerification(
+      new Request("https://api.inline.chat/.well-known/inline-protocol"),
+    )
+    expect(response?.status).toBe(200)
+    expect(response?.headers.get("cache-control")).toBe("no-store")
+    expect(response?.headers.get("access-control-allow-origin")).toBe("*")
+    const body = await response?.json() as Record<string, unknown>
+    expect(body).toEqual({
+      protocol: "Inline Protocol",
+      protocolVersion: 1,
+      applicationContract: "Realtime V3",
+      applicationContractVersion: 3,
+      status: "ready",
+      serverTime: expect.any(Number),
+      websocketPath: "/realtime/v3",
+      rsaPublicKeyRing: [{
+        modulus: Buffer.from(runtime.clientKey.modulus).toString("base64url"),
+        exponent: Buffer.from(runtime.clientKey.exponent).toString("base64url"),
+        fingerprint: runtime.clientKey.fingerprint.toString(),
+      }],
+    })
+    expect(JSON.stringify(body)).not.toContain("private")
+    expect(JSON.stringify(body)).not.toContain("pepper")
+    expect(JSON.stringify(body)).not.toContain("kek")
+    await transport.shutdown()
+  })
+
+  test("marks public verification degraded when the protocol clock is unsafe", async () => {
+    let wall = 1_000_000
+    let monotonic = 10_000
+    const transport = makeInlineProtocolRealtimeTransport(fixture({}, new InlineProtocolClock({
+      wallClock: () => wall,
+      monotonicClock: () => monotonic,
+    })))
+    wall += 21_000
+    monotonic += 500
+    const response = transport.handleVerification(
+      new Request("https://api.inline.chat/.well-known/inline-protocol"),
+    )
+    expect(response?.status).toBe(503)
+    expect(await response?.json()).toMatchObject({ status: "degraded" })
+    await transport.shutdown()
+  })
+
   test("uses only the configured trusted proxy header for HTTP upload client identity", async () => {
     const observed: Array<string | undefined> = []
     const runtime = fixture({
