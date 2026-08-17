@@ -5,7 +5,10 @@ import {
   encodeAbridgedPacket,
   encodeAbridgedQuickAck,
   type HandshakeRsaServerKey,
+  type InlineProtocolServerApplicationTask,
   type ObfuscatedServerHeader,
+  type ServerApplicationAuthorization,
+  type ServerApplicationDispatcher,
   type ServerAuthorizationKeyRepository,
   type ServerReplayRepository,
 } from "@inline-chat/protocol/server"
@@ -63,6 +66,8 @@ type InlineProtocolConnectionState = {
   session: InlineProtocolServerSession
   carrier?: ObfuscatedServerHeader
   queue: Promise<void>
+  outboundQueue: Promise<void>
+  applicationTasks: Set<Promise<void>>
   registered: boolean
 }
 
@@ -125,9 +130,23 @@ export const makeInlineProtocolRuntime = (
 
 export const makeInlineProtocolRealtimeTransport = (
   runtime: InlineProtocolRuntime,
-  { clientIpHeader }: { clientIpHeader?: TrustedClientIpHeader } = {},
+  {
+    clientIpHeader,
+    applicationDispatcherFactory = (input) => makeInlineProtocolApplicationDispatcher({
+      operations: runtime.operations,
+      ...input,
+    }),
+  }: {
+    clientIpHeader?: TrustedClientIpHeader
+    applicationDispatcherFactory?: (input: {
+      connectionId: string
+      metadata?: RealtimeRequestMetadata
+      onAuthorized: (authorization: ServerApplicationAuthorization) => void
+    }) => ServerApplicationDispatcher
+  } = {},
 ): InlineProtocolRealtimeTransport => {
   const sockets = new Set<ServerWebSocket<InlineProtocolWebSocketData>>()
+  const drainingConnections = new Set<Promise<void>>()
   let accepting = true
 
   const clockHealthy = (): boolean => {
@@ -139,30 +158,138 @@ export const makeInlineProtocolRealtimeTransport = (
     }
   }
 
-  const enqueue = (socket: ServerWebSocket<InlineProtocolWebSocketData>, operation: () => Promise<void>): void => {
+  const enqueue = (
+    socket: ServerWebSocket<InlineProtocolWebSocketData>,
+    operation: () => Promise<void>,
+    { allowClosed = false }: { allowClosed?: boolean } = {},
+  ): Promise<void> => {
     const state = socket.data.state
-    if (!state || socket.data.closed) return
-    state.queue = state.queue.then(operation).catch((error) => {
+    if (!state || (socket.data.closed && !allowClosed)) return Promise.resolve()
+    const queuedAt = performance.now()
+    state.queue = state.queue.then(async () => {
+      if (socket.data.closed && !allowClosed) return
+      const queueWaitMs = Math.round(performance.now() - queuedAt)
+      if (queueWaitMs >= 100) {
+        Log.shared.debug("Inline Protocol V3 session queue delayed", {
+          connectionId: socket.data.id,
+          queueWaitMs,
+        })
+      }
+      await operation()
+    }).catch((error) => {
       Log.shared.debug("Inline Protocol V3 connection failed", {
         connectionId: socket.data.id,
         error,
       })
       closeProtocol(socket)
     })
+    return state.queue
   }
 
-  const sendRecord = (socket: ServerWebSocket<InlineProtocolWebSocketData>, record: Uint8Array): void => {
-    runtime.clock.assertHealthy()
-    const carrier = socket.data.state?.carrier
-    if (!carrier || socket.data.closed) throw new RangeError("Inline Protocol carrier is unavailable")
-    const frame = carrier.outbound.process(encodeAbridgedPacket(record))
-    socket.sendBinary(frame, false)
+  const enqueueOutbound = (
+    socket: ServerWebSocket<InlineProtocolWebSocketData>,
+    operation: (carrier: ObfuscatedServerHeader) => void,
+  ): Promise<void> => {
+    const state = socket.data.state
+    if (!state || socket.data.closed) return Promise.resolve()
+    state.outboundQueue = state.outboundQueue.then(() => {
+      if (socket.data.closed) return
+      runtime.clock.assertHealthy()
+      if (!state.carrier) throw new RangeError("Inline Protocol carrier is unavailable")
+      operation(state.carrier)
+    }).catch((error) => {
+      Log.shared.debug("Inline Protocol V3 outbound carrier failed", {
+        connectionId: socket.data.id,
+        error,
+      })
+      closeProtocol(socket)
+    })
+    return state.outboundQueue
   }
 
-  const sendQuickAck = (socket: ServerWebSocket<InlineProtocolWebSocketData>, quickAckId: number): void => {
-    const carrier = socket.data.state?.carrier
-    if (!carrier || socket.data.closed) throw new RangeError("Inline Protocol carrier is unavailable")
+  const sendRecords = (
+    socket: ServerWebSocket<InlineProtocolWebSocketData>,
+    records: readonly Uint8Array[],
+  ): Promise<void> => enqueueOutbound(socket, (carrier) => {
+    for (const record of records) {
+      socket.sendBinary(carrier.outbound.process(encodeAbridgedPacket(record)), false)
+    }
+  })
+
+  const sendQuickAck = (
+    socket: ServerWebSocket<InlineProtocolWebSocketData>,
+    quickAckId: number,
+  ): Promise<void> => enqueueOutbound(socket, (carrier) => {
     socket.sendBinary(carrier.outbound.process(encodeAbridgedQuickAck(quickAckId)), false)
+  })
+
+  const closeDestroyedSessionAfterWrites = (
+    socket: ServerWebSocket<InlineProtocolWebSocketData>,
+  ): void => {
+    const state = socket.data.state
+    if (!state || socket.data.closed || !state.session.destroyed) return
+    state.outboundQueue = state.outboundQueue.then(() => {
+      if (!socket.data.closed) socket.close(1000, "Protocol session closed")
+    })
+  }
+
+  const scheduleApplicationTask = (
+    socket: ServerWebSocket<InlineProtocolWebSocketData>,
+    task: InlineProtocolServerApplicationTask,
+  ): void => {
+    const state = socket.data.state
+    if (!state) return
+    const handlerStartedAt = performance.now()
+    const execution = (async () => {
+      const completion = await task.dispatch()
+      const handlerDurationMs = Math.round(performance.now() - handlerStartedAt)
+      Log.shared.debug("Inline Protocol V3 application handler completed", {
+        connectionId: socket.data.id,
+        requestMessageId: task.messageId.toString(),
+        handlerDurationMs,
+        inFlightApplications: state.applicationTasks.size,
+      })
+      await enqueue(socket, async () => {
+        const finalizationStartedAt = performance.now()
+        const finalized = await completion.finalize()
+        const finalizationDurationMs = Math.round(performance.now() - finalizationStartedAt)
+        Log.shared.debug("Inline Protocol V3 application finalized", {
+          connectionId: socket.data.id,
+          requestMessageId: task.messageId.toString(),
+          handlerDurationMs,
+          finalizationDurationMs,
+          responseCount: finalized.responses.length,
+          releasedApplicationCount: finalized.applicationTasks.length,
+        })
+        if (!socket.data.closed) void sendRecords(socket, finalized.responses)
+        for (const released of finalized.applicationTasks) scheduleApplicationTask(socket, released)
+        closeDestroyedSessionAfterWrites(socket)
+      }, { allowClosed: true })
+    })().catch((error) => {
+      Log.shared.debug("Inline Protocol V3 application dispatch failed", {
+        connectionId: socket.data.id,
+        requestMessageId: task.messageId.toString(),
+        error,
+      })
+      closeProtocol(socket)
+    })
+    state.applicationTasks.add(execution)
+    void execution.finally(() => state.applicationTasks.delete(execution))
+  }
+
+  const drainConnectionState = async (state: InlineProtocolConnectionState): Promise<void> => {
+    await state.queue
+    while (state.applicationTasks.size > 0) {
+      await Promise.allSettled(state.applicationTasks)
+      await state.queue
+    }
+    await state.outboundQueue
+  }
+
+  const trackClosedConnection = (state: InlineProtocolConnectionState): void => {
+    const draining = drainConnectionState(state)
+    drainingConnections.add(draining)
+    void draining.finally(() => drainingConnections.delete(draining))
   }
 
   const registerAuthenticatedConnection = (
@@ -181,7 +308,7 @@ export const makeInlineProtocolRealtimeTransport = (
             const legacy = ServerProtocolMessage.fromBinary(bytes)
             if (legacy.body.oneofKind !== "message") return
             const payload = RealtimeV3Update.toBinary({ message: legacy.body.message })
-            sendRecord(socket, state.session.sendApplicationUpdate(payload))
+            void sendRecords(socket, [state.session.sendApplicationUpdate(payload)])
           })
           return bytes.length
         },
@@ -197,8 +324,7 @@ export const makeInlineProtocolRealtimeTransport = (
       rsaKeys: runtime.rsaKeys,
       authorizationKeys: runtime.authorizationKeys,
       replay: runtime.replay,
-      application: makeInlineProtocolApplicationDispatcher({
-        operations: runtime.operations,
+      application: applicationDispatcherFactory({
         connectionId: socket.data.id,
         metadata: socket.data.metadata,
         onAuthorized: (authorization) => {
@@ -217,6 +343,8 @@ export const makeInlineProtocolRealtimeTransport = (
     })
     const state: InlineProtocolConnectionState = {
       queue: Promise.resolve(),
+      outboundQueue: Promise.resolve(),
+      applicationTasks: new Set(),
       registered: false,
       session,
     }
@@ -229,7 +357,7 @@ export const makeInlineProtocolRealtimeTransport = (
       closeProtocol(socket)
       return
     }
-    const frame = bytesForFrame(message)
+    const frame = bytesForFrame(message).slice()
     enqueue(socket, async () => {
       runtime.clock.assertHealthy()
       const state = socket.data.state
@@ -244,18 +372,22 @@ export const makeInlineProtocolRealtimeTransport = (
       if (decoded.quickAckRequested && decoded.payload.slice(0, 8).every((byte) => byte === 0)) {
         throw new RangeError("Quick ACK is unavailable for unencrypted handshake packets")
       }
-      const responses = await state.session.receive(decoded.payload, decoded.quickAckRequested
-        ? { onQuickAck: (quickAckId) => sendQuickAck(socket, quickAckId) }
+      const accepted = await state.session.receiveConcurrent(decoded.payload, decoded.quickAckRequested
+        ? { onQuickAck: (quickAckId) => { void sendQuickAck(socket, quickAckId) } }
         : undefined)
-      for (const response of responses) sendRecord(socket, response)
-      if (state.session.destroyed && !socket.data.closed) socket.close(1000, "Protocol session closed")
+      void sendRecords(socket, accepted.responses)
+      for (const task of accepted.applicationTasks) scheduleApplicationTask(socket, task)
+      closeDestroyedSessionAfterWrites(socket)
     })
   }
 
   const close = (socket: ServerWebSocket<InlineProtocolWebSocketData>): void => {
     socket.data.closed = true
     sockets.delete(socket)
-    if (socket.data.state?.registered) connectionManager.removeConnection(socket.data.id)
+    if (socket.data.state) {
+      if (socket.data.state.registered) connectionManager.removeConnection(socket.data.id)
+      trackClosedConnection(socket.data.state)
+    }
   }
 
   return {
@@ -319,8 +451,12 @@ export const makeInlineProtocolRealtimeTransport = (
     shutdown: async () => {
       accepting = false
       const active = [...sockets]
+      const activeStates = active.flatMap((socket) => socket.data.state ? [socket.data.state] : [])
       for (const socket of active) socket.close(1001, "Server shutting down")
-      await Promise.allSettled(active.map((socket) => socket.data.state?.queue))
+      await Promise.allSettled(activeStates.map(drainConnectionState))
+      while (drainingConnections.size > 0) {
+        await Promise.allSettled(drainingConnections)
+      }
       sockets.clear()
       runtime.close()
     },

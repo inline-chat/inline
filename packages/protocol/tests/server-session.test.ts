@@ -1,22 +1,26 @@
 import { describe, expect, test } from "bun:test"
 import { constants, generateKeyPairSync, privateDecrypt, randomBytes } from "node:crypto"
-import { gunzipSync } from "node:zlib"
+import { gzipSync, gunzipSync } from "node:zlib"
 import {
   InlineHandshakeClient,
   InlineProtocolServerSession,
   MessageIdGenerator,
   ServiceConstructor,
+  authKeyId,
   bytesToHex,
   createTemporaryKeyBindingProof,
   decodeInlineApplicationObject,
+  decodeMsgsAck,
   decodeRpcResult,
   decodeRpcDropAnswerResult,
   decodeUnencryptedRecord,
   decryptRecord,
   decryptRecordWithMetadata,
+  encodeGzipPacked,
   encodeInlineInvoke,
   encodeInvokeAfterMsg,
   encodeMessageContainer,
+  encodeMsgCopy,
   encodePing,
   encodeRpcDropAnswer,
   encodeRpcResult,
@@ -34,6 +38,12 @@ import {
 
 const nowMilliseconds = 1_700_000_000_000
 const paddingFor = (bodyLength: number) => 12 + ((16 - ((32 + bodyLength + 12) % 16)) % 16)
+
+const deferred = <T = void>() => {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  const promise = new Promise<T>((continuation) => { resolve = continuation })
+  return { promise, resolve }
+}
 
 class MemoryAuthorizationKeys implements ServerAuthorizationKeyRepository {
   readonly values = new Map<string, LoadedServerAuthorizationKey>()
@@ -380,6 +390,187 @@ describe("carrier-independent Inline Protocol server session", () => {
     expect(restartedOutputs.length).toBeGreaterThan(0)
     expect(dispatches).toBe(4)
   }, 20_000)
+
+  test("accepts independent application RPCs before results and finalizes them by request identity", async () => {
+    const rsa = rsaFixture()
+    const authorizationKeys = new MemoryAuthorizationKeys()
+    const replay = new MemoryReplay()
+    const key = Uint8Array.from(randomBytes(256))
+    const keyId = authKeyId(key)
+    const serverSalt = 0x1020_3040_5060_7080n
+    const sessionId = 0x1122_3344n
+    authorizationKeys.values.set(bytesToHex(keyId), {
+      key,
+      keyId,
+      temporary: true,
+      expiresAt: Math.floor(nowMilliseconds / 1_000) + 600,
+      currentServerSalt: serverSalt,
+      binding: {
+        permanentAuthKeyId: Uint8Array.from(randomBytes(8)),
+        temporarySessionId: sessionId,
+        nonce: 1n,
+        expiresAt: Math.floor(nowMilliseconds / 1_000) + 600,
+        userId: 42,
+        accountSessionId: 84,
+      },
+    })
+
+    const firstGate = deferred()
+    const secondGate = deferred()
+    const started: number[] = []
+    const server = new InlineProtocolServerSession({
+      rsaKeys: [rsa.server], authorizationKeys, replay,
+      application: {
+        dispatch: async ({ payload, sendUpdate }) => {
+          const value = payload[0]!
+          started.push(value)
+          if (value === 1) {
+            sendUpdate(Uint8Array.of(101))
+            await firstGate.promise
+          } else if (value === 2) {
+            await secondGate.promise
+          }
+          return { kind: "result", payload: Uint8Array.of(value + 10) }
+        },
+      },
+      randomBytes: (length) => Uint8Array.from(randomBytes(length)),
+      nowMilliseconds: () => nowMilliseconds,
+      gunzip: (packed, maximum) => gunzipSync(packed, { maxOutputLength: maximum }),
+    })
+    const ids = new MessageIdGenerator()
+    const firstMessageId = ids.next(nowMilliseconds, 1, 0)
+    const dependentMessageId = ids.next(nowMilliseconds, 2, 0)
+    const secondMessageId = ids.next(nowMilliseconds, 3, 0)
+    const copiedMessageId = ids.next(nowMilliseconds, 4, 0)
+    const copyOuterMessageId = ids.next(nowMilliseconds, 5, 0)
+    const copyDependentMessageId = ids.next(nowMilliseconds, 6, 0)
+    const gzipPingMessageId = ids.next(nowMilliseconds, 7, 0)
+    const makeInvoke = (messageId: bigint, sequenceNumber: number, payload: Uint8Array): Uint8Array => {
+      const body = encodeInlineInvoke(payload)
+      return encryptRecord(key, "client-to-server", {
+        serverSalt, sessionId, messageId, sequenceNumber, body,
+      }, randomBytes(paddingFor(body.length)))
+    }
+    const decryptBodies = (records: readonly Uint8Array[]): Uint8Array[] => records.map((record) =>
+      decryptRecord(record, key, {
+        direction: "server-to-client",
+        sessionId,
+        validServerSalts: new Set([serverSalt]),
+        nowSeconds: nowMilliseconds / 1_000,
+      }).body)
+
+    const acceptedFirst = await server.receiveConcurrent(
+      makeInvoke(firstMessageId, 1, Uint8Array.of(1)),
+    )
+    expect(acceptedFirst.applicationTasks).toHaveLength(1)
+    const firstAck = decryptBodies(acceptedFirst.responses)
+      .find((body) => serviceConstructor(body) === ServiceConstructor.msgsAck)
+    expect(firstAck).toBeDefined()
+    expect(decodeMsgsAck(firstAck!)).toContain(firstMessageId)
+    const firstDispatch = acceptedFirst.applicationTasks[0]!.dispatch()
+
+    const dependentBody = encodeInvokeAfterMsg(firstMessageId, encodeInlineInvoke(Uint8Array.of(3)))
+    const acceptedDependent = await server.receiveConcurrent(encryptRecord(key, "client-to-server", {
+      serverSalt,
+      sessionId,
+      messageId: dependentMessageId,
+      sequenceNumber: 3,
+      body: dependentBody,
+    }, randomBytes(paddingFor(dependentBody.length))))
+    expect(acceptedDependent.applicationTasks).toHaveLength(0)
+
+    const acceptedDuplicate = await server.receiveConcurrent(
+      makeInvoke(firstMessageId, 1, Uint8Array.of(1)),
+    )
+    expect(acceptedDuplicate.applicationTasks).toHaveLength(0)
+    expect(started).toEqual([1])
+
+    const acceptedSecond = await server.receiveConcurrent(
+      makeInvoke(secondMessageId, 5, Uint8Array.of(2)),
+    )
+    expect(acceptedSecond.applicationTasks).toHaveLength(1)
+    const secondDispatch = acceptedSecond.applicationTasks[0]!.dispatch()
+    expect(started).toEqual([1, 2])
+
+    secondGate.resolve(undefined)
+    const finalizedSecond = await (await secondDispatch).finalize()
+    expect(finalizedSecond.applicationTasks).toHaveLength(0)
+    const secondResult = decryptBodies(finalizedSecond.responses)
+      .find((body) => serviceConstructor(body) === ServiceConstructor.rpcResult)
+    expect(secondResult).toBeDefined()
+    expect(decodeRpcResult(secondResult!).requestMessageId).toBe(secondMessageId)
+
+    firstGate.resolve(undefined)
+    const finalizedFirst = await (await firstDispatch).finalize()
+    expect(finalizedFirst.applicationTasks).toHaveLength(1)
+    const firstBodies = decryptBodies(finalizedFirst.responses)
+    expect(serviceConstructor(firstBodies[0]!)).toBe(ServiceConstructor.rpcResult)
+    expect(decodeRpcResult(firstBodies[0]!).requestMessageId).toBe(firstMessageId)
+    expect(decodeInlineApplicationObject(firstBodies[1]!)).toEqual({
+      kind: "update",
+      payload: Uint8Array.of(101),
+    })
+
+    const dependentCompletion = await finalizedFirst.applicationTasks[0]!.dispatch()
+    expect(started).toEqual([1, 2, 3])
+    const finalizedDependent = await dependentCompletion.finalize()
+    const dependentResult = decryptBodies(finalizedDependent.responses)
+      .find((body) => serviceConstructor(body) === ServiceConstructor.rpcResult)
+    expect(dependentResult).toBeDefined()
+    expect(decodeRpcResult(dependentResult!).requestMessageId).toBe(dependentMessageId)
+
+    const copiedBody = encodeMsgCopy({
+      messageId: copiedMessageId,
+      sequenceNumber: 7,
+      body: encodeInlineInvoke(Uint8Array.of(4)),
+    })
+    const acceptedCopy = await server.receiveConcurrent(encryptRecord(key, "client-to-server", {
+      serverSalt,
+      sessionId,
+      messageId: copyOuterMessageId,
+      sequenceNumber: 7,
+      body: copiedBody,
+    }, randomBytes(paddingFor(copiedBody.length))))
+    expect(acceptedCopy.applicationTasks).toHaveLength(1)
+    expect(acceptedCopy.applicationTasks[0]!.messageId).toBe(copiedMessageId)
+    const copiedDispatch = acceptedCopy.applicationTasks[0]!.dispatch()
+
+    const copyDependentBody = encodeInvokeAfterMsg(
+      copyOuterMessageId,
+      encodeInlineInvoke(Uint8Array.of(5)),
+    )
+    const acceptedCopyDependent = await server.receiveConcurrent(encryptRecord(key, "client-to-server", {
+      serverSalt,
+      sessionId,
+      messageId: copyDependentMessageId,
+      sequenceNumber: 9,
+      body: copyDependentBody,
+    }, randomBytes(paddingFor(copyDependentBody.length))))
+    expect(acceptedCopyDependent.applicationTasks).toHaveLength(0)
+
+    const finalizedCopy = await (await copiedDispatch).finalize()
+    expect(finalizedCopy.applicationTasks).toHaveLength(1)
+    expect(decodeRpcResult(decryptBodies(finalizedCopy.responses).find(
+      (body) => serviceConstructor(body) === ServiceConstructor.rpcResult,
+    )!).requestMessageId).toBe(copiedMessageId)
+    const copyDependentCompletion = await finalizedCopy.applicationTasks[0]!.dispatch()
+    const finalizedCopyDependent = await copyDependentCompletion.finalize()
+    expect(decodeRpcResult(decryptBodies(finalizedCopyDependent.responses).find(
+      (body) => serviceConstructor(body) === ServiceConstructor.rpcResult,
+    )!).requestMessageId).toBe(copyDependentMessageId)
+
+    const gzipPingBody = encodeGzipPacked(gzipSync(encodePing(123n)))
+    const gzipPing = await server.receiveConcurrent(encryptRecord(key, "client-to-server", {
+      serverSalt,
+      sessionId,
+      messageId: gzipPingMessageId,
+      sequenceNumber: 11,
+      body: gzipPingBody,
+    }, randomBytes(paddingFor(gzipPingBody.length))))
+    expect(decryptBodies(gzipPing.responses).some(
+      (body) => serviceConstructor(body) === ServiceConstructor.pong,
+    )).toBeTrue()
+  })
 
   test("binds a temporary key to an authorized permanent key before application dispatch", async () => {
     const rsa = rsaFixture()

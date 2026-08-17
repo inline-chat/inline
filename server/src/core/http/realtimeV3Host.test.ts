@@ -5,18 +5,22 @@ import {
   InlineHandshakeClient,
   MessageIdGenerator,
   ServiceConstructor,
+  authKeyId,
   bytesToHex,
   createObfuscatedClientHeader,
   decodeAbridgedFrame,
   decodeAbridgedPacket,
   decodeInlineApplicationObject,
+  decodeMsgsAck,
   decodeRpcResult,
   decryptRecord,
   decryptRecordWithMetadata,
   encodeAbridgedPacket,
   encodeInlineInvoke,
+  encodePing,
   encryptRecord,
   isValidObfuscatedHeader,
+  readInt64LE,
   serviceConstructor,
 } from "@inline-chat/protocol/secure"
 import { RealtimeV3Request, RealtimeV3Response } from "@inline-chat/protocol/core"
@@ -59,7 +63,10 @@ class MemoryKeys implements ServerAuthorizationKeyRepository {
 const fixture = (
   operations: unknown = {},
   clock: Pick<InlineProtocolClock, "assertHealthy" | "nowMilliseconds"> = new InlineProtocolClock(),
-): InlineProtocolRuntime & { clientKey: ReturnType<typeof makeRsaPublicKey> } => {
+): InlineProtocolRuntime & {
+  clientKey: ReturnType<typeof makeRsaPublicKey>
+  authorizationKeys: MemoryKeys
+} => {
   const pair = generateKeyPairSync("rsa", { modulusLength: 2048, publicExponent: 65537 })
   const jwk = pair.publicKey.export({ format: "jwk" })
   const clientKey = makeRsaPublicKey(
@@ -90,6 +97,12 @@ const fixture = (
 
 const paddingFor = (bodyLength: number): Uint8Array =>
   randomBytes(12 + ((16 - ((32 + bodyLength + 12) % 16)) % 16))
+
+const deferred = () => {
+  let resolve!: () => void
+  const promise = new Promise<void>((continuation) => { resolve = continuation })
+  return { promise, resolve }
+}
 
 const upgrade = (
   transport: ReturnType<typeof makeInlineProtocolRealtimeTransport>,
@@ -335,4 +348,151 @@ describe("Inline Protocol WebSocket carrier", () => {
     }
     await transport.shutdown()
   }, 20_000)
+
+  test("admits independent application RPCs while earlier handlers are still running", async () => {
+    const runtime = fixture()
+    const key = Uint8Array.from(randomBytes(256))
+    const keyId = authKeyId(key)
+    const serverSalt = 0x1020_3040_5060_7080n
+    const sessionId = 0x1122_3344n
+    runtime.authorizationKeys.values.set(bytesToHex(keyId), {
+      key,
+      keyId,
+      temporary: true,
+      expiresAt: Math.floor(Date.now() / 1_000) + 600,
+      currentServerSalt: serverSalt,
+      binding: {
+        permanentAuthKeyId: Uint8Array.from(randomBytes(8)),
+        temporarySessionId: sessionId,
+        nonce: 1n,
+        expiresAt: Math.floor(Date.now() / 1_000) + 600,
+        userId: 42,
+        accountSessionId: 84,
+      },
+    })
+    const firstGate = deferred()
+    const secondGate = deferred()
+    const thirdGate = deferred()
+    const started: number[] = []
+    let runtimeClosed = false
+    runtime.close = () => { runtimeClosed = true }
+    const transport = makeInlineProtocolRealtimeTransport(runtime, {
+      applicationDispatcherFactory: () => ({
+        dispatch: async ({ payload }) => {
+          const value = payload[0]!
+          started.push(value)
+          if (value === 1) await firstGate.promise
+          if (value === 2) await secondGate.promise
+          if (value === 3) await thirdGate.promise
+          return { kind: "result", payload: Uint8Array.of(value + 10) }
+        },
+      }),
+    })
+    const data = upgrade(transport)
+    const sent: Uint8Array[] = []
+    const socket = {
+      data,
+      close: () => {},
+      sendBinary: (bytes: Uint8Array) => { sent.push(bytes.slice()); return bytes.length },
+    } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+    transport.websocket.open?.(socket)
+
+    let headerBytes: Uint8Array
+    do headerBytes = Uint8Array.from(randomBytes(64))
+    while (!isValidObfuscatedHeader(headerBytes))
+    const carrier = createObfuscatedClientHeader(headerBytes, 1)
+    await transport.websocket.message(socket, Buffer.from(carrier.wireHeader))
+    await data.state?.queue
+
+    const ids = new MessageIdGenerator()
+    const firstMessageId = ids.next(Date.now(), 1, 0)
+    const secondMessageId = ids.next(Date.now(), 2, 0)
+    const pingMessageId = ids.next(Date.now(), 3, 0)
+    const thirdMessageId = ids.next(Date.now(), 4, 0)
+    const sendInvoke = async (messageId: bigint, sequenceNumber: number, value: number): Promise<void> => {
+      const body = encodeInlineInvoke(Uint8Array.of(value))
+      const record = encryptRecord(key, "client-to-server", {
+        serverSalt, sessionId, messageId, sequenceNumber, body,
+      }, paddingFor(body.length))
+      await transport.websocket.message(socket, Buffer.from(
+        carrier.outbound.process(encodeAbridgedPacket(record)),
+      ))
+      await data.state?.queue
+      await data.state?.outboundQueue
+    }
+    const drainBodies = (): Uint8Array[] => sent.splice(0).map((frame) => {
+      const decoded = decodeAbridgedFrame(carrier.inbound.process(frame))
+      if (decoded.kind !== "packet") throw new Error("Expected an encrypted packet")
+      return decryptRecord(decoded.payload, key, {
+        direction: "server-to-client",
+        sessionId,
+        validServerSalts: new Set([serverSalt]),
+        nowSeconds: Date.now() / 1_000,
+      }).body
+    })
+    const waitForOutput = async (): Promise<void> => {
+      for (let attempt = 0; attempt < 100 && sent.length === 0; attempt += 1) await Bun.sleep(1)
+      expect(sent.length).toBeGreaterThan(0)
+    }
+
+    await sendInvoke(firstMessageId, 1, 1)
+    await sendInvoke(secondMessageId, 3, 2)
+    const pingId = 0x0102_0304_0506_0708n
+    const pingBody = encodePing(pingId)
+    const pingRecord = encryptRecord(key, "client-to-server", {
+      serverSalt,
+      sessionId,
+      messageId: pingMessageId,
+      sequenceNumber: 4,
+      body: pingBody,
+    }, paddingFor(pingBody.length))
+    await transport.websocket.message(socket, Buffer.from(
+      carrier.outbound.process(encodeAbridgedPacket(pingRecord)),
+    ))
+    await data.state?.queue
+    await data.state?.outboundQueue
+    expect(started).toEqual([1, 2])
+    const immediateBodies = drainBodies()
+    expect(immediateBodies.some((body) => serviceConstructor(body) === ServiceConstructor.rpcResult)).toBeFalse()
+    const acknowledged = immediateBodies
+      .filter((body) => serviceConstructor(body) === ServiceConstructor.msgsAck)
+      .flatMap((body) => decodeMsgsAck(body))
+    expect(acknowledged).toContain(firstMessageId)
+    expect(acknowledged).toContain(secondMessageId)
+    const pong = immediateBodies.find((body) => serviceConstructor(body) === ServiceConstructor.pong)
+    expect(pong).toBeDefined()
+    expect(readInt64LE(pong!, 4)).toBe(pingMessageId)
+    expect(readInt64LE(pong!, 12)).toBe(pingId)
+
+    secondGate.resolve()
+    await waitForOutput()
+    const secondResult = drainBodies()
+      .find((body) => serviceConstructor(body) === ServiceConstructor.rpcResult)
+    expect(secondResult).toBeDefined()
+    expect(decodeRpcResult(secondResult!).requestMessageId).toBe(secondMessageId)
+
+    firstGate.resolve()
+    await waitForOutput()
+    const firstResult = drainBodies()
+      .find((body) => serviceConstructor(body) === ServiceConstructor.rpcResult)
+    expect(firstResult).toBeDefined()
+    expect(decodeRpcResult(firstResult!).requestMessageId).toBe(firstMessageId)
+
+    await sendInvoke(thirdMessageId, 5, 3)
+    expect(started).toEqual([1, 2, 3])
+    drainBodies()
+    transport.websocket.close?.(socket, 1000, "test close")
+    const sentAfterClose = sent.length
+    let shutdownFinished = false
+    const shutdown = transport.shutdown().then(() => { shutdownFinished = true })
+    await Bun.sleep(5)
+    expect(shutdownFinished).toBeFalse()
+    expect(runtimeClosed).toBeFalse()
+    thirdGate.resolve()
+    await shutdown
+    expect(shutdownFinished).toBeTrue()
+    expect(runtimeClosed).toBeTrue()
+    expect(sent).toHaveLength(sentAfterClose)
+
+  })
 })

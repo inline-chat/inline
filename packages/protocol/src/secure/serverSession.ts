@@ -76,6 +76,7 @@ const BOOL_TRUE = 0x997275b5
 const MAX_SESSION_OUTPUTS = 2048
 const MAX_COMPLETED_INCOMING_MESSAGES = 8192
 const MAX_DEFERRED_INVOKE_AFTER = 1024
+const MAX_IN_FLIGHT_APPLICATIONS = 64
 const MAX_INVOKE_AFTER_NESTING = 16
 const NON_CONTENT_CONSTRUCTORS = new Set<number>([
   ServiceConstructor.msgContainer,
@@ -212,6 +213,26 @@ export interface InlineProtocolServerReceiveOptions {
   onQuickAck?: (quickAckId: number) => void
 }
 
+export type InlineProtocolServerReceiveResult = {
+  responses: Uint8Array[]
+  applicationTasks: InlineProtocolServerApplicationTask[]
+}
+
+export interface InlineProtocolServerApplicationCompletion {
+  readonly messageId: bigint
+  finalize(): Promise<InlineProtocolServerReceiveResult>
+}
+
+export interface InlineProtocolServerApplicationTask {
+  readonly messageId: bigint
+  dispatch(): Promise<InlineProtocolServerApplicationCompletion>
+}
+
+type LogicalHandlingResult = {
+  result: InlineProtocolServerReceiveResult
+  completed: boolean
+}
+
 export class InlineProtocolServerSession {
   readonly #messageIds = new MessageIdGenerator()
   readonly #sequenceNumbers = new SequenceNumberGenerator()
@@ -221,6 +242,7 @@ export class InlineProtocolServerSession {
   readonly #pending = new PendingMessageCache()
   readonly #completedIncoming = new Map<bigint, true>()
   readonly #deferredInvokeAfter = new Map<bigint, PreparedLogicalMessage>()
+  readonly #inFlightApplications = new Set<bigint>()
   readonly #handshake: InlineHandshakeServer
   #authorization: LoadedServerAuthorizationKey | undefined
   #sessionId: bigint | undefined
@@ -244,9 +266,29 @@ export class InlineProtocolServerSession {
     payload: Uint8Array,
     receiveOptions: InlineProtocolServerReceiveOptions = {},
   ): Promise<Uint8Array[]> {
+    const accepted = await this.receiveConcurrent(payload, receiveOptions)
+    const responses = [...accepted.responses]
+    const applicationTasks = [...accepted.applicationTasks]
+    while (applicationTasks.length > 0) {
+      const task = applicationTasks.shift()!
+      const completion = await task.dispatch()
+      const finalized = await completion.finalize()
+      responses.push(...finalized.responses)
+      applicationTasks.push(...finalized.applicationTasks)
+      if (responses.length > MAX_SESSION_OUTPUTS) throw new RangeError("Too many Inline Protocol outputs")
+    }
+    return responses
+  }
+
+  async receiveConcurrent(
+    payload: Uint8Array,
+    receiveOptions: InlineProtocolServerReceiveOptions = {},
+  ): Promise<InlineProtocolServerReceiveResult> {
     if (this.#destroyed) throw new InvalidEncryptedRecord()
     if (payload.length < 8 || payload.length > MAX_PACKET_BYTES) throw new InvalidEncryptedRecord()
-    if (payload.slice(0, 8).every((byte) => byte === 0)) return [await this.#receiveHandshake(payload)]
+    if (payload.slice(0, 8).every((byte) => byte === 0)) {
+      return { responses: [await this.#receiveHandshake(payload)], applicationTasks: [] }
+    }
     return this.#receiveEncrypted(payload, receiveOptions)
   }
 
@@ -277,9 +319,10 @@ export class InlineProtocolServerSession {
   async #receiveEncrypted(
     payload: Uint8Array,
     receiveOptions: InlineProtocolServerReceiveOptions,
-  ): Promise<Uint8Array[]> {
+  ): Promise<InlineProtocolServerReceiveResult> {
     const authKeyId = payload.slice(0, 8)
     if (!this.#authorization || bytesToHex(this.#authorization.keyId) !== bytesToHex(authKeyId)) {
+      if (this.#sessionId !== undefined) throw new InvalidEncryptedRecord()
       const loaded = await this.options.authorizationKeys.load(authKeyId)
       if (!loaded) throw new InvalidEncryptedRecord()
       this.#authorization = loaded
@@ -316,7 +359,10 @@ export class InlineProtocolServerSession {
             error.fields.sequenceNumber,
             error.errorCode,
           )
-        return [this.#encryptOutgoing(recovery, false, 1)]
+        return {
+          responses: [this.#encryptOutgoing(recovery, false, 1)],
+          applicationTasks: [],
+        }
       }
       throw error
     }
@@ -332,9 +378,12 @@ export class InlineProtocolServerSession {
       if (outerError !== undefined) {
         this.#receivedIds.restore(receivedIdsCheckpoint)
         this.#receivedSequences.restore(receivedSequencesCheckpoint)
-        return [this.#encryptOutgoing(
-          encodeBadMsgNotification(fields.messageId, fields.sequenceNumber, outerError), false, 1,
-        )]
+        return {
+          responses: [this.#encryptOutgoing(
+            encodeBadMsgNotification(fields.messageId, fields.sequenceNumber, outerError), false, 1,
+          )],
+          applicationTasks: [],
+        }
       }
       messages = this.#expandContainer(fields)
     } else {
@@ -356,9 +405,12 @@ export class InlineProtocolServerSession {
       if (validation !== undefined) {
         this.#receivedIds.restore(receivedIdsCheckpoint)
         this.#receivedSequences.restore(receivedSequencesCheckpoint)
-        return [this.#encryptOutgoing(
-          encodeBadMsgNotification(message.messageId, message.sequenceNumber, validation), false, 1,
-        )]
+        return {
+          responses: [this.#encryptOutgoing(
+            encodeBadMsgNotification(message.messageId, message.sequenceNumber, validation), false, 1,
+          )],
+          applicationTasks: [],
+        }
       }
       prepared.push({
         message: !unwrapped.wrapped ? message : {
@@ -375,29 +427,43 @@ export class InlineProtocolServerSession {
 
     receiveOptions.onQuickAck?.(quickAckId)
 
-    const outputs: Uint8Array[] = []
+    const prefixResponses: Uint8Array[] = []
     if (newSession) {
       const firstContent = prepared.find((item) => item.contentRelated)?.message
       if (firstContent) {
-        outputs.push(this.#encryptOutgoing(encodeNewSessionCreated(
+        prefixResponses.push(this.#encryptOutgoing(encodeNewSessionCreated(
           firstContent.messageId,
           readInt64LE(this.options.randomBytes(8), 0),
           authorization.currentServerSalt,
         ), true, 1))
       }
     }
+    const responses: Uint8Array[] = []
+    const applicationTasks: InlineProtocolServerApplicationTask[] = []
     for (const item of prepared) {
+      if (item.contentRelated) this.#acknowledgements.add(item.message.messageId)
       if (this.#dependenciesComplete(item.dependencies)) {
-        outputs.push(...await this.#completePrepared(item))
-        outputs.push(...await this.#drainDeferred())
+        const handled = await this.#completePreparedConcurrent(item)
+        responses.push(...handled.responses)
+        applicationTasks.push(...handled.applicationTasks)
+        const deferred = await this.#drainDeferredConcurrent()
+        responses.push(...deferred.responses)
+        applicationTasks.push(...deferred.applicationTasks)
       } else {
         this.#defer(item)
       }
-      if (outputs.length > MAX_SESSION_OUTPUTS) throw new RangeError("Too many Inline Protocol outputs")
+      if (prefixResponses.length + responses.length > MAX_SESSION_OUTPUTS) {
+        throw new RangeError("Too many Inline Protocol outputs")
+      }
     }
     const acknowledgements = this.#acknowledgements.drain()
-    if (acknowledgements.length > 0) outputs.push(this.#encryptOutgoing(encodeMsgsAck(acknowledgements), false, 1))
-    return outputs
+    const acknowledgementResponses = acknowledgements.length > 0
+      ? [this.#encryptOutgoing(encodeMsgsAck(acknowledgements), false, 1)]
+      : []
+    return {
+      responses: [...prefixResponses, ...acknowledgementResponses, ...responses],
+      applicationTasks,
+    }
   }
 
   #expandContainer(outer: LogicalMessage): LogicalMessage[] {
@@ -442,31 +508,106 @@ export class InlineProtocolServerSession {
     this.#deferredInvokeAfter.set(item.message.messageId, item)
   }
 
-  async #completePrepared(item: PreparedLogicalMessage): Promise<Uint8Array[]> {
-    const outputs = await this.#handleLogical(item.message, item)
-    this.#completedIncoming.delete(item.message.messageId)
-    this.#completedIncoming.set(item.message.messageId, true)
+  async #completePreparedConcurrent(
+    item: PreparedLogicalMessage,
+  ): Promise<InlineProtocolServerReceiveResult> {
+    const handled = await this.#handleLogicalConcurrent(item.message, item)
+    if (handled.completed) this.#markCompleted(item.message.messageId)
+    return handled.result
+  }
+
+  #markCompleted(messageId: bigint): void {
+    this.#completedIncoming.delete(messageId)
+    this.#completedIncoming.set(messageId, true)
     if (this.#completedIncoming.size > MAX_COMPLETED_INCOMING_MESSAGES) {
       const oldest = this.#completedIncoming.keys().next().value
       if (oldest !== undefined) this.#completedIncoming.delete(oldest)
     }
-    return outputs
   }
 
-  async #drainDeferred(): Promise<Uint8Array[]> {
-    const outputs: Uint8Array[] = []
+  async #drainDeferredConcurrent(): Promise<InlineProtocolServerReceiveResult> {
+    const responses: Uint8Array[] = []
+    const applicationTasks: InlineProtocolServerApplicationTask[] = []
     let madeProgress = true
     while (madeProgress) {
       madeProgress = false
       for (const [messageId, item] of this.#deferredInvokeAfter) {
         if (!this.#dependenciesComplete(item.dependencies)) continue
         this.#deferredInvokeAfter.delete(messageId)
-        outputs.push(...await this.#completePrepared(item))
-        if (outputs.length > MAX_SESSION_OUTPUTS) throw new RangeError("Too many Inline Protocol outputs")
+        const handled = await this.#completePreparedConcurrent(item)
+        responses.push(...handled.responses)
+        applicationTasks.push(...handled.applicationTasks)
+        if (responses.length > MAX_SESSION_OUTPUTS) throw new RangeError("Too many Inline Protocol outputs")
         madeProgress = true
       }
     }
-    return outputs
+    return { responses, applicationTasks }
+  }
+
+  async #handleLogicalConcurrent(
+    message: LogicalMessage,
+    prepared?: PreparedLogicalMessage,
+    completionMessageIds: readonly bigint[] = [message.messageId],
+  ): Promise<LogicalHandlingResult> {
+    const constructor = prepared?.constructor ?? serviceConstructor(message.body)
+    const contentRelated = prepared?.contentRelated ?? this.#isContentRelated(constructor)
+    const allowDuplicate = constructor === BindingConstructor.bindTempAuthKey ||
+      constructor === ServiceConstructor.gzipPacked ||
+      constructor === ServiceConstructor.msgCopy ||
+      constructor === INLINE_INVOKE_CONSTRUCTOR
+    const duplicate = prepared?.duplicate ?? this.#receivedIds.has(message.messageId)
+    if (!prepared) {
+      const validation = this.#validateLogical(message, contentRelated, allowDuplicate)
+      if (validation !== undefined) {
+        return {
+          result: {
+            responses: [this.#encryptOutgoing(
+              encodeBadMsgNotification(message.messageId, message.sequenceNumber, validation), false, 1,
+            )],
+            applicationTasks: [],
+          },
+          completed: true,
+        }
+      }
+      if (contentRelated) this.#acknowledgements.add(message.messageId)
+    }
+    if (duplicate && !allowDuplicate) {
+      return { result: { responses: [], applicationTasks: [] }, completed: true }
+    }
+
+    if (constructor === ServiceConstructor.gzipPacked) {
+      const unpacked = decodeGzipPacked(message.body, this.options.gunzip)
+      const unpackedMessage = {
+        ...message,
+        body: unpacked,
+        authenticatedBody: message.authenticatedBody ?? message.body,
+      }
+      return this.#handleLogicalConcurrent(unpackedMessage, {
+        message: unpackedMessage,
+        constructor: serviceConstructor(unpacked),
+        contentRelated,
+        duplicate,
+        dependencies: prepared?.dependencies ?? [],
+      }, completionMessageIds)
+    }
+    if (constructor === ServiceConstructor.msgCopy) {
+      const copied = decodeMsgCopy(message.body)
+      return this.#handleLogicalConcurrent({
+        ...copied,
+        authenticatedBody: copied.body,
+      }, undefined, [...completionMessageIds, copied.messageId])
+    }
+    if (constructor === INLINE_INVOKE_CONSTRUCTOR) {
+      return this.#acceptApplication(message, completionMessageIds)
+    }
+
+    return {
+      result: {
+        responses: await this.#handleLogical(message, prepared),
+        applicationTasks: [],
+      },
+      completed: true,
+    }
   }
 
   async #handleLogical(
@@ -668,11 +809,20 @@ export class InlineProtocolServerSession {
     return this.#encryptOutgoing(encodeRpcResult(message.messageId, uint32LE(BOOL_TRUE)), true, 1)
   }
 
-  async #dispatchApplication(message: LogicalMessage): Promise<Uint8Array[]> {
-    const authorization = await this.options.authorizationKeys.load(this.#authorization!.keyId)
+  async #acceptApplication(
+    message: LogicalMessage,
+    completionMessageIds: readonly bigint[] = [message.messageId],
+  ): Promise<LogicalHandlingResult> {
+    const activeAuthorization = this.#authorization
+    const sessionId = this.#sessionId
+    if (!activeAuthorization || sessionId === undefined) throw new InvalidEncryptedRecord()
+    const authorization = await this.options.authorizationKeys.load(activeAuthorization.keyId)
     if (!authorization) {
       this.#destroyed = true
       throw new RangeError("Authorization key is no longer active")
+    }
+    if (!equalBytes(authorization.keyId, activeAuthorization.keyId) || this.#sessionId !== sessionId) {
+      throw new InvalidEncryptedRecord()
     }
     this.#authorization = authorization
     if (authorization.temporary && !authorization.binding) {
@@ -684,53 +834,192 @@ export class InlineProtocolServerSession {
     }
     const replay = await this.options.replay.claim({
       authKeyId: authorization.keyId,
-      sessionId: this.#sessionId!,
+      sessionId,
       messageId: message.messageId,
       authenticatedBody: message.authenticatedBody ?? message.body,
     })
     if (replay.kind === "digest_mismatch") throw new RangeError("Replay digest mismatch")
-    if (replay.kind === "completed") return [this.#encryptOutgoing(replay.resultBody, true, 1)]
-    if (replay.kind === "in_flight") return [this.#encryptOutgoing(
-      encodeMsgsStateInfo(message.messageId, Uint8Array.of(0x04)), false, 1,
-    )]
-    const updates: Uint8Array[] = []
-    const dispatched = await this.options.application.dispatch({
-      payload: application.payload,
-      authorization: {
-        authKeyId: authorization.keyId.slice(),
-        permanentAuthKeyId: authorization.temporary
-          ? authorization.binding?.permanentAuthKeyId.slice()
-          : authorization.keyId.slice(),
-        permanent: !authorization.temporary,
-        temporaryBound: authorization.binding !== undefined,
-        userId: authorization.temporary ? authorization.binding?.userId : authorization.authorized?.userId,
-        accountSessionId: authorization.temporary
-          ? authorization.binding?.accountSessionId
-          : authorization.authorized?.accountSessionId,
-      },
+    if (replay.kind === "completed") {
+      return {
+        result: {
+          responses: [this.#encryptOutgoing(replay.resultBody, true, 1)],
+          applicationTasks: [],
+        },
+        completed: true,
+      }
+    }
+    if (replay.kind === "in_flight") {
+      return {
+        result: {
+          responses: [this.#encryptOutgoing(
+            encodeMsgsStateInfo(message.messageId, Uint8Array.of(0x04)), false, 1,
+          )],
+          applicationTasks: [],
+        },
+        completed: false,
+      }
+    }
+
+    if (this.#inFlightApplications.size >= MAX_IN_FLIGHT_APPLICATIONS) {
+      const resultBody = encodeRpcResult(
+        message.messageId,
+        encodeRpcError(503, "Realtime application capacity exceeded"),
+      )
+      const completion = await this.options.replay.complete({
+        authKeyId: authorization.keyId,
+        sessionId,
+        messageId: message.messageId,
+        resultBody,
+      })
+      return {
+        result: {
+          responses: [this.#encryptOutgoing(
+            completion.kind === "completed" ? resultBody : completion.resultBody,
+            true,
+            1,
+          )],
+          applicationTasks: [],
+        },
+        completed: true,
+      }
+    }
+
+    const applicationAuthorization: ServerApplicationAuthorization = {
+      authKeyId: authorization.keyId.slice(),
+      permanentAuthKeyId: authorization.temporary
+        ? authorization.binding?.permanentAuthKeyId.slice()
+        : authorization.keyId.slice(),
+      permanent: !authorization.temporary,
+      temporaryBound: authorization.binding !== undefined,
+      userId: authorization.temporary ? authorization.binding?.userId : authorization.authorized?.userId,
+      accountSessionId: authorization.temporary
+        ? authorization.binding?.accountSessionId
+        : authorization.authorized?.accountSessionId,
+    }
+    this.#inFlightApplications.add(message.messageId)
+    let didDispatch = false
+    const task: InlineProtocolServerApplicationTask = {
       messageId: message.messageId,
-      sessionId: this.#sessionId!,
-      sendUpdate: (payload) => {
-        updates.push(this.sendApplicationUpdate(payload))
+      dispatch: async () => {
+        if (didDispatch) throw new RangeError("Application task was already dispatched")
+        didDispatch = true
+        const updates: Uint8Array[] = []
+        let updateBytes = 0
+        let acceptingUpdates = true
+        let dispatched: Awaited<ReturnType<ServerApplicationDispatcher["dispatch"]>>
+        try {
+          dispatched = await this.options.application.dispatch({
+            payload: application.payload.slice(),
+            authorization: applicationAuthorization,
+            messageId: message.messageId,
+            sessionId,
+            sendUpdate: (payload) => {
+              if (!acceptingUpdates) return
+              if (updates.length >= MAX_SESSION_OUTPUTS - 1 || updateBytes + payload.length > MAX_PACKET_BYTES) {
+                throw new RangeError("Application update buffer exceeds the session limit")
+              }
+              const copy = payload.slice()
+              updates.push(copy)
+              updateBytes += copy.length
+            },
+          })
+        } catch {
+          updates.length = 0
+          dispatched = { kind: "error", code: 500, message: "Internal server error" }
+        } finally {
+          acceptingUpdates = false
+        }
+        let didFinalize = false
+        return {
+          messageId: message.messageId,
+          finalize: async () => {
+            if (didFinalize) throw new RangeError("Application completion was already finalized")
+            didFinalize = true
+            return this.#finalizeApplication({
+              authKeyId: authorization.keyId.slice(),
+              sessionId,
+              messageId: message.messageId,
+              completionMessageIds,
+              dispatched,
+              updates,
+            })
+          },
+        }
       },
-    })
-    const resultObject = dispatched.kind === "result"
-      ? encodeInlineResult(dispatched.payload)
-      : encodeRpcError(dispatched.code, dispatched.message)
-    const resultBody = encodeRpcResult(message.messageId, resultObject)
-    const completion = await this.options.replay.complete({
-      authKeyId: authorization.keyId,
-      sessionId: this.#sessionId!,
-      messageId: message.messageId,
-      resultBody,
-    })
-    const refreshed = await this.options.authorizationKeys.load(authorization.keyId)
-    if (refreshed) this.#authorization = refreshed
-    return [this.#encryptOutgoing(
-      completion.kind === "completed" ? resultBody : completion.resultBody,
-      true,
-      1,
-    ), ...updates]
+    }
+
+    if (!authorization.temporary) {
+      const completion = await task.dispatch()
+      return { result: await completion.finalize(), completed: false }
+    }
+
+    return {
+      result: { responses: [], applicationTasks: [task] },
+      completed: false,
+    }
+  }
+
+  async #finalizeApplication(input: {
+    authKeyId: Uint8Array
+    sessionId: bigint
+    messageId: bigint
+    completionMessageIds: readonly bigint[]
+    dispatched: Awaited<ReturnType<ServerApplicationDispatcher["dispatch"]>>
+    updates: Uint8Array[]
+  }): Promise<InlineProtocolServerReceiveResult> {
+    try {
+      const resultObject = input.dispatched.kind === "result"
+        ? encodeInlineResult(input.dispatched.payload)
+        : encodeRpcError(input.dispatched.code, input.dispatched.message)
+      const resultBody = encodeRpcResult(input.messageId, resultObject)
+      const completion = await this.options.replay.complete({
+        authKeyId: input.authKeyId,
+        sessionId: input.sessionId,
+        messageId: input.messageId,
+        resultBody,
+      })
+      const refreshed = await this.options.authorizationKeys.load(input.authKeyId)
+      if (!refreshed) {
+        this.#destroyed = true
+        return { responses: [], applicationTasks: [] }
+      }
+      if (this.#destroyed || this.#sessionId !== input.sessionId ||
+          !this.#authorization || !equalBytes(this.#authorization.keyId, input.authKeyId)) {
+        return { responses: [], applicationTasks: [] }
+      }
+      this.#authorization = refreshed
+      const responses = [this.#encryptOutgoing(
+        completion.kind === "completed" ? resultBody : completion.resultBody,
+        true,
+        1,
+      )]
+      if (completion.kind === "completed") {
+        for (const update of input.updates) responses.push(this.sendApplicationUpdate(update))
+      }
+      for (const messageId of new Set(input.completionMessageIds)) this.#markCompleted(messageId)
+      const deferred = await this.#drainDeferredConcurrent()
+      const acknowledgements = this.#acknowledgements.drain()
+      if (acknowledgements.length > 0) {
+        responses.push(this.#encryptOutgoing(encodeMsgsAck(acknowledgements), false, 1))
+      }
+      responses.push(...deferred.responses)
+      return { responses, applicationTasks: deferred.applicationTasks }
+    } finally {
+      this.#inFlightApplications.delete(input.messageId)
+    }
+  }
+
+  async #dispatchApplication(message: LogicalMessage): Promise<Uint8Array[]> {
+    const accepted = await this.#acceptApplication(message)
+    const responses = [...accepted.result.responses]
+    const tasks = [...accepted.result.applicationTasks]
+    while (tasks.length > 0) {
+      const completion = await tasks.shift()!.dispatch()
+      const finalized = await completion.finalize()
+      responses.push(...finalized.responses)
+      tasks.push(...finalized.applicationTasks)
+    }
+    return responses
   }
 
   #validateLogical(
