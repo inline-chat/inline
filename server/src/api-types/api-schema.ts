@@ -66,10 +66,10 @@ export const encodePhotoInfo = (file: DbFile): PhotoInfo => {
 
   return Value.Encode(PhotoInfo, {
     fileUniqueId: file.fileUniqueId,
-    width: file.width,
-    height: file.height,
-    fileSize: file.fileSize,
-    mimeType: file.mimeType,
+    width: file.width ?? 0,
+    height: file.height ?? 0,
+    fileSize: file.fileSize ?? 0,
+    mimeType: file.mimeType ?? "application/octet-stream",
     temporaryUrl: url,
     thumbSize: null,
   } as PhotoInfo)
@@ -124,18 +124,33 @@ export const TUserInfo = Type.Object({
   photo: Optional(Type.Array(PhotoInfo)),
 })
 export type TUserInfo = StaticEncode<typeof TUserInfo>
+
+const publicUserPayload = (
+  user: DbUser | TUserInfo,
+  photo?: PhotoInfo[],
+) => ({
+  id: user.id,
+  firstName: user.firstName,
+  lastName: user.lastName,
+  bio: user.bio,
+  username: user.username,
+  email: user.email,
+  phoneNumber: user.phoneNumber,
+  pendingSetup: user.pendingSetup,
+  online: user.online,
+  lastOnline: user.lastOnline,
+  timeZone: user.timeZone,
+  date: user.date ?? 0,
+  ...(photo && photo.length > 0 ? { photo } : {}),
+})
+
 export const encodeUserInfo = (user: DbUser | TUserInfo, context?: { photoFile?: DbFile | undefined }): TUserInfo => {
   let photo: [PhotoInfo] | undefined = undefined
   if (context?.photoFile && context.photoFile.fileType === "photo") {
     photo = [encodePhotoInfo(context.photoFile)]
   }
 
-  const payload = {
-    ...user,
-    ...(photo ? { photo } : {}),
-  }
-
-  return Value.Encode(TUserInfo, payload)
+  return Value.Encode(TUserInfo, publicUserPayload(user, photo))
 }
 
 export const encodeFullUserInfo = (user: DbUserWithPhoto): TUserInfo => {
@@ -148,12 +163,7 @@ export const encodeFullUserInfo = (user: DbUserWithPhoto): TUserInfo => {
     photo?.push(encodePhotoInfo(thumb))
   })
 
-  const payload = {
-    ...user,
-    ...(photo ? { photo } : {}),
-  }
-
-  return Value.Encode(TUserInfo, payload)
+  return Value.Encode(TUserInfo, publicUserPayload(user, photo))
 }
 
 // No email or phone number, just public info. used in search results

@@ -769,17 +769,18 @@ const oauthResponseContracts: Readonly<
     ...oauthHtmlErrorVariants,
   ],
   providerCallbackGoogle: [
-    htmlVariant(200),
+    htmlVariant(200, ["cache-control"]),
     { status: 302, mediaType: "none", requiredHeaders: ["location", "cache-control"] },
     ...oauthHtmlErrorVariants,
   ],
   providerCallbackApple: [
-    htmlVariant(200),
+    htmlVariant(200, ["cache-control"]),
     { status: 302, mediaType: "none", requiredHeaders: ["location", "cache-control"] },
     badRequestVariant,
     ...oauthHtmlErrorVariants,
   ],
   providerContinueInvite: [
+    htmlVariant(200, ["cache-control"]),
     { status: 302, mediaType: "none", requiredHeaders: ["location", "cache-control"] },
     badRequestVariant,
     ...oauthHtmlErrorVariants,
@@ -790,6 +791,7 @@ const oauthResponseContracts: Readonly<
     ...oauthHtmlErrorVariants,
   ],
   providerVerifyEmailCode: [
+    htmlVariant(200, ["cache-control"]),
     { status: 302, mediaType: "none", requiredHeaders: ["location", "cache-control"] },
     badRequestVariant,
     ...oauthHtmlErrorVariants,

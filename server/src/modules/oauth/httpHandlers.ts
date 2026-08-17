@@ -39,7 +39,7 @@ import {
 } from "@in/server/modules/auth/sessionAuthentication"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
 import { Value } from "@sinclair/typebox/value"
-import { timingSafeEqual } from "node:crypto"
+import { randomBytes, timingSafeEqual } from "node:crypto"
 import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { OAuthHandlerFailure } from "./httpHandlerFailure"
@@ -54,6 +54,7 @@ import {
   completeProviderCallback,
   continueProviderWithInvite,
   issueAppTicket,
+  hashProviderSecret,
   redeemProviderTicket,
   requireProviderEmailAttempt,
   supportedAppCallbackScheme,
@@ -142,6 +143,13 @@ function renderPage(title: string, body: string): string {
     .spaces input { width: 17px; height: 17px; margin: 0; accent-color: #171717; }
     code { padding: 2px 5px; border-radius: 5px; background: #efefec; font-size: 11px; overflow-wrap: anywhere; }
     .trust { margin: 18px 4px 0; color: #85857f; font-size: 11px; line-height: 1.5; text-align: center; }
+    .status { display: grid; justify-items: center; gap: 14px; text-align: center; }
+    .status .intro { margin: 0; max-width: 320px; }
+    .spinner { width: 24px; height: 24px; border: 2px solid #deded9; border-top-color: #292925; border-radius: 50%; animation: spin 800ms linear infinite; }
+    .actions { display: grid; width: 100%; gap: 9px; margin-top: 8px; }
+    .action { display: grid; width: 100%; min-height: 46px; place-items: center; padding: 11px 16px; border: 1px solid #171717; border-radius: 11px; background: #171717; color: #fff; font-size: 14px; font-weight: 650; text-decoration: none; cursor: pointer; }
+    .action.secondary { border-color: #cececa; background: transparent; color: #171717; }
+    @keyframes spin { to { transform: rotate(360deg); } }
     @media (max-width: 520px) { body { align-items: start; padding: 22px 14px; } .brand { margin-bottom: 18px; } .card { padding: 24px 20px; border-radius: 16px; } }
     @media (prefers-color-scheme: dark) {
       body { color: #f3f3f0; background: #111210; }
@@ -163,6 +171,9 @@ function renderPage(title: string, body: string): string {
       code { background: #30312d; }
       .error { border-color: #663e39; background: #2d1d1b; color: #f1aaa2; }
       .trust { color: #878881; }
+      .spinner { border-color: #42433e; border-top-color: #f1f1ed; }
+      .action { border-color: #f1f1ed; background: #f1f1ed; color: #181916; }
+      .action.secondary { border-color: #464742; background: transparent; color: #f3f3f0; }
     }
   </style>
 </head>
@@ -182,6 +193,97 @@ function renderPage(title: string, body: string): string {
 </html>`
 }
 
+function jsonForInlineScript(value: string): string {
+  return JSON.stringify(value).replaceAll("<", "\\u003c")
+}
+
+function providerBrowserPage(input: {
+  title: string
+  description: string
+  appUrl?: string
+  loading?: boolean
+  status?: number
+}): Response {
+  const nonce = randomBytes(18).toString("base64")
+  const appAction = input.appUrl
+    ? `<a class="action" id="open-inline" href="${escapeHtml(input.appUrl)}">Open Inline</a>`
+    : ""
+  const loading = input.loading
+    ? `<div class="spinner" role="progressbar" aria-label="Opening Inline"></div>`
+    : ""
+  const appOpenScript = input.appUrl
+    ? `window.addEventListener("load",function(){window.location.assign(${jsonForInlineScript(input.appUrl)});});`
+    : ""
+  const body = renderPage(input.title, `
+<div class="status">
+  ${loading}
+  <p class="intro">${escapeHtml(input.description)}</p>
+  <div class="actions">
+    ${appAction}
+    <button class="action secondary" id="close-window" type="button">Close</button>
+  </div>
+</div>
+<script nonce="${nonce}">
+${appOpenScript}
+document.getElementById("close-window")?.addEventListener("click",function(){window.close();});
+</script>`)
+
+  return html(input.status ?? 200, body, {
+    "cache-control": "no-store",
+    "content-security-policy": `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+  })
+}
+
+export function providerAppHandoffResponse(appUrl: string): Response {
+  return providerBrowserPage({
+    title: "Continue in Inline",
+    description: "Inline should open automatically. You can close this window after it opens.",
+    appUrl,
+    loading: true,
+  })
+}
+
+export function providerAppErrorResponse(input: {
+  appUrl?: string
+  title: string
+  description: string
+}): Response {
+  return providerBrowserPage({ ...input, status: 400 })
+}
+
+async function providerBrowserError(input: {
+  state?: string
+  code: "cancelled" | "failed"
+  title: string
+  description: string
+}): Promise<Response> {
+  let appUrl: string | undefined
+  if (input.state) {
+    const attempt = await ProviderAuthModel.getActiveByStateHash(
+      hashProviderSecret(input.state),
+    ).catch(() => undefined)
+    if (attempt?.purpose === "app" && attempt.appCallbackScheme) {
+      appUrl = `${attempt.appCallbackScheme}://auth/provider?error=${input.code}`
+      await ProviderAuthModel.update(attempt.id, {
+        status: "used",
+        usedAt: new Date(),
+      }).catch((cause) => {
+        Log.shared.error("Failed to close provider attempt after callback error", {
+          provider: attempt.provider,
+          cause,
+        })
+      })
+    }
+  }
+  return providerAppErrorResponse({
+    appUrl,
+    title: input.title,
+    description: input.description,
+  })
+}
+
 function json(status: number, body: unknown, headers?: HeadersInit): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -197,6 +299,7 @@ function html(status: number, body: string, headers?: HeadersInit): Response {
     status,
     headers: {
       "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
       ...headers,
     },
   })
@@ -1316,10 +1419,20 @@ export async function handleProviderCallback(
   const code = provider === "google" ? url.searchParams.get("code") ?? "" : readParam(body, "code")
   const error = provider === "google" ? url.searchParams.get("error") : readParam(body, "error")
   if (error) {
-    return html(400, renderPage("Sign-in cancelled", `<div class="error">The provider did not complete sign-in.</div>`))
+    return providerBrowserError({
+      state,
+      code: "cancelled",
+      title: "Sign-in cancelled",
+      description: "No changes were made. Return to Inline when you are ready.",
+    })
   }
   if (!state || !code) {
-    return html(400, renderPage("Sign-in error", `<div class="error">The provider response is incomplete.</div>`))
+    return providerBrowserError({
+      state,
+      code: "failed",
+      title: "Sign-in could not finish",
+      description: "Return to Inline and try signing in again.",
+    })
   }
 
   try {
@@ -1353,7 +1466,12 @@ export async function handleProviderCallback(
 </form>`), { "cache-control": "no-store" })
   } catch (cause) {
     Log.shared.error("Provider callback failed", { provider, cause })
-    return html(400, renderPage("Sign-in failed", `<div class="error">We could not verify this provider sign-in. Please try again.</div>`))
+    return providerBrowserError({
+      state,
+      code: "failed",
+      title: "Sign-in could not finish",
+      description: "Return to Inline and try again. No session was shared with this browser.",
+    })
   }
 }
 
@@ -1448,7 +1566,7 @@ async function finishProviderBrowserLogin(
   if (attempt.purpose === "app") {
     const ticket = await issueAppTicket(attempt)
     const location = `${attempt.appCallbackScheme}://auth/provider?ticket=${encodeURIComponent(ticket)}`
-    return new Response(null, { status: 302, headers: { location, "cache-control": "no-store" } })
+    return providerAppHandoffResponse(location)
   }
   if (!attempt.oauthAuthRequestId) throw new Error("Connected-app authorization request is missing")
   const authRequest = await OauthModel.getAuthRequest(attempt.oauthAuthRequestId, Date.now())

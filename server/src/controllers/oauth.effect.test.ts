@@ -58,6 +58,12 @@ import {
   OAuthResponseContractFailure,
   validateOAuthResponse,
 } from "./oauth.effect"
+import { encodeFullUserInfo } from "../api-types"
+import type { DbUserWithPhoto } from "../db/schema"
+import {
+  providerAppErrorResponse,
+  providerAppHandoffResponse,
+} from "../modules/oauth/httpHandlers"
 
 const unusedIdentity = (name: string) =>
   Effect.die(
@@ -485,6 +491,109 @@ describe("Effect OAuth routes", () => {
     } finally {
       await kernel.dispose()
     }
+  })
+
+  it("accepts a real provider redemption user projection", async () => {
+    const user = encodeFullUserInfo({
+      id: 1000,
+      email: "person@example.com",
+      phoneNumber: null,
+      emailVerified: true,
+      phoneVerified: null,
+      firstName: "Inline",
+      lastName: "User",
+      bio: null,
+      username: "inline-user",
+      deleted: false,
+      online: false,
+      lastOnline: null,
+      date: new Date("2026-08-17T10:49:00Z"),
+      photoFileId: null,
+      pendingSetup: false,
+      timeZone: "UTC",
+      shareTimeZone: true,
+      appearInGlobalSearch: true,
+      nextThreadNumber: 1,
+      bot: false,
+      botCreatorId: null,
+      updateSeq: 0,
+      lastUpdateDate: null,
+      photo: null,
+    } satisfies DbUserWithPhoto)
+    const response = new Response(
+      JSON.stringify({
+        ok: true,
+        result: {
+          userId: user.id,
+          token: "provider-session-token",
+          user,
+        },
+      }),
+      {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      },
+    )
+
+    await expect(
+      Effect.runPromise(
+        validateOAuthResponse("providerRedeem", response),
+      ),
+    ).resolves.toBe(response)
+  })
+
+  it("accepts the secure app handoff page for every provider completion route", async () => {
+    const operations = [
+      "providerCallbackGoogle",
+      "providerCallbackApple",
+      "providerContinueInvite",
+      "providerVerifyEmailCode",
+    ] as const
+
+    for (const operation of operations) {
+      const response = providerAppHandoffResponse(
+        "inline-dev://auth/provider?ticket=opaque-ticket",
+      )
+      await expect(
+        Effect.runPromise(validateOAuthResponse(operation, response)),
+      ).resolves.toBe(response)
+    }
+  })
+
+  it("keeps provider handoff tickets out of caches and referrers", async () => {
+    const response = providerAppHandoffResponse(
+      "inline-dev://auth/provider?ticket=%3Copaque%3E",
+    )
+    const body = await response.text()
+    const policy = response.headers.get("content-security-policy") ?? ""
+    const nonce = policy.match(/script-src 'nonce-([^']+)'/)?.[1]
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get("cache-control")).toBe("no-store")
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer")
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff")
+    expect(policy).toContain("default-src 'none'")
+    expect(nonce).toBeTruthy()
+    expect(body).toContain(`nonce="${nonce}"`)
+    expect(body).toContain("Continue in Inline")
+    expect(body).toContain("Open Inline")
+    expect(body).toContain(">Close</button>")
+    expect(body).not.toContain("<opaque>")
+  })
+
+  it("accepts a ticketless provider error handoff", async () => {
+    const response = providerAppErrorResponse({
+      appUrl: "inline-dev://auth/provider?error=cancelled",
+      title: "Sign-in cancelled",
+      description: "No changes were made.",
+    })
+
+    await expect(
+      Effect.runPromise(
+        validateOAuthResponse("providerCallbackGoogle", response),
+      ),
+    ).resolves.toBe(response)
+    expect(await response.text()).not.toContain("ticket=")
   })
 
   it("reports a private OAuth defect once while preserving its established response", async () => {
