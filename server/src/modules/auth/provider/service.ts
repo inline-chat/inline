@@ -26,6 +26,7 @@ import { getFileByUniqueId } from "@in/server/db/models/files"
 import { toArrayBufferBackedBytes } from "@in/server/utils/arrayBuffer"
 import { Log } from "@in/server/utils/log"
 import { createAppCodeChallenge, isValidAppCodeVerifier } from "./appHandoff"
+import { applyAppleAuthorizationParameters } from "./authorizationUrl"
 
 const config = providerAuthConfig()
 const log = new Log("providerAuth")
@@ -98,7 +99,7 @@ export async function beginProviderAuth(input: {
     redirectUri,
   )
   const url = provider.createAuthorizationURL(state, ["name", "email"])
-  url.searchParams.set("nonce", nonce)
+  applyAppleAuthorizationParameters(url, nonce)
   return url
 }
 

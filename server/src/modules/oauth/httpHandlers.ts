@@ -199,38 +199,93 @@ function jsonForInlineScript(value: string): string {
 
 function providerBrowserPage(input: {
   title: string
-  description: string
+  description?: string
   appUrl?: string
-  loading?: boolean
+  openingLabel?: string
   status?: number
 }): Response {
   const nonce = randomBytes(18).toString("base64")
+  const favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 54 54'%3E%3Crect x='5' y='5' width='44' height='44' rx='16' fill='none' stroke='%23171717' stroke-width='10'/%3E%3Crect x='17' y='17' width='10' height='20' rx='4' fill='%23171717'/%3E%3C/svg%3E"
   const appAction = input.appUrl
     ? `<a class="action" id="open-inline" href="${escapeHtml(input.appUrl)}">Open Inline</a>`
     : ""
-  const loading = input.loading
-    ? `<div class="spinner" role="progressbar" aria-label="Opening Inline"></div>`
+  const openingStatus = input.appUrl
+    ? `<div class="opening" id="opening-status" role="status">
+        <span class="spinner" id="opening-spinner" aria-hidden="true"></span>
+        <span id="opening-label">${escapeHtml(input.openingLabel ?? "Opening Inline…")}</span>
+      </div>`
+    : ""
+  const description = input.description
+    ? `<p class="description">${escapeHtml(input.description)}</p>`
     : ""
   const appOpenScript = input.appUrl
-    ? `window.addEventListener("load",function(){window.location.assign(${jsonForInlineScript(input.appUrl)});});`
+    ? `window.addEventListener("load",function(){
+  window.location.assign(${jsonForInlineScript(input.appUrl)});
+  window.setTimeout(function(){
+    document.getElementById("opening-spinner")?.setAttribute("hidden","");
+    const label=document.getElementById("opening-label");
+    if(label)label.textContent="Inline is ready to open.";
+  },1200);
+});`
     : ""
-  const body = renderPage(input.title, `
-<div class="status">
-  ${loading}
-  <p class="intro">${escapeHtml(input.description)}</p>
-  <div class="actions">
-    ${appAction}
-    <button class="action secondary" id="close-window" type="button">Close</button>
-  </div>
-</div>
+  const body = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <title>${escapeHtml(input.title)} · Inline</title>
+  <link rel="icon" href="${favicon}" />
+  <style>
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body { margin: 0; color: #171717; background: #fafaf8; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    main { min-height: 100vh; display: grid; grid-template-rows: 1fr auto; padding: 32px 20px 20px; }
+    .content { align-self: center; display: grid; justify-items: center; gap: 18px; width: min(100%, 360px); margin: 0 auto; text-align: center; }
+    .mark { width: 34px; height: 34px; }
+    h1 { margin: 2px 0 0; font-size: 26px; font-weight: 600; letter-spacing: -0.02em; }
+    .description, .opening, footer { color: #81817b; font-size: 14px; font-weight: 400; line-height: 1.5; }
+    .description { max-width: 330px; margin: -5px 0 0; }
+    .opening { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 22px; }
+    .spinner { width: 15px; height: 15px; border: 1.5px solid #d5d5d0; border-top-color: #555550; border-radius: 50%; animation: spin 750ms linear infinite; }
+    .spinner[hidden] { display: none; }
+    .action { display: inline-flex; min-width: 210px; min-height: 40px; align-items: center; justify-content: center; padding: 0 18px; border-radius: 10px; background: #000; color: #fff; font-size: 15px; font-weight: 500; text-decoration: none; transition: opacity 150ms ease, transform 150ms ease; }
+    .action:hover { opacity: .82; }
+    .action:active { transform: scale(.98); }
+    footer { align-self: end; padding-top: 28px; text-align: center; font-size: 12px; color: #aaa9a4; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-color-scheme: dark) {
+      body { color: #f3f3f0; background: #111210; }
+      .mark { color: #f3f3f0; }
+      .description, .opening { color: #a7a8a1; }
+      .spinner { border-color: #42433e; border-top-color: #d7d7d2; }
+      .action { background: rgba(255,255,255,.92); color: #111210; }
+      footer { color: #777872; }
+    }
+    @media (max-width: 520px) { main { padding: 24px 18px 18px; } h1 { font-size: 24px; } }
+    @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 1500ms; } .action { transition: none; } }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="content">
+      <svg class="mark" viewBox="0 0 54 54" fill="none" aria-label="Inline"><rect x="5" y="5" width="44" height="44" rx="16" stroke="currentColor" stroke-width="10"/><rect x="17" y="17" width="10" height="20" rx="4" fill="currentColor"/></svg>
+      <h1>${escapeHtml(input.title)}</h1>
+      ${description}
+      ${openingStatus}
+      ${appAction}
+    </section>
+    <footer>You can close this window after Inline opens.</footer>
+  </main>
 <script nonce="${nonce}">
 ${appOpenScript}
-document.getElementById("close-window")?.addEventListener("click",function(){window.close();});
-</script>`)
+</script>
+</body>
+</html>`
 
   return html(input.status ?? 200, body, {
     "cache-control": "no-store",
-    "content-security-policy": `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+    "content-security-policy": `default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
   })
@@ -238,10 +293,9 @@ document.getElementById("close-window")?.addEventListener("click",function(){win
 
 export function providerAppHandoffResponse(appUrl: string): Response {
   return providerBrowserPage({
-    title: "Continue in Inline",
-    description: "Inline should open automatically. You can close this window after it opens.",
+    title: "Sign-in successful",
     appUrl,
-    loading: true,
+    openingLabel: "Opening Inline…",
   })
 }
 
@@ -250,7 +304,11 @@ export function providerAppErrorResponse(input: {
   title: string
   description: string
 }): Response {
-  return providerBrowserPage({ ...input, status: 400 })
+  return providerBrowserPage({
+    ...input,
+    openingLabel: input.appUrl ? "Returning to Inline…" : undefined,
+    status: 400,
+  })
 }
 
 async function providerBrowserError(input: {
