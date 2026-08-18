@@ -10,15 +10,18 @@ struct ProviderSignInProgress: View {
   @ObservedObject private var coordinator = ProviderSignInCoordinator.shared
   @State private var attemptID = UUID()
   @State private var openingBrowser = false
+  @State private var signInURL: URL?
 
   var body: some View {
     VStack(spacing: 16) {
       Spacer()
 
-      providerIcon
+      Image(systemName: "safari")
+        .font(.system(size: 28, weight: .regular))
+        .foregroundStyle(.secondary)
 
-      Text("Sign in with \(providerName)")
-        .font(.largeTitle.bold())
+      Text("Continue in your browser")
+        .font(.title2.weight(.semibold))
         .multilineTextAlignment(.center)
 
       if let error = coordinator.errorMessage {
@@ -29,17 +32,29 @@ struct ProviderSignInProgress: View {
 
         Button("Try Again") {
           coordinator.clearError()
+          signInURL = nil
           attemptID = UUID()
         }
         .buttonStyle(SimpleButtonStyle())
       } else {
-        Text("Continue in your browser, then return to Inline.")
+        Text(statusDescription)
           .foregroundStyle(.secondary)
           .multilineTextAlignment(.center)
 
-        ProgressView()
-          .controlSize(.large)
-          .padding(.top, 4)
+        Button {
+          Task { await openSignInURL() }
+        } label: {
+          HStack(spacing: 8) {
+            if isBusy {
+              ProgressView()
+                .tint(.white)
+            }
+            Text(buttonTitle)
+          }
+        }
+        .buttonStyle(SimpleButtonStyle())
+        .disabled(isBusy)
+        .frame(maxWidth: 340)
       }
 
       Spacer()
@@ -62,17 +77,20 @@ struct ProviderSignInProgress: View {
     }
   }
 
-  @ViewBuilder
-  private var providerIcon: some View {
-    if provider == .google {
-      Image("google-g")
-        .resizable()
-        .scaledToFit()
-        .frame(width: 44, height: 44)
-    } else {
-      Image(systemName: "apple.logo")
-        .font(.system(size: 44, weight: .medium))
-    }
+  private var isBusy: Bool {
+    openingBrowser || coordinator.isRedeeming || signInURL == nil
+  }
+
+  private var statusDescription: String {
+    if coordinator.isRedeeming { return "Finishing sign-in…" }
+    if openingBrowser || signInURL == nil { return "Opening \(providerName) Sign-In…" }
+    return "Complete \(providerName) Sign-In in your browser."
+  }
+
+  private var buttonTitle: String {
+    if coordinator.isRedeeming { return "Finishing sign-in" }
+    if openingBrowser || signInURL == nil { return "Opening \(providerName) Sign-In" }
+    return "Open \(providerName) Sign-In"
   }
 
   private var providerName: String {
@@ -85,9 +103,20 @@ struct ProviderSignInProgress: View {
     defer { openingBrowser = false }
     do {
       let url = try await coordinator.startURL(for: provider)
+      signInURL = url
       guard await UIApplication.shared.open(url) else { throw APIError.invalidURL }
     } catch {
       coordinator.recordStartFailure(error)
+    }
+  }
+
+  private func openSignInURL() async {
+    guard let signInURL, !openingBrowser, !coordinator.isRedeeming else { return }
+    openingBrowser = true
+    defer { openingBrowser = false }
+    guard await UIApplication.shared.open(signInURL) else {
+      coordinator.recordStartFailure(APIError.invalidURL)
+      return
     }
   }
 }
