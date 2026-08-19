@@ -60,6 +60,8 @@ export async function beginProviderAuth(input: {
   if (input.purpose === "app" && (!input.appCallbackScheme || !input.appCodeChallenge)) {
     throw new Error("App provider sign-in requires a callback scheme and code challenge")
   }
+  if (input.provider === "google" && !config.google) throw new ProviderUnavailableError("google")
+  if (input.provider === "apple" && !config.apple) throw new ProviderUnavailableError("apple")
   const state = randomSecret()
   const nonce = randomSecret()
   const verifier = input.provider === "google" ? generateCodeVerifier() : undefined
@@ -110,7 +112,11 @@ export async function completeProviderCallback(input: {
   idTokenFromAuthorization?: string
   appleUserJson?: string
 }): Promise<ProviderCallbackOutcome> {
-  const attempt = await ProviderAuthModel.getActiveByStateHash(hashProviderSecret(input.state))
+  const attempt = await ProviderAuthModel.claimActiveByStateHash(
+    hashProviderSecret(input.state),
+    input.provider,
+    hashProviderSecret(randomSecret()),
+  )
   if (!attempt || attempt.provider !== input.provider || attempt.status !== "pending_provider") {
     throw new Error("Provider sign-in attempt is invalid or expired")
   }
@@ -127,7 +133,7 @@ export async function completeProviderCallback(input: {
 
   if (!claims.authoritativeEmail || !claims.email) {
     const continuation = randomSecret()
-    const updated = await ProviderAuthModel.update(attempt.id, {
+    const updated = await ProviderAuthModel.transition(attempt.id, "pending_provider", {
       status: "pending_email",
       continuationHash: hashProviderSecret(continuation),
       subjectHash,
@@ -144,14 +150,25 @@ export async function continueProviderWithInvite(input: {
   continuation: string
   inviteCode: string
 }): Promise<{ attempt: DbProviderAuthAttempt; result: ProviderLoginResult }> {
-  const attempt = await requireContinuation(input.attemptId, input.continuation, "pending_invite")
-  const claims = decryptClaims(attempt)
-  if (!claims.email || !claims.authoritativeEmail || !attempt.subjectHash) {
-    throw new Error("Provider signup data is unavailable")
+  const attempt = await claimContinuation(input.attemptId, input.continuation, "pending_invite")
+  try {
+    const claims = decryptClaims(attempt)
+    if (!claims.email || !claims.authoritativeEmail || !attempt.subjectHash) {
+      throw new Error("Provider signup data is unavailable")
+    }
+    const outcome = await resolveTrustedClaims(attempt, claims, attempt.subjectHash, input.inviteCode)
+    if (outcome.kind !== "login") throw new Error("Invite code did not complete provider signup")
+    return { attempt: outcome.attempt, result: outcome.result }
+  } catch (cause) {
+    if (isRetryableInviteFailure(cause)) {
+      await ProviderAuthModel.restoreContinuationClaim({
+        id: attempt.id,
+        status: "pending_invite",
+        continuationHash: hashProviderSecret(input.continuation),
+      })
+    }
+    throw cause
   }
-  const outcome = await resolveTrustedClaims(attempt, claims, attempt.subjectHash, input.inviteCode)
-  if (outcome.kind !== "login") throw new Error("Invite code did not complete provider signup")
-  return { attempt: outcome.attempt, result: outcome.result }
 }
 
 export async function requireProviderEmailAttempt(
@@ -159,6 +176,24 @@ export async function requireProviderEmailAttempt(
   continuation: string,
 ): Promise<DbProviderAuthAttempt> {
   return requireContinuation(attemptId, continuation, "pending_email")
+}
+
+export async function claimProviderEmailAttempt(
+  attemptId: string,
+  continuation: string,
+): Promise<DbProviderAuthAttempt> {
+  return claimContinuation(attemptId, continuation, "pending_email")
+}
+
+export async function restoreProviderEmailAttempt(
+  attemptId: string,
+  continuation: string,
+): Promise<boolean> {
+  return ProviderAuthModel.restoreContinuationClaim({
+    id: attemptId,
+    status: "pending_email",
+    continuationHash: hashProviderSecret(continuation),
+  })
 }
 
 export async function attachProviderAfterEmailVerification(input: {
@@ -188,7 +223,7 @@ export async function redeemProviderTicket(
     createAppCodeChallenge(appCodeVerifier),
   )
   if (!attempt?.inlineUserId || !attempt.inlineTokenEncrypted) return undefined
-  const user = await loadFullUser(attempt.inlineUserId)
+  const user = await loadActiveProviderUser(attempt.inlineUserId)
   return {
     userId: attempt.inlineUserId,
     token: Encryption2.decryptToString(attempt.inlineTokenEncrypted),
@@ -257,7 +292,7 @@ async function resolveTrustedClaims(
       throw error
     }
     const continuation = randomSecret()
-    const updated = await ProviderAuthModel.update(attempt.id, {
+    const updated = await ProviderAuthModel.transition(attempt.id, attempt.status, {
       status: "pending_invite",
       continuationHash: hashProviderSecret(continuation),
       subjectHash,
@@ -268,6 +303,7 @@ async function resolveTrustedClaims(
 }
 
 async function createProviderSession(userId: number, client: ProviderAuthClient): Promise<ProviderLoginResult> {
+  const user = await loadActiveProviderUser(userId)
   const clientType = normalizeAuthClientType(client.clientType, "providerSignIn") ?? "web"
   const { token, tokenHash } = await generateToken(userId)
   await SessionsModel.create({
@@ -284,7 +320,6 @@ async function createProviderSession(userId: number, client: ProviderAuthClient)
       : undefined,
     osVersion: client.osVersion && validateUpToFourSegementSemver(client.osVersion) ? client.osVersion : undefined,
   })
-  const user = await loadFullUser(userId)
   return { userId, token, user: encodeFullUserInfo(user) }
 }
 
@@ -333,7 +368,7 @@ async function storeCompletedAttempt(
   attempt: DbProviderAuthAttempt,
   result: ProviderLoginResult,
 ): Promise<DbProviderAuthAttempt> {
-  return ProviderAuthModel.update(attempt.id, {
+  return ProviderAuthModel.transition(attempt.id, attempt.status, {
     status: "complete",
     continuationHash: null,
     inlineUserId: result.userId,
@@ -353,10 +388,40 @@ async function requireContinuation(
   return attempt
 }
 
+async function claimContinuation(
+  attemptId: string,
+  continuation: string,
+  status: "pending_invite" | "pending_email",
+): Promise<DbProviderAuthAttempt> {
+  const attempt = await ProviderAuthModel.claimContinuation({
+    id: attemptId,
+    status,
+    continuationHash: hashProviderSecret(continuation),
+  })
+  if (!attempt) throw new Error("Provider continuation is invalid, expired, or already in use")
+  return attempt
+}
+
 async function loadFullUser(userId: number) {
   const user = await db.query.users.findFirst({ where: { id: userId }, with: { photoFile: true } })
   if (!user) throw new Error("Provider user does not exist")
   return { ...user, photo: user.photoFile }
+}
+
+async function loadActiveProviderUser(userId: number) {
+  const user = await loadFullUser(userId)
+  if (user.deleted === true) {
+    throw new InlineError(InlineError.ApiError.USER_DEACTIVATED)
+  }
+  return user
+}
+
+function isRetryableInviteFailure(cause: unknown): boolean {
+  if (!(cause instanceof InlineError)) return false
+  return cause.type === InlineError.ApiError.INVITE_CODE_REQUIRED[0] ||
+    cause.type === InlineError.ApiError.INVITE_CODE_INVALID[0] ||
+    cause.type === InlineError.ApiError.INVITE_CODE_NOT_FOUND[0] ||
+    cause.type === InlineError.ApiError.INVITE_CODE_TAKEN[0]
 }
 
 function encryptClaims(claims: ProviderClaims): Buffer {

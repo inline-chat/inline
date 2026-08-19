@@ -51,12 +51,14 @@ import { ProviderAuthModel } from "@in/server/db/models/providerAuth"
 import {
   attachProviderAfterEmailVerification,
   beginProviderAuth,
+  claimProviderEmailAttempt,
   completeProviderCallback,
   continueProviderWithInvite,
   issueAppTicket,
   hashProviderSecret,
   redeemProviderTicket,
   requireProviderEmailAttempt,
+  restoreProviderEmailAttempt,
   supportedAppCallbackScheme,
   type ProviderLoginResult,
 } from "@in/server/modules/auth/provider/service"
@@ -67,6 +69,19 @@ const config = oauthConfig()
 // after the post-cutover differential window. Production injects a separately
 // scoped limiter through its Effect Layer.
 const legacyRateLimiter = new InMemoryRateLimiter()
+const PROVIDER_CLEANUP_INTERVAL_MS = 60_000
+const PROVIDER_CLEANUP_BATCH_SIZE = 250
+const PROVIDER_EMAIL_ATTEMPT_COOLDOWN = { max: 1, windowMs: 45_000 } as const
+const PROVIDER_EMAIL_ATTEMPT_LIMIT = { max: 3, windowMs: 15 * 60_000 } as const
+const PROVIDER_CLIENT_METADATA_LIMITS = [
+  ["device_id", 128],
+  ["client_version", 64],
+  ["os_version", 64],
+  ["device_name", 256],
+  ["timezone", 64],
+] as const
+let nextProviderCleanupAtMs = 0
+let providerCleanupInFlight: Promise<void> | undefined
 
 // The same opaque authorization-request cookie starts email/phone consent under /oauth
 // and provider sign-in under /v1/auth/provider. It contains no session or provider token.
@@ -1408,16 +1423,34 @@ export async function handleIntrospect(req: Request, body: unknown): Promise<Res
   })
 }
 
-export async function handleProviderStart(request: Request): Promise<Response> {
-  void ProviderAuthModel.cleanupExpired().catch((cause) => {
-    Log.shared.warn("Provider auth cleanup failed", { cause })
+export async function handleProviderStart(
+  request: Request,
+  clientIpOverride?: string,
+  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+): Promise<Response> {
+  const nowMs = Date.now()
+  const clientIp = resolveClientIp(clientIpOverride)
+  const endpointRate = rateLimiter.consume({
+    key: `oauth:endpoint:provider-start:${clientIp}`,
+    nowMs,
+    rule: config.endpointRateLimits.providerStart,
   })
+  if (!endpointRate.allowed) {
+    return rateLimitedHtml(endpointRate.retryAfterSeconds, "Too many sign-in attempts. Try again shortly.")
+  }
+
   const url = new URL(request.url)
   const provider = url.searchParams.get("provider")
   const purpose = url.searchParams.get("purpose")
   if ((provider !== "google" && provider !== "apple") || (purpose !== "app" && purpose !== "mcp_oauth")) {
     return html(400, renderPage("Sign-in error", `<div class="error">Invalid sign-in request.</div>`))
   }
+  for (const [name, limit] of PROVIDER_CLIENT_METADATA_LIMITS) {
+    if ((url.searchParams.get(name)?.length ?? 0) > limit) {
+      return html(400, renderPage("Sign-in error", `<div class="error">Invalid sign-in request.</div>`))
+    }
+  }
+  scheduleProviderCleanup(nowMs)
 
   try {
     if (purpose === "mcp_oauth") {
@@ -1547,15 +1580,63 @@ export async function handleProviderContinueInvite(body: unknown): Promise<Respo
   }
 }
 
-export async function handleProviderSendEmailCode(body: unknown, clientIp?: string): Promise<Response> {
+export async function handleProviderSendEmailCode(
+  body: unknown,
+  clientIpOverride?: string,
+  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+): Promise<Response> {
+  const nowMs = Date.now()
+  const clientIp = resolveClientIp(clientIpOverride)
+  const endpointRate = rateLimiter.consume({
+    key: `oauth:endpoint:provider-send-email:${clientIp}`,
+    nowMs,
+    rule: config.endpointRateLimits.sendEmailCode,
+  })
+  if (!endpointRate.allowed) {
+    return rateLimitedHtml(endpointRate.retryAfterSeconds, "Too many email-code requests. Try again shortly.")
+  }
+
   const attemptId = readParam(body, "attempt_id")
   const continuation = readParam(body, "continuation")
   const email = normalizeEmail(readParam(body, "email"))
   try {
     const attempt = await requireProviderEmailAttempt(attemptId, continuation)
+    const cooldown = rateLimiter.consume({
+      key: `oauth:abuse:provider-email:cooldown:${attempt.id}`,
+      nowMs,
+      rule: PROVIDER_EMAIL_ATTEMPT_COOLDOWN,
+    })
+    if (!cooldown.allowed) {
+      return rateLimitedHtml(cooldown.retryAfterSeconds, "Wait a moment before requesting another code.")
+    }
+    const perAttempt = rateLimiter.consume({
+      key: `oauth:abuse:provider-email:attempt:${attempt.id}`,
+      nowMs,
+      rule: PROVIDER_EMAIL_ATTEMPT_LIMIT,
+    })
+    if (!perAttempt.allowed) {
+      return rateLimitedHtml(perAttempt.retryAfterSeconds, "Too many codes were requested for this sign-in.")
+    }
+    const emailHash = await sha256Hex(email)
+    const perEmail = rateLimiter.consume({
+      key: `oauth:abuse:provider-email:email:${emailHash}`,
+      nowMs,
+      rule: config.emailAbuseRateLimits.sendPerEmail,
+    })
+    if (!perEmail.allowed) {
+      return rateLimitedHtml(perEmail.retryAfterSeconds, "Too many attempts for this email. Try again later.")
+    }
+    const perContext = rateLimiter.consume({
+      key: `oauth:abuse:provider-email:context:${emailHash}:${normalizeRateLimitKeyPart(attempt.client.deviceId ?? "unknown")}:${clientIp}`,
+      nowMs,
+      rule: config.emailAbuseRateLimits.sendPerContext,
+    })
+    if (!perContext.allowed) {
+      return rateLimitedHtml(perContext.retryAfterSeconds, "Too many attempts from this client context. Try again later.")
+    }
     const [existing] = await db.select().from(users).where(eq(users.email, email)).limit(1)
     if (!existing || existing.deleted === true) {
-      return html(400, renderPage("Email not found", `<div class="error">Use an existing Inline account email.</div>`))
+      return html(400, renderPage("Email verification failed", `<div class="error">We could not send that verification code.</div>`))
     }
     const sent = await sendEmailCodeHandler({
       email,
@@ -1584,8 +1665,10 @@ export async function handleProviderSendEmailCode(body: unknown, clientIp?: stri
 export async function handleProviderVerifyEmailCode(body: unknown, clientIp?: string): Promise<Response> {
   const attemptId = readParam(body, "attempt_id")
   const continuation = readParam(body, "continuation")
+  let claimed = false
   try {
-    const attempt = await requireProviderEmailAttempt(attemptId, continuation)
+    const attempt = await claimProviderEmailAttempt(attemptId, continuation)
+    claimed = true
     if (!attempt.confirmationEmail || !attempt.challengeToken) throw new Error("Email challenge is missing")
     const result = await verifyEmailCodeHandler({
       email: attempt.confirmationEmail,
@@ -1601,9 +1684,34 @@ export async function handleProviderVerifyEmailCode(body: unknown, clientIp?: st
     const completed = await attachProviderAfterEmailVerification({ attempt, result })
     return finishProviderBrowserLogin(completed, result)
   } catch (cause) {
+    if (claimed && isRetryableProviderEmailProofFailure(cause)) {
+      const restored = await restoreProviderEmailAttempt(attemptId, continuation).catch(() => false)
+      if (!restored) {
+        Log.shared.warn("Failed to restore provider email attempt after invalid code", { attemptId })
+      }
+    }
     Log.shared.error("Provider email verification failed", { cause })
     return html(401, renderPage("Verification failed", `<div class="error">That verification code is invalid or expired.</div>`))
   }
+}
+
+function scheduleProviderCleanup(nowMs: number): void {
+  if (providerCleanupInFlight || nowMs < nextProviderCleanupAtMs) return
+  nextProviderCleanupAtMs = nowMs + PROVIDER_CLEANUP_INTERVAL_MS
+  providerCleanupInFlight = ProviderAuthModel.cleanupExpired(PROVIDER_CLEANUP_BATCH_SIZE)
+    .then(() => undefined)
+    .catch((cause) => {
+      Log.shared.warn("Provider auth cleanup failed", { cause })
+    })
+    .finally(() => {
+      providerCleanupInFlight = undefined
+    })
+}
+
+function isRetryableProviderEmailProofFailure(cause: unknown): boolean {
+  return cause instanceof InlineError &&
+    (cause.type === InlineError.ApiError.EMAIL_CODE_EMPTY[0] ||
+      cause.type === InlineError.ApiError.EMAIL_CODE_INVALID[0])
 }
 
 export async function handleProviderRedeem(body: unknown): Promise<Response> {
@@ -1612,9 +1720,17 @@ export async function handleProviderRedeem(body: unknown): Promise<Response> {
   if (!ticket || !codeVerifier) {
     return json(400, { error: "invalid_ticket", error_description: "Ticket and verifier are required." })
   }
-  const result = await redeemProviderTicket(ticket, codeVerifier)
-  if (!result) return json(401, { error: "invalid_ticket", error_description: "Ticket is invalid or expired." })
-  return json(200, { ok: true, result })
+  try {
+    const result = await redeemProviderTicket(ticket, codeVerifier)
+    if (!result) return json(401, { error: "invalid_ticket", error_description: "Ticket is invalid or expired." })
+    return json(200, { ok: true, result })
+  } catch (cause) {
+    if (cause instanceof InlineError && cause.type === InlineError.ApiError.USER_DEACTIVATED[0]) {
+      Log.shared.warn("Provider ticket redemption rejected for a deactivated user")
+      return json(401, { error: "invalid_ticket", error_description: "Ticket is invalid or expired." })
+    }
+    throw cause
+  }
 }
 
 async function finishProviderBrowserLogin(

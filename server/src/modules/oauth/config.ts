@@ -11,6 +11,7 @@ export type OauthServerConfig = {
   refreshTokenTtlMs: number
   endpointRateLimits: {
     register: RateLimitRule
+    providerStart: RateLimitRule
     sendEmailCode: RateLimitRule
     verifyEmailCode: RateLimitRule
     sendSmsCode: RateLimitRule
@@ -77,6 +78,7 @@ export function oauthConfig(): OauthServerConfig {
     }),
     endpointRateLimits: {
       register: parseRateLimitRuleEnv("MCP_OAUTH_RATE_LIMIT_REGISTER", { max: 30, windowMs: 60_000 }),
+      providerStart: parseRateLimitRuleEnv("PROVIDER_AUTH_RATE_LIMIT_START", { max: 20, windowMs: 10 * 60_000 }),
       sendEmailCode: parseRateLimitRuleEnv("MCP_OAUTH_RATE_LIMIT_SEND_EMAIL_CODE", { max: 10, windowMs: 10 * 60_000 }),
       verifyEmailCode: parseRateLimitRuleEnv("MCP_OAUTH_RATE_LIMIT_VERIFY_EMAIL_CODE", { max: 20, windowMs: 10 * 60_000 }),
       sendSmsCode: parseRateLimitRuleEnv("MCP_OAUTH_RATE_LIMIT_SEND_SMS_CODE", { max: 10, windowMs: 10 * 60_000 }),

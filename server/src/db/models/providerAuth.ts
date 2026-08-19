@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull, lt, or } from "drizzle-orm"
+import { and, eq, gt, inArray, isNull, lt, or } from "drizzle-orm"
 import { db } from "@in/server/db"
 import {
   accountIdentities,
@@ -38,6 +38,25 @@ export const ProviderAuthModel = {
       )).limit(1).then(([attempt]) => attempt)
   },
 
+  async claimActiveByStateHash(
+    stateHash: string,
+    provider: AccountProvider,
+    claimedStateHash: string,
+  ): Promise<DbProviderAuthAttempt | undefined> {
+    const [attempt] = await db
+      .update(providerAuthAttempts)
+      .set({ stateHash: claimedStateHash })
+      .where(and(
+        eq(providerAuthAttempts.stateHash, stateHash),
+        eq(providerAuthAttempts.provider, provider),
+        eq(providerAuthAttempts.status, "pending_provider"),
+        gt(providerAuthAttempts.expiresAt, new Date()),
+        isNull(providerAuthAttempts.usedAt),
+      ))
+      .returning()
+    return attempt
+  },
+
   async getActive(id: string): Promise<DbProviderAuthAttempt | undefined> {
     return db.select().from(providerAuthAttempts).where(and(
         eq(providerAuthAttempts.id, id),
@@ -57,6 +76,62 @@ export const ProviderAuthModel = {
       .returning()
     if (!attempt) throw new Error("Provider auth attempt is unavailable")
     return attempt
+  },
+
+  async transition(
+    id: string,
+    from: ProviderAuthStatus,
+    values: Partial<typeof providerAuthAttempts.$inferInsert>,
+  ): Promise<DbProviderAuthAttempt> {
+    const [attempt] = await db
+      .update(providerAuthAttempts)
+      .set(values)
+      .where(and(
+        eq(providerAuthAttempts.id, id),
+        eq(providerAuthAttempts.status, from),
+        isNull(providerAuthAttempts.usedAt),
+      ))
+      .returning()
+    if (!attempt) throw new Error("Provider auth attempt changed or expired")
+    return attempt
+  },
+
+  async claimContinuation(input: {
+    id: string
+    status: "pending_invite" | "pending_email"
+    continuationHash: string
+  }): Promise<DbProviderAuthAttempt | undefined> {
+    const [attempt] = await db
+      .update(providerAuthAttempts)
+      .set({ continuationHash: null })
+      .where(and(
+        eq(providerAuthAttempts.id, input.id),
+        eq(providerAuthAttempts.status, input.status),
+        eq(providerAuthAttempts.continuationHash, input.continuationHash),
+        gt(providerAuthAttempts.expiresAt, new Date()),
+        isNull(providerAuthAttempts.usedAt),
+      ))
+      .returning()
+    return attempt
+  },
+
+  async restoreContinuationClaim(input: {
+    id: string
+    status: "pending_invite" | "pending_email"
+    continuationHash: string
+  }): Promise<boolean> {
+    const restored = await db
+      .update(providerAuthAttempts)
+      .set({ continuationHash: input.continuationHash })
+      .where(and(
+        eq(providerAuthAttempts.id, input.id),
+        eq(providerAuthAttempts.status, input.status),
+        isNull(providerAuthAttempts.continuationHash),
+        gt(providerAuthAttempts.expiresAt, new Date()),
+        isNull(providerAuthAttempts.usedAt),
+      ))
+      .returning({ id: providerAuthAttempts.id })
+    return restored.length === 1
   },
 
   async findIdentity(provider: AccountProvider, subjectHash: string): Promise<number | undefined> {
@@ -113,11 +188,19 @@ export const ProviderAuthModel = {
     })
   },
 
-  async cleanupExpired(): Promise<void> {
-    await db.delete(providerAuthAttempts).where(or(
+  async cleanupExpired(limit = 250): Promise<number> {
+    const expired = await db.select({ id: providerAuthAttempts.id })
+      .from(providerAuthAttempts)
+      .where(or(
       lt(providerAuthAttempts.expiresAt, new Date()),
       and(eq(providerAuthAttempts.status, "used"), lt(providerAuthAttempts.usedAt, new Date(Date.now() - 60_000))),
-    ))
+      ))
+      .limit(limit)
+    if (expired.length === 0) return 0
+    const deleted = await db.delete(providerAuthAttempts)
+      .where(inArray(providerAuthAttempts.id, expired.map(({ id }) => id)))
+      .returning({ id: providerAuthAttempts.id })
+    return deleted.length
   },
 }
 

@@ -52,7 +52,7 @@ const legacyOAuthClientIp = (
 
 export const oauth = new Elysia({ name: "oauth" })
   .get("/v1/auth/provider/start", ({ request }) =>
-    executeLegacyOAuth(() => handleProviderStart(request)),
+    executeLegacyOAuth(() => handleProviderStart(request, legacyOAuthClientIp(request))),
   )
   .get("/v1/auth/provider/callback/google", ({ request }) =>
     executeLegacyOAuth(() => handleProviderCallback("google", request)),

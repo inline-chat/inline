@@ -84,11 +84,13 @@ export const OAuthHttpServiceLive = Layer.effect(
           ),
         revoke: handleRevoke,
         introspect: handleIntrospect,
-        providerStart: handleProviderStart,
+        providerStart: (request, clientIp) =>
+          handleProviderStart(request, clientIp, rateLimiter),
         providerCallbackGoogle: (request) => handleProviderCallback("google", request),
         providerCallbackApple: (request, body) => handleProviderCallback("apple", request, body),
         providerContinueInvite: handleProviderContinueInvite,
-        providerSendEmailCode: handleProviderSendEmailCode,
+        providerSendEmailCode: (body, clientIp) =>
+          handleProviderSendEmailCode(body, clientIp, rateLimiter),
         providerVerifyEmailCode: handleProviderVerifyEmailCode,
         providerRedeem: handleProviderRedeem,
       }),

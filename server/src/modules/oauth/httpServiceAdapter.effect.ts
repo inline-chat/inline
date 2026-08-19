@@ -53,7 +53,7 @@ export interface OAuthHttpHandlers {
     request: Request,
     body: unknown,
   ) => Promise<Response>
-  readonly providerStart: (request: Request) => Promise<Response>
+  readonly providerStart: (request: Request, clientIp?: string) => Promise<Response>
   readonly providerCallbackGoogle: (request: Request) => Promise<Response>
   readonly providerCallbackApple: (request: Request, body: unknown) => Promise<Response>
   readonly providerContinueInvite: (body: unknown) => Promise<Response>
@@ -85,7 +85,7 @@ const execute = async (
     return handlers.authorize(request)
   }
   if (operation === "providerStart") {
-    return handlers.providerStart(request)
+    return handlers.providerStart(request, clientIp)
   }
   if (operation === "providerCallbackGoogle") {
     return handlers.providerCallbackGoogle(request)
