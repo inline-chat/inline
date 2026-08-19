@@ -502,6 +502,7 @@ struct SidebarView: View {
           isTemporary: isTemporaryItem(item),
           isDropTargeted: false,
           indentationLevel: min(projectedItem.depth, 3),
+          showsIcon: projectedItem.showsIcon,
           disclosureExpanded: projectedItem.isExpandable ? projectedItem.isExpanded : nil,
           usesFullWidthCollectionLayout: true
       )
@@ -533,6 +534,7 @@ struct SidebarView: View {
         isTemporary: isTemporary,
         isDropTargeted: appKitExternalDropTargetID == projectedItem.id,
         indentationLevel: min(projectedItem.depth, 3),
+        showsIcon: projectedItem.showsIcon,
         disclosureExpanded: projectedItem.isExpandable ? projectedItem.isExpanded : nil,
         usesFullWidthCollectionLayout: true,
         onOpen: {

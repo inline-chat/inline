@@ -60,6 +60,7 @@ struct SidebarChatItemView: Equatable, View {
   var isTemporary = false
   var isDropTargeted = false
   var indentationLevel = 0
+  var showsIcon = true
   var disclosureExpanded: Bool?
   var usesFullWidthCollectionLayout = false
   var onOpen: (() -> Void)?
@@ -140,6 +141,7 @@ struct SidebarChatItemView: Equatable, View {
       && lhs.isTemporary == rhs.isTemporary
       && lhs.isDropTargeted == rhs.isDropTargeted
       && lhs.indentationLevel == rhs.indentationLevel
+      && lhs.showsIcon == rhs.showsIcon
       && lhs.disclosureExpanded == rhs.disclosureExpanded
       && lhs.usesFullWidthCollectionLayout == rhs.usesFullWidthCollectionLayout
   }
@@ -153,9 +155,11 @@ struct SidebarChatItemView: Equatable, View {
       }
 
       HStack(spacing: 0) {
-        avatar
-          .frame(width: iconSize, height: iconSize)
-          .padding(.trailing, 8)
+        if showsIcon {
+          avatar
+            .frame(width: iconSize, height: iconSize)
+            .padding(.trailing, 8)
+        }
 
         VStack(alignment: .leading, spacing: 2) {
           titleBlock
@@ -183,6 +187,10 @@ struct SidebarChatItemView: Equatable, View {
       if disclosureExpanded != nil {
         disclosureButton
           .opacity(showsDisclosureControl ? 1 : 0)
+          .animation(
+            reduceMotion ? nil : .easeInOut(duration: 0.14),
+            value: showsDisclosureControl
+          )
           // Keep the generous invisible target active so entering from the
           // collection's leading edge can reveal the tiny visual chevron.
           .allowsHitTesting(true)
@@ -196,7 +204,6 @@ struct SidebarChatItemView: Equatable, View {
     .animation(.smoothSnappy, value: item.prominentUnreadDot)
     .animation(.smoothSnappy, value: unreadBadgeStyle)
     .animation(.smoothSnappy, value: item.pinned)
-    .animation(reduceMotion ? nil : .easeInOut(duration: 0.14), value: showsDisclosureControl)
     .background(background)
     // Outer paddings
     .padding(.horizontal, outerHorizontalPadding)
@@ -374,7 +381,8 @@ struct SidebarChatItemView: Equatable, View {
   }
 
   private var showsDisclosureControl: Bool {
-    disclosureExpanded != nil && (hasHoverAppearance || isDisclosureHovered)
+    guard disclosureExpanded != nil else { return false }
+    return disclosureExpanded == false || hasHoverAppearance
   }
 
   private var outerHorizontalPadding: CGFloat {

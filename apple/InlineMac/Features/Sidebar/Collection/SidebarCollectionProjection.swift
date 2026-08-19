@@ -16,6 +16,7 @@ struct SidebarProjectedItem: Equatable, Identifiable {
 
   var id: ChatListItem.Identifier { item.id }
   var isExpandable: Bool { childCount > 0 }
+  var showsIcon: Bool { depth == 0 }
 }
 
 /// Presentation containment is a product-mode choice, independent of the
