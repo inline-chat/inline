@@ -8,13 +8,18 @@ import RealtimeV2
 public actor UpdatesEngine: Sendable {
   public static let shared = UpdatesEngine()
 
-  private let database: AppDatabase = .shared
+  private let database: AppDatabase
   private let log = Log.scoped("RealtimeUpdates")
+
+  init(database: AppDatabase = .shared) {
+    self.database = database
+  }
 
   public nonisolated func apply(
     update: InlineProtocol.Update,
     db: Database,
     source: UpdateApplySource,
+    batchIndex: Int? = nil,
     reloadPeers: inout Set<Peer>
   ) -> Bool {
     log.trace("apply realtime update")
@@ -172,6 +177,13 @@ public actor UpdatesEngine: Sendable {
         case let .messageActionAnswered(messageActionAnswered):
           messageActionAnswered.apply()
 
+        case .messageActionInvoked, .spaceSettings:
+          // These records are durable so Sync must account for their sequence.
+          // Inline's Apple app has no local projection for bot-side action
+          // invocations or space grid enablement; the feature owners query their
+          // authoritative state when needed.
+          break
+
         case let .botPresence(botPresence):
           BotPresenceNotifications.post(botPresence)
 
@@ -180,7 +192,25 @@ public actor UpdatesEngine: Sendable {
       }
       return true
     } catch {
-      log.error("Failed to apply update", error: error)
+      let kind = RealtimeUpdateDiagnostics.kind(of: update.update)
+      #if DEBUG || DEBUG_BUILD
+      let batchIndexDescription = batchIndex.map(String.init) ?? "unknown"
+      let sequenceDescription = update.hasSeq ? String(update.seq) : "none"
+      let dateDescription = update.hasDate ? String(update.date) : "none"
+      log.error(
+        "Failed to apply update kind=\(kind) source=\(source.traceLabel) " +
+          "batch_index=\(batchIndexDescription) " +
+          "seq=\(sequenceDescription) date=\(dateDescription) " +
+          "payload=\(String(reflecting: update.update)) " +
+          "error_debug=\(String(reflecting: error))",
+        error: error
+      )
+      #else
+      log.error(
+        "Failed to apply update kind=\(kind) source=\(source.traceLabel)",
+        error: error
+      )
+      #endif
       return false
     }
   }
@@ -194,7 +224,8 @@ public actor UpdatesEngine: Sendable {
   public func applyBatch(
     updates: [InlineProtocol.Update],
     source: UpdateApplySource,
-    sidecars: InlineProtocol.UpdateSidecars? = nil
+    sidecars: InlineProtocol.UpdateSidecars? = nil,
+    bucketCommit: UpdateBucketCommit? = nil
   ) async -> UpdateApplyResult {
     let receivingUserID = Auth.shared.getCurrentUserId()
     let batchStartedAt = Date()
@@ -204,12 +235,16 @@ public actor UpdatesEngine: Sendable {
       "source=\(source.traceLabel) updates=\(updates.count) sidecars=\(sidecars?.traceCount ?? 0)"
     )
     log.debug("applying \(updates.count) updates (source=\(source))")
-    // Keep catch-up writes bounded so a very large reconnect batch does not monopolize
-    // the writer lock long enough to visibly stall chat UI reads.
-    let chunkSize = source == .syncCatchup ? 200 : max(updates.count, 1)
+    // A bucket-owned batch must commit all GRDB model changes and its cursor in one writer
+    // transaction. Non-bucket catch-up work keeps the existing bounded chunks so unrelated
+    // refreshes do not monopolize the writer lock.
+    let chunkSize = bucketCommit != nil
+      ? max(updates.count, 1)
+      : source == .syncCatchup ? 200 : max(updates.count, 1)
     var reloadPeers = Set<Peer>()
     var appliedCount = 0
     var failedCount = 0
+    var committedBucketState: BucketState?
     var didApplySidecars = false
     var chunkIndex = 0
 
@@ -217,7 +252,16 @@ public actor UpdatesEngine: Sendable {
     while start < updates.endIndex {
       let end = updates.index(start, offsetBy: chunkSize, limitedBy: updates.endIndex) ?? updates.endIndex
       let chunk = updates[start ..< end]
+      let chunkStartOffset = updates.distance(from: updates.startIndex, to: start)
       let applySidecarsInChunk = !didApplySidecars
+      let isFinalChunk = end == updates.endIndex
+      let priorFailedCount = failedCount
+      let hasExternalProjection = chunk.contains { update in
+        if case .updateUserSettings = update.update {
+          return true
+        }
+        return false
+      }
       chunkIndex += 1
       let chunkStartedAt = Date()
       let chunkSpan = PerformanceTrace.begin(
@@ -247,18 +291,41 @@ public actor UpdatesEngine: Sendable {
           var chunkReloadPeers = Set<Peer>()
           var writeApplied = 0
           var writeFailed = 0
-          for update in chunk {
+          for (offset, update) in chunk.enumerated() {
             if case .updateUserSettings = update.update {
               // This projection is MainActor-owned. Count it here, then apply
               // it after the database transaction so applyBatch can await it.
               writeApplied += 1
-            } else if self.apply(update: update, db: db, source: source, reloadPeers: &chunkReloadPeers) {
+            } else if self.apply(
+              update: update,
+              db: db,
+              source: source,
+              batchIndex: chunkStartOffset + offset,
+              reloadPeers: &chunkReloadPeers
+            ) {
               writeApplied += 1
             } else {
               writeFailed += 1
             }
           }
-          return (chunkReloadPeers, writeApplied, writeFailed)
+          let committedState: BucketState?
+          if isFinalChunk,
+             priorFailedCount == 0,
+             writeFailed == 0,
+             !hasExternalProjection,
+             let bucketCommit {
+            committedState = try GRDBSyncStorage.advanceBucketState(
+              for: bucketCommit.key,
+              state: bucketCommit.state,
+              in: db
+            )
+          } else {
+            // User settings are projected into account-owned preferences on the
+            // MainActor below. Leave their cursor for the caller to advance only
+            // after that idempotent projection has completed.
+            committedState = nil
+          }
+          return (chunkReloadPeers, writeApplied, writeFailed, committedState)
         }
         if applySidecarsInChunk {
           didApplySidecars = true
@@ -266,6 +333,7 @@ public actor UpdatesEngine: Sendable {
         reloadPeers.formUnion(chunkResult.0)
         chunkApplied = chunkResult.1
         chunkFailed = chunkResult.2
+        committedBucketState = chunkResult.3 ?? committedBucketState
         appliedCount += chunkApplied
         failedCount += chunkFailed
         for update in chunk {
@@ -299,6 +367,21 @@ public actor UpdatesEngine: Sendable {
         await Task.yield()
       }
       start = end
+    }
+
+    if updates.isEmpty, let bucketCommit {
+      do {
+        committedBucketState = try await database.dbWriter.write { db in
+          try GRDBSyncStorage.advanceBucketState(
+            for: bucketCommit.key,
+            state: bucketCommit.state,
+            in: db
+          )
+        }
+      } catch {
+        log.error("Failed to commit empty update batch cursor", error: error)
+        failedCount += 1
+      }
     }
 
     if source == .syncCatchup, !reloadPeers.isEmpty {
@@ -345,14 +428,23 @@ public actor UpdatesEngine: Sendable {
       ]
     )
 
-    return UpdateApplyResult(appliedCount: appliedCount, failedCount: failedCount)
+    return UpdateApplyResult(
+      appliedCount: appliedCount,
+      failedCount: failedCount,
+      committedBucketState: committedBucketState
+    )
   }
 
   @discardableResult
-  public func applyChatRepair(_ snapshot: ChatRepairSnapshot) async -> Bool {
+  public func applyChatRepair(_ snapshot: ChatRepairSnapshot) async -> BucketState? {
     guard snapshot.chat.hasChat, snapshot.chat.hasDialog else {
       log.error("Chat repair missing chat or dialog")
-      return false
+      return nil
+    }
+    let bucketKey = BucketKey.chat(peer: snapshot.peer)
+    guard BucketKey.chat(peer: snapshot.chat.chat.peerID) == bucketKey else {
+      log.error("Chat repair snapshot peer does not match the requested bucket")
+      return nil
     }
 
     let peer = snapshot.peer.toPeer()
@@ -364,12 +456,55 @@ public actor UpdatesEngine: Sendable {
     )
 
     do {
-      try await database.dbWriter.write { db in
+      let committedState = try await database.dbWriter.write { db in
+        if let existing = try DbBucketState
+          .filter(
+            DbBucketState.Columns.bucketType == bucketKey.getBucket()
+              && DbBucketState.Columns.entityId == bucketKey.getEntityId()
+          )
+          .fetchOne(db),
+          existing.seq >= snapshot.targetState.seq {
+          return BucketState(date: existing.date, seq: existing.seq)
+        }
+
+        let chatID = snapshot.chat.chat.id
+        // This is a bucket replacement, not an overlay. Clear every locally
+        // complete chat-owned projection before installing the bounded current
+        // snapshot. Older history is deliberately refetched on demand.
+        try Chat
+          .filter(Chat.Columns.id == chatID)
+          .updateAll(db, [Chat.Columns.lastMsgId.set(to: nil)])
+        try PinnedMessage.filter(PinnedMessage.Columns.chatId == chatID).deleteAll(db)
+        try Reaction.filter(Reaction.Columns.chatId == chatID).deleteAll(db)
+        try Message.filter(Message.Columns.chatId == chatID).deleteAll(db)
+        try ChatParticipant.filter(ChatParticipant.Columns.chatId == chatID).deleteAll(db)
+        try ChatParticipantGroup
+          .filter(ChatParticipantGroup.Columns.chatId == chatID)
+          .deleteAll(db)
+
+        if snapshot.chat.hasUser {
+          _ = try User.save(db, user: snapshot.chat.user)
+        }
+        for user in snapshot.participants.users {
+          _ = try User.save(db, user: user)
+        }
+        for group in snapshot.participants.groups {
+          try UserGroup.save(db, from: group)
+        }
+
         var chat = Chat(from: snapshot.chat.chat)
         try self.clearMissingOptionalReferences(in: &chat, db: db)
         try chat.saveWithValidLastMsg(db)
 
         _ = try snapshot.chat.dialog.saveFull(db)
+
+        for participant in snapshot.participants.participants {
+          let model = ChatParticipant(from: participant, chatId: chatID)
+          try model.save(db)
+        }
+        for participant in snapshot.participants.groupParticipants {
+          try ChatParticipantGroup.save(db, from: participant, chatId: chatID)
+        }
 
         if snapshot.chat.hasAnchorMessage {
           _ = try Message.save(
@@ -395,10 +530,16 @@ public actor UpdatesEngine: Sendable {
 
         let knownPinnedIds = try self.knownPinnedMessageIds(
           db,
-          chatId: snapshot.chat.chat.id,
+          chatId: chatID,
           messageIds: snapshot.chat.pinnedMessageIds
         )
-        try PinnedMessage.replaceAll(db, chatId: snapshot.chat.chat.id, messageIds: knownPinnedIds)
+        try PinnedMessage.replaceAll(db, chatId: chatID, messageIds: knownPinnedIds)
+
+        return try GRDBSyncStorage.advanceBucketState(
+          for: bucketKey,
+          state: snapshot.targetState,
+          in: db
+        )
       }
 
       let reloadStartedAt = Date()
@@ -434,12 +575,12 @@ public actor UpdatesEngine: Sendable {
           "messages": snapshot.history.messages.count,
         ]
       )
-      return true
+      return committedState
     } catch {
       let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
       span.end("success=false duration_ms=\(durationMs)")
       log.error("Failed to apply chat repair", error: error)
-      return false
+      return nil
     }
   }
 
@@ -504,6 +645,56 @@ public actor UpdatesEngine: Sendable {
 }
 
 // MARK: Extensions
+
+enum RealtimeUpdateDiagnostics {
+  static func kind(of update: InlineProtocol.Update.OneOf_Update?) -> String {
+    guard let update else { return "missing" }
+    switch update {
+    case .newMessage: return "newMessage"
+    case .editMessage: return "editMessage"
+    case .updateMessageID: return "updateMessageID"
+    case .deleteMessages: return "deleteMessages"
+    case .updateComposeAction: return "updateComposeAction"
+    case .updateUserStatus: return "updateUserStatus"
+    case .messageAttachment: return "messageAttachment"
+    case .updateReaction: return "updateReaction"
+    case .deleteReaction: return "deleteReaction"
+    case .participantAdd: return "participantAdd"
+    case .participantDelete: return "participantDelete"
+    case .newChat: return "newChat"
+    case .deleteChat: return "deleteChat"
+    case .spaceMemberAdd: return "spaceMemberAdd"
+    case .spaceMemberDelete: return "spaceMemberDelete"
+    case .joinSpace: return "joinSpace"
+    case .updateReadMaxID: return "updateReadMaxID"
+    case .updateUserSettings: return "updateUserSettings"
+    case .newMessageNotification: return "newMessageNotification"
+    case .markAsUnread: return "markAsUnread"
+    case .chatSkipPts: return "chatSkipPts"
+    case .chatHasNewUpdates: return "chatHasNewUpdates"
+    case .spaceHasNewUpdates: return "spaceHasNewUpdates"
+    case .spaceMemberUpdate: return "spaceMemberUpdate"
+    case .chatVisibility: return "chatVisibility"
+    case .dialogArchived: return "dialogArchived"
+    case .chatInfo: return "chatInfo"
+    case .pinnedMessages: return "pinnedMessages"
+    case .chatMoved: return "chatMoved"
+    case .dialogNotificationSettings: return "dialogNotificationSettings"
+    case .chatOpen: return "chatOpen"
+    case .messageActionInvoked: return "messageActionInvoked"
+    case .messageActionAnswered: return "messageActionAnswered"
+    case .clearChatHistory_p: return "clearChatHistory"
+    case .botPresence: return "botPresence"
+    case .dialogFollowMode: return "dialogFollowMode"
+    case .updatedUser: return "updatedUser"
+    case .participantGroupAdd: return "participantGroupAdd"
+    case .participantGroupDelete: return "participantGroupDelete"
+    case .spaceSettings: return "spaceSettings"
+    case .chatPermissions: return "chatPermissions"
+    case .dialogCollapsedMaxID: return "dialogCollapsedMaxID"
+    }
+  }
+}
 
 private func hasSidecars(_ sidecars: InlineProtocol.UpdateSidecars) -> Bool {
   !sidecars.users.isEmpty ||

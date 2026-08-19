@@ -125,6 +125,9 @@ extension PhoneNumberCode {
           mainViewRouter.setRoute(route: .main)
         }
 
+      } catch InlineProtocolNativeLoginError.inviteRequired {
+        formState.reset()
+        nav.push(.inviteCodeForPhone(phoneNumber: phoneNumber))
       } catch is CancellationError {
         formState.reset()
       } catch let error as APIError {

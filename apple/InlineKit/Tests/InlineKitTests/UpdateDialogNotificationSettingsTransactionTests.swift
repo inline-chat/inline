@@ -27,15 +27,15 @@ struct DialogNotificationTransactionTests {
     #expect(first.executionKey != sameNumericThread.executionKey)
   }
 
-  @Test("Notification mutations remain durable after ACK")
-  func notificationMutationRetriesAfterAck() {
+  @Test("Notification mutations do not automatically replay after ACK")
+  func notificationMutationDoesNotReplayAfterAck() {
     let transaction = UpdateDialogNotificationSettingsTransaction(peerId: .user(id: 104), selection: .all)
 
-    guard case let .mutation(config) = transaction.type else {
+    guard case .mutation = transaction.type else {
       Issue.record("Expected a mutation transaction")
       return
     }
-    #expect(config.retryAfterAck)
+    #expect(transaction.reconnectReplayPolicy == nil)
   }
 
   @Test("Previously queued transactions decode without a rollback intent")
@@ -133,6 +133,35 @@ struct DialogNotificationTransactionTests {
     #expect(latestFailure.targetSelection == .global)
     #expect(latestFailure.targetSettings == nil)
     await tracker.finalizeNotificationResolution(token: latestFailure.token, peer: peer)
+  }
+
+  @Test("Commit-unknown abandons rollback ownership without changing optimistic state")
+  func commitUnknownDoesNotBecomeFailure() async throws {
+    let tracker = DialogMutationRollbackTracker()
+    let peer = InlineKit.Peer.user(id: 114)
+    let original = Dialog(optimisticForUserId: 114)
+
+    await tracker.recordNotification(
+      intentID: "unknown",
+      peer: peer,
+      original: original,
+      selection: .all
+    )
+    await tracker.abandonNotificationIntent(intentID: "unknown", peer: peer)
+    if case .some = await tracker.beginNotificationFailure(intentID: "unknown", peer: peer) {
+      Issue.record("An abandoned commit-unknown intent must not retain rollback ownership")
+    }
+
+    var optimistic = original
+    optimistic.notificationSettings = .with { $0.mode = .all }
+    await tracker.recordNotification(
+      intentID: "next",
+      peer: peer,
+      original: optimistic,
+      selection: .none
+    )
+    let nextFailure = try #require(await tracker.beginNotificationFailure(intentID: "next", peer: peer))
+    #expect(nextFailure.targetSelection == .all)
   }
 
   @Test("A successful predecessor becomes the next failure baseline")

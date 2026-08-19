@@ -1,4 +1,3 @@
-import BigInt
 import CommonCrypto
 import Foundation
 import Security
@@ -56,7 +55,7 @@ public final class InlineHandshakeClient {
     case serverDH(nonce: [UInt8], serverNonce: [UInt8], newNonce: [UInt8], temporary: Bool)
     case result(
       nonce: [UInt8], serverNonce: [UInt8], newNonce: [UInt8], temporary: Bool,
-      prime: [UInt8], gA: [UInt8], authKey: [UInt8], retries: Int, serverTime: Int32
+      generator: Int32, prime: [UInt8], gA: [UInt8], authKey: [UInt8], retries: Int, serverTime: Int32
     )
     case complete
   }
@@ -90,14 +89,16 @@ public final class InlineHandshakeClient {
   }
 
   public func receive(_ body: [UInt8]) throws -> InlineHandshakeTransition {
-    switch phase {
-    case let .pq(nonce, temporary): try receivePQ(body, nonce: nonce, temporary: temporary)
+    let currentPhase = phase
+    phase = .complete
+    switch currentPhase {
+    case let .pq(nonce, temporary): return try receivePQ(body, nonce: nonce, temporary: temporary)
     case let .serverDH(nonce, serverNonce, newNonce, temporary):
-      try receiveServerDH(body, nonce: nonce, serverNonce: serverNonce, newNonce: newNonce, temporary: temporary)
-    case let .result(nonce, serverNonce, newNonce, temporary, prime, gA, authKey, retries, serverTime):
-      try receiveResult(
+      return try receiveServerDH(body, nonce: nonce, serverNonce: serverNonce, newNonce: newNonce, temporary: temporary)
+    case let .result(nonce, serverNonce, newNonce, temporary, generator, prime, gA, authKey, retries, serverTime):
+      return try receiveResult(
         body, nonce: nonce, serverNonce: serverNonce, newNonce: newNonce, temporary: temporary,
-        prime: prime, gA: gA, authKey: authKey, retries: retries, serverTime: serverTime
+        generator: generator, prime: prime, gA: gA, authKey: authKey, retries: retries, serverTime: serverTime
       )
     case .idle, .complete: throw InlineProtocolError.invalidInput
     }
@@ -105,7 +106,9 @@ public final class InlineHandshakeClient {
 
   private func receivePQ(_ body: [UInt8], nonce: [UInt8], temporary: Bool) throws -> InlineHandshakeTransition {
     var reader = try HandshakeReader(body, constructor: Handshake.resPQ)
-    guard try reader.fixed(16) == nonce else { throw InlineProtocolError.invalidInput }
+    guard InlineSecureTransport.constantTimeEqual(try reader.fixed(16), nonce) else {
+      throw InlineProtocolError.invalidInput
+    }
     let serverNonce = try reader.fixed(16)
     let pq = try reader.bytes()
     guard try reader.uint32() == Handshake.vector else { throw InlineProtocolError.invalidInput }
@@ -138,13 +141,20 @@ public final class InlineHandshakeClient {
   ) throws -> InlineHandshakeTransition {
     let constructor = try readHandshakeUInt32(body, at: 0)
     if constructor == Handshake.serverDHParamsFail {
-      guard body.count == 52, Array(body[4..<20]) == nonce, Array(body[20..<36]) == serverNonce,
-            Array(body[36..<52]) == Array(handshakeSHA1(newNonce)[4..<20])
+      guard body.count == 52,
+            InlineSecureTransport.constantTimeEqual(Array(body[4..<20]), nonce),
+            InlineSecureTransport.constantTimeEqual(Array(body[20..<36]), serverNonce),
+            InlineSecureTransport.constantTimeEqual(
+              Array(body[36..<52]),
+              Array(handshakeSHA1(newNonce)[4..<20])
+            )
       else { throw InlineProtocolError.invalidInput }
       throw InlineProtocolError.invalidInput
     }
     var reader = try HandshakeReader(body, constructor: Handshake.serverDHParamsOK)
-    guard try reader.fixed(16) == nonce, try reader.fixed(16) == serverNonce else {
+    guard InlineSecureTransport.constantTimeEqual(try reader.fixed(16), nonce),
+          InlineSecureTransport.constantTimeEqual(try reader.fixed(16), serverNonce)
+    else {
       throw InlineProtocolError.invalidInput
     }
     let encrypted = try reader.bytes()
@@ -153,7 +163,9 @@ public final class InlineHandshakeClient {
     let plaintext = try InlineSecureTransport.aesIGEDecrypt(encrypted, key: aes.key, iv: aes.iv)
     guard plaintext.count >= 24 else { throw InlineProtocolError.invalidInput }
     var inner = try HandshakeReader(Array(plaintext[20...]), constructor: Handshake.serverDHInner)
-    guard try inner.fixed(16) == nonce, try inner.fixed(16) == serverNonce else {
+    guard InlineSecureTransport.constantTimeEqual(try inner.fixed(16), nonce),
+          InlineSecureTransport.constantTimeEqual(try inner.fixed(16), serverNonce)
+    else {
       throw InlineProtocolError.invalidInput
     }
     let generator = try inner.int32()
@@ -162,22 +174,25 @@ public final class InlineHandshakeClient {
     let serverTime = try inner.int32()
     let consumed = 24 + inner.offset
     guard (0...15).contains(plaintext.count - consumed),
-          Array(plaintext[0..<20]) == handshakeSHA1(Array(plaintext[20..<consumed]))
+          InlineSecureTransport.constantTimeEqual(
+            Array(plaintext[0..<20]),
+            handshakeSHA1(Array(plaintext[20..<consumed]))
+          )
     else { throw InlineProtocolError.invalidInput }
     try InlineSecureTransport.validateDHParameters(primeBytes: prime, generator: generator)
     try InlineSecureTransport.validateDHPublicValue(gA, prime: prime)
     return .request(try makeClientDH(
       nonce: nonce, serverNonce: serverNonce, newNonce: newNonce, temporary: temporary,
-      prime: prime, gA: gA, retries: 0, retryID: 0, serverTime: serverTime
+      generator: generator, prime: prime, gA: gA, retries: 0, retryID: 0, serverTime: serverTime
     ))
   }
 
   private func makeClientDH(
     nonce: [UInt8], serverNonce: [UInt8], newNonce: [UInt8], temporary: Bool,
-    prime: [UInt8], gA: [UInt8], retries: Int, retryID: Int64, serverTime: Int32
+    generator: Int32, prime: [UInt8], gA: [UInt8], retries: Int, retryID: Int64, serverTime: Int32
   ) throws -> [UInt8] {
     let exponent = try requireRandom(256)
-    let gB = try modularPower(base: [3], exponent: exponent, modulus: prime)
+    let gB = try modularPower(base: [UInt8(generator)], exponent: exponent, modulus: prime)
     try InlineSecureTransport.validateDHPublicValue(gB, prime: prime)
     let authKey = try modularPower(base: gA, exponent: exponent, modulus: prime)
     let serialized = littleHandshake(Handshake.clientDHInner) + nonce + serverNonce
@@ -188,7 +203,7 @@ public final class InlineHandshakeClient {
     )
     phase = .result(
       nonce: nonce, serverNonce: serverNonce, newNonce: newNonce, temporary: temporary,
-      prime: prime, gA: gA, authKey: authKey, retries: retries, serverTime: serverTime
+      generator: generator, prime: prime, gA: gA, authKey: authKey, retries: retries, serverTime: serverTime
     )
     return littleHandshake(Handshake.setClientDHParams) + nonce + serverNonce
       + (try encodeHandshakeTLBytes(encrypted))
@@ -196,9 +211,11 @@ public final class InlineHandshakeClient {
 
   private func receiveResult(
     _ body: [UInt8], nonce: [UInt8], serverNonce: [UInt8], newNonce: [UInt8], temporary: Bool,
-    prime: [UInt8], gA: [UInt8], authKey: [UInt8], retries: Int, serverTime: Int32
+    generator: Int32, prime: [UInt8], gA: [UInt8], authKey: [UInt8], retries: Int, serverTime: Int32
   ) throws -> InlineHandshakeTransition {
-    guard body.count == 52, Array(body[4..<20]) == nonce, Array(body[20..<36]) == serverNonce
+    guard body.count == 52,
+          InlineSecureTransport.constantTimeEqual(Array(body[4..<20]), nonce),
+          InlineSecureTransport.constantTimeEqual(Array(body[20..<36]), serverNonce)
     else { throw InlineProtocolError.invalidInput }
     let constructor = try readHandshakeUInt32(body, at: 0)
     let index: UInt8 = switch constructor {
@@ -208,14 +225,17 @@ public final class InlineHandshakeClient {
     default: throw InlineProtocolError.invalidInput
     }
     let auxiliary = Array(handshakeSHA1(authKey)[0..<8])
-    guard Array(body[36..<52]) == Array(handshakeSHA1(newNonce + [index] + auxiliary)[4..<20])
+    guard InlineSecureTransport.constantTimeEqual(
+      Array(body[36..<52]),
+      Array(handshakeSHA1(newNonce + [index] + auxiliary)[4..<20])
+    )
     else { throw InlineProtocolError.invalidInput }
     if constructor == Handshake.dhGenFail { throw InlineProtocolError.invalidInput }
     if constructor == Handshake.dhGenRetry {
       guard retries < 4 else { throw InlineProtocolError.invalidInput }
       return .request(try makeClientDH(
         nonce: nonce, serverNonce: serverNonce, newNonce: newNonce, temporary: temporary,
-        prime: prime, gA: gA, retries: retries + 1,
+        generator: generator, prime: prime, gA: gA, retries: retries + 1,
         retryID: readHandshakeInt64(auxiliary, at: 0), serverTime: serverTime
       ))
     }
@@ -234,6 +254,8 @@ public final class InlineHandshakeClient {
   }
 
   private func factorPQ(_ bytes: [UInt8]) throws -> (p: [UInt8], q: [UInt8]) {
+    // TODO(mtproto-v2-compat): Remove this beta-only 8-byte/<2^63 bound and
+    // use lossless arbitrary-precision MTProto 2.0 factorization.
     guard !bytes.isEmpty, bytes.count <= 8 else { throw InlineProtocolError.invalidInput }
     let value = bytes.reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
     guard value > 3, value < 1 << 63 else { throw InlineProtocolError.invalidInput }
@@ -276,9 +298,7 @@ public final class InlineHandshakeClient {
   }
 
   private func modularPower(base: [UInt8], exponent: [UInt8], modulus: [UInt8]) throws -> [UInt8] {
-    let value = BigUInt(Data(base)).power(BigUInt(Data(exponent)), modulus: BigUInt(Data(modulus))).serialize()
-    guard value.count <= 256 else { throw InlineProtocolError.invalidInput }
-    return [UInt8](repeating: 0, count: 256 - value.count) + value
+    try InlineSecureTransport.modularExponentiation(base: base, exponent: exponent, modulus: modulus)
   }
 
   private func requireRandom(_ count: Int) throws -> [UInt8] {

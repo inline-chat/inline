@@ -154,6 +154,9 @@ struct OnboardingEnterCode: View {
         DispatchQueue.main.async {
           onboardingViewModel.navigateAfterLogin(pendingSetup: result.user.pendingSetup == true)
         }
+      } catch InlineProtocolNativeLoginError.inviteRequired {
+        formState.reset()
+        onboardingViewModel.navigate(to: .inviteCode)
       } catch is CancellationError {
         formState.reset()
       } catch {

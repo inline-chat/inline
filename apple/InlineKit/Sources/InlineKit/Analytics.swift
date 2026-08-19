@@ -10,7 +10,7 @@ public final class Analytics: Sendable {
 
   private static let log = Log.scoped("Analytics")
 
-  #if DEBUG
+  #if DEBUG || DEBUG_BUILD
   static let debugBuild = true
   #else
   static let debugBuild = false

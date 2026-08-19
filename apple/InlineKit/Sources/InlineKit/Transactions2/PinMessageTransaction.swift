@@ -25,6 +25,10 @@ public struct PinMessageTransaction: Transaction2 {
     context = Context(peer: peer, messageId: messageId, unpin: unpin)
   }
 
+  public var executionKey: TransactionExecutionKey? {
+    .peerMutation(context.peer)
+  }
+
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
     .pinMessage(.with {
       $0.peerID = context.peer.toInputPeer()

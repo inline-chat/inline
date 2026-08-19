@@ -20,8 +20,8 @@ final class SyncTests {
     #expect(config.maxConcurrentBucketFetches == SyncConfig.default.maxConcurrentBucketFetches)
   }
 
-  @Test("updates lastSyncDate with safety gap")
-  func testLastSyncDateSafetyGap() async throws {
+  @Test("direct bucket updates do not advance the discovery checkpoint")
+  func testDirectBucketUpdatePreservesDiscoveryCheckpoint() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let client = FakeProtocolClient(responses: [])
@@ -42,7 +42,7 @@ final class SyncTests {
     await sync.process(updates: [update])
 
     let state = await storage.getState()
-    #expect(state.lastSyncDate == 85)
+    #expect(state.lastSyncDate == 0)
   }
 
   @Test("coalesces bucket fetches while in-flight")
@@ -180,6 +180,60 @@ final class SyncTests {
     await sync.process(updates: [update])
 
     let bucketState = await storage.getBucketState(for: .user)
+    #expect(bucketState.seq == 1)
+    #expect(bucketState.date == 100)
+  }
+
+  @Test("sequenced durable user updates advance the user bucket")
+  func testSequencedDurableUserUpdateAdvancesUserBucketState() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    let client = FakeProtocolClient(responses: [])
+    let sync = Sync(
+      applyUpdates: apply,
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15)
+    )
+
+    var payload = InlineProtocol.UpdateMessageActionAnswered()
+    payload.interactionID = 42
+    var update = InlineProtocol.Update()
+    update.seq = 1
+    update.date = 100
+    update.update = .messageActionAnswered(payload)
+
+    await sync.process(updates: [update])
+
+    #expect(await apply.appliedUpdates.count == 1)
+    let bucketState = await storage.getBucketState(for: .user)
+    #expect(bucketState.seq == 1)
+    #expect(bucketState.date == 100)
+  }
+
+  @Test("sequenced space settings advance the space bucket")
+  func testSequencedSpaceSettingsAdvanceSpaceBucketState() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    let client = FakeProtocolClient(responses: [])
+    let sync = Sync(
+      applyUpdates: apply,
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15)
+    )
+
+    var payload = InlineProtocol.UpdateSpaceSettings()
+    payload.spaceID = 10
+    var update = InlineProtocol.Update()
+    update.seq = 1
+    update.date = 100
+    update.update = .spaceSettings(payload)
+
+    await sync.process(updates: [update])
+
+    #expect(await apply.appliedUpdates.count == 1)
+    let bucketState = await storage.getBucketState(for: .space(id: 10))
     #expect(bucketState.seq == 1)
     #expect(bucketState.date == 100)
   }
@@ -490,6 +544,7 @@ final class SyncTests {
   func testColdChatTooLongRepairsAndAdvances() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
+    await apply.setRepairStorage(storage)
 
     let tooLong = makeGetUpdatesResult(
       seq: 10,
@@ -505,6 +560,7 @@ final class SyncTests {
       methodResponses: [
         .getUpdates: [tooLong],
         .getChat: [makeGetChatResult(chatId: 1)],
+        .getChatParticipants: [makeGetChatParticipantsResult()],
         .getChatHistory: [makeGetChatHistoryResult(messages: [historyMessage])],
       ]
     )
@@ -535,10 +591,10 @@ final class SyncTests {
     #expect(stats.bucketFetchTooLong == 1)
 
     let callCount = await client.getCallCount()
-    #expect(callCount == 3)
+    #expect(callCount == 4)
 
     let methods = await client.getCalledMethods()
-    #expect(methods == [.getUpdates, .getChat, .getChatHistory])
+    #expect(methods == [.getUpdates, .getChat, .getChatParticipants, .getChatHistory])
   }
 
   @Test("cold chat TOO_LONG falls back to slicing when repair fails")
@@ -695,6 +751,113 @@ final class SyncTests {
 
     let state = await storage.getState()
     #expect(state.lastSyncDate == initialDate)
+  }
+
+  @Test("discovery checkpoint waits for every hinted bucket to apply")
+  func testDiscoveryCheckpointWaitsForHintedBucketApplication() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    await apply.setResult(UpdateApplyResult(appliedCount: 0, failedCount: 1))
+    await apply.setRepairResult(false)
+    await storage.setState(SyncState(lastSyncDate: 10))
+
+    let failedChatUpdate = makeChatInfoUpdate(seq: 1, date: 100)
+    let client = FakeProtocolClient(
+      responses: [],
+      gateMethods: [.getUpdatesState],
+      methodResponses: [
+        .getUpdatesState: [makeGetUpdatesStateResult(date: 120, updatesFound: true)],
+        .getUpdates: [
+          makeGetUpdatesResult(
+            seq: 0,
+            date: 10,
+            updates: [],
+            final: true,
+            resultType: .empty
+          ),
+          makeGetUpdatesResult(
+            seq: 1,
+            date: 100,
+            updates: [failedChatUpdate],
+            final: true,
+            resultType: .slice
+          ),
+          makeGetUpdatesResult(
+            seq: 0,
+            date: 120,
+            updates: [],
+            final: true,
+            resultType: .empty
+          ),
+        ],
+      ]
+    )
+    let sync = Sync(
+      applyUpdates: apply,
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15)
+    )
+
+    await sync.connectionStateChanged(state: .connected)
+    try #require(await waitForCondition {
+      let methods = await client.getCalledMethods()
+      return methods.contains(.getUpdatesState) && methods.contains(.getUpdates)
+    })
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 1)])
+    let attemptedHintedUpdate = await waitForCondition {
+      await apply.appliedUpdates.count == 1
+    }
+    #expect(attemptedHintedUpdate)
+    await client.releaseMethod(.getUpdatesState)
+    let didDiscover = await waitForCondition {
+      await client.getCalledMethods().contains(.getUpdatesState)
+    }
+
+    #expect(didDiscover)
+    try? await Task.sleep(for: .milliseconds(50))
+    #expect(await storage.getState().lastSyncDate == 10)
+    #expect(await storage.getBucketState(for: .chat(peer: makeChatPeer(chatId: 1))).seq == 0)
+    await sync.prepareForTermination()
+  }
+
+  @Test("non-fresh checkpoint retries a transient global cursor write failure")
+  func testNonFreshCheckpointRetriesGlobalWriteFailure() async throws {
+    let storage = InMemorySyncStorage()
+    await storage.setState(SyncState(lastSyncDate: 10))
+    await storage.failNextStateWrites(1)
+    let apply = RecordingApplyUpdates()
+    let client = FakeProtocolClient(
+      responses: [],
+      methodResponses: [
+        .getUpdatesState: [
+          makeGetUpdatesStateResult(date: 100, updatesFound: false),
+          makeGetUpdatesStateResult(date: 101, updatesFound: false),
+        ],
+        .getUpdates: [makeGetUpdatesResult(
+          seq: 0,
+          date: 10,
+          updates: [],
+          final: true,
+          resultType: .empty
+        )],
+      ]
+    )
+    let sync = Sync(
+      applyUpdates: apply,
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15)
+    )
+
+    await sync.connectionStateChanged(state: .connected)
+    let recovered = await waitForCondition(timeout: .seconds(3)) {
+      await storage.getState().lastSyncDate == 86
+    }
+
+    #expect(recovered)
+    #expect(await client.getCalledMethods().filter { $0 == .getUpdatesState }.count == 2)
+    await sync.prepareForTermination()
   }
 
   @Test("empty getUpdatesState response advances lastSyncDate")
@@ -937,6 +1100,61 @@ final class SyncTests {
     }
     #expect(didRunFollowUp)
     #expect(await client.getCalledMethods().filter { $0 == .getUpdatesState }.count == 2)
+  }
+
+  @Test("overlapping discovery rounds cannot borrow an earlier round target")
+  func testOverlappingDiscoveryRoundsRequireIndependentTargets() async throws {
+    let storage = InMemorySyncStorage()
+    await storage.setState(SyncState(lastSyncDate: 10))
+    let client = FakeProtocolClient(
+      responses: [],
+      gateCallNumbers: [1],
+      methodResponses: [
+        .getUpdatesState: [
+          makeGetUpdatesStateResult(date: 100, updatesFound: true),
+          makeGetUpdatesStateResult(date: 200, updatesFound: true),
+        ],
+        .getUpdates: [makeGetUpdatesResult(
+          seq: 1,
+          date: 100,
+          updates: [makeNewMessageUpdate(seq: 1, date: 100)],
+          final: true,
+          resultType: .slice
+        )],
+      ]
+    )
+    let sync = Sync(
+      applyUpdates: RecordingApplyUpdates(),
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15)
+    )
+
+    await sync.connectionStateChanged(state: .connected)
+    await client.waitForFirstCallStarted()
+    let peer = makeChatPeer(chatId: 1)
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 1)])
+    // Complete the first round's target deterministically; the bucket actor's
+    // eventual fetch is intentionally outside this round-accounting assertion.
+    await sync.bucketDidAdvance(
+      key: .chat(peer: peer),
+      state: BucketState(date: 100, seq: 1)
+    )
+
+    // Queue a second discovery while the first result is still in flight. Its
+    // updatesFound=true result has no same-round hint and must not reuse the
+    // first round's chat target.
+    await sync.connectionStateChanged(state: .connected)
+    await client.releaseFirstCall()
+    let secondRoundStarted = await waitForCondition {
+      await client.getCalledMethods().filter { $0 == .getUpdatesState }.count == 2
+    }
+    #expect(secondRoundStarted)
+    try? await Task.sleep(for: .milliseconds(50))
+
+    // Round one is allowed to commit; round two is not.
+    #expect(await storage.getState().lastSyncDate == 85)
+    await sync.prepareForTermination()
   }
 
   @Test("fresh checkpoint retries a response missing user sequence")
@@ -1360,10 +1578,233 @@ final class SyncTests {
     #expect(bucketState.date == 100)
   }
 
+  @Test("user catch-up applies every durable user update kind")
+  func testUserCatchUpAppliesEveryDurableUserUpdateKind() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    await storage.setState(SyncState(lastSyncDate: 50))
+
+    var participant = InlineProtocol.ChatParticipant()
+    participant.userID = 42
+    participant.date = 100
+    var participantAdd = InlineProtocol.UpdateChatParticipantAdd()
+    participantAdd.chatID = 7
+    participantAdd.participant = participant
+    let updates: [InlineProtocol.Update] = [
+      makeDurableUpdate(seq: 1, date: 100, payload: .participantAdd(participantAdd)),
+      makeDurableUpdate(seq: 2, date: 101, payload: .messageActionInvoked(.init())),
+      makeDurableUpdate(seq: 3, date: 102, payload: .messageActionAnswered(.init())),
+      makeDurableUpdate(seq: 4, date: 103, payload: .dialogFollowMode(.init())),
+      makeDurableUpdate(seq: 5, date: 104, payload: .updatedUser(.init())),
+      makeDurableUpdate(seq: 6, date: 105, payload: .dialogCollapsedMaxID(.init())),
+      makeDurableUpdate(seq: 7, date: 106, payload: .updateUserSettings(.init())),
+    ]
+    let client = FakeProtocolClient(
+      responses: [],
+      methodResponses: [
+        .getUpdatesState: [makeGetUpdatesStateResult(date: 106, seq: 7)],
+        .getUpdates: [makeGetUpdatesResult(
+          seq: 7,
+          date: 106,
+          updates: updates,
+          final: true,
+          resultType: .slice
+        )],
+      ]
+    )
+    let sync = Sync(
+      applyUpdates: apply,
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15)
+    )
+
+    await sync.connectionStateChanged(state: .connected)
+    let didApply = await waitForCondition {
+      await apply.appliedUpdates.count == updates.count
+    }
+
+    #expect(didApply)
+    #expect(await apply.appliedUpdates.map(\.seq) == [1, 2, 3, 4, 5, 6, 7])
+    let bucketState = await storage.getBucketState(for: .user)
+    #expect(bucketState.seq == 7)
+    #expect(bucketState.date == 106)
+  }
+
+  @Test("catch-up advances past a forward-compatible unknown update")
+  func testCatchUpAdvancesPastUnknownFutureUpdate() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+
+    var unknown = InlineProtocol.Update()
+    unknown.seq = 1
+    unknown.date = 100
+    let client = FakeProtocolClient(
+      responses: [],
+      methodResponses: [
+        .getUpdates: [makeGetUpdatesResult(
+          seq: 1,
+          date: 100,
+          updates: [unknown],
+          final: true,
+          resultType: .slice
+        )],
+      ]
+    )
+    let sync = Sync(
+      applyUpdates: apply,
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15)
+    )
+
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 1)])
+    let advanced = await waitForCondition {
+      await storage.getBucketState(for: .chat(peer: makeChatPeer(chatId: 1))).seq == 1
+    }
+
+    #expect(advanced)
+    #expect(await apply.appliedUpdates.count == 1)
+    #expect(await apply.appliedUpdates.first?.update == nil)
+  }
+
+  @Test("large catch-up continues without holding global Updating")
+  func testLargeCatchUpContinuesWithoutHoldingSyncActivity() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    let client = FakeProtocolClient(
+      responses: [],
+      gateCallNumbers: [4],
+      methodResponses: [
+        .getUpdates: [
+          makeGetUpdatesResult(
+            seq: 2_000,
+            date: 200,
+            updates: [],
+            final: false,
+            resultType: .tooLong
+          ),
+          makeGetUpdatesResult(
+            seq: 1_000,
+            date: 150,
+            updates: [],
+            final: true,
+            resultType: .empty,
+            skippedSequences: makeIrrelevantSkippedSequences(after: 0, through: 1_000)
+          ),
+          makeGetUpdatesResult(
+            seq: 2_000,
+            date: 200,
+            updates: [],
+            final: true,
+            resultType: .empty,
+            skippedSequences: makeIrrelevantSkippedSequences(after: 1_000, through: 2_000)
+          ),
+        ],
+      ]
+    )
+    let activity = SyncActivityRecorder()
+    let sync = Sync(
+      applyUpdates: apply,
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15)
+    )
+    await sync.setSyncActivityListener { isActive in
+      await activity.record(isActive)
+    }
+
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 2_000)])
+    await client.waitForCallStarted(4)
+
+    let activityWhileBackgroundFetchIsBlocked = await activity.sequence
+    let stateWhileBackgroundFetchIsBlocked = await storage.getBucketState(
+      for: .chat(peer: makeChatPeer(chatId: 1))
+    )
+    #expect(activityWhileBackgroundFetchIsBlocked == [true, false])
+    #expect(stateWhileBackgroundFetchIsBlocked.seq == 1_000)
+
+    await client.releaseCall(4)
+    let completed = await waitForCondition {
+      await storage.getBucketState(for: .chat(peer: makeChatPeer(chatId: 1))).seq == 2_000
+    }
+    #expect(completed)
+    let finalActivity = await activity.sequence
+    #expect(finalActivity == [true, false])
+  }
+
+  @Test("chat catch-up applies durable reaction updates")
+  func testChatCatchUpAppliesDurableReactionUpdates() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    let updates = [
+      makeDurableUpdate(seq: 1, date: 100, payload: .updateReaction(.init())),
+      makeDurableUpdate(seq: 2, date: 101, payload: .deleteReaction(.init())),
+    ]
+    let client = FakeProtocolClient(responses: [makeGetUpdatesResult(
+      seq: 2,
+      date: 101,
+      updates: updates,
+      final: true,
+      resultType: .slice
+    )])
+    let sync = Sync(
+      applyUpdates: apply,
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15)
+    )
+
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 2)])
+    let didApply = await waitForCondition {
+      await apply.appliedUpdates.count == updates.count
+    }
+
+    #expect(didApply)
+    #expect(await apply.appliedUpdates.map(\.seq) == [1, 2])
+    let peer = makeChatPeer(chatId: 1)
+    let bucketState = await storage.getBucketState(for: .chat(peer: peer))
+    #expect(bucketState.seq == 2)
+    #expect(bucketState.date == 101)
+  }
+
+  @Test("space catch-up accounts for durable space settings")
+  func testSpaceCatchUpAccountsForSpaceSettings() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    var payload = InlineProtocol.UpdateSpaceSettings()
+    payload.spaceID = 10
+    let update = makeDurableUpdate(seq: 1, date: 100, payload: .spaceSettings(payload))
+    let client = FakeProtocolClient(responses: [makeGetUpdatesResult(
+      seq: 1,
+      date: 100,
+      updates: [update],
+      final: true,
+      resultType: .slice
+    )])
+    let sync = Sync(
+      applyUpdates: apply,
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15)
+    )
+
+    await sync.process(updates: [makeSpaceHasNewUpdatesSignal(spaceId: 10, updateSeq: 1)])
+    let didApply = await waitForCondition {
+      await apply.appliedUpdates.count == 1
+    }
+
+    #expect(didApply)
+    let bucketState = await storage.getBucketState(for: .space(id: 10))
+    #expect(bucketState.seq == 1)
+    #expect(bucketState.date == 100)
+  }
+
   @Test("chat catch-up apply failure repairs and advances bucket state")
   func testChatCatchUpApplyFailureRepairsAndAdvancesBucketState() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
+    await apply.setRepairStorage(storage)
     await apply.setResult(UpdateApplyResult(appliedCount: 0, failedCount: 1))
 
     let peer = makeChatPeer(chatId: 1)
@@ -1382,6 +1823,7 @@ final class SyncTests {
       responses: [response],
       methodResponses: [
         .getChat: [makeGetChatResult(chatId: 1)],
+        .getChatParticipants: [makeGetChatParticipantsResult()],
         .getChatHistory: [makeGetChatHistoryResult()],
       ]
     )
@@ -1528,8 +1970,8 @@ final class SyncTests {
     #expect(bucketState.date == 0)
   }
 
-  @Test("isolated realtime apply failure advances bucket state")
-  func testIsolatedRealtimeApplyFailureAdvancesBucketState() async throws {
+  @Test("isolated realtime apply failure keeps bucket state for repair")
+  func testIsolatedRealtimeApplyFailureKeepsBucketStateForRepair() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setResult(UpdateApplyResult(appliedCount: 0, failedCount: 1))
@@ -1548,8 +1990,8 @@ final class SyncTests {
     #expect(applied.count == 1)
 
     let bucketState = await storage.getBucketState(for: .chat(peer: peer))
-    #expect(bucketState.seq == 6)
-    #expect(bucketState.date == 120)
+    #expect(bucketState.seq == 5)
+    #expect(bucketState.date == 100)
   }
 
   @Test("non-retryable fetch clears buffered realtime")
@@ -1696,6 +2138,7 @@ final class SyncTests {
   func testRealtimeBufferLimitUsesAuthoritativeRepair() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
+    await apply.setRepairStorage(storage)
     let tooLong = makeGetUpdatesResult(
       seq: 4_098,
       date: 200,
@@ -1708,6 +2151,7 @@ final class SyncTests {
       methodResponses: [
         .getUpdates: [tooLong],
         .getChat: [makeGetChatResult(chatId: 1)],
+        .getChatParticipants: [makeGetChatParticipantsResult()],
         .getChatHistory: [makeGetChatHistoryResult(messages: [])],
       ]
     )
@@ -2291,7 +2735,7 @@ private func waitForCondition(
 }
 
 final actor FakeProtocolClient: ProtocolClientType {
-  nonisolated let events = AsyncChannel<ProtocolSessionEvent>()
+  nonisolated let events = AsyncChannel<ProtocolSessionEventEnvelope>()
 
   private var responses: [InlineProtocol.RpcResult.OneOf_Result?]
   private var methodResponses: [InlineProtocol.Method: [InlineProtocol.RpcResult.OneOf_Result?]]?
@@ -2302,14 +2746,17 @@ final actor FakeProtocolClient: ProtocolClientType {
   private var updatesStartSequences: [Int64] = []
 
   private let gatedCalls: Set<Int>
+  private let gatedMethods: Set<InlineProtocol.Method>
   private var startedCalls: Set<Int> = []
   private var callStartWaiters: [Int: [CheckedContinuation<Void, Never>]] = [:]
   private var callGates: [Int: CheckedContinuation<Void, Never>] = [:]
+  private var methodGates: [InlineProtocol.Method: CheckedContinuation<Void, Never>] = [:]
 
   init(
     responses: [InlineProtocol.RpcResult.OneOf_Result?],
     gateFirstCall: Bool = false,
     gateCallNumbers: Set<Int> = [],
+    gateMethods: Set<InlineProtocol.Method> = [],
     methodResponses: [InlineProtocol.Method: [InlineProtocol.RpcResult.OneOf_Result?]]? = nil,
     methodErrors: [InlineProtocol.Method: [Error]] = [:]
   ) {
@@ -2319,15 +2766,16 @@ final actor FakeProtocolClient: ProtocolClientType {
       gates.insert(1)
     }
     gatedCalls = gates
+    gatedMethods = gateMethods
     self.methodResponses = methodResponses
     self.methodErrors = methodErrors
   }
 
-  func startTransport() async {}
+  func startTransport(sessionID _: UInt64) async {}
 
   func stopTransport() async {}
 
-  func startHandshake() async {}
+  func startHandshake(sessionID _: UInt64) async {}
 
   func sendPing(nonce: UInt64) async {}
 
@@ -2352,6 +2800,11 @@ final actor FakeProtocolClient: ProtocolClientType {
     if gatedCalls.contains(callNumber) {
       await withCheckedContinuation { continuation in
         callGates[callNumber] = continuation
+      }
+    }
+    if gatedMethods.contains(method) {
+      await withCheckedContinuation { continuation in
+        methodGates[method] = continuation
       }
     }
 
@@ -2397,6 +2850,11 @@ final actor FakeProtocolClient: ProtocolClientType {
     gate.resume()
   }
 
+  func releaseMethod(_ method: InlineProtocol.Method) {
+    guard let gate = methodGates.removeValue(forKey: method) else { return }
+    gate.resume()
+  }
+
   func getCallCount() -> Int {
     callCount
   }
@@ -2430,6 +2888,7 @@ actor RecordingApplyUpdates: ApplyUpdates {
   private(set) var repairedChats: [ChatRepairSnapshot] = []
   var result = UpdateApplyResult.success(count: 0)
   var repairResult = true
+  var repairStorage: InMemorySyncStorage?
 
   func setResult(_ result: UpdateApplyResult) {
     self.result = result
@@ -2437,6 +2896,10 @@ actor RecordingApplyUpdates: ApplyUpdates {
 
   func setRepairResult(_ result: Bool) {
     repairResult = result
+  }
+
+  func setRepairStorage(_ storage: InMemorySyncStorage) {
+    repairStorage = storage
   }
 
   func apply(
@@ -2455,9 +2918,14 @@ actor RecordingApplyUpdates: ApplyUpdates {
     return result
   }
 
-  func repairChat(_ snapshot: ChatRepairSnapshot) async -> Bool {
+  func repairChat(_ snapshot: ChatRepairSnapshot) async -> BucketState? {
     repairedChats.append(snapshot)
-    return repairResult
+    guard repairResult else { return nil }
+    await repairStorage?.setBucketState(
+      for: .chat(peer: snapshot.peer),
+      state: snapshot.targetState
+    )
+    return snapshot.targetState
   }
 }
 
@@ -2662,6 +3130,10 @@ private func makeGetChatHistoryResult(
   return .getChatHistory(result)
 }
 
+private func makeGetChatParticipantsResult() -> InlineProtocol.RpcResult.OneOf_Result {
+  .getChatParticipants(InlineProtocol.GetChatParticipantsResult())
+}
+
 private func makeGetUpdatesResult(
   seq: Int64,
   date: Int64,
@@ -2721,6 +3193,18 @@ private func makeNewMessageUpdate(seq: Int64, date: Int64) -> InlineProtocol.Upd
   update.seq = Int32(seq)
   update.date = date
   update.update = .newMessage(payload)
+  return update
+}
+
+private func makeDurableUpdate(
+  seq: Int64,
+  date: Int64,
+  payload: InlineProtocol.Update.OneOf_Update
+) -> InlineProtocol.Update {
+  var update = InlineProtocol.Update()
+  update.seq = Int32(seq)
+  update.date = date
+  update.update = payload
   return update
 }
 

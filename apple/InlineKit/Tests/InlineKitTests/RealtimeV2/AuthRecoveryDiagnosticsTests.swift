@@ -1,5 +1,6 @@
 import Auth
 import Foundation
+import InlineProtocol
 import Logger
 import Testing
 
@@ -7,6 +8,61 @@ import Testing
 
 @Suite("Realtime auth recovery diagnostics", .serialized)
 struct AuthRecoveryDiagnosticsTests {
+  @Test("temporary V3 refresh preserves the realtime session authority")
+  func temporaryV3RefreshPreservesRealtimeAuthority() throws {
+    let first = try inlineProtocolSnapshot(permanentByte: 0x11, temporaryByte: 0x21)
+    let refreshed = try inlineProtocolSnapshot(permanentByte: 0x11, temporaryByte: 0x22)
+    let replacementPermanent = try inlineProtocolSnapshot(permanentByte: 0x12, temporaryByte: 0x22)
+    let replacementSession = try inlineProtocolSnapshot(
+      permanentByte: 0x11,
+      temporaryByte: 0x22,
+      accountSessionId: 8
+    )
+    let removedTemporary = try inlineProtocolSnapshot(permanentByte: 0x11, temporaryByte: nil)
+
+    #expect(first != refreshed)
+    #expect(RealtimeAuthAuthority(snapshot: first) == RealtimeAuthAuthority(snapshot: refreshed))
+    #expect(RealtimeAuthTransition(from: first, to: refreshed).temporaryRefreshed)
+    #expect(!RealtimeAuthTransition(from: first, to: refreshed).requiresReconnect)
+    #expect(RealtimeAuthTransition(from: refreshed, to: removedTemporary).requiresReconnect)
+    #expect(RealtimeAuthTransition(from: removedTemporary, to: refreshed).requiresReconnect)
+    #expect(
+      RealtimeAuthAuthority(snapshot: refreshed) !=
+        RealtimeAuthAuthority(snapshot: replacementPermanent)
+    )
+    #expect(
+      RealtimeAuthAuthority(snapshot: refreshed) !=
+        RealtimeAuthAuthority(snapshot: replacementSession)
+    )
+  }
+
+  @Test("bearer replacement changes the realtime session authority")
+  func bearerReplacementChangesRealtimeAuthority() {
+    let first = authenticatedSnapshot(token: "first")
+    let replacement = authenticatedSnapshot(token: "replacement")
+
+    #expect(RealtimeAuthAuthority(snapshot: first) != RealtimeAuthAuthority(snapshot: replacement))
+  }
+
+  @Test("only the authenticated V3 revocation close becomes terminal auth invalidation")
+  func v3RevocationCloseBecomesTerminalAuthInvalidation() {
+    #expect(
+      InlineProtocolV3Transport.authenticationInvalidationReason(
+        for: InlineProtocolV3ConnectionError.authorizationInvalidated
+      ) == .sessionRevoked
+    )
+    #expect(
+      InlineProtocolV3Transport.authenticationInvalidationReason(
+        for: InlineProtocolV3ConnectionError.closed
+      ) == nil
+    )
+    #expect(
+      InlineProtocolV3Transport.authenticationInvalidationReason(
+        for: InlineProtocolV3ConnectionError.protocolFailure
+      ) == nil
+    )
+  }
+
   @Test("captures an authenticated snapshot missed by the auth observer")
   func observerMissedCapture() {
     let sink = RecordingLogSink()
@@ -142,6 +198,42 @@ struct AuthRecoveryDiagnosticsTests {
     #expect(cancelled == .cancelled)
     #expect(sink.errorMessages.isEmpty)
   }
+}
+
+private func inlineProtocolSnapshot(
+  permanentByte: UInt8,
+  temporaryByte: UInt8?,
+  accountSessionId: Int64 = 7
+) throws -> AuthSnapshot {
+  let permanentKey = [UInt8](repeating: permanentByte, count: 256)
+  let permanent = try InlineProtocolAuthorization(
+    key: permanentKey,
+    keyID: InlineSecureTransport.authKeyID(permanentKey),
+    serverSalt: 1,
+    temporary: false,
+    expiresAt: nil
+  )
+  let temporary = try temporaryByte.map { temporaryByte in
+    let temporaryKey = [UInt8](repeating: temporaryByte, count: 256)
+    return try InlineProtocolAuthorization(
+      key: temporaryKey,
+      keyID: InlineSecureTransport.authKeyID(temporaryKey),
+      serverSalt: 2,
+      temporary: true,
+      expiresAt: 1_900_000_000
+    )
+  }
+  return AuthSnapshot(
+    status: .authenticatedV3(userId: 1),
+    didHydrate: true,
+    inlineProtocol: InlineProtocolSessionCredentials(
+      userId: 1,
+      accountSessionId: accountSessionId,
+      permanent: permanent,
+      temporary: temporary,
+      createdAt: Date(timeIntervalSince1970: 1)
+    )
+  )
 }
 
 private func authenticatedSnapshot(token: String) -> AuthSnapshot {

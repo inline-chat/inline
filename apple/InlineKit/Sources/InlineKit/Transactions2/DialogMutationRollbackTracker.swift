@@ -151,6 +151,16 @@ actor DialogMutationRollbackTracker {
     beginNotificationResolution(intentID: intentID, peer: peer, outcome: .failed)
   }
 
+  func abandonNotificationIntent(intentID: String?, peer: Peer) {
+    guard let intentID, var chain = notificationChainsByPeer[peer] else { return }
+    chain.intents.removeAll(where: { $0.id == intentID })
+    if chain.intents.isEmpty, !hasNotificationRecordReservation(peer: peer) {
+      notificationChainsByPeer[peer] = nil
+    } else {
+      notificationChainsByPeer[peer] = chain
+    }
+  }
+
   func finalizeNotificationResolution(token: UInt64, peer: Peer) {
     guard var chain = notificationChainsByPeer[peer],
           let index = chain.intents.firstIndex(where: { intent in

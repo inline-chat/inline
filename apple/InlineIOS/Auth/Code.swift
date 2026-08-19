@@ -132,6 +132,9 @@ extension Code {
           mainViewRouter.setRoute(route: .main)
         }
 
+      } catch InlineProtocolNativeLoginError.inviteRequired {
+        formState.reset()
+        nav.push(.inviteCodeForEmail(email: email, challengeToken: challengeToken))
       } catch is CancellationError {
         formState.reset()
       } catch let error as APIError {

@@ -1,4 +1,5 @@
 import Foundation
+import InlineProtocol
 import Security
 import Testing
 
@@ -85,17 +86,22 @@ final class Auth2StoreTests {
   private struct Harness {
     let namespace: String
     let userDefaultsKey: String
+    let logoutPendingKey: String
 
     init() {
       namespace = UUID().uuidString
-      userDefaultsKey = "\(AuthKeychainConfig.userDefaultsPrefix(mocked: true, namespace: namespace))userId"
+      let prefix = AuthKeychainConfig.userDefaultsPrefix(mocked: true, namespace: namespace)
+      userDefaultsKey = "\(prefix)userId"
+      logoutPendingKey = "\(prefix)logoutPending"
     }
 
     func resetStorage() {
       AuthKeychainConfig.mockDelete("token", namespace: namespace)
       AuthKeychainConfig.mockDelete("credentials_v2", namespace: namespace)
+      AuthKeychainConfig.mockDelete("inline_protocol_credentials_v1", namespace: namespace)
       DatabaseKeyStore.delete(mocked: true, namespace: namespace)
       UserDefaults.standard.removeObject(forKey: userDefaultsKey)
+      UserDefaults.standard.removeObject(forKey: logoutPendingKey)
     }
 
     func makeStore() -> (cache: AuthSnapshotCache, store: AuthStore) {
@@ -103,6 +109,22 @@ final class Auth2StoreTests {
       let store = AuthStore(cache: cache, mocked: true, namespace: namespace)
       return (cache: cache, store: store)
     }
+  }
+
+  private func v3Credentials(userID: Int64 = 42) throws -> InlineProtocolSessionCredentials {
+    let key = Array(UInt8.min...UInt8.max)
+    let authorization = try InlineProtocolAuthorization(
+      key: key,
+      keyID: InlineSecureTransport.authKeyID(key),
+      serverSalt: 7,
+      temporary: false,
+      expiresAt: nil
+    )
+    return InlineProtocolSessionCredentials(
+      userId: userID,
+      accountSessionId: 84,
+      permanent: authorization
+    )
   }
 
   @Test("loads authenticated snapshot from credentials_v2")
@@ -127,6 +149,60 @@ final class Auth2StoreTests {
 
     let writtenBack = UserDefaults.standard.object(forKey: h.userDefaultsKey) as? NSNumber
     #expect(writtenBack?.int64Value == 42)
+  }
+
+  @Test("saving V3 credentials removes bearer authority")
+  func savingV3RemovesBearerAuthority() async throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+
+    let (cache, store) = h.makeStore()
+    await store.saveCredentials(token: "42:legacy", userId: 42)
+    try await store.saveInlineProtocolCredentials(v3Credentials())
+
+    #expect(AuthKeychainConfig.mockGetString("token", namespace: h.namespace) == nil)
+    #expect(AuthKeychainConfig.mockGetData("credentials_v2", namespace: h.namespace) == nil)
+    #expect(cache.snapshot().status == .authenticatedV3(userId: 42))
+    #expect(cache.snapshot().token == nil)
+  }
+
+  @Test("saving bearer credentials removes V3 authority")
+  func savingBearerRemovesV3Authority() async throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+
+    let (cache, store) = h.makeStore()
+    try await store.saveInlineProtocolCredentials(v3Credentials())
+    await store.saveCredentials(token: "42:legacy", userId: 42)
+
+    #expect(AuthKeychainConfig.mockGetData("inline_protocol_credentials_v1", namespace: h.namespace) == nil)
+    guard case let .authenticated(credentials) = cache.snapshot().status else {
+      Issue.record("Expected bearer-authenticated status")
+      return
+    }
+    #expect(credentials.token == "42:legacy")
+    #expect(cache.snapshot().inlineProtocol == nil)
+  }
+
+  @Test("hydration prefers V3 and repairs mixed stored authority")
+  func hydrationRepairsMixedAuthority() async throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+
+    let v2 = try JSONEncoder().encode(AuthCredentials(userId: 7, token: "7:legacy"))
+    let v3 = try JSONEncoder().encode(v3Credentials(userID: 42))
+    AuthKeychainConfig.mockSet("7:legacy", forKey: "token", namespace: h.namespace)
+    AuthKeychainConfig.mockSet(v2, forKey: "credentials_v2", namespace: h.namespace)
+    AuthKeychainConfig.mockSet(v3, forKey: "inline_protocol_credentials_v1", namespace: h.namespace)
+
+    let (cache, _) = h.makeStore()
+    #expect(cache.snapshot().status == .authenticatedV3(userId: 42))
+    #expect(cache.snapshot().inlineProtocol?.userId == 42)
+    #expect(AuthKeychainConfig.mockGetString("token", namespace: h.namespace) == nil)
+    #expect(AuthKeychainConfig.mockGetData("credentials_v2", namespace: h.namespace) == nil)
   }
 
   @Test("launch repair fills missing userId hint from cached credentials")
@@ -230,6 +306,28 @@ final class Auth2StoreTests {
     await store.logOut()
     let e2 = await it.next()
     #expect(e2 == .logout)
+  }
+
+  @Test("pending logout blocks restart authentication and resumes credential destruction")
+  func pendingLogoutBlocksRestartAndDestroysCredentials() async throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+
+    let (_, store) = h.makeStore()
+    try await store.saveInlineProtocolCredentials(v3Credentials())
+    await store.beginLogout()
+
+    let recoveredCache = AuthSnapshotCache(
+      initial: AuthSnapshot(status: .hydrating, didHydrate: false)
+    )
+    let recovered = AuthStore(cache: recoveredCache, mocked: true, namespace: h.namespace)
+    #expect(recoveredCache.snapshot().status == .unauthenticated)
+
+    await recovered.recoverInterruptedLogoutIfNeeded()
+
+    #expect(AuthKeychainConfig.mockGetData("inline_protocol_credentials_v1", namespace: h.namespace) == nil)
+    #expect(await recovered.hasPendingLogout() == false)
   }
 
   @Test("broadcasts login and logout events to every subscriber")

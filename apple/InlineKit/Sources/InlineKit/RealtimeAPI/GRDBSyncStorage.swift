@@ -99,28 +99,7 @@ public struct GRDBSyncStorage: SyncStorage {
   public func advanceBucketState(for key: BucketKey, state: BucketState) async -> BucketState? {
     do {
       return try await db.dbWriter.write { database in
-        let existing = try DbBucketState
-          .filter(
-            DbBucketState.Columns.bucketType == key.getBucket()
-              && DbBucketState.Columns.entityId == key.getEntityId()
-          )
-          .fetchOne(database)
-
-        if let existing, existing.seq > state.seq {
-          return BucketState(date: existing.date, seq: existing.seq)
-        }
-
-        let effectiveState = BucketState(
-          date: max(existing?.date ?? 0, state.date),
-          seq: state.seq
-        )
-        try DbBucketState(
-          bucketType: key.getBucket(),
-          entityId: key.getEntityId(),
-          date: effectiveState.date,
-          seq: effectiveState.seq
-        ).save(database)
-        return effectiveState
+        try Self.advanceBucketState(for: key, state: state, in: database)
       }
     } catch {
       AppDatabase.log.error("Failed to advance bucket state for \(key): \(error)")
@@ -192,6 +171,35 @@ public struct GRDBSyncStorage: SyncStorage {
 }
 
 extension GRDBSyncStorage {
+  static func advanceBucketState(
+    for key: BucketKey,
+    state: BucketState,
+    in database: Database
+  ) throws -> BucketState {
+    let existing = try DbBucketState
+      .filter(
+        DbBucketState.Columns.bucketType == key.getBucket()
+          && DbBucketState.Columns.entityId == key.getEntityId()
+      )
+      .fetchOne(database)
+
+    if let existing, existing.seq > state.seq {
+      return BucketState(date: existing.date, seq: existing.seq)
+    }
+
+    let effectiveState = BucketState(
+      date: max(existing?.date ?? 0, state.date),
+      seq: state.seq
+    )
+    try DbBucketState(
+      bucketType: key.getBucket(),
+      entityId: key.getEntityId(),
+      date: effectiveState.date,
+      seq: effectiveState.seq
+    ).save(database)
+    return effectiveState
+  }
+
   /// Seeds a resource cursor carried by an authoritative snapshot without ever
   /// moving an already-newer local cursor backwards.
   static func seedSnapshotBucketState(

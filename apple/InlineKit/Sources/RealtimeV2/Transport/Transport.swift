@@ -14,6 +14,10 @@ public enum TransportEvent: Sendable {
 
   /// A message was received from the server.
   case message(ServerProtocolMessage)
+
+  /// The authenticated carrier returned an MTProto service-level deadline result
+  /// for this request. The connection remains usable; only this request is uncertain.
+  case rpcCommitOutcomeUnknown(msgId: UInt64)
 }
 
 public enum TransportError: Error {
@@ -35,4 +39,13 @@ public protocol Transport: Sendable {
   /// Send an encoded `ClientMessage` to the server.  Throws if the transport
   /// is not currently in the `.connected` state.
   func send(_ message: ClientMessage) async throws
+
+  /// Whether `.connected` already represents an application-authenticated session.
+  /// Legacy V2 still performs `connectionInit`; V3 verifies its authorization key before
+  /// publishing `.connected` and must not synthesize a second asynchronous open handshake.
+  func isApplicationAuthenticatedOnConnect() async -> Bool
+}
+
+public extension Transport {
+  func isApplicationAuthenticatedOnConnect() async -> Bool { false }
 }

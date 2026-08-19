@@ -59,6 +59,7 @@ private extension DefaultTransactionPersistenceHandler {
       id: wrapper.id,
       date: wrapper.date,
       rpcErrorRetryCount: wrapper.rpcErrorRetryCount,
+      dispatchPhase: wrapper.dispatchPhase,
       type: TransactionTypeRegistry.typeString(for: wrapper.transaction),
       transactionData: try JSONEncoder().encode(wrapper.transaction)
     )
@@ -81,7 +82,11 @@ private extension DefaultTransactionPersistenceHandler {
         id: persisted.id,
         date: persisted.date,
         transaction: transaction,
-        rpcErrorRetryCount: persisted.rpcErrorRetryCount ?? 0
+        rpcErrorRetryCount: persisted.rpcErrorRetryCount ?? 0,
+        // Files written before dispatch phases existed are ambiguous: they may
+        // have survived a crash after socket write. Never reinterpret them as
+        // definitely unsent work.
+        dispatchPhase: persisted.dispatchPhase ?? .mayHaveExecuted
       )
     } catch {
       log.error("Failed to load transaction from \(file.lastPathComponent)", error: error)
@@ -139,6 +144,7 @@ private struct StoredTransaction: Codable {
   let id: TransactionId
   let date: Date
   let rpcErrorRetryCount: Int?
+  let dispatchPhase: TransactionDispatchPhase?
   let type: String
   let transactionData: Data
 }

@@ -10,6 +10,11 @@ struct RealtimeDirectRpcErrorPresentationTests {
   func transportFailures() {
     #expect(RealtimeDirectRpcError.notConnected.localizedDescription == "Inline is offline. Check your connection and try again.")
     #expect(RealtimeDirectRpcError.timeout.localizedDescription == "The request took too long. Try again.")
+    #expect(
+      RealtimeDirectRpcError.commitOutcomeUnknown.localizedDescription ==
+        "Inline may have completed this action. Refresh to confirm before trying again."
+    )
+    #expect(RealtimeDirectRpcError.capacityExceeded.localizedDescription == "Inline is busy. Wait a moment and try again.")
     #expect(RealtimeDirectRpcError.notAuthorized.localizedDescription == "Your session has expired. Sign in again.")
   }
 

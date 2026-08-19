@@ -8,6 +8,15 @@ public enum InlineProtocolError: Error, Equatable, Sendable {
   case invalidInput
 }
 
+extension InlineProtocolError: LocalizedError {
+  public var errorDescription: String? {
+    switch self {
+    case .invalidEncryptedRecord: "Inline Protocol encrypted record authentication failed."
+    case .invalidInput: "Inline Protocol input or handshake data was invalid."
+    }
+  }
+}
+
 public enum InlineProtocolDirection: Sendable {
   case clientToServer
   case serverToClient
@@ -56,6 +65,16 @@ public enum InlineApplicationObject: Equatable, Sendable {
   case update(payload: [UInt8])
 }
 
+/// The MTProto service-level `rpc_error` carried inside an outer `rpc_result`.
+/// This remains distinct from the protobuf `RpcError` application payload.
+public struct InlineTLRPCError: Equatable, Sendable {
+  public let code: Int32
+
+  public init(code: Int32) {
+    self.code = code
+  }
+}
+
 public enum InlineAbridgedFrame: Equatable, Sendable {
   case packet(payload: [UInt8], quickAckRequested: Bool)
   case quickAck(id: UInt32)
@@ -74,6 +93,7 @@ public struct InlineInvokeAfter: Equatable, Sendable {
 public enum InlineSecureTransport {
   public static let maximumPacketBytes = 16 * 1024 * 1024
   public static let resultConstructor: UInt32 = 0xac3ddc54
+  public static let rpcErrorConstructor: UInt32 = 0x2144ca19
   public static let updateConstructor: UInt32 = 0xdc412c98
   public static let invokeConstructor: UInt32 = 0xeb7d4aa6
   public static let invokeAfterMessageConstructor: UInt32 = 0xcb9f372d
@@ -111,19 +131,11 @@ public enum InlineSecureTransport {
     let aesEncrypted = try aesIGEEncrypt(Array(dataWithHash), key: temporaryKey, iv: [UInt8](repeating: 0, count: 32))
     let keyAESEncrypted = xor(temporaryKey, sha256(aesEncrypted)) + aesEncrypted
     guard lexicographicallyLess(keyAESEncrypted, modulus) else { throw InlineProtocolError.invalidInput }
-    let publicKey = try rsaPublicKey(modulus: modulus, exponent: exponent)
-    var error: Unmanaged<CFError>?
-    guard let encrypted = SecKeyCreateEncryptedData(
-      publicKey,
-      .rsaEncryptionRaw,
-      Data(keyAESEncrypted) as CFData,
-      &error
-    ) as Data? else {
-      if let error { throw error.takeRetainedValue() }
-      throw InlineProtocolError.invalidInput
-    }
-    let encryptedData = [UInt8](encrypted)
-    guard encryptedData.count == 256 else { throw InlineProtocolError.invalidInput }
+    let encryptedData = try modularExponentiation(
+      base: keyAESEncrypted,
+      exponent: exponent,
+      modulus: modulus
+    )
     return InlineRSAPadIntermediate(
       dataWithPadding: dataWithPadding,
       dataWithHash: Array(dataWithHash),
@@ -220,6 +232,33 @@ public enum InlineSecureTransport {
     else { throw InlineProtocolError.invalidInput }
   }
 
+  static func modularExponentiation(base: [UInt8], exponent: [UInt8], modulus: [UInt8]) throws -> [UInt8] {
+    guard modulus.count == 256,
+          !base.isEmpty,
+          base.count <= modulus.count,
+          !exponent.isEmpty
+    else { throw InlineProtocolError.invalidInput }
+    let paddedBase = [UInt8](repeating: 0, count: modulus.count - base.count) + base
+    guard lexicographicallyLess(paddedBase, modulus) else { throw InlineProtocolError.invalidInput }
+
+    // Raw RSA is the Security framework's native big-endian modular exponentiation primitive.
+    // This path, like the previous BigUInt path, does not claim constant-time handling of the exponent.
+    let publicKey = try rsaPublicKey(modulus: modulus, exponent: exponent)
+    var error: Unmanaged<CFError>?
+    guard let result = SecKeyCreateEncryptedData(
+      publicKey,
+      .rsaEncryptionRaw,
+      Data(paddedBase) as CFData,
+      &error
+    ) as Data? else {
+      if let error { throw error.takeRetainedValue() }
+      throw InlineProtocolError.invalidInput
+    }
+    let bytes = [UInt8](result)
+    guard bytes.count == modulus.count else { throw InlineProtocolError.invalidInput }
+    return bytes
+  }
+
   public static func encodeInlineInvoke(
     payload: [UInt8],
     layer: Int32 = realtimeLayer
@@ -251,6 +290,17 @@ public enum InlineSecureTransport {
     case updateConstructor: return .update(payload: decoded.value)
     default: throw InlineProtocolError.invalidInput
     }
+  }
+
+  /// Decodes the code of an MTProto service-level `rpc_error` result.
+  /// A non-rpc-error result returns nil; a malformed rpc-error is rejected.
+  public static func decodeTLRPCError(_ bytes: [UInt8]) throws -> InlineTLRPCError? {
+    guard bytes.count >= 4 else { return nil }
+    guard try readUInt32(bytes, at: 0) == rpcErrorConstructor else { return nil }
+    guard bytes.count >= 8 else { throw InlineProtocolError.invalidInput }
+    let message = try decodeTLBytes(Array(bytes.dropFirst(8)))
+    guard message.consumed == bytes.count - 8 else { throw InlineProtocolError.invalidInput }
+    return InlineTLRPCError(code: try readInt32(bytes, at: 4))
   }
 
   public static func encodeInvokeAfterMessage(messageID: Int64, query: [UInt8]) throws -> [UInt8] {
@@ -382,7 +432,9 @@ public enum InlineSecureTransport {
       + littleEndian(Int32(fields.body.count))
       + fields.body
       + padding
-    guard plaintext.count.isMultiple(of: 16) else { throw InlineProtocolError.invalidInput }
+    guard plaintext.count.isMultiple(of: 16),
+          24 + plaintext.count <= maximumPacketBytes
+    else { throw InlineProtocolError.invalidInput }
     let messageKey = try computeV2MessageKey(authKey: authKey, plaintext: plaintext, direction: direction)
     let aes = try deriveV2AES(authKey: authKey, messageKey: messageKey, direction: direction)
     return try authKeyID(authKey) + messageKey + aesIGEEncrypt(plaintext, key: aes.key, iv: aes.iv)
@@ -634,7 +686,7 @@ public enum InlineSecureTransport {
     return output
   }
 
-  private static func constantTimeEqual(_ left: [UInt8], _ right: [UInt8]) -> Bool {
+  static func constantTimeEqual(_ left: [UInt8], _ right: [UInt8]) -> Bool {
     var difference = left.count ^ right.count
     for index in 0..<max(left.count, right.count) {
       difference |= Int((index < left.count ? left[index] : 0) ^ (index < right.count ? right[index] : 0))

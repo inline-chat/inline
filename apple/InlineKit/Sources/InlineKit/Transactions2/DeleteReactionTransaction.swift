@@ -48,6 +48,10 @@ public struct DeleteReactionTransaction: Transaction2 {
   public var peerId: Peer { context.peerId }
   public var chatId: Int64 { context.chatId }
 
+  public var executionKey: TransactionExecutionKey? {
+    .chatMutation(chatID: context.chatId)
+  }
+
   // Methods
   public func optimistic() async {
     log.debug("Optimistic delete reaction \(messageId) \(peerId) \(chatId)")

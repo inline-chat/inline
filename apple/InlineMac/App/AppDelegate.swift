@@ -827,6 +827,8 @@ extension AppDelegate {
       return
     }
 
+    await Auth.shared.beginLogout()
+
     // Navigate outside of the app
     dependencies.viewModel.navigate(.onboarding)
 

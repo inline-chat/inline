@@ -27,7 +27,7 @@ public enum DialogNotificationSettingSelection: String, Codable, Sendable, CaseI
 public struct UpdateDialogNotificationSettingsTransaction: Transaction2 {
   public var method: InlineProtocol.Method = .updateDialogNotificationSettings
   public var context: Context
-  public var type: TransactionKindType = .mutation(MutationConfig(retryAfterAck: true))
+  public var type: TransactionKindType = .mutation()
 
   public struct Context: Sendable, Codable {
     public var peerId: Peer
@@ -118,6 +118,14 @@ public struct UpdateDialogNotificationSettingsTransaction: Transaction2 {
   public func failed(error: TransactionError2) async {
     log.error("UpdateDialogNotificationSettings transaction failed", error: error)
     await rollbackNotificationSettings()
+  }
+
+  public func commitOutcomeUnknown() async {
+    log.warning("UpdateDialogNotificationSettings commit outcome is unknown; preserving optimistic state")
+    await DialogMutationRollbackTracker.shared.abandonNotificationIntent(
+      intentID: context.intentId,
+      peer: context.peerId
+    )
   }
 
   public func cancelled() async {

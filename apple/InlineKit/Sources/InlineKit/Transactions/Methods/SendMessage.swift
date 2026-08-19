@@ -420,7 +420,7 @@ public struct TransactionSendMessage: Transaction {
         return code != 400 && code != 401
       case .notAuthorized:
         return false
-      case .notConnected, .timeout, .unknown:
+      case .notConnected, .timeout, .commitOutcomeUnknown, .capacityExceeded, .unknown:
         return true
       }
     }

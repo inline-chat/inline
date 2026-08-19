@@ -165,7 +165,10 @@ public enum DocumentPendingUploadDisplayState: Equatable, Sendable {
       let totalBytes = max(progress.totalBytes, progress.bytesSent)
       return .uploading(bytesSent: progress.bytesSent, totalBytes: totalBytes)
     case .failed:
-      return .inactive
+      // A failed attempt does not make a pending outgoing attachment complete.
+      // The transaction owner may retry it, and the user must retain a visible
+      // pending/cancel state until that transaction itself becomes terminal.
+      return .processing
     }
   }
 }

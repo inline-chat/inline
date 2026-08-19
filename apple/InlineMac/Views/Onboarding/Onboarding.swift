@@ -87,6 +87,9 @@ struct Onboarding: View {
     .task {
       viewModel.setMainWindowViewModel(windowViewModel)
     }
+    .onDisappear {
+      Task { await InlineProtocolNativeLogin.shared.cancel() }
+    }
   }
 
   @ViewBuilder

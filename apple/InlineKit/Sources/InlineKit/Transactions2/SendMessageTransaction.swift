@@ -16,7 +16,8 @@ public struct SendMessageTransaction: Transaction2 {
   // Properties
   public var method: InlineProtocol.Method = .sendMessage
   public var context: Context
-  public var type: TransactionKindType = .mutation(MutationConfig(retryAfterAck: true))
+  public var type: TransactionKindType = .mutation()
+  public var reconnectReplayPolicy: TransactionReconnectPolicy? { .replaySafe }
 
   public struct Context: Sendable, Codable {
     public var text: String?
@@ -114,7 +115,7 @@ public struct SendMessageTransaction: Transaction2 {
     entities: MessageEntities? = nil,
     sendMode: MessageSendMode? = nil
   ) {
-    let randomId = Int64.random(in: 0 ... Int64.max)
+    let randomId = Int64.random(in: 1 ... Int64.max)
     context = Context(
       text: text,
       peerId: peerId,
@@ -162,6 +163,10 @@ public struct SendMessageTransaction: Transaction2 {
 
   public var blockers: [TransactionBlocker] {
     [.chatCreated(chatId: context.chatId)]
+  }
+
+  public var executionKey: TransactionExecutionKey? {
+    .chatMutation(chatID: context.chatId)
   }
 
   // Methods

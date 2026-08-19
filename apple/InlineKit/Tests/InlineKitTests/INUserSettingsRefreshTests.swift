@@ -18,11 +18,11 @@ struct INUserSettingsRefreshTests {
 
     #expect(first.executionKey == second.executionKey)
     let type = first.type
-    guard case let .mutation(config) = type else {
+    guard case .mutation = type else {
       Issue.record("Expected a mutation transaction")
       return
     }
-    #expect(config.retryAfterAck)
+    #expect(first.reconnectReplayPolicy == nil)
   }
 
   @Test("legacy notification transactions do not overwrite privacy")

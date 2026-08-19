@@ -9,6 +9,8 @@ public enum RealtimeDirectRpcError: Error {
   case notAuthorized
   case notConnected
   case timeout
+  case commitOutcomeUnknown
+  case capacityExceeded
   case rpcError(errorCode: InlineProtocol.RpcError.Code, message: String?, code: Int)
   case unknown(Error)
 }
@@ -38,6 +40,15 @@ private final class TransactionSendCancellationState: @unchecked Sendable {
 private struct PendingTransactionContinuation {
   let continuation: CheckedContinuation<InlineProtocol.RpcResult.OneOf_Result?, any Error>
   let cancellationState: TransactionSendCancellationState
+}
+
+private enum TransactionDispatchOutcome {
+  case dispatched
+  case deferred
+}
+
+private enum TransactionDispatchPreparationError: Error {
+  case persistenceUnavailable
 }
 
 /// This root actor manages the connection, sync, transactions, queries, etc.
@@ -74,6 +85,7 @@ public actor RealtimeV2 {
   private var syncActivityInProgress = false
   private var lastSnapshotState: ConnectionState = .stopped
   private var didNotifyConnectionInitFailure = false
+  private var didNotifyAuthInvalidated = false
   private let authRecoveryDiagnostics = RealtimeAuthRecoveryDiagnostics()
   private let authObservationProbe = AuthObservationProbe()
   private var authRecoverySequence: UInt64 = 0
@@ -234,6 +246,7 @@ public actor RealtimeV2 {
       await task.value
     }
     await connectionTermination
+    await connectionManager.finishSessionEventForwarding()
     await waitForTransactionOperationsToFinish()
 
     if let endingOwner {
@@ -270,6 +283,7 @@ public actor RealtimeV2 {
 
         if snapshot.state == .open && self.lastSnapshotState != .open {
           self.didNotifyConnectionInitFailure = false
+          self.didNotifyAuthInvalidated = false
           await self.restartTransactions()
         }
         self.lastSnapshotState = snapshot.state
@@ -279,8 +293,12 @@ public actor RealtimeV2 {
     // Session events (RPC + updates)
     Task {
       self.log.trace("Starting session events listener")
-      for await event in await self.connectionManager.sessionEvents() {
-        guard !Task.isCancelled else { return }
+      for await envelope in await self.connectionManager.sessionEvents() {
+        guard !Task.isCancelled else {
+          await envelope.markProcessed()
+          return
+        }
+        let event = envelope.event
 
         switch event {
         case let .ack(msgId):
@@ -293,7 +311,17 @@ public actor RealtimeV2 {
 
         case let .rpcError(msgId, rpcError):
           self.log.trace("Received RPC error for message \(msgId)")
+          if rpcError.errorCode == .unauthenticated {
+            await self.handleAuthInvalidated()
+          }
           await self.completeTransaction(msgId: msgId, error: TransactionError.rpcError(rpcError))
+
+        case let .rpcCommitOutcomeUnknown(msgId):
+          self.log.warning("Received carrier commit-unknown result for message \(msgId)")
+          await self.completeTransaction(
+            msgId: msgId,
+            error: TransactionError.commitOutcomeUnknownAfterReconnect
+          )
 
         case let .updates(updates):
           self.log.trace("Received updates \(updates)")
@@ -313,6 +341,7 @@ public actor RealtimeV2 {
         default:
           break
         }
+        await envelope.markProcessed()
       }
     }.store(in: &tasks)
 
@@ -326,12 +355,15 @@ public actor RealtimeV2 {
           continue
         }
 
-        while let dequeueResult = await self.transactions.dequeue(owner: owner) {
-          guard await self.isCurrentTransactionOwner(owner) else { break }
+        transactionDrain: while await self.canExecuteTransactions(),
+                                await self.isCurrentTransactionOwner(owner),
+                                let dequeueResult = await self.transactions.dequeue(owner: owner) {
           switch dequeueResult {
             case let .ready(transaction):
               self.log.trace("Dequeued transaction \(transaction.id)")
-              await self.runTransaction(transaction, owner: owner)
+              if await self.runTransaction(transaction, owner: owner) == .deferred {
+                break transactionDrain
+              }
             case let .failed(transaction):
               self.log.trace("Dropping blocked transaction \(transaction.id) after dependency failure")
               await self.failQueuedTransaction(transaction, error: .dependencyFailed)
@@ -426,28 +458,87 @@ public actor RealtimeV2 {
     }
   }
 
-  private func runTransaction(_ transactionWrapper: TransactionWrapper, owner expectedOwner: TransactionOwner) async {
-    guard isCurrentTransactionOwner(expectedOwner) else { return }
+  private func runTransaction(
+    _ transactionWrapper: TransactionWrapper,
+    owner expectedOwner: TransactionOwner
+  ) async -> TransactionDispatchOutcome {
+    guard isCurrentTransactionOwner(expectedOwner) else {
+      await transactions.requeue(transactionId: transactionWrapper.id, signal: false)
+      return .deferred
+    }
     log.trace("Running transaction \(transactionWrapper.id) with method \(transactionWrapper.transaction.method)")
     let transaction = transactionWrapper.transaction
+    let queueDurationMilliseconds = max(0, Int(Date().timeIntervalSince(transactionWrapper.date) * 1_000))
+    log.debug(
+      "Transaction dispatch started transaction_id=\(transactionWrapper.id) method=\(transaction.method) queue_ms=\(queueDurationMilliseconds)"
+    )
     beginTransactionOperation()
     defer { endTransactionOperation() }
 
     do {
-      guard isCurrentTransactionOwner(expectedOwner) else { return }
-      let msgId = try await session.sendRpc(method: transaction.method, input: transaction.input)
-      guard isCurrentTransactionOwner(expectedOwner) else { return }
-      await transactions.running(
-        transactionId: transactionWrapper.id,
-        rpcMsgId: msgId,
-        owner: expectedOwner
-      )
-    } catch is CancellationError {
-      await transactions.requeue(transactionId: transactionWrapper.id, signal: false)
-    } catch {
-      log.warning("Transaction dispatch deferred method=\(transaction.method) reason=transport_unavailable")
+      guard isCurrentTransactionOwner(expectedOwner) else {
+        await transactions.requeue(transactionId: transactionWrapper.id, signal: false)
+        return .deferred
+      }
+      try await session.sendRpc(
+        method: transaction.method,
+        input: transaction.input
+      ) { [transactions] msgId in
+        switch await transactions.prepareForDispatch(
+          transactionId: transactionWrapper.id,
+          rpcMsgId: msgId,
+          owner: expectedOwner
+        ) {
+          case .prepared:
+            break
+          case .ownerUnavailable:
+            throw ProtocolSessionError.stopped
+          case .persistenceUnavailable:
+            throw TransactionDispatchPreparationError.persistenceUnavailable
+        }
+      }
+      guard isCurrentTransactionOwner(expectedOwner) else { return .dispatched }
+      return .dispatched
+    } catch TransactionDispatchPreparationError.persistenceUnavailable {
+      log.warning("Transaction dispatch deferred method=\(transaction.method) reason=persistence_unavailable")
       await transactions.requeue(transactionId: transactionWrapper.id, signal: false)
       scheduleTransactionQueueRetry()
+      return .deferred
+    } catch ProtocolSessionError.stopped {
+      log.warning("Transaction dispatch deferred method=\(transaction.method) reason=not_dispatched")
+      await transactions.requeue(transactionId: transactionWrapper.id, signal: false)
+      scheduleTransactionQueueRetry()
+      return .deferred
+    } catch ProtocolSessionError.notConnected {
+      // The transport rejected the write before accepting bytes. The durable
+      // dispatch marker was intentionally conservative, but this boundary is
+      // still known-unsent and may safely return to the queue, including for
+      // non-replayable mutations.
+      log.warning("Transaction dispatch deferred method=\(transaction.method) reason=transport_not_connected")
+      await transactions.requeueBeforeDispatch(transactionId: transactionWrapper.id, signal: false)
+      scheduleTransactionQueueRetry()
+      return .deferred
+    } catch {
+      if let unresolved = await transactions.recoverAfterUncertainDispatch(
+        transactionId: transactionWrapper.id
+      ) {
+        log.error(
+          "Transaction commit outcome unknown after transport failure method=\(transaction.method)",
+          error: error
+        )
+        await transaction.commitOutcomeUnknown()
+        await transactions.deletePersisted(transactionId: unresolved.id, owner: expectedOwner)
+        await transactions.finishExecution(for: unresolved)
+        resumeTransactionContinuation(
+          for: transactionWrapper.id,
+          throwing: TransactionError.commitOutcomeUnknownAfterReconnect
+        )
+        await transactions.signalQueue()
+        return .dispatched
+      }
+      log.warning("Replaying application-idempotent transaction method=\(transaction.method)")
+      scheduleTransactionQueueRetry()
+      return .deferred
     }
   }
 
@@ -461,7 +552,11 @@ public actor RealtimeV2 {
     beginTransactionOperation()
     defer { endTransactionOperation() }
 
-    guard let transactionWrapper = await transactions.complete(rpcMsgId: msgId, owner: completingOwner) else {
+    guard let transactionWrapper = await transactions.complete(
+      rpcMsgId: msgId,
+      owner: completingOwner,
+      deletePersisted: false
+    ) else {
       return
     }
 
@@ -475,6 +570,10 @@ public actor RealtimeV2 {
     }
 
     log.trace("Transaction \(transactionId) completed with result")
+    let totalDurationMilliseconds = max(0, Int(Date().timeIntervalSince(transactionWrapper.date) * 1_000))
+    log.debug(
+      "Transaction completed transaction_id=\(transactionId) method=\(transaction.method) total_ms=\(totalDurationMilliseconds)"
+    )
 
     do {
       try await transaction.apply(rpcResult)
@@ -483,6 +582,7 @@ public actor RealtimeV2 {
         await transactions.finishExecution(for: transactionWrapper)
         return
       }
+      await transactions.deletePersisted(transactionId: transactionId, owner: completingOwner)
       await transactions.finishExecution(for: transactionWrapper)
       await transactions.satisfy(blockers: transaction.satisfiedBlockersOnSuccess)
       resumeTransactionContinuation(for: transactionId, returning: rpcResult)
@@ -493,6 +593,7 @@ public actor RealtimeV2 {
         return
       }
       await transaction.failed(error: TransactionError.invalid)
+      await transactions.deletePersisted(transactionId: transactionId, owner: completingOwner)
       await transactions.finishExecution(for: transactionWrapper)
       await transactions.signalQueue()
       resumeTransactionContinuation(for: transactionId, throwing: TransactionError.invalid)
@@ -508,7 +609,7 @@ public actor RealtimeV2 {
     guard let transactionWrapper = await transactions.complete(
       rpcMsgId: msgId,
       owner: completingOwner,
-      deletePersisted: !shouldRetry
+      deletePersisted: false
     ) else {
       return
     }
@@ -519,6 +620,17 @@ public actor RealtimeV2 {
     guard completingOwner == transactionOwner else {
       await transaction.cancelled()
       await transactions.finishExecution(for: transactionWrapper)
+      return
+    }
+
+    if case .commitOutcomeUnknownAfterReconnect = error {
+      log.warning("Transaction commit outcome is unknown transaction_id=\(transactionId)")
+      await transaction.commitOutcomeUnknown()
+      await transactions.deletePersisted(transactionId: transactionId, owner: completingOwner)
+      await transactions.finishExecution(for: transactionWrapper)
+      guard completingOwner == transactionOwner else { return }
+      resumeTransactionContinuation(for: transactionId, throwing: error)
+      await transactions.signalQueue()
       return
     }
 
@@ -551,6 +663,7 @@ public actor RealtimeV2 {
       return
     }
     await transaction.failed(error: error)
+    await transactions.deletePersisted(transactionId: transactionId, owner: completingOwner)
     await transactions.finishExecution(for: transactionWrapper)
     guard completingOwner == transactionOwner else { return }
     resumeTransactionContinuation(for: transactionId, throwing: error)
@@ -591,14 +704,18 @@ public actor RealtimeV2 {
       let transaction = wrapper.transaction
       let transactionId = wrapper.id
       log.warning(
-        "Failing acked transaction without retryAfterAck after reconnect method=\(transaction.method)"
+        "Failing non-replayable transaction with unknown commit outcome after reconnect method=\(transaction.method)"
       )
       beginTransactionOperation()
-      await transaction.failed(error: .ackedButNoResultAfterReconnect)
+      await transaction.commitOutcomeUnknown()
+      await transactions.deletePersisted(transactionId: transactionId, owner: restartingOwner)
       await transactions.finishExecution(for: wrapper)
       endTransactionOperation()
       guard restartingOwner == transactionOwner else { return }
-      resumeTransactionContinuation(for: transactionId, throwing: TransactionError.ackedButNoResultAfterReconnect)
+      resumeTransactionContinuation(
+        for: transactionId,
+        throwing: TransactionError.commitOutcomeUnknownAfterReconnect
+      )
     }
 
     await transactions.signalQueue()
@@ -1007,11 +1124,20 @@ public actor RealtimeV2 {
           throw RealtimeDirectRpcError.notConnected
         case .timeout:
           throw RealtimeDirectRpcError.timeout
+        case .commitOutcomeUnknown:
+          throw RealtimeDirectRpcError.commitOutcomeUnknown
+        case .capacityExceeded:
+          throw RealtimeDirectRpcError.capacityExceeded
         case let .rpcError(errorCode, message, code):
+          if errorCode == .unauthenticated {
+            await handleAuthInvalidated()
+          }
           throw RealtimeDirectRpcError.rpcError(errorCode: errorCode, message: message, code: code)
         case .stopped:
           throw RealtimeDirectRpcError.notConnected
-      }
+        }
+    } catch is CancellationError {
+      throw CancellationError()
     } catch {
       throw RealtimeDirectRpcError.unknown(error)
     }
@@ -1306,8 +1432,7 @@ public actor RealtimeV2 {
   private func handleConnectionErrorDuringHandshake(reason: InlineProtocol.ConnectionError.Reason) async {
     if reason == .sessionRevoked || reason == .invalidAuth {
       log.error("Realtime handshake failed because auth was invalidated")
-      await connectionManager.setAuthAvailable(false)
-      NotificationCenter.default.post(name: .realtimeV2AuthInvalidated, object: nil)
+      await handleAuthInvalidated()
       return
     }
 
@@ -1317,6 +1442,14 @@ public actor RealtimeV2 {
 
     log.error("Realtime handshake connectionError mapped to missing auth token")
     await handleMissingAuthTokenHandshakeFailure()
+  }
+
+  private func handleAuthInvalidated() async {
+    guard !didNotifyAuthInvalidated else { return }
+    didNotifyAuthInvalidated = true
+    acceptsTransactions = false
+    await connectionManager.setAuthAvailable(false)
+    NotificationCenter.default.post(name: .realtimeV2AuthInvalidated, object: nil)
   }
 
   private func handleMissingAuthTokenHandshakeFailure() async {

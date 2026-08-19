@@ -134,6 +134,14 @@ public final class Auth: ObservableObject, @unchecked Sendable {
     await store.logOut()
   }
 
+  public func beginLogout() async {
+    await store.beginLogout()
+  }
+
+  public func hasPendingLogout() async -> Bool {
+    await store.hasPendingLogout()
+  }
+
   public func refreshFromStorage() async {
     await store.refreshFromStorage()
   }

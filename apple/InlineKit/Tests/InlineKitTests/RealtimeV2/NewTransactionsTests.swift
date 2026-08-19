@@ -103,6 +103,22 @@ class NewTransactionsTests {
     #expect(!inFlight)
   }
 
+  @Test("pre-dispatch transport rejection restores queued durable state")
+  func testRequeueBeforeDispatchRestoresQueuedState() async throws {
+    let transactions = Transactions()
+    let id = await transactions.queue(transaction: MockTransaction(type: .mutation()))
+    _ = await transactions.dequeue()
+    await transactions.running(transactionId: id, rpcMsgId: 23)
+    await transactions.requeueBeforeDispatch(transactionId: id)
+
+    guard case let .ready(wrapper)? = await transactions.dequeue() else {
+      Issue.record("Expected pre-dispatch rejection to restore the queued transaction")
+      return
+    }
+    #expect(wrapper.id == id)
+    #expect(wrapper.dispatchPhase == .queued)
+  }
+
   @Test("requeueAll moves inflight transactions back to queue")
   func testRequeueAllMovesInflightTransactionsBackToQueue() async throws {
     let transactions = Transactions()
@@ -118,8 +134,34 @@ class NewTransactionsTests {
     #expect(!inFlight)
   }
 
-  @Test("requeueAll drops acked sent transactions when retryAfterAck is disabled")
-  func testRequeueAllDropsAckedSentTransactionsWhenRetryAfterAckDisabled() async throws {
+  @Test("requeueAll keeps a non-replayable mutation that was dequeued but never attempted")
+  func testRequeueAllKeepsUnattemptedMutation() async throws {
+    let transactions = Transactions()
+    let id = await transactions.queue(transaction: MockTransaction(type: .mutation()))
+    _ = await transactions.dequeue()
+
+    let dropped = await transactions.requeueAll()
+
+    #expect(await transactions.isInQueue(transactionId: id))
+    #expect(dropped.isEmpty)
+  }
+
+  @Test("requeueAll fails an attempted non-replayable mutation even when its ACK was lost")
+  func testRequeueAllDropsAttemptedUnackedMutation() async throws {
+    let transactions = Transactions()
+    let id = await transactions.queue(transaction: MockTransaction(type: .mutation()))
+    _ = await transactions.dequeue()
+    await transactions.running(transactionId: id, rpcMsgId: 32)
+
+    let dropped = await transactions.requeueAll()
+
+    #expect(await transactions.isInQueue(transactionId: id) == false)
+    #expect(dropped.map(\.id) == [id])
+    #expect(await transactions.transactionIdFrom(msgId: 32) == nil)
+  }
+
+  @Test("requeueAll drops an acked non-replayable mutation")
+  func testRequeueAllDropsAckedNonReplayableMutation() async throws {
     let transactions = Transactions()
     let id = await transactions.queue(transaction: MockTransaction(type: .mutation(MutationConfig())))
     _ = await transactions.dequeue()
@@ -140,11 +182,11 @@ class NewTransactionsTests {
     #expect(droppedContainsId)
   }
 
-  @Test("requeueAll requeues acked sent transactions when retryAfterAck is enabled")
-  func testRequeueAllRequeuesAckedSentTransactionsWhenRetryAfterAckEnabled() async throws {
+  @Test("requeueAll requeues an acked application-idempotent mutation")
+  func testRequeueAllRequeuesAckedApplicationIdempotentMutation() async throws {
     let transactions = Transactions()
     let id = await transactions.queue(
-      transaction: MockTransaction(type: .mutation(MutationConfig(retryAfterAck: true)))
+      transaction: MockTransaction(type: .mutation(), reconnectReplayPolicy: .replaySafe)
     )
     _ = await transactions.dequeue()
     await transactions.running(transactionId: id, rpcMsgId: 44)
@@ -165,6 +207,88 @@ class NewTransactionsTests {
     #expect(!inSent)
     #expect(mappedAfterReconnect == nil)
     #expect(dropped.isEmpty)
+  }
+
+  @Test("requeueAll requeues an ACKed query")
+  func testRequeueAllRequeuesAckedQuery() async throws {
+    let transactions = Transactions()
+    let id = await transactions.queue(transaction: MockTransaction(type: .query()))
+    _ = await transactions.dequeue()
+    await transactions.running(transactionId: id, rpcMsgId: 45)
+    await transactions.ack(rpcMsgId: 45)
+
+    let dropped = await transactions.requeueAll()
+
+    #expect(await transactions.isInQueue(transactionId: id))
+    #expect(dropped.isEmpty)
+  }
+
+  @Test("explicit never-replay overrides the query compatibility default")
+  func testExplicitNeverReplayOverridesQueryDefault() async throws {
+    let transactions = Transactions()
+    let id = await transactions.queue(
+      transaction: MockTransaction(type: .query(), reconnectReplayPolicy: .neverReplay)
+    )
+    _ = await transactions.dequeue()
+    await transactions.running(transactionId: id, rpcMsgId: 451)
+
+    let dropped = await transactions.requeueAll()
+
+    #expect(dropped.map(\.id) == [id])
+    #expect(await transactions.isInQueue(transactionId: id) == false)
+  }
+
+  @Test("reconnect replay defaults from classification and honors per-transaction overrides")
+  func testEffectiveReconnectReplayPolicy() {
+    #expect(
+      MockTransaction(type: .query()).effectiveReconnectReplayPolicy == .replaySafe
+    )
+    #expect(
+      MockTransaction(type: .mutation()).effectiveReconnectReplayPolicy == .neverReplay
+    )
+    #expect(
+      MockTransaction(type: .mutation(), reconnectReplayPolicy: .replaySafe)
+        .effectiveReconnectReplayPolicy == .replaySafe
+    )
+    #expect(
+      MockTransaction(type: .query(), reconnectReplayPolicy: .neverReplay)
+        .effectiveReconnectReplayPolicy == .neverReplay
+    )
+  }
+
+  @Test("connection loss keeps durable attempted state after rpc mappings are cleared")
+  func testConnectionLossDoesNotMakeAttemptedMutationLookUnsent() async throws {
+    let transactions = Transactions()
+    let id = await transactions.queue(transaction: MockTransaction(type: .mutation()))
+    _ = await transactions.dequeue()
+    await transactions.running(transactionId: id, rpcMsgId: 452)
+
+    await transactions.connectionLost()
+    let dropped = await transactions.requeueAll()
+
+    #expect(dropped.map(\.id) == [id])
+    #expect(await transactions.isInQueue(transactionId: id) == false)
+  }
+
+  @Test("uncertain dispatch only requeues application-idempotent work")
+  func testRecoverAfterUncertainDispatchUsesSemanticPolicy() async throws {
+    let transactions = Transactions()
+    let unsafeID = await transactions.queue(transaction: MockTransaction(type: .mutation()))
+    let safeID = await transactions.queue(transaction: MockTransaction(
+      type: .mutation(),
+      reconnectReplayPolicy: .replaySafe
+    ))
+    _ = await transactions.dequeue()
+    _ = await transactions.dequeue()
+    await transactions.running(transactionId: unsafeID, rpcMsgId: 46)
+    await transactions.running(transactionId: safeID, rpcMsgId: 47)
+
+    let unresolved = await transactions.recoverAfterUncertainDispatch(transactionId: unsafeID)
+    let replayed = await transactions.recoverAfterUncertainDispatch(transactionId: safeID)
+
+    #expect(unresolved?.id == unsafeID)
+    #expect(replayed == nil)
+    #expect(await transactions.isInQueue(transactionId: safeID))
   }
 
   @Test("maps rpc message id to transaction id")
@@ -305,9 +429,14 @@ private struct MockTransaction: Transaction, Codable {
   var method: InlineProtocol.Method = .UNRECOGNIZED(0)
   var type: TransactionKindType = .query()
   var context: Context = Context()
+  var reconnectReplayPolicy: TransactionReconnectPolicy?
 
-  init(type: TransactionKindType = .query()) {
+  init(
+    type: TransactionKindType = .query(),
+    reconnectReplayPolicy: TransactionReconnectPolicy? = nil
+  ) {
     self.type = type
+    self.reconnectReplayPolicy = reconnectReplayPolicy
   }
 
   func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {

@@ -59,6 +59,10 @@ public struct EditMessageTransaction: Transaction2 {
   var peerId: Peer { context.peerId }
   var entities: MessageEntities? { context.entities }
 
+  public var executionKey: TransactionExecutionKey? {
+    .chatMutation(chatID: context.chatId)
+  }
+
   // Methods
   public func optimistic() async {
     log.debug("Optimistic edit message \(messageId) \(peerId) \(chatId)")

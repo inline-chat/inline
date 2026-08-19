@@ -33,6 +33,9 @@ struct OnboardingView: View {
         }
     }
     .animation(.snappy, value: navigation.path)
+    .onDisappear {
+      Task { await InlineProtocolNativeLogin.shared.cancel() }
+    }
   }
 }
 

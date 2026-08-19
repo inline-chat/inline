@@ -6,6 +6,7 @@ public struct ReserveChatIdsTransaction: Transaction2 {
   public var method: InlineProtocol.Method = .reserveChatIds
   public var context: Context
   public var type: TransactionKindType = .query()
+  public var reconnectReplayPolicy: TransactionReconnectPolicy? { .neverReplay }
 
   public struct Context: Sendable, Codable {
     public var count: Int32

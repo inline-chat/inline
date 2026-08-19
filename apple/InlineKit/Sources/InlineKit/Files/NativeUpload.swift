@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import Auth
 import InlineProtocol
+import Logger
 import RealtimeV2
 
 public struct NativeMediaUploadRequest: Sendable {
@@ -152,6 +153,8 @@ public enum NativeMediaUploadError: Error, LocalizedError, Sendable {
   case unexpectedResponse
   case rejected(code: UploadFailure.Code, retryable: Bool)
   case sourceChanged
+  case canceled
+  case expired
 
   public var errorDescription: String? {
     switch self {
@@ -162,6 +165,8 @@ public enum NativeMediaUploadError: Error, LocalizedError, Sendable {
     case let .rejected(code, retryable):
       "Upload processing failed (\(code), retryable: \(retryable))."
     case .sourceChanged: "The upload source changed while it was being read."
+    case .canceled: "The upload was canceled."
+    case .expired: "The upload expired before it completed."
     }
   }
 }
@@ -171,12 +176,26 @@ public actor DurableUploadCoordinator: MediaUploading {
 
   private static let hashReadSize = 1_048_576
   private static let maximumPartSize = 16 * 1_048_576
+  private static let maximumConcurrentPartsPerUpload = 2
 
+  private enum FinishReconciliation {
+    case complete(UploadComplete)
+    case uploading(Set<UInt32>)
+    case failed(UploadFailure)
+    case canceled
+    case expired
+  }
+
+  private let log = Log.scoped("NativeUpload")
   private let transport: any NativeUploadRPCTransport
   private let staging: any NativeUploadStaging
   private let ownerScope: @Sendable () -> String?
   private var activePartTransfers = 0
-  private var partTransferWaiters: [CheckedContinuation<Void, Never>] = []
+  private struct PartTransferWaiter {
+    let id: UUID
+    let continuation: CheckedContinuation<Bool, Never>
+  }
+  private var partTransferWaiters: [PartTransferWaiter] = []
 
   public init(
     transport: any NativeUploadRPCTransport = Api.realtime,
@@ -258,63 +277,119 @@ public actor DurableUploadCoordinator: MediaUploading {
 
     do {
       while true {
-        for partIndex in 0 ..< created.partCount where !accepted.contains(partIndex) {
-          try Task.checkCancellation()
-          let offset = Int64(partIndex) * partSize
-          let length = Int(min(partSize, byteCount - offset))
-          let data = try Self.readPart(
-            at: stagedURL,
-            offset: UInt64(offset),
-            length: length
-          )
-          var save = SaveUploadPartInput()
-          save.uploadID = created.uploadID
-          save.partIndex = partIndex
-          save.data = data
-          await acquirePartTransferSlot()
-          do {
-            defer { releasePartTransferSlot() }
-            let result = try await transport.callUploadRPC(
-              method: .saveUploadPart,
-              input: .saveUploadPart(save),
-              timeout: .seconds(60)
-            )
-            guard case .saveUploadPart? = result else {
-              throw NativeMediaUploadError.unexpectedResponse
+        let missingParts = (0 ..< created.partCount).filter { !accepted.contains($0) }
+        if !missingParts.isEmpty {
+          try await withThrowingTaskGroup(of: UInt32.self) { group in
+            var nextPart = 0
+            for _ in 0 ..< min(Self.maximumConcurrentPartsPerUpload, missingParts.count) {
+              let partIndex = missingParts[nextPart]
+              nextPart += 1
+              group.addTask { [self] in
+                try await transferPart(
+                  partIndex,
+                  uploadID: created.uploadID,
+                  stagedURL: stagedURL,
+                  partSize: partSize,
+                  byteCount: byteCount
+                )
+              }
             }
-          } catch {
-            let state = try? await uploadState(uploadID: created.uploadID)
-            guard state?.acceptedParts.contains(partIndex) == true else { throw error }
+
+            while let partIndex = try await group.next() {
+              accepted.insert(partIndex)
+              durableAcceptedBytes = Self.acceptedBytes(
+                accepted,
+                partSize: partSize,
+                total: byteCount
+              )
+              await staging.recordProgress(
+                logicalID: ownerScopedLogicalID,
+                acceptedBytes: durableAcceptedBytes,
+                totalBytes: byteCount
+              )
+              progress(durableAcceptedBytes, byteCount)
+
+              if nextPart < missingParts.count {
+                let nextPartIndex = missingParts[nextPart]
+                nextPart += 1
+                group.addTask { [self] in
+                  try await transferPart(
+                    nextPartIndex,
+                    uploadID: created.uploadID,
+                    stagedURL: stagedURL,
+                    partSize: partSize,
+                    byteCount: byteCount
+                  )
+                }
+              }
+            }
           }
-          accepted.insert(partIndex)
-          durableAcceptedBytes = Self.acceptedBytes(
-            accepted,
-            partSize: partSize,
-            total: byteCount
-          )
-          await staging.recordProgress(
-            logicalID: ownerScopedLogicalID,
-            acceptedBytes: durableAcceptedBytes,
-            totalBytes: byteCount
-          )
-          progress(durableAcceptedBytes, byteCount)
         }
 
         var finish = FinishUploadInput()
         finish.uploadID = created.uploadID
-        let result = try await transport.callUploadRPC(
-          method: .finishUpload,
-          input: .finishUpload(finish),
-          timeout: .seconds(60)
-        )
-        guard case let .finishUpload(finished)? = result,
-              let state = finished.state
-        else {
+        let finished: FinishUploadResult
+        do {
+          let result = try await transport.callUploadRPC(
+            method: .finishUpload,
+            input: .finishUpload(finish),
+            timeout: .seconds(60)
+          )
+          guard case let .finishUpload(value)? = result,
+                value.state != nil
+          else {
+            throw NativeMediaUploadError.unexpectedResponse
+          }
+          finished = value
+        } catch is CancellationError {
+          throw CancellationError()
+        } catch {
+          switch try await reconcileLostFinish(uploadID: created.uploadID) {
+          case let .complete(complete):
+            if durableAcceptedBytes < byteCount {
+              progress(byteCount, byteCount)
+            }
+            await staging.discard(logicalID: ownerScopedLogicalID)
+            return complete
+          case let .uploading(reconciledAccepted):
+            guard reconciledAccepted.allSatisfy({ $0 < created.partCount }) else {
+              throw NativeMediaUploadError.invalidGeometry
+            }
+            accepted = reconciledAccepted
+            let reconciledBytes = Self.acceptedBytes(
+              accepted,
+              partSize: partSize,
+              total: byteCount
+            )
+            if reconciledBytes > durableAcceptedBytes {
+              durableAcceptedBytes = reconciledBytes
+              await staging.recordProgress(
+                logicalID: ownerScopedLogicalID,
+                acceptedBytes: durableAcceptedBytes,
+                totalBytes: byteCount
+              )
+              progress(durableAcceptedBytes, byteCount)
+            }
+          case let .failed(failure):
+            throw NativeMediaUploadError.rejected(
+              code: failure.code,
+              retryable: failure.retryable
+            )
+          case .canceled:
+            throw NativeMediaUploadError.canceled
+          case .expired:
+            throw NativeMediaUploadError.expired
+          }
+          continue
+        }
+        guard let state = finished.state else {
           throw NativeMediaUploadError.unexpectedResponse
         }
         switch state {
         case let .complete(complete):
-          progress(byteCount, byteCount)
+          if durableAcceptedBytes < byteCount {
+            progress(byteCount, byteCount)
+          }
           await staging.discard(logicalID: ownerScopedLogicalID)
           return complete
         case let .missing(missing):
@@ -360,13 +435,123 @@ public actor DurableUploadCoordinator: MediaUploading {
     return state
   }
 
-  private func acquirePartTransferSlot() async {
+  private func reconcileLostFinish(uploadID: Data) async throws -> FinishReconciliation {
+    while true {
+      let state = try await uploadState(uploadID: uploadID)
+      switch state.status {
+      case .complete:
+        guard state.hasComplete else { throw NativeMediaUploadError.unexpectedResponse }
+        return .complete(state.complete)
+      case .uploading:
+        return .uploading(Set(state.acceptedParts))
+      case .processing:
+        // The finalizer owns this state. Keep querying authoritative state
+        // instead of replaying FINISH_UPLOAD while the response is unknown.
+        try await Task.sleep(for: .seconds(1))
+      case .failed:
+        guard state.hasFailure else { throw NativeMediaUploadError.unexpectedResponse }
+        return .failed(state.failure)
+      case .canceled:
+        return .canceled
+      case .expired:
+        return .expired
+      case .unspecified, .UNRECOGNIZED:
+        throw NativeMediaUploadError.unexpectedResponse
+      }
+    }
+  }
+
+  private func transferPart(
+    _ partIndex: UInt32,
+    uploadID: Data,
+    stagedURL: URL,
+    partSize: Int64,
+    byteCount: Int64
+  ) async throws -> UInt32 {
+    try Task.checkCancellation()
+    let startedAt = ProcessInfo.processInfo.systemUptime
+    let offset = Int64(partIndex) * partSize
+    let length = Int(min(partSize, byteCount - offset))
+    let readStartedAt = ProcessInfo.processInfo.systemUptime
+    let data = try Self.readPart(
+      at: stagedURL,
+      offset: UInt64(offset),
+      length: length
+    )
+    let readMilliseconds = Int(
+      (ProcessInfo.processInfo.systemUptime - readStartedAt) * 1_000
+    )
+    var save = SaveUploadPartInput()
+    save.uploadID = uploadID
+    save.partIndex = partIndex
+    save.data = data
+
+    let slotStartedAt = ProcessInfo.processInfo.systemUptime
+    try await acquirePartTransferSlot()
+    let slotWaitMilliseconds = Int(
+      (ProcessInfo.processInfo.systemUptime - slotStartedAt) * 1_000
+    )
+    defer { releasePartTransferSlot() }
+    try Task.checkCancellation()
+    let rpcStartedAt = ProcessInfo.processInfo.systemUptime
+    log.debug(
+      "Part dispatch started part=\(partIndex) bytes=\(length) active=\(activePartTransfers) read_ms=\(readMilliseconds) slot_wait_ms=\(slotWaitMilliseconds)"
+    )
+    do {
+      let result = try await transport.callUploadRPC(
+        method: .saveUploadPart,
+        input: .saveUploadPart(save),
+        timeout: .seconds(60)
+      )
+      guard case .saveUploadPart? = result else {
+        throw NativeMediaUploadError.unexpectedResponse
+      }
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      let state = try? await uploadState(uploadID: uploadID)
+      guard state?.acceptedParts.contains(partIndex) == true else { throw error }
+    }
+    try Task.checkCancellation()
+    let rpcMilliseconds = Int(
+      (ProcessInfo.processInfo.systemUptime - rpcStartedAt) * 1_000
+    )
+    let totalMilliseconds = Int(
+      (ProcessInfo.processInfo.systemUptime - startedAt) * 1_000
+    )
+    log.debug(
+      "Part accepted part=\(partIndex) bytes=\(length) rpc_ms=\(rpcMilliseconds) total_ms=\(totalMilliseconds)"
+    )
+    return partIndex
+  }
+
+  private func acquirePartTransferSlot() async throws {
+    try Task.checkCancellation()
     guard activePartTransfers >= 3 else {
       activePartTransfers += 1
       return
     }
-    await withCheckedContinuation { continuation in
-      partTransferWaiters.append(continuation)
+
+    let waiterID = UUID()
+    let granted = await withTaskCancellationHandler {
+      await withCheckedContinuation { continuation in
+        // The cancellation handler hops back to this actor. Re-check while actor-isolated
+        // registration is synchronous so cancellation cannot run before the waiter exists.
+        guard !Task.isCancelled else {
+          continuation.resume(returning: false)
+          return
+        }
+        partTransferWaiters.append(
+          PartTransferWaiter(id: waiterID, continuation: continuation)
+        )
+      }
+    } onCancel: {
+      Task { await self.cancelPartTransferWaiter(waiterID) }
+    }
+    guard granted else { throw CancellationError() }
+    if Task.isCancelled {
+      releasePartTransferSlot()
+      throw CancellationError()
     }
   }
 
@@ -374,8 +559,16 @@ public actor DurableUploadCoordinator: MediaUploading {
     if partTransferWaiters.isEmpty {
       activePartTransfers -= 1
     } else {
-      partTransferWaiters.removeFirst().resume()
+      partTransferWaiters.removeFirst().continuation.resume(returning: true)
     }
+  }
+
+  private func cancelPartTransferWaiter(_ id: UUID) {
+    guard let index = partTransferWaiters.firstIndex(where: { $0.id == id }) else {
+      return
+    }
+    let waiter = partTransferWaiters.remove(at: index)
+    waiter.continuation.resume(returning: false)
   }
 
   private static func hashFile(at url: URL) throws -> (Int64, Data) {

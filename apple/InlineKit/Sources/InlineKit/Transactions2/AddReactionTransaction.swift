@@ -48,6 +48,10 @@ public struct AddReactionTransaction: Transaction2 {
   var peerId: Peer { context.peerId }
   var chatId: Int64 { context.chatId }
 
+  public var executionKey: TransactionExecutionKey? {
+    .chatMutation(chatID: context.chatId)
+  }
+
   // Methods
 
   public func optimistic() async {

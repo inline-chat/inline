@@ -19,6 +19,8 @@ enum LogoutPerformer {
     }
     guard shouldRun else { return }
 
+    await Auth.shared.beginLogout()
+
     defer {
       Task { @MainActor in
         isRunning = false

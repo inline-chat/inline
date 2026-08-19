@@ -3,22 +3,129 @@ import Foundation
 import Testing
 @testable import InlineProtocol
 
+private final class HandshakeThreadProbe: @unchecked Sendable {
+  private let lock = NSLock()
+  private var observations: [Bool] = []
+
+  func record() {
+    lock.withLock { observations.append(Thread.isMainThread) }
+  }
+
+  var ranOnlyOffMainThread: Bool {
+    lock.withLock { !observations.isEmpty && observations.allSatisfy { !$0 } }
+  }
+}
+
 @Suite("Inline Protocol portable core")
 struct SecureTransportTests {
+  @Test("distinguishes carrier rpc_error from a protobuf application error")
+  func carrierRpcErrorIsNotProtobufRpcError() throws {
+    let carrierError = withUnsafeBytes(of: InlineSecureTransport.rpcErrorConstructor.littleEndian, Array.init)
+      + withUnsafeBytes(of: Int32(504).littleEndian, Array.init)
+      + [0, 0, 0, 0]
+    #expect(try InlineSecureTransport.decodeTLRPCError(carrierError)?.code == 504)
+
+    var application = RealtimeV3Response()
+    application.body = .rpcError(.with { $0.code = 504 })
+    #expect(try InlineSecureTransport.decodeTLRPCError(Array(application.serializedData())) == nil)
+  }
+
+  @Test("handshake worker executes Security work off the main thread")
+  @MainActor
+  func handshakeWorkerRunsOffMainThread() async throws {
+    let probe = HandshakeThreadProbe()
+    let client = InlineHandshakeClient(rsaKeys: []) { count in
+      [UInt8](repeating: 7, count: count)
+    }
+    let worker = InlineProtocolHandshakeWorker(client: client, onExecution: probe.record)
+
+    _ = try await worker.begin(temporary: false)
+
+    #expect(probe.ranOnlyOffMainThread)
+  }
+
   @Test("loads the exact shared language-neutral corpus")
   func sharedVectorCorpus() throws {
     let data = try InlineProtocolVectors.v1JSON()
     #expect(SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-      == "73fbe70763140f91cd1667c9d714848acfe0234a770ee2dfb891939ac2148893")
+      == "eac2cd11a9e3431109e522472e4a784aec7f0ef307dcea60616c882a2acd79f1")
     let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
     #expect(object["formatVersion"] as? Int == 1)
     #expect(object["protocol"] as? String == "Inline Protocol v1")
     let transcripts = try #require(object["handshakeTranscripts"] as? [String: Any])
     let permanent = try #require(transcripts["permanent"] as? [String: Any])
     let temporary = try #require(transcripts["temporary"] as? [String: Any])
+    let generatorFour = try #require(transcripts["generatorFour"] as? [String: Any])
     #expect((permanent["requestHex"] as? [String])?.count == 3)
     #expect((permanent["authKeyHex"] as? String)?.count == 512)
     #expect(temporary["expiresAt"] as? Int == 1_700_086_400)
+    #expect(generatorFour["generator"] as? Int == 4)
+  }
+
+  @Test("replays both record directions, padding boundaries, and temporary-key binding")
+  func sharedRecordAndBindingVectors() throws {
+    let root = try #require(JSONSerialization.jsonObject(with: InlineProtocolVectors.v1JSON()) as? [String: Any])
+    let records = try #require(root["encryptedRecords"] as? [String: Any])
+    let clientToServer = try #require(records["clientToServer"] as? [String: Any])
+    let applicationObjects = try #require(root["applicationObjects"] as? [String: Any])
+    let serviceObjects = try #require(root["serviceObjects"] as? [String: Any])
+    let authKey = bytes(try #require(clientToServer["authKeyHex"] as? String))
+
+    let serverToClient = try InlineSecureTransport.decryptRecord(
+      bytes(try #require(records["serverToClientHex"] as? String)),
+      authKey: authKey,
+      direction: .serverToClient,
+      expectedSessionID: 0x1112131415161718,
+      validServerSalts: [0x0102030405060708],
+      nowSeconds: 1_700_000_000
+    )
+    #expect(serverToClient.body.hex == applicationObjects["updateHex"] as? String)
+
+    let minimumPadding = try InlineSecureTransport.decryptRecord(
+      bytes(try #require(records["minimumPaddingHex"] as? String)),
+      authKey: authKey,
+      direction: .clientToServer,
+      expectedSessionID: 2,
+      validServerSalts: [1],
+      nowSeconds: 1_700_000_000
+    )
+    #expect(minimumPadding.body.hex == serviceObjects["destroyAuthKeyHex"] as? String)
+    let maximumPadding = try InlineSecureTransport.decryptRecord(
+      bytes(try #require(records["maximumPaddingHex"] as? String)),
+      authKey: authKey,
+      direction: .clientToServer,
+      expectedSessionID: 2,
+      validServerSalts: [1],
+      nowSeconds: 1_700_000_000
+    )
+    #expect(maximumPadding.messageID == (1_700_000_000 << 32) | 8)
+
+    let temporaryKey = authKey.map { 0xff - $0 }
+    let permanent = try InlineProtocolAuthorization(
+      key: authKey,
+      keyID: InlineSecureTransport.authKeyID(authKey),
+      serverSalt: 0,
+      temporary: false,
+      expiresAt: nil
+    )
+    let temporary = try InlineProtocolAuthorization(
+      key: temporaryKey,
+      keyID: InlineSecureTransport.authKeyID(temporaryKey),
+      serverSalt: 0,
+      temporary: true,
+      expiresAt: 1_700_086_400
+    )
+    let proof = try InlineTemporaryKeyBinding.createProof(
+      permanent: permanent,
+      temporary: temporary,
+      temporarySessionID: 123,
+      messageID: (1_700_000_000 << 32) | 4,
+      nonce: 456,
+      expiresAt: 1_700_086_400,
+      randomInt128: [UInt8](repeating: 0x11, count: 16),
+      randomPadding: [UInt8](repeating: 0x22, count: 8)
+    )
+    #expect(proof.hex == root["bindingProofHex"] as? String)
   }
 
   @Test("matches the frozen TypeScript and Rust record vector")
@@ -69,6 +176,25 @@ struct SecureTransportTests {
         expectedSessionID: fields.sessionID,
         validServerSalts: [fields.serverSalt],
         nowSeconds: 1_700_000_000
+      )
+    }
+  }
+
+  @Test("rejects records whose final framed size exceeds the carrier limit")
+  func oversizedFinalRecord() throws {
+    let fields = InlineEncryptedRecordFields(
+      serverSalt: 1,
+      sessionID: 2,
+      messageID: (1_700_000_000 << 32) | 4,
+      sequenceNumber: 1,
+      body: [UInt8](repeating: 0, count: 16 * 1024 * 1024)
+    )
+    #expect(throws: (any Error).self) {
+      try InlineSecureTransport.encryptRecord(
+        authKey: [UInt8](repeating: 0, count: 256),
+        direction: .clientToServer,
+        fields: fields,
+        padding: [UInt8](repeating: 0, count: 16)
       )
     }
   }
@@ -166,8 +292,20 @@ struct SecureTransportTests {
     ) == serialized)
   }
 
-  @Test("matches the frozen cross-language permanent client handshake")
-  func clientHandshakeTranscript() throws {
+  @Test("replays permanent, temporary, and non-default-generator handshakes")
+  func clientHandshakeTranscripts() throws {
+    let root = try #require(JSONSerialization.jsonObject(with: InlineProtocolVectors.v1JSON()) as? [String: Any])
+    let transcripts = try #require(root["handshakeTranscripts"] as? [String: Any])
+    let elapsed = try ContinuousClock().measure {
+      try replayHandshake(try #require(transcripts["permanent"] as? [String: Any]), temporary: false)
+      try replayHandshake(try #require(transcripts["temporary"] as? [String: Any]), temporary: true)
+      try replayHandshake(try #require(transcripts["generatorFour"] as? [String: Any]), temporary: false)
+    }
+    #expect(elapsed < .seconds(2))
+  }
+
+  @Test("a failed client handshake response is terminal")
+  func failedHandshakeIsTerminal() throws {
     let root = try #require(JSONSerialization.jsonObject(with: InlineProtocolVectors.v1JSON()) as? [String: Any])
     let transcripts = try #require(root["handshakeTranscripts"] as? [String: Any])
     let transcript = try #require(transcripts["permanent"] as? [String: Any])
@@ -182,10 +320,29 @@ struct SecureTransportTests {
       exponent: bytes(try #require(transcript["rsaExponentHex"] as? String)),
       fingerprint: fingerprint
     )
+    let responses = try #require(transcript["responseHex"] as? [String])
+    let client = InlineHandshakeClient(rsaKeys: [key], randomBytes: random.bytes)
+    _ = try client.begin(temporary: false)
+    #expect(throws: (any Error).self) { try client.receive([0]) }
+    #expect(throws: (any Error).self) { try client.receive(bytes(responses[0])) }
+  }
+
+  private func replayHandshake(_ transcript: [String: Any], temporary: Bool) throws {
+    let calls = try #require(transcript["clientRandomCalls"] as? [[String: Any]])
+    let random = DeterministicHandshakeRandom(calls: try calls.map {
+      bytes(try #require($0["hex"] as? String))
+    })
+    let fingerprintString = try #require(transcript["rsaFingerprint"] as? String)
+    let fingerprint = try #require(Int64(fingerprintString))
+    let key = try InlineProtocolRSAPublicKey(
+      modulus: bytes(try #require(transcript["rsaModulusHex"] as? String)),
+      exponent: bytes(try #require(transcript["rsaExponentHex"] as? String)),
+      fingerprint: fingerprint
+    )
     let requests = try #require(transcript["requestHex"] as? [String])
     let responses = try #require(transcript["responseHex"] as? [String])
     let client = InlineHandshakeClient(rsaKeys: [key], randomBytes: random.bytes)
-    #expect(try client.begin(temporary: false).hex == requests[0])
+    #expect(try client.begin(temporary: temporary).hex == requests[0])
     for index in 0..<2 {
       let transition = try client.receive(bytes(responses[index]))
       guard case let .request(request) = transition else {
@@ -202,7 +359,8 @@ struct SecureTransportTests {
     #expect(authorization.key.hex == transcript["authKeyHex"] as? String)
     #expect(authorization.keyID.hex == transcript["authKeyIdHex"] as? String)
     #expect(String(authorization.serverSalt) == transcript["serverSalt"] as? String)
-    #expect(!authorization.temporary)
+    #expect(authorization.temporary == temporary)
+    #expect(authorization.expiresAt == (transcript["expiresAt"] as? Int).map(Int32.init))
   }
 
   @Test("completes the opt-in local V3 login, bind, RPC, and reconnect flow")
@@ -261,13 +419,71 @@ struct SecureTransportTests {
     await reconnected.close()
   }
 
-  #if INLINE_PROTOCOL_PRODUCTION_CANARY
-  @Test("pins the overlapping production canary ring")
-  func productionCanaryRing() {
-    #expect(InlineProtocolTrustRoots.production.map(\.fingerprint) == [
-      -8_339_382_514_522_710_386,
-      -3_957_383_261_870_667_958,
-    ])
+  @Test("pins the overlapping production release ring")
+  func productionReleaseRing() throws {
+    let canonicalURL = URL(fileURLWithPath: #filePath)
+      .deletingLastPathComponent()
+      .appendingPathComponent("../../../../packages/protocol/trust-roots/inline-protocol-production.json")
+      .standardizedFileURL
+    let canonical = try InlineProtocolTrustRoots.decodeRing(Data(contentsOf: canonicalURL))
+    #expect(InlineProtocolTrustRoots.production == canonical)
+  }
+
+  @Test("validates the complete verification document before trusting its ring")
+  func verificationDocumentContract() throws {
+    let modulus = [UInt8](repeating: 1, count: 256)
+    let exponent: [UInt8] = [1, 0, 1]
+    let fingerprint = try InlineProtocolRSAPublicKey.fingerprint(
+      modulus: modulus,
+      exponent: exponent
+    )
+    var document: [String: Any] = [
+      "protocol": "Inline Protocol",
+      "protocolVersion": 1,
+      "applicationContract": "Realtime V3",
+      "applicationContractVersion": 3,
+      "status": "ready",
+      "websocketPath": "/realtime/v3",
+      "rsaPublicKeyRing": [[
+        "modulus": base64URL(modulus),
+        "exponent": base64URL(exponent),
+        "fingerprint": String(fingerprint),
+      ]],
+    ]
+    let keys = try InlineProtocolTrustRoots.decodeVerificationDocument(
+      JSONSerialization.data(withJSONObject: document),
+      expectedWebsocketPath: "/realtime/v3"
+    )
+    #expect(keys.map(\.fingerprint) == [fingerprint])
+
+    document["status"] = "degraded"
+    #expect(throws: InlineProtocolTrustRootError.invalidVerificationDocument) {
+      try InlineProtocolTrustRoots.decodeVerificationDocument(
+        JSONSerialization.data(withJSONObject: document),
+        expectedWebsocketPath: "/realtime/v3"
+      )
+    }
+  }
+
+  #if DEBUG
+  @Test("limits dynamic trust discovery to local Debug websocket hosts")
+  func localDebugTrustDiscoveryPolicy() {
+    #expect(InlineProtocolTrustRoots.supportsLocalDebugDiscovery(
+      for: URL(string: "ws://localhost:8000/realtime/v3")!,
+      allowedDevelopmentHost: nil
+    ))
+    #expect(InlineProtocolTrustRoots.supportsLocalDebugDiscovery(
+      for: URL(string: "ws://dev-machine.local:8000/realtime/v3")!,
+      allowedDevelopmentHost: "dev-machine.local"
+    ))
+    #expect(!InlineProtocolTrustRoots.supportsLocalDebugDiscovery(
+      for: URL(string: "ws://remote.example/realtime/v3")!,
+      allowedDevelopmentHost: "dev-machine.local"
+    ))
+    #expect(!InlineProtocolTrustRoots.supportsLocalDebugDiscovery(
+      for: URL(string: "wss://localhost/realtime/v3")!,
+      allowedDevelopmentHost: "localhost"
+    ))
   }
   #endif
 
@@ -327,4 +543,11 @@ private func bytes(_ hex: String) -> [UInt8] {
     let start = hex.index(hex.startIndex, offsetBy: offset)
     return UInt8(hex[start..<hex.index(start, offsetBy: 2)], radix: 16)!
   }
+}
+
+private func base64URL(_ bytes: [UInt8]) -> String {
+  Data(bytes).base64EncodedString()
+    .replacingOccurrences(of: "+", with: "-")
+    .replacingOccurrences(of: "/", with: "_")
+    .replacingOccurrences(of: "=", with: "")
 }

@@ -2,6 +2,7 @@ import Foundation
 import InlineProtocol
 import Testing
 
+@testable import InlineKit
 @testable import RealtimeV2
 
 @Suite("RealtimeV2 transaction execution ordering", .serialized)
@@ -132,13 +133,42 @@ struct TransactionExecutionOrderingTests {
     #expect(second.id == secondID)
   }
 
+  @Test("chat mutations share only their conversation lane")
+  func chatMutationKeysMatchWithinOneChat() {
+    let first = SendMessageTransaction(
+      text: "first",
+      peerId: .thread(id: 70),
+      chatId: 70
+    )
+    let second = SendMessageTransaction(
+      text: "second",
+      peerId: .thread(id: 70),
+      chatId: 70
+    )
+    let deletion = DeleteMessageTransaction(
+      messageIds: [1],
+      peerId: .thread(id: 70),
+      chatId: 70
+    )
+    let unrelated = SendMessageTransaction(
+      text: "other",
+      peerId: .thread(id: 71),
+      chatId: 71
+    )
+
+    #expect(first.context.randomId != 0)
+    #expect(first.executionKey == second.executionKey)
+    #expect(first.executionKey == deletion.executionKey)
+    #expect(first.executionKey != unrelated.executionKey)
+  }
+
   private func readyWrapper(from result: TransactionDequeueResult?) -> TransactionWrapper? {
     guard case let .ready(wrapper)? = result else { return nil }
     return wrapper
   }
 }
 
-private struct OrderedMutation: Transaction, Codable {
+private struct OrderedMutation: Transaction2, Codable {
   struct Context: Sendable, Codable {
     let marker: Int
     let key: String
@@ -149,7 +179,8 @@ private struct OrderedMutation: Transaction, Codable {
   }
 
   var method: InlineProtocol.Method = .UNRECOGNIZED(9_999_981)
-  var type: TransactionKindType = .mutation(MutationConfig(retryAfterAck: true))
+  var type: TransactionKindType = .mutation()
+  var reconnectReplayPolicy: TransactionReconnectPolicy? { .replaySafe }
   var context: Context
 
   init(marker: Int, key: String) {

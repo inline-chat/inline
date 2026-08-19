@@ -4,7 +4,8 @@ import Logger
 
 private struct ConnectionCommand: Sendable {
   let event: ConnectionEvent
-  let receipt: ConnectionCommandReceipt
+  let enqueuedAt: TimeInterval
+  let receipt: ConnectionCommandReceipt?
 }
 
 private actor ConnectionCommandReceipt {
@@ -35,9 +36,12 @@ actor ConnectionManager {
 
   private let snapshotStream: AsyncStream<ConnectionSnapshot>
   private let snapshotContinuation: AsyncStream<ConnectionSnapshot>.Continuation
-  private let sessionEventStream: AsyncStream<ProtocolSessionEvent>
-  private let sessionEventContinuation: AsyncStream<ProtocolSessionEvent>.Continuation
-  private let commandStream = AsyncChannel<ConnectionCommand>()
+  // One ordered account collector. Backpressure here preserves the wire order
+  // between update application and a later RPC result without creating another
+  // observer or replay queue.
+  private let sessionEventChannel = AsyncChannel<ProtocolSessionEventEnvelope>()
+  private let commandStream: AsyncStream<ConnectionCommand>
+  private let commandContinuation: AsyncStream<ConnectionCommand>.Continuation
 
   private var state: ConnectionState = .stopped
   private var reason: ConnectionReason = .none
@@ -50,6 +54,8 @@ actor ConnectionManager {
 
   private var commandTask: Task<Void, Never>?
   private var sessionTask: Task<Void, Never>?
+  private var transportStartTask: Task<Void, Never>?
+  private var handshakeTask: Task<Void, Never>?
   private var loopsStarted = false
 
   private var backoffTask: Task<Void, Never>?
@@ -57,6 +63,7 @@ actor ConnectionManager {
   private var connectTimeoutTask: Task<Void, Never>?
   private var pingTask: Task<Void, Never>?
   private var pingTimeoutTask: Task<Void, Never>?
+  private var wakeProbeTask: Task<Void, Never>?
   private var probeTimeoutTask: Task<Void, Never>?
   private var probeContinuation: CheckedContinuation<Bool, Never>?
   private var probeNonce: UInt64?
@@ -75,19 +82,22 @@ actor ConnectionManager {
     self.timeProvider = timeProvider
     self.constraints = constraints
     stateSince = timeProvider.now()
+    (commandStream, commandContinuation) = AsyncStream.create(
+      ConnectionCommand.self,
+      bufferingPolicy: .unbounded
+    )
     (snapshotStream, snapshotContinuation) = AsyncStream.create(
       ConnectionSnapshot.self,
       bufferingPolicy: .bufferingNewest(1)
-    )
-    (sessionEventStream, sessionEventContinuation) = AsyncStream.create(
-      ProtocolSessionEvent.self,
-      bufferingPolicy: .unbounded
     )
   }
 
   deinit {
     commandTask?.cancel()
     sessionTask?.cancel()
+    transportStartTask?.cancel()
+    handshakeTask?.cancel()
+    wakeProbeTask?.cancel()
   }
 
   // MARK: - Public API
@@ -132,8 +142,22 @@ actor ConnectionManager {
     snapshotStream
   }
 
-  func sessionEvents() -> AsyncStream<ProtocolSessionEvent> {
-    sessionEventStream
+  func sessionEvents() -> AsyncChannel<ProtocolSessionEventEnvelope> {
+    sessionEventChannel
+  }
+
+  /// Final process teardown only. Normal stop/logout keeps the collector alive
+  /// so the same account owner can reconnect.
+  func finishSessionEventForwarding() async {
+    let task = sessionTask
+    sessionTask = nil
+    task?.cancel()
+    // Wake a ProtocolSession producer that is waiting on the unbuffered source
+    // channel. The envelope's cancellation handler below releases its apply
+    // receipt when there is no longer an account collector to acknowledge it.
+    session.events.finish()
+    sessionEventChannel.finish()
+    await task?.value
   }
 
   func currentSnapshot() -> ConnectionSnapshot {
@@ -154,12 +178,17 @@ actor ConnectionManager {
     pendingPingNonce = nil
     commandTask?.cancel()
     sessionTask?.cancel()
-    commandStream.finish()
+    transportStartTask?.cancel()
+    handshakeTask?.cancel()
+    wakeProbeTask?.cancel()
+    commandContinuation.finish()
     snapshotContinuation.finish()
-    sessionEventContinuation.finish()
+    sessionEventChannel.finish()
     session.events.finish()
     commandTask = nil
     sessionTask = nil
+    transportStartTask = nil
+    handshakeTask = nil
   }
 
   // MARK: - Event Handling
@@ -229,34 +258,74 @@ actor ConnectionManager {
       resetPendingPing()
       await evaluateConstraints(resetBackoff: true)
       if state == .open {
-        let isHealthy = await probeConnection(timeout: policy.wakeProbeTimeout)
-        if !isHealthy, state == .open {
-          await forceReconnect(reason: .none)
-        }
+        startWakeProbe(sessionID: sessionID)
       }
 
-    case .transportConnecting:
+    case let .wakeProbeCompleted(eventSessionID, isHealthy):
+      guard eventSessionID == sessionID else {
+        log.warning(
+          "Ignoring stale wake probe event_session=\(eventSessionID) current_session=\(sessionID) state=\(state)"
+        )
+        return
+      }
+      wakeProbeTask = nil
+      if !isHealthy, state == .open {
+        await forceReconnect(reason: .none)
+      }
+
+    case let .transportConnecting(eventSessionID):
+      guard eventSessionID == sessionID else {
+        log.warning(
+          "Ignoring stale transport connecting event_session=\(eventSessionID) current_session=\(sessionID) state=\(state)"
+        )
+        return
+      }
       if state != .connectingTransport {
         await transition(to: .connectingTransport, reason: .none)
       }
 
-    case .transportConnected:
+    case let .transportConnected(eventSessionID):
+      guard eventSessionID == sessionID else {
+        log.warning(
+          "Ignoring stale transport connected event_session=\(eventSessionID) current_session=\(sessionID) state=\(state)"
+        )
+        return
+      }
       cancelConnectTimeout()
       guard state == .connectingTransport || state == .authenticating else { return }
       await transition(to: .authenticating, reason: .none)
       startAuthTimeout(sessionID: sessionID)
       log.info("Realtime authenticated handshake started session=\(sessionID)")
-      await session.startHandshake()
+      handshakeTask?.cancel()
+      let session = self.session
+      let currentSessionID = sessionID
+      handshakeTask = Task {
+        await session.startHandshake(sessionID: currentSessionID)
+      }
 
-    case let .transportDisconnected(errorDescription):
+    case let .transportDisconnected(eventSessionID, errorDescription):
+      guard eventSessionID == sessionID else {
+        log.warning(
+          "Ignoring stale transport disconnected event_session=\(eventSessionID) current_session=\(sessionID) state=\(state)"
+        )
+        return
+      }
       lastErrorDescription = errorDescription
       await handleTransportDisconnect(reason: .transportDisconnected)
 
-    case .protocolOpen:
+    case let .protocolOpen(openSessionID):
+      guard openSessionID == sessionID else {
+        log.warning(
+          "Ignoring stale protocol open event_session=\(openSessionID) current_session=\(sessionID) state=\(state)"
+        )
+        return
+      }
+      guard state == .authenticating || state == .connectingTransport else { return }
       cancelAuthTimeout()
+      handshakeTask?.cancel()
+      handshakeTask = nil
       attempt = 0
       lastErrorDescription = nil
-      guard state == .authenticating || state == .connectingTransport else { return }
       await transition(to: .open, reason: .none)
       log.info("Realtime authenticated handshake opened session=\(sessionID)")
       startPingLoop(sessionID: sessionID)
@@ -295,18 +364,21 @@ actor ConnectionManager {
     commandTask = Task { [weak self] in
       for await command in commandStream {
         guard let self else {
-          await command.receipt.finish()
+          await command.receipt?.finish()
           return
         }
-        await self.handle(command.event)
-        await command.receipt.finish()
+        await self.handleCommand(command)
       }
     }
 
     sessionTask = Task { [weak self] in
       guard let self else { return }
-      for await event in self.session.events {
-        await self.handleSessionEvent(event)
+      for await envelope in self.session.events {
+        guard !Task.isCancelled else {
+          await envelope.markProcessed()
+          return
+        }
+        await self.handleSessionEvent(envelope)
       }
     }
   }
@@ -314,39 +386,89 @@ actor ConnectionManager {
   private func enqueue(_ event: ConnectionEvent) async {
     startLoopsIfNeeded()
     let receipt = ConnectionCommandReceipt()
-    await commandStream.send(ConnectionCommand(event: event, receipt: receipt))
+    commandContinuation.yield(ConnectionCommand(
+      event: event,
+      enqueuedAt: ProcessInfo.processInfo.systemUptime,
+      receipt: receipt
+    ))
     await receipt.wait()
   }
 
-  private func handleSessionEvent(_ event: ProtocolSessionEvent) async {
+  /// Session callbacks are already ordered by `sessionTask`. Submit them without waiting for the
+  /// command receipt so a stop handler cannot wait on a disconnect callback that is waiting on
+  /// the stop handler itself. `commandStream` remains the sole FIFO state-mutation owner.
+  private func submit(_ event: ConnectionEvent) {
+    startLoopsIfNeeded()
+    commandContinuation.yield(ConnectionCommand(
+      event: event,
+      enqueuedAt: ProcessInfo.processInfo.systemUptime,
+      receipt: nil
+    ))
+  }
+
+  private func handleCommand(_ command: ConnectionCommand) async {
+    let startedAt = ProcessInfo.processInfo.systemUptime
+    let queueMilliseconds = Int((startedAt - command.enqueuedAt) * 1_000)
+    if queueMilliseconds >= 250 {
+      log.warning(
+        "Connection event delayed event=\(command.event.diagnosticName) queue_ms=\(queueMilliseconds) state=\(state) session=\(sessionID)"
+      )
+    }
+
+    await handle(command.event)
+
+    let handleMilliseconds = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1_000)
+    if handleMilliseconds >= 250 {
+      log.warning(
+        "Connection event handler slow event=\(command.event.diagnosticName) duration_ms=\(handleMilliseconds) state=\(state) session=\(sessionID)"
+      )
+    }
+    await command.receipt?.finish()
+  }
+
+  private func handleSessionEvent(_ envelope: ProtocolSessionEventEnvelope) async {
+    let event = envelope.event
     switch event {
-    case .transportConnecting:
-      await enqueue(.transportConnecting)
+    case let .transportConnecting(eventSessionID):
+      submit(.transportConnecting(sessionID: eventSessionID))
 
-    case .transportConnected:
-      await enqueue(.transportConnected)
+    case let .transportConnected(eventSessionID):
+      submit(.transportConnected(sessionID: eventSessionID))
 
-    case let .transportDisconnected(errorDescription):
-      await enqueue(.transportDisconnected(errorDescription: errorDescription))
+    case let .transportDisconnected(eventSessionID, errorDescription):
+      submit(.transportDisconnected(
+        sessionID: eventSessionID,
+        errorDescription: errorDescription
+      ))
 
-    case .protocolOpen:
-      await enqueue(.protocolOpen)
+    case let .protocolOpen(openSessionID):
+      submit(.protocolOpen(sessionID: openSessionID))
 
     case .authFailed:
-      await enqueue(.authLost)
-      forwardSessionEvent(event)
+      submit(.authLost)
+      await forwardSessionEvent(envelope)
 
     case let .pong(nonce):
       handlePong(nonce: nonce)
-      forwardSessionEvent(event)
+      await envelope.markProcessed()
 
     default:
-      forwardSessionEvent(event)
+      await forwardSessionEvent(envelope)
     }
   }
 
-  private func forwardSessionEvent(_ event: ProtocolSessionEvent) {
-    sessionEventContinuation.yield(event)
+  private func forwardSessionEvent(_ envelope: ProtocolSessionEventEnvelope) async {
+    await withTaskCancellationHandler {
+      await sessionEventChannel.send(envelope)
+      if Task.isCancelled {
+        await envelope.markProcessed()
+      }
+    } onCancel: {
+      // AsyncChannel.send is intentionally unbuffered. If termination cancels
+      // this forwarding task while no account collector is receiving, release
+      // the source acknowledgement so ProtocolSession cannot remain stranded.
+      Task { await envelope.markProcessed() }
+    }
   }
 
   // MARK: - State Transitions
@@ -380,6 +502,8 @@ actor ConnectionManager {
     guard state != .stopped, state != .waitingForConstraints, state != .backgroundSuspended, state != .backoff else {
       return
     }
+    handshakeTask?.cancel()
+    handshakeTask = nil
     cancelAllTimers(exceptBackground: true)
 
     guard constraintsSatisfied() else {
@@ -405,11 +529,24 @@ actor ConnectionManager {
   private func startConnecting() async {
     sessionID = sessionID &+ 1
     cancelAllTimers()
+    handshakeTask?.cancel()
+    handshakeTask = nil
     pendingPingNonce = nil
 
     await transition(to: .connectingTransport, reason: .none)
-    await session.startTransport()
     startConnectTimeout(sessionID: sessionID)
+    let session = self.session
+    let currentSessionID = sessionID
+    transportStartTask?.cancel()
+    transportStartTask = Task { [weak self] in
+      await session.startTransport(sessionID: currentSessionID)
+      await self?.transportStartDidFinish(sessionID: currentSessionID)
+    }
+  }
+
+  private func transportStartDidFinish(sessionID completedSessionID: UInt64) {
+    guard sessionID == completedSessionID else { return }
+    transportStartTask = nil
   }
 
   private func transition(to newState: ConnectionState, reason newReason: ConnectionReason) async {
@@ -423,9 +560,15 @@ actor ConnectionManager {
 
   private func stopTransportAndReset() async {
     cancelAllTimers()
+    let stoppingStartTask = transportStartTask
+    transportStartTask = nil
+    stoppingStartTask?.cancel()
+    handshakeTask?.cancel()
+    handshakeTask = nil
     pendingPingNonce = nil
     backgroundGraceActive = false
     await session.stopTransport()
+    await stoppingStartTask?.value
   }
 
   private func constraintsSatisfied() -> Bool {
@@ -520,7 +663,6 @@ actor ConnectionManager {
     guard pendingPingNonce == nil else { return }
     let nonce = UInt64.random(in: 0 ... UInt64.max)
     pendingPingNonce = nonce
-    await session.sendPing(nonce: nonce)
 
     pingTimeoutTask?.cancel()
     pingTimeoutTask = Task { [weak self] in
@@ -532,6 +674,8 @@ actor ConnectionManager {
       guard await self.pendingPingNonce == nonce else { return }
       await self.enqueue(.pingTimeout)
     }
+
+    await session.sendPing(nonce: nonce)
   }
 
   private func handlePong(nonce: UInt64) {
@@ -574,6 +718,17 @@ actor ConnectionManager {
     }
   }
 
+  private func startWakeProbe(sessionID: UInt64) {
+    cancelWakeProbe()
+    let timeout = policy.wakeProbeTimeout
+    wakeProbeTask = Task { [weak self] in
+      guard let self else { return }
+      let isHealthy = await self.probeConnection(timeout: timeout)
+      guard !Task.isCancelled else { return }
+      await self.submit(.wakeProbeCompleted(sessionID: sessionID, isHealthy: isHealthy))
+    }
+  }
+
   private func timeoutProbe(nonce: UInt64) async {
     guard probeNonce == nonce else { return }
     probeNonce = nil
@@ -595,11 +750,17 @@ actor ConnectionManager {
     probeNonce = nil
   }
 
+  private func cancelWakeProbe() {
+    wakeProbeTask?.cancel()
+    wakeProbeTask = nil
+    cancelProbe()
+  }
+
   private func cancelAllTimers(exceptBackground: Bool = false) {
     cancelBackoff()
     cancelAuthTimeout()
     cancelConnectTimeout()
-    cancelProbe()
+    cancelWakeProbe()
     pingTask?.cancel()
     pingTask = nil
     pingTimeoutTask?.cancel()

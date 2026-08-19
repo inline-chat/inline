@@ -21,6 +21,10 @@ public struct DeleteChatTransaction: Transaction2 {
     context = Context(peerId: peerId)
   }
 
+  public var executionKey: TransactionExecutionKey? {
+    .peerMutation(context.peerId)
+  }
+
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
     .deleteChat(.with {
       $0.peerID = context.peerId.toInputPeer()

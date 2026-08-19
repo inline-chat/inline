@@ -1,5 +1,7 @@
+import Auth
 import InlineKit
 import Logger
+import RealtimeV2
 import SwiftUI
 
 enum UsernameStatus {
@@ -31,10 +33,10 @@ struct Profile: View {
   // MARK: - Environment
 
   @EnvironmentObject private var nav: Navigation
-  @EnvironmentObject private var api: ApiClient
   @EnvironmentObject private var mainViewRouter: MainViewRouter
   @Environment(\.auth) private var auth
   @Environment(\.appDatabase) private var database
+  @Environment(\.realtimeV2) private var realtimeV2
   @FormState private var formState
 
   // MARK: - Constants
@@ -110,10 +112,14 @@ extension Profile {
       do {
         usernameStatus = .checking
         try? await Task.sleep(for: .seconds(0.5))
-        let result = try await api.checkUsername(username: username)
+        let result = try await realtimeV2.checkUsername(username)
 
         withAnimation(.smooth(duration: 0.15)) {
-          usernameStatus = result.available ? .available : .taken
+          usernameStatus = switch result.availability {
+          case .usernameAvailable, .usernameCurrent: .available
+          case .usernameTaken, .usernameReserved, .usernameInvalid: .taken
+          case .unspecified, .UNRECOGNIZED: .checking
+          }
         }
       } catch {
         Log.shared.error("Failed to check username", error: error)
@@ -137,15 +143,16 @@ extension Profile {
         }
 
         let (firstName, lastName) = parseNameComponents(from: fullName)
-        let result = try await api.updateProfile(
+        let profile = try await realtimeV2.updateProfile(
           firstName: firstName,
           lastName: lastName,
-          username: username.lowercased()
+          bio: nil
         )
-
-        print(result.user)
+        await realtimeV2.applyUpdates(profile.updates)
+        let usernameResult = try await realtimeV2.changeUsername(username.lowercased())
+        await realtimeV2.applyUpdates(usernameResult.updates)
         try await database.dbWriter.write { db in
-          try User(from: result.user).save(db)
+          try User(from: usernameResult.user).save(db)
         }
         nav.reset()
         mainViewRouter.setRoute(route: .main)

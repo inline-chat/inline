@@ -178,6 +178,104 @@ struct TransactionLifetimeTests {
     #expect(await transactions.isInFlight(transactionId: transactionID) == false)
   }
 
+  @Test("dispatch phase is durable before transport ownership is registered")
+  func dispatchPhasePersistsBeforeRegistration() async throws {
+    let persistence = DelayedPersistence()
+    let owner = TransactionOwner(accountID: 913, generation: 1)
+    let transactions = Transactions(persistenceHandler: persistence)
+    await transactions.activate(owner: owner)
+
+    let transactionID = try #require(
+      await transactions.queue(transaction: LifetimeMutation(), owner: owner)
+    )
+    _ = await transactions.dequeue(owner: owner)
+
+    #expect(
+      await transactions.prepareForDispatch(
+        transactionId: transactionID,
+        rpcMsgId: 913,
+        owner: owner
+      ) == .prepared
+    )
+    #expect(await persistence.phase(transactionID, for: owner) == .mayHaveExecuted)
+    #expect(await transactions.transactionIdFrom(msgId: 913) == transactionID)
+  }
+
+  @Test("process reopen does not replay a non-replayable dispatched mutation")
+  func processReopenDoesNotReplayDispatchedMutation() async throws {
+    let persistence = DelayedPersistence()
+    let owner = TransactionOwner(accountID: 914, generation: 1)
+    let firstProcess = Transactions(persistenceHandler: persistence)
+    await firstProcess.activate(owner: owner)
+
+    let transactionID = try #require(
+      await firstProcess.queue(transaction: LifetimeMutation(), owner: owner)
+    )
+    _ = await firstProcess.dequeue(owner: owner)
+    #expect(
+      await firstProcess.prepareForDispatch(
+        transactionId: transactionID,
+        rpcMsgId: 914,
+        owner: owner
+      ) == .prepared
+    )
+
+    let reopenedProcess = Transactions(persistenceHandler: persistence)
+    await reopenedProcess.activate(owner: owner)
+    await reopenedProcess.waitForPersistence()
+
+    #expect(await reopenedProcess.isInQueue(transactionId: transactionID) == false)
+    #expect(await persistence.contains(transactionID, for: owner) == false)
+  }
+
+  @Test("uncertain dispatch keeps its durable receipt until reconciliation finishes")
+  func uncertainDispatchRetainsReceiptUntilReconciled() async throws {
+    let persistence = DelayedPersistence()
+    let owner = TransactionOwner(accountID: 916, generation: 1)
+    let transactions = Transactions(persistenceHandler: persistence)
+    await transactions.activate(owner: owner)
+
+    let transactionID = try #require(
+      await transactions.queue(transaction: LifetimeMutation(), owner: owner)
+    )
+    _ = await transactions.dequeue(owner: owner)
+    #expect(
+      await transactions.prepareForDispatch(
+        transactionId: transactionID,
+        rpcMsgId: 916,
+        owner: owner
+      ) == .prepared
+    )
+
+    let unresolved = try #require(
+      await transactions.recoverAfterUncertainDispatch(transactionId: transactionID)
+    )
+    await transactions.waitForPersistence()
+    #expect(await persistence.contains(transactionID, for: owner))
+
+    await unresolved.transaction.commitOutcomeUnknown()
+    await transactions.deletePersisted(transactionId: transactionID, owner: owner)
+    await transactions.waitForPersistence()
+    #expect(await persistence.contains(transactionID, for: owner) == false)
+  }
+
+  @Test("process reopen preserves a mutation known to be queued")
+  func processReopenPreservesQueuedMutation() async throws {
+    let persistence = DelayedPersistence()
+    let owner = TransactionOwner(accountID: 915, generation: 1)
+    let firstProcess = Transactions(persistenceHandler: persistence)
+    await firstProcess.activate(owner: owner)
+
+    let transactionID = try #require(
+      await firstProcess.queue(transaction: LifetimeMutation(), owner: owner)
+    )
+
+    let reopenedProcess = Transactions(persistenceHandler: persistence)
+    await reopenedProcess.activate(owner: owner)
+
+    #expect(await reopenedProcess.isInQueue(transactionId: transactionID))
+  }
+
   @Test("owner reset while blocker resolution is suspended cannot resurrect work")
   func resetDuringBlockerResolutionDoesNotResurrectWork() async throws {
     let resolver = GatedBlockerResolver()
@@ -224,6 +322,10 @@ private actor DelayedPersistence: TransactionPersistenceHandler {
 
   func contains(_ transactionId: TransactionId, for owner: TransactionOwner) -> Bool {
     storage[owner]?[transactionId] != nil
+  }
+
+  func phase(_ transactionId: TransactionId, for owner: TransactionOwner) -> TransactionDispatchPhase? {
+    storage[owner]?[transactionId]?.dispatchPhase
   }
 }
 

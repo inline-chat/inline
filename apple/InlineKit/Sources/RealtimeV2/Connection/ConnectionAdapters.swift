@@ -34,14 +34,11 @@ final class AuthConnectionAdapter {
     // logout/login transitions that occur before the task gets an opportunity to run.
     let snapshots = auth.snapshots
     let initial = auth.snapshot()
-    let initialToken = initial.token
-    let initialProtocol = initial.inlineProtocol
     let initialAuthAvailable = initial.isLoggedIn
     log.info("Realtime auth observer started baseline_available=\(initialAuthAvailable ? 1 : 0)")
     task = Task {
       var authAvailable = initialAuthAvailable
-      var appliedToken = initialToken
-      var appliedProtocol = initialProtocol
+      var appliedSnapshot = initial
       var sequence: UInt64 = 0
 
       for await snapshot in snapshots {
@@ -50,20 +47,25 @@ final class AuthConnectionAdapter {
         observationProbe.recordObserved(snapshot)
         let nextAuthAvailable = snapshot.isLoggedIn
         let changed = nextAuthAvailable != authAvailable
-        let tokenChanged = snapshot.token != appliedToken || snapshot.inlineProtocol != appliedProtocol
+        let transition = RealtimeAuthTransition(from: appliedSnapshot, to: snapshot)
         log.info(
           "Realtime auth observer received snapshot sequence=\(sequence)" +
             " status=\(diagnosticName(for: snapshot.status))" +
             " available=\(nextAuthAvailable ? 1 : 0)" +
-            " changed=\(changed ? 1 : 0) token_changed=\(tokenChanged ? 1 : 0)"
+            " changed=\(changed ? 1 : 0)" +
+            " authority_changed=\(transition.authorityChanged ? 1 : 0)" +
+            " credentials_changed=\(transition.credentialsChanged ? 1 : 0)" +
+            " temporary_refreshed=\(transition.temporaryRefreshed ? 1 : 0)" +
+            " temporary_presence_changed=\(transition.temporaryPresenceChanged ? 1 : 0)"
         )
-        guard changed || tokenChanged else {
+        guard changed || transition.requiresReconnect else {
+          appliedSnapshot = snapshot
           observationProbe.recordApplied(snapshot)
           continue
         }
 
         if nextAuthAvailable {
-          if authAvailable, tokenChanged {
+          if authAvailable, transition.requiresReconnect {
             await manager.stop()
           }
           await manager.setAuthAvailable(true)
@@ -73,8 +75,7 @@ final class AuthConnectionAdapter {
           await manager.stop()
         }
         authAvailable = nextAuthAvailable
-        appliedToken = snapshot.token
-        appliedProtocol = snapshot.inlineProtocol
+        appliedSnapshot = snapshot
         observationProbe.recordApplied(snapshot)
         log.info(
           "Realtime auth observer queued transition sequence=\(sequence)" +
@@ -92,6 +93,59 @@ final class AuthConnectionAdapter {
   deinit {
     task?.cancel()
     task = nil
+  }
+}
+
+/// The account/session authority that owns one realtime connection lifecycle.
+///
+/// Temporary V3 authorizations are transport-owned, replaceable application keys. Refreshing one
+/// must not tear down the connection that just created it. Bearer tokens and permanent V3 account
+/// session credentials remain authority changes and therefore require a new connection lifecycle.
+enum RealtimeAuthAuthority: Equatable {
+  case unavailable
+  case bearer(userId: Int64, token: String)
+  case inlineProtocol(userId: Int64, accountSessionId: Int64?, permanentKey: [UInt8]?)
+
+  init(snapshot: AuthSnapshot) {
+    switch snapshot.status {
+    case .authenticated(let credentials):
+      self = .bearer(userId: credentials.userId, token: credentials.token)
+    case .authenticatedV3(let userId):
+      self = .inlineProtocol(
+        userId: userId,
+        accountSessionId: snapshot.inlineProtocol?.accountSessionId,
+        permanentKey: snapshot.inlineProtocol?.permanent.key
+      )
+    case .hydrating, .unauthenticated, .locked, .reauthRequired:
+      self = .unavailable
+    }
+  }
+}
+
+struct RealtimeAuthTransition: Equatable {
+  let authorityChanged: Bool
+  let credentialsChanged: Bool
+  let temporaryRefreshed: Bool
+  let temporaryPresenceChanged: Bool
+
+  var requiresReconnect: Bool { authorityChanged || temporaryPresenceChanged }
+
+  init(from previous: AuthSnapshot, to next: AuthSnapshot) {
+    let previousAuthority = RealtimeAuthAuthority(snapshot: previous)
+    let nextAuthority = RealtimeAuthAuthority(snapshot: next)
+    authorityChanged = previousAuthority != nextAuthority
+    credentialsChanged = previous.token != next.token || previous.inlineProtocol != next.inlineProtocol
+
+    let sameV3Authority: Bool = switch (previousAuthority, nextAuthority) {
+    case (.inlineProtocol, .inlineProtocol) where !authorityChanged: true
+    default: false
+    }
+    let previousTemporary = previous.inlineProtocol?.temporary
+    let nextTemporary = next.inlineProtocol?.temporary
+    temporaryRefreshed = sameV3Authority && previousTemporary != nil && nextTemporary != nil &&
+      previousTemporary != nextTemporary
+    temporaryPresenceChanged = sameV3Authority &&
+      ((previousTemporary == nil) != (nextTemporary == nil))
   }
 }
 

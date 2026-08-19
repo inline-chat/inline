@@ -21,7 +21,7 @@ public struct GetSpaceSettingsTransaction: Transaction2 {
 public struct ToggleSpaceGridTransaction: Transaction2 {
   public var method: InlineProtocol.Method = .toggleSpaceGrid
   public var context: Context
-  public var type: TransactionKindType = .mutation(.init(transient: true, retryAfterAck: false))
+  public var type: TransactionKindType = .mutation(.init(transient: true))
 
   public struct Context: Sendable, Codable { let spaceID: Int64; let enabled: Bool }
   enum CodingKeys: String, CodingKey { case context }
@@ -67,7 +67,7 @@ public struct GetGridHomeTransaction: Transaction2 {
 public struct CreateGridRoomTransaction: Transaction2 {
   public var method: InlineProtocol.Method = .createGridRoom
   public var context: Context
-  public var type: TransactionKindType = .mutation(.init(transient: true, retryAfterAck: false))
+  public var type: TransactionKindType = .mutation(.init(transient: true))
 
   public struct Context: Sendable, Codable { let spaceID: Int64 }
   enum CodingKeys: String, CodingKey { case context }
@@ -83,7 +83,7 @@ public struct CreateGridRoomTransaction: Transaction2 {
 public struct JoinGridRoomTransaction: Transaction2 {
   public var method: InlineProtocol.Method = .joinGridRoom
   public var context: Context
-  public var type: TransactionKindType = .mutation(.init(transient: true, retryAfterAck: false))
+  public var type: TransactionKindType = .mutation(.init(transient: true))
 
   public struct Context: Sendable, Codable { let roomID: Int64 }
   enum CodingKeys: String, CodingKey { case context }
@@ -99,7 +99,7 @@ public struct JoinGridRoomTransaction: Transaction2 {
 public struct LeaveGridRoomTransaction: Transaction2 {
   public var method: InlineProtocol.Method = .leaveGridRoom
   public var context: Context
-  public var type: TransactionKindType = .mutation(.init(transient: true, retryAfterAck: false))
+  public var type: TransactionKindType = .mutation(.init(transient: true))
 
   public struct Context: Sendable, Codable { let roomID: Int64 }
   enum CodingKeys: String, CodingKey { case context }
@@ -115,7 +115,7 @@ public struct LeaveGridRoomTransaction: Transaction2 {
 public struct SetGridRoomLockedTransaction: Transaction2 {
   public var method: InlineProtocol.Method = .setGridRoomLocked
   public var context: Context
-  public var type: TransactionKindType = .mutation(.init(transient: true, retryAfterAck: false))
+  public var type: TransactionKindType = .mutation(.init(transient: true))
 
   public struct Context: Sendable, Codable { let roomID: Int64; let locked: Bool }
   enum CodingKeys: String, CodingKey { case context }
@@ -131,7 +131,7 @@ public struct SetGridRoomLockedTransaction: Transaction2 {
 public struct SetGridRoomTitleTransaction: Transaction2 {
   public var method: InlineProtocol.Method = .setGridRoomTitle
   public var context: Context
-  public var type: TransactionKindType = .mutation(.init(transient: true, retryAfterAck: false))
+  public var type: TransactionKindType = .mutation(.init(transient: true))
 
   public struct Context: Sendable, Codable { let roomID: Int64; let title: String }
   enum CodingKeys: String, CodingKey { case context }
@@ -147,7 +147,7 @@ public struct SetGridRoomTitleTransaction: Transaction2 {
 public struct DeleteGridRoomTransaction: Transaction2 {
   public var method: InlineProtocol.Method = .deleteGridRoom
   public var context: Context
-  public var type: TransactionKindType = .mutation(.init(transient: true, retryAfterAck: false))
+  public var type: TransactionKindType = .mutation(.init(transient: true))
 
   public struct Context: Sendable, Codable { let roomID: Int64 }
   enum CodingKeys: String, CodingKey { case context }
@@ -164,6 +164,7 @@ public struct PrepareGridConnectionTransaction: Transaction2 {
   public var method: InlineProtocol.Method = .prepareGridConnection
   public var context: Context
   public var type: TransactionKindType = .query()
+  public var reconnectReplayPolicy: TransactionReconnectPolicy? { .neverReplay }
 
   public struct Context: Sendable, Codable { let roomID: Int64; let generation: Int32 }
   enum CodingKeys: String, CodingKey { case context }
@@ -181,7 +182,7 @@ public struct PrepareGridConnectionTransaction: Transaction2 {
 public struct SetGridAvatarMicTransaction: Transaction2 {
   public var method: InlineProtocol.Method = .setGridAvatarMicrophoneEnabled
   public var context: Context
-  public var type: TransactionKindType = .mutation(.init(transient: true, retryAfterAck: false))
+  public var type: TransactionKindType = .mutation(.init(transient: true))
 
   public struct Context: Sendable, Codable { let roomID: Int64; let enabled: Bool }
   enum CodingKeys: String, CodingKey { case context }

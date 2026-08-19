@@ -9,6 +9,7 @@ public struct InvokeMessageActionTransaction: Transaction2 {
   public var method: InlineProtocol.Method = .invokeMessageAction
   public var context: Context
   public var type: TransactionKindType = .query()
+  public var reconnectReplayPolicy: TransactionReconnectPolicy? { .neverReplay }
 
   public struct Context: Sendable, Codable {
     public let peerId: Peer

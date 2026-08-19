@@ -6,7 +6,7 @@ public enum TransactionError: Error {
   case timeout
   case invalid
   case persistenceFailed
-  case ackedButNoResultAfterReconnect
+  case commitOutcomeUnknownAfterReconnect
   case dependencyFailed
 }
 

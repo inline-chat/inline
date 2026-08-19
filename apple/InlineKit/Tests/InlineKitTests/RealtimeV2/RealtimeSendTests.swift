@@ -194,6 +194,114 @@ final class RealtimeSendTests {
     withExtendedLifetime(realtime) {}
   }
 
+  @Test("transaction drain multiplexes writes before any RPC response")
+  func testTransactionDrainMultiplexesWritesBeforeResponses() async throws {
+    await SendTestRecorder.shared.reset()
+
+    let auth = Auth.mocked(authenticated: true)
+    let transport = HeldResultTransport()
+    let realtime = RealtimeV2(
+      transport: transport,
+      auth: auth.handle,
+      applyUpdates: SendTestApplyUpdates(),
+      syncStorage: SendTestSyncStorage()
+    )
+
+    let connected = await waitForCondition(timeout: .seconds(2)) {
+      let stateObject = realtime.stateObject
+      return await MainActor.run { stateObject.connectionState == .connected }
+    }
+    #expect(connected)
+
+    let firstID = UUID()
+    let secondID = UUID()
+    let first = Task {
+      try await realtime.send(SendTestTransaction(id: firstID, method: multiplexedSendMethod))
+    }
+    let second = Task {
+      try await realtime.send(SendTestTransaction(id: secondID, method: multiplexedSendMethod))
+    }
+
+    let bothWritten = await waitForCondition {
+      await transport.pendingMultiplexedResultCount == 2
+    }
+    #expect(bothWritten)
+    #expect(await SendTestRecorder.shared.didRunApply(firstID) == false)
+    #expect(await SendTestRecorder.shared.didRunApply(secondID) == false)
+
+    await transport.completePendingResultsInReverseOrder()
+    _ = try await first.value
+    _ = try await second.value
+
+    #expect(await SendTestRecorder.shared.didRunApply(firstID))
+    #expect(await SendTestRecorder.shared.didRunApply(secondID))
+    withExtendedLifetime(realtime) {}
+  }
+
+  @Test("deferred transaction waits for retry signal instead of spinning")
+  func testDeferredTransactionWaitsForRetrySignal() async throws {
+    let auth = Auth.mocked(authenticated: true)
+    let transport = FailOnceTransactionTransport()
+    let realtime = RealtimeV2(
+      transport: transport,
+      auth: auth.handle,
+      applyUpdates: SendTestApplyUpdates(),
+      syncStorage: SendTestSyncStorage()
+    )
+
+    let connected = await waitForCondition(timeout: .seconds(2)) {
+      let stateObject = realtime.stateObject
+      return await MainActor.run { stateObject.connectionState == .connected }
+    }
+    #expect(connected)
+
+    let sending = Task {
+      try await realtime.send(SendTestTransaction(id: UUID(), method: deferredSpinMethod))
+    }
+    let firstAttempt = await waitForCondition {
+      await transport.targetAttemptCount == 1
+    }
+    #expect(firstAttempt)
+    try await Task.sleep(for: .milliseconds(150))
+    #expect(await transport.targetAttemptCount == 1)
+
+    _ = try await sending.value
+    #expect(await transport.targetAttemptCount == 2)
+    withExtendedLifetime(realtime) {}
+  }
+
+  @Test("pre-write not-connected requeues a non-replayable mutation")
+  func testPreWriteNotConnectedRequeuesNonReplayableMutation() async throws {
+    let auth = Auth.mocked(authenticated: true)
+    let transport = PreWriteNotConnectedTransport()
+    let realtime = RealtimeV2(
+      transport: transport,
+      auth: auth.handle,
+      applyUpdates: SendTestApplyUpdates(),
+      syncStorage: SendTestSyncStorage()
+    )
+
+    let connected = await waitForCondition(timeout: .seconds(2)) {
+      let stateObject = realtime.stateObject
+      return await MainActor.run { stateObject.connectionState == .connected }
+    }
+    #expect(connected)
+
+    let sending = Task {
+      try await realtime.send(
+        SendTestTransaction(
+          id: UUID(),
+          method: preWriteMutationMethod,
+          type: .mutation()
+        )
+      )
+    }
+
+    _ = try await sending.value
+    #expect(await transport.targetAttemptCount == 2)
+    withExtendedLifetime(realtime) {}
+  }
+
   @Test("send runs optimistic before rpc dispatch")
   func testSendRunsOptimisticBeforeRpcDispatch() async throws {
     await SendOrderingProbe.shared.reset()
@@ -259,7 +367,7 @@ final class RealtimeSendTests {
       }
       Issue.record("Expected send to fail for acked non-retry transaction after reconnect")
     } catch let error as TransactionError {
-      if case .ackedButNoResultAfterReconnect = error {
+      if case .commitOutcomeUnknownAfterReconnect = error {
         // expected
       } else {
         Issue.record("Unexpected TransactionError: \(error)")
@@ -270,6 +378,36 @@ final class RealtimeSendTests {
       Issue.record("Unexpected error: \(error)")
     }
 
+    withExtendedLifetime(realtime) {}
+  }
+
+  @Test("carrier commit-unknown preserves transaction optimistic state")
+  func testCarrierCommitUnknownUsesUnknownOutcomeHook() async throws {
+    await UnknownOutcomeRecorder.shared.reset()
+    let auth = Auth.mocked(authenticated: true)
+    let realtime = RealtimeV2(
+      transport: CarrierCommitUnknownTransport(),
+      auth: auth.handle,
+      applyUpdates: SendTestApplyUpdates(),
+      syncStorage: SendTestSyncStorage()
+    )
+
+    #expect(await waitForCondition(timeout: .seconds(2)) {
+      await MainActor.run { realtime.stateObject.connectionState == .connected }
+    })
+
+    do {
+      _ = try await realtime.send(UnknownOutcomeTransaction(id: UUID()))
+      Issue.record("Expected carrier commit-unknown transaction to fail")
+    } catch let error as TransactionError {
+      guard case .commitOutcomeUnknownAfterReconnect = error else {
+        Issue.record("Unexpected transaction error: \(error)")
+        return
+      }
+    }
+
+    #expect(await UnknownOutcomeRecorder.shared.commitUnknownCount == 1)
+    #expect(await UnknownOutcomeRecorder.shared.failedCount == 0)
     withExtendedLifetime(realtime) {}
   }
 
@@ -643,9 +781,10 @@ final class RealtimeSendTests {
     await session.start()
 
     Task {
-      for await event in session.events {
-        if case .connectionError(reason: .unspecified) = event {
+      for await envelope in session.events {
+        if case .connectionError(reason: .unspecified) = envelope.event {
           await sawConnectionError.set()
+          await envelope.markProcessed()
           return
         }
       }
@@ -657,6 +796,301 @@ final class RealtimeSendTests {
       await sawConnectionError.get()
     }
     #expect(received)
+  }
+
+  @Test("protocol session registers RPC ownership before transport write")
+  func testProtocolSessionRegistersRPCOwnershipBeforeTransportWrite() async throws {
+    let auth = Auth.mocked(authenticated: true)
+    let probe = RPCPreparationProbe()
+    let transport = RPCPreparationObservingTransport(probe: probe)
+    let session = ProtocolSession(transport: transport, auth: auth.handle)
+
+    let messageID = try await session.sendRpc(method: .getMe, input: nil) { messageID in
+      await probe.register(messageID)
+    }
+
+    #expect(await probe.registeredMessageID() == messageID)
+    #expect(await transport.observedPreparedOwnership())
+  }
+
+  @Test("protocol session does not write when RPC ownership registration fails")
+  func testProtocolSessionDoesNotWriteWhenOwnershipRegistrationFails() async {
+    let auth = Auth.mocked(authenticated: true)
+    let transport = RPCWriteCountingTransport()
+    let session = ProtocolSession(transport: transport, auth: auth.handle)
+
+    await #expect(throws: RPCPreparationTestError.self) {
+      try await session.sendRpc(method: .getMe, input: nil) { _ in
+        throw RPCPreparationTestError()
+      }
+    }
+
+    #expect(await transport.sendCount == 0)
+  }
+
+  @Test("direct RPC completion waits for earlier account update processing")
+  func testDirectRPCWaitsForEarlierAccountUpdateProcessing() async throws {
+    await TerminationApplyGate.shared.reset()
+    let auth = Auth.mocked(authenticated: true)
+    let transport = MockTransport()
+    let session = ProtocolSession(transport: transport, auth: auth.handle)
+    let completed = SendTestFlag()
+    await session.start()
+
+    let collector = Task {
+      for await envelope in session.events {
+        if case .updates = envelope.event {
+          await TerminationApplyGate.shared.hold()
+        }
+        await envelope.markProcessed()
+      }
+    }
+    defer { collector.cancel() }
+
+    let resultTask = Task {
+      _ = try await session.callRpc(method: .getUpdatesState, input: nil, timeout: .seconds(1))
+      await completed.set()
+    }
+    try #require(await waitForCondition {
+      !(await transport.sentMessages.isEmpty)
+    })
+    let requestID = try #require(await transport.sentMessages.first?.id)
+
+    var updatesPayload = InlineProtocol.UpdatesPayload()
+    updatesPayload.updates = []
+    var serverMessage = InlineProtocol.ServerMessage()
+    serverMessage.payload = .update(updatesPayload)
+    var updateEnvelope = ServerProtocolMessage()
+    updateEnvelope.body = .message(serverMessage)
+    await transport.emit(.message(updateEnvelope))
+
+    try #require(await waitForCondition {
+      await TerminationApplyGate.shared.hasStarted()
+    })
+    var result = InlineProtocol.RpcResult()
+    result.reqMsgID = requestID
+    var resultEnvelope = ServerProtocolMessage()
+    resultEnvelope.body = .rpcResult(result)
+    let resultDelivery = Task { await transport.emit(.message(resultEnvelope)) }
+
+    try? await Task.sleep(for: .milliseconds(30))
+    #expect(await completed.get() == false)
+
+    await TerminationApplyGate.shared.release()
+    try await resultTask.value
+    await resultDelivery.value
+    #expect(await completed.get())
+  }
+
+  @Test("protocol request IDs remain unique across transport reset")
+  func testProtocolRequestIDsRemainUniqueAcrossTransportReset() async throws {
+    let auth = Auth.mocked(authenticated: true)
+    let transport = MockTransport()
+    let session = ProtocolSession(transport: transport, auth: auth.handle)
+
+    let first = try await session.sendRpc(method: .getMe, input: nil)
+    await session.stopTransport()
+    let second = try await session.sendRpc(method: .getMe, input: nil)
+
+    #expect(second > first)
+  }
+
+  @Test("late RPC results from an old transport cannot complete a new request")
+  func testLateOldTransportResultCannotCollideAfterReset() async throws {
+    let auth = Auth.mocked(authenticated: true)
+    let transport = MockTransport()
+    let session = ProtocolSession(transport: transport, auth: auth.handle)
+    await session.start()
+    let collector = Task {
+      for await envelope in session.events {
+        await envelope.markProcessed()
+      }
+    }
+    defer { collector.cancel() }
+
+    let oldRequest = Task {
+      try await session.callRpc(method: .getMe, input: nil, timeout: nil)
+    }
+    try #require(await waitForCondition { await transport.sentMessages.count == 1 })
+    let oldID = try #require(await transport.sentMessages.first?.id)
+
+    await session.stopTransport()
+    do {
+      _ = try await oldRequest.value
+      Issue.record("Expected the old request to be cancelled by transport reset")
+    } catch ProtocolSessionError.stopped {
+      // Expected.
+    } catch {
+      Issue.record("Unexpected old request error: \(error)")
+    }
+
+    let newCompleted = SendTestFlag()
+    let newRequest = Task {
+      _ = try await session.callRpc(method: .getMe, input: nil, timeout: .seconds(1))
+      await newCompleted.set()
+    }
+    try #require(await waitForCondition { await transport.sentMessages.count == 2 })
+    let newID = try #require(await transport.sentMessages.last?.id)
+    #expect(newID != oldID)
+
+    var oldResult = InlineProtocol.RpcResult()
+    oldResult.reqMsgID = oldID
+    var oldEnvelope = ServerProtocolMessage()
+    oldEnvelope.body = .rpcResult(oldResult)
+    await transport.emit(.message(oldEnvelope))
+    await transport.emit(.rpcCommitOutcomeUnknown(msgId: oldID))
+    try? await Task.sleep(for: .milliseconds(30))
+    #expect(await newCompleted.get() == false)
+
+    var newResult = InlineProtocol.RpcResult()
+    newResult.reqMsgID = newID
+    var newEnvelope = ServerProtocolMessage()
+    newEnvelope.body = .rpcResult(newResult)
+    await transport.emit(.message(newEnvelope))
+    _ = try await newRequest.value
+    #expect(await newCompleted.get())
+  }
+
+  @Test("direct RPC timeout after transport acceptance has unknown commit outcome")
+  func testDirectRPCTimeoutAfterTransportAcceptanceIsCommitUnknown() async {
+    let auth = Auth.mocked(authenticated: true)
+    let transport = MockTransport()
+    let session = ProtocolSession(transport: transport, auth: auth.handle)
+
+    do {
+      _ = try await session.callRpc(
+        method: .deleteChat,
+        input: nil,
+        timeout: .milliseconds(10)
+      )
+      Issue.record("Expected the unanswered mutation to time out")
+    } catch ProtocolSessionError.commitOutcomeUnknown {
+      // Expected: the transport accepted the request, but no authoritative result arrived.
+    } catch {
+      Issue.record("Unexpected direct RPC error: \(error)")
+    }
+  }
+
+  @Test("direct RPC cancellation after dispatch reports unknown outcome without stranding capacity")
+  func testDirectRPCCancellationReleasesPendingOwnership() async throws {
+    let auth = Auth.mocked(authenticated: true)
+    let transport = MockTransport()
+    let session = ProtocolSession(transport: transport, auth: auth.handle)
+    await session.start()
+    let collector = Task {
+      for await envelope in session.events {
+        await envelope.markProcessed()
+      }
+    }
+    defer { collector.cancel() }
+
+    let cancelled = Task {
+      try await session.callRpc(method: .deleteChat, input: nil, timeout: nil)
+    }
+    try #require(await waitForCondition {
+      await transport.sentMessages.count == 1
+    })
+    cancelled.cancel()
+    do {
+      _ = try await cancelled.value
+      Issue.record("Expected direct RPC cancellation")
+    } catch ProtocolSessionError.commitOutcomeUnknown {
+      // Cancellation after the dispatch boundary stops waiting without claiming
+      // that server execution stopped.
+    } catch {
+      Issue.record("Unexpected direct RPC cancellation error: \(error)")
+    }
+
+    let next = Task {
+      try await session.callRpc(method: .getMe, input: nil, timeout: .seconds(1))
+    }
+    try #require(await waitForCondition {
+      await transport.sentMessages.count == 2
+    })
+    let nextID = try #require(await transport.sentMessages.last?.id)
+    var result = InlineProtocol.RpcResult()
+    result.reqMsgID = nextID
+    var envelope = ServerProtocolMessage()
+    envelope.body = .rpcResult(result)
+    await transport.emit(.message(envelope))
+    _ = try await next.value
+  }
+
+  @Test("direct read-only RPC cancellation after dispatch remains cancellation")
+  func testDirectReadOnlyRPCCancellationAfterDispatchRemainsCancellation() async throws {
+    let auth = Auth.mocked(authenticated: true)
+    let transport = MockTransport()
+    let session = ProtocolSession(transport: transport, auth: auth.handle)
+
+    let cancelled = Task {
+      try await session.callRpc(method: .getMe, input: nil, timeout: nil)
+    }
+    try #require(await waitForCondition {
+      await transport.sentMessages.count == 1
+    })
+    cancelled.cancel()
+
+    do {
+      _ = try await cancelled.value
+      Issue.record("Expected direct read-only RPC cancellation")
+    } catch is CancellationError {
+      // Cancellation stops interest in a query result and cannot hide a mutation.
+    } catch {
+      Issue.record("Unexpected direct read-only RPC cancellation error: \(error)")
+    }
+  }
+
+  @Test("direct RPC cancellation before admission does not write")
+  func testDirectRPCCancellationBeforeAdmissionDoesNotWrite() async throws {
+    let auth = Auth.mocked(authenticated: true)
+    let transport = MockTransport()
+    let session = ProtocolSession(transport: transport, auth: auth.handle)
+    let gate = DirectRpcStartGate()
+    let cancelled = Task {
+      await gate.wait()
+      _ = try await session.callRpc(method: .deleteChat, input: nil, timeout: nil)
+    }
+
+    cancelled.cancel()
+    await gate.release()
+
+    do {
+      _ = try await cancelled.value
+      Issue.record("Expected direct RPC cancellation before admission")
+    } catch is CancellationError {
+      // The request never crossed the dispatch boundary.
+    } catch {
+      Issue.record("Unexpected direct RPC cancellation error: \(error)")
+    }
+    #expect(await transport.sentMessages.isEmpty)
+  }
+
+  @Test("carrier commit-unknown completes only the matching direct RPC")
+  func testCarrierCommitUnknownStaysRequestScoped() async {
+    let auth = Auth.mocked(authenticated: true)
+    let transport = MockTransport()
+    let session = ProtocolSession(transport: transport, auth: auth.handle)
+    await session.start()
+
+    let resultTask = Task { () -> Bool in
+      do {
+        _ = try await session.callRpc(method: .deleteChat, input: nil, timeout: .seconds(1))
+        return false
+      } catch ProtocolSessionError.commitOutcomeUnknown {
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    let sent = await waitForCondition {
+      !(await transport.sentMessages.isEmpty)
+    }
+    #expect(sent)
+    if let messageID = await transport.sentMessages.first?.id {
+      await transport.emit(.rpcCommitOutcomeUnknown(msgId: messageID))
+    }
+    #expect(await resultTask.value)
   }
 
   @Test("connectionError posts restart alert notification when auth refresh shows missing token")
@@ -709,6 +1143,69 @@ final class RealtimeSendTests {
   }
 }
 
+private actor RPCPreparationProbe {
+  private var messageID: UInt64?
+
+  func register(_ messageID: UInt64) {
+    self.messageID = messageID
+  }
+
+  func registeredMessageID() -> UInt64? {
+    messageID
+  }
+}
+
+private actor DirectRpcStartGate {
+  private var released = false
+  private var waiter: CheckedContinuation<Void, Never>?
+
+  func wait() async {
+    if released { return }
+    await withCheckedContinuation { continuation in
+      waiter = continuation
+    }
+  }
+
+  func release() {
+    released = true
+    waiter?.resume()
+    waiter = nil
+  }
+}
+
+private actor RPCPreparationObservingTransport: Transport {
+  nonisolated let events = AsyncChannel<TransportEvent>()
+
+  private let probe: RPCPreparationProbe
+  private var ownershipWasPrepared = false
+
+  init(probe: RPCPreparationProbe) {
+    self.probe = probe
+  }
+
+  func start() async {}
+  func stop() async {}
+
+  func send(_ message: ClientMessage) async throws {
+    ownershipWasPrepared = await probe.registeredMessageID() == message.id
+  }
+
+  func observedPreparedOwnership() -> Bool {
+    ownershipWasPrepared
+  }
+}
+
+private struct RPCPreparationTestError: Error {}
+
+private actor RPCWriteCountingTransport: Transport {
+  nonisolated let events = AsyncChannel<TransportEvent>()
+  private(set) var sendCount = 0
+
+  func start() async {}
+  func stop() async {}
+  func send(_: ClientMessage) async throws { sendCount += 1 }
+}
+
 private actor AccountSwitchSendRecorder {
   static let shared = AccountSwitchSendRecorder()
 
@@ -747,6 +1244,90 @@ private actor AccountSwitchSendRecorder {
   func cancelledCount(_ id: UUID) -> Int { cancelled[id, default: 0] }
   func applyCount(_ id: UUID) -> Int { applied[id, default: 0] }
   func failedCount(_ id: UUID) -> Int { failed[id, default: 0] }
+}
+
+private actor UnknownOutcomeRecorder {
+  static let shared = UnknownOutcomeRecorder()
+
+  private(set) var commitUnknownCount = 0
+  private(set) var failedCount = 0
+
+  func reset() {
+    commitUnknownCount = 0
+    failedCount = 0
+  }
+
+  func markCommitUnknown() {
+    commitUnknownCount += 1
+  }
+
+  func markFailed() {
+    failedCount += 1
+  }
+}
+
+private struct UnknownOutcomeTransaction: Transaction, Codable {
+  struct Context: Sendable, Codable {
+    let id: UUID
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case context
+  }
+
+  var method: InlineProtocol.Method = carrierCommitUnknownMethod
+  var type: TransactionKindType = .mutation()
+  var context: Context
+
+  init(id: UUID) {
+    context = Context(id: id)
+  }
+
+  func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? { nil }
+
+  func apply(_ rpcResult: InlineProtocol.RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {}
+
+  func failed(error: TransactionError) async {
+    await UnknownOutcomeRecorder.shared.markFailed()
+  }
+
+  func commitOutcomeUnknown() async {
+    await UnknownOutcomeRecorder.shared.markCommitUnknown()
+  }
+}
+
+private actor CarrierCommitUnknownTransport: Transport {
+  nonisolated var events: AsyncChannel<TransportEvent> { channel }
+
+  private let channel = AsyncChannel<TransportEvent>()
+  private var started = false
+
+  func start() async {
+    guard !started else { return }
+    started = true
+    await channel.send(.connecting)
+    await channel.send(.connected)
+  }
+
+  func stop() async {
+    guard started else { return }
+    started = false
+    await channel.send(.disconnected(errorDescription: "stopped"))
+  }
+
+  func send(_ message: ClientMessage) async throws {
+    switch message.body {
+    case .connectionInit:
+      var open = ServerProtocolMessage()
+      open.id = message.id
+      open.body = .connectionOpen(.init())
+      await channel.send(.message(open))
+    case let .rpcCall(call) where call.method == carrierCommitUnknownMethod:
+      await channel.send(.rpcCommitOutcomeUnknown(msgId: message.id))
+    default:
+      break
+    }
+  }
 }
 
 private struct AccountSwitchSendTransaction: Transaction, Codable {
@@ -882,8 +1463,14 @@ private struct SendTestTransaction: Transaction, Codable {
   var type: TransactionKindType = .query()
   var context: Context
 
-  init(id: UUID) {
+  init(
+    id: UUID,
+    method: InlineProtocol.Method = .UNRECOGNIZED(0),
+    type: TransactionKindType = .query()
+  ) {
     context = Context(id: id)
+    self.method = method
+    self.type = type
   }
 
   func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
@@ -1163,6 +1750,148 @@ private actor ImmediateRoundTripTransport: Transport {
   }
 }
 
+private actor HeldResultTransport: Transport {
+  nonisolated let events = AsyncChannel<TransportEvent>()
+
+  private var started = false
+  private var pendingMessages: [ClientMessage] = []
+
+  var pendingMultiplexedResultCount: Int {
+    pendingMessages.count { message in
+      guard case let .rpcCall(call) = message.body else { return false }
+      return call.method == multiplexedSendMethod
+    }
+  }
+
+  func start() async {
+    guard !started else { return }
+    started = true
+    await events.send(.connecting)
+    await events.send(.connected)
+  }
+
+  func stop() async {
+    guard started else { return }
+    started = false
+    await events.send(.disconnected(errorDescription: "stopped"))
+  }
+
+  func send(_ message: ClientMessage) async throws {
+    switch message.body {
+    case .connectionInit:
+      var open = ServerProtocolMessage()
+      open.id = message.id
+      open.body = .connectionOpen(.init())
+      await events.send(.message(open))
+    case .rpcCall:
+      pendingMessages.append(message)
+    default:
+      break
+    }
+  }
+
+  func completePendingResultsInReverseOrder() async {
+    let messages = pendingMessages.reversed()
+    pendingMessages.removeAll()
+    for message in messages {
+      var result = InlineProtocol.RpcResult()
+      result.reqMsgID = message.id
+      var response = ServerProtocolMessage()
+      response.id = message.id
+      response.body = .rpcResult(result)
+      await events.send(.message(response))
+    }
+  }
+}
+
+private actor FailOnceTransactionTransport: Transport {
+  nonisolated let events = AsyncChannel<TransportEvent>()
+
+  private var started = false
+  private(set) var targetAttemptCount = 0
+
+  func start() async {
+    guard !started else { return }
+    started = true
+    await events.send(.connecting)
+    await events.send(.connected)
+  }
+
+  func stop() async {
+    guard started else { return }
+    started = false
+    await events.send(.disconnected(errorDescription: "stopped"))
+  }
+
+  func send(_ message: ClientMessage) async throws {
+    switch message.body {
+    case .connectionInit:
+      var open = ServerProtocolMessage()
+      open.id = message.id
+      open.body = .connectionOpen(.init())
+      await events.send(.message(open))
+    case let .rpcCall(call):
+      if call.method == deferredSpinMethod {
+        targetAttemptCount += 1
+        if targetAttemptCount == 1 { throw TransportError.notConnected }
+      }
+      var result = InlineProtocol.RpcResult()
+      result.reqMsgID = message.id
+      var response = ServerProtocolMessage()
+      response.id = message.id
+      response.body = .rpcResult(result)
+      await events.send(.message(response))
+    default:
+      break
+    }
+  }
+}
+
+private actor PreWriteNotConnectedTransport: Transport {
+  nonisolated let events = AsyncChannel<TransportEvent>()
+
+  private var started = false
+  private(set) var targetAttemptCount = 0
+
+  func start() async {
+    guard !started else { return }
+    started = true
+    await events.send(.connecting)
+    await events.send(.connected)
+  }
+
+  func stop() async {
+    guard started else { return }
+    started = false
+    await events.send(.disconnected(errorDescription: "stopped"))
+  }
+
+  func send(_ message: ClientMessage) async throws {
+    switch message.body {
+    case .connectionInit:
+      var open = ServerProtocolMessage()
+      open.id = message.id
+      open.body = .connectionOpen(.init())
+      await events.send(.message(open))
+    case let .rpcCall(call):
+      guard call.method == preWriteMutationMethod else { return }
+      targetAttemptCount += 1
+      if targetAttemptCount == 1 {
+        // Model the real transport guard: no request bytes were accepted.
+        throw TransportError.notConnected
+      }
+      var result = InlineProtocol.RpcResult()
+      result.reqMsgID = message.id
+      var response = ServerProtocolMessage()
+      response.id = message.id
+      response.body = .rpcResult(result)
+      await events.send(.message(response))
+    default:
+      break
+    }
+  }
+}
+
 private actor SendOrderingProbe {
   static let shared = SendOrderingProbe()
 
@@ -1267,6 +1996,10 @@ private let blockedSendMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_992)
 private let failingCreatorMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_993)
 private let limitedRpcRetryMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_994)
 private let accountSwitchSendMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_995)
+private let multiplexedSendMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_996)
+private let deferredSpinMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_997)
+private let preWriteMutationMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_998)
+private let carrierCommitUnknownMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_999)
 
 private struct BlockedSendTransaction: Transaction, Codable {
   struct Context: Sendable, Codable {

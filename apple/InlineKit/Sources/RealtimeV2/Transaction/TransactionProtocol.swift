@@ -40,13 +40,19 @@ public struct QueryConfig: Sendable {
   public init() {}
 }
 
+public enum TransactionReconnectPolicy: Equatable, Sendable {
+  /// The request must not be attempted again once dispatch may have reached the server.
+  case neverReplay
+
+  /// The application contract has its own stable idempotency key or equivalent set semantics.
+  case replaySafe
+}
+
 public struct MutationConfig: Sendable {
   public var transient: Bool = false
-  public var retryAfterAck: Bool = false
 
-  public init(transient: Bool = false, retryAfterAck: Bool = false) {
+  public init(transient: Bool = false) {
     self.transient = transient
-    self.retryAfterAck = retryAfterAck
   }
 }
 
@@ -78,6 +84,10 @@ public protocol Transaction: Sendable, Codable {
   /// Called when the transaction fails to execute
   func failed(error: TransactionError) async
 
+  /// Called when execution may have committed but no authoritative result was received.
+  /// This must not perform the rollback used for a definitive pre-execution failure.
+  func commitOutcomeUnknown() async
+
   /// Called when the transaction is cancelled
   func cancelled() async
 
@@ -89,6 +99,18 @@ public protocol Transaction: Sendable, Codable {
 
   /// Transactions sharing this key execute serially until terminal completion.
   var executionKey: TransactionExecutionKey? { get }
+
+  /// Overrides the query/mutation compatibility default for reconnect replay.
+  ///
+  /// Use this only when the exact application operation is known to be replay-safe
+  /// or execution-sensitive. A nil value preserves the legacy default: queries
+  /// replay and mutations do not.
+  var reconnectReplayPolicy: TransactionReconnectPolicy? { get }
+
+  /// The policy the transaction owner must use when deciding whether work may
+  /// cross a reconnect boundary again. Keep the compatibility fallback here so
+  /// every owner path applies the same conservative query/mutation default.
+  var effectiveReconnectReplayPolicy: TransactionReconnectPolicy { get }
 }
 
 public extension Transaction {
@@ -107,9 +129,23 @@ public extension Transaction {
   func failed(error: TransactionError) async {
     Log.shared.error("Transaction failed \(debugDescription)", error: error)
   }
+  func commitOutcomeUnknown() async {}
   var blockers: [TransactionBlocker] { [] }
   var satisfiedBlockersOnSuccess: [TransactionBlocker] { [] }
   var executionKey: TransactionExecutionKey? { nil }
+  var reconnectReplayPolicy: TransactionReconnectPolicy? { nil }
+  var effectiveReconnectReplayPolicy: TransactionReconnectPolicy {
+    if let reconnectReplayPolicy {
+      return reconnectReplayPolicy
+    }
+
+    switch type {
+    case .query:
+      return .replaySafe
+    case .mutation:
+      return .neverReplay
+    }
+  }
 
   var input: InlineProtocol.RpcCall.OneOf_Input? {
     input(from: context)

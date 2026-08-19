@@ -1536,7 +1536,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   }
 
   public func getAlphaText() async throws -> String {
-    try await request(.getAlphaText, includeToken: true)
+    try await request(.getAlphaText, includeToken: false)
   }
 
   public func getNotionDatabases(spaceId: Int64) async throws -> [NotionSimplifiedDatabase] {

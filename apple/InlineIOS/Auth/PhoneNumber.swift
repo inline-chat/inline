@@ -1,4 +1,5 @@
 import InlineKit
+import Logger
 import SwiftUI
 
 struct PhoneNumber: View {
@@ -115,7 +116,7 @@ struct PhoneNumber: View {
         formState.startLoading()
         let result = try await api.sendSmsCode(phoneNumber: fullPhoneNumber)
 
-        print("result is \(result)")
+        Log.shared.debug("result is \(result)")
         formState.reset()
         nav.existingUser = result.existingUser
         if result.needsInviteCode == true {

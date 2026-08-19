@@ -488,7 +488,7 @@ final class InviteComposerModel {
       default:
         realtimeError.localizedDescription
       }
-    case .notAuthorized, .notConnected, .timeout, .unknown:
+    case .notAuthorized, .notConnected, .timeout, .commitOutcomeUnknown, .capacityExceeded, .unknown:
       realtimeError.localizedDescription
     }
   }

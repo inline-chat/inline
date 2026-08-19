@@ -92,6 +92,17 @@ struct FileUploadProgressTests {
     #expect(state == .uploading(bytesSent: 512, totalBytes: 1024))
   }
 
+  @Test("failed upload attempt remains pending while its message can retry")
+  func testPendingDocumentUploadFailureRemainsPending() {
+    let state = DocumentPendingUploadDisplayState.resolve(
+      isPendingMessage: true,
+      localDocumentId: 42,
+      progress: .failed(id: "document_42", error: nil)
+    )
+
+    #expect(state == .processing)
+  }
+
   @Test("document upload state is inactive for non-pending messages")
   func testPendingDocumentUploadInactiveWhenMessageIsNotPending() {
     let state = DocumentPendingUploadDisplayState.resolve(

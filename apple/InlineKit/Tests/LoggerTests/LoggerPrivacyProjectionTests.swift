@@ -100,6 +100,28 @@ struct LoggerPrivacyProjectionTests {
     #expect(entry.file == "/tmp/Feature.swift")
   }
 
+  @Test("build flavor chooses the matching log projection")
+  func buildFlavorChoosesProjection() {
+    #expect(Log.includeSensitiveDetails(isDebugBuild: true))
+    #expect(!Log.includeSensitiveDetails(isDebugBuild: false))
+    #if DEBUG || DEBUG_BUILD
+    #expect(Log.includeSensitiveDetails)
+    #else
+    #expect(!Log.includeSensitiveDetails)
+    #endif
+  }
+
+  @Test("debug console exposes the already-detailed local projection")
+  func debugConsoleExposesDetails() {
+    #expect(ConsoleLogSink.detailVisibility(isDebugBuild: true) == .publicDetails)
+    #expect(ConsoleLogSink.detailVisibility(isDebugBuild: false) == .privateDetails)
+    #if DEBUG || DEBUG_BUILD
+    #expect(ConsoleLogSink.detailVisibility == .publicDetails)
+    #else
+    #expect(ConsoleLogSink.detailVisibility == .privateDetails)
+    #endif
+  }
+
   @Test("HTTP diagnostics allow only templates and finite metadata")
   func httpDiagnosticsAreStructurallyPrivate() throws {
     let diagnostic = try #require(HTTPLogMetadata(

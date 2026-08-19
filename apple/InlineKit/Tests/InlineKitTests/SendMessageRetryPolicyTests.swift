@@ -68,6 +68,7 @@ struct SendMessageRetryPolicyTests {
     )
 
     #expect(transaction.shouldRetryOnFail(error: RealtimeDirectRpcError.notConnected))
+    #expect(transaction.shouldRetryOnFail(error: RealtimeDirectRpcError.commitOutcomeUnknown))
   }
 
   @Test("does not retry permanent primary realtime failures")

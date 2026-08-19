@@ -13,6 +13,12 @@ enum TransactionAdmissionResult: Equatable {
   case persistenceFailed
 }
 
+enum TransactionDispatchPreparationResult: Equatable {
+  case prepared
+  case ownerUnavailable
+  case persistenceUnavailable
+}
+
 public struct TransactionOwner: Sendable, Hashable {
   public let accountID: Int64
   public let generation: UInt64
@@ -77,8 +83,13 @@ actor Transactions {
     guard owner == newOwner else { return }
 
     var combined: OrderedDictionary<TransactionId, TransactionWrapper> = [:]
+    var uncertain = [TransactionWrapper]()
     for transaction in loaded.sorted(by: { $0.date < $1.date }) {
-      combined[transaction.id] = transaction
+      if transaction.dispatchPhase == .queued || canReplayAfterReconnect(transaction: transaction) {
+        combined[transaction.id] = transaction.withDispatchPhase(.queued)
+      } else {
+        uncertain.append(transaction)
+      }
     }
     for (id, transaction) in _queue {
       combined[id] = transaction
@@ -86,6 +97,15 @@ actor Transactions {
     _queue = combined
     acceptsTransactions = true
     resumeActivationWaiters(accepted: true)
+
+    for transaction in uncertain {
+      log.warning(
+        "Discarding persisted commit-unknown transaction without replay method=\(transaction.transaction.method)"
+      )
+      await transaction.transaction.commitOutcomeUnknown()
+      deleteFromDisk(transactionId: transaction.id)
+    }
+
     queueContinuation.yield(())
   }
 
@@ -238,11 +258,14 @@ actor Transactions {
   }
 
   /// Mark a transaction as running, which means it has an RPC call in progress.
-  func running(transactionId: TransactionId, rpcMsgId: UInt64) {
-    guard let _ = inFlight[transactionId] else {
+  @discardableResult
+  func running(transactionId: TransactionId, rpcMsgId: UInt64) -> Bool {
+    guard let wrapper = inFlight[transactionId] else {
       // if not found, it means it was already completed or discarded
-      return
+      return false
     }
+
+    inFlight[transactionId] = wrapper.withDispatchPhase(.mayHaveExecuted)
 
     // map rpc msgId to transactionId
     transactionRpcMap[rpcMsgId] = transactionId
@@ -251,11 +274,45 @@ actor Transactions {
     if pendingAckMsgIds.remove(rpcMsgId) != nil {
       ack(transactionId: transactionId)
     }
+    return true
   }
 
-  func running(transactionId: TransactionId, rpcMsgId: UInt64, owner expectedOwner: TransactionOwner) {
-    guard acceptsTransactions, owner == expectedOwner else { return }
-    running(transactionId: transactionId, rpcMsgId: rpcMsgId)
+  @discardableResult
+  func running(
+    transactionId: TransactionId,
+    rpcMsgId: UInt64,
+    owner expectedOwner: TransactionOwner
+  ) -> Bool {
+    guard acceptsTransactions, owner == expectedOwner else { return false }
+    return running(transactionId: transactionId, rpcMsgId: rpcMsgId)
+  }
+
+  /// Durably crosses the dispatch boundary before bytes may reach the transport.
+  /// Queries and transient mutations update only in-memory state; durable mutations
+  /// must flush `mayHaveExecuted` before request ownership is registered.
+  func prepareForDispatch(
+    transactionId: TransactionId,
+    rpcMsgId: UInt64,
+    owner expectedOwner: TransactionOwner
+  ) async -> TransactionDispatchPreparationResult {
+    guard acceptsTransactions, owner == expectedOwner,
+          let wrapper = inFlight[transactionId]
+    else { return .ownerUnavailable }
+
+    let marked = wrapper.withDispatchPhase(.mayHaveExecuted)
+    guard await persistDispatchPhase(marked, owner: expectedOwner) else {
+      return .persistenceUnavailable
+    }
+    guard acceptsTransactions, owner == expectedOwner,
+          inFlight[transactionId]?.id == wrapper.id
+    else { return .ownerUnavailable }
+
+    inFlight[transactionId] = marked
+    transactionRpcMap[rpcMsgId] = transactionId
+    if pendingAckMsgIds.remove(rpcMsgId) != nil {
+      ack(transactionId: transactionId)
+    }
+    return .prepared
   }
 
   /// Acknowledge a transaction by the rpc message ID. It deletes the transaction from the system.
@@ -279,11 +336,8 @@ actor Transactions {
     // remove from in-flight
     _ = inFlight.removeValue(forKey: transactionId)
 
-    // Transactions that retry after ACK are retained for replay until their
-    // RPC result arrives.
-    if let transaction = sent[transactionId], !shouldRetryAfterAck(transaction: transaction) {
-      deleteFromDisk(transactionId: transactionId)
-    }
+    // Keep durable mutations through result application. ACK proves receipt, not
+    // commit or local application, and process death must retain that distinction.
   }
 
   /// Complete a transaction by the rpc message ID. Called when a response or error is received.
@@ -363,6 +417,28 @@ actor Transactions {
     }
   }
 
+  /// Requeue a transaction when the transport definitively rejected the write
+  /// before accepting any bytes. This is different from an uncertain
+  /// transport failure: the dispatch boundary was persisted defensively, but
+  /// `TransportError.notConnected` proves that no request reached the wire.
+  func requeueBeforeDispatch(transactionId: TransactionId, signal: Bool = true) {
+    guard let wrapper = inFlight.removeValue(forKey: transactionId) else {
+      // If not found, it was already completed, requeued, or discarded.
+      return
+    }
+
+    removeRpcMappings(for: [transactionId])
+
+    // Undo the defensive mayHaveExecuted marker before persisting the retry.
+    let queued = wrapper.withDispatchPhase(.queued)
+    _queue[transactionId] = queued
+    saveToDisk(transaction: queued)
+
+    if signal {
+      queueContinuation.yield(())
+    }
+  }
+
   @discardableResult
   func requeueAll() -> [TransactionWrapper] {
     var requeuedIds = Set<TransactionId>()
@@ -370,14 +446,19 @@ actor Transactions {
     var droppedIds = Set<TransactionId>()
 
     for (transactionId, wrapper) in inFlight {
-      _queue[transactionId] = wrapper
-      requeuedIds.insert(transactionId)
+      if wrapper.dispatchPhase == .queued || canReplayAfterReconnect(transaction: wrapper) {
+        _queue[transactionId] = wrapper.withDispatchPhase(.queued)
+        requeuedIds.insert(transactionId)
+      } else {
+        dropped.append(wrapper)
+        droppedIds.insert(transactionId)
+      }
     }
     inFlight.removeAll()
 
     for (transactionId, wrapper) in sent {
-      if shouldRetryAfterAck(transaction: wrapper) {
-        _queue[transactionId] = wrapper
+      if canReplayAfterReconnect(transaction: wrapper) {
+        _queue[transactionId] = wrapper.withDispatchPhase(.queued)
         requeuedIds.insert(transactionId)
       } else {
         dropped.append(wrapper)
@@ -393,6 +474,24 @@ actor Transactions {
     queueContinuation.yield(())
 
     return dropped
+  }
+
+  /// Recovers a transport write whose completion is ambiguous. Returns the
+  /// transaction only when the caller must fail it as commit-outcome-unknown.
+  func recoverAfterUncertainDispatch(transactionId: TransactionId) -> TransactionWrapper? {
+    guard let wrapper = inFlight.removeValue(forKey: transactionId) else { return nil }
+    removeRpcMappings(for: [transactionId])
+
+    if wrapper.dispatchPhase == .queued || canReplayAfterReconnect(transaction: wrapper) {
+      _queue[transactionId] = wrapper.withDispatchPhase(.queued)
+      queueContinuation.yield(())
+      return nil
+    }
+
+    // Keep the durable receipt until the owning Realtime actor has awaited the
+    // transaction-specific commit-unknown hook. Deleting here would let a
+    // process exit lose the only evidence before reconciliation completes.
+    return wrapper
   }
 
   func requeueAll(owner expectedOwner: TransactionOwner) -> [TransactionWrapper]? {
@@ -507,6 +606,11 @@ actor Transactions {
     await flushPersistence()
   }
 
+  func deletePersisted(transactionId: TransactionId, owner expectedOwner: TransactionOwner) {
+    guard owner == expectedOwner else { return }
+    deleteFromDisk(transactionId: transactionId)
+  }
+
   private func uniqueTransactions() -> [TransactionWrapper] {
     var seen = Set<TransactionId>()
     var wrappers: [TransactionWrapper] = []
@@ -546,13 +650,8 @@ actor Transactions {
     }
   }
 
-  private func shouldRetryAfterAck(transaction: TransactionWrapper) -> Bool {
-    switch transaction.transaction.type {
-      case .query:
-        false
-      case let .mutation(config):
-        config.retryAfterAck
-    }
+  private func canReplayAfterReconnect(transaction: TransactionWrapper) -> Bool {
+    transaction.transaction.effectiveReconnectReplayPolicy == .replaySafe
   }
 
   private enum BlockerEvaluation {
@@ -656,6 +755,36 @@ actor Transactions {
     }
   }
 
+  private func persistDispatchPhase(
+    _ transaction: TransactionWrapper,
+    owner expectedOwner: TransactionOwner
+  ) async -> Bool {
+    guard shouldSaveToDisk(transaction: transaction), let persistenceHandler else { return true }
+
+    let previous = persistenceTail
+    let operation = Task<Result<Void, any Error>, Never>(priority: .utility) { [log] in
+      await previous?.value
+      do {
+        log.trace("Persisting transaction dispatch boundary \(transaction.id)")
+        try await persistenceHandler.saveTransaction(transaction, for: expectedOwner)
+        return .success(())
+      } catch {
+        return .failure(error)
+      }
+    }
+    persistenceTail = Task(priority: .utility) {
+      _ = await operation.value
+    }
+
+    switch await operation.value {
+      case .success:
+        return true
+      case let .failure(error):
+        log.error("Failed to persist transaction dispatch boundary \(transaction.id)", error: error)
+        return false
+    }
+  }
+
   private func deleteFromDisk(transactionId: TransactionId) {
     guard let owner else { return }
     schedulePersistenceOperation { [transactionId, owner, persistenceHandler, log] in
@@ -697,10 +826,17 @@ actor Transactions {
           }
         }
 
-        // Trigger failed() for expired transactions
+        // An expired record that crossed the dispatch boundary is still not a
+        // definitive failure. Preserve the same commit-unknown semantics used
+        // for live reconnects; only known-unsent work may time out normally.
         for expiredTransaction in expiredTransactions {
-          log.trace("Transaction \(expiredTransaction.id) expired, calling failed()")
-          await expiredTransaction.transaction.failed(error: .timeout)
+          if expiredTransaction.dispatchPhase == .mayHaveExecuted {
+            log.trace("Transaction \(expiredTransaction.id) expired with unknown commit outcome")
+            await expiredTransaction.transaction.commitOutcomeUnknown()
+          } else {
+            log.trace("Transaction \(expiredTransaction.id) expired before dispatch, calling failed()")
+            await expiredTransaction.transaction.failed(error: .timeout)
+          }
 
           // Delete expired transaction from disk
           try? await persistenceHandler.deleteTransaction(expiredTransaction.id, for: owner)

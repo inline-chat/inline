@@ -210,6 +210,11 @@ public protocol Logging {
 }
 
 public final class ConsoleLogSink: LogSink, @unchecked Sendable {
+  enum DetailVisibility: Equatable {
+    case publicDetails
+    case privateDetails
+  }
+
   private let subsystem: String
   private let lock = NSLock()
   private var loggers: [String: Logger] = [:]
@@ -224,8 +229,25 @@ public final class ConsoleLogSink: LogSink, @unchecked Sendable {
     if let http = event.http {
       logger.log(level: entry.level.osLogType, "\(http.consoleMessage, privacy: .public)")
     } else {
-      logger.log(level: entry.level.osLogType, "\(entry.consoleMessage, privacy: .private)")
+      switch Self.detailVisibility {
+      case .publicDetails:
+        logger.log(level: entry.level.osLogType, "\(entry.consoleMessage, privacy: .public)")
+      case .privateDetails:
+        logger.log(level: entry.level.osLogType, "\(entry.consoleMessage, privacy: .private)")
+      }
     }
+  }
+
+  static var detailVisibility: DetailVisibility {
+    #if DEBUG || DEBUG_BUILD
+    detailVisibility(isDebugBuild: true)
+    #else
+    detailVisibility(isDebugBuild: false)
+    #endif
+  }
+
+  static func detailVisibility(isDebugBuild: Bool) -> DetailVisibility {
+    isDebugBuild ? .publicDetails : .privateDetails
   }
 
   private func logger(for scope: String) -> Logger {
@@ -343,7 +365,7 @@ public final class Log: @unchecked Sendable {
       message: message,
       error: error,
       source: LogSourceLocation(file: file, function: function, line: line),
-      includeSensitiveDetails: _isDebugAssertConfiguration()
+      includeSensitiveDetails: Self.includeSensitiveDetails
     )
 
     let event = LogEvent(entry: entry, error: error, http: http)
@@ -409,6 +431,18 @@ public final class Log: @unchecked Sendable {
       function: source.function,
       line: source.line
     )
+  }
+
+  static var includeSensitiveDetails: Bool {
+    #if DEBUG || DEBUG_BUILD
+    includeSensitiveDetails(isDebugBuild: true)
+    #else
+    includeSensitiveDetails(isDebugBuild: false)
+    #endif
+  }
+
+  static func includeSensitiveDetails(isDebugBuild: Bool) -> Bool {
+    isDebugBuild
   }
 
   private static func safeScope(_ scope: String) -> String {

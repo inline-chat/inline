@@ -191,8 +191,7 @@ on run argv
       if (count of windows) is 0 then error "Inline-Dev has no window."
 
       try
-        set sidebarOutline to UI element 1 of UI element 3 of UI element 1 of UI element 1 of UI element 1 of window 1
-        if role of sidebarOutline is not "AXOutline" then error "Unexpected sidebar role."
+        set sidebarOutline to my findSidebarOutline(window 1)
       on error
         error "Could not locate the Inline-Dev sidebar outline."
       end try
@@ -206,8 +205,8 @@ on run argv
           set rowSize to size of row rowIndex of sidebarOutline
           set rowHeight to item 2 of rowSize
           try
-            set rowButton to UI element 1 of UI element 1 of row rowIndex of sidebarOutline
-            set isActionable to (rowHeight ≤ 36 and name of every action of rowButton contains "AXPress")
+            set rowButton to my findPressTarget(row rowIndex of sidebarOutline)
+            set isActionable to (rowHeight ≤ 44 and rowButton is not missing value)
           end try
           set end of outputLines to ((rowIndex as text) & tab & "chat_candidate=" & (isActionable as text) & tab & "height=" & rowHeight)
         end repeat
@@ -218,16 +217,16 @@ on run argv
         set pressedCount to 0
         repeat with argumentIndex from 5 to count of argv
           set rowIndex to (item argumentIndex of argv) as integer
-          set sidebarOutline to UI element 1 of UI element 3 of UI element 1 of UI element 1 of UI element 1 of window 1
+          set sidebarOutline to my findSidebarOutline(window 1)
           set rowCount to count of rows of sidebarOutline
           if rowIndex < 1 or rowIndex > rowCount then error "Row is outside the visible sidebar: " & rowIndex
 
           try
             set rowSize to size of row rowIndex of sidebarOutline
             set rowHeight to item 2 of rowSize
-            if rowHeight > 36 then error "Row looks like a section/header rather than a chat."
-            set rowButton to UI element 1 of UI element 1 of row rowIndex of sidebarOutline
-            if name of every action of rowButton does not contain "AXPress" then error "Row is not actionable."
+            if rowHeight > 44 then error "Row looks like a section/header rather than a chat."
+            set rowButton to my findPressTarget(row rowIndex of sidebarOutline)
+            if rowButton is missing value then error "Row is not actionable."
             perform action "AXPress" of rowButton
           on error
             error "Could not activate sidebar row " & rowIndex & "."
@@ -245,8 +244,8 @@ on run argv
           try
             set rowSize to size of row rowIndex of sidebarOutline
             set rowHeight to item 2 of rowSize
-            set rowButton to UI element 1 of UI element 1 of row rowIndex of sidebarOutline
-            if rowHeight ≤ 36 and name of every action of rowButton contains "AXPress" then set end of actionableRows to rowIndex
+            set rowButton to my findPressTarget(row rowIndex of sidebarOutline)
+            if rowHeight ≤ 44 and rowButton is not missing value then set end of actionableRows to rowIndex
           end try
         end repeat
 
@@ -255,8 +254,9 @@ on run argv
         repeat with iteration from 1 to cycleCount
           set sequenceIndex to ((iteration - 1) mod (count of actionableRows)) + 1
           set rowIndex to item sequenceIndex of actionableRows
-          set sidebarOutline to UI element 1 of UI element 3 of UI element 1 of UI element 1 of UI element 1 of window 1
-          set rowButton to UI element 1 of UI element 1 of row rowIndex of sidebarOutline
+          set sidebarOutline to my findSidebarOutline(window 1)
+          set rowButton to my findPressTarget(row rowIndex of sidebarOutline)
+          if rowButton is missing value then error "Row is no longer actionable: " & rowIndex
           perform action "AXPress" of rowButton
           delay paceSeconds
         end repeat
@@ -265,6 +265,33 @@ on run argv
     end tell
   end tell
 end run
+
+on findSidebarOutline(targetWindow)
+  tell application "System Events"
+    set candidates to entire contents of targetWindow
+    repeat with candidate in candidates
+      try
+        if role of candidate is "AXOutline" and (count of rows of candidate) > 0 then return contents of candidate
+      end try
+    end repeat
+  end tell
+  error "No populated outline found."
+end findSidebarOutline
+
+on findPressTarget(targetRow)
+  tell application "System Events"
+    try
+      if name of every action of targetRow contains "AXPress" then return targetRow
+    end try
+    set candidates to entire contents of targetRow
+    repeat with candidate in candidates
+      try
+        if name of every action of candidate contains "AXPress" then return contents of candidate
+      end try
+    end repeat
+  end tell
+  return missing value
+end findPressTarget
 
 on joinLines(itemsToJoin)
   set oldDelimiters to AppleScript's text item delimiters

@@ -25,6 +25,12 @@ public struct ClearChatHistoryTransaction: Transaction2 {
     context = Context(peerId: nil, spaceId: spaceId, keepLastDays: keepLastDays, deleteReplyThreads: deleteReplyThreads)
   }
 
+  public var executionKey: TransactionExecutionKey? {
+    if let peerId = context.peerId { return .peerMutation(peerId) }
+    if let spaceId = context.spaceId { return .spaceMutation(spaceID: spaceId) }
+    return nil
+  }
+
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
     .clearChatHistory_p(.with {
       if let peerId = context.peerId {

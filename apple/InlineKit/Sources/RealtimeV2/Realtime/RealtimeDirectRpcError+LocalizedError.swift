@@ -10,6 +10,10 @@ extension RealtimeDirectRpcError: LocalizedError {
       String(localized: "Inline is offline. Check your connection and try again.")
     case .timeout:
       String(localized: "The request took too long. Try again.")
+    case .commitOutcomeUnknown:
+      String(localized: "Inline may have completed this action. Refresh to confirm before trying again.")
+    case .capacityExceeded:
+      String(localized: "Inline is busy. Wait a moment and try again.")
     case let .rpcError(errorCode, message, code):
       RealtimeErrorPresentation.rpcErrorDescription(
         errorCode: errorCode,
