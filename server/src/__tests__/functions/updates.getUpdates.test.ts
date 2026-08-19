@@ -15,6 +15,8 @@ import {
 import type { ServerUpdate } from "@in/server/protocol/server"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { UpdatesModel } from "@in/server/db/models/updates"
+import { Encoders } from "@in/server/realtime/encoders/encoders"
+import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings/types"
 import { chats, dialogs, members, messages, spaces } from "@in/server/db/schema"
 import { handler as readMessages } from "@in/server/methods/readMessages"
 import { and, desc, eq } from "drizzle-orm"
@@ -1132,6 +1134,49 @@ describe("getUpdates", () => {
     expect(updatedUser.id).toBe(BigInt(user.id))
     expect(updatedUser.firstName).toBe("Updated")
     expect(updatedUser.bio).toBe("Profile bio")
+  })
+
+  test("inflates user settings in the user bucket", async () => {
+    const user = await testUtils.createUser("settings-sync@sync.com")
+    const settings = Encoders.userSettings({
+      general: {
+        notifications: { mode: UserSettingsNotificationsMode.All, silent: false, disableDmNotifications: false },
+        privacy: { shareTimeZone: false, appearInGlobalSearch: true },
+        compose: { replacePastedLinksWithTitles: true },
+      },
+    })
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.User,
+      entityId: user.id,
+      seq: 1,
+      payload: {
+        oneofKind: "userSettings",
+        userSettings: { settings },
+      },
+    })
+
+    const result = await getUpdates(
+      {
+        bucket: { type: { oneofKind: "user", user: {} } },
+        startSeq: 0n,
+        seqEnd: 0n,
+        totalLimit: 1000,
+        limit: 0,
+      },
+      { currentUserId: user.id } as any,
+    )
+
+    expect(result.resultType).toBe(GetUpdatesResult_ResultType.SLICE)
+    expect(result.final).toBe(true)
+    expect(Number(result.seq)).toBe(1)
+    expect(result.updates).toHaveLength(1)
+    const first = result.updates[0]
+    expect(first).toBeDefined()
+    if (!first) throw new Error("Missing first update")
+    expect(first.update.oneofKind).toBe("updateUserSettings")
+    if (first.update.oneofKind !== "updateUserSettings") throw new Error("Unexpected update type")
+    expect(first.update.updateUserSettings.settings).toEqual(settings)
   })
 
   test("integration: readMessages persists userReadMaxId and getUpdates inflates updateReadMaxId", async () => {

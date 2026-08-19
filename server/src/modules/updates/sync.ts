@@ -578,6 +578,41 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
         })
         break
 
+      case "reaction": {
+        const reaction = serverUpdate.update.reaction.reaction
+        if (!reaction) {
+          log.warn("Skipping malformed reaction update", { chatId, seq: update.seq })
+          inflatedUpdates.push(chatSkipPts(update, chatId))
+          break
+        }
+
+        inflatedUpdates.push({
+          seq: update.seq,
+          date: encodeDateStrict(update.date),
+          update: {
+            oneofKind: "updateReaction",
+            updateReaction: { reaction },
+          },
+        })
+        break
+      }
+
+      case "reactionDeleted":
+        inflatedUpdates.push({
+          seq: update.seq,
+          date: encodeDateStrict(update.date),
+          update: {
+            oneofKind: "deleteReaction",
+            deleteReaction: {
+              emoji: serverUpdate.update.reactionDeleted.emoji,
+              chatId: serverUpdate.update.reactionDeleted.chatId,
+              messageId: serverUpdate.update.reactionDeleted.messageId,
+              userId: serverUpdate.update.reactionDeleted.userId,
+            },
+          },
+        })
+        break
+
       case "spaceRemoveMember":
       case "spaceMemberUpdate":
       case "spaceMemberAdd":
@@ -600,6 +635,7 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
       case "userChatParticipantGroupAdd":
       case "userChatParticipantGroupDelete":
       case "userChatPermissions":
+      case "userSettings":
         inflatedUpdates.push(chatSkipPts(update, chatId))
         break
       case undefined:
@@ -1308,6 +1344,8 @@ function convertSpaceUpdate(update: DecryptedUpdate, options?: { sanitizeUsers?:
     case "chatInfo":
     case "pinnedMessages":
     case "chatMoved":
+    case "reaction":
+    case "reactionDeleted":
     case "userSpaceMemberDelete":
     case "userChatParticipantDelete":
     case "userChatParticipantAdd":
@@ -1329,6 +1367,7 @@ function convertSpaceUpdate(update: DecryptedUpdate, options?: { sanitizeUsers?:
     case "userChatParticipantGroupAdd":
     case "userChatParticipantGroupDelete":
     case "userChatPermissions":
+    case "userSettings":
       return null
     case undefined:
       throw new Error(`Space sync update ${update.seq} has no payload`)
@@ -1551,6 +1590,18 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
         },
       }
 
+    case "userSettings":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "updateUserSettings",
+          updateUserSettings: {
+            settings: payload.userSettings.settings,
+          },
+        },
+      }
+
     case "userChatOpen":
       return {
         seq,
@@ -1606,6 +1657,8 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
     case "chatInfo":
     case "pinnedMessages":
     case "chatMoved":
+    case "reaction":
+    case "reactionDeleted":
     case "spaceRemoveMember":
     case "spaceMemberUpdate":
     case "spaceMemberAdd":

@@ -5,6 +5,9 @@ import { Updates } from "@in/server/modules/updates/updates"
 import { ReactionModel } from "../db/models/reactions"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
+import { getUpdateGroupFromInputPeer } from "@in/server/modules/updates"
+import { isSingleEmoji } from "@in/server/utils/emoji"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 
 type Input = {
   emoji: string
@@ -17,35 +20,55 @@ type Output = {
 }
 
 export const addReaction = async (input: Input, context: FunctionContext): Promise<Output> => {
+  const emoji = input.emoji.trim()
+  if (!isSingleEmoji(emoji)) throw RealtimeRpcError.BadRequest()
+
   const chat = await ChatModel.getChatFromInputPeer(input.peer, context)
   const chatId = chat.id
+  const updateGroup = await getUpdateGroupFromInputPeer(input.peer, { currentUserId: context.currentUserId })
 
-  const _reactions = await ReactionModel.insertReaction({
+  const result = await ReactionModel.insertReactionWithUpdate({
     messageId: Number(input.messageId),
     chatId: chatId,
     userId: context.currentUserId,
-    emoji: input.emoji,
+    emoji,
     date: new Date(),
   })
 
+  if (!result) {
+    return { updates: [] }
+  }
+
   const update: Update = {
+    seq: result.update.seq,
+    date: encodeDateStrict(result.update.date),
     update: {
       oneofKind: "updateReaction",
       updateReaction: {
         reaction: {
-          emoji: input.emoji,
-          messageId: input.messageId,
-          chatId: BigInt(chatId),
-          userId: BigInt(context.currentUserId),
-          date: encodeDateStrict(new Date()),
+          emoji: result.reaction.emoji,
+          messageId: BigInt(result.reaction.messageId),
+          chatId: BigInt(result.reaction.chatId),
+          userId: BigInt(result.reaction.userId),
+          date: encodeDateStrict(result.reaction.date),
         },
       },
     },
   }
 
-  Updates.shared.pushUpdate([update], { peerId: input.peer, currentUserId: context.currentUserId })
+  await Updates.shared.pushUpdate([update], {
+    peerId: input.peer,
+    currentUserId: context.currentUserId,
+    updateGroup,
+  })
 
-  BotUpdateProjector.reactionChanged({ chat, messageId: Number(input.messageId), actorUserId: context.currentUserId, emoji: input.emoji, added: true })
+  BotUpdateProjector.reactionChanged({
+    chat,
+    messageId: Number(input.messageId),
+    actorUserId: context.currentUserId,
+    emoji,
+    added: true,
+  })
 
   return { updates: [update] }
 }

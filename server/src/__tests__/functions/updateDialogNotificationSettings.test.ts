@@ -6,7 +6,7 @@ import {
 } from "@inline-chat/protocol/core"
 import { setupTestLifecycle, testUtils } from "../setup"
 import { db } from "@in/server/db"
-import { chats, dialogs, messages, updates, UpdateBucket } from "@in/server/db/schema"
+import { chats, dialogs, messages, updates, UpdateBucket, users } from "@in/server/db/schema"
 import { updateDialogNotificationSettings } from "@in/server/functions/messages.updateDialogNotificationSettings"
 import { decodeDialogNotificationSettings } from "@in/server/modules/notifications/dialogNotificationSettings"
 
@@ -256,6 +256,48 @@ describe("updateDialogNotificationSettings", () => {
       .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, userA.id)))
       .limit(1)
     expect(dialogRow?.notificationSettings).toBeDefined()
+  })
+
+  test("keeps user-before-dialog lock order with concurrent dialog mutations", async () => {
+    const userA = await testUtils.createUser("dialog-notif-lock-order-a@example.com")
+    const userB = await testUtils.createUser("dialog-notif-lock-order-b@example.com")
+    const { chat } = await testUtils.createPrivateChatWithOptionalDialog({
+      userA,
+      userB,
+      createDialogForUserA: true,
+      createDialogForUserB: false,
+    })
+    const peerId: InputPeer = {
+      type: { oneofKind: "user", user: { userId: BigInt(userB.id) } },
+    }
+    let releaseOwner!: () => void
+    const ownerCanContinue = new Promise<void>((resolve) => { releaseOwner = resolve })
+    let ownerLocked!: () => void
+    const ownerHasUserLock = new Promise<void>((resolve) => { ownerLocked = resolve })
+    const owner = db.transaction(async (tx) => {
+      await tx.select({ id: users.id }).from(users).where(eq(users.id, userA.id)).for("update").limit(1)
+      ownerLocked()
+      await ownerCanContinue
+      await tx
+        .select({ id: dialogs.id })
+        .from(dialogs)
+        .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, userA.id)))
+        .for("update")
+        .limit(1)
+    })
+    await ownerHasUserLock
+
+    const notification = updateDialogNotificationSettings(
+      {
+        peerId,
+        notificationSettings: { mode: DialogNotificationSettings_Mode.MENTIONS },
+      },
+      testUtils.functionContext({ userId: userA.id, sessionId: 1 }),
+    )
+    await Bun.sleep(25)
+    releaseOwner()
+
+    await expect(Promise.all([owner, notification])).resolves.toBeDefined()
   })
 
   test("returns no-op when clearing with no dialog row", async () => {

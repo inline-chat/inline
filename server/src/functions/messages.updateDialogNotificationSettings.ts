@@ -8,7 +8,7 @@ import {
 import type { FunctionContext } from "@in/server/functions/_types"
 import { ChatModel } from "@in/server/db/models/chats"
 import { db } from "@in/server/db"
-import { dialogs } from "@in/server/db/schema"
+import { dialogs, users } from "@in/server/db/schema"
 import { and, eq } from "drizzle-orm"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
@@ -75,6 +75,16 @@ export const updateDialogNotificationSettings = async (input: Input, context: Fu
   const peer = encodePeerFromInputPeer({ inputPeer: input.peerId, currentUserId: context.currentUserId })
 
   const didUpdate = await db.transaction(async (tx) => {
+    // User-bucket sequence allocation updates the user row. Acquire it before
+    // the dialog row, matching read/unread and dialog-order mutations so two
+    // mixed operations cannot form dialogs->users / users->dialogs deadlocks.
+    await tx
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.id, context.currentUserId))
+      .for("update")
+      .limit(1)
+
     const existing = await tx
       .select({
         id: dialogs.id,
@@ -82,6 +92,7 @@ export const updateDialogNotificationSettings = async (input: Input, context: Fu
       })
       .from(dialogs)
       .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, context.currentUserId)))
+      .for("update")
       .limit(1)
       .then((rows) => rows[0])
 

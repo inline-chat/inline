@@ -8,6 +8,7 @@ import { and, eq } from "drizzle-orm"
 import type { DbSpace, DbUser } from "@in/server/db/schema"
 import { createGridRoom, getGrid, joinGridRoom } from "@in/server/functions/grid"
 import { toggleSpaceGrid } from "@in/server/functions/space.settings"
+import { joinPublicSpace } from "@in/server/functions/space.joinPublicSpace"
 import { connectionManager, ConnVersion } from "@in/server/ws/connections"
 
 describe("deleteMemberHandler", () => {
@@ -190,6 +191,37 @@ describe("deleteMemberHandler", () => {
       .from(schema.dialogs)
       .where(and(eq(schema.dialogs.chatId, privateThreadId), eq(schema.dialogs.userId, adminUser.id)))
     expect(adminDialogs.length).toBe(1)
+  })
+
+  test("serializes member deletion with a concurrent public-space join", async () => {
+    const handle = `delete-member-race-${space.id}`
+    await db
+      .update(schema.spaces)
+      .set({ handle, isPublic: true })
+      .where(eq(schema.spaces.id, space.id))
+
+    const [deletion, join] = await Promise.all([
+      deleteMemberHandler(
+        { spaceId: BigInt(space.id), userId: BigInt(memberUser.id) },
+        handlerContext,
+      ),
+      joinPublicSpace(
+        { handle },
+        { currentUserId: memberUser.id, currentSessionId: 1 },
+      ),
+    ])
+
+    expect(deletion.updates.length).toBeGreaterThan(0)
+    expect(join.member?.userId).toBe(BigInt(memberUser.id))
+    const remainingMembers = await db
+      .select()
+      .from(schema.members)
+      .where(and(eq(schema.members.spaceId, space.id), eq(schema.members.userId, memberUser.id)))
+    // Either operation may commit first: the join can observe the old
+    // membership before deletion, or it can re-add after deletion. The
+    // invariant under the race is that the unique membership row remains
+    // singular and both operations complete without a deadlock.
+    expect(remainingMembers.length).toBeLessThanOrEqual(1)
   })
 
   test("revokes active Grid presence and reconciles the remaining room", async () => {

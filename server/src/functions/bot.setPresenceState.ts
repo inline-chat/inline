@@ -1,6 +1,6 @@
 import { db } from "@in/server/db"
 import { ChatModel } from "@in/server/db/models/chats"
-import { botAvatarAssets, chatParticipants, type DbChat, userNotDeleted, users } from "@in/server/db/schema"
+import { chatParticipants, type DbChat, userNotDeleted, users } from "@in/server/db/schema"
 import {
   botPresenceStateTimeoutMs,
   expireBotPresenceState,
@@ -34,7 +34,7 @@ export const setBotPresenceStateFn = async (
   }
 
   const botUserId = context.currentUserId
-  await requireBotWithAvatar(botUserId)
+  await requireBot(botUserId)
 
   const chat = await ChatModel.getChatFromInputPeer(peerIdInput, context)
   await requireBotInChat(chat, botUserId)
@@ -156,11 +156,10 @@ async function expireAndPushBotPresence({
   }
 }
 
-async function requireBotWithAvatar(botUserId: number) {
+async function requireBot(botUserId: number) {
   const [row] = await db
-    .select({ id: botAvatarAssets.id })
+    .select({ id: users.id })
     .from(users)
-    .innerJoin(botAvatarAssets, eq(users.id, botAvatarAssets.botUserId))
     .where(and(eq(users.id, botUserId), eq(users.bot, true), userNotDeleted()))
     .limit(1)
 

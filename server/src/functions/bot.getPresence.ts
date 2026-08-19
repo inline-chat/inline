@@ -45,10 +45,13 @@ export const getBotPresence = async (
     }
   }
 
+  const avatar = row.avatar && row.file
+    ? Encoders.botAvatar({ avatar: row.avatar, file: row.file })
+    : undefined
   return {
-    botUserId: BigInt(row.avatar.botUserId),
-    avatar: Encoders.botAvatar({ avatar: row.avatar, file: row.file }),
-    state: getBotPresenceState(row.avatar.botUserId, chat.id),
+    botUserId: BigInt(row.botUserId),
+    ...(avatar ? { avatar } : {}),
+    state: getBotPresenceState(row.botUserId, chat.id),
     peerId,
   }
 }
@@ -60,11 +63,11 @@ async function getPrivateChatAvatar(minUserId: number | null, maxUserId: number 
   }
 
   const [row] = await db
-    .select({ avatar: botAvatarAssets, file: files })
-    .from(botAvatarAssets)
-    .innerJoin(users, eq(botAvatarAssets.botUserId, users.id))
-    .innerJoin(files, eq(botAvatarAssets.fileId, files.id))
-    .where(and(eq(botAvatarAssets.botUserId, botUserId), eq(users.bot, true), userNotDeleted()))
+    .select({ botUserId: users.id, avatar: botAvatarAssets, file: files })
+    .from(users)
+    .leftJoin(botAvatarAssets, eq(users.id, botAvatarAssets.botUserId))
+    .leftJoin(files, eq(botAvatarAssets.fileId, files.id))
+    .where(and(eq(users.id, botUserId), eq(users.bot, true), userNotDeleted()))
     .limit(1)
 
   return row
@@ -72,11 +75,11 @@ async function getPrivateChatAvatar(minUserId: number | null, maxUserId: number 
 
 async function getThreadAvatar(chatId: number) {
   const [row] = await db
-    .select({ avatar: botAvatarAssets, file: files })
+    .select({ botUserId: users.id, avatar: botAvatarAssets, file: files })
     .from(chatParticipants)
     .innerJoin(users, eq(chatParticipants.userId, users.id))
-    .innerJoin(botAvatarAssets, eq(users.id, botAvatarAssets.botUserId))
-    .innerJoin(files, eq(botAvatarAssets.fileId, files.id))
+    .leftJoin(botAvatarAssets, eq(users.id, botAvatarAssets.botUserId))
+    .leftJoin(files, eq(botAvatarAssets.fileId, files.id))
     .where(and(eq(chatParticipants.chatId, chatId), eq(users.bot, true), userNotDeleted()))
     .orderBy(asc(users.id))
     .limit(1)

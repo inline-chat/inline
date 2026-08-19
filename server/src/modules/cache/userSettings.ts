@@ -21,6 +21,11 @@ export type CacheStats = {
 
 class UserSettingsCache {
   private cache = new Map<number, CachedUserSettings>()
+  // A fill may outlive an invalidation. Per-user generations prevent an
+  // unrelated user's invalidation from discarding this user's refresh, while
+  // the clear generation still fences every in-flight fill after clear().
+  private clearEpoch = 0
+  private userEpochs = new Map<number, number>()
   private readonly maxSize = 10000 // Maximum cache entries
   private readonly cacheValidTime = 60 * 60 * 1000 // 1 hour
   private readonly staleTime = 90 * 60 * 1000 // 1.5 hours (serve stale data up to this point)
@@ -63,6 +68,7 @@ class UserSettingsCache {
     if (cached.isRefreshing) return
 
     cached.isRefreshing = true
+    const generation = this.generationFor(userId)
 
     try {
       const general = await UserSettingsModel.getGeneral(userId)
@@ -73,8 +79,12 @@ class UserSettingsCache {
         lastAccessed: cached.lastAccessed,
       }
 
-      this.cache.set(userId, newCached)
-      log.debug("Background refresh completed", { userId })
+      if (this.isCurrentGeneration(userId, generation)) {
+        this.set(userId, newCached)
+        log.debug("Background refresh completed", { userId })
+      } else {
+        log.debug("Dropped stale background refresh", { userId })
+      }
     } catch (error) {
       this.stats.errors++
       log.error("Background refresh failed", { userId, error })
@@ -84,6 +94,8 @@ class UserSettingsCache {
   }
 
   private async fetchAndCache(userId: number): Promise<UserSettingsGeneral | null> {
+    const generation = this.generationFor(userId)
+
     try {
       const general = await UserSettingsModel.getGeneral(userId)
 
@@ -93,7 +105,11 @@ class UserSettingsCache {
         lastAccessed: Date.now(),
       }
 
-      this.set(userId, cached)
+      if (this.isCurrentGeneration(userId, generation)) {
+        this.set(userId, cached)
+      } else {
+        log.debug("Dropped stale settings fetch", { userId })
+      }
       return general
     } catch (error) {
       this.stats.errors++
@@ -120,6 +136,14 @@ class UserSettingsCache {
     this.stats.size = this.cache.size
   }
 
+  private generationFor(userId: number): readonly [number, number] {
+    return [this.clearEpoch, this.userEpochs.get(userId) ?? 0]
+  }
+
+  private isCurrentGeneration(userId: number, generation: readonly [number, number]): boolean {
+    return generation[0] === this.clearEpoch && generation[1] === (this.userEpochs.get(userId) ?? 0)
+  }
+
   private evictOldest(): void {
     let oldestKey: number | undefined
     let oldestTime = Date.now()
@@ -139,6 +163,7 @@ class UserSettingsCache {
   }
 
   invalidate(userId: number): void {
+    this.userEpochs.set(userId, (this.userEpochs.get(userId) ?? 0) + 1)
     const deleted = this.cache.delete(userId)
     if (deleted) {
       this.stats.size = this.cache.size
@@ -148,6 +173,8 @@ class UserSettingsCache {
 
   clear(): void {
     const size = this.cache.size
+    this.clearEpoch += 1
+    this.userEpochs.clear()
     this.cache.clear()
     this.stats.size = 0
     log.debug("Cleared user settings cache", { previousSize: size })

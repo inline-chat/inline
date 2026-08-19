@@ -3,7 +3,7 @@ import { UsersModel } from "@in/server/db/models/users"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { DialogsModel } from "@in/server/db/models/dialogs"
 import { MessageModel, type DbFullMessage } from "@in/server/db/models/messages"
-import { chats, dialogs, messages, type DbChat, type DbDialog } from "@in/server/db/schema"
+import { chats, dialogs, messages, users, type DbChat, type DbDialog } from "@in/server/db/schema"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import { getUpdateGroup } from "@in/server/modules/updates"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
@@ -476,49 +476,59 @@ export async function emitChatListOpenUpdates(input: {
   dialogs: DbDialog[]
   skipSessionId?: number
 }): Promise<void> {
-  const uniqueDialogs = Array.from(
-    new Map(
-      input.dialogs
-        .filter((dialog) => !dialog.chatListHidden)
-        .map((dialog) => [dialog.userId, dialog]),
-    ).values(),
-  )
-
-  if (uniqueDialogs.length === 0) {
+  // The caller's DbDialog is a post-commit snapshot and may already be stale.
+  // Use it only to identify affected users; the projection transaction below
+  // locks users, rereads dialogs, and enqueues the authoritative snapshot.
+  const userIds = Array.from(new Set(input.dialogs.map((dialog) => dialog.userId))).sort((a, b) => a - b)
+  if (userIds.length === 0) {
     return
   }
 
-  const chatsByUserId = await Encoders.chatForUsers(
-    input.chat,
-    uniqueDialogs.map((dialog) => dialog.userId),
-  )
-  const preparedUpdates = await Promise.all(
-    uniqueDialogs.map(async (dialog) => {
-      const unreadCount = await DialogsModel.getUnreadCount(dialog.chatId, dialog.userId)
-      return {
-        dialog,
-        unreadCount,
-        chat: chatsByUserId.get(dialog.userId),
-        encodedDialog: Encoders.dialog(dialog, { unreadCount }),
-      }
-    }),
-  )
+  // Permission encoding may query related data, so keep it outside the row
+  // lock. The dialog itself is always reread and encoded inside the owner tx.
+  const chatsByUserId = await Encoders.chatForUsers(input.chat, userIds)
+  const projection = await db.transaction(async (tx) => {
+    // All callers use this users -> dialogs order. Lock each user explicitly
+    // so multi-user batches acquire owners deterministically.
+    for (const userId of userIds) {
+      await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("update").limit(1)
+    }
 
-  const userUpdates = await UserBucketUpdates.enqueueMany(
-    preparedUpdates.map((prepared) => ({
-      userId: prepared.dialog.userId,
-      update: {
-        oneofKind: "userChatOpen" as const,
-        userChatOpen: {
-          chat: prepared.chat,
-          dialog: prepared.encodedDialog,
+    const freshDialogs = await tx
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, input.chat.id), inArray(dialogs.userId, userIds)))
+    const visibleDialogs = freshDialogs.filter((dialog) => !dialog.chatListHidden)
+    const preparedUpdates = await Promise.all(
+      visibleDialogs.map(async (dialog) => {
+        const unreadCount = await DialogsModel.getUnreadCount(dialog.chatId, dialog.userId, tx)
+        return {
+          dialog,
+          chat: chatsByUserId.get(dialog.userId),
+          encodedDialog: Encoders.dialog(dialog, { unreadCount }),
+        }
+      }),
+    )
+
+    const userUpdates = await UserBucketUpdates.enqueueMany(
+      preparedUpdates.map((prepared) => ({
+        userId: prepared.dialog.userId,
+        update: {
+          oneofKind: "userChatOpen" as const,
+          userChatOpen: {
+            chat: prepared.chat,
+            dialog: prepared.encodedDialog,
+          },
         },
-      },
-    })),
-  )
+      })),
+      { tx },
+    )
 
-  preparedUpdates.forEach((prepared, index) => {
-    const persisted = userUpdates[index]
+    return { preparedUpdates, userUpdates }
+  })
+
+  projection.preparedUpdates.forEach((prepared, index) => {
+    const persisted = projection.userUpdates[index]
     if (!persisted) {
       return
     }

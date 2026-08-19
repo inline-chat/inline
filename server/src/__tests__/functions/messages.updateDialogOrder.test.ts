@@ -16,6 +16,13 @@ describe("messages.updateDialogOrder", () => {
     },
   })
 
+  const peerThread = (chatId: number): InputPeer => ({
+    type: {
+      oneofKind: "chat",
+      chat: { chatId: BigInt(chatId) },
+    },
+  })
+
   test("updates normal sidebar order", async () => {
     const userA = await testUtils.createUser("dialog-order-a@example.com")
     const userB = await testUtils.createUser("dialog-order-b@example.com")
@@ -183,5 +190,32 @@ describe("messages.updateDialogOrder", () => {
     expect(dialog?.order).toBe("n")
     expect(dialog?.archived).toBe(false)
     expect(dialog?.chatListHidden).toBe(null)
+  })
+
+  test("serializes derived normal and pinned order allocation across concurrent pins", async () => {
+    const userA = await testUtils.createUser("dialog-order-concurrent-a@example.com")
+    const userB = await testUtils.createUser("dialog-order-concurrent-b@example.com")
+    const chatsToPin = []
+
+    for (let index = 0; index < 4; index += 1) {
+      const chat = await testUtils.createChat(null, `Concurrent pin ${index}`, "thread", false, userA.id)
+      if (!chat) throw new Error("Failed to create concurrent-pin chat")
+      await testUtils.addParticipant(chat.id, userA.id)
+      await testUtils.addParticipant(chat.id, userB.id)
+      await db.insert(dialogs).values({ chatId: chat.id, userId: userA.id, open: true })
+      chatsToPin.push(chat)
+    }
+
+    const results = await Promise.all(
+      chatsToPin.map((chat) =>
+        updateDialogOrder(
+          { peerId: peerThread(chat.id), pinned: true },
+          testUtils.functionContext({ userId: userA.id, sessionId: 11 }),
+        ),
+      ),
+    )
+    const pinnedOrders = results.map((result) => result.dialog.pinnedOrder)
+
+    expect(new Set(pinnedOrders).size).toBe(pinnedOrders.length)
   })
 })

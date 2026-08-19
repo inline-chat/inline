@@ -14,6 +14,7 @@ import { MessageType } from "@protobuf-ts/runtime";
 import { MessageActionResponseUi } from "@inline-chat/protocol/core";
 import { Dialog } from "@inline-chat/protocol/core";
 import { Chat } from "@inline-chat/protocol/core";
+import { UserSettings } from "@inline-chat/protocol/core";
 import { DialogFollowMode } from "@inline-chat/protocol/core";
 import { DialogNotificationSettings } from "@inline-chat/protocol/core";
 import { Space } from "@inline-chat/protocol/core";
@@ -22,6 +23,7 @@ import { ChatPermissions } from "@inline-chat/protocol/core";
 import { SpaceSettings } from "@inline-chat/protocol/core";
 import { User } from "@inline-chat/protocol/core";
 import { Member } from "@inline-chat/protocol/core";
+import { Reaction } from "@inline-chat/protocol/core";
 import { ChatParticipantGroup } from "@inline-chat/protocol/core";
 import { ChatParticipant } from "@inline-chat/protocol/core";
 /**
@@ -105,6 +107,18 @@ export interface ServerUpdate {
          * @generated from protobuf field: server.ServerChatUpdateMoved chat_moved = 21;
          */
         chatMoved: ServerChatUpdateMoved;
+    } | {
+        oneofKind: "reaction";
+        /**
+         * @generated from protobuf field: server.ServerChatUpdateReaction reaction = 41;
+         */
+        reaction: ServerChatUpdateReaction;
+    } | {
+        oneofKind: "reactionDeleted";
+        /**
+         * @generated from protobuf field: server.ServerChatUpdateDeleteReaction reaction_deleted = 42;
+         */
+        reactionDeleted: ServerChatUpdateDeleteReaction;
     } | {
         oneofKind: "spaceRemoveMember";
         /**
@@ -265,6 +279,12 @@ export interface ServerUpdate {
          * @generated from protobuf field: server.ServerUserUpdateDialogCollapsedMaxId user_dialog_collapsed_max_id = 40;
          */
         userDialogCollapsedMaxId: ServerUserUpdateDialogCollapsedMaxId;
+    } | {
+        oneofKind: "userSettings";
+        /**
+         * @generated from protobuf field: server.ServerUserUpdateSettings user_settings = 43;
+         */
+        userSettings: ServerUserUpdateSettings;
     } | {
         oneofKind: undefined;
     };
@@ -534,6 +554,39 @@ export interface ServerChatUpdateMessageAttachment {
      * @generated from protobuf field: int64 attachment_id = 3;
      */
     attachmentId: bigint;
+}
+/**
+ * A reaction mutation is part of the chat bucket so catch-up preserves its
+ * order relative to other chat mutations.
+ *
+ * @generated from protobuf message server.ServerChatUpdateReaction
+ */
+export interface ServerChatUpdateReaction {
+    /**
+     * @generated from protobuf field: Reaction reaction = 1;
+     */
+    reaction?: Reaction;
+}
+/**
+ * @generated from protobuf message server.ServerChatUpdateDeleteReaction
+ */
+export interface ServerChatUpdateDeleteReaction {
+    /**
+     * @generated from protobuf field: string emoji = 1;
+     */
+    emoji: string;
+    /**
+     * @generated from protobuf field: int64 chat_id = 2;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: int64 message_id = 3;
+     */
+    messageId: bigint;
+    /**
+     * @generated from protobuf field: int64 user_id = 4;
+     */
+    userId: bigint;
 }
 // ------------------------------------------------------------
 // Space updates
@@ -838,6 +891,19 @@ export interface ServerUserUpdateUser {
      */
     user?: User;
 }
+/**
+ * Update for a user when their account-wide settings change. This full
+ * snapshot is kept in the durable user bucket so reconnect/catch-up preserves
+ * the same order as the settings write.
+ *
+ * @generated from protobuf message server.ServerUserUpdateSettings
+ */
+export interface ServerUserUpdateSettings {
+    /**
+     * @generated from protobuf field: UserSettings settings = 1;
+     */
+    settings?: UserSettings;
+}
 // ------------------------------------------------------------
 // Server-only stored payloads
 // ------------------------------------------------------------
@@ -986,6 +1052,8 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 15, name: "chat_info", kind: "message", oneof: "update", T: () => ServerChatUpdateInfo },
             { no: 16, name: "pinned_messages", kind: "message", oneof: "update", T: () => ServerChatUpdatePinnedMessages },
             { no: 21, name: "chat_moved", kind: "message", oneof: "update", T: () => ServerChatUpdateMoved },
+            { no: 41, name: "reaction", kind: "message", oneof: "update", T: () => ServerChatUpdateReaction },
+            { no: 42, name: "reaction_deleted", kind: "message", oneof: "update", T: () => ServerChatUpdateDeleteReaction },
             { no: 9, name: "space_remove_member", kind: "message", oneof: "update", T: () => ServerSpaceUpdateRemoveMember },
             { no: 12, name: "space_member_update", kind: "message", oneof: "update", T: () => ServerSpaceUpdateMemberUpdate },
             { no: 19, name: "space_member_add", kind: "message", oneof: "update", T: () => ServerSpaceUpdateMemberAdd },
@@ -1011,7 +1079,8 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 36, name: "user_chat_participant_group_add", kind: "message", oneof: "update", T: () => ServerUserUpdateChatParticipantGroupAdd },
             { no: 37, name: "user_chat_participant_group_delete", kind: "message", oneof: "update", T: () => ServerUserUpdateChatParticipantGroupDelete },
             { no: 39, name: "user_chat_permissions", kind: "message", oneof: "update", T: () => ServerUserUpdateChatPermissions },
-            { no: 40, name: "user_dialog_collapsed_max_id", kind: "message", oneof: "update", T: () => ServerUserUpdateDialogCollapsedMaxId }
+            { no: 40, name: "user_dialog_collapsed_max_id", kind: "message", oneof: "update", T: () => ServerUserUpdateDialogCollapsedMaxId },
+            { no: 43, name: "user_settings", kind: "message", oneof: "update", T: () => ServerUserUpdateSettings }
         ]);
     }
     create(value?: PartialMessage<ServerUpdate>): ServerUpdate {
@@ -1098,6 +1167,18 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                     message.update = {
                         oneofKind: "chatMoved",
                         chatMoved: ServerChatUpdateMoved.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).chatMoved)
+                    };
+                    break;
+                case /* server.ServerChatUpdateReaction reaction */ 41:
+                    message.update = {
+                        oneofKind: "reaction",
+                        reaction: ServerChatUpdateReaction.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).reaction)
+                    };
+                    break;
+                case /* server.ServerChatUpdateDeleteReaction reaction_deleted */ 42:
+                    message.update = {
+                        oneofKind: "reactionDeleted",
+                        reactionDeleted: ServerChatUpdateDeleteReaction.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).reactionDeleted)
                     };
                     break;
                 case /* server.ServerSpaceUpdateRemoveMember space_remove_member */ 9:
@@ -1256,6 +1337,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                         userDialogCollapsedMaxId: ServerUserUpdateDialogCollapsedMaxId.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userDialogCollapsedMaxId)
                     };
                     break;
+                case /* server.ServerUserUpdateSettings user_settings */ 43:
+                    message.update = {
+                        oneofKind: "userSettings",
+                        userSettings: ServerUserUpdateSettings.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userSettings)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -1307,6 +1394,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* server.ServerChatUpdateMoved chat_moved = 21; */
         if (message.update.oneofKind === "chatMoved")
             ServerChatUpdateMoved.internalBinaryWrite(message.update.chatMoved, writer.tag(21, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerChatUpdateReaction reaction = 41; */
+        if (message.update.oneofKind === "reaction")
+            ServerChatUpdateReaction.internalBinaryWrite(message.update.reaction, writer.tag(41, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerChatUpdateDeleteReaction reaction_deleted = 42; */
+        if (message.update.oneofKind === "reactionDeleted")
+            ServerChatUpdateDeleteReaction.internalBinaryWrite(message.update.reactionDeleted, writer.tag(42, WireType.LengthDelimited).fork(), options).join();
         /* server.ServerSpaceUpdateRemoveMember space_remove_member = 9; */
         if (message.update.oneofKind === "spaceRemoveMember")
             ServerSpaceUpdateRemoveMember.internalBinaryWrite(message.update.spaceRemoveMember, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
@@ -1385,6 +1478,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* server.ServerUserUpdateDialogCollapsedMaxId user_dialog_collapsed_max_id = 40; */
         if (message.update.oneofKind === "userDialogCollapsedMaxId")
             ServerUserUpdateDialogCollapsedMaxId.internalBinaryWrite(message.update.userDialogCollapsedMaxId, writer.tag(40, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerUserUpdateSettings user_settings = 43; */
+        if (message.update.oneofKind === "userSettings")
+            ServerUserUpdateSettings.internalBinaryWrite(message.update.userSettings, writer.tag(43, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2300,6 +2396,123 @@ class ServerChatUpdateMessageAttachment$Type extends MessageType<ServerChatUpdat
  * @generated MessageType for protobuf message server.ServerChatUpdateMessageAttachment
  */
 export const ServerChatUpdateMessageAttachment = new ServerChatUpdateMessageAttachment$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerChatUpdateReaction$Type extends MessageType<ServerChatUpdateReaction> {
+    constructor() {
+        super("server.ServerChatUpdateReaction", [
+            { no: 1, name: "reaction", kind: "message", T: () => Reaction }
+        ]);
+    }
+    create(value?: PartialMessage<ServerChatUpdateReaction>): ServerChatUpdateReaction {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<ServerChatUpdateReaction>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerChatUpdateReaction): ServerChatUpdateReaction {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Reaction reaction */ 1:
+                    message.reaction = Reaction.internalBinaryRead(reader, reader.uint32(), options, message.reaction);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerChatUpdateReaction, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Reaction reaction = 1; */
+        if (message.reaction)
+            Reaction.internalBinaryWrite(message.reaction, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerChatUpdateReaction
+ */
+export const ServerChatUpdateReaction = new ServerChatUpdateReaction$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerChatUpdateDeleteReaction$Type extends MessageType<ServerChatUpdateDeleteReaction> {
+    constructor() {
+        super("server.ServerChatUpdateDeleteReaction", [
+            { no: 1, name: "emoji", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ServerChatUpdateDeleteReaction>): ServerChatUpdateDeleteReaction {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.emoji = "";
+        message.chatId = 0n;
+        message.messageId = 0n;
+        message.userId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ServerChatUpdateDeleteReaction>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerChatUpdateDeleteReaction): ServerChatUpdateDeleteReaction {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string emoji */ 1:
+                    message.emoji = reader.string();
+                    break;
+                case /* int64 chat_id */ 2:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* int64 message_id */ 3:
+                    message.messageId = reader.int64().toBigInt();
+                    break;
+                case /* int64 user_id */ 4:
+                    message.userId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerChatUpdateDeleteReaction, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string emoji = 1; */
+        if (message.emoji !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.emoji);
+        /* int64 chat_id = 2; */
+        if (message.chatId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.chatId);
+        /* int64 message_id = 3; */
+        if (message.messageId !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.messageId);
+        /* int64 user_id = 4; */
+        if (message.userId !== 0n)
+            writer.tag(4, WireType.Varint).int64(message.userId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerChatUpdateDeleteReaction
+ */
+export const ServerChatUpdateDeleteReaction = new ServerChatUpdateDeleteReaction$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ServerSpaceUpdateRemoveMember$Type extends MessageType<ServerSpaceUpdateRemoveMember> {
     constructor() {
@@ -3349,6 +3562,52 @@ class ServerUserUpdateUser$Type extends MessageType<ServerUserUpdateUser> {
  * @generated MessageType for protobuf message server.ServerUserUpdateUser
  */
 export const ServerUserUpdateUser = new ServerUserUpdateUser$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerUserUpdateSettings$Type extends MessageType<ServerUserUpdateSettings> {
+    constructor() {
+        super("server.ServerUserUpdateSettings", [
+            { no: 1, name: "settings", kind: "message", T: () => UserSettings }
+        ]);
+    }
+    create(value?: PartialMessage<ServerUserUpdateSettings>): ServerUserUpdateSettings {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<ServerUserUpdateSettings>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerUserUpdateSettings): ServerUserUpdateSettings {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* UserSettings settings */ 1:
+                    message.settings = UserSettings.internalBinaryRead(reader, reader.uint32(), options, message.settings);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerUserUpdateSettings, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* UserSettings settings = 1; */
+        if (message.settings)
+            UserSettings.internalBinaryWrite(message.settings, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerUserUpdateSettings
+ */
+export const ServerUserUpdateSettings = new ServerUserUpdateSettings$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class StoredSpaceSettings$Type extends MessageType<StoredSpaceSettings> {
     constructor() {

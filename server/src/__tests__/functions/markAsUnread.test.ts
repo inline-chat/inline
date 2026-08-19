@@ -6,8 +6,9 @@ import type { DbChat, DbUser } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { db } from "@in/server/db"
 import { chats, dialogs, messages, updates, UpdateBucket } from "@in/server/db/schema"
-import { and, desc, eq } from "drizzle-orm"
+import { and, desc, eq, sql } from "drizzle-orm"
 import { handler as readMessagesHandler } from "@in/server/methods/readMessages"
+import { readMessages } from "@in/server/functions/messages.readMessages"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import { getMessages } from "@in/server/functions/messages.getMessages"
 
@@ -22,6 +23,47 @@ let userCounter = 0
 const nextEmail = (prefix: string) => {
   userCounter += 1
   return `${prefix}-${process.pid}-${userCounter}@example.com`
+}
+
+const waitForDialogMutationWaiters = async (minimum: number) => {
+  const deadline = Date.now() + 5_000
+  while (Date.now() < deadline) {
+    const rows = await db.execute<{ count: number }>(sql`
+      SELECT count(*)::int AS count
+      FROM pg_stat_activity
+      WHERE pid <> pg_backend_pid()
+        AND wait_event_type = 'Lock'
+        AND (query ILIKE '%dialogs%' OR query ILIKE '%users%')
+    `)
+    if (Number(rows[0]?.count ?? 0) >= minimum) return
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  throw new Error(`Timed out waiting for ${minimum} dialog mutation lock waiters`)
+}
+
+const holdDialogRowLock = async (chatId: number, userId: number) => {
+  let release!: () => void
+  const released = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let locked!: () => void
+  const lockAcquired = new Promise<void>((resolve) => {
+    locked = resolve
+  })
+
+  const transaction = db.transaction(async (tx) => {
+    await tx
+      .select({ id: dialogs.id })
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, chatId), eq(dialogs.userId, userId)))
+      .for("update")
+      .limit(1)
+    locked()
+    await released
+  })
+
+  await lockAcquired
+  return { release, transaction }
 }
 
 describe("markAsUnread", () => {
@@ -145,6 +187,73 @@ describe("markAsUnread", () => {
       .limit(1)
     
     expect(readDialog?.unreadMark).toBe(false)
+  })
+
+  test("concurrent reads keep the highest read watermark", async () => {
+    await db
+      .update(dialogs)
+      .set({ readInboxMaxId: 0, unreadMark: false })
+      .where(and(eq(dialogs.chatId, privateChat.id), eq(dialogs.userId, currentUser.id)))
+
+    const lock = await holdDialogRowLock(privateChat.id, currentUser.id)
+    const highRead = readMessages(
+      { peer: privateChatPeerId, maxId: 100 },
+      context,
+    )
+    await waitForDialogMutationWaiters(1)
+    const lowRead = readMessages(
+      { peer: privateChatPeerId, maxId: 50 },
+      context,
+    )
+    await waitForDialogMutationWaiters(2)
+
+    lock.release()
+    await Promise.all([lock.transaction, highRead, lowRead])
+
+    const [dialog] = await db
+      .select({ readInboxMaxId: dialogs.readInboxMaxId })
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, privateChat.id), eq(dialogs.userId, currentUser.id)))
+      .limit(1)
+    expect(dialog?.readInboxMaxId).toBe(100)
+  })
+
+  test("a read serialized after mark-as-unread clears the mark it observed", async () => {
+    await db
+      .update(dialogs)
+      .set({ readInboxMaxId: 1, unreadMark: false })
+      .where(and(eq(dialogs.chatId, privateChat.id), eq(dialogs.userId, currentUser.id)))
+
+    const lock = await holdDialogRowLock(privateChat.id, currentUser.id)
+    const mark = markAsUnread({ peer: privateChatPeerId }, context)
+    await waitForDialogMutationWaiters(1)
+    const read = readMessages(
+      {
+        peer: privateChatPeerId,
+        maxId: 1,
+      },
+      context,
+    )
+    await waitForDialogMutationWaiters(2)
+
+    lock.release()
+    const [, readResult] = await Promise.all([mark, read])
+
+    const [dialog] = await db
+      .select({ unreadMark: dialogs.unreadMark })
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, privateChat.id), eq(dialogs.userId, currentUser.id)))
+      .limit(1)
+    expect(dialog?.unreadMark).toBe(false)
+    expect(readResult.updates[0]?.update.oneofKind).toBe("markAsUnread")
+
+    const [latestUpdate] = await db
+      .select()
+      .from(updates)
+      .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, currentUser.id)))
+      .orderBy(desc(updates.seq))
+      .limit(1)
+    expect(UpdatesModel.decrypt(latestUpdate!).payload.update.oneofKind).toBe("userMarkAsUnread")
   })
 
   test("readMessages (empty chat) should persist unreadMark cleared in user bucket", async () => {

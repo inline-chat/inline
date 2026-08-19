@@ -1,4 +1,8 @@
-import type { GetUpdatesStateInput, GetUpdatesStateResult } from "@inline-chat/protocol/core"
+import {
+  UpdatesPayload,
+  type GetUpdatesStateInput,
+  type GetUpdatesStateResult,
+} from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { SpaceModel } from "@in/server/db/models/spaces"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
@@ -14,6 +18,9 @@ import { db } from "@in/server/db"
 import { UpdateBucket } from "@in/server/db/schema"
 
 const log = new Log("updates.getUpdatesState")
+const MAX_UPDATE_HINTS_PER_BATCH = 512
+const MAX_UPDATE_HINT_BATCH_BYTES = 1024 * 1024
+const MAX_CONCURRENT_CHAT_ACCESS_CHECKS = 16
 
 export const getUpdatesState = async (
   input: GetUpdatesStateInput,
@@ -142,22 +149,22 @@ export const getUpdatesState = async (
     if (!space.lastUpdateDate) {
       continue
     }
-    if (typeof space.updateSeq !== "number") {
-      continue
-    }
     updatesToPush.push({
       update: {
         oneofKind: "spaceHasNewUpdates",
         spaceHasNewUpdates: {
           spaceId: BigInt(space.id),
-          updateSeq: space.updateSeq,
+          // Zero is the existing "fetch authoritatively" sentinel. A changed
+          // bucket must never disappear merely because its cached counter is
+          // temporarily absent or being repaired.
+          updateSeq: space.updateSeq ?? 0,
         },
       },
     })
   }
 
   if (updatesToPush.length > 0) {
-    RealtimeUpdates.pushToUser(context.currentUserId, updatesToPush)
+    pushBoundedUpdateHints(context.currentUserId, updatesToPush)
   }
 
   logGetUpdatesStateTiming({
@@ -174,6 +181,26 @@ export const getUpdatesState = async (
     date: latestUpdateDateEncoded,
     updatesFound: true,
     seq: userSeq,
+  }
+}
+
+const pushBoundedUpdateHints = (
+  userId: number,
+  updates: Parameters<typeof RealtimeUpdates.pushToUser>[1],
+): void => {
+  let offset = 0
+  while (offset < updates.length) {
+    let batch = updates.slice(offset, offset + MAX_UPDATE_HINTS_PER_BATCH)
+    let encodedBytes = UpdatesPayload.toBinary({ updates: batch }).length
+    while (encodedBytes > MAX_UPDATE_HINT_BATCH_BYTES && batch.length > 1) {
+      batch = batch.slice(0, Math.ceil(batch.length / 2))
+      encodedBytes = UpdatesPayload.toBinary({ updates: batch }).length
+    }
+    if (encodedBytes > MAX_UPDATE_HINT_BATCH_BYTES) {
+      throw new RangeError("Realtime update hint exceeds the bounded batch size")
+    }
+    RealtimeUpdates.pushToUser(userId, batch)
+    offset += batch.length
   }
 }
 
@@ -200,21 +227,29 @@ const logGetUpdatesStateTiming = (timing: GetUpdatesStateTiming): void => {
 }
 
 const filterAccessibleChats = async (chats: DbChat[], userId: number): Promise<DbChat[]> => {
-  const accessible: DbChat[] = []
+  const accessible = Array.from<DbChat | undefined>({ length: chats.length })
+  let nextIndex = 0
+  const workerCount = Math.min(chats.length, MAX_CONCURRENT_CHAT_ACCESS_CHECKS)
 
-  for (const chat of chats) {
-    try {
-      await AccessGuards.ensureChatAccess(chat, userId)
-      accessible.push(chat)
-    } catch (error) {
-      if (isExpectedAccessError(error)) {
-        continue
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < chats.length) {
+      const index = nextIndex
+      nextIndex += 1
+      const chat = chats[index]
+      if (!chat) continue
+      try {
+        await AccessGuards.ensureChatAccess(chat, userId)
+        accessible[index] = chat
+      } catch (error) {
+        if (isExpectedAccessError(error)) {
+          continue
+        }
+        throw error
       }
-      throw error
     }
-  }
+  }))
 
-  return accessible
+  return accessible.filter((chat): chat is DbChat => chat !== undefined)
 }
 
 const isExpectedAccessError = (error: unknown): boolean =>

@@ -511,4 +511,31 @@ describe("messages.updateDialogOpen", () => {
     expect(savedChat).toBeDefined()
     expect(savedDialog?.open).toBe(false)
   })
+
+  test("serializes derived order allocation across concurrent opens", async () => {
+    const userA = await testUtils.createUser("dialog-open-concurrent-a@example.com")
+    const userB = await testUtils.createUser("dialog-open-concurrent-b@example.com")
+    const chatsToOpen = []
+
+    for (let index = 0; index < 4; index += 1) {
+      const chat = await testUtils.createChat(null, `Concurrent open ${index}`, "thread", false, userA.id)
+      if (!chat) throw new Error("Failed to create concurrent-open chat")
+      await testUtils.addParticipant(chat.id, userA.id)
+      await testUtils.addParticipant(chat.id, userB.id)
+      chatsToOpen.push(chat)
+    }
+
+    const results = await Promise.all(
+      chatsToOpen.map((chat) =>
+        updateDialogOpen(
+          { peerId: peerThread(chat.id), open: true },
+          testUtils.functionContext({ userId: userA.id, sessionId: 11 }),
+        ),
+      ),
+    )
+    const orders = results.map((result) => result.dialog?.order).filter((order): order is string => order != null)
+
+    expect(orders).toHaveLength(chatsToOpen.length)
+    expect(new Set(orders).size).toBe(orders.length)
+  })
 })

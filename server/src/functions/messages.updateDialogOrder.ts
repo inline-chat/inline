@@ -4,7 +4,7 @@ import { db } from "@in/server/db"
 import { DialogsModel } from "@in/server/db/models/dialogs"
 import { ChatModel } from "@in/server/db/models/chats"
 import { UsersModel } from "@in/server/db/models/users"
-import { dialogs } from "@in/server/db/schema"
+import { dialogs, users } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { dialogOpenFieldsForOpen, nextDialogOrder } from "@in/server/modules/dialogOpen"
@@ -41,6 +41,10 @@ export async function updateDialogOrder(input: Input, context: FunctionContext):
   await AccessGuards.ensureChatAccess(chat, context.currentUserId)
 
   const dialog = await db.transaction(async (tx) => {
+    // Keep the dialog mutation and its subsequent user-bucket projection on
+    // one deterministic owner path: users before dialogs.
+    await tx.select({ id: users.id }).from(users).where(eq(users.id, context.currentUserId)).for("update").limit(1)
+
     const whereClause = and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, context.currentUserId))
     const [existingDialog] = await tx.select().from(dialogs).where(whereClause).limit(1)
 

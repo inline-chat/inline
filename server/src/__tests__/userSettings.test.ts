@@ -7,7 +7,10 @@ import { UserSettingsModel } from "@in/server/db/models/userSettings/userSetting
 import { NotificationSettings_Mode } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { users } from "@in/server/db/schema"
+import { UpdateBucket, updates } from "@in/server/db/schema/updates"
+import { Sync } from "@in/server/modules/updates/sync"
 import { eq } from "drizzle-orm"
+import { clearUserSettingsCache } from "@in/server/modules/cache/userSettings"
 
 describe("User Settings RPC", () => {
   let userId: number
@@ -99,6 +102,81 @@ describe("User Settings RPC", () => {
       .where(eq(users.id, userId))
       .limit(1)
     expect(user).toEqual({ shareTimeZone: false, appearInGlobalSearch: false })
+  })
+
+  test("merges concurrent partial updates instead of losing a field", async () => {
+    await UserSettingsModel.updateGeneral(userId, {
+      notifications: { mode: UserSettingsNotificationsMode.All, silent: false, disableDmNotifications: false },
+      privacy: { shareTimeZone: true, appearInGlobalSearch: true },
+      compose: { replacePastedLinksWithTitles: false },
+    })
+    clearUserSettingsCache()
+
+    const makeContext = (sessionId: number) => ({
+      userId,
+      sessionId,
+      connectionId: `settings-race-${sessionId}`,
+      sendRaw: () => {},
+      sendRpcReply: () => {},
+    })
+
+    await Promise.all([
+      updateUserSettingsHandler(
+        { userSettings: { composeSettings: { replacePastedLinksWithTitles: true } } },
+        makeContext(11),
+      ),
+      updateUserSettingsHandler(
+        { userSettings: { privacySettings: { shareTimeZone: false } } },
+        makeContext(12),
+      ),
+    ])
+
+    const stored = await UserSettingsModel.getGeneral(userId)
+    expect(stored?.compose.replacePastedLinksWithTitles).toBe(true)
+    expect(stored?.privacy.shareTimeZone).toBe(false)
+    expect(stored?.privacy.appearInGlobalSearch).toBe(true)
+  })
+
+  test("sequences concurrent full-payload projections in the user bucket", async () => {
+    await UserSettingsModel.updateGeneral(userId, {
+      notifications: { mode: UserSettingsNotificationsMode.All, silent: false, disableDmNotifications: false },
+      privacy: { shareTimeZone: true, appearInGlobalSearch: true },
+      compose: { replacePastedLinksWithTitles: false },
+    })
+    clearUserSettingsCache()
+
+    const makeContext = (sessionId: number) => ({
+      userId,
+      sessionId,
+      connectionId: `settings-projection-${sessionId}`,
+      sendRaw: () => {},
+      sendRpcReply: () => {},
+    })
+
+    const results = await Promise.all([
+      updateUserSettingsHandler(
+        { userSettings: { composeSettings: { replacePastedLinksWithTitles: true } } },
+        makeContext(21),
+      ),
+      updateUserSettingsHandler(
+        { userSettings: { privacySettings: { shareTimeZone: false } } },
+        makeContext(22),
+      ),
+    ])
+
+    const projected = results.flatMap((result) => result.updates)
+    expect(projected).toHaveLength(2)
+    expect(projected.every((update) => update.seq !== undefined && update.seq > 0)).toBe(true)
+    const sequences = projected.map((update) => update.seq!).sort((a, b) => a - b)
+    expect(sequences[1]).toBe(sequences[0]! + 1)
+    expect(projected.every((update) => update.date !== undefined && update.date > 0n)).toBe(true)
+
+    const durableRows = (await db.select().from(updates).where(eq(updates.entityId, userId))).filter(
+      (row) => row.bucket === UpdateBucket.User && sequences.includes(row.seq),
+    )
+    const durableProjection = Sync.inflateUserUpdates(durableRows)
+    expect(durableProjection.map((update) => update.seq).sort((a, b) => a! - b!)).toEqual(sequences)
+    expect(durableProjection.every((update) => update.update.oneofKind === "updateUserSettings")).toBe(true)
   })
 
   test("updateUserSettings should save and return settings", async () => {

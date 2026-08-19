@@ -1,14 +1,14 @@
 import { db } from "@in/server/db"
-import { and, eq } from "drizzle-orm"
-import { dialogs } from "@in/server/db/schema"
+import { and, eq, sql } from "drizzle-orm"
+import { dialogs, users } from "@in/server/db/schema"
 import type { InputPeer, Update } from "@inline-chat/protocol/core"
 import { encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { DialogsModel } from "@in/server/db/models/dialogs"
 import { Notifications } from "@in/server/modules/notifications/notifications"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
-import type { ServerUpdate } from "@in/server/protocol/server"
 import type { FunctionContext } from "@in/server/functions/_types"
+import type { ServerUpdate } from "@in/server/protocol/server"
 import { getLastMessageId } from "@in/server/db/models/chats"
 import { InlineError } from "@in/server/types/errors"
 import { emitReplyThreadParentRepliesUpdateIfNeeded } from "@in/server/modules/subthreads"
@@ -44,133 +44,161 @@ export const readMessages = async (input: Input, context: FunctionContext): Prom
 
   const outputPeer = encodePeerFromInputPeer({ inputPeer: input.peer, currentUserId: context.currentUserId })
 
-  const existingDialog = await db
-    .select({
-      chatId: dialogs.chatId,
-      readInboxMaxId: dialogs.readInboxMaxId,
-      unreadMark: dialogs.unreadMark,
-    })
-    .from(dialogs)
-    .where(
-      and(
-        dialogPeerCondition,
-        eq(dialogs.userId, context.currentUserId),
-      ),
-    )
-    .limit(1)
-    .then((rows) => rows[0])
-
   let maxId = input.maxId
   if (maxId === undefined) {
     const lastMsgId = await getLastMessageId(peer, context)
     maxId = lastMsgId ?? undefined
   }
 
-  if (maxId === undefined) {
-    const updated = await db
-      .update(dialogs)
-      .set({ unreadMark: false })
+  const mutation = await db.transaction(async (tx): Promise<{
+    updated: boolean
+    chatId?: number
+    effectiveMaxId?: number
+    didAdvanceReadMaxId: boolean
+    didClearUnreadMark: boolean
+    unreadCount: number
+  }> => {
+    // User-bucket sequence allocation and dialog mutation share the same
+    // deterministic owner order: users, then dialogs. This makes the durable
+    // projection commit in the same order as the state it describes.
+    await tx.select({ id: users.id }).from(users).where(eq(users.id, context.currentUserId)).for("update").limit(1)
+
+    const existing = await tx
+      .select({
+        chatId: dialogs.chatId,
+        readInboxMaxId: dialogs.readInboxMaxId,
+        unreadMark: dialogs.unreadMark,
+      })
+      .from(dialogs)
       .where(
         and(
           dialogPeerCondition,
           eq(dialogs.userId, context.currentUserId),
-          eq(dialogs.unreadMark, true),
+        ),
+      )
+      .for("update")
+      .limit(1)
+      .then((rows) => rows[0])
+
+    if (maxId === undefined) {
+      if (existing?.unreadMark !== true) {
+        return { updated: false, didAdvanceReadMaxId: false, didClearUnreadMark: false, unreadCount: 0 }
+      }
+
+      const updated = await tx
+        .update(dialogs)
+        .set({ unreadMark: false })
+        .where(
+          and(
+            dialogPeerCondition,
+            eq(dialogs.userId, context.currentUserId),
+            eq(dialogs.unreadMark, true),
+          ),
+        )
+        .returning({ chatId: dialogs.chatId })
+
+      if (updated.length === 0) {
+        return { updated: false, didAdvanceReadMaxId: false, didClearUnreadMark: false, unreadCount: 0 }
+      }
+
+      await UserBucketUpdates.enqueue(
+        {
+          userId: context.currentUserId,
+          update: {
+            oneofKind: "userMarkAsUnread",
+            userMarkAsUnread: {
+              peerId: outputPeer,
+              unreadMark: false,
+            },
+          },
+        },
+        { tx },
+      )
+
+      return {
+        updated: true,
+        chatId: updated[0]?.chatId,
+        didAdvanceReadMaxId: false,
+        didClearUnreadMark: true,
+        unreadCount: 0,
+      }
+    }
+
+    const previousReadMaxId = existing?.readInboxMaxId ?? 0
+    const didClearUnreadMark = existing?.unreadMark === true
+    const effectiveMaxId = Math.max(previousReadMaxId, maxId)
+    const didAdvanceReadMaxId = effectiveMaxId > previousReadMaxId
+
+    if (!didAdvanceReadMaxId && !didClearUnreadMark) {
+      return { updated: false, didAdvanceReadMaxId: false, didClearUnreadMark: false, unreadCount: 0 }
+    }
+
+    const updated = await tx
+      .update(dialogs)
+      .set({
+        unreadMark: false,
+        ...(didAdvanceReadMaxId
+          ? { readInboxMaxId: sql<number>`GREATEST(COALESCE(${dialogs.readInboxMaxId}, 0), ${maxId})` }
+          : {}),
+      })
+      .where(
+        and(
+          dialogPeerCondition,
+          eq(dialogs.userId, context.currentUserId),
         ),
       )
       .returning({ chatId: dialogs.chatId })
 
     if (updated.length === 0) {
-      return { updates: [] }
+      return { updated: false, didAdvanceReadMaxId: false, didClearUnreadMark: false, unreadCount: 0 }
     }
 
-    const userUpdatePayload: ServerUpdate["update"] = {
-      oneofKind: "userMarkAsUnread",
-      userMarkAsUnread: {
-        peerId: outputPeer,
-        unreadMark: false,
-      },
-    }
-    await UserBucketUpdates.enqueue({ userId: context.currentUserId, update: userUpdatePayload })
-
-    const updates: Update[] = [
+    const unreadCount =
+      didAdvanceReadMaxId && updated[0]?.chatId
+        ? await DialogsModel.getUnreadCount(updated[0].chatId, context.currentUserId, tx)
+        : 0
+    const userUpdatePayload: ServerUpdate["update"] = didAdvanceReadMaxId
+      ? {
+          oneofKind: "userReadMaxId",
+          userReadMaxId: {
+            peerId: outputPeer,
+            readMaxId: BigInt(effectiveMaxId),
+            unreadCount,
+          },
+        }
+      : {
+          oneofKind: "userMarkAsUnread",
+          userMarkAsUnread: {
+            peerId: outputPeer,
+            unreadMark: false,
+          },
+        }
+    await UserBucketUpdates.enqueue(
       {
-        update: {
-          oneofKind: "markAsUnread",
-          markAsUnread: { peerId: outputPeer, unreadMark: false },
-        },
+        userId: context.currentUserId,
+        update: userUpdatePayload,
       },
-    ]
-
-    RealtimeUpdates.pushToUser(context.currentUserId, updates, { skipSessionId: context.currentSessionId })
-
-    await emitReplyThreadParentRepliesUpdateIfNeeded({
-      chatId: updated[0]!.chatId,
-      currentUserId: context.currentUserId,
-    })
-
-    return { updates }
-  }
-
-  const existing = existingDialog
-
-  const previousReadMaxId = existing?.readInboxMaxId ?? 0
-  const didClearUnreadMark = existing?.unreadMark === true
-  const effectiveMaxId = Math.max(previousReadMaxId, maxId)
-  const didAdvanceReadMaxId = effectiveMaxId > previousReadMaxId
-
-  if (!didAdvanceReadMaxId && !didClearUnreadMark) {
-    return { updates: [] }
-  }
-
-  const set: Partial<typeof dialogs.$inferInsert> = {
-    unreadMark: false,
-  }
-  if (didAdvanceReadMaxId) {
-    set.readInboxMaxId = effectiveMaxId
-  }
-
-  const updated = await db
-    .update(dialogs)
-    .set(set)
-    .where(
-      and(
-        dialogPeerCondition,
-        eq(dialogs.userId, context.currentUserId),
-      ),
+      { tx },
     )
-    .returning({ chatId: dialogs.chatId })
 
-  if (updated.length === 0) {
+    return {
+      updated: true,
+      chatId: updated[0]?.chatId,
+      effectiveMaxId,
+      didAdvanceReadMaxId,
+      didClearUnreadMark,
+      unreadCount,
+    }
+  })
+
+  if (!mutation.updated) {
     return { updates: [] }
   }
 
-  const chatId = updated[0]?.chatId
-  const unreadCount =
-    didAdvanceReadMaxId && chatId ? await DialogsModel.getUnreadCount(chatId, context.currentUserId) : 0
-
-  if (didAdvanceReadMaxId) {
-    const userUpdatePayload: ServerUpdate["update"] = {
-      oneofKind: "userReadMaxId",
-      userReadMaxId: {
-        peerId: outputPeer,
-        readMaxId: BigInt(effectiveMaxId),
-        unreadCount,
-      },
-    }
-    await UserBucketUpdates.enqueue({ userId: context.currentUserId, update: userUpdatePayload })
-  } else if (didClearUnreadMark) {
-    const userUpdatePayload: ServerUpdate["update"] = {
-      oneofKind: "userMarkAsUnread",
-      userMarkAsUnread: {
-        peerId: outputPeer,
-        unreadMark: false,
-      },
-    }
-    await UserBucketUpdates.enqueue({ userId: context.currentUserId, update: userUpdatePayload })
-  }
+  const { chatId, didAdvanceReadMaxId, didClearUnreadMark, effectiveMaxId, unreadCount } = mutation
 
   let updates: Update[] = []
-  if (didAdvanceReadMaxId) {
+  if (didAdvanceReadMaxId && effectiveMaxId !== undefined) {
     updates = [
       {
         update: {
@@ -205,7 +233,7 @@ export const readMessages = async (input: Input, context: FunctionContext): Prom
     })
   }
 
-  if (chatId && didAdvanceReadMaxId) {
+  if (chatId && didAdvanceReadMaxId && effectiveMaxId !== undefined) {
     try {
       await Notifications.sendToUser({
         userId: context.currentUserId,

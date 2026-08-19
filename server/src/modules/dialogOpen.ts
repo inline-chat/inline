@@ -1,7 +1,7 @@
 import { db } from "@in/server/db"
 import { UsersModel } from "@in/server/db/models/users"
 import type { Transaction } from "@in/server/db/types"
-import { chats, dialogs, type DbChat, type DbDialog, type DbNewDialog } from "@in/server/db/schema"
+import { chats, dialogs, users, type DbChat, type DbDialog, type DbNewDialog } from "@in/server/db/schema"
 import { and, asc, desc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm"
 import { FractionalIndex } from "@in/server/modules/fractionalIndex"
 
@@ -81,6 +81,12 @@ export async function dialogOrderForPlacement(
   lane: "sidebar" | "pinned" = "sidebar",
   preferredOrder?: string | null,
 ): Promise<string> {
+  // The user row is the database-owned serialization point for all derived
+  // order allocations. Lock it before reading the edge so UPDATE_DIALOG_OPEN,
+  // UPDATE_DIALOG_ORDER, and other dialog-opening paths cannot derive the same
+  // fractional key on separate connections.
+  await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("update").limit(1)
+
   const column = lane === "pinned" ? dialogs.pinnedOrder : dialogs.order
   const laneFilter =
     lane === "pinned"
@@ -163,12 +169,21 @@ export async function setDialogOpenForUsers(input: {
   openPlacementByUserId?: ReadonlyMap<number, DialogOpenPlacement>
   showInChatList?: boolean
 }): Promise<{ dialogs: DbDialog[]; changedDialogs: DbDialog[] }> {
-  const userIds = await UsersModel.getActiveUserIds(uniqueUserIds(input.userIds))
+  // Every derived allocation below takes the owning user's row lock. Keep
+  // multi-user batches in one order so overlapping batches cannot deadlock.
+  const userIds = (await UsersModel.getActiveUserIds(uniqueUserIds(input.userIds))).sort((a, b) => a - b)
   if (userIds.length === 0) {
     return { dialogs: [], changedDialogs: [] }
   }
 
   return db.transaction(async (tx) => {
+    // Acquire all user owners before touching any dialog rows. Projection
+    // writers use the same users -> dialogs order, so overlapping batches do
+    // not deadlock or derive a stale fractional order.
+    for (const userId of userIds) {
+      await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("update").limit(1)
+    }
+
     const existingDialogs = await tx
       .select()
       .from(dialogs)

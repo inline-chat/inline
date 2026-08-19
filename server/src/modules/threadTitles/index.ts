@@ -11,6 +11,7 @@ import { openaiClient } from "@in/server/libs/openAI"
 import { getAnchorMessageForChat, isDefaultReplyThreadTitle } from "@in/server/modules/subthreads"
 import { Log } from "@in/server/utils/log"
 import { validateIanaTimezone } from "@in/server/utils/validate"
+import { isSingleEmoji } from "@in/server/utils/emoji"
 import { eq } from "drizzle-orm"
 
 const log = new Log("modules.threadTitles")
@@ -468,12 +469,6 @@ function formatTodayForThreadTitle(timeZone: string | undefined): string {
   }
 
   return new Intl.DateTimeFormat("en-US", options).format(new Date())
-}
-
-function isSingleEmoji(value: string): boolean {
-  return /^(?:\p{Extended_Pictographic}(?:\p{Emoji_Modifier})?(?:\uFE0F|\uFE0E)?(?:\u200D\p{Extended_Pictographic}(?:\p{Emoji_Modifier})?(?:\uFE0F|\uFE0E)?)*|\p{Regional_Indicator}{2}|[#*0-9]\uFE0F?\u20E3)$/u.test(
-    value,
-  )
 }
 
 function displayName(user: Pick<DbFullMessage["from"], "firstName" | "lastName" | "username">): string {

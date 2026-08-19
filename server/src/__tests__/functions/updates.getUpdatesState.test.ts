@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test"
+import { describe, test, expect, spyOn } from "bun:test"
 import { getUpdatesState } from "@in/server/functions/updates.getUpdatesState"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { setupTestLifecycle, testUtils } from "../setup"
@@ -7,6 +7,9 @@ import { chats, members, spaces, users as usersTable } from "@in/server/db/schem
 import { and, eq } from "drizzle-orm"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
+import { RealtimeUpdates } from "@in/server/realtime/message"
+import { ChatModel } from "@in/server/db/models/chats"
+import { SpaceModel } from "@in/server/db/models/spaces"
 
 describe("getUpdatesState", () => {
   setupTestLifecycle()
@@ -157,6 +160,85 @@ describe("getUpdatesState", () => {
     const result = await getUpdatesState({ date: inputDate }, testUtils.functionContext({ userId: user.id }))
     expect(result.date).toBe(encodeDateStrict(spaceUpdateDate))
     expect(result.updatesFound).toBe(true)
+  })
+
+  test("emits an authoritative space hint when a changed space counter is absent", async () => {
+    const { users, space } = await testUtils.createSpaceWithMembers("Updates State Space Hint", [
+      "space-hint@example.com",
+    ])
+    const user = users[0]
+    if (!user) throw new Error("Fixture creation failed")
+
+    const inputDate = encodeDateStrict(new Date(Date.now() - 60 * 1000))
+    const spaceUpdateDate = new Date(Date.now() + 45 * 1000)
+    await db
+      .update(spaces)
+      .set({
+        lastUpdateDate: spaceUpdateDate,
+        updateSeq: null,
+      })
+      .where(eq(spaces.id, space.id))
+      .execute()
+
+    const push = spyOn(RealtimeUpdates, "pushToUser").mockImplementation(() => {})
+    try {
+      const result = await getUpdatesState(
+        { date: inputDate },
+        testUtils.functionContext({ userId: user.id }),
+      )
+
+      expect(result.updatesFound).toBe(true)
+      expect(push).toHaveBeenCalledWith(user.id, [
+        {
+          update: {
+            oneofKind: "spaceHasNewUpdates",
+            spaceHasNewUpdates: {
+              spaceId: BigInt(space.id),
+              updateSeq: 0,
+            },
+          },
+        },
+      ])
+    } finally {
+      push.mockRestore()
+    }
+  })
+
+  test("publishes large discovery results as bounded ordered hint batches", async () => {
+    const user = await testUtils.createUser("updates-state-bounded-hints@example.com")
+    const inputDate = encodeDateStrict(new Date(Date.now() - 60 * 1000))
+    const updateDate = new Date(Date.now() + 30 * 1000)
+    const changedSpaces = Array.from({ length: 1_025 }, (_, index) => ({
+      id: index + 1,
+      lastUpdateDate: updateDate,
+      updateSeq: index + 10,
+    }))
+    const getChats = spyOn(ChatModel, "getUserChats").mockResolvedValue({ chats: [] } as never)
+    const getSpaces = spyOn(SpaceModel, "getSpacesAfterUpdateDate").mockResolvedValue(changedSpaces as never)
+    const push = spyOn(RealtimeUpdates, "pushToUser").mockImplementation(() => {})
+    try {
+      const result = await getUpdatesState(
+        { date: inputDate },
+        testUtils.functionContext({ userId: user.id }),
+      )
+
+      expect(result).toMatchObject({
+        date: encodeDateStrict(updateDate),
+        updatesFound: true,
+      })
+      expect(push).toHaveBeenCalledTimes(3)
+      const batches = push.mock.calls.map(([, updates]) => updates)
+      expect(batches.map((batch) => batch.length)).toEqual([512, 512, 1])
+      expect(batches.flat().map((update) =>
+        update.update.oneofKind === "spaceHasNewUpdates"
+          ? Number(update.update.spaceHasNewUpdates.spaceId)
+          : 0,
+      )).toEqual(changedSpaces.map((space) => space.id))
+    } finally {
+      push.mockRestore()
+      getSpaces.mockRestore()
+      getChats.mockRestore()
+    }
   })
 
   test("returns max(chat, space) lastUpdateDate when both changed since input", async () => {
