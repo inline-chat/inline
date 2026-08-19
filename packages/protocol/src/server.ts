@@ -1,5 +1,7 @@
 export {
   InlineHandshakeServer,
+  InlineProtocolApplicationOutputOverloaded,
+  InlineProtocolAuthorizationInvalidated,
   InlineProtocolServerSession,
   acceptObfuscatedClientHeader,
   decodeAbridgedFrame,
@@ -13,6 +15,9 @@ export {
   type EstablishedAuthorizationKey,
   type InlineProtocolServerSessionOptions,
   type InlineProtocolServerReceiveOptions,
+  type InlineProtocolServerReceiveResult,
+  type InlineProtocolServerApplicationTask,
+  type InlineProtocolServerApplicationCompletion,
   type LoadedServerAuthorizationKey,
   type ObfuscatedServerHeader,
   type ServerApplicationAuthorization,

@@ -18,6 +18,8 @@ const HASH_READ_SIZE = 1024 * 1024
 const MAX_NEGOTIATED_PART_SIZE = 16 * 1024 * 1024
 const DEFAULT_GLOBAL_CONCURRENCY = 3
 const DEFAULT_UPLOAD_CONCURRENCY = 2
+const MAX_FINISH_RECONCILIATION_ATTEMPTS = 3
+const FINISH_RECONCILIATION_DELAY_SECONDS = 1
 
 export interface UploadByteSource {
   readonly byteCount: number
@@ -91,6 +93,12 @@ const acceptedBytes = (job: UploadJob): number => {
     total += Math.min(job.upload.partSize, job.input.source.byteCount - offset)
   }
   return total
+}
+
+const validatePartIndices = (indices: number[], partCount: number): void => {
+  if (indices.some((index) => !Number.isInteger(index) || index < 0 || index >= partCount)) {
+    throw new NativeUploadError("protocol", "Server returned an invalid upload-part index")
+  }
 }
 
 const delay = async (seconds: number, signal?: AbortSignal): Promise<void> => {
@@ -237,10 +245,53 @@ export class NativeUploadClient {
   async #finish(job: UploadJob): Promise<void> {
     if (job.settled || job.active > 0) return
     job.active = -1
+    let reconciliationAttempts = 0
     try {
       for (;;) {
         if (job.input.signal?.aborted) throw new NativeUploadError("canceled", "Upload was canceled")
-        const result = await this.rpc.finish({ uploadId: job.upload.uploadId })
+        let result: FinishUploadResult
+        try {
+          result = await this.rpc.finish({ uploadId: job.upload.uploadId })
+        } catch (error) {
+          if (job.input.signal?.aborted) throw new NativeUploadError("canceled", "Upload was canceled")
+          if (++reconciliationAttempts > MAX_FINISH_RECONCILIATION_ATTEMPTS) throw error
+
+          let state: GetUploadStateResult
+          try {
+            state = await this.rpc.state({ uploadId: job.upload.uploadId })
+          } catch {
+            throw error
+          }
+          validatePartIndices(state.acceptedParts, job.upload.partCount)
+          switch (state.status) {
+            case UploadStatus.COMPLETE:
+              if (!state.complete) throw new NativeUploadError("protocol", "Complete upload state had no result")
+              job.settled = true
+              this.#remove(job)
+              job.resolve(state.complete)
+              return
+            case UploadStatus.PROCESSING:
+              await delay(FINISH_RECONCILIATION_DELAY_SECONDS, job.input.signal)
+              continue
+            case UploadStatus.UPLOADING:
+              job.accepted = new Set(state.acceptedParts)
+              if (this.#nextPart(job) === undefined) continue
+              job.active = 0
+              this.#pump()
+              return
+            case UploadStatus.FAILED:
+              throw new NativeUploadError(
+                state.failure?.retryable ? "retryable" : "rejected",
+                `Upload finalization failed with code ${state.failure?.code ?? "unknown"}`,
+              )
+            case UploadStatus.CANCELED:
+              throw new NativeUploadError("canceled", "Upload was canceled")
+            case UploadStatus.EXPIRED:
+              throw new NativeUploadError("rejected", "Upload expired before finalization completed")
+            default:
+              throw new NativeUploadError("protocol", "Server returned an invalid upload state")
+          }
+        }
         switch (result.state.oneofKind) {
           case "complete":
             job.settled = true
@@ -253,11 +304,7 @@ export class NativeUploadClient {
               `Upload finalization failed with code ${result.state.failed.code}`,
             )
           case "missing":
-            if (result.state.missing.partIndices.some(
-              (index) => !Number.isInteger(index) || index < 0 || index >= job.upload.partCount,
-            )) {
-              throw new NativeUploadError("protocol", "Server returned an invalid missing-part index")
-            }
+            validatePartIndices(result.state.missing.partIndices, job.upload.partCount)
             for (const index of result.state.missing.partIndices) job.accepted.delete(index)
             job.active = 0
             this.#pump()

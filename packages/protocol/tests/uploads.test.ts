@@ -20,7 +20,11 @@ class MemoryUploadTransport implements NativeUploadRpcTransport {
   active = 0
   maxActive = 0
   failAfterAcceptOnce = false
+  failFinishOnce = false
   acceptedPartsOverride: number[] | undefined
+  stateResponses: GetUploadStateResult[] = []
+  stateCalls = 0
+  finishCalls = 0
   partSize = 4
   maxPartBytes = 0
 
@@ -53,6 +57,9 @@ class MemoryUploadTransport implements NativeUploadRpcTransport {
   }
 
   async state(input: { uploadId: Uint8Array }) {
+    this.stateCalls += 1
+    const response = this.stateResponses.shift()
+    if (response) return response
     const id = Buffer.from(input.uploadId).toString("hex")
     return {
       status: UploadStatus.UPLOADING,
@@ -61,6 +68,11 @@ class MemoryUploadTransport implements NativeUploadRpcTransport {
   }
 
   async finish(input: { uploadId: Uint8Array }) {
+    this.finishCalls += 1
+    if (this.failFinishOnce) {
+      this.failFinishOnce = false
+      throw new Error("finish response lost")
+    }
     const id = Buffer.from(input.uploadId).toString("hex")
     return {
       state: {
@@ -121,6 +133,68 @@ describe("native upload coordinator", () => {
     expect(result.fileUniqueId).toContain("file-")
     expect(progress.at(-1)).toBe(12)
     expect(transport.partCalls).toHaveLength(3)
+  })
+
+  test("reconciles a finish whose response was lost after complete publication", async () => {
+    const transport = new MemoryUploadTransport()
+    transport.failFinishOnce = true
+    const uploadId = Buffer.from(new Uint8Array(16).fill(42)).toString("hex")
+    transport.stateResponses.push({
+      status: UploadStatus.COMPLETE,
+      acceptedParts: [0, 1, 2],
+      complete: { fileUniqueId: `file-${uploadId}`, media: { oneofKind: undefined } },
+    })
+
+    await expect(new NativeUploadClient(transport).upload(input(42))).resolves.toEqual({
+      fileUniqueId: `file-${uploadId}`,
+      media: { oneofKind: undefined },
+    })
+    expect(transport.finishCalls).toBe(1)
+    expect(transport.stateCalls).toBe(1)
+  })
+
+  test("continues the same upload when a lost finish response is still processing", async () => {
+    const transport = new MemoryUploadTransport()
+    transport.failFinishOnce = true
+    const uploadId = Buffer.from(new Uint8Array(16).fill(43)).toString("hex")
+    transport.stateResponses.push({ status: UploadStatus.PROCESSING, acceptedParts: [0, 1, 2] })
+
+    await expect(new NativeUploadClient(transport).upload(input(43))).resolves.toEqual({
+      fileUniqueId: `file-${uploadId}`,
+      media: { oneofKind: undefined },
+    })
+    expect(transport.finishCalls).toBe(2)
+    expect(transport.stateCalls).toBe(1)
+  })
+
+  test("reconciles missing parts reported after a lost finish response", async () => {
+    const transport = new MemoryUploadTransport()
+    transport.failFinishOnce = true
+    const uploadId = Buffer.from(new Uint8Array(16).fill(45)).toString("hex")
+    transport.stateResponses.push({ status: UploadStatus.UPLOADING, acceptedParts: [0] })
+
+    await expect(new NativeUploadClient(transport).upload(input(45))).resolves.toEqual({
+      fileUniqueId: `file-${uploadId}`,
+      media: { oneofKind: undefined },
+    })
+    expect(transport.finishCalls).toBe(2)
+    expect(transport.stateCalls).toBe(1)
+    expect(transport.partCalls).toHaveLength(5)
+  })
+
+  test("preserves a terminal failure discovered while reconciling finish", async () => {
+    const transport = new MemoryUploadTransport()
+    transport.failFinishOnce = true
+    transport.stateResponses.push({
+      status: UploadStatus.FAILED,
+      acceptedParts: [0, 1, 2],
+      failure: { code: UploadFailure_Code.UPLOAD_FAILURE_INTEGRITY, retryable: false },
+    })
+
+    await expect(new NativeUploadClient(transport).upload(input(44)))
+      .rejects.toThrow("Upload finalization failed")
+    expect(transport.finishCalls).toBe(1)
+    expect(transport.stateCalls).toBe(1)
   })
 
   test("rejects accepted-part indices outside negotiated geometry", async () => {

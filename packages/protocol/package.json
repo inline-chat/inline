@@ -27,6 +27,7 @@
     "dist/index.d.ts",
     "dist/index.js",
     "vectors/inline-protocol-v1.json",
+    "trust-roots",
     "docs",
     "dist/secure",
     "README.md"
@@ -70,7 +71,8 @@
       "types": "./dist/uploads.d.ts",
       "default": "./dist/uploads.js"
     },
-    "./vectors/inline-protocol-v1.json": "./vectors/inline-protocol-v1.json"
+    "./vectors/inline-protocol-v1.json": "./vectors/inline-protocol-v1.json",
+    "./trust-roots/inline-protocol-production.json": "./trust-roots/inline-protocol-production.json"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
