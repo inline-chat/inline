@@ -2,12 +2,19 @@ use super::*;
 
 pub async fn run_codex_dev(
     config: &Config,
-    owner_token: String,
+    owner_auth: AuthCredential,
     folder: PathBuf,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let workspace = canonical_workspace(&folder)?;
     let provider = probe_provider(PROVIDER_ID).map_err(io::Error::other)?;
-    let provisioned = provision_dev_bot(config, &owner_token, &provider, &workspace, None).await?;
+    let mut owner = crate::owner_session::OwnerSession::connect(config, owner_auth).await?;
+    let me = owner
+        .call(proto::GetMeInput {})
+        .await?
+        .user
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "GetMe returned no user"))?;
+    let provisioned =
+        provision_dev_bot(config, &mut owner, me, &provider, &workspace, None).await?;
     run_provider_installation(
         config,
         provisioned.installation,
@@ -42,11 +49,11 @@ pub struct DebugSettingsRequest {
 
 pub async fn debug_request_settings(
     config: &Config,
-    owner_token: &str,
+    owner_auth: AuthCredential,
     request: DebugSettingsRequest,
     json_format: JsonFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut owner = connect_realtime(&config.realtime_url, owner_token).await?;
+    let mut owner = crate::owner_session::OwnerSession::connect(config, owner_auth).await?;
     let peer_id = Some(proto::InputPeer {
         r#type: Some(proto::input_peer::Type::Chat(proto::InputPeerChat {
             chat_id: request.chat_id,
@@ -120,14 +127,14 @@ pub(super) fn redact_debug_settings_secrets(value: &mut serde_json::Value) {
 
 pub async fn debug_probe_workspace_picker(
     config: &Config,
-    owner_token: &str,
+    owner_auth: AuthCredential,
     bot_user_id: i64,
     chat_id: i64,
     folder: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (config, owner_token, bot_user_id, chat_id, folder);
+        let _ = (config, owner_auth, bot_user_id, chat_id, folder);
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "the host-local folder picker is available only on macOS",
@@ -137,7 +144,7 @@ pub async fn debug_probe_workspace_picker(
 
     #[cfg(target_os = "macos")]
     {
-        let mut owner = connect_realtime(&config.realtime_url, owner_token).await?;
+        let mut owner = crate::owner_session::OwnerSession::connect(config, owner_auth).await?;
         let result = owner
             .call(proto::RequestBotChatSettingsInput {
                 peer_id: Some(proto::InputPeer {
@@ -221,7 +228,7 @@ pub async fn debug_probe_workspace_picker(
 
 pub async fn debug_observe_typing(
     config: &Config,
-    owner_token: &str,
+    owner_auth: AuthCredential,
     bot_user_id: i64,
     timeout: Duration,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -230,9 +237,9 @@ pub async fn debug_observe_typing(
             io::Error::new(io::ErrorKind::InvalidInput, "bot user id must be positive").into(),
         );
     }
-    let session = inline_sdk::RealtimeClient::builder(&config.realtime_url, owner_token)
-        .identity(crate::identity::client_identity())
-        .connect_session()
+    let session = crate::owner_session::OwnerSession::connect(config, owner_auth)
+        .await?
+        .into_realtime_session(config)
         .await?;
     let mut events = session.subscribe();
     let deadline = tokio::time::sleep(timeout);

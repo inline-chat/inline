@@ -112,6 +112,9 @@ pub(super) struct AccountBridgeSecrets {
     pub(super) owner_user_id: i64,
     pub(super) control_token: String,
     #[serde(default)]
+    pub(super) owner_auth: Option<AuthCredential>,
+    /// Legacy v1 bearer owner authority. New records leave this empty and use `owner_auth`.
+    #[serde(default)]
     pub(super) owner_token: String,
     pub(super) providers: Vec<ProviderCredentials>,
 }
@@ -131,6 +134,10 @@ impl std::fmt::Debug for AccountBridgeSecrets {
             .field("version", &self.version)
             .field("owner_user_id", &self.owner_user_id)
             .field("control_token", &"<redacted>")
+            .field(
+                "owner_auth",
+                &self.owner_auth.as_ref().map(|_| "<redacted>"),
+            )
             .field("owner_token", &"<redacted>")
             .field("providers", &self.providers)
             .finish()
@@ -263,12 +270,11 @@ pub(super) fn load_installed_account(
         }
         let legacy_paths = BridgePaths::legacy(config);
         if legacy_paths.config.is_file() {
+            if configured_owner_user_id(&legacy_paths.config)? != owner_user_id {
+                return Ok(None);
+            }
             let loaded = load_account_at(legacy_paths)?;
-            return if loaded.account.owner_user_id == owner_user_id {
-                Ok(Some(loaded))
-            } else {
-                Ok(None)
-            };
+            return Ok(Some(loaded));
         }
         return Ok(None);
     }
@@ -322,6 +328,21 @@ pub(super) fn load_account_at(
         account,
         secrets,
     })
+}
+
+pub(super) fn configured_owner_user_id(path: &Path) -> Result<i64, Box<dyn std::error::Error>> {
+    let value: serde_json::Value = read_required_json(path)?;
+    value
+        .get("ownerUserId")
+        .and_then(serde_json::Value::as_i64)
+        .filter(|owner_user_id| *owner_user_id > 0)
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "bridge config has no valid owner user id",
+            )
+            .into()
+        })
 }
 
 pub(super) fn current_owner_user_id(config: &Config) -> Option<i64> {
@@ -460,6 +481,7 @@ pub(super) fn account_from_legacy(
         version: ACCOUNT_SECRETS_VERSION,
         owner_user_id: account.owner_user_id,
         control_token: legacy_secrets.control_token,
+        owner_auth: None,
         owner_token: String::new(),
         providers: vec![ProviderCredentials {
             installation_id: INSTALLATION_ID.to_string(),
@@ -478,6 +500,12 @@ pub(super) fn validate_account_for_setup(
     let mut repairable = secrets.clone();
     if repairable.control_token.trim().is_empty() {
         repairable.control_token = "pending-setup-repair".to_string();
+    }
+    if repairable.owner_auth.is_none() && repairable.owner_token.trim().is_empty() {
+        repairable.owner_auth = Some(AuthCredential::AccessToken {
+            token: AuthToken::try_new("pending-setup-repair")?,
+        });
+        repairable.version = ACCOUNT_SECRETS_VERSION;
     }
     for provider in &account.providers {
         match repairable
@@ -518,7 +546,7 @@ pub(super) fn validate_account(
         || !account.service_binary.is_absolute()
         || account.provider_path.trim().is_empty()
         || account.providers.is_empty()
-        || secrets.version != ACCOUNT_SECRETS_VERSION
+        || !matches!(secrets.version, 1 | ACCOUNT_SECRETS_VERSION)
         || secrets.owner_user_id != account.owner_user_id
         || secrets.control_token.trim().is_empty()
     {
@@ -528,6 +556,7 @@ pub(super) fn validate_account(
         )
         .into());
     }
+    owner_credential(secrets)?;
     let mut retired_labels = HashSet::new();
     if account.superseded_service_labels.iter().any(|label| {
         !is_safe_identifier(label)
@@ -623,6 +652,61 @@ pub(super) fn validate_account(
         .into());
     }
     Ok(())
+}
+
+pub(super) fn owner_credential(
+    secrets: &AccountBridgeSecrets,
+) -> Result<AuthCredential, Box<dyn std::error::Error>> {
+    let credential = match secrets.version {
+        1 | ACCOUNT_SECRETS_VERSION
+            if secrets.owner_auth.is_none() && !secrets.owner_token.trim().is_empty() =>
+        {
+            AuthCredential::AccessToken {
+                token: AuthToken::try_new(&secrets.owner_token)?,
+            }
+        }
+        ACCOUNT_SECRETS_VERSION
+            if secrets.owner_token.trim().is_empty() && secrets.owner_auth.is_some() =>
+        {
+            secrets.owner_auth.clone().expect("checked owner auth")
+        }
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "bridge owner credentials must select exactly one supported authority",
+            )
+            .into());
+        }
+    };
+    if let AuthCredential::InlineProtocolV3 {
+        permanent,
+        temporary,
+        public_keys,
+    } = &credential
+        && (permanent.temporary || !temporary.temporary || public_keys.is_empty())
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "bridge V3 owner credentials require permanent and temporary keys plus a pinned key ring",
+        )
+        .into());
+    }
+    Ok(credential)
+}
+
+pub(super) fn clear_bridge_owner_authority(
+    paths: &BridgePaths,
+    expected: &AuthCredential,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let _account_mutation_lock = acquire_account_mutation_lock(paths)?;
+    let mut secrets: AccountBridgeSecrets = read_required_json(&paths.secrets)?;
+    if owner_credential(&secrets).ok().as_ref() != Some(expected) {
+        return Ok(false);
+    }
+    secrets.owner_auth = None;
+    secrets.owner_token.clear();
+    write_private_json(&paths.secrets, &secrets)?;
+    Ok(true)
 }
 
 pub(super) fn is_safe_identifier(value: &str) -> bool {

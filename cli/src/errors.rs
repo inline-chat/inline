@@ -647,6 +647,12 @@ fn json_cli_error_from_realtime_error(error: &RealtimeError) -> JsonCliError {
             payload.hint = Some("Check network connectivity and INLINE_REALTIME_URL.".to_string());
             payload
         }
+        RealtimeError::CommitOutcomeUnknown => {
+            let mut payload = JsonCliError::new("commit_outcome_unknown", error.to_string());
+            payload.hint =
+                Some("Refresh authoritative state before retrying this action.".to_string());
+            payload
+        }
         RealtimeError::WebSocket(err) => {
             let mut payload = JsonCliError::new("websocket_error", err.to_string());
             payload.hint = Some("Check network connectivity and INLINE_REALTIME_URL.".to_string());

@@ -1,7 +1,6 @@
 use dialoguer::{Input, Select};
 use serde::Serialize;
 use std::io::{self, IsTerminal, Read};
-use std::path::Path;
 
 use crate::auth::AuthStore;
 use crate::errors::CliError;
@@ -61,19 +60,16 @@ pub(crate) async fn handle_login(
     json: bool,
     json_format: JsonFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if let Some(ring_path) = std::env::var_os("INLINE_PROTOCOL_PUBLIC_RING") {
-        if !args.mac_app_bootstrap && (args.send_code || args.code.is_some() || args.code_stdin) {
-            return handle_inline_protocol_login(
-                &args,
-                auth_store,
-                realtime_url,
-                local_db,
-                Path::new(&ring_path),
-                json,
-                json_format,
-            )
-            .await;
-        }
+    if !args.mac_app_bootstrap && (args.send_code || args.code.is_some() || args.code_stdin) {
+        return handle_inline_protocol_login(
+            &args,
+            auth_store,
+            realtime_url,
+            local_db,
+            json,
+            json_format,
+        )
+        .await;
     }
     let send_code_only = args.send_code;
     let supplied_code = args.code.clone();
@@ -311,14 +307,13 @@ async fn handle_inline_protocol_login(
     auth_store: &AuthStore,
     realtime_url: &str,
     local_db: &LocalDb,
-    ring_path: &Path,
     json: bool,
     json_format: JsonFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let contact = require_contact(contact_from_args(args.clone())?, "Inline Protocol login")?;
     let v3_url = format!("{}/v3", realtime_url.trim_end_matches('/'));
     if args.send_code {
-        let keys = client_info::load_inline_protocol_public_ring(ring_path)?;
+        let keys = client_info::resolve_inline_protocol_public_ring()?;
         let mut connection =
             client_info::connect_inline_protocol_fresh(&v3_url, keys, false).await?;
         let identifier = match contact {
@@ -386,7 +381,7 @@ async fn handle_inline_protocol_login(
             return Err(CliError::invalid_args("authentication returned no account state").into());
         }
     };
-    let keys = client_info::load_inline_protocol_public_ring(ring_path)?;
+    let keys = client_info::resolve_inline_protocol_public_ring()?;
     let mut temporary = client_info::connect_inline_protocol_fresh(&v3_url, keys, true).await?;
     temporary.bind_temporary(&permanent_authorization).await?;
     auth_store.store_inline_protocol_authorizations(

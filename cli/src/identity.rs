@@ -4,7 +4,7 @@ use inline_protocol::secure::handshake::RsaPublicKey;
 use inline_sdk::{
     AuthMetadata, ClientIdentity, InlineProtocolAuthorization, InlineProtocolPublicKey,
     InlineProtocolV3Connection, InlineProtocolV3Options, RealtimeClient, RealtimeError,
-    client_info,
+    client_info, inline_protocol_production_public_key_ring,
 };
 use serde::Deserialize;
 
@@ -61,14 +61,49 @@ struct PublicRing {
     rsa_public_key_ring: Vec<InlineProtocolPublicKey>,
 }
 
-pub fn load_inline_protocol_public_ring(
+pub fn load_inline_protocol_public_key_ring(
     path: &Path,
-) -> Result<Vec<RsaPublicKey>, Box<dyn std::error::Error>> {
-    let ring: PublicRing = serde_json::from_slice(&std::fs::read(path)?)?;
-    ring.rsa_public_key_ring
+) -> Result<Vec<InlineProtocolPublicKey>, Box<dyn std::error::Error>> {
+    parse_inline_protocol_public_key_ring(&std::fs::read(path)?)
+}
+
+pub fn resolve_inline_protocol_public_ring() -> Result<Vec<RsaPublicKey>, Box<dyn std::error::Error>>
+{
+    resolve_inline_protocol_public_key_ring()?
         .into_iter()
         .map(|key| key.try_into().map_err(Into::into))
         .collect()
+}
+
+pub fn resolve_inline_protocol_public_key_ring()
+-> Result<Vec<InlineProtocolPublicKey>, Box<dyn std::error::Error>> {
+    match std::env::var_os("INLINE_PROTOCOL_PUBLIC_RING") {
+        Some(path) => load_inline_protocol_public_key_ring(Path::new(&path)),
+        None => inline_protocol_production_public_key_ring().map_err(Into::into),
+    }
+}
+
+fn parse_inline_protocol_public_key_ring(
+    bytes: &[u8],
+) -> Result<Vec<InlineProtocolPublicKey>, Box<dyn std::error::Error>> {
+    let ring: PublicRing = serde_json::from_slice(bytes)?;
+    for key in ring.rsa_public_key_ring.iter().cloned() {
+        let _: RsaPublicKey = key.try_into()?;
+    }
+    Ok(ring.rsa_public_key_ring)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bundled_production_ring_is_valid_and_contains_rotation_overlap() {
+        let ring = inline_protocol_production_public_key_ring().unwrap();
+        assert_eq!(ring.len(), 2);
+        assert_eq!(ring[0].fingerprint, "-8339382514522710386");
+        assert_eq!(ring[1].fingerprint, "-3957383261870667958");
+    }
 }
 
 pub async fn connect_inline_protocol_fresh(

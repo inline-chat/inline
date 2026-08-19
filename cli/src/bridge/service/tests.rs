@@ -405,6 +405,7 @@ async fn control_socket_authenticates_status_and_shutdown() {
         version: 1,
         owner_user_id: 42,
         control_token: "control-secret".to_string(),
+        owner_auth: None,
         owner_token: "owner-secret".to_string(),
         providers: vec![super::super::ProviderCredentials {
             installation_id: "codex".to_string(),
@@ -473,6 +474,7 @@ async fn assert_control_server_epochs_release_descriptors() {
         version: 1,
         owner_user_id: 42,
         control_token: "control-secret".to_string(),
+        owner_auth: None,
         owner_token: "owner-secret".to_string(),
         providers: vec![],
     };

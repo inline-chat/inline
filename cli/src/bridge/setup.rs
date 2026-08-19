@@ -169,35 +169,14 @@ pub(super) fn persist_setup_account_files(
     Ok(())
 }
 
-pub(super) async fn resolve_owner_user_id(
-    config: &Config,
-    owner_token: &str,
-) -> Result<i64, Box<dyn std::error::Error>> {
-    let mut owner = connect_realtime(&config.realtime_url, owner_token).await?;
-    let me = owner
-        .call(proto::GetMeInput {})
-        .await?
-        .user
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "GetMe returned no user"))?;
-    if me.id <= 0 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "owner id is invalid").into());
-    }
-    Ok(me.id)
-}
-
 pub(super) async fn provision_dev_bot(
     config: &Config,
-    owner_token: &str,
+    owner: &mut crate::owner_session::OwnerSession,
+    me: proto::User,
     provider: &ProviderProbe,
     workspace: &Path,
     requested_name: Option<&str>,
 ) -> Result<ProvisionedBridge, Box<dyn std::error::Error>> {
-    let mut owner = connect_realtime(&config.realtime_url, owner_token).await?;
-    let me = owner
-        .call(proto::GetMeInput {})
-        .await?
-        .user
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "GetMe returned no user"))?;
     if me.id <= 0 {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "owner id is invalid").into());
     }
@@ -252,7 +231,8 @@ pub(super) async fn provision_dev_bot(
                     version: ACCOUNT_SECRETS_VERSION,
                     owner_user_id: me.id,
                     control_token: generate_control_token(),
-                    owner_token: owner_token.to_string(),
+                    owner_auth: Some(owner.credential()?),
+                    owner_token: String::new(),
                     providers: Vec::new(),
                 },
             )
@@ -285,7 +265,8 @@ pub(super) async fn provision_dev_bot(
     );
     account.provider_path = default_provider_path();
     account_secrets.version = ACCOUNT_SECRETS_VERSION;
-    account_secrets.owner_token = owner_token.to_string();
+    account_secrets.owner_auth = Some(owner.credential()?);
+    account_secrets.owner_token.clear();
     if account_secrets.control_token.trim().is_empty() {
         account_secrets.control_token = generate_control_token();
     }
@@ -424,17 +405,14 @@ pub(super) async fn provision_dev_bot(
             provider.provider_id,
         ));
         tokio::fs::write(&source_path, profile_asset.bytes).await?;
-        let upload = inline_sdk::upload_file_v2(
-            &mut owner,
-            inline_sdk::NativeUploadInput::new(
+        let upload = owner
+            .upload(inline_sdk::NativeUploadInput::new(
                 &source_path,
                 profile_asset.file_name,
                 profile_asset.mime_type,
                 proto::UploadKind::Photo,
-            ),
-            |_| {},
-        )
-        .await;
+            ))
+            .await;
         let _ = tokio::fs::remove_file(source_path).await;
         let upload = upload?;
         bot = owner
@@ -462,7 +440,7 @@ pub(super) async fn provision_dev_bot(
     } else {
         (None, None)
     };
-    sync_agent_command_catalog(&mut owner, bot.id, provider.provider_id).await?;
+    sync_agent_command_catalog(owner, bot.id, provider.provider_id).await?;
 
     let stored_secret = saved.as_ref().and_then(|saved| {
         account_secrets
@@ -512,9 +490,27 @@ pub(super) async fn provision_dev_bot(
     let dm_chat_id = match saved.as_ref().and_then(|saved| saved.dm_chat_id) {
         Some(chat_id) if chat_id > 0 => chat_id,
         _ => {
-            let api = inline_sdk::api::ApiClient::try_new(&config.api_base_url)?;
-            let result = api.create_private_chat(owner_token, bot.id).await?;
-            private_chat_id(&result.chat, &result.dialog)?
+            let result = owner
+                .call(proto::CreateChatInput {
+                    title: None,
+                    space_id: None,
+                    description: None,
+                    emoji: None,
+                    is_public: false,
+                    participants: vec![proto::InputChatParticipant {
+                        user_id: Some(bot.id),
+                        group_id: None,
+                    }],
+                    reserved_chat_id: None,
+                })
+                .await?;
+            result
+                .chat
+                .map(|chat| chat.id)
+                .filter(|chat_id| *chat_id > 0)
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "CreateChat returned no chat")
+                })?
         }
     };
 
@@ -563,6 +559,8 @@ pub(super) async fn provision_dev_bot(
         installation.clone(),
         credentials.clone(),
     )?;
+    account_secrets.owner_auth = Some(owner.credential()?);
+    account_secrets.owner_token.clear();
     account.provider_path = merged_provider_path(&account.providers, &default_provider_path());
     validate_account(&account, &account_secrets)?;
     ensure_private_dir(&installation.state_dir)?;
@@ -640,7 +638,7 @@ pub(super) fn agent_command_catalog(provider_id: &str) -> Vec<proto::BotCommand>
 }
 
 async fn sync_agent_command_catalog(
-    owner: &mut inline_sdk::RealtimeClient,
+    owner: &mut crate::owner_session::OwnerSession,
     bot_user_id: i64,
     provider_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {

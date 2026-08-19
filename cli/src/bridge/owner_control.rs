@@ -4,12 +4,15 @@
 //! synchronized. It never dispatches provider work or authors bot messages.
 
 use super::*;
-use inline_client::{ClientStore, DialogFollowMode, UpdateDialogFollowModeRequest};
+use inline_client::{
+    BackendError, ClientStatus, ClientStore, DialogFollowMode, UpdateDialogFollowModeRequest,
+};
 
 pub(super) struct OwnerControl {
     client: InlineClient,
     store: SqliteStore,
     drain: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+    authentication_invalidated: tokio::sync::watch::Receiver<bool>,
 }
 
 impl OwnerControl {
@@ -17,16 +20,9 @@ impl OwnerControl {
         config: &Config,
         paths: &BridgePaths,
         owner_user_id: i64,
-        owner_token: &str,
+        owner_auth: &AuthCredential,
         start_after_current: bool,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        if owner_token.trim().is_empty() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                "owner control credentials are unavailable; run setup again",
-            )
-            .into());
-        }
         let store = SqliteStore::open(&paths.owner_client_db)?;
         let backend = SdkBackend::builder()
             .api_base_url(config.api_base_url.clone())
@@ -44,22 +40,28 @@ impl OwnerControl {
                 "owner control event stream was already claimed",
             )
         })?;
-        let mut request = ConnectRequest::new(AuthCredential::AccessToken {
-            token: AuthToken::try_new(owner_token)?,
-        })
-        .with_account_namespace(format!("agent-bridge-owner-{owner_user_id}"));
+        let mut request = ConnectRequest::new(owner_auth.clone())
+            .with_account_namespace(format!("agent-bridge-owner-{owner_user_id}"));
         if start_after_current {
             request = request.start_after_current();
         }
         client.connect(request).await?;
 
+        let (authentication_invalidated_tx, authentication_invalidated) =
+            tokio::sync::watch::channel(false);
         let drain = tokio::spawn(async move {
             while let Some(delivery) = events.recv_delivery().await {
+                let authentication_invalidated =
+                    owner_event_invalidates_authentication(delivery.event());
                 if let Err(error) = delivery.ack().await {
                     eprintln!(
                         "Owner control event acknowledgement failed: {}",
                         safe_diagnostic(&error.to_string())
                     );
+                    break;
+                }
+                if authentication_invalidated {
+                    let _ = authentication_invalidated_tx.send(true);
                     break;
                 }
             }
@@ -68,7 +70,14 @@ impl OwnerControl {
             client,
             store,
             drain: tokio::sync::Mutex::new(Some(drain)),
+            authentication_invalidated,
         })
+    }
+
+    pub(super) fn authentication_invalidation_receiver(
+        &self,
+    ) -> tokio::sync::watch::Receiver<bool> {
+        self.authentication_invalidated.clone()
     }
 
     pub(super) async fn follow_mode(
@@ -121,5 +130,77 @@ impl OwnerControl {
             )
             .into()),
         }
+    }
+}
+
+pub(super) fn owner_control_error_invalidates_authentication(
+    error: &(dyn std::error::Error + 'static),
+) -> bool {
+    matches!(
+        error.downcast_ref::<ClientRequestError>(),
+        Some(ClientRequestError::Backend(BackendError {
+            category: ClientErrorCategory::AuthExpired
+                | ClientErrorCategory::AuthRequired
+                | ClientErrorCategory::ReloginRequired,
+            ..
+        }))
+    )
+}
+
+fn owner_event_invalidates_authentication(event: &ClientEvent) -> bool {
+    matches!(
+        event,
+        ClientEvent::StatusChanged {
+            status: ClientStatus::AuthExpired
+                | ClientStatus::AuthRequired
+                | ClientStatus::LoggedOut,
+            ..
+        }
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn owner_control_classifies_terminal_authentication_failures() {
+        for category in [
+            ClientErrorCategory::AuthExpired,
+            ClientErrorCategory::AuthRequired,
+            ClientErrorCategory::ReloginRequired,
+        ] {
+            let error = ClientRequestError::Backend(BackendError::new(category, "redacted"));
+            assert!(owner_control_error_invalidates_authentication(&error));
+        }
+
+        let network = ClientRequestError::Backend(BackendError::new(
+            ClientErrorCategory::Network,
+            "redacted",
+        ));
+        assert!(!owner_control_error_invalidates_authentication(&network));
+    }
+
+    #[test]
+    fn owner_control_only_stops_for_terminal_authentication_status() {
+        for status in [
+            ClientStatus::AuthExpired,
+            ClientStatus::AuthRequired,
+            ClientStatus::LoggedOut,
+        ] {
+            assert!(owner_event_invalidates_authentication(
+                &ClientEvent::StatusChanged {
+                    status,
+                    failure: None,
+                }
+            ));
+        }
+
+        assert!(!owner_event_invalidates_authentication(
+            &ClientEvent::StatusChanged {
+                status: ClientStatus::Reconnecting,
+                failure: None,
+            }
+        ));
     }
 }

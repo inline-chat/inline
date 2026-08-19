@@ -96,7 +96,7 @@ const INSTALLATION_ID: &str = "codex";
 const PROVIDER_ID: &str = "codex";
 const LEGACY_CONFIG_VERSION: u32 = 3;
 const ACCOUNT_CONFIG_VERSION: u32 = 4;
-const ACCOUNT_SECRETS_VERSION: u32 = 1;
+const ACCOUNT_SECRETS_VERSION: u32 = 2;
 const MAX_ACCOUNT_CONCURRENT_TURNS: usize = 4;
 
 mod account;
@@ -108,7 +108,7 @@ use claude_history::*;
 mod settings;
 use settings::*;
 mod owner_control;
-use owner_control::OwnerControl;
+use owner_control::{OwnerControl, owner_control_error_invalidates_authentication};
 mod workspace_rpc;
 use workspace_rpc::*;
 mod routing;
@@ -202,7 +202,7 @@ pub(crate) struct ProviderSetupOptions {
 
 pub async fn setup_provider(
     config: &Config,
-    owner_token: String,
+    owner_auth: AuthCredential,
     provider_id: &str,
     folder: Option<PathBuf>,
     name: Option<String>,
@@ -211,7 +211,7 @@ pub async fn setup_provider(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let outcome = setup_provider_core(
         config,
-        owner_token,
+        owner_auth,
         provider_id,
         folder,
         name,
@@ -258,15 +258,23 @@ pub async fn setup_provider(
 
 pub(crate) async fn setup_provider_core(
     config: &Config,
-    owner_token: String,
+    owner_auth: AuthCredential,
     provider_id: &str,
     folder: Option<PathBuf>,
     name: Option<String>,
     options: ProviderSetupOptions,
 ) -> Result<ProviderSetupOutcome, Box<dyn std::error::Error>> {
     let workspace = resolve_setup_workspace(folder)?;
-    let owner_user_id = resolve_owner_user_id(config, &owner_token).await?;
-    let account_paths = BridgePaths::for_owner(config, owner_user_id);
+    let mut owner = crate::owner_session::OwnerSession::connect(config, owner_auth).await?;
+    let me = owner
+        .call(proto::GetMeInput {})
+        .await?
+        .user
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "GetMe returned no user"))?;
+    if me.id <= 0 {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "owner id is invalid").into());
+    }
+    let account_paths = BridgePaths::for_owner(config, me.id);
     let provider = prepare_setup_provider(
         &account_paths,
         provider_id,
@@ -274,8 +282,15 @@ pub(crate) async fn setup_provider_core(
         options.allow_adapter_install,
     )
     .map_err(io::Error::other)?;
-    let provisioned =
-        provision_dev_bot(config, &owner_token, &provider, &workspace, name.as_deref()).await?;
+    let provisioned = provision_dev_bot(
+        config,
+        &mut owner,
+        me,
+        &provider,
+        &workspace,
+        name.as_deref(),
+    )
+    .await?;
     validate_account(&provisioned.account, &provisioned.secrets)?;
     if let Some(operator_user_ids) = options.operator_user_ids.as_deref() {
         set_provider_operator_ids(&provisioned.account, provider_id, operator_user_ids)?;
@@ -357,11 +372,12 @@ pub async fn run_service(
     );
     let _instance_lock = acquire_instance_lock(&paths.instance_lock)?;
     let owner_control_seed_required = !account.owner_control_cursor_seeded;
+    let owner_auth = owner_credential(&secrets)?;
     let owner_control = match OwnerControl::connect(
         &runtime_config,
         &paths,
         account.owner_user_id,
-        &secrets.owner_token,
+        &owner_auth,
         owner_control_seed_required,
     )
     .await
@@ -377,6 +393,14 @@ pub async fn run_service(
             Some(Arc::new(control))
         }
         Err(error) => {
+            if owner_control_error_invalidates_authentication(error.as_ref()) {
+                let _ = clear_bridge_owner_authority(&paths, &owner_auth)?;
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "bridge owner authorization expired; run Inline agent setup again",
+                )
+                .into());
+            }
             eprintln!(
                 "Owner follow controls are unavailable: {}",
                 safe_diagnostic(&error.to_string())
@@ -384,6 +408,9 @@ pub async fn run_service(
             None
         }
     };
+    let mut owner_authentication_invalidation = owner_control
+        .as_ref()
+        .map(|control| control.authentication_invalidation_receiver());
     let health = service::RuntimeHealth::starting(
         account
             .providers
@@ -512,6 +539,16 @@ pub async fn run_service(
                     ).into());
                 }
             }
+            _ = wait_for_owner_authentication_invalidation(&mut owner_authentication_invalidation) => {
+                let terminal_error = match clear_bridge_owner_authority(&paths, &owner_auth) {
+                    Ok(_) => io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "bridge owner authorization expired; run Inline agent setup again",
+                    ).into(),
+                    Err(error) => error,
+                };
+                break Err(terminal_error);
+            }
             _ = wait_for_control_shutdown(&mut control_shutdown) => break Ok(()),
             _ = &mut termination => break Ok(()),
         }
@@ -566,6 +603,24 @@ pub async fn run_service(
         return Err(error.into());
     }
     Ok(())
+}
+
+async fn wait_for_owner_authentication_invalidation(
+    receiver: &mut Option<tokio::sync::watch::Receiver<bool>>,
+) {
+    let Some(receiver) = receiver else {
+        std::future::pending::<()>().await;
+        return;
+    };
+    loop {
+        if *receiver.borrow() {
+            return;
+        }
+        if receiver.changed().await.is_err() {
+            std::future::pending::<()>().await;
+            return;
+        }
+    }
 }
 
 pub async fn status(
@@ -1045,11 +1100,12 @@ async fn run_provider_installation(
         shared_owner_control
     } else {
         let owner_control_seed_required = !account.owner_control_cursor_seeded;
+        let owner_auth = owner_credential(&secrets)?;
         match OwnerControl::connect(
             config,
             &paths,
             account.owner_user_id,
-            &secrets.owner_token,
+            &owner_auth,
             owner_control_seed_required,
         )
         .await

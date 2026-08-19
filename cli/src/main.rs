@@ -17,6 +17,7 @@ mod message_output;
 mod message_selectors;
 mod notifications;
 mod output;
+mod owner_session;
 mod peer;
 mod skill;
 mod state;
@@ -73,7 +74,7 @@ use crate::output::{
     build_space_members_output, build_user_list, print_chat_details, print_message_detail,
     user_display_name, user_summary,
 };
-use crate::peer::{api_peer_from_args, input_peer_from_args};
+use crate::peer::input_peer_from_args;
 use crate::state::LocalDb;
 use crate::validation::{
     normalize_search_queries, normalize_translation_language, parse_time_filters,
@@ -83,10 +84,66 @@ use crate::validation::{
     validate_positive_ids_arg, validate_table_only_list_flags,
 };
 use inline_protocol::proto;
-use inline_sdk::api::{
-    ApiClient, CreateLinearIssueInput, CreateNotionTaskInput, PeerId, ReadMessagesInput,
+use inline_sdk::api::ApiClient;
+use inline_sdk::{
+    InlineProtocolV3Connection, NativeUploadError, NativeUploadInput, RealtimeClient, RpcRequest,
+    upload_file_v2, upload_file_v3,
 };
-use inline_sdk::{InlineProtocolV3Connection, RealtimeClient, upload_file_v2, upload_file_v3};
+
+enum AuthenticatedRealtime {
+    V2(RealtimeClient),
+    V3 {
+        connection: InlineProtocolV3Connection,
+        auth_store: AuthStore,
+    },
+}
+
+impl AuthenticatedRealtime {
+    async fn call<R>(&mut self, request: R) -> Result<R::Response, Box<dyn std::error::Error>>
+    where
+        R: RpcRequest,
+    {
+        match self {
+            Self::V2(connection) => Ok(connection.call(request).await?),
+            Self::V3 {
+                connection,
+                auth_store,
+            } => match connection.call(request).await {
+                Ok(response) => Ok(response),
+                Err(error) => {
+                    if error.is_unauthenticated() {
+                        auth_store.clear_account_authority()?;
+                    }
+                    Err(error.into())
+                }
+            },
+        }
+    }
+
+    async fn upload(
+        &mut self,
+        input: NativeUploadInput,
+    ) -> Result<proto::UploadComplete, Box<dyn std::error::Error>> {
+        match self {
+            Self::V2(connection) => Ok(upload_file_v2(connection, input, |_| {}).await?),
+            Self::V3 {
+                connection,
+                auth_store,
+            } => match upload_file_v3(connection, input, |_| {}).await {
+                Ok(upload) => Ok(upload),
+                Err(error) => {
+                    if matches!(
+                        &error,
+                        NativeUploadError::V3(error) if error.is_unauthenticated()
+                    ) {
+                        auth_store.clear_account_authority()?;
+                    }
+                    Err(error.into())
+                }
+            },
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 struct DetectedGlobalFlags {
@@ -1732,6 +1789,10 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
     let config = Config::load();
     let auth_store = AuthStore::new(config.secrets_path.clone(), config.api_base_url.clone());
     let local_db = LocalDb::new(config.state_path.clone(), config.api_base_url.clone());
+    if auth_store.logout_pending()? {
+        auth_store.complete_logout()?;
+        local_db.clear_current_user()?;
+    }
     let api = ApiClient::try_new(config.api_base_url.clone())?;
     let skip_update_check = matches!(
         &cli.command,
@@ -1807,8 +1868,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             SetupCommand::Amp(args) => ("amp", args),
                             SetupCommand::Hermes(_) | SetupCommand::Openclaw(_) => unreachable!(),
                         };
-                        let owner_token = match auth_store.load_token()? {
-                            Some(token) => token,
+                        let owner_auth = match owner_session::resolve_owner_credential(&auth_store)? {
+                            Some(credential) => credential,
                             None => {
                                 handle_login(
                                     AuthLoginArgs {
@@ -1829,12 +1890,14 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                                     json_format,
                                 )
                                 .await?;
-                                require_token(&auth_store)?
+                                owner_session::resolve_owner_credential(&auth_store)?.ok_or_else(
+                                    || CliError::not_authenticated(),
+                                )?
                             }
                         };
                         bridge::setup_provider(
                             &config,
-                            owner_token,
+                            owner_auth,
                             provider_id,
                             args.folder,
                             args.name,
@@ -1935,14 +1998,14 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 }
                 BridgeCommand::Dev { command } => match command {
                     BridgeDevCommand::Codex(args) => {
-                        let owner_token = require_token(&auth_store)?;
-                        bridge::run_codex_dev(&config, owner_token, args.folder).await?;
+                        let owner_auth = require_owner_credential(&auth_store)?;
+                        bridge::run_codex_dev(&config, owner_auth, args.folder).await?;
                     }
                     BridgeDevCommand::Settings(args) => {
-                        let owner_token = require_token(&auth_store)?;
+                        let owner_auth = require_owner_credential(&auth_store)?;
                         bridge::debug_request_settings(
                             &config,
-                            &owner_token,
+                            owner_auth,
                             bridge::DebugSettingsRequest {
                                 bot_user_id: args.bot_user_id,
                                 chat_id: args.chat_id,
@@ -1956,10 +2019,10 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         .await?;
                     }
                     BridgeDevCommand::WorkspacePicker(args) => {
-                        let owner_token = require_token(&auth_store)?;
+                        let owner_auth = require_owner_credential(&auth_store)?;
                         bridge::debug_probe_workspace_picker(
                             &config,
-                            &owner_token,
+                            owner_auth,
                             args.bot_user_id,
                             args.chat_id,
                             args.folder,
@@ -1967,10 +2030,10 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         .await?;
                     }
                     BridgeDevCommand::ObserveTyping(args) => {
-                        let owner_token = require_token(&auth_store)?;
+                        let owner_auth = require_owner_credential(&auth_store)?;
                         bridge::debug_observe_typing(
                             &config,
-                            &owner_token,
+                            owner_auth,
                             args.bot_user_id,
                             Duration::from_secs(args.timeout_seconds),
                         )
@@ -1991,10 +2054,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 .await?;
             }
             Command::Logout => {
-                let env_token_present = auth::env_token_present();
-                auth_store.clear_token()?;
-                local_db.clear_current_user()?;
-                let output = build_auth_logout_output(env_token_present);
+                let output = perform_auth_logout(&config, &auth_store, &local_db).await?;
                 if cli.json {
                     output::print_json(&output, json_format)?;
                 } else {
@@ -2024,10 +2084,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     }
                 }
                 AuthCommand::Logout => {
-                    let env_token_present = auth::env_token_present();
-                    auth_store.clear_token()?;
-                    local_db.clear_current_user()?;
-                    let output = build_auth_logout_output(env_token_present);
+                    let output = perform_auth_logout(&config, &auth_store, &local_db).await?;
                     if cli.json {
                         output::print_json(&output, json_format)?;
                     } else {
@@ -2070,8 +2127,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 let peer = input_peer_from_args(args.chat_id, args.user_id)?;
                 let queries = normalize_search_queries(&args.query)?;
                 let peer_summary = peer_summary_from_input(&peer);
-                let token = require_token(&auth_store)?;
-                let mut realtime = connect_realtime(&config.realtime_url, &token).await?;
+                let mut realtime =
+                        connect_authenticated_realtime(&config, &auth_store).await?;
 
                 let input = proto::SearchMessagesInput {
                     peer_id: Some(peer.clone()),
@@ -2164,8 +2221,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
             Command::Bots { command } => match command {
                 BotsCommand::List(args) => {
                     validate_table_only_list_flags(cli.json, args.ids, args.id)?;
-                    let token = require_token(&auth_store)?;
-                    let mut realtime = connect_realtime(&config.realtime_url, &token).await?;
+                    let mut realtime =
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let mut payload = realtime.call(proto::ListBotsInput {}).await?;
                     if cli.json {
                         filter_bots_payload(&mut payload, args.filter.as_deref());
@@ -2207,8 +2264,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         return Err(CliError::invalid_args("Bot username cannot be empty").into());
                     }
 
-                    let token = require_token(&auth_store)?;
-                    let mut realtime = connect_realtime(&config.realtime_url, &token).await?;
+                    let mut realtime =
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let input = proto::CreateBotInput {
                         name: name.to_string(),
                         username: username.to_string(),
@@ -2230,8 +2287,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 BotsCommand::RevealToken(args) => {
                     let bot_user_id =
                         validate_positive_id_arg("--bot-user-id", args.bot_user_id)?;
-                    let token = require_token(&auth_store)?;
-                    let mut realtime = connect_realtime(&config.realtime_url, &token).await?;
+                    let mut realtime =
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let input = proto::RevealBotTokenInput {
                         bot_user_id,
                     };
@@ -2253,8 +2310,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     TypingCommand::Stop(args) => ("stopped", args, None),
                 };
                 let peer = input_peer_from_args(args.chat_id, args.user_id)?;
-                let token = require_token(&auth_store)?;
-                let mut realtime = connect_realtime(&config.realtime_url, &token).await?;
+                let mut realtime =
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                 let input = proto::SendComposeActionInput {
                     peer_id: Some(peer.clone()),
                     action,
@@ -2269,9 +2326,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
             Command::Chats { command } => match command {
                 ChatsCommand::List(args) => {
                     validate_table_only_list_flags(cli.json, args.ids, args.id)?;
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let payload = realtime.call(proto::GetChatsInput {}).await?;
 
                     if cli.json {
@@ -2313,9 +2369,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 }
                 ChatsCommand::Get(args) => {
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let input = proto::GetChatInput {
                         peer_id: Some(peer),
                     };
@@ -2330,9 +2385,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 }
                 ChatsCommand::Participants(args) => {
                     let chat_id = validate_positive_id_arg("--chat-id", args.chat_id)?;
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let input = proto::GetChatParticipantsInput { chat_id };
                     let payload = realtime.call(input).await?;
                     if cli.json {
@@ -2346,9 +2400,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 ChatsCommand::AddParticipant(args) => {
                     let chat_id = validate_positive_id_arg("--chat-id", args.chat_id)?;
                     let user_id = validate_positive_id_arg("--user-id", args.user_id)?;
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let input = proto::AddChatParticipantInput {
                         chat_id,
                         user_id: Some(user_id),
@@ -2364,9 +2417,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 ChatsCommand::RemoveParticipant(args) => {
                     let chat_id = validate_positive_id_arg("--chat-id", args.chat_id)?;
                     let user_id = validate_positive_id_arg("--user-id", args.user_id)?;
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let input = proto::RemoveChatParticipantInput {
                         chat_id,
                         user_id: Some(user_id),
@@ -2407,9 +2459,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         }
                     }
                     validate_positive_ids_arg("--participant", &args.participants)?;
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let participants = args
                         .participants
                         .iter()
@@ -2454,13 +2505,26 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 }
                 ChatsCommand::CreateDm(args) => {
                     let user_id = validate_positive_id_arg("--user-id", args.user_id)?;
-                    let token = require_token(&auth_store)?;
-                    let payload = api.create_private_chat(&token, user_id).await?;
+                    let mut realtime =
+                        connect_authenticated_realtime(&config, &auth_store).await?;
+                    let payload = realtime
+                        .call(proto::CreateChatInput {
+                            title: None,
+                            space_id: None,
+                            description: None,
+                            emoji: None,
+                            is_public: false,
+                            participants: vec![proto::InputChatParticipant {
+                                user_id: Some(user_id),
+                                group_id: None,
+                            }],
+                            reserved_chat_id: None,
+                        })
+                        .await?;
                     if cli.json {
                         output::print_json(&payload, json_format)?;
                     } else {
-                        let chat_id = payload.chat.get("id").and_then(|value| value.as_i64());
-                        if let Some(chat_id) = chat_id {
+                        if let Some(chat_id) = payload.chat.as_ref().map(|chat| chat.id) {
                             println!("Created DM chat {} with user {}.", chat_id, user_id);
                         } else {
                             println!("Created DM with user {}.", user_id);
@@ -2486,9 +2550,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     }
                     validate_positive_ids_arg("--participant", &args.participants)?;
 
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let participants = args
                         .participants
                         .iter()
@@ -2529,8 +2592,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         }
                     });
 
-                    let token = require_token(&auth_store)?;
-                    let mut realtime = connect_realtime(&config.realtime_url, &token).await?;
+                    let mut realtime =
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let input = proto::UpdateChatInfoInput {
                         chat_id,
                         title: Some(title.to_string()),
@@ -2547,9 +2610,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 }
                 ChatsCommand::MarkUnread(args) => {
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let input = proto::MarkAsUnreadInput {
                         peer_id: Some(peer),
                     };
@@ -2564,12 +2626,14 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let max_id = validate_optional_message_id_arg("--max-id", args.max_id)?;
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
                     let label = peer_label_from_input(&peer);
-                    let token = require_token(&auth_store)?;
-                    let mut input = ReadMessagesInput::new(api_peer_from_args(args.chat_id, args.user_id)?);
-                    if let Some(max_id) = max_id {
-                        input = input.with_max_id(max_id);
-                    }
-                    let payload = api.read_messages(&token, input).await?;
+                    let mut realtime =
+                        connect_authenticated_realtime(&config, &auth_store).await?;
+                    let payload = realtime
+                        .call(proto::ReadMessagesInput {
+                            peer_id: Some(peer),
+                            max_id,
+                        })
+                        .await?;
                     if cli.json {
                         output::print_json(&payload, json_format)?;
                     } else if let Some(max_id) = max_id {
@@ -2584,13 +2648,12 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     if cli.json && !args.yes {
                         return Err(CliError::confirmation_required().into());
                     }
-                    let token = require_token(&auth_store)?;
                     if !confirm_action(&prompt, args.yes)? {
                         println!("Cancelled.");
                         return Ok(());
                     }
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let peer = input_peer_from_args(Some(chat_id), None)?;
                     let input = proto::DeleteChatInput {
                         peer_id: Some(peer),
@@ -2606,9 +2669,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
             Command::Users { command } => match command {
                 UsersCommand::List(args) => {
                     validate_table_only_list_flags(cli.json, args.ids, args.id)?;
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let mut payload = realtime.call(proto::GetChatsInput {}).await?;
 
                     if cli.json {
@@ -2639,9 +2701,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 }
                 UsersCommand::Get(args) => {
                     let user_id = validate_positive_id_arg("--id", args.id)?;
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let payload = realtime.call(proto::GetChatsInput {}).await?;
 
                     if cli.json {
@@ -2681,9 +2742,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         .transpose()?;
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
                     let peer_summary = peer_summary_from_input(&peer);
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
 
                     let input = proto::GetChatHistoryInput {
                         peer_id: Some(peer.clone()),
@@ -2767,9 +2827,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
                     let queries = normalize_search_queries(&args.query)?;
                     let peer_summary = peer_summary_from_input(&peer);
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
 
                     let input = proto::SearchMessagesInput {
                         peer_id: Some(peer.clone()),
@@ -2849,9 +2908,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         .as_deref()
                         .map(normalize_translation_language)
                         .transpose()?;
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let (messages, missing_message_ids) =
                         fetch_messages_by_ids(&mut realtime, &peer, &message_ids).await?;
                     if message_ids.len() == 1 {
@@ -2991,7 +3049,6 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         .into());
                     }
                     validate_attachment_inputs(&args.attachments, MAX_ATTACHMENT_BYTES)?;
-                    let token = require_token(&auth_store)?;
                     let attachments = prepare_attachments(
                         &args.attachments,
                         &config.data_dir,
@@ -2999,7 +3056,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         cli.json,
                     )?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     if attachments.is_empty() {
                         let text = caption
                             .ok_or_else(|| {
@@ -3023,28 +3080,9 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             println!("Message sent (updates: {}).", payload.updates.len());
                         }
                     } else {
-                        let mut upload_realtime = if let Some(authorization) =
-                            auth_store.load_inline_protocol_temporary()?
-                        {
-                            let url = format!("{}/v3", config.realtime_url.trim_end_matches('/'));
-                            match identity::reconnect_inline_protocol(&url, authorization).await {
-                                Ok(connection) => Some(connection),
-                                Err(error) => {
-                                    if !cli.json {
-                                        eprintln!(
-                                            "Secure upload connection unavailable; using typed Realtime V2 RPCs: {error}"
-                                        );
-                                    }
-                                    None
-                                }
-                            }
-                        } else {
-                            None
-                        };
                         let peer_summary = peer_summary_from_input(&peer);
                         let output = send_messages_with_attachments(
                             &mut realtime,
-                            upload_realtime.as_mut(),
                             &peer,
                             caption,
                             reply_to,
@@ -3131,9 +3169,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let message_count = message_ids.len();
                     let share_forward_header = if no_header { Some(false) } else { None };
 
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let input = proto::ForwardMessagesInput {
                         from_peer_id: Some(from_peer),
                         message_ids,
@@ -3215,9 +3252,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     if let Some(dir) = args.dir.as_ref() {
                         validate_output_dir_path_arg("--dir", dir)?;
                     }
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let (messages, missing_message_ids) = if let Some(from_msg_id) = from_msg_id {
                         (
                             fetch_history_messages(&mut realtime, &peer, Some(from_msg_id), limit)
@@ -3276,13 +3312,12 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     if cli.json && !args.yes {
                         return Err(CliError::confirmation_required().into());
                     }
-                    let token = require_token(&auth_store)?;
                     if !confirm_action(&prompt, args.yes)? {
                         println!("Cancelled.");
                         return Ok(());
                     }
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let input = proto::DeleteMessagesInput {
                         message_ids: args.message_ids,
                         peer_id: Some(peer),
@@ -3303,9 +3338,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
                     let text = resolve_message_caption(args.text, args.stdin)?
                         .ok_or_else(CliError::missing_text_or_stdin)?;
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let input = proto::EditMessageInput {
                         message_id,
                         peer_id: Some(peer),
@@ -3328,9 +3362,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     if emoji.is_empty() {
                         return Err(CliError::invalid_args("Emoji cannot be empty").into());
                     }
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let input = proto::AddReactionInput {
                         emoji,
                         message_id,
@@ -3350,9 +3383,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     if emoji.is_empty() {
                         return Err(CliError::invalid_args("Emoji cannot be empty").into());
                     }
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let input = proto::DeleteReactionInput {
                         emoji,
                         peer_id: Some(peer),
@@ -3368,9 +3400,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
             },
             Command::Spaces { command } => match command {
                 SpacesCommand::List => {
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let payload = realtime.call(proto::GetChatsInput {}).await?;
 
                     if cli.json {
@@ -3382,9 +3413,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 }
                 SpacesCommand::Members(args) => {
                     let space_id = validate_positive_id_arg("--space-id", args.space_id)?;
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let input = proto::GetSpaceMembersInput { space_id };
                     let payload = realtime.call(input).await?;
                     if cli.json {
@@ -3398,9 +3428,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let space_id = validate_positive_id_arg("--space-id", args.space_id)?;
                     let via = invite_target_from_args(&args)?;
                     let role = invite_role_from_args(args.admin, args.public_chats)?;
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let input = proto::InviteToSpaceInput {
                         space_id,
                         role,
@@ -3425,13 +3454,12 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     if cli.json && !args.yes {
                         return Err(CliError::confirmation_required().into());
                     }
-                    let token = require_token(&auth_store)?;
                     if !confirm_action(&prompt, args.yes)? {
                         println!("Cancelled.");
                         return Ok(());
                     }
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let input = proto::DeleteMemberInput { space_id, user_id };
                     let payload = realtime.call(input).await?;
                     if cli.json {
@@ -3445,9 +3473,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let user_id = validate_positive_id_arg("--user-id", args.user_id)?;
                     let role =
                         require_member_access_role(args.admin, args.member, args.public_chats)?;
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let input = proto::UpdateMemberAccessInput {
                         space_id,
                         user_id,
@@ -3466,9 +3493,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
             },
             Command::Notifications { command } => match command {
                 NotificationsCommand::Get => {
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let payload = realtime.call(proto::GetUserSettingsInput {}).await?;
                     if cli.json {
                         output::print_json(&payload, json_format)?;
@@ -3483,9 +3509,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         )
                         .into());
                     }
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let current = fetch_user_settings(&mut realtime).await?;
                     let mut values = notification_settings_values(
                         current
@@ -3532,71 +3557,68 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 TasksCommand::CreateLinear(args) => {
                     let chat_id = validate_positive_id_arg("--chat-id", args.chat_id)?;
                     let message_id = validate_message_id_arg("--message-id", args.message_id)?;
-                    let space_id =
+                    let requested_space_id =
                         validate_optional_positive_id_arg("--space-id", args.space_id)?;
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
-                        connect_realtime(&config.realtime_url, &token).await?;
-
-                    // Get current user id
-                    let me = fetch_me(&mut realtime).await?;
-                    let from_id = me.id;
-
-                    // Get message to extract text
+                        connect_authenticated_realtime(&config, &auth_store).await?;
                     let peer = input_peer_from_args(Some(chat_id), None)?;
-                    let message = fetch_message_by_id(&mut realtime, &peer, message_id).await?;
-
-                    let text = message.message.unwrap_or_default();
-                    if text.trim().is_empty() {
-                        return Err(
-                            CliError::invalid_args("Message has no text content").into()
-                        );
-                    }
-
-                    let mut api_input = CreateLinearIssueInput::new(
-                        text,
-                        message_id,
-                        chat_id,
-                        from_id,
-                        PeerId::thread(chat_id),
-                    );
-                    if let Some(space_id) = space_id {
-                        api_input = api_input.with_space_id(space_id);
-                    }
-
-                    let result = api.create_linear_issue(&token, api_input).await?;
+                    let space_id = match requested_space_id {
+                        Some(space_id) => space_id,
+                        None => realtime
+                            .call(proto::GetChatInput {
+                                peer_id: Some(peer.clone()),
+                            })
+                            .await?
+                            .chat
+                            .and_then(|chat| chat.space_id)
+                            .ok_or_else(|| {
+                                CliError::invalid_args(
+                                    "--space-id is required for a home thread",
+                                )
+                            })?,
+                    };
+                    let result = realtime
+                        .call(proto::CreateExternalTaskInput {
+                            provider: proto::ConnectorProvider::Linear as i32,
+                            scope: Some(proto::InputScope {
+                                r#type: Some(proto::input_scope::Type::Space(
+                                    proto::InputScopeSpace { space_id },
+                                )),
+                            }),
+                            peer_id: Some(peer),
+                            message_id,
+                        })
+                        .await?;
 
                     if cli.json {
                         output::print_json(&result, json_format)?;
-                    } else if let Some(link) = result.link {
-                        println!("Created Linear issue: {}", link);
                     } else {
-                        println!("Linear issue created.");
+                        println!("Created Linear issue: {}", result.url);
                     }
                 }
                 TasksCommand::CreateNotion(args) => {
                     let chat_id = validate_positive_id_arg("--chat-id", args.chat_id)?;
                     let message_id = validate_message_id_arg("--message-id", args.message_id)?;
                     let space_id = validate_positive_id_arg("--space-id", args.space_id)?;
-                    let token = require_token(&auth_store)?;
-
-                    let api_input = CreateNotionTaskInput::new(
-                        space_id,
-                        message_id,
-                        chat_id,
-                        PeerId::thread(chat_id),
-                    );
-
-                    let result = api.create_notion_task(&token, api_input).await?;
+                    let mut realtime =
+                        connect_authenticated_realtime(&config, &auth_store).await?;
+                    let result = realtime
+                        .call(proto::CreateExternalTaskInput {
+                            provider: proto::ConnectorProvider::Notion as i32,
+                            scope: Some(proto::InputScope {
+                                r#type: Some(proto::input_scope::Type::Space(
+                                    proto::InputScopeSpace { space_id },
+                                )),
+                            }),
+                            peer_id: Some(input_peer_from_args(Some(chat_id), None)?),
+                            message_id,
+                        })
+                        .await?;
 
                     if cli.json {
                         output::print_json(&result, json_format)?;
                     } else {
-                        let title_display = result
-                            .task_title
-                            .map(|t| format!(" \"{}\"", t))
-                            .unwrap_or_default();
-                        println!("Created Notion task{}: {}", title_display, result.url);
+                        println!("Created Notion task: {}", result.url);
                     }
                 }
             },
@@ -3669,7 +3691,7 @@ fn resolve_message_caption(
 }
 
 async fn send_message(
-    realtime: &mut RealtimeClient,
+    realtime: &mut AuthenticatedRealtime,
     peer: &proto::InputPeer,
     text: Option<String>,
     media: Option<proto::InputMedia>,
@@ -3701,8 +3723,7 @@ async fn send_message(
 
 #[allow(clippy::too_many_arguments)]
 async fn send_messages_with_attachments(
-    realtime: &mut RealtimeClient,
-    mut upload_realtime: Option<&mut InlineProtocolV3Connection>,
+    realtime: &mut AuthenticatedRealtime,
     peer: &proto::InputPeer,
     caption: Option<String>,
     reply_to_msg_id: Option<i64>,
@@ -3725,11 +3746,7 @@ async fn send_messages_with_attachments(
         }
 
         let input = attachment.to_native_upload_input();
-        let upload = if let Some(connection) = upload_realtime.as_deref_mut() {
-            upload_file_v3(connection, input, |_| {}).await?
-        } else {
-            upload_file_v2(realtime, input, |_| {}).await?
-        };
+        let upload = realtime.upload(input).await?;
 
         let media = input_media_from_native_upload(&upload)?;
         let send = send_message(
@@ -3797,8 +3814,7 @@ async fn handle_messages_export(
     if let Some((media_dir, _)) = media_download.as_ref() {
         validate_output_dir_path_arg("--media-dir", media_dir)?;
     }
-    let token = require_token(auth_store)?;
-    let mut realtime = connect_realtime(&config.realtime_url, &token).await?;
+    let mut realtime = connect_authenticated_realtime(config, auth_store).await?;
 
     let mut messages = if args.message_ids.is_empty() {
         fetch_history_messages(&mut realtime, &peer, history_offset_id, limit).await?
@@ -4039,7 +4055,7 @@ fn print_download_errors(errors: &[DownloadErrorOutput]) {
 }
 
 async fn fetch_export_indexes(
-    realtime: &mut RealtimeClient,
+    realtime: &mut AuthenticatedRealtime,
 ) -> Result<
     (
         HashMap<i64, proto::User>,
@@ -4178,10 +4194,10 @@ async fn run_agents_setup_command(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let resolved = agents::resolve_setup(args, json)?;
     if resolved.args.dry_run {
-        return agents::setup(config, String::new(), resolved, json, json_format).await;
+        return agents::setup(config, None, resolved, json, json_format).await;
     }
-    let owner_token = match auth_store.load_token()? {
-        Some(token) => token,
+    let owner_auth = match owner_session::resolve_owner_credential(auth_store)? {
+        Some(credential) => credential,
         None if resolved.non_interactive => {
             return Err(CliError::not_authenticated().into());
         }
@@ -4205,10 +4221,59 @@ async fn run_agents_setup_command(
                 json_format,
             )
             .await?;
-            require_token(auth_store)?
+            owner_session::resolve_owner_credential(auth_store)?
+                .ok_or_else(|| CliError::not_authenticated())?
         }
     };
-    agents::setup(config, owner_token, resolved, json, json_format).await
+    agents::setup(config, Some(owner_auth), resolved, json, json_format).await
+}
+
+async fn perform_auth_logout(
+    config: &Config,
+    auth_store: &AuthStore,
+    local_db: &LocalDb,
+) -> Result<auth_flow::AuthLogoutOutput, Box<dyn std::error::Error>> {
+    let env_token_present = auth::env_token_present();
+    let inline_protocol_authorizations = if env_token_present {
+        None
+    } else {
+        auth_store.load_inline_protocol_authorizations()?
+    };
+    let saved_token = if env_token_present || inline_protocol_authorizations.is_some() {
+        None
+    } else {
+        auth_store.load_saved_token()?
+    };
+    auth_store.begin_logout()?;
+    if !env_token_present {
+        let remote_logout = async {
+            if let Some((permanent, temporary)) = inline_protocol_authorizations {
+                let url = format!("{}/v3", config.realtime_url.trim_end_matches('/'));
+                let now_seconds = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)?
+                    .as_secs() as i64;
+                let mut connection =
+                    if auth::temporary_authorization_needs_regeneration(&temporary, now_seconds) {
+                        let keys = identity::resolve_inline_protocol_public_ring()?;
+                        let mut fresh =
+                            identity::connect_inline_protocol_fresh(&url, keys, true).await?;
+                        fresh.bind_temporary(&permanent).await?;
+                        fresh
+                    } else {
+                        identity::reconnect_inline_protocol(&url, temporary).await?
+                    };
+                connection.call(proto::LogOutInput {}).await?;
+            } else if let Some(token) = saved_token {
+                let mut connection = connect_realtime(&config.realtime_url, &token).await?;
+                connection.call(proto::LogOutInput {}).await?;
+            }
+            Ok::<(), Box<dyn std::error::Error>>(())
+        };
+        let _ = tokio::time::timeout(Duration::from_secs(3), remote_logout).await;
+    }
+    auth_store.complete_logout()?;
+    local_db.clear_current_user()?;
+    Ok(build_auth_logout_output(env_token_present))
 }
 
 fn require_token(auth_store: &AuthStore) -> Result<String, Box<dyn std::error::Error>> {
@@ -4216,6 +4281,91 @@ fn require_token(auth_store: &AuthStore) -> Result<String, Box<dyn std::error::E
         Some(token) => Ok(token),
         None => Err(CliError::not_authenticated().into()),
     }
+}
+
+fn require_owner_credential(
+    auth_store: &AuthStore,
+) -> Result<inline_client::AuthCredential, Box<dyn std::error::Error>> {
+    owner_session::resolve_owner_credential(auth_store)?
+        .ok_or_else(|| CliError::not_authenticated().into())
+}
+
+async fn connect_authenticated_realtime(
+    config: &Config,
+    auth_store: &AuthStore,
+) -> Result<AuthenticatedRealtime, Box<dyn std::error::Error>> {
+    if auth::env_token_present() {
+        let token = require_token(auth_store)?;
+        return Ok(AuthenticatedRealtime::V2(
+            connect_realtime(&config.realtime_url, &token).await?,
+        ));
+    }
+
+    if let Some((permanent, temporary)) = auth_store.load_inline_protocol_authorizations()? {
+        let url = format!("{}/v3", config.realtime_url.trim_end_matches('/'));
+        let now_seconds = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs() as i64;
+        if !auth::temporary_authorization_needs_regeneration(&temporary, now_seconds) {
+            match identity::reconnect_inline_protocol(&url, temporary).await {
+                Ok(mut cached) => match cached.call(proto::GetMeInput {}).await {
+                    Ok(_) if !cached.temporary_key_rotation_due() => {
+                        return Ok(AuthenticatedRealtime::V3 {
+                            connection: cached,
+                            auth_store: auth_store.clone(),
+                        });
+                    }
+                    Ok(_) => {
+                        // GetMe refreshed the authenticated server clock; refresh
+                        // before exposing a session at the 80% boundary.
+                        drop(cached);
+                    }
+                    Err(error) if owner_session::temporary_reconnect_can_regenerate(&error) => {
+                        drop(cached);
+                    }
+                    Err(error) => {
+                        if error.is_unauthenticated() {
+                            auth_store.clear_account_authority()?;
+                        }
+                        return Err(error.into());
+                    }
+                },
+                Err(error) if owner_session::temporary_reconnect_can_regenerate(&error) => {}
+                Err(error) => {
+                    if error.is_unauthenticated() {
+                        auth_store.clear_account_authority()?;
+                    }
+                    return Err(error.into());
+                }
+            }
+        }
+
+        let keys = identity::resolve_inline_protocol_public_ring()?;
+        let mut regenerated = identity::connect_inline_protocol_fresh(&url, keys, true).await?;
+        if let Err(error) = regenerated.bind_temporary(&permanent).await {
+            if error.is_unauthenticated() {
+                auth_store.clear_account_authority()?;
+            }
+            return Err(error.into());
+        }
+        if let Err(error) = regenerated.call(proto::GetMeInput {}).await {
+            if error.is_unauthenticated() {
+                auth_store.clear_account_authority()?;
+            }
+            return Err(error.into());
+        }
+        auth_store
+            .store_inline_protocol_authorizations(&permanent, &regenerated.authorization())?;
+        return Ok(AuthenticatedRealtime::V3 {
+            connection: regenerated,
+            auth_store: auth_store.clone(),
+        });
+    }
+
+    let token = require_token(auth_store)?;
+    Ok(AuthenticatedRealtime::V2(
+        connect_realtime(&config.realtime_url, &token).await?,
+    ))
 }
 
 #[derive(Serialize)]
@@ -4359,22 +4509,15 @@ async fn fetch_authenticated_me(
     config: &Config,
     auth_store: &AuthStore,
 ) -> Result<proto::User, Box<dyn std::error::Error>> {
-    if let Some(authorization) = auth_store.load_inline_protocol_temporary()? {
-        let url = format!("{}/v3", config.realtime_url.trim_end_matches('/'));
-        let mut realtime = identity::reconnect_inline_protocol(&url, authorization).await?;
-        return realtime
-            .call(proto::GetMeInput {})
-            .await?
-            .user
-            .ok_or_else(|| CliError::unexpected_api_response("getMe", "missing user").into());
-    }
-    let token = require_token(auth_store)?;
-    let mut realtime = connect_realtime(&config.realtime_url, &token).await?;
-    fetch_me(&mut realtime).await
+    let mut realtime = connect_authenticated_realtime(config, auth_store).await?;
+    let payload = realtime.call(proto::GetMeInput {}).await?;
+    payload
+        .user
+        .ok_or_else(|| CliError::unexpected_api_response("getMe", "missing user").into())
 }
 
 async fn fetch_user_settings(
-    realtime: &mut RealtimeClient,
+    realtime: &mut AuthenticatedRealtime,
 ) -> Result<Option<proto::UserSettings>, Box<dyn std::error::Error>> {
     let payload = realtime.call(proto::GetUserSettingsInput {}).await?;
     Ok(payload.user_settings)
@@ -4669,7 +4812,7 @@ fn message_has_downloadable_media(message: &proto::Message) -> bool {
 }
 
 async fn fetch_message_translations(
-    realtime: &mut RealtimeClient,
+    realtime: &mut AuthenticatedRealtime,
     peer: &proto::InputPeer,
     message_ids: &[i64],
     language: &str,
@@ -4776,8 +4919,9 @@ fn proto_user_matches_filter(user: &proto::User, needle: &str) -> bool {
     false
 }
 
+#[allow(dead_code)] // Retained until the legacy bearer-only compatibility seam is removed.
 async fn fetch_message_by_id(
-    realtime: &mut RealtimeClient,
+    realtime: &mut AuthenticatedRealtime,
     peer: &proto::InputPeer,
     message_id: i64,
 ) -> Result<proto::Message, Box<dyn std::error::Error>> {
@@ -4789,7 +4933,7 @@ async fn fetch_message_by_id(
 }
 
 async fn fetch_history_messages(
-    realtime: &mut RealtimeClient,
+    realtime: &mut AuthenticatedRealtime,
     peer: &proto::InputPeer,
     offset_id: Option<i64>,
     limit: Option<i32>,
@@ -4805,7 +4949,7 @@ async fn fetch_history_messages(
 }
 
 async fn fetch_messages_by_ids(
-    realtime: &mut RealtimeClient,
+    realtime: &mut AuthenticatedRealtime,
     peer: &proto::InputPeer,
     message_ids: &[i64],
 ) -> Result<(Vec<proto::Message>, Vec<i64>), Box<dyn std::error::Error>> {

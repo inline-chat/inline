@@ -64,8 +64,13 @@ struct DoctorPaths {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DoctorAuth {
+    authority: Option<String>,
+    transport: Option<String>,
     token_present: bool,
     token_source: Option<String>,
+    environment_bearer_present: bool,
+    saved_bearer_present: bool,
+    inline_protocol_present: bool,
     token_error: Option<String>,
     current_user: Option<proto::User>,
     state_error: Option<String>,
@@ -85,25 +90,45 @@ pub(crate) fn build_doctor_output(
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
-    let mut token_present = false;
-    let mut token_source = None;
-    let mut token_error = None;
-
-    if env_token.is_some() {
-        token_present = true;
-        token_source = Some("INLINE_TOKEN".to_string());
-    } else {
-        match auth_store.load_token() {
-            Ok(Some(_)) => {
-                token_present = true;
-                token_source = Some("secrets_file".to_string());
-            }
-            Ok(None) => {}
-            Err(err) => {
-                token_error = Some(err.to_string());
-            }
+    let mut authority_errors = Vec::new();
+    let saved_bearer_present = match auth_store.load_saved_token() {
+        Ok(token) => token.is_some(),
+        Err(err) => {
+            authority_errors.push(err.to_string());
+            false
         }
-    }
+    };
+    let inline_protocol_present = match auth_store.load_inline_protocol_authorizations() {
+        Ok(authorizations) => authorizations.is_some(),
+        Err(err) => {
+            authority_errors.push(err.to_string());
+            false
+        }
+    };
+    let environment_bearer_present = env_token.is_some();
+    let token_present = environment_bearer_present || saved_bearer_present;
+    let (authority, transport, token_source) = if environment_bearer_present {
+        (
+            Some("bearer_environment".to_string()),
+            Some("realtime_v2".to_string()),
+            Some("INLINE_TOKEN".to_string()),
+        )
+    } else if inline_protocol_present {
+        (
+            Some("inline_protocol_v3".to_string()),
+            Some("realtime_v3".to_string()),
+            None,
+        )
+    } else if saved_bearer_present {
+        (
+            Some("bearer_saved".to_string()),
+            Some("realtime_v2".to_string()),
+            Some("secrets_file".to_string()),
+        )
+    } else {
+        (None, None, None)
+    };
+    let token_error = (!authority_errors.is_empty()).then(|| authority_errors.join("; "));
 
     let (current_user, state_error) = match local_db.load() {
         Ok(state) => (state.current_user, None),
@@ -134,8 +159,13 @@ pub(crate) fn build_doctor_output(
             state_exists: config.state_path.exists(),
         },
         auth: DoctorAuth {
+            authority,
+            transport,
             token_present,
             token_source,
+            environment_bearer_present,
+            saved_bearer_present,
+            inline_protocol_present,
             token_error,
             current_user,
             state_error,
@@ -216,6 +246,14 @@ pub(crate) fn print_doctor(output: &DoctorOutput) {
     );
 
     print_section_after_break("Auth");
+    println!(
+        "  authority: {}",
+        output.auth.authority.as_deref().unwrap_or("none")
+    );
+    println!(
+        "  selected transport: {}",
+        output.auth.transport.as_deref().unwrap_or("none")
+    );
     if output.auth.token_present {
         if let Some(source) = &output.auth.token_source {
             println!("  token: present ({source})");
@@ -225,6 +263,30 @@ pub(crate) fn print_doctor(output: &DoctorOutput) {
     } else {
         println!("  token: absent");
     }
+    println!(
+        "  environment bearer: {}",
+        if output.auth.environment_bearer_present {
+            "present"
+        } else {
+            "absent"
+        }
+    );
+    println!(
+        "  saved bearer: {}",
+        if output.auth.saved_bearer_present {
+            "present"
+        } else {
+            "absent"
+        }
+    );
+    println!(
+        "  Inline Protocol V3 credentials: {}",
+        if output.auth.inline_protocol_present {
+            "present"
+        } else {
+            "absent"
+        }
+    );
 
     if let Some(user) = &output.auth.current_user {
         println!(

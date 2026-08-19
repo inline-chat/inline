@@ -92,7 +92,10 @@ pub(super) fn account_fixture() -> (AccountBridgeConfig, AccountBridgeSecrets) {
             version: ACCOUNT_SECRETS_VERSION,
             owner_user_id: 42,
             control_token: "control-secret".to_string(),
-            owner_token: "owner-secret".to_string(),
+            owner_auth: Some(AuthCredential::AccessToken {
+                token: AuthToken::try_new("owner-secret").unwrap(),
+            }),
+            owner_token: String::new(),
             providers: vec![ProviderCredentials {
                 installation_id: "codex".to_string(),
                 bot_user_id: 84,
@@ -110,6 +113,98 @@ fn account_secret_debug_output_is_redacted() {
     assert!(!rendered.contains("owner-secret"));
     assert!(!rendered.contains("bot-secret"));
     assert!(rendered.contains("<redacted>"));
+}
+
+#[test]
+fn issued_owner_bearers_are_readable_but_mixed_authority_is_rejected() {
+    let (account, mut secrets) = account_fixture();
+    secrets.version = 1;
+    secrets.owner_auth = None;
+    secrets.owner_token = "legacy-owner".to_string();
+    assert!(matches!(
+        owner_credential(&secrets).unwrap(),
+        AuthCredential::AccessToken { .. }
+    ));
+    validate_account(&account, &secrets).unwrap();
+
+    secrets.version = ACCOUNT_SECRETS_VERSION;
+    secrets.owner_token = "current-owner".to_string();
+    assert!(matches!(
+        owner_credential(&secrets).unwrap(),
+        AuthCredential::AccessToken { .. }
+    ));
+    validate_account(&account, &secrets).unwrap();
+
+    secrets.owner_auth = Some(AuthCredential::AccessToken {
+        token: AuthToken::try_new("new-owner").unwrap(),
+    });
+    assert!(validate_account(&account, &secrets).is_err());
+}
+
+#[test]
+fn v3_owner_authority_round_trips_without_a_bearer() {
+    let (account, mut secrets) = account_fixture();
+    let authorization = |temporary: bool, byte: u8| inline_sdk::InlineProtocolAuthorization {
+        key: [byte; 256],
+        key_id: [byte; 8],
+        server_salt: 7,
+        temporary,
+        expires_at: temporary.then_some(2_000_000_000),
+    };
+    let expected = AuthCredential::InlineProtocolV3 {
+        permanent: authorization(false, 1),
+        temporary: authorization(true, 2),
+        public_keys: vec![inline_sdk::InlineProtocolPublicKey {
+            modulus: "pinned".to_string(),
+            exponent: "AQAB".to_string(),
+            fingerprint: "1".to_string(),
+        }],
+    };
+    secrets.owner_auth = Some(expected.clone());
+    secrets.owner_token.clear();
+    validate_account(&account, &secrets).unwrap();
+    let encoded = serde_json::to_vec(&secrets).unwrap();
+    let decoded: AccountBridgeSecrets = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(owner_credential(&decoded).unwrap(), expected);
+}
+
+#[test]
+fn revoked_bridge_owner_authority_is_cleared_without_touching_bot_credentials() {
+    let (account, secrets) = account_fixture();
+    let revoked = owner_credential(&secrets).expect("revoked owner credential");
+    let directory = tempfile::tempdir().expect("temporary bridge directory");
+    let paths = BridgePaths::from_root(
+        directory.path().to_path_buf(),
+        directory.path().join("bin").join("inline"),
+    );
+    write_private_json(&paths.secrets, &secrets).expect("write bridge secrets");
+
+    assert!(clear_bridge_owner_authority(&paths, &revoked).expect("clear revoked owner authority"));
+
+    let persisted: AccountBridgeSecrets =
+        read_required_json(&paths.secrets).expect("read bridge secrets");
+    assert!(persisted.owner_auth.is_none());
+    assert!(persisted.owner_token.is_empty());
+    assert_eq!(persisted.providers.len(), secrets.providers.len());
+    assert_eq!(
+        persisted.providers[0].bot_token,
+        secrets.providers[0].bot_token
+    );
+    assert!(owner_credential(&persisted).is_err());
+    validate_account_for_setup(&account, &persisted).expect("setup can repair owner authority");
+
+    let replacement = AuthCredential::AccessToken {
+        token: AuthToken::try_new("replacement-owner").unwrap(),
+    };
+    let mut repaired = persisted;
+    repaired.owner_auth = Some(replacement.clone());
+    write_private_json(&paths.secrets, &repaired).expect("write replacement owner authority");
+    assert!(
+        !clear_bridge_owner_authority(&paths, &revoked).expect("ignore a superseded revocation")
+    );
+    let preserved: AccountBridgeSecrets =
+        read_required_json(&paths.secrets).expect("read replacement owner authority");
+    assert_eq!(owner_credential(&preserved).unwrap(), replacement);
 }
 
 #[test]
@@ -215,6 +310,15 @@ fn account_paths_scope_service_and_provider_state_by_owner() {
         PathBuf::from("/tmp/inline/bridge/accounts/99/bin/inline"),
     );
     assert!(validate_account_location(&wrong_paths, &account).is_err());
+}
+
+#[test]
+fn configured_owner_is_read_without_loading_another_accounts_credentials() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.json");
+    fs::write(&path, r#"{"version":3,"ownerUserId":42}"#).unwrap();
+
+    assert_eq!(configured_owner_user_id(&path).unwrap(), 42);
 }
 
 #[test]

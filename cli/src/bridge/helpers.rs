@@ -447,6 +447,7 @@ pub(super) fn local_host_label() -> String {
     }
 }
 
+#[allow(dead_code)] // Retained for legacy HTTP setup payload compatibility and fixture coverage.
 pub(super) fn private_chat_id(
     chat: &serde_json::Value,
     dialog: &serde_json::Value,
