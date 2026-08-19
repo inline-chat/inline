@@ -16,6 +16,7 @@ export const Response = Type.Undefined()
 export const handler = async (
   input: Static<typeof Input>,
   context: HandlerContext,
+  options: { preserveConnectionId?: string } = {},
 ): Promise<Static<typeof Response>> => {
   try {
     const session = await SessionsModel.getById(context.currentSessionId).catch(() => null)
@@ -25,6 +26,7 @@ export const handler = async (
       actorUserId: context.currentUserId,
       targetUserId: context.currentUserId,
       sessionId: context.currentSessionId,
+      preserveConnectionId: options.preserveConnectionId,
     })
     await db.delete(sessions).where(eq(sessions.id, context.currentSessionId))
 
@@ -43,7 +45,11 @@ export const handler = async (
     })
 
     setTimeout(() => {
-      connectionManager.sessionLoggedOut(context.currentUserId, context.currentSessionId)
+      connectionManager.sessionLoggedOut(
+        context.currentUserId,
+        context.currentSessionId,
+        options.preserveConnectionId,
+      )
     }, 50)
 
     return undefined

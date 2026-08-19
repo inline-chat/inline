@@ -40,4 +40,48 @@ describe("ConnectionManager", () => {
     expect(handleConnectionClose).toHaveBeenCalledTimes(1)
     expect(handleConnectionClose).toHaveBeenCalledWith({ userId: 1, sessionId: 10 })
   })
+
+  it("marks an explicitly revoked session with the terminal authentication close code", async () => {
+    const {
+      ConnVersion,
+      REALTIME_CLOSE_SESSION_REVOKED,
+      REALTIME_CLOSE_SESSION_REVOKED_REASON,
+      connectionManager,
+    } = await import("@in/server/ws/connections")
+    const ws = { id: "revoked", close: mock(), subscribe: mock() } as any
+    const id = connectionManager.addConnection(ws, ConnVersion.REALTIME_V3)
+    connectionManager.authenticateConnection(id, 2, 20)
+
+    connectionManager.closeConnectionForSession(2, 20, { authenticationInvalidated: true })
+
+    expect(ws.close).toHaveBeenCalledWith(
+      REALTIME_CLOSE_SESSION_REVOKED,
+      REALTIME_CLOSE_SESSION_REVOKED_REASON,
+    )
+    expect(connectionManager.getConnection(id)).toBeUndefined()
+  })
+
+  it("preserves the logout caller until its terminal protocol result is written", async () => {
+    const { ConnVersion, connectionManager } = await import("@in/server/ws/connections")
+    const caller = { id: "logout-caller", close: mock(), subscribe: mock() } as any
+    const sibling = { id: "logout-sibling", close: mock(), subscribe: mock() } as any
+    const callerId = connectionManager.addConnection(caller, ConnVersion.REALTIME_V3)
+    const siblingId = connectionManager.addConnection(sibling, ConnVersion.REALTIME_V3)
+    connectionManager.authenticateConnection(callerId, 3, 30)
+    connectionManager.authenticateConnection(siblingId, 3, 30)
+
+    connectionManager.closeConnectionForSession(
+      3,
+      30,
+      { authenticationInvalidated: true },
+      callerId,
+    )
+
+    expect(caller.close).not.toHaveBeenCalled()
+    expect(connectionManager.getConnection(callerId)).toBeDefined()
+    expect(sibling.close).toHaveBeenCalled()
+    expect(connectionManager.getConnection(siblingId)).toBeUndefined()
+
+    connectionManager.closeConnection(callerId)
+  })
 })

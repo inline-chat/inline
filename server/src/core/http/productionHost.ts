@@ -141,6 +141,13 @@ export class CoreProductionShutdownError extends
     "The Effect production server failed to shut down cleanly."
 }
 
+export const coreProductionStartupErrorDetails = (
+  error: unknown,
+): string | undefined =>
+  error instanceof CoreProductionStartupError
+    ? Cause.pretty(error.cause)
+    : undefined
+
 export interface StartCoreProductionServerOptions<
   ApplicationError,
   ApplicationRequirements,
@@ -394,14 +401,6 @@ export const startCoreProductionServer = async <
         if (inlineProtocolVerification !== undefined) {
           return inlineProtocolVerification
         }
-        const unsupportedV3 =
-          realtimeV3
-            ?.rejectUnsupportedUpgrade(
-              request,
-            )
-        if (unsupportedV3 !== undefined) {
-          return unsupportedV3
-        }
         if (
           realtimeV3?.tryUpgrade(
             request,
@@ -409,6 +408,14 @@ export const startCoreProductionServer = async <
           )
         ) {
           return undefined
+        }
+        const unsupportedV3 =
+          realtimeV3
+            ?.rejectUnsupportedUpgrade(
+              request,
+            )
+        if (unsupportedV3 !== undefined) {
+          return unsupportedV3
         }
         if (
           realtime.tryUpgrade(

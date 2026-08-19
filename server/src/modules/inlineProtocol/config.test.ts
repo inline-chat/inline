@@ -19,6 +19,12 @@ describe("Inline Protocol configuration", () => {
       INLINE_PROTOCOL_RSA_PRIVATE_KEYS_JSON: "[]",
       INLINE_PROTOCOL_AUTH_KEY_KEK_RING_JSON: ring,
       INLINE_PROTOCOL_AUTH_CODE_PEPPER_RING_JSON: ring,
-    })).toMatchObject({ enabled: true })
+    })).toMatchObject({ enabled: true, requireCanonicalPublicRing: true })
+    expect(loadInlineProtocolConfiguration({
+      NODE_ENV: "development",
+      INLINE_PROTOCOL_RSA_PRIVATE_KEYS_JSON: "[]",
+      INLINE_PROTOCOL_AUTH_KEY_KEK_RING_JSON: ring,
+      INLINE_PROTOCOL_AUTH_CODE_PEPPER_RING_JSON: ring,
+    })).toMatchObject({ enabled: true, requireCanonicalPublicRing: false })
   })
 })

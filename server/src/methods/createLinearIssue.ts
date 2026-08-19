@@ -39,8 +39,20 @@ import {
   type ProviderTaskIdentity,
 } from "@in/server/modules/integrations/providerTaskIdempotency"
 
+const LINEAR_PROVIDER_TIMEOUT_MS = 60_000
+
 type Context = {
   currentUserId: number
+  signal?: AbortSignal
+}
+
+const providerSignal = (requestSignal: AbortSignal | undefined): AbortSignal =>
+  requestSignal === undefined
+    ? AbortSignal.timeout(LINEAR_PROVIDER_TIMEOUT_MS)
+    : AbortSignal.any([requestSignal, AbortSignal.timeout(LINEAR_PROVIDER_TIMEOUT_MS)])
+
+const throwIfAborted = (signal: AbortSignal): void => {
+  if (signal.aborted) throw signal.reason ?? new DOMException("The operation was aborted", "AbortError")
 }
 
 export const Input = Type.Object({
@@ -58,10 +70,13 @@ export const Response = Type.Object({
 
 export const handler = async (
   input: Static<typeof Input>,
-  { currentUserId }: Context,
+  context: Context,
 ): Promise<Static<typeof Response>> => {
+  const { currentUserId } = context
+  const signal = providerSignal(context.signal)
   const startTime = Date.now()
   const { messageId, chatId } = input
+  throwIfAborted(signal)
   Log.shared.info("Starting Linear issue creation", {
     currentUserId,
     chatId,
@@ -79,6 +94,7 @@ export const handler = async (
       claimedSpaceId: input.spaceId,
     })
   } catch (error) {
+    if (signal.aborted) throw error
     Log.shared.warn("Linear issue requested without valid chat and space access", {
       chatId,
       messageId,
@@ -113,11 +129,11 @@ export const handler = async (
   const contextEnd = messageId + 10
 
   const loadedContext = await Promise.all([
-    getLinearTeams({ spaceId, requireSavedTeam: true }),
-    getLinearOrg({ spaceId }),
-    getLinearIssueLabels({ spaceId }),
+    getLinearTeams({ spaceId, requireSavedTeam: true, signal }),
+    getLinearOrg({ spaceId, signal }),
+    getLinearIssueLabels({ spaceId, signal }),
     db.select().from(users).where(eq(users.id, currentUserId)),
-    getLinearUsers({ spaceId }),
+    getLinearUsers({ spaceId, signal }),
     db
       .select({
         messageId: messages.messageId,
@@ -150,9 +166,11 @@ export const handler = async (
       .where(eq(chatParticipants.chatId, chatId))
       .limit(50),
   ]).catch((error) => {
+    if (signal.aborted) throw error
     Log.shared.error("Failed to load Linear issue context", { error, chatId, messageId, currentUserId, spaceId })
     return null
   })
+  throwIfAborted(signal)
   if (!loadedContext) return { link: undefined }
 
   const [teamData, orgData, labels, [actorUser], linearUsers, contextMessages, participantRows] = loadedContext
@@ -271,7 +289,9 @@ export const handler = async (
       },
     ],
     response_format: zodResponseFormat(issueSchema, "linearIssue"),
+    signal,
   }).catch((error) => {
+    if (signal.aborted) throw error
     Log.shared.error("Failed to generate Linear issue data", { error, chatId, messageId, currentUserId, spaceId })
     return null
   })
@@ -324,6 +344,7 @@ export const handler = async (
       spaceId,
       team: teamData,
       organizationUrlKey: orgData?.urlKey ?? "",
+      signal,
     })
 
     if (!result?.taskId) {
@@ -432,6 +453,10 @@ export const handler = async (
     })
     return { link: result.link }
   } catch (error) {
+    // A provider mutation may have committed even when its response was
+    // interrupted. Preserve commit-unknown rather than deleting a task on the
+    // basis of the local deadline.
+    if (signal.aborted) throw error
     const idempotencyConflict = isProviderTaskIdempotencyConflict(error)
     if (createdProviderTaskId && !providerTaskPersisted) {
       await deleteLinearIssue({ spaceId, issueId: createdProviderTaskId })
@@ -481,6 +506,7 @@ type CreateIssueProps = {
   currentUserId: number
   team: { id: string; key: string }
   organizationUrlKey: string
+  signal: AbortSignal
 }
 
 type CreateIssueResult = {
@@ -490,6 +516,7 @@ type CreateIssueResult = {
 }
 const createIssueFunc = async (props: CreateIssueProps): Promise<CreateIssueResult | undefined> => {
   try {
+    throwIfAborted(props.signal)
     const chatId = "threadId" in props.peerId ? props.peerId.threadId : undefined
     Log.shared.debug("Creating Linear issue via API", {
       spaceId: props.spaceId,
@@ -512,6 +539,7 @@ const createIssueFunc = async (props: CreateIssueProps): Promise<CreateIssueResu
       chatId: chatId ?? 0,
       labelIds: props.labelIds,
       assigneeId: props.assigneeId,
+      signal: props.signal,
     })
 
     return result
@@ -522,6 +550,7 @@ const createIssueFunc = async (props: CreateIssueProps): Promise<CreateIssueResu
         }
       : undefined
   } catch (error) {
+    if (props.signal.aborted) throw error
     Log.shared.error("Failed to create Linear issue", { error })
     return undefined
   }

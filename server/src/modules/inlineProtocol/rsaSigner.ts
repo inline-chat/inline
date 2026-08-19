@@ -82,7 +82,13 @@ const keyProfile = (privateKey: KeyObject): HandshakeRsaServerKey => {
 
 export const makeInlineProtocolRsaSigner = (
   json: string,
-  { requireOverlappingRing = true }: { requireOverlappingRing?: boolean } = {},
+  {
+    requireOverlappingRing = true,
+    requiredPublicRing,
+  }: {
+    requireOverlappingRing?: boolean
+    requiredPublicRing?: readonly InlineProtocolPublicRsaKey[]
+  } = {},
 ): InlineProtocolRsaSigner => {
   const configured = decodeConfiguration(json)
   const keys = configured.map((configuration) => {
@@ -101,7 +107,7 @@ export const makeInlineProtocolRsaSigner = (
   if (fingerprints.size !== advertised.length) {
     throw new InlineProtocolConfigurationError({ reason: "RSA key ring contains duplicate fingerprints" })
   }
-  return {
+  const signer: InlineProtocolRsaSigner = {
     handshakeKeys: advertised,
     publicKeyRing: advertised.map((key) => ({
       modulus: Buffer.from(key.modulus).toString("base64url"),
@@ -109,4 +115,10 @@ export const makeInlineProtocolRsaSigner = (
       fingerprint: key.fingerprint.toString(),
     })),
   }
+  if (requiredPublicRing && JSON.stringify(signer.publicKeyRing) !== JSON.stringify(requiredPublicRing)) {
+    throw new InlineProtocolConfigurationError({
+      reason: "configured RSA key ring does not match the canonical client ring",
+    })
+  }
+  return signer
 }

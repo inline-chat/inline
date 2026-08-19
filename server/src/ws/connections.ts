@@ -16,6 +16,14 @@ const log = new Log("ws-connections")
 
 const CLOSE_UNAUTHENTICATED_TIMEOUT = 20_000
 
+export const REALTIME_CLOSE_SESSION_REVOKED = 4401
+export const REALTIME_CLOSE_SESSION_REVOKED_REASON = "session_revoked"
+
+type ConnectionCloseContext = {
+  loggedOut?: boolean
+  authenticationInvalidated?: boolean
+}
+
 export enum ConnVersion {
   BASIC_V1 = 1,
   REALTIME_V1 = 2,
@@ -141,12 +149,16 @@ class ConnectionManager {
     }
   }
 
-  closeConnection(id: string, context: { loggedOut?: boolean } = {}) {
+  closeConnection(id: string, context: ConnectionCloseContext = {}) {
     log.debug(`Closing connection ${id}`)
     const connection = this.connections.get(id)
     if (connection) {
       try {
-        connection.ws.close()
+        if (context.authenticationInvalidated) {
+          connection.ws.close(REALTIME_CLOSE_SESSION_REVOKED, REALTIME_CLOSE_SESSION_REVOKED_REASON)
+        } else {
+          connection.ws.close()
+        }
       } catch (error) {
         log.error(error)
       }
@@ -154,17 +166,23 @@ class ConnectionManager {
     }
   }
 
-  sessionLoggedOut(userId: number, sessionId: number) {
-    this.closeConnectionForSession(userId, sessionId, { loggedOut: true })
+  sessionLoggedOut(userId: number, sessionId: number, exceptConnectionId?: string) {
+    this.closeConnectionForSession(userId, sessionId, { loggedOut: true }, exceptConnectionId)
   }
 
-  closeConnectionForSession(userId: number, sessionId: number, context: { loggedOut?: boolean } = {}) {
+  closeConnectionForSession(
+    userId: number,
+    sessionId: number,
+    context: ConnectionCloseContext = {},
+    exceptConnectionId?: string,
+  ) {
     const connectionIdsForUser = this.authenticatedUsers.get(userId)
     if (!connectionIdsForUser) {
       return
     }
 
     connectionIdsForUser.forEach((id) => {
+      if (id === exceptConnectionId) return
       const connection = this.connections.get(id)
       if (connection?.sessionId === sessionId) {
         this.closeConnection(id, context)
@@ -172,7 +190,7 @@ class ConnectionManager {
     })
   }
 
-  removeConnection(id: string, context: { loggedOut?: boolean } = {}) {
+  removeConnection(id: string, context: ConnectionCloseContext = {}) {
     log.debug(`Removing connection ${id}`)
     const connection = this.connections.get(id)
     if (connection) {

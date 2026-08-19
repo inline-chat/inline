@@ -18,6 +18,7 @@ Usage:
   inline-protocol-keys init OUT
   inline-protocol-keys status IN
   inline-protocol-keys export-public-ring IN OUT
+  inline-protocol-keys check-public-ring
   inline-protocol-keys rotate-{rsa,kek,pepper} IN OUT
   inline-protocol-keys retire-{rsa,kek,pepper} IN OUT ID --confirmed-safe
   inline-protocol-keys copy-environment IN
@@ -120,10 +121,15 @@ const retireRsa = (bundle: KeyBundle, fingerprint: string): KeyBundle => {
   return { ...bundle, rsaPrivateKeys: remaining }
 }
 
-const environmentPayload = (bundle: KeyBundle): string => [
-  `INLINE_PROTOCOL_RSA_PRIVATE_KEYS_JSON=${JSON.stringify(bundle.rsaPrivateKeys)}`,
-  `INLINE_PROTOCOL_AUTH_KEY_KEK_RING_JSON=${JSON.stringify(bundle.authKeyKekRing)}`,
-  `INLINE_PROTOCOL_AUTH_CODE_PEPPER_RING_JSON=${JSON.stringify(bundle.authCodePepperRing)}`,
+const dotenvQuoted = (value: string): string => {
+  if (value.includes("'")) throw new Error("Inline Protocol credential JSON cannot contain a single quote")
+  return `'${value}'`
+}
+
+export const environmentPayload = (bundle: KeyBundle): string => [
+  `INLINE_PROTOCOL_RSA_PRIVATE_KEYS_JSON=${dotenvQuoted(JSON.stringify(bundle.rsaPrivateKeys))}`,
+  `INLINE_PROTOCOL_AUTH_KEY_KEK_RING_JSON=${dotenvQuoted(JSON.stringify(bundle.authKeyKekRing))}`,
+  `INLINE_PROTOCOL_AUTH_CODE_PEPPER_RING_JSON=${dotenvQuoted(JSON.stringify(bundle.authCodePepperRing))}`,
 ].join("\n")
 
 const environmentVariables = (bundle: KeyBundle): Record<string, string> => ({
@@ -148,6 +154,34 @@ const copyToMacOSClipboard = async (payload: string): Promise<void> => {
 const printPublicRing = (bundle: KeyBundle): void => {
   const signer = makeInlineProtocolRsaSigner(JSON.stringify(bundle.rsaPrivateKeys))
   console.log(JSON.stringify({ rsaPublicKeyRing: signer.publicKeyRing }, null, 2))
+}
+
+type PublicRing = {
+  rsaPublicKeyRing: readonly { modulus: string; exponent: string; fingerprint: string }[]
+}
+
+export const publicRingsMatch = (left: PublicRing, right: PublicRing): boolean =>
+  JSON.stringify(left.rsaPublicKeyRing) === JSON.stringify(right.rsaPublicKeyRing)
+
+const checkConfiguredPublicRing = async (): Promise<void> => {
+  const { loadInlineProtocolConfiguration } = await import("../src/modules/inlineProtocol/config")
+  const configuration = loadInlineProtocolConfiguration()
+  if (!configuration.enabled) throw new Error("Inline Protocol credentials are not configured")
+  const configured: PublicRing = {
+    rsaPublicKeyRing: makeInlineProtocolRsaSigner(configuration.rsaPrivateKeysJson).publicKeyRing,
+  }
+  const canonical = JSON.parse(await readFile(resolve(
+    import.meta.dir,
+    "../../packages/protocol/trust-roots/inline-protocol-production.json",
+  ), "utf8")) as PublicRing
+  if (!publicRingsMatch(configured, canonical)) {
+    throw new Error("Configured Inline Protocol RSA ring does not match the canonical client ring")
+  }
+  console.log(JSON.stringify({
+    matching: true,
+    keyCount: configured.rsaPublicKeyRing.length,
+    fingerprints: configured.rsaPublicKeyRing.map(({ fingerprint }) => fingerprint),
+  }))
 }
 
 const writePublicRing = async (path: string, bundle: KeyBundle): Promise<void> => {
@@ -234,6 +268,10 @@ const main = async (): Promise<void> => {
   }
   if (command === "export-public-ring" && args.length === 2) {
     await writePublicRing(args[1]!, await readBundle(args[0]!))
+    return
+  }
+  if (command === "check-public-ring" && args.length === 0) {
+    await checkConfiguredPublicRing()
     return
   }
   if (command === "run" && args.length >= 3 && args[1] === "--") {

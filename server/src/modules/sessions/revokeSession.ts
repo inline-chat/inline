@@ -15,6 +15,7 @@ export type RevokeSessionInput = {
   actorUserId?: number
   targetUserId: number
   sessionId: number
+  preserveConnectionId?: string
 }
 
 export type RevokeSessionResult = {
@@ -81,7 +82,9 @@ export async function revokeSession(input: RevokeSessionInput): Promise<RevokeSe
     await finishGridSessionAccess(outcome.gridState, input.targetUserId, input.sessionId)
   }
   if (outcome.result.session) {
-    connectionManager.closeConnectionForSession(input.targetUserId, input.sessionId)
+    connectionManager.closeConnectionForSession(input.targetUserId, input.sessionId, {
+      authenticationInvalidated: true,
+    }, input.preserveConnectionId)
   }
   return outcome.result
 }

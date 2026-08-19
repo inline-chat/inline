@@ -28,6 +28,7 @@ import {
   parseClientIpMode,
 } from "@in/server/core/http/middleware"
 import {
+  coreProductionStartupErrorDetails,
   startCoreProductionServer,
   type CoreProductionServerHandle,
 } from "@in/server/core/http/productionHost"
@@ -159,5 +160,17 @@ export const runServer =
   }
 
 if (import.meta.main) {
-  await runServer()
+  try {
+    await runServer()
+  } catch (error) {
+    const details =
+      NODE_ENV === "development"
+        ? coreProductionStartupErrorDetails(error) ?? error
+        : { errorType: "CoreProductionStartupError" }
+    Log.shared.fatal(
+      "The server failed to start.",
+      details,
+    )
+    process.exitCode = 1
+  }
 }

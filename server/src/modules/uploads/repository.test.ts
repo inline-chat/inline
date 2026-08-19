@@ -8,9 +8,22 @@ import { PermanentAuthorizationKeyRepository } from "@in/server/db/models/inline
 import {
   INLINE_UPLOAD_PART_SIZE,
   InlineUploadMetadataConflictError,
+  InlineUploadPublicationConflictError,
   InlineUploadRepository,
+  inlineUploadFileUniqueId,
+  inlineUploadPublicationPath,
+  type InlineUploadPublication,
+  type InlineUploadRecord,
 } from "@in/server/db/models/inlineUploads"
-import { inlineUploads } from "@in/server/db/schema"
+import {
+  documents,
+  files,
+  inlineUploads,
+  photoSizes,
+  videos,
+  voices,
+} from "@in/server/db/schema"
+import { encrypt } from "@in/server/modules/encryption/encryption"
 import { makeAuthorizationKeyCipher } from "@in/server/modules/inlineProtocol/keyCipher"
 
 setDefaultTimeout(20_000)
@@ -22,10 +35,82 @@ const authorizationKeys = () => new PermanentAuthorizationKeyRepository(
   }),
 )
 
+const publicationFile = (
+  upload: InlineUploadRecord,
+  fileType: InlineUploadPublication["file"]["record"]["fileType"],
+): InlineUploadPublication["file"] => {
+  if (!upload.resultFileUniqueId) throw new Error("Expected a reserved publication identity")
+  const path = inlineUploadPublicationPath(upload.resultFileUniqueId)
+  const encryptedPath = encrypt(path)
+  const encryptedName = encrypt(upload.fileName)
+  return {
+    record: {
+      fileUniqueId: upload.resultFileUniqueId,
+      userId: upload.userId,
+      pathEncrypted: encryptedPath.encrypted,
+      pathIv: encryptedPath.iv,
+      pathTag: encryptedPath.authTag,
+      nameEncrypted: encryptedName.encrypted,
+      nameIv: encryptedName.iv,
+      nameTag: encryptedName.authTag,
+      fileType,
+      fileSize: Number(upload.byteCount),
+      mimeType: upload.mimeType,
+    },
+    path,
+    fileName: upload.fileName,
+  }
+}
+
+const publicationFor = (upload: InlineUploadRecord): InlineUploadPublication => {
+  switch (upload.kind) {
+    case "photo": return {
+      file: publicationFile(upload, "photo"),
+      media: {
+        kind: "photo",
+        format: "png",
+        width: 16,
+        height: 12,
+        stripped: null,
+        strippedIv: null,
+        strippedTag: null,
+      },
+    }
+    case "video": return {
+      file: publicationFile(upload, "video"),
+      media: {
+        kind: "video",
+        width: 20,
+        height: 10,
+        duration: 4,
+        isAnimated: false,
+        hasAudio: true,
+      },
+    }
+    case "document": {
+      const encryptedName = encrypt(upload.fileName)
+      return {
+        file: publicationFile(upload, "document"),
+        media: {
+          kind: "document",
+          fileName: encryptedName.encrypted,
+          fileNameIv: encryptedName.iv,
+          fileNameTag: encryptedName.authTag,
+        },
+      }
+    }
+    case "voice": return {
+      file: publicationFile(upload, "voice"),
+      media: { kind: "voice", duration: 3, waveform: Buffer.from([1, 2, 3]) },
+    }
+    default: throw new Error("Unexpected upload kind")
+  }
+}
+
 describe("native upload repository", () => {
   setupTestLifecycle()
 
-  test("reconciles out-of-order parts and caches a completed result", async () => {
+  test("reconciles parts and deterministically publishes through the current fence", async () => {
     const user = await testUtils.createUser("native-upload@example.com")
     const account = await testUtils.createSessionForUser(user.id)
     const permanentKey = new Uint8Array(256).fill(0x41)
@@ -70,7 +155,7 @@ describe("native upload repository", () => {
       byteCount: second.length,
       sha256: createHash("sha256").update(second).digest(),
       objectKey: "part-1",
-    })).toBe("accepted")
+    })).toEqual({ kind: "accepted", durableObjectKey: "part-1" })
     expect((await repository.get(created.upload.uploadId, owner))?.acceptedParts).toEqual([1])
 
     const first = bytes.subarray(0, INLINE_UPLOAD_PART_SIZE)
@@ -81,31 +166,131 @@ describe("native upload repository", () => {
       byteCount: first.length,
       sha256: firstDigest,
       objectKey: "part-0",
-    })).toBe("accepted")
+    })).toEqual({ kind: "accepted", durableObjectKey: "part-0" })
     expect(await repository.acceptPart({
       upload: created.upload,
       partIndex: 0,
       byteCount: first.length,
       sha256: firstDigest,
       objectKey: "ignored-duplicate-key",
-    })).toBe("already-present")
+    })).toEqual({ kind: "already-present", durableObjectKey: "part-0" })
 
     const claim = await repository.claimFinish(created.upload.uploadId, owner)
     expect(claim.kind).toBe("claimed")
     if (claim.kind !== "claimed") throw new Error("Expected an upload finalization claim")
     expect(claim.parts.map(({ partIndex }) => partIndex)).toEqual([0, 1])
-    expect(await repository.complete({
+    const fileUniqueId = inlineUploadFileUniqueId({ uploadId: created.upload.uploadId, kind: "document" })
+    expect(claim.upload.resultFileUniqueId).toBe(fileUniqueId)
+    const publication = publicationFor(claim.upload)
+
+    await repository.release({ uploadDbId: claim.upload.id, lockToken: claim.lockToken })
+    const reclaimed = await repository.claimFinish(created.upload.uploadId, owner)
+    expect(reclaimed.kind).toBe("claimed")
+    if (reclaimed.kind !== "claimed") throw new Error("Expected a replacement finalization claim")
+    expect(reclaimed.upload.resultFileUniqueId).toBe(fileUniqueId)
+
+    expect(await repository.publishComplete({
       uploadDbId: claim.upload.id,
       lockToken: claim.lockToken,
-      fileUniqueId: "INDnative",
-      mediaId: 44,
-    })).toBe(true)
+      publication,
+    })).toBeUndefined()
+    expect(await db.select().from(files).where(eq(files.fileUniqueId, fileUniqueId))).toHaveLength(0)
+
+    await expect(repository.publishComplete({
+      uploadDbId: reclaimed.upload.id,
+      lockToken: reclaimed.lockToken,
+      publication: {
+        ...publication,
+        file: { ...publication.file, path: `unexpected/${fileUniqueId}` },
+      },
+    })).rejects.toBeInstanceOf(InlineUploadPublicationConflictError)
+    expect(await db.select().from(files).where(eq(files.fileUniqueId, fileUniqueId))).toHaveLength(0)
+
+    // Treat the successful result as lost. A subsequent finish claim must
+    // reconcile from the committed upload row without publishing again.
+    await repository.publishComplete({
+      uploadDbId: reclaimed.upload.id,
+      lockToken: reclaimed.lockToken,
+      publication: publicationFor(reclaimed.upload),
+    })
 
     const cached = await repository.claimFinish(created.upload.uploadId, owner)
     expect(cached.kind).toBe("complete")
     if (cached.kind === "complete") {
-      expect(cached.upload.resultFileUniqueId).toBe("INDnative")
-      expect(cached.upload.resultMediaId).toBe(44)
+      expect(cached.upload.resultFileUniqueId).toBe(fileUniqueId)
+      expect(cached.upload.resultMediaId).toBeDefined()
+    }
+    const storedFiles = await db.select().from(files).where(eq(files.fileUniqueId, fileUniqueId))
+    expect(storedFiles).toHaveLength(1)
+    expect(await db.select().from(documents).where(eq(documents.fileId, storedFiles[0]!.id))).toHaveLength(1)
+
+    await db.update(inlineUploads).set({ expiresAt: new Date(0) })
+      .where(eq(inlineUploads.id, reclaimed.upload.id))
+    const cleanupClaim = await repository.claimExpiredCleanup(reclaimed.upload.id)
+    expect(cleanupClaim?.upload.status).toBe("complete")
+    expect(await repository.removeCleanupClaim(
+      reclaimed.upload.id,
+      cleanupClaim!.cleanupToken,
+    )).toBe(true)
+    expect(await db.select().from(files).where(eq(files.fileUniqueId, fileUniqueId))).toHaveLength(1)
+  })
+
+  test("publishes every native media kind inside the fenced transaction", async () => {
+    const user = await testUtils.createUser("native-upload-media-kinds@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const permanentKey = new Uint8Array(256).fill(0x44)
+    const permanentKeyId = authKeyId(permanentKey)
+    const keys = authorizationKeys()
+    await keys.create({ key: permanentKey, keyId: permanentKeyId, serverSalt: 4n, temporary: false })
+    await keys.authorize(permanentKeyId, user.id, account.session.id)
+    const owner = {
+      userId: user.id,
+      accountSessionId: account.session.id,
+      permanentAuthKeyId: permanentKeyId,
+    }
+    const repository = new InlineUploadRepository()
+    const kinds = ["photo", "video", "document", "voice"] as const
+
+    for (const [index, kind] of kinds.entries()) {
+      const bytes = new Uint8Array([index + 1, index + 2, index + 3])
+      const created = await repository.create(owner, {
+        clientUploadId: new Uint8Array(16).fill(index + 10),
+        fileName: `${kind}.bin`,
+        mimeType: "application/octet-stream",
+        byteCount: BigInt(bytes.length),
+        sha256: createHash("sha256").update(bytes).digest(),
+        kind,
+      })
+      await repository.acceptPart({
+        upload: created.upload,
+        partIndex: 0,
+        byteCount: bytes.length,
+        sha256: createHash("sha256").update(bytes).digest(),
+        objectKey: `${kind}-part`,
+      })
+      const claim = await repository.claimFinish(created.upload.uploadId, owner)
+      expect(claim.kind).toBe("claimed")
+      if (claim.kind !== "claimed") throw new Error("Expected an upload finalization claim")
+      const fileUniqueId = claim.upload.resultFileUniqueId
+      if (!fileUniqueId) throw new Error("Expected a reserved publication identity")
+      const result = await repository.publishComplete({
+        uploadDbId: claim.upload.id,
+        lockToken: claim.lockToken,
+        publication: publicationFor(claim.upload),
+      })
+      expect(result?.fileUniqueId).toBe(fileUniqueId)
+      const [storedFile] = await db.select().from(files)
+        .where(eq(files.fileUniqueId, fileUniqueId))
+      expect(storedFile).toBeDefined()
+      if (!storedFile) throw new Error("Expected a published file")
+      const mediaRows = kind === "photo"
+        ? await db.select().from(photoSizes).where(eq(photoSizes.fileId, storedFile.id))
+        : kind === "video"
+          ? await db.select().from(videos).where(eq(videos.fileId, storedFile.id))
+          : kind === "document"
+            ? await db.select().from(documents).where(eq(documents.fileId, storedFile.id))
+            : await db.select().from(voices).where(eq(voices.fileId, storedFile.id))
+      expect(mediaRows).toHaveLength(1)
     }
   })
 
@@ -144,5 +329,59 @@ describe("native upload repository", () => {
       .toEqual({ canceled: true, alreadyTerminal: true })
     expect(await repository.claimFinish(created.upload.uploadId, owner))
       .toEqual({ kind: "rejected" })
+  })
+
+  test("processing finalization owns cancellation and expired cleanup through its fence", async () => {
+    const user = await testUtils.createUser("native-upload-fence@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const permanentKey = new Uint8Array(256).fill(0x43)
+    const permanentKeyId = authKeyId(permanentKey)
+    const keys = authorizationKeys()
+    await keys.create({ key: permanentKey, keyId: permanentKeyId, serverSalt: 3n, temporary: false })
+    await keys.authorize(permanentKeyId, user.id, account.session.id)
+    const owner = {
+      userId: user.id,
+      accountSessionId: account.session.id,
+      permanentAuthKeyId: permanentKeyId,
+    }
+    const repository = new InlineUploadRepository()
+    const bytes = new Uint8Array([4, 5, 6])
+    const created = await repository.create(owner, {
+      clientUploadId: new Uint8Array(16).fill(3),
+      fileName: "fenced.bin",
+      mimeType: "application/octet-stream",
+      byteCount: BigInt(bytes.length),
+      sha256: createHash("sha256").update(bytes).digest(),
+      kind: "document",
+    })
+    await repository.acceptPart({
+      upload: created.upload,
+      partIndex: 0,
+      byteCount: bytes.length,
+      sha256: createHash("sha256").update(bytes).digest(),
+      objectKey: "fenced-part",
+    })
+    const claim = await repository.claimFinish(created.upload.uploadId, owner)
+    expect(claim.kind).toBe("claimed")
+    if (claim.kind !== "claimed") throw new Error("Expected an upload finalization claim")
+
+    expect(await repository.cancel(created.upload.uploadId, owner))
+      .toEqual({ canceled: false, alreadyTerminal: false })
+    expect(await repository.renew({ uploadDbId: claim.upload.id, lockToken: claim.lockToken }))
+      .toBe(true)
+    expect(await repository.renew({ uploadDbId: claim.upload.id, lockToken: new Uint8Array(32) }))
+      .toBe(false)
+
+    await db.update(inlineUploads).set({ expiresAt: new Date(0) })
+      .where(eq(inlineUploads.id, claim.upload.id))
+    expect(await repository.claimExpiredCleanup(claim.upload.id)).toBeUndefined()
+
+    await db.update(inlineUploads).set({ lockedAt: new Date(Date.now() - 6 * 60 * 1_000) })
+      .where(eq(inlineUploads.id, claim.upload.id))
+    const cleanupClaim = await repository.claimExpiredCleanup(claim.upload.id)
+    expect(cleanupClaim?.upload.status).toBe("processing")
+    expect(await repository.renew({ uploadDbId: claim.upload.id, lockToken: claim.lockToken }))
+      .toBe(false)
+    expect(await repository.removeCleanupClaim(claim.upload.id, cleanupClaim!.cleanupToken)).toBe(true)
   })
 })

@@ -19,19 +19,43 @@ export interface FileMetadata {
   fileName: string
 }
 
-export async function uploadFile(
+export type FileObjectIdentity = {
+  fileUniqueId: string
+  path: string
+}
+
+export type UploadedFileObject = {
+  dbFile: {
+    fileUniqueId: string
+    userId: number
+    pathEncrypted: Buffer
+    pathIv: Buffer
+    pathTag: Buffer
+    nameEncrypted: Buffer
+    nameIv: Buffer
+    nameTag: Buffer
+    fileType: FileTypes
+    fileSize: number
+    width?: number
+    height?: number
+    mimeType: string
+  }
+  fileUniqueId: string
+  path: string
+  prefix?: string
+}
+
+export async function uploadFileObject(
   file: File,
   fileType: FileTypes,
   metadata: FileMetadata,
   context: { userId: number },
-): Promise<{ dbFile: DbNewFile; fileUniqueId: string; prefix: string }> {
+  identity?: FileObjectIdentity,
+): Promise<UploadedFileObject> {
   let normalizedMetadata = metadata
   try {
     normalizedMetadata = normalizeMetadata(metadata)
-
-    if (file.size === 0) {
-      throw badRequest("Uploaded file is empty")
-    }
+    if (file.size === 0) throw badRequest("Uploaded file is empty")
 
     log.info("Starting file upload", {
       fileType,
@@ -43,15 +67,15 @@ export async function uploadFile(
       userId: context.userId,
     })
 
-    const fileUniqueId = generateFileUniqueId(fileType)
-    const prefix = nanoid(32)
+    const fileUniqueId = identity?.fileUniqueId ?? generateFileUniqueId(fileType)
     const suffix = normalizedMetadata.extension ? `.${normalizedMetadata.extension}` : ""
-    const path = `${fileUniqueId}/${prefix}${suffix}`
-    const bucketPath = `${FILES_PATH_PREFIX}/${path}`
-
-    // Upload file to bucket
+    const prefix = identity ? undefined : nanoid(32)
+    const path = identity?.path ?? `${fileUniqueId}/${prefix}${suffix}`
     try {
-      await uploadToBucket(file, { path: bucketPath, type: normalizedMetadata.mimeType })
+      await uploadToBucket(file, {
+        path: `${FILES_PATH_PREFIX}/${path}`,
+        type: normalizedMetadata.mimeType,
+      })
       log.info("File uploaded to bucket successfully", { fileType, userId: context.userId })
     } catch (error) {
       const storageError = describeStorageError(error)
@@ -68,7 +92,6 @@ export async function uploadFile(
 
     let encryptedPath: EncryptedData
     let encryptedName: EncryptedData
-
     try {
       encryptedPath = encrypt(path)
       encryptedName = encrypt(normalizedMetadata.fileName)
@@ -78,33 +101,25 @@ export async function uploadFile(
       throw new Error("Failed to encrypt file metadata", { cause: error as Error })
     }
 
-    const dbNewFile: DbNewFile = {
+    return {
       fileUniqueId,
-      userId: context.userId,
-      pathEncrypted: encryptedPath.encrypted,
-      pathIv: encryptedPath.iv,
-      pathTag: encryptedPath.authTag,
-      nameEncrypted: encryptedName.encrypted,
-      nameIv: encryptedName.iv,
-      nameTag: encryptedName.authTag,
-      fileType,
-      fileSize: file.size,
-      width: normalizedMetadata.width,
-      height: normalizedMetadata.height,
-      mimeType: normalizedMetadata.mimeType,
-    }
-
-    // Save to DB
-    try {
-      let [dbFile] = await db.insert(files).values(dbNewFile).returning()
-      if (!dbFile) {
-        throw new Error("No file returned from database")
-      }
-      log.info("File saved to database successfully", { fileUniqueId })
-      return { dbFile, fileUniqueId, prefix }
-    } catch (error) {
-      log.error("Failed to save file to database", { error, fileUniqueId })
-      throw new Error("Failed to save file to database", { cause: error as Error })
+      path,
+      prefix,
+      dbFile: {
+        fileUniqueId,
+        userId: context.userId,
+        pathEncrypted: encryptedPath.encrypted,
+        pathIv: encryptedPath.iv,
+        pathTag: encryptedPath.authTag,
+        nameEncrypted: encryptedName.encrypted,
+        nameIv: encryptedName.iv,
+        nameTag: encryptedName.authTag,
+        fileType,
+        fileSize: file.size,
+        width: normalizedMetadata.width,
+        height: normalizedMetadata.height,
+        mimeType: normalizedMetadata.mimeType,
+      },
     }
   } catch (error) {
     log.error("File upload failed", {
@@ -116,6 +131,29 @@ export async function uploadFile(
       userId: context.userId,
     })
     throw error
+  }
+}
+
+export async function uploadFile(
+  file: File,
+  fileType: FileTypes,
+  metadata: FileMetadata,
+  context: { userId: number },
+): Promise<{ dbFile: DbNewFile; fileUniqueId: string; prefix: string }> {
+  const prepared = await uploadFileObject(file, fileType, metadata, context)
+  if (!prepared.prefix) throw new Error("Generated file upload is missing its object prefix")
+
+  // Save to DB
+  try {
+    const [dbFile] = await db.insert(files).values(prepared.dbFile).returning()
+    if (!dbFile) {
+      throw new Error("No file returned from database")
+    }
+    log.info("File saved to database successfully", { fileUniqueId: prepared.fileUniqueId })
+    return { dbFile, fileUniqueId: prepared.fileUniqueId, prefix: prepared.prefix }
+  } catch (error) {
+    log.error("Failed to save file to database", { error, fileUniqueId: prepared.fileUniqueId })
+    throw new Error("Failed to save file to database", { cause: error as Error })
   }
 }
 

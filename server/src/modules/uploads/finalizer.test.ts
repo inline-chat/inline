@@ -26,13 +26,36 @@ const upload = {
 } as InlineUploadRecord
 
 describe("native upload finalizer integrity", () => {
+  test("does not begin publication after cancellation", async () => {
+    let reads = 0
+    const store: UploadPartStore = {
+      async put() { throw new Error("not used") },
+      async read() { reads += 1; return bytes },
+      async remove() {},
+    }
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(new UploadMediaFinalizer(store).preparePublication({
+      upload,
+      parts: [part],
+      assertOwnership: async () => {},
+      signal: controller.signal,
+    })).rejects.toMatchObject({ name: "AbortError" })
+    expect(reads).toBe(0)
+  })
+
   test("rejects substituted part bytes before media publication", async () => {
     const store: UploadPartStore = {
       async put() { throw new Error("not used") },
       async read() { return new TextEncoder().encode("altered part!") },
       async remove() {},
     }
-    await expect(new UploadMediaFinalizer(store).finalize({ upload, parts: [part] }))
+    await expect(new UploadMediaFinalizer(store).preparePublication({
+      upload,
+      parts: [part],
+      assertOwnership: async () => {},
+    }))
       .rejects.toBeInstanceOf(UploadIntegrityError)
   })
 
@@ -46,9 +69,10 @@ describe("native upload finalizer integrity", () => {
       ...upload,
       sha256: Buffer.alloc(32, 9),
     }
-    await expect(new UploadMediaFinalizer(store).finalize({
+    await expect(new UploadMediaFinalizer(store).preparePublication({
       upload: wrongCommitment,
       parts: [part],
+      assertOwnership: async () => {},
     })).rejects.toBeInstanceOf(UploadIntegrityError)
   })
 })

@@ -15,6 +15,7 @@
 
     // Bundler mode
     "moduleResolution": "bundler",
+    "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "jsx": "react-jsx",
@@ -29,6 +30,7 @@
     "noUncheckedIndexedAccess": true,
 
     "paths": {
+      "@inline-chat/protocol/trust-roots/inline-protocol-production.json": ["../packages/protocol/trust-roots/inline-protocol-production.json"],
       "@in/server": ["./src"],
       "@in/server/*": ["./src/*"],
       "@in/protocol": ["../packages/protocol/src"],

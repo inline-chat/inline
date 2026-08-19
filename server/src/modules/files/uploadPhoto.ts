@@ -119,7 +119,7 @@ export async function uploadPhoto(file: File, context: { userId: number }): Prom
   }
 }
 
-async function normalizePhotoUpload(
+export async function normalizePhotoUpload(
   file: File,
   metadata: Awaited<ReturnType<typeof getPhotoMetadataAndValidate>>,
 ): Promise<{

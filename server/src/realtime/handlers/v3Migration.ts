@@ -49,6 +49,9 @@ const legacyContext = (context: HandlerContext) => ({
   currentUserId: context.userId,
   currentSessionId: context.sessionId,
   ip: undefined,
+  // Keep the V3 deadline attached when a retained handler is the owner of the
+  // operation. Legacy handlers that do not consume it remain unchanged.
+  signal: context.signal,
 })
 
 const safeId = (value: bigint): number => {
@@ -195,7 +198,7 @@ export async function unregisterDeviceV3(context: HandlerContext): Promise<Unreg
 }
 
 export async function logOutV3(context: HandlerContext): Promise<LogOutResult> {
-  await logOut({}, legacyContext(context))
+  await logOut({}, legacyContext(context), { preserveConnectionId: context.connectionId })
   return { loggedOut: true }
 }
 

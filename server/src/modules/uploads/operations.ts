@@ -15,10 +15,14 @@ import {
   type UploadFailure,
 } from "@inline-chat/protocol/core"
 import { createHash } from "node:crypto"
+import { setTimeout as delay } from "node:timers/promises"
 import { MAX_FILE_SIZE } from "@in/server/config"
 import {
   INLINE_UPLOAD_MAX_PARTS,
+  InlineUploadAdmissionCapacityError,
+  InlineUploadAdmissionOwnerInvalidError,
   InlineUploadMetadataConflictError,
+  InlineUploadPublicationConflictError,
   InlineUploadRepository,
   type InlineUploadKind,
   type InlineUploadMetadata,
@@ -31,6 +35,7 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { Log } from "@in/server/utils/log"
 import {
   UploadIntegrityError,
+  UploadFinalizationOwnershipLostError,
   UploadMediaFinalizer,
   type MediaUploadFinalizer,
 } from "./finalizer"
@@ -46,7 +51,9 @@ const MAX_WAVEFORM_BYTES = 2_048
 const CLEANUP_BATCH_SIZE = 100
 const CLEANUP_MIN_INTERVAL_MS = 60_000
 const MAX_ACTIVE_UPLOADS_PER_SESSION = 20
+const MAX_ACTIVE_RESERVED_UPLOAD_BYTES_PER_SESSION = 2n * 1_024n * 1_024n * 1_024n
 const MAX_CONCURRENT_FINALIZERS = 4
+const FINALIZER_LEASE_RENEW_INTERVAL_MS = 60_000
 
 const kindFor = (kind: UploadKind): InlineUploadKind | undefined => {
   switch (kind) {
@@ -63,6 +70,10 @@ const badRequest = (): never => {
 }
 
 const requireValue = <T>(value: T | undefined): T => value ?? badRequest()
+
+const throwIfAborted = (signal: AbortSignal | undefined): void => {
+  if (signal?.aborted) throw signal.reason ?? new DOMException("The operation was aborted", "AbortError")
+}
 
 const validateCreate = (input: CreateUploadInput): InlineUploadMetadata => {
   const kind = kindFor(input.kind)
@@ -146,15 +157,17 @@ export class NativeUploadOperations {
   async create(input: CreateUploadInput, context: HandlerContext): Promise<CreateUploadResult> {
     this.#scheduleCleanup()
     const owner = await this.#owner(context)
-    if (!await this.repository.hasClientUpload(owner, input.clientUploadId) &&
-        await this.repository.activeCount(owner) >= MAX_ACTIVE_UPLOADS_PER_SESSION) {
-      throw RealtimeRpcError.RateLimit()
-    }
+    const metadata = validateCreate(input)
     let result
     try {
-      result = await this.repository.create(owner, validateCreate(input))
+      result = await this.repository.create(owner, metadata, {
+        maxActiveCount: MAX_ACTIVE_UPLOADS_PER_SESSION,
+        maxReservedBytes: MAX_ACTIVE_RESERVED_UPLOAD_BYTES_PER_SESSION,
+      })
     } catch (error) {
       if (error instanceof InlineUploadMetadataConflictError) badRequest()
+      if (error instanceof InlineUploadAdmissionCapacityError) throw RealtimeRpcError.RateLimit()
+      if (error instanceof InlineUploadAdmissionOwnerInvalidError) throw RealtimeRpcError.Unauthenticated()
       throw error
     }
     return {
@@ -167,9 +180,12 @@ export class NativeUploadOperations {
   }
 
   async savePart(input: SaveUploadPartInput, context: HandlerContext): Promise<SaveUploadPartResult> {
+    const startedAt = Date.now()
     this.#scheduleCleanup()
     const owner = await this.#owner(context)
+    const ownerDoneAt = Date.now()
     const upload = requireValue(await this.repository.get(input.uploadId, owner))
+    const uploadLookupDoneAt = Date.now()
     if (upload.status !== "uploading" || upload.expiresAt <= new Date() ||
         input.partIndex >= upload.partCount) return badRequest()
     const expected = input.partIndex === upload.partCount - 1
@@ -177,18 +193,34 @@ export class NativeUploadOperations {
       : upload.partSize
     if (input.data.length !== expected) return badRequest()
     const sha256 = createHash("sha256").update(input.data).digest()
+    const hashDoneAt = Date.now()
     const existing = await this.repository.getPart(upload.id, input.partIndex)
+    const existingLookupDoneAt = Date.now()
     if (existing) {
       if (existing.byteCount !== input.data.length ||
           !Buffer.from(existing.sha256).equals(sha256)) return badRequest()
+      log.debug("UPLOAD_TRACE phase=save_part_done", {
+        outcome: "already_present",
+        partIndex: input.partIndex,
+        byteCount: input.data.length,
+        ownerMs: ownerDoneAt - startedAt,
+        uploadLookupMs: uploadLookupDoneAt - ownerDoneAt,
+        hashMs: hashDoneAt - uploadLookupDoneAt,
+        existingLookupMs: existingLookupDoneAt - hashDoneAt,
+        objectStoreMs: 0,
+        acceptMs: 0,
+        elapsedMs: Date.now() - startedAt,
+      })
       return { alreadyPresent: true }
     }
+    const objectStoreStartedAt = Date.now()
     const objectKey = await this.partStore.put({
       uploadId: input.uploadId,
       partIndex: input.partIndex,
       sha256,
       data: input.data,
     })
+    const objectStoreDoneAt = Date.now()
     const accepted = await this.repository.acceptPart({
       upload,
       partIndex: input.partIndex,
@@ -196,11 +228,31 @@ export class NativeUploadOperations {
       sha256,
       objectKey,
     })
-    if (accepted === "conflict" || accepted === "terminal") {
-      await this.partStore.remove(objectKey).catch(() => {})
+    const acceptDoneAt = Date.now()
+    if (accepted.durableObjectKey !== objectKey) {
+      // The object-store write happens before the manifest transaction. Remove
+      // only the key that transaction proved has no durable owner; a matching
+      // key may belong to a concurrent/repeated accepted part.
+      await this.partStore.remove(objectKey).catch((error) => {
+        log.warn("Upload unowned staging object cleanup failed", { error })
+      })
+    }
+    if (accepted.kind === "conflict" || accepted.kind === "terminal") {
       return badRequest()
     }
-    return { alreadyPresent: accepted === "already-present" }
+    log.debug("UPLOAD_TRACE phase=save_part_done", {
+      outcome: accepted.kind === "already-present" ? "already_present_race" : "accepted",
+      partIndex: input.partIndex,
+      byteCount: input.data.length,
+      ownerMs: ownerDoneAt - startedAt,
+      uploadLookupMs: uploadLookupDoneAt - ownerDoneAt,
+      hashMs: hashDoneAt - uploadLookupDoneAt,
+      existingLookupMs: existingLookupDoneAt - hashDoneAt,
+      objectStoreMs: objectStoreDoneAt - objectStoreStartedAt,
+      acceptMs: acceptDoneAt - objectStoreDoneAt,
+      elapsedMs: acceptDoneAt - startedAt,
+    })
+    return { alreadyPresent: accepted.kind === "already-present" }
   }
 
   async state(input: GetUploadStateInput, context: HandlerContext): Promise<GetUploadStateResult> {
@@ -235,7 +287,10 @@ export class NativeUploadOperations {
   }
 
   async finish(input: FinishUploadInput, context: HandlerContext): Promise<FinishUploadResult> {
+    const startedAt = Date.now()
+    throwIfAborted(context.signal)
     const owner = await this.#owner(context)
+    throwIfAborted(context.signal)
     const claim = await this.repository.claimFinish(input.uploadId, owner)
     switch (claim.kind) {
       case "rejected": return badRequest()
@@ -263,7 +318,44 @@ export class NativeUploadOperations {
       await this.repository.release({ uploadDbId: claim.upload.id, lockToken: claim.lockToken })
       return { state: { oneofKind: "processing", processing: { retryAfterSeconds: RETRY_AFTER_SECONDS } } }
     }
+    // The claim is released if cancellation wins before publication starts.
+    // Once preparePublication begins, the object-store write is an
+    // irreversible boundary and an abort must not be interpreted as rollback.
+    if (context.signal?.aborted) {
+      await this.repository.release({ uploadDbId: claim.upload.id, lockToken: claim.lockToken })
+      throwIfAborted(context.signal)
+    }
     this.#activeFinalizers += 1
+    const leaseAbort = new AbortController()
+    let leaseLost = false
+    const renewLease = async (): Promise<void> => {
+      if (leaseLost || !await this.repository.renew({
+        uploadDbId: claim.upload.id,
+        lockToken: claim.lockToken,
+      })) {
+        leaseLost = true
+        throw new UploadFinalizationOwnershipLostError()
+      }
+    }
+    const leaseHeartbeat = (async () => {
+      while (!leaseAbort.signal.aborted) {
+        try {
+          await delay(FINALIZER_LEASE_RENEW_INTERVAL_MS, undefined, { signal: leaseAbort.signal })
+        } catch (error) {
+          if (leaseAbort.signal.aborted) return
+          leaseLost = true
+          log.warn("Upload finalization lease heartbeat failed", { error })
+          return
+        }
+        try {
+          await renewLease()
+        } catch (error) {
+          leaseLost = true
+          log.warn("Upload finalization lease was lost", { error })
+          return
+        }
+      }
+    })()
 
     try {
       const thumbnailPhotoId = claim.upload.thumbnailFileUniqueId
@@ -278,22 +370,41 @@ export class NativeUploadOperations {
         })
         return { state: { oneofKind: "failed", failed: failure(UploadFailure_Code.UPLOAD_FAILURE_INVALID_MEDIA, false) } }
       }
-      const result = await this.finalizer.finalize({
+      const finalizerStartedAt = Date.now()
+      const publication = await this.finalizer.preparePublication({
         upload: claim.upload,
         parts: claim.parts,
         thumbnailPhotoId,
+        assertOwnership: renewLease,
+        signal: context.signal,
       })
-      if (!await this.repository.complete({
+      const finalizedAt = Date.now()
+      const result = await this.repository.publishComplete({
         uploadDbId: claim.upload.id,
         lockToken: claim.lockToken,
-        fileUniqueId: result.fileUniqueId,
-        mediaId: result.mediaId,
-      })) {
+        publication,
+      })
+      if (!result) {
         return { state: { oneofKind: "processing", processing: { retryAfterSeconds: RETRY_AFTER_SECONDS } } }
       }
+      leaseAbort.abort()
+      const complete = await this.finalizer.project(claim.upload.kind, result.fileUniqueId, result.mediaId)
+      const completedAt = Date.now()
       await this.#removeParts(claim.parts.map(({ objectKey }) => objectKey))
-      return { state: { oneofKind: "complete", complete: result.complete } }
+      log.debug("UPLOAD_TRACE phase=finish_done", {
+        outcome: "complete",
+        kind: claim.upload.kind,
+        partCount: claim.parts.length,
+        finalizerMs: finalizedAt - finalizerStartedAt,
+        completionMs: completedAt - finalizedAt,
+        cleanupMs: Date.now() - completedAt,
+        elapsedMs: Date.now() - startedAt,
+      })
+      return { state: { oneofKind: "complete", complete } }
     } catch (error) {
+      if (error instanceof UploadFinalizationOwnershipLostError) {
+        return { state: { oneofKind: "processing", processing: { retryAfterSeconds: RETRY_AFTER_SECONDS } } }
+      }
       if (error instanceof UploadIntegrityError) {
         await this.repository.fail({
           uploadDbId: claim.upload.id,
@@ -306,6 +417,15 @@ export class NativeUploadOperations {
       if (error instanceof UploadPartStorageUnavailableError) {
         await this.repository.release({ uploadDbId: claim.upload.id, lockToken: claim.lockToken })
         return { state: { oneofKind: "failed", failed: failure(UploadFailure_Code.UPLOAD_FAILURE_STORAGE, true) } }
+      }
+      if (error instanceof InlineUploadPublicationConflictError) {
+        await this.repository.fail({
+          uploadDbId: claim.upload.id,
+          lockToken: claim.lockToken,
+          code: "publication_conflict",
+          retryable: false,
+        })
+        return { state: { oneofKind: "failed", failed: failure(UploadFailure_Code.UPLOAD_FAILURE_PROCESSING, false) } }
       }
       if (error instanceof InlineError &&
           (error.type === "BAD_REQUEST" || error.type === "FILE_TOO_LARGE")) {
@@ -320,6 +440,8 @@ export class NativeUploadOperations {
       await this.repository.release({ uploadDbId: claim.upload.id, lockToken: claim.lockToken })
       throw error
     } finally {
+      leaseAbort.abort()
+      await leaseHeartbeat
       this.#activeFinalizers -= 1
     }
   }
@@ -331,6 +453,7 @@ export class NativeUploadOperations {
     if (result.canceled) {
       const parts = await this.repository.parts(upload.id)
       await this.#removeParts(parts.map(({ objectKey }) => objectKey))
+      await this.#discardPublication(upload)
     }
     return result
   }
@@ -351,6 +474,17 @@ export class NativeUploadOperations {
     if (failures > 0) log.warn("Upload staging cleanup incomplete", { objectCount: objectKeys.length, failures })
   }
 
+  async #discardPublication(upload: InlineUploadRecord): Promise<boolean> {
+    if (!upload.resultFileUniqueId) return true
+    try {
+      await this.finalizer.discardPublication(upload)
+      return true
+    } catch (error) {
+      log.warn("Upload permanent publication cleanup incomplete", { error, uploadDbId: upload.id })
+      return false
+    }
+  }
+
   #scheduleCleanup(): void {
     const now = Date.now()
     if (this.#cleanupPromise || now - this.#lastCleanupStartedAt < CLEANUP_MIN_INTERVAL_MS) return
@@ -362,11 +496,14 @@ export class NativeUploadOperations {
 
   async #cleanupExpired(): Promise<void> {
     const expired = await this.repository.listExpired(CLEANUP_BATCH_SIZE)
-    for (const upload of expired) {
-      const parts = await this.repository.parts(upload.id)
+    for (const listedUpload of expired) {
+      const claim = await this.repository.claimExpiredCleanup(listedUpload.id)
+      if (!claim) continue
+      const parts = await this.repository.parts(claim.upload.id)
       const outcomes = await Promise.allSettled(parts.map(({ objectKey }) => this.partStore.remove(objectKey)))
       if (outcomes.some(({ status }) => status === "rejected")) continue
-      await this.repository.remove(upload.id)
+      if (claim.upload.status !== "complete" && !await this.#discardPublication(claim.upload)) continue
+      await this.repository.removeCleanupClaim(claim.upload.id, claim.cleanupToken)
     }
     if (expired.length > 0) log.info("Cleaned expired native uploads", { count: expired.length })
   }

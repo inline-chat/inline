@@ -111,7 +111,12 @@ export const revokeLinearToken = async (input: {
   return { ok: false }
 }
 
-export const queryLinear = async (input: { query: string; token: string; variables?: Record<string, unknown> }) => {
+export const queryLinear = async (input: {
+  query: string
+  token: string
+  variables?: Record<string, unknown>
+  signal?: AbortSignal
+}) => {
   return await fetch("https://api.linear.app/graphql", {
     method: "POST",
     headers: {
@@ -122,6 +127,7 @@ export const queryLinear = async (input: { query: string; token: string; variabl
       query: input.query,
       variables: input.variables,
     }),
+    signal: input.signal,
   })
 }
 
@@ -141,17 +147,19 @@ interface CreateIssueParams {
   chatId: number
   labelIds?: string[]
   assigneeId?: string
+  signal?: AbortSignal
 }
 
 export type LinearIssueLabel = { id: string; name: string }
 export type LinearWorkspaceUser = { id: string; name: string; email: string }
 
-const getLinearIssueLabels = async ({ spaceId }: { spaceId: number }): Promise<{ labels: LinearIssueLabel[] }> => {
+const getLinearIssueLabels = async ({ spaceId, signal }: { spaceId: number; signal?: AbortSignal }): Promise<{ labels: LinearIssueLabel[] }> => {
   const { accessToken } = await getLinearAccess(spaceId)
 
   const response = await queryLinear({
     query: "{ issueLabels { nodes { name createdAt id } } }",
     token: accessToken,
+    signal,
   })
 
   const labels = await response.json()
@@ -165,12 +173,13 @@ const getLinearIssueLabels = async ({ spaceId }: { spaceId: number }): Promise<{
   }
 }
 
-const getLinearIssueStatuses = async ({ spaceId }: { spaceId: number }) => {
+const getLinearIssueStatuses = async ({ spaceId, signal }: { spaceId: number; signal?: AbortSignal }) => {
   const { accessToken } = await getLinearAccess(spaceId)
 
   const response = await queryLinear({
     query: `{ workflowStates { nodes { id color type position description createdAt updatedAt } } }`,
     token: accessToken,
+    signal,
   })
 
   const workflowStates = await response.json()
@@ -186,12 +195,13 @@ const getLinearIssueStatuses = async ({ spaceId }: { spaceId: number }) => {
 
 export type LinearTeam = { id: string; name: string; key: string }
 
-const listLinearTeams = async ({ spaceId }: { spaceId: number }): Promise<LinearTeam[]> => {
+const listLinearTeams = async ({ spaceId, signal }: { spaceId: number; signal?: AbortSignal }): Promise<LinearTeam[]> => {
   const { accessToken } = await getLinearAccess(spaceId)
 
   const response = await queryLinear({
     query: "{ teams { nodes { id name key } } }",
     token: accessToken,
+    signal,
   })
 
   const teamsData = await response.json()
@@ -206,12 +216,14 @@ const listLinearTeams = async ({ spaceId }: { spaceId: number }): Promise<Linear
 const getLinearTeams = async ({
   spaceId,
   requireSavedTeam = false,
+  signal,
 }: {
   spaceId: number
   requireSavedTeam?: boolean
+  signal?: AbortSignal
 }): Promise<LinearTeam | undefined> => {
   const { linearTeamId } = await getLinearAccess(spaceId)
-  const teams = await listLinearTeams({ spaceId })
+  const teams = await listLinearTeams({ spaceId, signal })
 
   if (teams.length === 0) return undefined
   if (requireSavedTeam && !linearTeamId) return undefined
@@ -223,12 +235,13 @@ const getLinearTeams = async ({
   return requireSavedTeam ? undefined : teams[0]
 }
 
-const getLinearOrg = async ({ spaceId }: { spaceId: number }): Promise<Organization | undefined> => {
+const getLinearOrg = async ({ spaceId, signal }: { spaceId: number; signal?: AbortSignal }): Promise<Organization | undefined> => {
   const { accessToken } = await getLinearAccess(spaceId)
 
   const response = await queryLinear({
     query: "{ organization{ id name urlKey} }",
     token: accessToken,
+    signal,
   })
 
   const orgData = await response.json()
@@ -240,7 +253,7 @@ const getLinearOrg = async ({ spaceId }: { spaceId: number }): Promise<Organizat
   return orgData.data.organization
 }
 
-const getLinearUser = async ({ spaceId }: { spaceId: number }) => {
+const getLinearUser = async ({ spaceId, signal }: { spaceId: number; signal?: AbortSignal }) => {
   const { accessToken } = await getLinearAccess(spaceId)
 
   const response = await fetch("https://api.linear.app/graphql", {
@@ -252,6 +265,7 @@ const getLinearUser = async ({ spaceId }: { spaceId: number }) => {
     body: JSON.stringify({
       query: "{ viewer { id name email } }",
     }),
+    signal,
   })
 
   const userData = await response.json()
@@ -265,12 +279,13 @@ const getLinearUser = async ({ spaceId }: { spaceId: number }) => {
   }
 }
 
-const getLinearUsers = async ({ spaceId }: { spaceId: number }): Promise<{ users: LinearWorkspaceUser[] }> => {
+const getLinearUsers = async ({ spaceId, signal }: { spaceId: number; signal?: AbortSignal }): Promise<{ users: LinearWorkspaceUser[] }> => {
   const { accessToken } = await getLinearAccess(spaceId)
 
   const response = await queryLinear({
     query: `{ users { nodes { id name email } } }`,
     token: accessToken,
+    signal,
   })
 
   const usersData = await response.json()
@@ -291,6 +306,7 @@ const createIssue = async ({
   teamId,
   labelIds = [],
   assigneeId,
+  signal,
 }: CreateIssueParams): Promise<Issue | undefined> => {
   const { accessToken } = await getLinearAccess(spaceId)
 
@@ -326,6 +342,7 @@ const createIssue = async ({
         assigneeId,
       },
     }),
+    signal,
   })
   let result: any
   let rawText: string | undefined
@@ -380,7 +397,11 @@ const createIssue = async ({
   return issueCreate.issue
 }
 
-const deleteLinearIssue = async ({ spaceId, issueId }: { spaceId: number; issueId: string }) => {
+const deleteLinearIssue = async ({
+  spaceId,
+  issueId,
+  signal,
+}: { spaceId: number; issueId: string; signal?: AbortSignal }) => {
   const { accessToken } = await getLinearAccess(spaceId)
 
   const response = await queryLinear({
@@ -391,6 +412,7 @@ const deleteLinearIssue = async ({ spaceId, issueId }: { spaceId: number; issueI
     }`,
     token: accessToken,
     variables: { id: issueId },
+    signal,
   })
 
   const result = await response.json()

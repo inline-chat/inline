@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { constants, generateKeyPairSync, publicEncrypt } from "node:crypto"
+import { InlineProtocolConfigurationError } from "./errors"
 import { makeInlineProtocolRsaSigner } from "./rsaSigner"
 
 const makePem = () => {
@@ -30,5 +31,28 @@ describe("Inline Protocol RSA signer boundary", () => {
     const json = JSON.stringify([{ privateKeyPem: key.privateKeyPem }])
     expect(() => makeInlineProtocolRsaSigner(json)).toThrow()
     expect(makeInlineProtocolRsaSigner(json, { requireOverlappingRing: false }).publicKeyRing.length).toBe(1)
+  })
+
+  test("fails closed when a production signer differs from the required client ring", () => {
+    const first = makePem()
+    const second = makePem()
+    const json = JSON.stringify([
+      { privateKeyPem: first.privateKeyPem },
+      { privateKeyPem: second.privateKeyPem },
+    ])
+    const signer = makeInlineProtocolRsaSigner(json)
+    expect(makeInlineProtocolRsaSigner(json, { requiredPublicRing: signer.publicKeyRing }).publicKeyRing)
+      .toEqual(signer.publicKeyRing)
+    try {
+      makeInlineProtocolRsaSigner(json, {
+        requiredPublicRing: signer.publicKeyRing.map((key, index) => index === 0
+          ? { ...key, modulus: `${key.modulus}mismatch` }
+          : key),
+      })
+      throw new Error("expected signer validation to fail")
+    } catch (error) {
+      expect(error).toBeInstanceOf(InlineProtocolConfigurationError)
+      expect((error as InlineProtocolConfigurationError).reason).toContain("canonical client ring")
+    }
   })
 })

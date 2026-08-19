@@ -4,6 +4,7 @@ import { decodeInlineProtocolSecretKeyRing, type InlineProtocolSecretKeyRing } f
 export type InlineProtocolDisabledConfiguration = { enabled: false }
 export type InlineProtocolEnabledConfiguration = {
   enabled: true
+  requireCanonicalPublicRing: boolean
   rsaPrivateKeysJson: string
   authKeyKekRing: InlineProtocolSecretKeyRing
   authCodePepperRing: InlineProtocolSecretKeyRing
@@ -37,6 +38,10 @@ export const loadInlineProtocolConfiguration = (
   }
   return {
     enabled: true,
+    // Local plaintext Debug endpoints intentionally publish process-local
+    // verification keys. Every production endpoint must match the release
+    // clients' pinned overlapping ring before the listener becomes ready.
+    requireCanonicalPublicRing: environment["NODE_ENV"] === "production",
     rsaPrivateKeysJson,
     authKeyKekRing: requiredRing(environment, "INLINE_PROTOCOL_AUTH_KEY_KEK_RING_JSON"),
     authCodePepperRing: requiredRing(environment, "INLINE_PROTOCOL_AUTH_CODE_PEPPER_RING_JSON"),

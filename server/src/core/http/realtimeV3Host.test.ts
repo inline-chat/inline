@@ -5,21 +5,30 @@ import {
   InlineHandshakeClient,
   MessageIdGenerator,
   ServiceConstructor,
+  authKeyId,
   bytesToHex,
   createObfuscatedClientHeader,
   decodeAbridgedFrame,
   decodeAbridgedPacket,
   decodeInlineApplicationObject,
+  decodeMsgsAck,
   decodeRpcResult,
   decryptRecord,
   decryptRecordWithMetadata,
   encodeAbridgedPacket,
   encodeInlineInvoke,
+  encodePing,
   encryptRecord,
   isValidObfuscatedHeader,
+  readInt64LE,
   serviceConstructor,
 } from "@inline-chat/protocol/secure"
-import { RealtimeV3Request, RealtimeV3Response } from "@inline-chat/protocol/core"
+import {
+  RealtimeV3Request,
+  RealtimeV3Response,
+  RealtimeV3Update,
+  ServerProtocolMessage,
+} from "@inline-chat/protocol/core"
 import {
   decodeUnencryptedRecord,
   encodeUnencryptedRecord,
@@ -35,6 +44,7 @@ import {
   type InlineProtocolWebSocketData,
 } from "./realtimeV3Host"
 import { InlineProtocolClock } from "@in/server/modules/inlineProtocol/clockHealth"
+import { connectionManager } from "@in/server/ws/connections"
 
 class MemoryKeys implements ServerAuthorizationKeyRepository {
   readonly values = new Map<string, LoadedServerAuthorizationKey>()
@@ -59,7 +69,10 @@ class MemoryKeys implements ServerAuthorizationKeyRepository {
 const fixture = (
   operations: unknown = {},
   clock: Pick<InlineProtocolClock, "assertHealthy" | "nowMilliseconds"> = new InlineProtocolClock(),
-): InlineProtocolRuntime & { clientKey: ReturnType<typeof makeRsaPublicKey> } => {
+): InlineProtocolRuntime & {
+  clientKey: ReturnType<typeof makeRsaPublicKey>
+  authorizationKeys: MemoryKeys
+} => {
   const pair = generateKeyPairSync("rsa", { modulusLength: 2048, publicExponent: 65537 })
   const jwk = pair.publicKey.export({ format: "jwk" })
   const clientKey = makeRsaPublicKey(
@@ -90,6 +103,12 @@ const fixture = (
 
 const paddingFor = (bodyLength: number): Uint8Array =>
   randomBytes(12 + ((16 - ((32 + bodyLength + 12) % 16)) % 16))
+
+const deferred = () => {
+  let resolve!: () => void
+  const promise = new Promise<void>((continuation) => { resolve = continuation })
+  return { promise, resolve }
+}
 
 const upgrade = (
   transport: ReturnType<typeof makeInlineProtocolRealtimeTransport>,
@@ -175,6 +194,62 @@ describe("Inline Protocol WebSocket carrier", () => {
     await transport.shutdown()
   })
 
+  test("asks clients to replace a process-local authorization key forgotten on restart", async () => {
+    const transport = makeInlineProtocolRealtimeTransport(fixture())
+    const data = upgrade(transport)
+    const closes: Array<[number, string]> = []
+    const socket = {
+      data,
+      close: (code: number, reason: string) => closes.push([code, reason]),
+      sendBinary: () => 0,
+    } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+    transport.websocket.open?.(socket)
+
+    let headerBytes: Uint8Array
+    do headerBytes = Uint8Array.from(randomBytes(64))
+    while (!isValidObfuscatedHeader(headerBytes))
+    const carrier = createObfuscatedClientHeader(headerBytes, 1)
+    await transport.websocket.message(socket, Buffer.from(carrier.wireHeader))
+    await data.state?.queue
+
+    const forgottenKey = Uint8Array.from(randomBytes(256))
+    const ping = encodePing(123n)
+    const record = encryptRecord(forgottenKey, "client-to-server", {
+      serverSalt: 456n,
+      sessionId: 789n,
+      messageId: new MessageIdGenerator().next(Date.now(), 1, 0),
+      sequenceNumber: 0,
+      body: ping,
+    }, paddingFor(ping.length))
+    await transport.websocket.message(socket, Buffer.from(
+      carrier.outbound.process(encodeAbridgedPacket(record)),
+    ))
+    await data.state?.queue
+
+    expect(closes).toEqual([[4401, "session_revoked"]])
+    await transport.shutdown()
+  })
+
+  test("closes overloaded sockets before copying another inbound frame", async () => {
+    const transport = makeInlineProtocolRealtimeTransport(fixture())
+    const data = upgrade(transport)
+    const closes: Array<[number, string]> = []
+    const socket = {
+      data,
+      close: (code: number, reason: string) => closes.push([code, reason]),
+      sendBinary: () => 0,
+    } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+    transport.websocket.open?.(socket)
+    if (!data.state) throw new Error("Expected open connection state")
+    data.state.inboundQueuedBytes = 32 * 1024 * 1024
+
+    await transport.websocket.message(socket, Buffer.alloc(4))
+
+    expect(closes).toEqual([[1013, "Realtime V3 overloaded"]])
+    expect(data.state.inboundQueuedFrames).toBe(0)
+    await transport.shutdown()
+  })
+
   test("refuses new V3 upgrades after a dangerous server clock step", async () => {
     let wall = 1_000_000
     let monotonic = 10_000
@@ -189,6 +264,52 @@ describe("Inline Protocol WebSocket carrier", () => {
     const request = new Request("http://inline.test/realtime/v3")
 
     expect(transport.rejectUnsupportedUpgrade(request)?.status).toBe(503)
+    await transport.shutdown()
+  })
+
+  test("rejects handshakes above the per-IP admission limit before upgrading", async () => {
+    const transport = makeInlineProtocolRealtimeTransport(fixture())
+    let upgrades = 0
+    const server = {
+      requestIP: () => ({ address: "127.0.0.1" }),
+      upgrade: () => {
+        upgrades += 1
+        return true
+      },
+    } as unknown as Server<InlineProtocolWebSocketData>
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const request = new Request("http://inline.test/realtime/v3")
+      expect(transport.tryUpgrade(request, server)).toBe(true)
+    }
+
+    const rejected = new Request("http://inline.test/realtime/v3")
+    expect(transport.tryUpgrade(rejected, server)).toBe(false)
+    expect(transport.rejectUnsupportedUpgrade(rejected)?.status).toBe(503)
+    expect(upgrades).toBe(8)
+    await transport.shutdown()
+  })
+
+  test("rate-limits repeated handshake starts from one IP", async () => {
+    const transport = makeInlineProtocolRealtimeTransport(fixture())
+    let data: InlineProtocolWebSocketData | undefined
+    const server = {
+      requestIP: () => ({ address: "127.0.0.1" }),
+      upgrade: (_request: Request, options: { data: InlineProtocolWebSocketData }) => {
+        data = options.data
+        return true
+      },
+    } as unknown as Server<InlineProtocolWebSocketData>
+
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      expect(transport.tryUpgrade(new Request("http://inline.test/realtime/v3"), server)).toBe(true)
+      const socket = { data: data!, close: () => {} } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+      transport.websocket.close?.(socket, 1000, "test close")
+    }
+
+    const rejected = new Request("http://inline.test/realtime/v3")
+    expect(transport.tryUpgrade(rejected, server)).toBe(false)
+    expect(transport.rejectUnsupportedUpgrade(rejected)?.status).toBe(503)
     await transport.shutdown()
   })
 
@@ -303,6 +424,9 @@ describe("Inline Protocol WebSocket carrier", () => {
       carrier.outbound.process(encodeAbridgedPacket(record, true)),
     ))
     await data.state?.queue
+    await Promise.all(data.state?.applicationTasks ?? [])
+    await data.state?.queue
+    await data.state?.outboundQueue
 
     const expectedQuickAck = decryptRecordWithMetadata(record, established.key, {
       direction: "client-to-server",
@@ -335,4 +459,248 @@ describe("Inline Protocol WebSocket carrier", () => {
     }
     await transport.shutdown()
   }, 20_000)
+
+  test("admits independent application RPCs while earlier handlers are still running", async () => {
+    const runtime = fixture()
+    const key = Uint8Array.from(randomBytes(256))
+    const keyId = authKeyId(key)
+    const serverSalt = 0x1020_3040_5060_7080n
+    const sessionId = 0x1122_3344n
+    runtime.authorizationKeys.values.set(bytesToHex(keyId), {
+      key,
+      keyId,
+      temporary: true,
+      expiresAt: Math.floor(Date.now() / 1_000) + 600,
+      currentServerSalt: serverSalt,
+      binding: {
+        permanentAuthKeyId: Uint8Array.from(randomBytes(8)),
+        temporarySessionId: sessionId,
+        nonce: 1n,
+        expiresAt: Math.floor(Date.now() / 1_000) + 600,
+        userId: 42,
+        accountSessionId: 84,
+      },
+    })
+    const firstGate = deferred()
+    const secondGate = deferred()
+    const thirdGate = deferred()
+    const started: number[] = []
+    let runtimeClosed = false
+    runtime.close = () => { runtimeClosed = true }
+    const transport = makeInlineProtocolRealtimeTransport(runtime, {
+      applicationDispatcherFactory: () => ({
+        dispatch: async ({ payload, markExecutionStarted }) => {
+          markExecutionStarted()
+          const value = payload[0]!
+          started.push(value)
+          if (value === 1) await firstGate.promise
+          if (value === 2) await secondGate.promise
+          if (value === 3) await thirdGate.promise
+          return { kind: "result", payload: Uint8Array.of(value + 10) }
+        },
+      }),
+    })
+    const data = upgrade(transport)
+    const sent: Uint8Array[] = []
+    const socket = {
+      data,
+      close: () => {},
+      sendBinary: (bytes: Uint8Array) => { sent.push(bytes.slice()); return bytes.length },
+    } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+    transport.websocket.open?.(socket)
+
+    let headerBytes: Uint8Array
+    do headerBytes = Uint8Array.from(randomBytes(64))
+    while (!isValidObfuscatedHeader(headerBytes))
+    const carrier = createObfuscatedClientHeader(headerBytes, 1)
+    await transport.websocket.message(socket, Buffer.from(carrier.wireHeader))
+    await data.state?.queue
+
+    const ids = new MessageIdGenerator()
+    const firstMessageId = ids.next(Date.now(), 1, 0)
+    const secondMessageId = ids.next(Date.now(), 2, 0)
+    const pingMessageId = ids.next(Date.now(), 3, 0)
+    const thirdMessageId = ids.next(Date.now(), 4, 0)
+    const sendInvoke = async (messageId: bigint, sequenceNumber: number, value: number): Promise<void> => {
+      const body = encodeInlineInvoke(Uint8Array.of(value))
+      const record = encryptRecord(key, "client-to-server", {
+        serverSalt, sessionId, messageId, sequenceNumber, body,
+      }, paddingFor(body.length))
+      await transport.websocket.message(socket, Buffer.from(
+        carrier.outbound.process(encodeAbridgedPacket(record)),
+      ))
+      await data.state?.queue
+      await data.state?.outboundQueue
+    }
+    const drainBodies = (): Uint8Array[] => sent.splice(0).map((frame) => {
+      const decoded = decodeAbridgedFrame(carrier.inbound.process(frame))
+      if (decoded.kind !== "packet") throw new Error("Expected an encrypted packet")
+      return decryptRecord(decoded.payload, key, {
+        direction: "server-to-client",
+        sessionId,
+        validServerSalts: new Set([serverSalt]),
+        nowSeconds: Date.now() / 1_000,
+      }).body
+    })
+    const waitForOutput = async (): Promise<void> => {
+      for (let attempt = 0; attempt < 100 && sent.length === 0; attempt += 1) await Bun.sleep(1)
+      expect(sent.length).toBeGreaterThan(0)
+    }
+
+    await sendInvoke(firstMessageId, 1, 1)
+    await sendInvoke(secondMessageId, 3, 2)
+    const pingId = 0x0102_0304_0506_0708n
+    const pingBody = encodePing(pingId)
+    const pingRecord = encryptRecord(key, "client-to-server", {
+      serverSalt,
+      sessionId,
+      messageId: pingMessageId,
+      sequenceNumber: 4,
+      body: pingBody,
+    }, paddingFor(pingBody.length))
+    await transport.websocket.message(socket, Buffer.from(
+      carrier.outbound.process(encodeAbridgedPacket(pingRecord)),
+    ))
+    await data.state?.queue
+    await data.state?.outboundQueue
+    expect(started).toEqual([1, 2])
+    const immediateBodies = drainBodies()
+    expect(immediateBodies.some((body) => serviceConstructor(body) === ServiceConstructor.rpcResult)).toBeFalse()
+    const acknowledged = immediateBodies
+      .filter((body) => serviceConstructor(body) === ServiceConstructor.msgsAck)
+      .flatMap((body) => decodeMsgsAck(body))
+    expect(acknowledged).toContain(firstMessageId)
+    expect(acknowledged).toContain(secondMessageId)
+    const pong = immediateBodies.find((body) => serviceConstructor(body) === ServiceConstructor.pong)
+    expect(pong).toBeDefined()
+    expect(readInt64LE(pong!, 4)).toBe(pingMessageId)
+    expect(readInt64LE(pong!, 12)).toBe(pingId)
+
+    secondGate.resolve()
+    await waitForOutput()
+    const secondResult = drainBodies()
+      .find((body) => serviceConstructor(body) === ServiceConstructor.rpcResult)
+    expect(secondResult).toBeDefined()
+    expect(decodeRpcResult(secondResult!).requestMessageId).toBe(secondMessageId)
+
+    firstGate.resolve()
+    await waitForOutput()
+    const firstResult = drainBodies()
+      .find((body) => serviceConstructor(body) === ServiceConstructor.rpcResult)
+    expect(firstResult).toBeDefined()
+    expect(decodeRpcResult(firstResult!).requestMessageId).toBe(firstMessageId)
+
+    await sendInvoke(thirdMessageId, 5, 3)
+    expect(started).toEqual([1, 2, 3])
+    drainBodies()
+    transport.websocket.close?.(socket, 1000, "test close")
+    const sentAfterClose = sent.length
+    let shutdownFinished = false
+    const shutdown = transport.shutdown().then(() => { shutdownFinished = true })
+    await Bun.sleep(5)
+    expect(shutdownFinished).toBeFalse()
+    expect(runtimeClosed).toBeFalse()
+    thirdGate.resolve()
+    await shutdown
+    expect(shutdownFinished).toBeTrue()
+    expect(runtimeClosed).toBeTrue()
+    expect(sent).toHaveLength(sentAfterClose)
+
+  })
+
+  test("reserves compatibility fanout bytes before queueing retained updates", async () => {
+    const runtime = fixture()
+    const key = Uint8Array.from(randomBytes(256))
+    const keyId = authKeyId(key)
+    const serverSalt = 0x1020_3040_5060_7080n
+    const sessionId = 0x5566_7788n
+    runtime.authorizationKeys.values.set(bytesToHex(keyId), {
+      key,
+      keyId,
+      temporary: true,
+      expiresAt: Math.floor(Date.now() / 1_000) + 600,
+      currentServerSalt: serverSalt,
+      binding: {
+        permanentAuthKeyId: Uint8Array.from(randomBytes(8)),
+        temporarySessionId: sessionId,
+        nonce: 1n,
+        expiresAt: Math.floor(Date.now() / 1_000) + 600,
+        userId: 42,
+        accountSessionId: 84,
+      },
+    })
+    const legacyUpdate = ServerProtocolMessage.toBinary({
+      id: 1n,
+      body: {
+        oneofKind: "message",
+        message: {
+          payload: {
+            oneofKind: "update",
+            update: { updates: [] },
+          },
+        },
+      },
+    })
+    const decodedLegacy = ServerProtocolMessage.fromBinary(legacyUpdate)
+    if (decodedLegacy.body.oneofKind !== "message") throw new Error("Expected legacy update message")
+    const retainedBytes = RealtimeV3Update.toBinary({ message: decodedLegacy.body.message }).length
+    const transport = makeInlineProtocolRealtimeTransport(runtime, {
+      maximumBufferedApplicationUpdateBytes: retainedBytes,
+      applicationDispatcherFactory: ({ onAuthorized }) => ({
+        dispatch: async ({ authorization, markExecutionStarted }) => {
+          markExecutionStarted()
+          onAuthorized(authorization)
+          return { kind: "result", payload: Uint8Array.of(1) }
+        },
+      }),
+    })
+    const data = upgrade(transport)
+    const closes: Array<[number, string]> = []
+    const socket = {
+      data,
+      close: (code: number, reason: string) => closes.push([code, reason]),
+      sendBinary: (bytes: Uint8Array) => bytes.length,
+    } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+    transport.websocket.open?.(socket)
+
+    let headerBytes: Uint8Array
+    do headerBytes = Uint8Array.from(randomBytes(64))
+    while (!isValidObfuscatedHeader(headerBytes))
+    const carrier = createObfuscatedClientHeader(headerBytes, 1)
+    await transport.websocket.message(socket, Buffer.from(carrier.wireHeader))
+    await data.state?.queue
+
+    const application = encodeInlineInvoke(Uint8Array.of(1))
+    const record = encryptRecord(key, "client-to-server", {
+      serverSalt,
+      sessionId,
+      messageId: new MessageIdGenerator().next(Date.now(), 1, 0),
+      sequenceNumber: 1,
+      body: application,
+    }, paddingFor(application.length))
+    await transport.websocket.message(socket, Buffer.from(
+      carrier.outbound.process(encodeAbridgedPacket(record)),
+    ))
+    await data.state?.queue
+    await Promise.all(data.state?.applicationTasks ?? [])
+    await data.state?.queue
+    await data.state?.outboundQueue
+
+    const compatibility = connectionManager.getConnection(data.id)?.ws.raw
+    expect(compatibility).toBeDefined()
+    if (!data.state || !compatibility) throw new Error("Expected registered V3 compatibility connection")
+    const outboundGate = deferred()
+    data.state.outboundQueue = outboundGate.promise
+
+    expect(compatibility.sendBinary(legacyUpdate, true)).toBe(legacyUpdate.length)
+    expect(compatibility.sendBinary(legacyUpdate, true)).toBe(0)
+    expect(closes).toContainEqual([1013, "Realtime V3 overloaded"])
+
+    outboundGate.resolve()
+    await data.state.queue
+    await data.state.outboundQueue
+    transport.websocket.close?.(socket, 1000, "test close")
+    await transport.shutdown()
+  })
+
 })

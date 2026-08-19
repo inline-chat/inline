@@ -1,5 +1,5 @@
 import { authKeyId as deriveAuthKeyId, equalBytes, type EstablishedAuthorizationKey } from "@inline-chat/protocol/secure"
-import { and, count, eq, exists, gt, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm"
+import { and, count, eq, exists, gt, isNotNull, isNull, ne, or, sql } from "drizzle-orm"
 import { createHash, timingSafeEqual } from "node:crypto"
 import { db } from "@in/server/db"
 import {
@@ -261,19 +261,6 @@ export class InlineProtocolReplayRepository {
         expiresAt: new Date(now.getTime() + (input.ttlMs ?? DEFAULT_REPLAY_TTL_MS)),
       }).onConflictDoNothing().returning({ messageId: inlineProtocolRequests.messageId })
       if (inserted.length === 1) return { kind: "claimed" }
-      const reclaimed = await db.update(inlineProtocolRequests).set({
-        requestDigest: digest,
-        resultBody: null,
-        claimedAt: now,
-        completedAt: null,
-        expiresAt: new Date(now.getTime() + (input.ttlMs ?? DEFAULT_REPLAY_TTL_MS)),
-      }).where(and(
-        eq(inlineProtocolRequests.authKeyId, Buffer.from(input.authKeyId)),
-        eq(inlineProtocolRequests.protocolSessionId, input.protocolSessionId),
-        eq(inlineProtocolRequests.messageId, input.messageId),
-        lte(inlineProtocolRequests.expiresAt, now),
-      )).returning({ messageId: inlineProtocolRequests.messageId })
-      if (reclaimed.length === 1) return { kind: "claimed" }
       const existing = (await db.select({
         requestDigest: inlineProtocolRequests.requestDigest,
         resultBody: inlineProtocolRequests.resultBody,
@@ -339,6 +326,26 @@ export class InlineProtocolReplayRepository {
     }
   }
 
+  async isInFlight(input: {
+    authKeyId: Uint8Array
+    protocolSessionId: bigint
+    messageId: bigint
+  }): Promise<boolean> {
+    try {
+      const row = (await db.select({ messageId: inlineProtocolRequests.messageId })
+        .from(inlineProtocolRequests)
+        .where(and(
+          eq(inlineProtocolRequests.authKeyId, Buffer.from(input.authKeyId)),
+          eq(inlineProtocolRequests.protocolSessionId, input.protocolSessionId),
+          eq(inlineProtocolRequests.messageId, input.messageId),
+          isNull(inlineProtocolRequests.resultBody),
+        )).limit(1))[0]
+      return row !== undefined
+    } catch (cause) {
+      throw new InlineProtocolReplayError({ operation: "in_flight", cause })
+    }
+  }
+
   async replaceResult(input: {
     authKeyId: Uint8Array
     protocolSessionId: bigint
@@ -359,6 +366,38 @@ export class InlineProtocolReplayRepository {
       return updated.length === 1
     } catch (cause) {
       throw new InlineProtocolReplayError({ operation: "replace_result", cause })
+    }
+  }
+
+  /**
+   * Deletes only completed replay results. An expired in-flight claim may still
+   * represent a running application handler, so deleting it without a durable
+   * execution-owner fence would make its eventual completion ambiguous.
+   */
+  async cleanupExpiredCompleted(now = new Date(), limit = 1_000): Promise<number> {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10_000) {
+      throw new InlineProtocolReplayError({ operation: "cleanup_limit" })
+    }
+    try {
+      const deleted = await db.execute<{ messageId: bigint }>(sql`
+        with expired as (
+          select ctid
+          from ${inlineProtocolRequests}
+          where ${inlineProtocolRequests.expiresAt} <= ${now.toISOString()}::timestamptz
+            and ${inlineProtocolRequests.resultBody} is not null
+          order by ${inlineProtocolRequests.expiresAt}
+          limit ${limit}
+          for update skip locked
+        )
+        delete from ${inlineProtocolRequests} as request
+        using expired
+        where request.ctid = expired.ctid
+        returning request.message_id as "messageId"
+      `)
+      return deleted.length
+    } catch (cause) {
+      if (cause instanceof InlineProtocolReplayError) throw cause
+      throw new InlineProtocolReplayError({ operation: "cleanup_completed", cause })
     }
   }
 }

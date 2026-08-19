@@ -22,6 +22,8 @@ export type HandlerContext = {
   sessionId: number
   isBot?: boolean
   connectionId: string
+  /** V3 application deadline. Handlers should forward this to cancellable downstream work. */
+  signal?: AbortSignal
   sendRaw: (message: ServerProtocolMessage) => void
   sendRpcReply: (result: RpcResult["result"]) => void
   inlineProtocol?: {

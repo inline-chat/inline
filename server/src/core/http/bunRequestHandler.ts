@@ -38,6 +38,23 @@ export const makeCoreHttpRequestHandler = (
     onRequestComplete,
   ) =>
     new Promise<Response>((resolve) => {
+      let didComplete = false
+      let abortListener:
+        | (() => void)
+        | undefined
+      const completeRequest = () => {
+        if (didComplete) return
+        didComplete = true
+        if (abortListener !== undefined) {
+          request.signal
+            .removeEventListener(
+              "abort",
+              abortListener,
+            )
+          abortListener = undefined
+        }
+        onRequestComplete?.()
+      }
       const serverRequest =
         HttpServerRequest
           .fromWeb(request)
@@ -48,18 +65,16 @@ export const makeCoreHttpRequestHandler = (
               ),
           })
       const httpEffect =
-        onRequestComplete === undefined
-          ? router.asHttpEffect()
-          : Effect.gen(function* () {
-              yield* Effect.addFinalizer(
-                () =>
-                  Effect.sync(
-                    onRequestComplete,
-                  ),
-              )
-              return yield* router
-                .asHttpEffect()
-            })
+        Effect.gen(function* () {
+          yield* Effect.addFinalizer(
+            () =>
+              Effect.sync(
+                completeRequest,
+              ),
+          )
+          return yield* router
+            .asHttpEffect()
+        })
       const handled = HttpEffect.toHandled(
         httpEffect,
         (
@@ -91,12 +106,21 @@ export const makeCoreHttpRequestHandler = (
       )
       const fiber = runFork(handled)
 
+      // A fully synchronous handler can finalize before runFork returns. In that case there is no
+      // live request left to observe, so avoid attaching a listener that can never be removed.
+      if (didComplete) return
+
+      abortListener = () => {
+        fiber.interruptUnsafe()
+      }
       request.signal.addEventListener(
         "abort",
-        () => {
-          fiber.interruptUnsafe()
-        },
+        abortListener,
         { once: true },
       )
+      // AbortSignal does not replay an abort that happened before listener registration.
+      if (request.signal.aborted) {
+        abortListener()
+      }
     })
 }
