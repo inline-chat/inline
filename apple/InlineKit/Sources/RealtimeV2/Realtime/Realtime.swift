@@ -1344,6 +1344,53 @@ public actor RealtimeV2 {
   public func runSyncDebugScenario(_ scenario: SyncDebugScenario) async -> SyncDebugScenarioResult {
     await sync.runDebugScenario(scenario)
   }
+
+  public func runSyncDebugBucketScenario(
+    _ scenario: SyncDebugBucketScenario,
+    key: BucketKey
+  ) async -> SyncDebugActionResult {
+    await sync.runDebugBucketScenario(scenario, key: key)
+  }
+
+  public func cycleConnectionForSyncDebug() async -> SyncDebugActionResult {
+    guard auth.snapshot().isLoggedIn else {
+      return SyncDebugActionResult(
+        succeeded: false,
+        summary: "Sign in before cycling the realtime connection."
+      )
+    }
+
+    await connectionManager.stop()
+    await connectionManager.start()
+    await connectionManager.setAuthAvailable(true)
+    await connectionManager.connectNow()
+
+    let clock = ContinuousClock()
+    let deadline = clock.now + .seconds(15)
+    while clock.now < deadline {
+      let snapshot = await connectionManager.currentSnapshot()
+      if snapshot.state == .open {
+        return SyncDebugActionResult(
+          succeeded: true,
+          summary: "Cycled the real connection owner and reached authenticated open; reconnect discovery is running normally."
+        )
+      }
+      do {
+        try await Task.sleep(for: .milliseconds(100))
+      } catch {
+        return SyncDebugActionResult(
+          succeeded: false,
+          summary: "Connection-cycle observation was cancelled."
+        )
+      }
+    }
+
+    let snapshot = await connectionManager.currentSnapshot()
+    return SyncDebugActionResult(
+      succeeded: false,
+      summary: "Connection cycle did not reopen within 15 seconds (state: \(snapshot.state))."
+    )
+  }
 #endif
 
   // MARK: - Helpers

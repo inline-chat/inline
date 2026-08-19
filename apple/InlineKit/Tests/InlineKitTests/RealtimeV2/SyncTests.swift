@@ -1430,16 +1430,63 @@ final class SyncTests {
     #expect(didCallState)
   }
 
-  @Test("debug bucket rewind reports no tracked buckets")
-  func testDebugBucketRewindReportsNoTrackedBuckets() async throws {
+  @Test("debug user rewind does not sweep chat buckets")
+  func testDebugUserRewindDoesNotSweepChatBuckets() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
-    let client = FakeProtocolClient(responses: [])
+    let userDate: Int64 = 500
+    let chatDate: Int64 = 600
+    let chatKey = BucketKey.chat(peer: makeChatPeer(chatId: 7))
+    await storage.setBucketState(for: .user, state: BucketState(date: userDate, seq: 50))
+    await storage.setBucketState(for: chatKey, state: BucketState(date: chatDate, seq: 100))
+    let client = FakeProtocolClient(responses: [makeGetUpdatesResult(
+      seq: 25,
+      date: userDate - 60 * 60,
+      updates: [],
+      final: true,
+      resultType: .empty
+    )])
     let config = SyncConfig(lastSyncSafetyGapSeconds: 15)
     let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
 
-    let result = await sync.runDebugScenario(.rewindTrackedBucketsAndFetch)
-    #expect(!result.succeeded)
+    let result = await sync.runDebugScenario(.rewindUserBucketAndFetch)
+
+    #expect(result.succeeded)
+    #expect(await storage.getBucketState(for: .user).seq == 25)
+    #expect(await storage.getBucketState(for: chatKey).seq == 100)
+    #expect(await client.getUpdatesStartSequences() == [25])
+  }
+
+  @Test("debug buffer overflow uses the normal bounded recovery path")
+  func testDebugBufferOverflowUsesBoundedRecovery() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    let empty = makeGetUpdatesResult(
+      seq: 0,
+      date: 100,
+      updates: [],
+      final: true,
+      resultType: .empty
+    )
+    let client = FakeProtocolClient(responses: [empty, empty])
+    let config = SyncConfig(lastSyncSafetyGapSeconds: 15)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+    let key = BucketKey.chat(peer: makeChatPeer(chatId: 7))
+
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 7, updateSeq: 1)])
+    let actorReady = await waitForCondition {
+      let bucket = await sync.getStats().buckets.first(where: { $0.key == key })
+      return bucket?.isFetching == false && bucket?.needsFetch == false
+    }
+    #expect(actorReady)
+
+    let result = await sync.runDebugBucketScenario(.overflowBufferAndRecover, key: key)
+    let stats = await sync.getStats()
+
+    #expect(result.succeeded)
+    #expect(stats.realtimeBufferRecoveries == 1)
+    #expect(stats.buckets.first(where: { $0.key == key })?.needsFetch == false)
+    #expect(await client.getCallCount() == 2)
   }
 #endif
 

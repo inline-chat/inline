@@ -66,6 +66,12 @@ public struct SyncStats: Sendable {
   public var lastBucketFetchFailureAt: Int64
   public var lastSyncDate: Int64
   public var buckets: [SyncBucketSnapshot]
+  public var activeBucketFetches: Int
+  public var discoveryRoundsPending: Int
+  public var discoveryTargetsPending: Int
+  public var queuedDiscoveryTargets: Int
+  public var isStateFetchInFlight: Bool
+  public var hasPendingStateFetch: Bool
 
   public init(
     directUpdatesApplied: Int64,
@@ -82,7 +88,13 @@ public struct SyncStats: Sendable {
     lastBucketFetchAt: Int64,
     lastBucketFetchFailureAt: Int64,
     lastSyncDate: Int64,
-    buckets: [SyncBucketSnapshot]
+    buckets: [SyncBucketSnapshot],
+    activeBucketFetches: Int = 0,
+    discoveryRoundsPending: Int = 0,
+    discoveryTargetsPending: Int = 0,
+    queuedDiscoveryTargets: Int = 0,
+    isStateFetchInFlight: Bool = false,
+    hasPendingStateFetch: Bool = false
   ) {
     self.directUpdatesApplied = directUpdatesApplied
     self.bucketUpdatesApplied = bucketUpdatesApplied
@@ -99,6 +111,12 @@ public struct SyncStats: Sendable {
     self.lastBucketFetchFailureAt = lastBucketFetchFailureAt
     self.lastSyncDate = lastSyncDate
     self.buckets = buckets
+    self.activeBucketFetches = activeBucketFetches
+    self.discoveryRoundsPending = discoveryRoundsPending
+    self.discoveryTargetsPending = discoveryTargetsPending
+    self.queuedDiscoveryTargets = queuedDiscoveryTargets
+    self.isStateFetchInFlight = isStateFetchInFlight
+    self.hasPendingStateFetch = hasPendingStateFetch
   }
 
   public static let empty = SyncStats(
@@ -126,7 +144,7 @@ public enum SyncDebugScenario: String, CaseIterable, Identifiable, Sendable {
   case clearStateAndFetch
   case seedZeroDateAndFetch
   case seedStaleDateAndFetch
-  case rewindTrackedBucketsAndFetch
+  case rewindUserBucketAndFetch
 
   public var id: String { rawValue }
 
@@ -140,8 +158,8 @@ public enum SyncDebugScenario: String, CaseIterable, Identifiable, Sendable {
         "Seed Zero Date + Fetch"
       case .seedStaleDateAndFetch:
         "Seed Stale Date + Fetch"
-      case .rewindTrackedBucketsAndFetch:
-        "Rewind Tracked Buckets"
+      case .rewindUserBucketAndFetch:
+        "Rewind User Bucket"
     }
   }
 
@@ -155,8 +173,8 @@ public enum SyncDebugScenario: String, CaseIterable, Identifiable, Sendable {
         "Clears the global checkpoint so the next discovery requests a fresh current checkpoint."
       case .seedStaleDateAndFetch:
         "Stores a 15-day-old global cursor so discovery runs from the real persisted date."
-      case .rewindTrackedBucketsAndFetch:
-        "Moves currently tracked bucket cursors back and queues catch-up for those buckets."
+      case .rewindUserBucketAndFetch:
+        "Moves only the user-bucket cursor back by 25 sequences and runs its normal catch-up path."
     }
   }
 
@@ -170,9 +188,54 @@ public enum SyncDebugScenario: String, CaseIterable, Identifiable, Sendable {
         "0.circle.fill"
       case .seedStaleDateAndFetch:
         "calendar.badge.clock"
-      case .rewindTrackedBucketsAndFetch:
+      case .rewindUserBucketAndFetch:
         "backward.end.circle.fill"
     }
+  }
+}
+
+public enum SyncDebugBucketScenario: String, CaseIterable, Identifiable, Sendable {
+  case fetchLatest
+  case rewind25AndFetch
+  case rewindToZeroAndFetch
+  case overflowBufferAndRecover
+
+  public var id: String { rawValue }
+
+  public var title: String {
+    switch self {
+      case .fetchLatest:
+        "Fetch Latest"
+      case .rewind25AndFetch:
+        "Rewind 25 + Fetch"
+      case .rewindToZeroAndFetch:
+        "Rewind to Zero + Fetch"
+      case .overflowBufferAndRecover:
+        "Overflow Buffer + Recover"
+    }
+  }
+
+  public var detail: String {
+    switch self {
+      case .fetchLatest:
+        "Runs an authoritative latest fetch without changing the cursor first."
+      case .rewind25AndFetch:
+        "Rewinds only this bucket by 25 sequences and exercises normal replay."
+      case .rewindToZeroAndFetch:
+        "Resets only this bucket to zero; a backlog over 1,000 exercises TOO_LONG recovery."
+      case .overflowBufferAndRecover:
+        "Injects a bounded debug-only overflow, discards the synthetic buffer, and catches up from the server."
+    }
+  }
+}
+
+public struct SyncDebugActionResult: Sendable {
+  public let succeeded: Bool
+  public let summary: String
+
+  public init(succeeded: Bool, summary: String) {
+    self.succeeded = succeeded
+    self.summary = summary
   }
 }
 
@@ -551,6 +614,14 @@ actor Sync {
     let bucketSnapshots = await getBucketSnapshots()
     snapshot.buckets = bucketSnapshots
     snapshot.bucketsTracked = bucketSnapshots.count
+    snapshot.activeBucketFetches = activeBucketFetches
+    snapshot.discoveryRoundsPending = pendingDiscoveryRounds.count + (activeDiscoveryRound == nil ? 0 : 1)
+    snapshot.discoveryTargetsPending = pendingDiscoveryRounds.values.reduce(0) { partial, round in
+      partial + round.pendingTargets.count
+    } + (activeDiscoveryRound?.pendingTargets.count ?? 0)
+    snapshot.queuedDiscoveryTargets = queuedDiscoveryTargets.count
+    snapshot.isStateFetchInFlight = isStateFetchInFlight
+    snapshot.hasPendingStateFetch = isStateFetchPending
     return snapshot
   }
 
@@ -621,44 +692,105 @@ actor Sync {
           summary: "Stored 15-day-old lastSyncDate and queued discovery."
         )
 
-      case .rewindTrackedBucketsAndFetch:
-        let snapshots = await getBucketSnapshots()
-        guard !snapshots.isEmpty else {
+      case .rewindUserBucketAndFetch:
+        guard let actor = await getBucketActor(key: .user, generation: generation) else {
           return SyncDebugScenarioResult(
             scenario: scenario,
             succeeded: false,
-            summary: "No tracked buckets yet. Open a chat or wait for sync hints first."
+            summary: "Could not create the user-bucket owner."
           )
         }
-
-        var rewound = 0
-        for snapshot in snapshots {
-          guard let actor = buckets[snapshot.key] else { continue }
-          let newSeq = max(0, snapshot.seq - 25)
-          let newDate = max(0, snapshot.date - 60 * 60)
-          let saved = await syncStorage.setBucketState(
-            for: snapshot.key,
-            state: BucketState(date: newDate, seq: newSeq)
-          )
-          guard saved else { continue }
-          await actor.debugRewindState(seq: newSeq, date: newDate)
-          rewound += 1
-        }
-
-        guard rewound > 0 else {
+        let snapshot = await actor.snapshot()
+        let newState = BucketState(
+          date: max(0, snapshot.date - 60 * 60),
+          seq: max(0, snapshot.seq - 25)
+        )
+        guard await syncStorage.setBucketState(for: .user, state: newState) else {
           return SyncDebugScenarioResult(
             scenario: scenario,
             succeeded: false,
-            summary: "Failed to save rewound bucket state."
+            summary: "Failed to save the rewound user-bucket cursor."
           )
         }
-
+        await actor.debugRewindState(seq: newState.seq, date: newState.date)
         return SyncDebugScenarioResult(
           scenario: scenario,
           succeeded: true,
-          summary: "Rewound \(rewound) tracked bucket(s) and queued catch-up."
+          summary: "Rewound only the user bucket from seq \(snapshot.seq) to \(newState.seq) and ran catch-up."
         )
     }
+  }
+
+  func runDebugBucketScenario(
+    _ scenario: SyncDebugBucketScenario,
+    key: BucketKey
+  ) async -> SyncDebugActionResult {
+    guard let actor = buckets[key] else {
+      return SyncDebugActionResult(
+        succeeded: false,
+        summary: "The selected bucket is no longer tracked. Refresh sync stats and try again."
+      )
+    }
+
+    let snapshot = await actor.snapshot()
+    switch scenario {
+      case .fetchLatest:
+        await actor.debugFetchLatest()
+        return SyncDebugActionResult(
+          succeeded: true,
+          summary: "Fetched the latest authoritative state for \(key.traceKind) from seq \(snapshot.seq)."
+        )
+
+      case .rewind25AndFetch:
+        return await debugRewindAndFetch(
+          actor: actor,
+          key: key,
+          from: snapshot,
+          to: BucketState(
+            date: max(0, snapshot.date - 60 * 60),
+            seq: max(0, snapshot.seq - 25)
+          )
+        )
+
+      case .rewindToZeroAndFetch:
+        return await debugRewindAndFetch(
+          actor: actor,
+          key: key,
+          from: snapshot,
+          to: BucketState(date: 0, seq: 0)
+        )
+
+      case .overflowBufferAndRecover:
+        guard await actor.debugOverflowRealtimeBufferAndRecover() else {
+          return SyncDebugActionResult(
+            succeeded: false,
+            summary: "The current sequence is too close to the protocol Int32 limit to synthesize a safe overflow."
+          )
+        }
+        return SyncDebugActionResult(
+          succeeded: true,
+          summary: "Overflowed and discarded a synthetic \(key.traceKind) buffer, then ran bounded server catch-up."
+        )
+    }
+  }
+
+  private func debugRewindAndFetch(
+    actor: BucketActor,
+    key: BucketKey,
+    from oldState: SyncBucketSnapshot,
+    to newState: BucketState
+  ) async -> SyncDebugActionResult {
+    guard await syncStorage.setBucketState(for: key, state: newState) else {
+      return SyncDebugActionResult(
+        succeeded: false,
+        summary: "Failed to persist the debug cursor for \(key.traceKind)."
+      )
+    }
+    await actor.debugRewindState(seq: newState.seq, date: newState.date)
+    return SyncDebugActionResult(
+      succeeded: true,
+      summary: "Rewound only \(key.traceKind) from seq \(oldState.seq) to \(newState.seq) and ran catch-up."
+    )
   }
 
   private func queueDebugDiscovery() {
@@ -2777,12 +2909,34 @@ actor BucketActor {
   }
 
 #if DEBUG || DEBUG_BUILD
+  func debugFetchLatest() async {
+    await fetchNewUpdates()
+  }
+
   func debugRewindState(seq: Int64, date: Int64) async {
     self.seq = seq
     self.date = date
     fetchSeqEnd = nil
     needsFetch = true
     await fetchNewUpdates()
+  }
+
+  func debugOverflowRealtimeBufferAndRecover() async -> Bool {
+    let overflowCount = Self.maxBufferedRealtimeUpdates + 1
+    let firstSyntheticSeq = seq + 2
+    guard firstSyntheticSeq >= 1,
+          firstSyntheticSeq <= Int64(Int32.max) - Int64(overflowCount - 1)
+    else { return false }
+
+    let syntheticDate = max(date, Int64(Date().timeIntervalSince1970))
+    let updates = (0 ..< overflowCount).map { offset in
+      InlineProtocol.Update.with {
+        $0.seq = Int32(firstSyntheticSeq + Int64(offset))
+        $0.date = syntheticDate
+      }
+    }
+    await processRealtimeUpdates(updates)
+    return true
   }
 #endif
 
