@@ -31,11 +31,12 @@ struct OnboardingGetStarted: View {
           Image(systemName: "envelope")
             .font(.system(size: 16))
             .foregroundColor(.secondary)
-            .padding(.leading, 12)
+            .frame(width: 18, height: 18)
 
           Text("Continue with Email")
             .frame(width: 170, alignment: .leading)
         }
+        .frame(width: 220, alignment: .leading)
       }
       InlineButton(size: .large, style: .secondary) {
         onboardingViewModel.navigate(to: .enterPhone)
@@ -44,11 +45,12 @@ struct OnboardingGetStarted: View {
           Image(systemName: "checkmark.message")
             .font(.system(size: 16))
             .foregroundColor(.secondary)
-            .padding(.leading, 12)
+            .frame(width: 18, height: 18)
 
           Text("Continue with Phone")
             .frame(width: 170, alignment: .leading)
         }
+        .frame(width: 220, alignment: .leading)
       }
 
       Spacer()
@@ -69,6 +71,7 @@ struct OnboardingGetStarted: View {
         } else {
           Image(systemName: "apple.logo")
             .font(.system(size: 18, weight: .medium))
+            .frame(width: 18, height: 18)
         }
         Group {
           if provider == .google {
@@ -79,7 +82,7 @@ struct OnboardingGetStarted: View {
         }
         .frame(width: 170, alignment: .leading)
       }
-      .padding(.leading, 12)
+      .frame(width: 220, alignment: .leading)
     }
   }
 }
