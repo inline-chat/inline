@@ -1090,6 +1090,10 @@ impl ClientRunner {
                 }
             }
             ClientRequest::Logout => {
+                // The receiver can be blocked indefinitely inside the backend's
+                // event stream. Cancel and join it before marker-first teardown
+                // needs the same realtime owner.
+                self.stop_event_receiver().await;
                 self.backend.logout().await?;
                 self.update_status(ClientStatus::LoggedOut, None).await;
                 Ok(ClientResponse::Empty)
@@ -2013,6 +2017,21 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[tokio::test]
+    async fn logout_cancels_a_blocked_event_receiver_before_backend_teardown() {
+        let backend = InMemoryBackend::new();
+        let client = InlineClient::builder().backend(backend).build().spawn();
+
+        client.connect(token_connect()).await.unwrap();
+
+        tokio::time::timeout(Duration::from_secs(1), client.logout())
+            .await
+            .expect("logout must not wait for the blocked event receiver")
+            .unwrap();
+
+        assert_eq!(client.status(), ClientStatus::LoggedOut);
     }
 
     #[tokio::test]

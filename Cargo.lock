@@ -1408,6 +1408,7 @@ name = "inline-client"
 version = "0.6.3"
 dependencies = [
  "futures-util",
+ "getrandom 0.3.4",
  "inline-sdk",
  "log",
  "prost",
@@ -1434,6 +1435,7 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
+ "subtle",
 ]
 
 [[package]]

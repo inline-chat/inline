@@ -360,6 +360,8 @@ pub enum ClientErrorCategory {
     Network,
     /// Operation timed out.
     Timeout,
+    /// A mutation may have committed, but no authoritative result arrived.
+    CommitOutcomeUnknown,
     /// Remote server rate limited the operation.
     RateLimited,
     /// Local and remote protocol versions are incompatible.

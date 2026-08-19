@@ -7,6 +7,7 @@ use super::{
 };
 use crate::secure::{InvalidEncryptedRecord, aes_ige_decrypt, aes_ige_encrypt, auth_key_id};
 use sha1::{Digest, Sha1};
+use subtle::ConstantTimeEq;
 
 const RES_PQ: u32 = 0x0516_2463;
 const PQ_INNER_DC: u32 = 0xa9f5_5f95;
@@ -71,6 +72,7 @@ enum Phase {
         server_nonce: [u8; 16],
         new_nonce: [u8; 32],
         temporary: bool,
+        generator: i32,
         prime: Vec<u8>,
         g_a: Vec<u8>,
         auth_key: [u8; 256],
@@ -133,6 +135,7 @@ impl InlineHandshakeClient {
                 server_nonce,
                 new_nonce,
                 temporary,
+                generator,
                 prime,
                 g_a,
                 auth_key,
@@ -144,6 +147,7 @@ impl InlineHandshakeClient {
                 server_nonce,
                 new_nonce,
                 temporary,
+                generator,
                 prime,
                 g_a,
                 auth_key,
@@ -272,6 +276,7 @@ impl InlineHandshakeClient {
             server_nonce,
             new_nonce,
             temporary,
+            generator,
             prime,
             g_a,
             0,
@@ -289,6 +294,7 @@ impl InlineHandshakeClient {
         server_nonce: [u8; 16],
         new_nonce: [u8; 32],
         temporary: bool,
+        generator: i32,
         prime: Vec<u8>,
         g_a: Vec<u8>,
         retries: u8,
@@ -297,7 +303,8 @@ impl InlineHandshakeClient {
     ) -> Result<Vec<u8>, InvalidEncryptedRecord> {
         let mut exponent = [0; 256];
         (self.random)(&mut exponent)?;
-        let g_b = derive_auth_key(&[3], &exponent, &prime)?;
+        let generator_byte = u8::try_from(generator).map_err(|_| InvalidEncryptedRecord)?;
+        let g_b = derive_auth_key(&[generator_byte], &exponent, &prime)?;
         validate_dh_public_value(&g_b, &prime)?;
         let auth_key = derive_auth_key(&g_a, &exponent, &prime)?;
         let serialized = concat(&[
@@ -321,6 +328,7 @@ impl InlineHandshakeClient {
             server_nonce,
             new_nonce,
             temporary,
+            generator,
             prime,
             g_a,
             auth_key,
@@ -343,6 +351,7 @@ impl InlineHandshakeClient {
         server_nonce: [u8; 16],
         new_nonce: [u8; 32],
         temporary: bool,
+        generator: i32,
         prime: Vec<u8>,
         g_a: Vec<u8>,
         auth_key: [u8; 256],
@@ -380,6 +389,7 @@ impl InlineHandshakeClient {
                 server_nonce,
                 new_nonce,
                 temporary,
+                generator,
                 prime,
                 g_a,
                 retries + 1,
@@ -438,13 +448,7 @@ fn sha1(value: &[u8]) -> [u8; 20] {
 }
 
 fn require_equal(left: &[u8], right: &[u8]) -> Result<(), InvalidEncryptedRecord> {
-    let mut difference = left.len() ^ right.len();
-    for index in 0..left.len().max(right.len()) {
-        difference |= usize::from(
-            left.get(index).copied().unwrap_or(0) ^ right.get(index).copied().unwrap_or(0),
-        );
-    }
-    if difference == 0 {
+    if left.len() == right.len() && left.ct_eq(right).into() {
         Ok(())
     } else {
         Err(InvalidEncryptedRecord)
@@ -593,11 +597,10 @@ mod tests {
     use serde_json::Value;
     use std::collections::VecDeque;
 
-    #[test]
-    fn matches_frozen_typescript_permanent_handshake() {
+    fn replay_frozen_handshake(name: &str, temporary: bool) {
         let corpus: Value =
             serde_json::from_str(include_str!("../../../vectors/inline-protocol-v1.json")).unwrap();
-        let transcript = &corpus["handshakeTranscripts"]["permanent"];
+        let transcript = &corpus["handshakeTranscripts"][name];
         let calls = transcript["clientRandomCalls"]
             .as_array()
             .unwrap()
@@ -625,7 +628,7 @@ mod tests {
         let requests = transcript["requestHex"].as_array().unwrap();
         let responses = transcript["responseHex"].as_array().unwrap();
         let mut client = InlineHandshakeClient::new(vec![key], 1, random);
-        assert_eq!(hex::encode(client.begin(false).unwrap()), requests[0]);
+        assert_eq!(hex::encode(client.begin(temporary).unwrap()), requests[0]);
         for index in 0..2 {
             let response = hex::decode(responses[index].as_str().unwrap()).unwrap();
             let ClientHandshakeResult::Request(request) = client.receive(&response).unwrap() else {
@@ -648,6 +651,29 @@ mod tests {
             authorization.server_salt.to_string(),
             transcript["serverSalt"]
         );
-        assert!(!authorization.temporary);
+        assert_eq!(authorization.temporary, temporary);
+        assert_eq!(
+            authorization.expires_at,
+            transcript["expiresAt"].as_i64().map(|value| value as i32)
+        );
+    }
+
+    #[test]
+    fn replays_permanent_temporary_and_non_default_generator_handshakes() {
+        replay_frozen_handshake("permanent", false);
+        replay_frozen_handshake("temporary", true);
+        replay_frozen_handshake("generatorFour", false);
+    }
+
+    #[test]
+    fn failed_handshake_response_is_terminal() {
+        let mut client = InlineHandshakeClient::new(Vec::new(), 1, |output| {
+            output.fill(0x11);
+            Ok(())
+        });
+        client.begin(false).unwrap();
+        assert!(client.receive(&[0]).is_err());
+        assert!(matches!(client.phase, Phase::Complete));
+        assert!(client.receive(&[0]).is_err());
     }
 }

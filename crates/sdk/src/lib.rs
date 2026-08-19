@@ -60,8 +60,10 @@ pub use realtime::{
     RealtimeEvent, RealtimeEventReceiver, RealtimeSession, RpcRequest,
 };
 pub use realtime_v3::{
-    InlineProtocolAuthorization, InlineProtocolPublicKey, InlineProtocolV3Connection,
-    InlineProtocolV3Error, InlineProtocolV3Options,
+    INLINE_PROTOCOL_PRODUCTION_PUBLIC_RING_JSON, InlineProtocolAuthorization,
+    InlineProtocolPublicKey, InlineProtocolV3Connection, InlineProtocolV3Error,
+    InlineProtocolV3Options, inline_protocol_production_public_key_ring,
+    inline_protocol_production_rsa_keys,
 };
 
 /// Convenient imports for common SDK consumers.

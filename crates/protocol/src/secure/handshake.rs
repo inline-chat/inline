@@ -362,6 +362,8 @@ pub fn factor_pq<F>(
 where
     F: FnMut(&mut [u8]) -> Result<(), InvalidEncryptedRecord>,
 {
+    // TODO(mtproto-v2-compat): Remove this beta-only 8-byte/<2^63 bound and
+    // use lossless arbitrary-precision MTProto 2.0 factorization.
     if pq_bytes.is_empty() || pq_bytes.len() > 8 {
         return Err(InvalidEncryptedRecord);
     }

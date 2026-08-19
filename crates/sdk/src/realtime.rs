@@ -5,7 +5,8 @@ use prost::Message;
 use std::collections::HashMap;
 use std::fmt;
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{Semaphore, broadcast, mpsc, oneshot, watch};
 use tokio_tungstenite::connect_async;
@@ -77,6 +78,10 @@ pub enum RealtimeError {
         /// Configured timeout.
         timeout: Duration,
     },
+    /// Request bytes were accepted by the local carrier, but no authoritative
+    /// result arrived. Callers must reconcile before retrying a mutation.
+    #[error("realtime request commit outcome is unknown")]
+    CommitOutcomeUnknown,
     /// The realtime server rejected the connection.
     #[error("{friendly}")]
     ConnectionError {
@@ -90,6 +95,12 @@ pub enum RealtimeError {
     /// The realtime connection closed before the requested operation completed.
     #[error("realtime connection closed")]
     ConnectionClosed,
+    /// The secure Inline Protocol carrier rejected an authenticated record or service message.
+    #[error("Inline Protocol transport error: {message}")]
+    InlineProtocol {
+        /// Sanitized transport failure description.
+        message: String,
+    },
     /// A multiplexed event subscriber could not keep up with pushed events.
     #[error("realtime event subscriber lagged and skipped {skipped} events")]
     EventLagged {
@@ -142,6 +153,7 @@ impl fmt::Debug for RealtimeError {
                 .field("operation", operation)
                 .field("timeout", timeout)
                 .finish(),
+            RealtimeError::CommitOutcomeUnknown => f.debug_struct("CommitOutcomeUnknown").finish(),
             RealtimeError::ConnectionError {
                 reason,
                 reason_name,
@@ -153,6 +165,10 @@ impl fmt::Debug for RealtimeError {
                 .field("friendly", friendly)
                 .finish(),
             RealtimeError::ConnectionClosed => f.debug_struct("ConnectionClosed").finish(),
+            RealtimeError::InlineProtocol { message } => f
+                .debug_struct("InlineProtocol")
+                .field("message", message)
+                .finish(),
             RealtimeError::EventLagged { skipped } => f
                 .debug_struct("EventLagged")
                 .field("skipped", skipped)
@@ -198,6 +214,8 @@ pub struct RealtimeClient {
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum RealtimeEvent {
+    /// The server explicitly revoked the authenticated account session.
+    AuthenticationInvalidated,
     /// Inline protocol updates pushed by the server.
     Updates(Vec<proto::Update>),
     /// Transient Grid state or connection event pushed by the server.
@@ -225,6 +243,7 @@ pub enum RealtimeEvent {
 pub struct RealtimeSession {
     commands: mpsc::Sender<SessionCommand>,
     events: broadcast::Sender<RealtimeEvent>,
+    initial_events: Arc<Mutex<Option<broadcast::Receiver<RealtimeEvent>>>>,
     closed: watch::Receiver<bool>,
     rpc_timeout: Option<Duration>,
     heartbeat_interval: Option<Duration>,
@@ -261,10 +280,11 @@ impl fmt::Debug for RealtimeEventReceiver {
     }
 }
 
-enum SessionCommand {
+pub(crate) enum SessionCommand {
     Invoke {
         method: proto::Method,
         input: proto::rpc_call::Input,
+        attempted: Arc<AtomicBool>,
         response: oneshot::Sender<Result<proto::rpc_result::Result, RealtimeError>>,
     },
 }
@@ -319,6 +339,50 @@ pub trait RpcRequest: Sized {
     ) -> Result<Self::Response, RealtimeError>;
 }
 
+pub(crate) fn rpc_method_is_read_only(method: proto::Method) -> bool {
+    matches!(
+        method,
+        proto::Method::GetMe
+            | proto::Method::GetPeerPhoto
+            | proto::Method::GetChatHistory
+            | proto::Method::GetSpaceMembers
+            | proto::Method::GetChatParticipants
+            | proto::Method::GetChats
+            | proto::Method::GetUserSettings
+            | proto::Method::GetUpdatesState
+            | proto::Method::GetChat
+            | proto::Method::GetUpdates
+            | proto::Method::SearchMessages
+            | proto::Method::ListBots
+            | proto::Method::RevealBotToken
+            | proto::Method::GetMessages
+            | proto::Method::GetBotCommands
+            | proto::Method::GetPeerBotCommands
+            | proto::Method::GetBotPresence
+            | proto::Method::GetSessions
+            | proto::Method::CheckUsername
+            | proto::Method::GetSpaceUrlPreviewExclusions
+            | proto::Method::GetUserGroups
+            | proto::Method::GetSpaceSettings
+            | proto::Method::GetThreadReferences
+            | proto::Method::GetThreadSubthreads
+            | proto::Method::GetPeerBots
+            | proto::Method::GetMyBotCapabilities
+            | proto::Method::GetGrid
+            | proto::Method::GetGridHome
+            | proto::Method::GetExternalProfilePhoto
+            | proto::Method::GetChatTranscript
+            | proto::Method::SearchExternalResources
+            | proto::Method::ListConnectors
+            | proto::Method::SearchUsers
+            | proto::Method::ResolveUrlPreview
+            | proto::Method::GetBotAgent
+            | proto::Method::ListBotAgents
+            | proto::Method::GetConnectorConfig
+            | proto::Method::GetUploadState
+    )
+}
+
 impl RealtimeClient {
     /// Starts a realtime client builder.
     pub fn builder(url: impl Into<String>, token: impl Into<String>) -> RealtimeClientBuilder {
@@ -360,8 +424,14 @@ impl RealtimeSession {
 
     /// Subscribes to server-pushed events routed by this session.
     pub fn subscribe(&self) -> RealtimeEventReceiver {
+        let events = self
+            .initial_events
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+            .unwrap_or_else(|| self.events.subscribe());
         RealtimeEventReceiver {
-            events: self.events.subscribe(),
+            events,
             closed: self.closed.clone(),
         }
     }
@@ -392,6 +462,8 @@ impl RealtimeSession {
             return Err(RealtimeError::ConnectionClosed);
         }
         let (response_tx, response_rx) = oneshot::channel();
+        let attempted = Arc::new(AtomicBool::new(false));
+        let attempted_by_actor = attempted.clone();
         let commands = self.commands.clone();
         let permits = self.rpc_permits.clone();
         let response = async move {
@@ -403,6 +475,7 @@ impl RealtimeSession {
                 .send(SessionCommand::Invoke {
                     method,
                     input,
+                    attempted: attempted_by_actor,
                     response: response_tx,
                 })
                 .await
@@ -411,7 +484,19 @@ impl RealtimeSession {
                 .await
                 .map_err(|_| RealtimeError::ConnectionClosed)?
         };
-        with_optional_timeout("rpc", self.rpc_timeout, response).await
+        let read_only = rpc_method_is_read_only(method);
+        match with_optional_timeout("rpc", self.rpc_timeout, response).await {
+            Err(RealtimeError::Timeout { .. } | RealtimeError::ConnectionClosed)
+                if attempted.load(Ordering::Acquire) && !read_only =>
+            {
+                Err(RealtimeError::CommitOutcomeUnknown)
+            }
+            Err(RealtimeError::CommitOutcomeUnknown) if read_only => Err(RealtimeError::Timeout {
+                operation: "rpc",
+                timeout: self.rpc_timeout.unwrap_or(DEFAULT_RPC_TIMEOUT),
+            }),
+            result => result,
+        }
     }
 
     fn from_client(client: RealtimeClient) -> Self {
@@ -420,7 +505,7 @@ impl RealtimeSession {
         let heartbeat_timeout = client.heartbeat_timeout;
         let max_in_flight_rpcs = client.max_in_flight_rpcs;
         let (command_tx, command_rx) = mpsc::channel(DEFAULT_SESSION_COMMAND_CAPACITY);
-        let (event_tx, _) = broadcast::channel(DEFAULT_SESSION_EVENT_CAPACITY);
+        let (event_tx, initial_event_rx) = broadcast::channel(DEFAULT_SESSION_EVENT_CAPACITY);
         let (closed_tx, closed_rx) = watch::channel(false);
         tokio::spawn(run_realtime_session(
             client,
@@ -431,6 +516,7 @@ impl RealtimeSession {
         Self {
             commands: command_tx,
             events: event_tx,
+            initial_events: Arc::new(Mutex::new(Some(initial_event_rx))),
             closed: closed_rx,
             rpc_timeout,
             heartbeat_interval,
@@ -438,9 +524,56 @@ impl RealtimeSession {
             rpc_permits: Arc::new(Semaphore::new(max_in_flight_rpcs)),
         }
     }
+
+    pub(crate) fn from_inline_protocol_v3(
+        client: crate::realtime_v3::InlineProtocolV3Connection,
+    ) -> Self {
+        let (command_tx, command_rx) = mpsc::channel(DEFAULT_SESSION_COMMAND_CAPACITY);
+        let (event_tx, initial_event_rx) = broadcast::channel(DEFAULT_SESSION_EVENT_CAPACITY);
+        let (closed_tx, closed_rx) = watch::channel(false);
+        tokio::spawn(crate::realtime_v3::run_inline_protocol_v3_session(
+            client,
+            command_rx,
+            event_tx.clone(),
+            closed_tx,
+        ));
+        Self {
+            commands: command_tx,
+            events: event_tx,
+            initial_events: Arc::new(Mutex::new(Some(initial_event_rx))),
+            closed: closed_rx,
+            rpc_timeout: Some(DEFAULT_RPC_TIMEOUT),
+            heartbeat_interval: Some(DEFAULT_HEARTBEAT_INTERVAL),
+            heartbeat_timeout: DEFAULT_HEARTBEAT_TIMEOUT,
+            rpc_permits: Arc::new(Semaphore::new(DEFAULT_SESSION_MAX_IN_FLIGHT_RPCS)),
+        }
+    }
 }
 
 impl RealtimeEventReceiver {
+    /// Returns the number of pushed events queued at this receiver now.
+    ///
+    /// Callers that need a bounded wire-order drain should snapshot this
+    /// before calling [`Self::try_recv`], so arrivals during the drain are
+    /// left for the normal receiver path.
+    pub fn len(&self) -> usize {
+        self.events.len()
+    }
+
+    /// Returns one already-queued pushed event without waiting for a future
+    /// event. This is used by callers that need a bounded wire-order drain at
+    /// an RPC response boundary.
+    pub fn try_recv(&mut self) -> Result<Option<RealtimeEvent>, RealtimeError> {
+        match self.events.try_recv() {
+            Ok(event) => Ok(Some(event)),
+            Err(broadcast::error::TryRecvError::Empty) => Ok(None),
+            Err(broadcast::error::TryRecvError::Lagged(skipped)) => {
+                Err(RealtimeError::EventLagged { skipped })
+            }
+            Err(broadcast::error::TryRecvError::Closed) => Err(RealtimeError::ConnectionClosed),
+        }
+    }
+
     /// Waits for the next pushed event or a terminal session failure.
     pub async fn recv(&mut self) -> Result<RealtimeEvent, RealtimeError> {
         loop {
@@ -915,9 +1048,10 @@ async fn run_realtime_session(
                     break;
                 };
                 match command {
-                    SessionCommand::Invoke { method, input, response } => {
+                    SessionCommand::Invoke { method, input, attempted, response } => {
                         match client.send_rpc_call(method, input).await {
                             Ok(message_id) => {
+                                attempted.store(true, Ordering::Release);
                                 pending.insert(message_id, response);
                             }
                             Err(error) => {
@@ -1047,6 +1181,36 @@ macro_rules! rpc_requests {
             match result {
                 $(proto::rpc_result::Result::$result_variant(_) => stringify!($result_variant),)+
                 _ => "unknown",
+            }
+        }
+
+        pub(crate) fn validate_rpc_result_for_method(
+            method: proto::Method,
+            result: &proto::rpc_result::Result,
+        ) -> Result<(), RealtimeError> {
+            match (method, result) {
+                $((proto::Method::$method, proto::rpc_result::Result::$result_variant(_)) => Ok(()),)+
+                (method, result) => {
+                    let Some(expected) = (match method {
+                        $(proto::Method::$method => Some(stringify!($result_variant)),)+
+                        _ => None,
+                    }) else {
+                        // Untyped methods are still available through `invoke`; their
+                        // caller owns result-shape validation.
+                        return Ok(());
+                    };
+                    let actual = rpc_result_variant_name(result);
+                    log::warn!(
+                        target: "inline_sdk::realtime",
+                        "unexpected rpc result method={} expected={expected} actual={actual}",
+                        method.as_str_name(),
+                    );
+                    Err(RealtimeError::UnexpectedResult {
+                        method: method.as_str_name(),
+                        expected,
+                        actual,
+                    })
+                }
             }
         }
     };
@@ -1309,6 +1473,14 @@ rpc_requests!(
         ReadMessagesResult,
         ReadMessages
     ),
+    (
+        CreateExternalTaskInput,
+        CreateExternalTask,
+        CreateExternalTask,
+        CreateExternalTaskResult,
+        CreateExternalTask
+    ),
+    (LogOutInput, LogOut, LogOut, LogOutResult, LogOut),
     (
         RegisterDeviceInput,
         RegisterDevice,
@@ -1851,6 +2023,7 @@ fn realtime_header_value(field: &'static str, value: &str) -> Result<HeaderValue
 
 fn realtime_event_kind(event: &RealtimeEvent) -> &'static str {
     match event {
+        RealtimeEvent::AuthenticationInvalidated => "authentication_invalidated",
         RealtimeEvent::Updates(_) => "updates",
         RealtimeEvent::Grid(_) => "grid",
         RealtimeEvent::Bot(_) => "bot",
@@ -1920,6 +2093,61 @@ mod tests {
     use tokio_tungstenite::WebSocketStream;
     use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
     use tokio_tungstenite::{accept_async, accept_hdr_async};
+
+    #[tokio::test]
+    async fn first_session_subscriber_receives_events_published_before_subscription() {
+        let (commands, _command_rx) = mpsc::channel(DEFAULT_SESSION_COMMAND_CAPACITY);
+        let (events, initial_events) = broadcast::channel(DEFAULT_SESSION_EVENT_CAPACITY);
+        let (_closed_tx, closed) = watch::channel(false);
+        let session = RealtimeSession {
+            commands,
+            events: events.clone(),
+            initial_events: Arc::new(Mutex::new(Some(initial_events))),
+            closed,
+            rpc_timeout: Some(DEFAULT_RPC_TIMEOUT),
+            heartbeat_interval: Some(DEFAULT_HEARTBEAT_INTERVAL),
+            heartbeat_timeout: DEFAULT_HEARTBEAT_TIMEOUT,
+            rpc_permits: Arc::new(Semaphore::new(DEFAULT_SESSION_MAX_IN_FLIGHT_RPCS)),
+        };
+
+        events.send(RealtimeEvent::Pong { nonce: 42 }).unwrap();
+        let mut receiver = session.subscribe();
+
+        assert!(matches!(
+            receiver.recv().await.unwrap(),
+            RealtimeEvent::Pong { nonce: 42 }
+        ));
+    }
+
+    #[test]
+    fn bounded_receiver_snapshot_does_not_chase_future_events() {
+        let (commands, _command_rx) = mpsc::channel(DEFAULT_SESSION_COMMAND_CAPACITY);
+        let (events, initial_events) = broadcast::channel(DEFAULT_SESSION_EVENT_CAPACITY);
+        let (_closed_tx, closed) = watch::channel(false);
+        let session = RealtimeSession {
+            commands,
+            events: events.clone(),
+            initial_events: Arc::new(Mutex::new(Some(initial_events))),
+            closed,
+            rpc_timeout: Some(DEFAULT_RPC_TIMEOUT),
+            heartbeat_interval: Some(DEFAULT_HEARTBEAT_INTERVAL),
+            heartbeat_timeout: DEFAULT_HEARTBEAT_TIMEOUT,
+            rpc_permits: Arc::new(Semaphore::new(DEFAULT_SESSION_MAX_IN_FLIGHT_RPCS)),
+        };
+
+        events.send(RealtimeEvent::Pong { nonce: 42 }).unwrap();
+        let mut receiver = session.subscribe();
+        let queued_count = receiver.len();
+        events.send(RealtimeEvent::Pong { nonce: 43 }).unwrap();
+
+        for _ in 0..queued_count {
+            assert!(receiver.try_recv().unwrap().is_some());
+        }
+        assert!(matches!(
+            receiver.try_recv().unwrap(),
+            Some(RealtimeEvent::Pong { nonce: 43 })
+        ));
+    }
 
     #[test]
     fn rpc_error_code_name_uses_stable_proto_name() {
@@ -2588,6 +2816,47 @@ mod tests {
         ));
         let recovered = session.call(proto::GetMeInput {}).await.unwrap();
         assert_eq!(recovered.user.unwrap().id, 2);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn realtime_session_reports_commit_unknown_for_timed_out_mutation() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let _ = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+
+            let _mutation = read_test_client_message(&mut ws).await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        });
+
+        let session = RealtimeClient::builder(format!("ws://{addr}/realtime"), "token-1")
+            .without_connect_timeout()
+            .rpc_timeout(Duration::from_millis(25))
+            .connect_session()
+            .await
+            .unwrap();
+
+        let error = session
+            .invoke(
+                proto::Method::DeleteChat,
+                proto::rpc_call::Input::DeleteChat(proto::DeleteChatInput::default()),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(error, RealtimeError::CommitOutcomeUnknown));
         server.await.unwrap();
     }
 

@@ -7,7 +7,7 @@
 mod bot_settings;
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     fmt,
     sync::{
         Arc, Mutex as StdMutex,
@@ -18,11 +18,13 @@ use std::{
 
 use futures_util::future::BoxFuture;
 use inline_sdk::{
-    ApiClient, ApiError, AuthMetadata, ClientIdentity, NativeUploadError, NativeUploadInput,
+    ApiClient, ApiError, AuthMetadata, ClientIdentity, InlineProtocolV3Connection,
+    InlineProtocolV3Error, InlineProtocolV3Options, NativeUploadError, NativeUploadInput,
     RealtimeError, RealtimeEvent, RealtimeEventReceiver, RealtimeSession, RpcRequest,
     UploadFileBytesInput, UploadFileResult, UploadFileType, UploadThumbnailBytesInput,
     UploadVideoMetadata, proto, upload_file_session,
 };
+use prost::Message as _;
 use serde_json::Value;
 use tokio::sync::{Mutex, Notify};
 
@@ -61,6 +63,8 @@ use self::bot_settings::{
 const DEFAULT_API_BASE_URL: &str = "https://api.inline.chat/v1";
 const DEFAULT_REALTIME_URL: &str = "wss://api.inline.chat/realtime";
 const CHAT_REPAIR_HISTORY_LIMIT: i32 = 50;
+const CLIENT_EVENT_DELIVERY_PAGE_LIMIT: usize = 256;
+const CLIENT_EVENT_DELIVERY_PAGE_BYTES: usize = 8 * 1024 * 1024;
 
 /// Error returned when building an [`SdkBackend`].
 #[derive(Debug, thiserror::Error)]
@@ -198,6 +202,7 @@ impl SdkBackendBuilder {
             realtime_connector: self.realtime_connector,
             realtime: Arc::new(Mutex::new(None)),
             realtime_events: Arc::new(Mutex::new(None)),
+            queued_realtime_events: Arc::new(Mutex::new(VecDeque::new())),
             in_flight_deliveries: Arc::new(StdMutex::new(HashSet::new())),
             client_event_notify: Arc::new(Notify::new()),
         })
@@ -218,6 +223,7 @@ pub struct SdkBackend {
     realtime_connector: Option<Arc<dyn RealtimeConnector>>,
     realtime: Arc<Mutex<Option<RealtimeSession>>>,
     realtime_events: Arc<Mutex<Option<RealtimeEventReceiver>>>,
+    queued_realtime_events: Arc<Mutex<VecDeque<RealtimeEvent>>>,
     in_flight_deliveries: Arc<StdMutex<HashSet<u64>>>,
     client_event_notify: Arc<Notify>,
 }
@@ -300,9 +306,10 @@ impl SdkBackend {
 
         let session = self.require_session().await?;
         let initial_chat_id = chat_id_for_peer(request.peer);
-        let random_id = request
-            .random_id
-            .unwrap_or_else(|| random_id_for_request(&request));
+        let random_id = match request.random_id {
+            Some(random_id) => random_id,
+            None => random_id_for_request(&request)?,
+        };
         let transaction_id = transaction_id_for_send(&request, random_id);
         let new_identity = TransactionIdentity::new(
             transaction_id.clone(),
@@ -417,10 +424,124 @@ impl SdkBackend {
         match realtime.call(request).await {
             Ok(response) => Ok(response),
             Err(error) => {
+                let auth_invalidated = matches!(
+                    &error,
+                    RealtimeError::RpcError { error_name, .. }
+                        if error_name == "UNAUTHENTICATED"
+                );
                 if realtime_error_closes_session(&error) {
                     self.clear_realtime().await;
                 }
+                if auth_invalidated {
+                    // Logout owns the marker and the final local purge. Do
+                    // not let a rejected logout RPC clear that marker before
+                    // the caller has completed its ordered cleanup.
+                    if !matches!(self.store.logout_pending().await, Ok(true)) {
+                        self.store
+                            .clear_session()
+                            .await
+                            .map_err(store_error_to_backend)?;
+                        self.store
+                            .clear_account_data()
+                            .await
+                            .map_err(store_error_to_backend)?;
+                    }
+                }
                 Err(realtime_error_to_backend(error))
+            }
+        }
+    }
+
+    async fn connect_realtime_session(
+        &self,
+        auth: &AuthCredential,
+    ) -> BackendResult<(RealtimeSession, Option<AuthCredential>)> {
+        match auth {
+            AuthCredential::AccessToken { token } => Ok((
+                RealtimeSession::connect_with_identity(
+                    &self.realtime_url,
+                    token.expose_secret(),
+                    self.identity.clone(),
+                )
+                .await
+                .map_err(realtime_error_to_backend)?,
+                None,
+            )),
+            AuthCredential::InlineProtocolV3 {
+                permanent,
+                temporary,
+                public_keys,
+            } => {
+                if permanent.temporary || !temporary.temporary || public_keys.is_empty() {
+                    return Err(BackendError::new(
+                        ClientErrorCategory::InvalidInput,
+                        "Inline Protocol V3 credentials require one permanent key, one temporary key, and a non-empty pinned key ring",
+                    ));
+                }
+                let url = inline_protocol_v3_url(&self.realtime_url);
+                let now_seconds = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_err(|error| {
+                        BackendError::new(ClientErrorCategory::Internal, error.to_string())
+                    })?
+                    .as_secs() as i64;
+                let locally_expired =
+                    temporary_authorization_needs_regeneration(temporary, now_seconds);
+                let regenerate = if locally_expired {
+                    true
+                } else {
+                    match InlineProtocolV3Connection::connect(InlineProtocolV3Options::reconnect(
+                        &url,
+                        temporary.clone(),
+                    ))
+                    .await
+                    {
+                        Ok(mut cached) => match cached.call(proto::GetMeInput {}).await {
+                            Ok(_) if !cached.temporary_key_rotation_due() => {
+                                return Ok((cached.into_session(), None));
+                            }
+                            Ok(_) => {
+                                // GetMe refreshed the authenticated server clock; rotate
+                                // before exposing a session past the 80% boundary.
+                                drop(cached);
+                                true
+                            }
+                            Err(error) if temporary_reconnect_can_regenerate(&error) => {
+                                drop(cached);
+                                true
+                            }
+                            Err(error) => return Err(inline_protocol_v3_error_to_backend(error)),
+                        },
+                        Err(error) if temporary_reconnect_can_regenerate(&error) => true,
+                        Err(error) => return Err(inline_protocol_v3_error_to_backend(error)),
+                    }
+                };
+                debug_assert!(regenerate);
+                let keys = public_keys
+                    .iter()
+                    .cloned()
+                    .map(TryInto::try_into)
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(inline_protocol_v3_error_to_backend)?;
+                let mut options = InlineProtocolV3Options::permanent(&url, keys);
+                options.temporary = true;
+                let mut regenerated = InlineProtocolV3Connection::connect(options)
+                    .await
+                    .map_err(inline_protocol_v3_error_to_backend)?;
+                regenerated
+                    .bind_temporary(permanent)
+                    .await
+                    .map_err(inline_protocol_v3_error_to_backend)?;
+                regenerated
+                    .call(proto::GetMeInput {})
+                    .await
+                    .map_err(inline_protocol_v3_error_to_backend)?;
+                let replacement = AuthCredential::InlineProtocolV3 {
+                    permanent: permanent.clone(),
+                    temporary: regenerated.authorization(),
+                    public_keys: public_keys.clone(),
+                };
+                Ok((regenerated.into_session(), Some(replacement)))
             }
         }
     }
@@ -433,13 +554,45 @@ impl SdkBackend {
             return Ok(existing.clone());
         }
 
-        let connected = RealtimeSession::connect_with_identity(
-            &self.realtime_url,
-            session.auth.access_token().expose_secret(),
-            self.identity.clone(),
-        )
-        .await
-        .map_err(realtime_error_to_backend)?;
+        let (connected, replacement_auth) = match self.connect_realtime_session(&session.auth).await
+        {
+            Ok(result) => result,
+            Err(error) if error.category == ClientErrorCategory::AuthExpired => {
+                drop(realtime);
+                if !matches!(self.store.logout_pending().await, Ok(true)) {
+                    self.store
+                        .clear_session()
+                        .await
+                        .map_err(store_error_to_backend)?;
+                    self.store
+                        .clear_account_data()
+                        .await
+                        .map_err(store_error_to_backend)?;
+                }
+                return Err(error);
+            }
+            Err(error) => return Err(error),
+        };
+        if self
+            .store
+            .logout_pending()
+            .await
+            .map_err(store_error_to_backend)?
+        {
+            return Err(BackendError::new(
+                ClientErrorCategory::AuthRequired,
+                "logout is in progress",
+            ));
+        }
+        if let Some(auth) = replacement_auth {
+            self.store
+                .save_session(StoredSession {
+                    auth,
+                    account_namespace: session.account_namespace.clone(),
+                })
+                .await
+                .map_err(store_error_to_backend)?;
+        }
         let receiver = connected.subscribe();
         *self.realtime_events.lock().await = Some(receiver);
         *realtime = Some(connected.clone());
@@ -455,14 +608,50 @@ impl SdkBackend {
     async fn clear_realtime(&self) {
         *self.realtime.lock().await = None;
         *self.realtime_events.lock().await = None;
+        self.queued_realtime_events.lock().await.clear();
         self.sync_required.store(true, Ordering::Release);
+    }
+
+    /// Finishes a locally durable logout before any authority can reconnect.
+    /// The marker is cleared only by `clear_session`, which remains the final
+    /// local lifecycle step after account-owned data has been purged.
+    async fn finish_interrupted_logout(&self) -> BackendResult<bool> {
+        let pending = self
+            .store
+            .logout_pending()
+            .await
+            .map_err(store_error_to_backend)?;
+        if !pending {
+            return Ok(false);
+        }
+
+        self.clear_realtime().await;
+        self.store
+            .clear_account_data()
+            .await
+            .map_err(store_error_to_backend)?;
+        self.store
+            .clear_session()
+            .await
+            .map_err(store_error_to_backend)?;
+        self.in_flight_deliveries
+            .lock()
+            .expect("client event delivery claims poisoned")
+            .clear();
+        Ok(true)
     }
 
     async fn receive_realtime_event(
         &self,
         session: &StoredSession,
     ) -> BackendResult<RealtimeEvent> {
+        if let Some(event) = self.queued_realtime_events.lock().await.pop_front() {
+            return Ok(event);
+        }
         self.ensure_realtime(session).await?;
+        if let Some(event) = self.queued_realtime_events.lock().await.pop_front() {
+            return Ok(event);
+        }
         let mut receiver = self.realtime_events.lock().await;
         let Some(events) = receiver.as_mut() else {
             return Err(BackendError::new(
@@ -492,10 +681,91 @@ impl SdkBackend {
         }
     }
 
+    async fn capture_state_preceding_updates(&self) -> BackendResult<()> {
+        let (updates, retained_events) = {
+            let mut receiver = self.realtime_events.lock().await;
+            let Some(receiver) = receiver.as_mut() else {
+                return Ok(());
+            };
+            // Bound this drain to the events that were already queued when the
+            // state RPC returned. Events published while draining belong to
+            // the normal live receiver path, not this discovery round.
+            let queued_count = receiver.len();
+            let mut updates = Vec::new();
+            let mut retained_events = VecDeque::new();
+            for _ in 0..queued_count {
+                match receiver.try_recv().map_err(realtime_error_to_backend)? {
+                    Some(RealtimeEvent::Updates(batch)) => updates.extend(batch),
+                    Some(event) => retained_events.push_back(event),
+                    None => break,
+                }
+            }
+            (updates, retained_events)
+        };
+        self.sync.queue_state_preceding_updates(updates).await;
+        self.retain_realtime_events(retained_events).await
+    }
+
+    async fn retain_realtime_events(&self, incoming: VecDeque<RealtimeEvent>) -> BackendResult<()> {
+        if incoming.is_empty() {
+            return Ok(());
+        }
+
+        let mut queued = self.queued_realtime_events.lock().await;
+        let count = queued.len().saturating_add(incoming.len());
+        let bytes = queued
+            .iter()
+            .chain(incoming.iter())
+            .map(realtime_event_encoded_len)
+            .fold(0usize, usize::saturating_add);
+        if count <= CLIENT_EVENT_DELIVERY_PAGE_LIMIT && bytes <= CLIENT_EVENT_DELIVERY_PAGE_BYTES {
+            queued.extend(incoming);
+            return Ok(());
+        }
+        drop(queued);
+
+        // Updates have already been handed to SyncManager above. Keep every
+        // auth invalidation visible while dropping only transient retained
+        // events and forcing a new realtime generation/discovery attempt.
+        let mut preserved_auth = VecDeque::new();
+        {
+            let mut queued = self.queued_realtime_events.lock().await;
+            for event in queued.drain(..) {
+                if matches!(event, RealtimeEvent::AuthenticationInvalidated) {
+                    preserved_auth.push_back(event);
+                }
+            }
+        }
+        for event in incoming {
+            if matches!(event, RealtimeEvent::AuthenticationInvalidated) {
+                preserved_auth.push_back(event);
+            }
+        }
+        self.reset_realtime_after_event_overflow(preserved_auth)
+            .await;
+        Err(BackendError::new(
+            ClientErrorCategory::Network,
+            "realtime event queue overflow; reconnect required",
+        ))
+    }
+
+    async fn reset_realtime_after_event_overflow(&self, preserved_auth: VecDeque<RealtimeEvent>) {
+        *self.realtime.lock().await = None;
+        *self.realtime_events.lock().await = None;
+        *self.queued_realtime_events.lock().await = preserved_auth;
+        self.sync_required.store(true, Ordering::Release);
+        self.event_reconnect_pending.store(true, Ordering::Release);
+    }
+
     async fn connect_with_auth(
         &self,
-        request: ConnectRequest,
+        mut request: ConnectRequest,
     ) -> BackendResult<ClientStatusSnapshot> {
+        if self.finish_interrupted_logout().await? {
+            return Ok(ClientStatusSnapshot::current(
+                crate::ClientStatus::AuthRequired,
+            ));
+        }
         let initial_event_policy = request.initial_event_policy;
         let existing_session = self
             .store
@@ -508,24 +778,27 @@ impl SdkBackend {
         });
         let connected = if self.realtime_handshake {
             if let Some(connector) = &self.realtime_connector {
+                let token = request.auth.access_token().ok_or_else(|| {
+                    BackendError::new(
+                        ClientErrorCategory::Unsupported,
+                        "custom realtime connectors do not own Inline Protocol V3 sessions",
+                    )
+                })?;
                 connector
                     .connect(RealtimeConnectRequest::new(
                         self.realtime_url.clone(),
-                        request.auth.access_token().clone(),
+                        token.clone(),
                         self.identity.clone(),
                     ))
                     .await?;
                 None
             } else {
-                Some(
-                    RealtimeSession::connect_with_identity(
-                        &self.realtime_url,
-                        request.auth.access_token().expose_secret(),
-                        self.identity.clone(),
-                    )
-                    .await
-                    .map_err(realtime_error_to_backend)?,
-                )
+                let (connected, replacement_auth) =
+                    self.connect_realtime_session(&request.auth).await?;
+                if let Some(auth) = replacement_auth {
+                    request.auth = auth;
+                }
+                Some(connected)
             }
         } else {
             None
@@ -616,6 +889,11 @@ impl SdkBackend {
     }
 
     async fn resume_stored_session(&self) -> BackendResult<ClientStatusSnapshot> {
+        if self.finish_interrupted_logout().await? {
+            return Ok(ClientStatusSnapshot::current(
+                crate::ClientStatus::AuthRequired,
+            ));
+        }
         let Some(session) = self
             .store
             .load_session()
@@ -631,21 +909,45 @@ impl SdkBackend {
         self.clear_realtime().await;
         if self.realtime_handshake {
             if let Some(connector) = &self.realtime_connector {
+                let token = session.auth.access_token().ok_or_else(|| {
+                    BackendError::new(
+                        ClientErrorCategory::Unsupported,
+                        "custom realtime connectors do not own Inline Protocol V3 sessions",
+                    )
+                })?;
                 connector
                     .connect(RealtimeConnectRequest::new(
                         self.realtime_url.clone(),
-                        session.auth.access_token().clone(),
+                        token.clone(),
                         self.identity.clone(),
                     ))
                     .await?;
             } else {
-                let connected = RealtimeSession::connect_with_identity(
-                    &self.realtime_url,
-                    session.auth.access_token().expose_secret(),
-                    self.identity.clone(),
-                )
-                .await
-                .map_err(realtime_error_to_backend)?;
+                let (connected, replacement_auth) =
+                    match self.connect_realtime_session(&session.auth).await {
+                        Ok(result) => result,
+                        Err(error) if error.category == ClientErrorCategory::AuthExpired => {
+                            self.store
+                                .clear_session()
+                                .await
+                                .map_err(store_error_to_backend)?;
+                            self.store
+                                .clear_account_data()
+                                .await
+                                .map_err(store_error_to_backend)?;
+                            return Err(error);
+                        }
+                        Err(error) => return Err(error),
+                    };
+                if let Some(auth) = replacement_auth {
+                    self.store
+                        .save_session(StoredSession {
+                            auth,
+                            account_namespace: session.account_namespace.clone(),
+                        })
+                        .await
+                        .map_err(store_error_to_backend)?;
+                }
                 self.install_realtime(connected).await;
             }
         }
@@ -657,7 +959,10 @@ impl SdkBackend {
     async fn claim_pending_client_events(&self) -> BackendResult<Vec<ClientEventDelivery>> {
         let pending = self
             .store
-            .pending_client_events()
+            .pending_client_events_page(
+                CLIENT_EVENT_DELIVERY_PAGE_LIMIT,
+                CLIENT_EVENT_DELIVERY_PAGE_BYTES,
+            )
             .await
             .map_err(store_error_to_backend)?;
         let mut in_flight = self
@@ -739,6 +1044,21 @@ impl SdkBackend {
                     }
                 }
                 RealtimeEvent::Bot(event) => return Ok(vec![bot_event_delivery(event)?]),
+                RealtimeEvent::AuthenticationInvalidated => {
+                    self.clear_realtime().await;
+                    self.store
+                        .clear_session()
+                        .await
+                        .map_err(store_error_to_backend)?;
+                    self.store
+                        .clear_account_data()
+                        .await
+                        .map_err(store_error_to_backend)?;
+                    return Err(BackendError::new(
+                        ClientErrorCategory::AuthExpired,
+                        "Inline Protocol session was revoked",
+                    ));
+                }
                 RealtimeEvent::Ack { .. } | RealtimeEvent::Pong { .. } => {}
                 _ => {}
             }
@@ -865,23 +1185,48 @@ impl ClientBackend for SdkBackend {
                 .load_session()
                 .await
                 .map_err(store_error_to_backend)?;
-            backend.clear_realtime().await;
-            if let Some(session) = session
-                && let Err(error) = backend
-                    .api
-                    .logout(session.auth.access_token().expose_secret())
+            if let Some(session) = session.as_ref() {
+                backend
+                    .store
+                    .begin_logout()
                     .await
-            {
-                log::warn!("Inline remote session logout failed; clearing local session: {error}");
+                    .map_err(store_error_to_backend)?;
+                let remote_logout: Result<(), String> = match &session.auth {
+                    AuthCredential::AccessToken { token } => backend
+                        .api
+                        .logout(token.expose_secret())
+                        .await
+                        .map(|_| ())
+                        .map_err(|error| error.to_string()),
+                    AuthCredential::InlineProtocolV3 { .. } => backend
+                        .call_realtime(session, proto::LogOutInput {})
+                        .await
+                        .map(|_| ())
+                        .map_err(|error| error.to_string()),
+                };
+                if let Err(error) = remote_logout {
+                    log::warn!(
+                        "Inline remote session logout failed; clearing local session: {error}"
+                    );
+                }
+                // A failed authenticated call may have cleared local state as
+                // part of its auth-recovery path. Reassert the marker before
+                // the local purge so a crash cannot resurrect authority.
+                backend
+                    .store
+                    .begin_logout()
+                    .await
+                    .map_err(store_error_to_backend)?;
             }
+            backend.clear_realtime().await;
             backend
                 .store
-                .clear_session()
+                .clear_account_data()
                 .await
                 .map_err(store_error_to_backend)?;
             backend
                 .store
-                .clear_account_data()
+                .clear_session()
                 .await
                 .map_err(store_error_to_backend)?;
             backend
@@ -1249,19 +1594,23 @@ impl ClientBackend for SdkBackend {
             }
             let session = backend.require_session().await?;
             let result = backend
-                .api
-                .create_private_chat(
-                    session.auth.access_token().expose_secret(),
-                    request.user_id.get(),
+                .call_realtime(
+                    &session,
+                    proto::CreateChatInput {
+                        title: None,
+                        space_id: None,
+                        description: None,
+                        emoji: None,
+                        is_public: false,
+                        participants: vec![proto::InputChatParticipant {
+                            user_id: Some(request.user_id.get()),
+                            group_id: None,
+                        }],
+                        reserved_chat_id: None,
+                    },
                 )
-                .await
-                .map_err(api_error_to_backend)?;
-            let (created, user) = created_chat_from_private_chat_result(
-                result.chat,
-                result.dialog,
-                result.user,
-                request.user_id,
-            )?;
+                .await?;
+            let created = created_chat_from_proto(result.chat, result.dialog, None, None, None)?;
             backend
                 .store
                 .record_dialog(DialogRecord {
@@ -1275,13 +1624,6 @@ impl ClientBackend for SdkBackend {
                 })
                 .await
                 .map_err(store_error_to_backend)?;
-            if let Some(user) = user {
-                backend
-                    .store
-                    .record_users(vec![user])
-                    .await
-                    .map_err(store_error_to_backend)?;
-            }
             Ok(created)
         })
     }
@@ -1430,9 +1772,10 @@ impl ClientBackend for SdkBackend {
 
             let session = backend.require_session().await?;
             let initial_chat_id = chat_id_for_peer(request.peer);
-            let random_id = request
-                .random_id
-                .unwrap_or_else(|| random_id_for_upload_request(&request, bytes.len()));
+            let random_id = match request.random_id {
+                Some(random_id) => random_id,
+                None => random_id_for_upload_request(&request, bytes.len())?,
+            };
             let transaction_id = transaction_id_for_upload(&request, random_id);
             let new_identity = TransactionIdentity::new(
                 transaction_id.clone(),
@@ -1474,28 +1817,22 @@ impl ClientBackend for SdkBackend {
             }
 
             let realtime = backend.ensure_realtime(&session).await?;
-            let upload = match upload_native_media(
-                &realtime,
-                &request,
-                bytes,
-                thumbnail,
-                random_id,
-            )
-            .await {
-                Ok(upload) => upload,
-                Err(error) => {
-                    let backend_error = native_upload_error_to_backend(error);
-                    backend
-                        .record_transaction_error(
-                            identity,
-                            initial_chat_id,
-                            TransactionState::Queued,
-                            backend_error.clone(),
-                        )
-                        .await?;
-                    return Err(backend_error);
-                }
-            };
+            let upload =
+                match upload_native_media(&realtime, &request, bytes, thumbnail, random_id).await {
+                    Ok(upload) => upload,
+                    Err(error) => {
+                        let backend_error = native_upload_error_to_backend(error);
+                        backend
+                            .record_transaction_error(
+                                identity,
+                                initial_chat_id,
+                                TransactionState::Queued,
+                                backend_error.clone(),
+                            )
+                            .await?;
+                        return Err(backend_error);
+                    }
+                };
             let media = match input_media_from_complete(upload) {
                 Ok(media) => media,
                 Err(error) => {
@@ -2165,9 +2502,11 @@ impl SyncHost for SdkBackend {
         let backend = self.clone();
         Box::pin(async move {
             let session = backend.require_session().await?;
-            backend
+            let state = backend
                 .call_realtime(&session, proto::GetUpdatesStateInput { date: Some(date) })
-                .await
+                .await?;
+            backend.capture_state_preceding_updates().await?;
+            Ok(state)
         })
     }
 
@@ -2439,6 +2778,14 @@ impl SdkBackend {
             .into_iter()
             .map(InlineId::new)
             .collect::<Vec<_>>();
+
+        // A scoped repair is a replacement, not an overlay. Drop stale
+        // chat-owned projections only after every authoritative network read
+        // has succeeded, then rebuild the bucket from the fetched snapshot.
+        self.store
+            .remove_dialog(chat_id)
+            .await
+            .map_err(store_error_to_backend)?;
         let mut events = self.record_chat_update(chat, dialog, None).await?;
         self.mutate_dialog(chat_id, |dialog| {
             dialog.pinned_message_ids = pinned_message_ids;
@@ -4053,6 +4400,7 @@ fn validate_chat_and_user_ids(chat_id: InlineId, user_id: InlineId) -> BackendRe
     Ok(())
 }
 
+#[allow(dead_code)] // Retained until the legacy authenticated HTTP compatibility seam is removed.
 fn created_chat_from_private_chat_result(
     chat: Value,
     dialog: Value,
@@ -4130,6 +4478,7 @@ fn created_chat_from_proto(
     })
 }
 
+#[allow(dead_code)]
 fn user_record_from_api_value(value: &Value) -> Option<UserRecord> {
     let user_id = api_i64_field(value, &["id", "userId", "user_id"])?;
     Some(UserRecord {
@@ -4147,6 +4496,7 @@ fn user_record_from_api_value(value: &Value) -> Option<UserRecord> {
     })
 }
 
+#[allow(dead_code)]
 fn user_display_name_from_record(user: &UserRecord) -> Option<String> {
     user.display_name
         .clone()
@@ -4163,30 +4513,35 @@ fn user_display_name_from_record(user: &UserRecord) -> Option<String> {
         .or_else(|| user.username.clone())
 }
 
+#[allow(dead_code)]
 fn api_i64_field(value: &Value, fields: &[&str]) -> Option<i64> {
     fields
         .iter()
         .find_map(|field| value.get(*field).and_then(value_as_i64))
 }
 
+#[allow(dead_code)]
 fn api_bool_field(value: &Value, fields: &[&str]) -> Option<bool> {
     fields
         .iter()
         .find_map(|field| value.get(*field).and_then(Value::as_bool))
 }
 
+#[allow(dead_code)]
 fn api_string_field(value: &Value, fields: &[&str]) -> Option<String> {
     fields
         .iter()
         .find_map(|field| value.get(*field).and_then(value_as_string))
 }
 
+#[allow(dead_code)]
 fn api_nested_string_field(value: &Value, field: &str, nested_fields: &[&str]) -> Option<String> {
     value
         .get(field)
         .and_then(|nested| api_string_field(nested, nested_fields))
 }
 
+#[allow(dead_code)]
 fn value_as_i64(value: &Value) -> Option<i64> {
     value
         .as_i64()
@@ -4194,6 +4549,7 @@ fn value_as_i64(value: &Value) -> Option<i64> {
         .or_else(|| value.as_str()?.trim().parse().ok())
 }
 
+#[allow(dead_code)]
 fn value_as_string(value: &Value) -> Option<String> {
     value
         .as_str()
@@ -4247,6 +4603,55 @@ fn non_empty_option(value: Option<&str>) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+fn inline_protocol_v3_url(realtime_url: &str) -> String {
+    let base = realtime_url.trim_end_matches('/');
+    format!("{base}/v3")
+}
+
+fn temporary_authorization_needs_regeneration(
+    temporary: &inline_sdk::InlineProtocolAuthorization,
+    now_seconds: i64,
+) -> bool {
+    temporary
+        .expires_at
+        .is_none_or(|expires_at| i64::from(expires_at) <= now_seconds + 60)
+}
+
+fn temporary_reconnect_can_regenerate(error: &InlineProtocolV3Error) -> bool {
+    error.is_unauthenticated()
+}
+
+fn inline_protocol_v3_error_to_backend(error: InlineProtocolV3Error) -> BackendError {
+    let rendered = error.to_string();
+    match error {
+        InlineProtocolV3Error::Rpc {
+            status, error_code, ..
+        } if status == 420
+            || status == 429
+            || error_code == proto::rpc_error::Code::RateLimit as i32 =>
+        {
+            rate_limited_backend_error(rendered)
+        }
+        error if error.is_unauthenticated() => {
+            BackendError::new(ClientErrorCategory::AuthExpired, rendered)
+        }
+        InlineProtocolV3Error::Timeout => BackendError::new(ClientErrorCategory::Timeout, rendered),
+        InlineProtocolV3Error::CommitOutcomeUnknown => {
+            BackendError::new(ClientErrorCategory::CommitOutcomeUnknown, rendered)
+        }
+        InlineProtocolV3Error::WebSocket(_) | InlineProtocolV3Error::Closed => {
+            BackendError::new(ClientErrorCategory::Network, rendered)
+        }
+        InlineProtocolV3Error::InvalidKey
+        | InlineProtocolV3Error::Protocol
+        | InlineProtocolV3Error::Schema(_)
+        | InlineProtocolV3Error::UnexpectedResponse => {
+            BackendError::new(ClientErrorCategory::ProtocolMismatch, rendered)
+        }
+        _ => BackendError::new(ClientErrorCategory::Internal, rendered),
+    }
+}
+
 fn realtime_error_to_backend(error: RealtimeError) -> BackendError {
     match error {
         RealtimeError::InvalidUrl { message, .. } => {
@@ -4254,6 +4659,9 @@ fn realtime_error_to_backend(error: RealtimeError) -> BackendError {
         }
         RealtimeError::Timeout { .. } => {
             BackendError::new(ClientErrorCategory::Timeout, error.to_string())
+        }
+        RealtimeError::CommitOutcomeUnknown => {
+            BackendError::new(ClientErrorCategory::CommitOutcomeUnknown, error.to_string())
         }
         RealtimeError::ConnectionError { .. } => {
             BackendError::new(ClientErrorCategory::AuthExpired, error.to_string())
@@ -4288,6 +4696,7 @@ fn realtime_error_to_backend(error: RealtimeError) -> BackendError {
         }
         RealtimeError::InvalidHeaderValue { .. }
         | RealtimeError::Protocol(_)
+        | RealtimeError::InlineProtocol { .. }
         | RealtimeError::MissingResult
         | RealtimeError::UnexpectedResult { .. } => {
             BackendError::new(ClientErrorCategory::ProtocolMismatch, error.to_string())
@@ -4296,12 +4705,30 @@ fn realtime_error_to_backend(error: RealtimeError) -> BackendError {
     }
 }
 
+fn realtime_event_encoded_len(event: &RealtimeEvent) -> usize {
+    match event {
+        RealtimeEvent::AuthenticationInvalidated => 1,
+        RealtimeEvent::Updates(updates) => updates
+            .iter()
+            .map(prost::Message::encoded_len)
+            .fold(1usize, usize::saturating_add),
+        RealtimeEvent::Grid(event) => event.encoded_len(),
+        RealtimeEvent::Bot(event) => event.encoded_len(),
+        RealtimeEvent::Ack { .. } | RealtimeEvent::Pong { .. } => 16,
+        _ => 1,
+    }
+}
+
 fn realtime_error_closes_session(error: &RealtimeError) -> bool {
     matches!(
         error,
         RealtimeError::ConnectionClosed
             | RealtimeError::ConnectionError { .. }
+            | RealtimeError::InlineProtocol { .. }
             | RealtimeError::WebSocket(_)
+    ) || matches!(
+        error,
+        RealtimeError::RpcError { error_name, .. } if error_name == "UNAUTHENTICATED"
     )
 }
 
@@ -4499,13 +4926,21 @@ fn transaction_id_for_send(request: &SendTextRequest, random_id: RandomId) -> Tr
         .expect("generated transaction ID should be valid")
 }
 
-fn random_id_for_request(request: &SendTextRequest) -> RandomId {
-    let seed = request
+fn random_id_for_request(request: &SendTextRequest) -> BackendResult<RandomId> {
+    request
         .external_id
         .as_ref()
-        .map(|external| format!("{}:{}:{}", external.source(), external.id(), request.text))
-        .unwrap_or_else(|| format!("{}:{}", now_seconds(), request.text));
-    RandomId::new((stable_hash(&seed) & 0x7fff_ffff_ffff_ffff) as i64)
+        .map(|external| {
+            Ok(RandomId::new(
+                (stable_hash(&format!(
+                    "{}:{}:{}",
+                    external.source(),
+                    external.id(),
+                    request.text
+                )) & 0x7fff_ffff_ffff_ffff) as i64,
+            ))
+        })
+        .unwrap_or_else(random_operation_id)
 }
 
 fn transaction_id_for_upload(request: &UploadRequest, random_id: RandomId) -> TransactionId {
@@ -4518,28 +4953,37 @@ fn transaction_id_for_upload(request: &UploadRequest, random_id: RandomId) -> Tr
         .expect("generated transaction ID should be valid")
 }
 
-fn random_id_for_upload_request(request: &UploadRequest, size_bytes: usize) -> RandomId {
-    let seed = request
+fn random_id_for_upload_request(
+    request: &UploadRequest,
+    _size_bytes: usize,
+) -> BackendResult<RandomId> {
+    request
         .external_id
         .as_ref()
         .map(|external| {
-            format!(
-                "{}:{}:{}",
-                external.source(),
-                external.id(),
-                request.caption.as_deref().unwrap_or_default()
-            )
+            Ok(RandomId::new(
+                (stable_hash(&format!(
+                    "{}:{}:{}",
+                    external.source(),
+                    external.id(),
+                    request.caption.as_deref().unwrap_or_default()
+                )) & 0x7fff_ffff_ffff_ffff) as i64,
+            ))
         })
-        .unwrap_or_else(|| {
-            format!(
-                "{}:{}:{}:{}",
-                now_seconds(),
-                request.file_name.as_deref().unwrap_or_default(),
-                request.caption.as_deref().unwrap_or_default(),
-                size_bytes
-            )
-        });
-    RandomId::new((stable_hash(&seed) & 0x7fff_ffff_ffff_ffff) as i64)
+        .unwrap_or_else(random_operation_id)
+}
+
+fn random_operation_id() -> BackendResult<RandomId> {
+    let mut bytes = [0_u8; 8];
+    getrandom::fill(&mut bytes).map_err(|error| {
+        BackendError::new(
+            ClientErrorCategory::Internal,
+            format!("failed to generate mutation identity: {error}"),
+        )
+    })?;
+    Ok(RandomId::new(
+        (u64::from_le_bytes(bytes) & 0x7fff_ffff_ffff_ffff) as i64,
+    ))
 }
 
 #[allow(dead_code)] // Retained only to decode historical HTTP-upload fixtures during migration.
@@ -4596,7 +5040,9 @@ async fn upload_native_media(
     tokio::fs::write(&source_path, &bytes).await?;
 
     let thumbnail_result: Result<Option<String>, NativeUploadError> = async {
-        let Some(thumbnail) = thumbnail else { return Ok(None) };
+        let Some(thumbnail) = thumbnail else {
+            return Ok(None);
+        };
         let thumbnail_path = std::env::temp_dir().join(format!("{base}.thumbnail"));
         if let Err(error) = tokio::fs::write(&thumbnail_path, &thumbnail.bytes).await {
             let _ = tokio::fs::remove_file(&thumbnail_path).await;
@@ -4747,12 +5193,12 @@ fn native_upload_error_to_backend(error: NativeUploadError) -> BackendError {
             ClientErrorCategory::ProtocolMismatch,
             NativeUploadError::Protocol.to_string(),
         ),
-        error @ NativeUploadError::Rejected { retryable: true, .. } => {
-            BackendError::new(ClientErrorCategory::Network, error.to_string())
-        }
-        error @ NativeUploadError::Rejected { retryable: false, .. } => {
-            BackendError::new(ClientErrorCategory::InvalidInput, error.to_string())
-        }
+        error @ NativeUploadError::Rejected {
+            retryable: true, ..
+        } => BackendError::new(ClientErrorCategory::Network, error.to_string()),
+        error @ NativeUploadError::Rejected {
+            retryable: false, ..
+        } => BackendError::new(ClientErrorCategory::InvalidInput, error.to_string()),
         _ => BackendError::new(
             ClientErrorCategory::ProtocolMismatch,
             "unknown native upload failure",
@@ -5382,6 +5828,7 @@ fn retryable_transaction_category(category: ClientErrorCategory) -> bool {
             | ClientErrorCategory::ReloginRequired
             | ClientErrorCategory::Network
             | ClientErrorCategory::Timeout
+            | ClientErrorCategory::CommitOutcomeUnknown
             | ClientErrorCategory::RateLimited
             | ClientErrorCategory::Internal
     )
@@ -5462,6 +5909,58 @@ mod tests {
         assert_eq!(
             proto_send_mode(SendNotificationMode::Silent),
             Some(proto::MessageSendMode::ModeSilent as i32)
+        );
+    }
+
+    #[test]
+    fn fallback_text_random_ids_are_distinct_for_different_peers() {
+        let first = SendTextRequest::new(
+            crate::PeerRef::User {
+                user_id: InlineId::new(7),
+            },
+            "identical message",
+        );
+        let second = SendTextRequest::new(
+            crate::PeerRef::User {
+                user_id: InlineId::new(8),
+            },
+            "identical message",
+        );
+
+        assert_ne!(
+            random_id_for_request(&first).unwrap(),
+            random_id_for_request(&second).unwrap()
+        );
+    }
+
+    #[test]
+    fn fallback_upload_random_ids_are_distinct_for_different_peers() {
+        let first = UploadRequest {
+            peer: crate::PeerRef::User {
+                user_id: InlineId::new(7),
+            },
+            kind: MediaKind::Document,
+            file_name: Some("same.txt".to_owned()),
+            mime_type: Some("text/plain".to_owned()),
+            size_bytes: Some(4),
+            caption: Some("same caption".to_owned()),
+            width: None,
+            height: None,
+            duration_ms: None,
+            external_id: None,
+            random_id: None,
+            reply_to_message_id: None,
+        };
+        let second = UploadRequest {
+            peer: crate::PeerRef::User {
+                user_id: InlineId::new(8),
+            },
+            ..first.clone()
+        };
+
+        assert_ne!(
+            random_id_for_upload_request(&first, 4).unwrap(),
+            random_id_for_upload_request(&second, 4).unwrap()
         );
     }
 
@@ -5788,6 +6287,47 @@ mod tests {
         assert_eq!(backend.realtime_url(), "wss://api.inline.chat/realtime");
     }
 
+    #[test]
+    fn inline_protocol_v3_url_preserves_the_realtime_route() {
+        assert_eq!(
+            inline_protocol_v3_url("wss://api.inline.chat/realtime"),
+            "wss://api.inline.chat/realtime/v3"
+        );
+        assert_eq!(
+            inline_protocol_v3_url("ws://127.0.0.1:3000/realtime/"),
+            "ws://127.0.0.1:3000/realtime/v3"
+        );
+    }
+
+    #[test]
+    fn expired_or_nearly_expired_temporary_authorization_regenerates_before_connect() {
+        let temporary = inline_sdk::InlineProtocolAuthorization {
+            key: [1; 256],
+            key_id: [2; 8],
+            server_salt: 3,
+            temporary: true,
+            expires_at: Some(1_061),
+        };
+
+        assert!(!temporary_authorization_needs_regeneration(
+            &temporary, 1_000
+        ));
+        assert!(temporary_authorization_needs_regeneration(
+            &inline_sdk::InlineProtocolAuthorization {
+                expires_at: Some(1_060),
+                ..temporary.clone()
+            },
+            1_000,
+        ));
+        assert!(temporary_authorization_needs_regeneration(
+            &inline_sdk::InlineProtocolAuthorization {
+                expires_at: None,
+                ..temporary
+            },
+            1_000,
+        ));
+    }
+
     #[tokio::test]
     async fn sdk_backend_connect_persists_session() {
         let store = InMemoryStore::new();
@@ -5893,12 +6433,93 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn retained_realtime_event_overflow_resets_and_preserves_auth() {
+        let backend = SdkBackend::builder().build().unwrap();
+        backend.sync_required.store(false, Ordering::Release);
+
+        for attempt in 0..2 {
+            {
+                let mut queued = backend.queued_realtime_events.lock().await;
+                let missing = CLIENT_EVENT_DELIVERY_PAGE_LIMIT - queued.len();
+                queued.extend((0..missing).map(|id| RealtimeEvent::Ack { msg_id: id as u64 }));
+                assert_eq!(queued.len(), CLIENT_EVENT_DELIVERY_PAGE_LIMIT);
+            }
+
+            let incoming = VecDeque::from([
+                RealtimeEvent::Ack {
+                    msg_id: attempt as u64,
+                },
+                RealtimeEvent::AuthenticationInvalidated,
+            ]);
+            let error = backend.retain_realtime_events(incoming).await.unwrap_err();
+            assert_eq!(error.category, ClientErrorCategory::Network);
+            assert!(backend.sync_required.load(Ordering::Acquire));
+            assert!(backend.event_reconnect_pending.load(Ordering::Acquire));
+            assert!(backend.realtime.lock().await.is_none());
+            assert!(backend.realtime_events.lock().await.is_none());
+            assert!(
+                backend
+                    .queued_realtime_events
+                    .lock()
+                    .await
+                    .iter()
+                    .all(|event| matches!(event, RealtimeEvent::AuthenticationInvalidated))
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn sdk_backend_resume_without_session_reports_auth_required() {
         let backend = SdkBackend::builder().build().unwrap();
 
         let status = backend.resume_session().await.unwrap();
 
         assert_eq!(status.status, crate::ClientStatus::AuthRequired);
+    }
+
+    #[tokio::test]
+    async fn sdk_backend_resume_finishes_interrupted_logout_before_reconnect() {
+        let store = InMemoryStore::new();
+        store.save_session(connect_session()).await.unwrap();
+        store
+            .record_dialog(DialogRecord::new(InlineId::new(9)))
+            .await
+            .unwrap();
+        store.begin_logout().await.unwrap();
+        let realtime = FakeRealtimeConnector::new();
+        let backend = SdkBackend::builder()
+            .store(store.clone())
+            .realtime_connector(realtime.clone())
+            .build()
+            .unwrap();
+
+        let status = backend.resume_session().await.unwrap();
+
+        assert_eq!(status.status, crate::ClientStatus::AuthRequired);
+        assert!(realtime.attempts().is_empty());
+        assert!(!store.logout_pending().await.unwrap());
+        assert!(store.load_session().await.unwrap().is_none());
+        assert!(store.dialog(InlineId::new(9)).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn sdk_backend_connect_cannot_overwrite_interrupted_logout_marker() {
+        let store = InMemoryStore::new();
+        store.save_session(connect_session()).await.unwrap();
+        store.begin_logout().await.unwrap();
+        let realtime = FakeRealtimeConnector::new();
+        let backend = SdkBackend::builder()
+            .store(store.clone())
+            .realtime_connector(realtime.clone())
+            .build()
+            .unwrap();
+
+        let status = backend.connect(connect_request()).await.unwrap();
+
+        assert_eq!(status.status, crate::ClientStatus::AuthRequired);
+        assert!(realtime.attempts().is_empty());
+        assert!(!store.logout_pending().await.unwrap());
+        assert!(store.load_session().await.unwrap().is_none());
     }
 
     #[tokio::test]
@@ -7179,6 +7800,12 @@ mod tests {
 
         let store = InMemoryStore::new();
         store.save_session(connect_session()).await.unwrap();
+        store.upsert_dialog(DialogRecord {
+            chat_id: InlineId::new(7),
+            title: Some("Stale".to_owned()),
+            ..DialogRecord::new(InlineId::new(7))
+        });
+        store.insert_message(test_message_record(10));
         store
             .save_sync_bucket_state(
                 crate::SyncBucketKey::User,
@@ -7206,6 +7833,20 @@ mod tests {
         let dialog = store.dialog(InlineId::new(7)).await.unwrap().unwrap();
         assert_eq!(dialog.title.as_deref(), Some("Repaired"));
         assert_eq!(dialog.pinned_message_ids, vec![InlineId::new(11)]);
+        assert!(
+            store
+                .message(InlineId::new(7), InlineId::new(10))
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            store
+                .message(InlineId::new(7), InlineId::new(11))
+                .await
+                .unwrap()
+                .is_some()
+        );
         assert_eq!(
             store
                 .sync_bucket_state(crate::SyncBucketKey::Chat {

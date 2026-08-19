@@ -210,6 +210,9 @@ fn realtime_error_to_backend(error: RealtimeError) -> BackendError {
         RealtimeError::Timeout { .. } => {
             BackendError::new(ClientErrorCategory::Timeout, error.to_string())
         }
+        RealtimeError::CommitOutcomeUnknown => {
+            BackendError::new(ClientErrorCategory::CommitOutcomeUnknown, error.to_string())
+        }
         RealtimeError::ConnectionError { .. } | RealtimeError::RpcError { .. } => {
             BackendError::new(ClientErrorCategory::AuthExpired, error.to_string())
         }

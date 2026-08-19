@@ -87,6 +87,12 @@ pub enum NativeUploadError {
         /// Whether retrying may succeed.
         retryable: bool,
     },
+    /// The server canceled the upload before it completed.
+    #[error("upload canceled by server")]
+    Canceled,
+    /// The server expired the upload before it completed.
+    #[error("upload expired before completion")]
+    Expired,
 }
 
 enum Transport<'a> {
@@ -284,7 +290,50 @@ async fn upload_with_transport(
             report_progress(&accepted, created.part_size, byte_count, progress);
         }
 
-        let finish = transport.finish(created.upload_id.clone()).await?;
+        let finish = match transport.finish(created.upload_id.clone()).await {
+            Ok(finish) => finish,
+            Err(error) if is_ambiguous_finish_error(&error) => {
+                let state = match transport.state(created.upload_id.clone()).await {
+                    Ok(state) => state,
+                    Err(_) => return Err(error),
+                };
+                match proto::UploadStatus::try_from(state.status) {
+                    Ok(proto::UploadStatus::Uploading) => {
+                        accepted.fill(false);
+                        for index in state.accepted_parts {
+                            let Some(slot) = accepted.get_mut(index as usize) else {
+                                return Err(NativeUploadError::Protocol);
+                            };
+                            *slot = true;
+                        }
+                    }
+                    Ok(proto::UploadStatus::Processing) => {
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    }
+                    Ok(proto::UploadStatus::Complete) => {
+                        return state.complete.ok_or(NativeUploadError::Protocol);
+                    }
+                    Ok(proto::UploadStatus::Failed) => {
+                        let failure = state.failure.ok_or(NativeUploadError::Protocol)?;
+                        return Err(NativeUploadError::Rejected {
+                            code: failure.code,
+                            retryable: failure.retryable,
+                        });
+                    }
+                    Ok(proto::UploadStatus::Canceled) => {
+                        return Err(NativeUploadError::Canceled);
+                    }
+                    Ok(proto::UploadStatus::Expired) => {
+                        return Err(NativeUploadError::Expired);
+                    }
+                    Ok(proto::UploadStatus::Unspecified) | Err(_) => {
+                        return Err(NativeUploadError::Protocol);
+                    }
+                }
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
         match finish.state.ok_or(NativeUploadError::Protocol)? {
             proto::finish_upload_result::State::Complete(complete) => return Ok(complete),
             proto::finish_upload_result::State::Missing(missing) => {
@@ -311,6 +360,17 @@ async fn upload_with_transport(
     }
 }
 
+fn is_ambiguous_finish_error(error: &NativeUploadError) -> bool {
+    matches!(
+        error,
+        NativeUploadError::V2(
+            RealtimeError::CommitOutcomeUnknown | RealtimeError::ConnectionClosed
+        ) | NativeUploadError::V3(
+            InlineProtocolV3Error::CommitOutcomeUnknown | InlineProtocolV3Error::Closed
+        )
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,7 +378,17 @@ mod tests {
     struct LostResponseTransport {
         accepted: bool,
         lose_response: bool,
+        lose_finish_response: bool,
+        finish_state: Option<ReconciledState>,
         calls: Vec<&'static str>,
+    }
+
+    #[derive(Clone, Copy)]
+    enum ReconciledState {
+        Complete,
+        Failed,
+        Canceled,
+        Expired,
     }
 
     impl NativeUploadTransport for LostResponseTransport {
@@ -348,14 +418,51 @@ mod tests {
                 self.lose_response = false;
                 return Err(NativeUploadError::Protocol);
             }
-            Ok(proto::SaveUploadPartResult { already_present: false })
+            Ok(proto::SaveUploadPartResult {
+                already_present: false,
+            })
         }
 
         async fn state(
             &mut self,
-            _upload_id: Vec<u8>,
+            upload_id: Vec<u8>,
         ) -> Result<proto::GetUploadStateResult, NativeUploadError> {
             self.calls.push("state");
+            assert_eq!(upload_id, vec![7; 16]);
+            if let Some(finish_state) = self.finish_state {
+                return Ok(match finish_state {
+                    ReconciledState::Complete => proto::GetUploadStateResult {
+                        status: proto::UploadStatus::Complete as i32,
+                        accepted_parts: vec![0],
+                        complete: Some(proto::UploadComplete {
+                            file_unique_id: "INDnative".into(),
+                            media: None,
+                        }),
+                        failure: None,
+                    },
+                    ReconciledState::Failed => proto::GetUploadStateResult {
+                        status: proto::UploadStatus::Failed as i32,
+                        accepted_parts: vec![0],
+                        complete: None,
+                        failure: Some(proto::UploadFailure {
+                            code: proto::upload_failure::Code::UploadFailureInvalidMedia as i32,
+                            retryable: false,
+                        }),
+                    },
+                    ReconciledState::Canceled => proto::GetUploadStateResult {
+                        status: proto::UploadStatus::Canceled as i32,
+                        accepted_parts: vec![0],
+                        complete: None,
+                        failure: None,
+                    },
+                    ReconciledState::Expired => proto::GetUploadStateResult {
+                        status: proto::UploadStatus::Expired as i32,
+                        accepted_parts: vec![0],
+                        complete: None,
+                        failure: None,
+                    },
+                });
+            }
             Ok(proto::GetUploadStateResult {
                 status: proto::UploadStatus::Uploading as i32,
                 accepted_parts: if self.accepted { vec![0] } else { vec![] },
@@ -366,9 +473,19 @@ mod tests {
 
         async fn finish(
             &mut self,
-            _upload_id: Vec<u8>,
+            upload_id: Vec<u8>,
         ) -> Result<proto::FinishUploadResult, NativeUploadError> {
             self.calls.push("finish");
+            assert_eq!(upload_id, vec![7; 16]);
+            if self.lose_finish_response {
+                self.lose_finish_response = false;
+                if self.finish_state.is_none() {
+                    self.finish_state = Some(ReconciledState::Complete);
+                }
+                return Err(NativeUploadError::V3(
+                    InlineProtocolV3Error::CommitOutcomeUnknown,
+                ));
+            }
             Ok(proto::FinishUploadResult {
                 state: Some(proto::finish_upload_result::State::Complete(
                     proto::UploadComplete {
@@ -390,6 +507,8 @@ mod tests {
         let transport = LostResponseTransport {
             accepted: false,
             lose_response: true,
+            lose_finish_response: false,
+            finish_state: None,
             calls: vec![],
         };
         let mut progress = vec![];
@@ -409,6 +528,76 @@ mod tests {
 
         assert_eq!(result.file_unique_id, "INDnative");
         assert_eq!(progress, vec![0, 3]);
+    }
+
+    #[tokio::test]
+    async fn reconciles_finish_committed_before_its_response_was_lost() {
+        let result = run_lost_finish(None).await.unwrap();
+
+        assert_eq!(result.file_unique_id, "INDnative");
+    }
+
+    #[tokio::test]
+    async fn preserves_authoritative_failed_finish_state() {
+        let error = run_lost_finish(Some(ReconciledState::Failed))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            NativeUploadError::Rejected {
+                code,
+                retryable: false
+            } if code == proto::upload_failure::Code::UploadFailureInvalidMedia as i32
+        ));
+    }
+
+    #[tokio::test]
+    async fn preserves_authoritative_canceled_finish_state() {
+        let error = run_lost_finish(Some(ReconciledState::Canceled))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, NativeUploadError::Canceled));
+    }
+
+    #[tokio::test]
+    async fn preserves_authoritative_expired_finish_state() {
+        let error = run_lost_finish(Some(ReconciledState::Expired))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, NativeUploadError::Expired));
+    }
+
+    async fn run_lost_finish(
+        finish_state: Option<ReconciledState>,
+    ) -> Result<proto::UploadComplete, NativeUploadError> {
+        let path = std::env::temp_dir().join(format!(
+            "inline-native-upload-finish-state-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        tokio::fs::write(&path, [1_u8, 2, 3]).await.unwrap();
+        let transport = LostResponseTransport {
+            accepted: false,
+            lose_response: false,
+            lose_finish_response: true,
+            finish_state,
+            calls: vec![],
+        };
+        let result = upload_with_transport(
+            transport,
+            NativeUploadInput::new(
+                &path,
+                "proof.bin",
+                "application/octet-stream",
+                proto::UploadKind::Document,
+            ),
+            &mut |_| {},
+        )
+        .await;
+        tokio::fs::remove_file(&path).await.unwrap();
+        result
     }
 }
 

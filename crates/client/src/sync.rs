@@ -1,7 +1,7 @@
 //! Inline-native update discovery, ordering, and bucket recovery.
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -89,6 +89,50 @@ pub(crate) struct SyncManager {
     bucket_locks: Mutex<HashMap<SyncBucketKey, Arc<Mutex<()>>>>,
     fetch_limiter: Arc<Semaphore>,
     sync_state_lock: Mutex<()>,
+    sync_operation_lock: Mutex<()>,
+    discovery_round: Mutex<Option<DiscoveryRound>>,
+    state_preceding_updates: Mutex<Vec<proto::Update>>,
+}
+
+#[derive(Debug)]
+struct DiscoveryRound {
+    candidate_checkpoint: i64,
+    requires_target: bool,
+    observed: bool,
+    targets: HashMap<SyncBucketKey, DiscoveryTarget>,
+    satisfied: HashSet<SyncBucketKey>,
+    status: DiscoveryRoundStatus,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DiscoveryRoundStatus {
+    Open,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DiscoveryTarget {
+    Through { seq: i64 },
+    Latest,
+}
+
+impl DiscoveryTarget {
+    fn merge(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Latest, _) | (_, Self::Latest) => Self::Latest,
+            (Self::Through { seq: left }, Self::Through { seq: right }) => Self::Through {
+                seq: left.max(right),
+            },
+        }
+    }
+}
+
+fn discovery_target(seq: i64) -> DiscoveryTarget {
+    if seq == 0 {
+        DiscoveryTarget::Latest
+    } else {
+        DiscoveryTarget::Through { seq }
+    }
 }
 
 impl SyncManager {
@@ -100,10 +144,25 @@ impl SyncManager {
             bucket_locks: Mutex::new(HashMap::new()),
             fetch_limiter: Arc::new(Semaphore::new(max_fetches)),
             sync_state_lock: Mutex::new(()),
+            sync_operation_lock: Mutex::new(()),
+            discovery_round: Mutex::new(None),
+            state_preceding_updates: Mutex::new(Vec::new()),
         }
     }
 
     pub(crate) async fn discover<H: SyncHost>(
+        &self,
+        host: &H,
+    ) -> BackendResult<Vec<ClientEventDelivery>> {
+        let _operation_guard = self.sync_operation_lock.lock().await;
+        let result = self.discover_inner(host).await;
+        if result.is_err() {
+            self.fail_discovery_round().await;
+        }
+        result
+    }
+
+    async fn discover_inner<H: SyncHost>(
         &self,
         host: &H,
     ) -> BackendResult<Vec<ClientEventDelivery>> {
@@ -114,13 +173,19 @@ impl SyncManager {
             state.last_sync_date
         );
         let result = host.get_updates_state(state.last_sync_date).await?;
-        if result.updates_found == Some(false) {
-            self.update_last_sync_date(result.date).await?;
-        }
+        self.begin_discovery_round(result.date, result.updates_found != Some(false))
+            .await;
         events.extend(
             self.process_bucket(host, SyncBucketKey::User, Vec::new(), None, true)
                 .await?,
         );
+        let preceding = std::mem::take(&mut *self.state_preceding_updates.lock().await);
+        if !preceding.is_empty() {
+            events.extend(self.process_realtime_inner(host, preceding).await?);
+        }
+        self.satisfy_discovery_target(SyncBucketKey::User, true)
+            .await?;
+        self.settle_discovery_round().await?;
         log::debug!(
             "finished Inline update discovery date={} events={}",
             result.date,
@@ -134,30 +199,57 @@ impl SyncManager {
         host: &H,
         updates: Vec<proto::Update>,
     ) -> BackendResult<Vec<ClientEventDelivery>> {
+        let _operation_guard = self.sync_operation_lock.lock().await;
+        let result = self.process_realtime_inner(host, updates).await;
+        if result.is_err() {
+            self.fail_discovery_round().await;
+        }
+        result
+    }
+
+    async fn process_realtime_inner<H: SyncHost>(
+        &self,
+        host: &H,
+        updates: Vec<proto::Update>,
+    ) -> BackendResult<Vec<ClientEventDelivery>> {
         let mut events = self.recover_pending_batches(host).await?;
         let received_count = updates.len();
         let mut direct = Vec::new();
         let mut buckets = HashMap::<SyncBucketKey, Vec<proto::Update>>::new();
-        let mut targets = HashMap::<SyncBucketKey, i64>::new();
+        let mut targets = HashMap::<SyncBucketKey, DiscoveryTarget>::new();
 
         for update in updates {
+            if update.update.is_none() {
+                // An older prost schema cannot recover the bucket identity from
+                // an unknown oneof payload. Ignore the live copy without
+                // poisoning the session; the next bucket hint/gap replays the
+                // same sequence through GET_UPDATES, whose page envelope owns
+                // cursor advancement and treats it as an accounted no-op.
+                log::warn!(
+                    "ignoring forward-compatible unknown live Inline update seq={}",
+                    update_seq(&update)
+                );
+                continue;
+            }
             match update.update.as_ref() {
                 Some(proto::update::Update::ChatHasNewUpdates(hint)) => {
                     if let Some(key) = chat_hint_bucket_key(hint) {
+                        let target = discovery_target(i64::from(hint.update_seq));
                         targets
                             .entry(key)
-                            .and_modify(|seq| *seq = (*seq).max(i64::from(hint.update_seq)))
-                            .or_insert(i64::from(hint.update_seq));
+                            .and_modify(|existing| *existing = existing.merge(target))
+                            .or_insert(target);
                     }
                 }
                 Some(proto::update::Update::SpaceHasNewUpdates(hint)) => {
                     let key = SyncBucketKey::Space {
                         space_id: InlineId::new(hint.space_id),
                     };
+                    let target = discovery_target(i64::from(hint.update_seq));
                     targets
                         .entry(key)
-                        .and_modify(|seq| *seq = (*seq).max(i64::from(hint.update_seq)))
-                        .or_insert(i64::from(hint.update_seq));
+                        .and_modify(|existing| *existing = existing.merge(target))
+                        .or_insert(target);
                 }
                 _ => {
                     let seq = update_seq(&update);
@@ -172,6 +264,8 @@ impl SyncManager {
             }
         }
 
+        self.observe_discovery_targets(&targets).await;
+
         if !direct.is_empty() {
             let max_date = max_update_date(&direct);
             let applied = host.apply_sync_batch(direct, None).await?;
@@ -180,7 +274,7 @@ impl SyncManager {
                 .append_client_events(applied)
                 .await
                 .map_err(store_error_to_backend)?;
-            self.update_last_sync_date(max_date).await?;
+            self.record_direct_date(max_date).await?;
             events.extend(applied);
         }
 
@@ -192,38 +286,48 @@ impl SyncManager {
             .into_iter()
             .map(|(key, updates)| {
                 let target = targets.get(&key).copied();
-                (key, updates, target)
+                let target_seq = match target {
+                    Some(DiscoveryTarget::Through { seq }) => Some(seq),
+                    Some(DiscoveryTarget::Latest) | None => None,
+                };
+                let force_fetch = target == Some(DiscoveryTarget::Latest);
+                (key, updates, target_seq, force_fetch)
             })
             .collect::<Vec<_>>();
         let bucket_count = ordered.len();
-        ordered.sort_by_key(|(key, _, _)| bucket_sort_key(*key));
+        ordered.sort_by_key(|(key, _, _, _)| bucket_sort_key(*key));
 
         if let Some(user_index) = ordered
             .iter()
-            .position(|(key, _, _)| *key == SyncBucketKey::User)
+            .position(|(key, _, _, _)| *key == SyncBucketKey::User)
         {
-            let (key, updates, target) = ordered.remove(user_index);
+            let (key, updates, target, force_fetch) = ordered.remove(user_index);
             events.extend(
-                self.process_bucket(host, key, updates, target, false)
+                self.process_bucket(host, key, updates, target, force_fetch)
                     .await?,
             );
+            self.satisfy_discovery_target(key, force_fetch).await?;
         }
 
         let concurrency = self.config.max_concurrent_bucket_fetches.max(1);
         let mut results = stream::iter(ordered)
-            .map(|(key, updates, target)| async move {
+            .map(|(key, updates, target, force_fetch)| async move {
                 (
-                    bucket_sort_key(key),
-                    self.process_bucket(host, key, updates, target, false).await,
+                    key,
+                    force_fetch,
+                    self.process_bucket(host, key, updates, target, force_fetch)
+                        .await,
                 )
             })
             .buffer_unordered(concurrency)
             .collect::<Vec<_>>()
             .await;
-        results.sort_by_key(|(sort_key, _)| *sort_key);
-        for (_, result) in results {
+        results.sort_by_key(|(key, _, _)| bucket_sort_key(*key));
+        for (key, force_fetch, result) in results {
             events.extend(result?);
+            self.satisfy_discovery_target(key, force_fetch).await?;
         }
+        self.maybe_commit_discovery_round().await?;
         log::debug!(
             "processed Inline realtime batch received={received_count} buckets={bucket_count} events={}",
             events.len()
@@ -295,7 +399,6 @@ impl SyncManager {
         let events = self
             .commit_sync_batch(host, key, committed, updates, None)
             .await?;
-        self.update_last_sync_date(committed.date).await?;
         *state = committed;
         Ok(events)
     }
@@ -360,32 +463,27 @@ impl SyncManager {
                         "bucket sync received a non-advancing TOO_LONG pointer",
                     ));
                 }
-                if cold_start {
-                    let target_seq = response.seq;
-                    let target_date = final_date.max(response.date);
-                    log::warn!(
-                        "repairing cold Inline bucket after TOO_LONG kind={} target_seq={target_seq}",
-                        bucket_kind(key)
-                    );
-                    deliveries.extend(
-                        self.repair_cold_bucket(host, key, target_seq, target_date)
-                            .await?,
-                    );
-                    cold_start = false;
-                    committed_floor = target_seq;
-                    current_seq = target_seq;
-                    final_date = target_date;
-                    fetched.clear();
-                    sidecars = proto::UpdateSidecars::default();
-                    slice_end = None;
-                    buffered.retain(|seq, _| *seq > target_seq);
-                    if hard_end.is_none_or(|end| target_seq >= end) {
-                        return Ok(deliveries);
-                    }
-                    continue;
+                let target_seq = response.seq;
+                let target_date = final_date.max(response.date);
+                log::warn!(
+                    "replacing Inline bucket after bounded catch-up was exceeded kind={} target_seq={target_seq}",
+                    bucket_kind(key)
+                );
+                deliveries.extend(
+                    self.repair_cold_bucket(host, key, target_seq, target_date)
+                        .await?,
+                );
+                cold_start = false;
+                committed_floor = target_seq;
+                current_seq = target_seq;
+                final_date = target_date;
+                fetched.clear();
+                sidecars = proto::UpdateSidecars::default();
+                slice_end = None;
+                buffered.retain(|seq, _| *seq > target_seq);
+                if hard_end.is_none_or(|end| target_seq >= end) {
+                    return Ok(deliveries);
                 }
-                let max_slice = current_seq + i64::from(self.config.max_total_updates);
-                slice_end = Some(response.seq.min(max_slice));
                 continue;
             }
 
@@ -417,7 +515,16 @@ impl SyncManager {
                     self.repair_cold_bucket(host, key, current_seq, final_date)
                         .await?,
                 );
-                return Ok(deliveries);
+                cold_start = false;
+                committed_floor = current_seq;
+                fetched.clear();
+                sidecars = proto::UpdateSidecars::default();
+                slice_end = None;
+                buffered.retain(|seq, _| *seq > current_seq);
+                if hard_end.is_none_or(|end| current_seq >= end) {
+                    return Ok(deliveries);
+                }
+                continue;
             }
 
             if cold_start {
@@ -425,6 +532,14 @@ impl SyncManager {
                     merge_sidecars(&mut sidecars, page_sidecars);
                 }
                 for update in page_updates {
+                    if update.update.is_none() {
+                        log::warn!(
+                            "ignoring forward-compatible unknown Inline update kind={} seq={}",
+                            bucket_kind(key),
+                            update_seq(&update)
+                        );
+                        continue;
+                    }
                     let seq = update_seq(&update);
                     if seq > committed_floor {
                         insert_unique_update(&mut fetched, seq, update, "fetched page")?;
@@ -433,6 +548,14 @@ impl SyncManager {
             } else if current_seq > previous_seq {
                 let mut page = BTreeMap::<i64, proto::Update>::new();
                 for update in page_updates {
+                    if update.update.is_none() {
+                        log::warn!(
+                            "ignoring forward-compatible unknown Inline update kind={} seq={}",
+                            bucket_kind(key),
+                            update_seq(&update)
+                        );
+                        continue;
+                    }
                     let seq = update_seq(&update);
                     insert_unique_update(&mut page, seq, update, "fetched page")?;
                 }
@@ -466,7 +589,6 @@ impl SyncManager {
                         has_sidecars.then_some(page_sidecars).flatten(),
                     )
                     .await?;
-                self.update_last_sync_date(committed.date).await?;
                 deliveries.extend(page_deliveries);
                 for seq in buffered_sequences {
                     buffered.remove(&seq);
@@ -571,7 +693,6 @@ impl SyncManager {
                 has_sidecars.then_some(sidecars),
             )
             .await?;
-        self.update_last_sync_date(committed.date).await?;
         log::debug!(
             "finished Inline bucket fetch kind={} pages={page_count} end_seq={} updates={} events={}",
             bucket_kind(key),
@@ -614,7 +735,6 @@ impl SyncManager {
             .commit_pending_sync_batch_with_events(key, committed, events)
             .await
             .map_err(store_error_to_backend)?;
-        self.update_last_sync_date(committed.date).await?;
         Ok(deliveries)
     }
 
@@ -644,6 +764,15 @@ impl SyncManager {
                         .discard_pending_sync_batch(key)
                         .await
                         .map_err(store_error_to_backend)?;
+                    log::warn!(
+                        "replacing Inline sync bucket after permanent apply failure kind={} end_seq={}",
+                        bucket_kind(key),
+                        committed_state.seq
+                    );
+                    let events = host.repair_bucket(key).await?;
+                    return self
+                        .commit_cold_pointer(key, committed_state.seq, committed_state.date, events)
+                        .await;
                 }
                 return Err(error);
             }
@@ -722,8 +851,6 @@ impl SyncManager {
                     .await
                     .map_err(store_error_to_backend)?,
             );
-            self.update_last_sync_date(batch.committed_state.date)
-                .await?;
         }
         for (_, (key, target_seq)) in refetch {
             events.extend(
@@ -759,6 +886,163 @@ impl SyncManager {
                 .map_err(store_error_to_backend)?;
         }
         Ok(state)
+    }
+
+    async fn begin_discovery_round(&self, candidate_checkpoint: i64, requires_target: bool) {
+        let mut round = self.discovery_round.lock().await;
+        *round = Some(DiscoveryRound {
+            candidate_checkpoint,
+            requires_target,
+            observed: false,
+            targets: HashMap::new(),
+            satisfied: HashSet::new(),
+            status: DiscoveryRoundStatus::Open,
+        });
+    }
+
+    pub(crate) async fn queue_state_preceding_updates(&self, updates: Vec<proto::Update>) {
+        if updates.is_empty() {
+            return;
+        }
+        self.state_preceding_updates.lock().await.extend(updates);
+    }
+
+    async fn observe_discovery_targets(&self, targets: &HashMap<SyncBucketKey, DiscoveryTarget>) {
+        if targets.is_empty() {
+            return;
+        }
+        let mut round = self.discovery_round.lock().await;
+        let Some(round) = round.as_mut() else {
+            return;
+        };
+        if round.status != DiscoveryRoundStatus::Open {
+            return;
+        }
+        round.observed = true;
+        for (key, target) in targets {
+            let target = *target;
+            let previous = round.targets.get(key).copied();
+            round
+                .targets
+                .entry(*key)
+                .and_modify(|existing| *existing = existing.merge(target))
+                .or_insert(target);
+            if previous != Some(target) {
+                round.satisfied.remove(key);
+            }
+        }
+    }
+
+    async fn fail_discovery_round(&self) {
+        let mut round = self.discovery_round.lock().await;
+        if let Some(round) = round.as_mut() {
+            round.status = DiscoveryRoundStatus::Failed;
+        }
+    }
+
+    async fn settle_discovery_round(&self) -> BackendResult<()> {
+        let mut round = self.discovery_round.lock().await;
+        let Some(current) = round.as_ref() else {
+            return Ok(());
+        };
+        if current.status != DiscoveryRoundStatus::Open {
+            return Ok(());
+        }
+        if current.requires_target && !current.observed {
+            // The state RPC's queued-event snapshot contained no target.
+            // Close this round before future live events are received.
+            *round = None;
+            return Ok(());
+        }
+        drop(round);
+        self.maybe_commit_discovery_round().await
+    }
+
+    async fn satisfy_discovery_target(
+        &self,
+        key: SyncBucketKey,
+        authoritative_fetch: bool,
+    ) -> BackendResult<()> {
+        let target = {
+            let round = self.discovery_round.lock().await;
+            round
+                .as_ref()
+                .and_then(|round| round.targets.get(&key).copied())
+        };
+        let Some(target) = target else {
+            return Ok(());
+        };
+        let state = self
+            .store
+            .sync_bucket_state(key)
+            .await
+            .map_err(store_error_to_backend)?;
+        let satisfied = match target {
+            DiscoveryTarget::Through { seq } => state.seq >= seq,
+            DiscoveryTarget::Latest => authoritative_fetch,
+        };
+        if satisfied {
+            let mut round = self.discovery_round.lock().await;
+            if round
+                .as_ref()
+                .and_then(|round| round.targets.get(&key).copied())
+                == Some(target)
+            {
+                if let Some(round) = round.as_mut() {
+                    round.satisfied.insert(key);
+                }
+            }
+            drop(round);
+            self.maybe_commit_discovery_round().await?;
+        }
+        Ok(())
+    }
+
+    async fn maybe_commit_discovery_round(&self) -> BackendResult<()> {
+        let mut round_guard = self.discovery_round.lock().await;
+        let Some(round) = round_guard.as_ref() else {
+            return Ok(());
+        };
+        if round.status != DiscoveryRoundStatus::Open {
+            return Ok(());
+        }
+        if round.requires_target && !round.observed {
+            return Ok(());
+        }
+        if round.requires_target && round.targets.is_empty() {
+            return Ok(());
+        }
+        for (key, target) in &round.targets {
+            if round.satisfied.contains(key) {
+                continue;
+            }
+            let state = self
+                .store
+                .sync_bucket_state(*key)
+                .await
+                .map_err(store_error_to_backend)?;
+            let satisfied = match target {
+                DiscoveryTarget::Through { seq } => state.seq >= *seq,
+                DiscoveryTarget::Latest => false,
+            };
+            if !satisfied {
+                return Ok(());
+            }
+        }
+        // Keep the round open until the durable checkpoint write succeeds.
+        // A store error must force reconnect discovery to retry the same
+        // candidate rather than being mistaken for a settled round.
+        self.update_last_sync_date(round.candidate_checkpoint)
+            .await?;
+        *round_guard = None;
+        Ok(())
+    }
+
+    async fn record_direct_date(&self, max_applied_date: i64) -> BackendResult<()> {
+        if self.discovery_round.lock().await.is_some() {
+            return Ok(());
+        }
+        self.update_last_sync_date(max_applied_date).await
     }
 
     async fn update_last_sync_date(&self, max_applied_date: i64) -> BackendResult<()> {
@@ -829,6 +1113,7 @@ fn bucket_key_for_update(update: &proto::Update) -> Option<SyncBucketKey> {
         | Update::UpdateUserStatus(_)
         | Update::UpdateUserSettings(_)
         | Update::UpdatedUser(_)
+        | Update::ChatPermissions(_)
         | Update::DialogArchived(_)
         | Update::DialogNotificationSettings(_)
         | Update::DialogFollowMode(_)
@@ -1307,6 +1592,7 @@ mod tests {
         applied: Arc<Mutex<Vec<Vec<proto::Update>>>>,
         repaired_buckets: Arc<Mutex<Vec<SyncBucketKey>>>,
         fail_apply: Arc<AtomicBool>,
+        fail_apply_permanently: Arc<AtomicBool>,
         fetch_delay_ms: u64,
         fetches_in_flight: Arc<AtomicUsize>,
         max_fetches_in_flight: Arc<AtomicUsize>,
@@ -1327,6 +1613,7 @@ mod tests {
                 applied: Arc::new(Mutex::new(Vec::new())),
                 repaired_buckets: Arc::new(Mutex::new(Vec::new())),
                 fail_apply: Arc::new(AtomicBool::new(false)),
+                fail_apply_permanently: Arc::new(AtomicBool::new(false)),
                 fetch_delay_ms: 0,
                 fetches_in_flight: Arc::new(AtomicUsize::new(0)),
                 max_fetches_in_flight: Arc::new(AtomicUsize::new(0)),
@@ -1335,6 +1622,11 @@ mod tests {
 
         fn failing_apply(mut self) -> Self {
             self.fail_apply = Arc::new(AtomicBool::new(true));
+            self
+        }
+
+        fn permanently_failing_apply(mut self) -> Self {
+            self.fail_apply_permanently = Arc::new(AtomicBool::new(true));
             self
         }
 
@@ -1388,6 +1680,12 @@ mod tests {
                     return Err(BackendError::new(
                         ClientErrorCategory::Internal,
                         "fake apply failure",
+                    ));
+                }
+                if host.fail_apply_permanently.load(Ordering::Relaxed) {
+                    return Err(BackendError::new(
+                        ClientErrorCategory::Unsupported,
+                        "fake permanent apply failure",
                     ));
                 }
                 host.applied.lock().await.push(updates.clone());
@@ -1492,6 +1790,318 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn failed_discovery_target_preserves_the_previous_global_date() {
+        let old_date = now_seconds() - 60;
+        let store = Arc::new(InMemoryStore::new());
+        store
+            .save_sync_state(SyncState {
+                last_sync_date: old_date,
+            })
+            .await
+            .unwrap();
+        let mut host = FakeHost::new(vec![skipped_result(0, 1, old_date + 10)]);
+        host.state = proto::GetUpdatesStateResult {
+            date: old_date + 100,
+            updates_found: Some(true),
+            seq: None,
+        };
+        let sync = SyncManager::new(
+            store.clone(),
+            SyncConfig {
+                stale_state_max_age_seconds: i64::MAX,
+                ..SyncConfig::default()
+            },
+        );
+
+        sync.discover(&host).await.unwrap();
+        assert_eq!(store.sync_state().await.unwrap().last_sync_date, old_date);
+        let error = sync
+            .process_realtime(&host, vec![chat_hint(7, 2)])
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.category, ClientErrorCategory::Internal);
+        assert_eq!(store.sync_state().await.unwrap().last_sync_date, old_date);
+    }
+
+    #[tokio::test]
+    async fn late_hint_after_failed_round_does_not_attach_to_checkpoint() {
+        let old_date = now_seconds() - 60;
+        let store = Arc::new(InMemoryStore::new());
+        store
+            .save_sync_state(SyncState {
+                last_sync_date: old_date,
+            })
+            .await
+            .unwrap();
+        let mut host = FakeHost::new(vec![skipped_result(0, 1, old_date + 10)]);
+        host.state = proto::GetUpdatesStateResult {
+            date: old_date + 100,
+            updates_found: Some(true),
+            seq: None,
+        };
+        let sync = SyncManager::new(
+            store.clone(),
+            SyncConfig {
+                stale_state_max_age_seconds: i64::MAX,
+                ..SyncConfig::default()
+            },
+        );
+
+        sync.discover(&host).await.unwrap();
+        assert!(
+            sync.process_realtime(&host, vec![chat_hint(7, 2)])
+                .await
+                .is_err()
+        );
+        host.responses
+            .lock()
+            .await
+            .push_back(Ok(skipped_result(0, 3, old_date + 30)));
+
+        sync.process_realtime(&host, vec![chat_hint(8, 3)])
+            .await
+            .unwrap();
+
+        assert_eq!(store.sync_state().await.unwrap().last_sync_date, old_date);
+        assert_eq!(store.sync_bucket_state(chat_key(8)).await.unwrap().seq, 3);
+    }
+
+    #[tokio::test]
+    async fn future_hint_after_unobserved_state_round_does_not_advance_global_date() {
+        let old_date = now_seconds() - 60;
+        let store = Arc::new(InMemoryStore::new());
+        store
+            .save_sync_state(SyncState {
+                last_sync_date: old_date,
+            })
+            .await
+            .unwrap();
+        let mut host = FakeHost::new(vec![
+            skipped_result(0, 1, old_date + 10),
+            skipped_result(0, 2, old_date + 20),
+        ]);
+        host.state = proto::GetUpdatesStateResult {
+            date: old_date + 100,
+            updates_found: Some(true),
+            seq: None,
+        };
+        let sync = SyncManager::new(
+            store.clone(),
+            SyncConfig {
+                stale_state_max_age_seconds: i64::MAX,
+                ..SyncConfig::default()
+            },
+        );
+        sync.discover(&host).await.unwrap();
+        sync.process_realtime(&host, vec![chat_hint(7, 2)])
+            .await
+            .unwrap();
+
+        assert_eq!(store.sync_state().await.unwrap().last_sync_date, old_date);
+    }
+
+    #[tokio::test]
+    async fn newer_discovery_round_replaces_an_older_failed_round() {
+        let old_date = now_seconds() - 60;
+        let store = Arc::new(InMemoryStore::new());
+        store
+            .save_sync_state(SyncState {
+                last_sync_date: old_date,
+            })
+            .await
+            .unwrap();
+        let mut host = FakeHost::new(vec![skipped_result(0, 1, old_date + 10)]);
+        host.state = proto::GetUpdatesStateResult {
+            date: old_date + 100,
+            updates_found: Some(true),
+            seq: None,
+        };
+        let sync = SyncManager::new(
+            store.clone(),
+            SyncConfig {
+                stale_state_max_age_seconds: i64::MAX,
+                ..SyncConfig::default()
+            },
+        );
+
+        sync.discover(&host).await.unwrap();
+        assert!(
+            sync.process_realtime(&host, vec![chat_hint(7, 2)])
+                .await
+                .is_err()
+        );
+        host.state = proto::GetUpdatesStateResult {
+            date: old_date + 200,
+            updates_found: Some(false),
+            seq: None,
+        };
+        host.responses
+            .lock()
+            .await
+            .push_back(Ok(skipped_result(1, 1, old_date + 20)));
+
+        sync.discover(&host).await.unwrap();
+
+        assert_eq!(
+            store.sync_state().await.unwrap().last_sync_date,
+            old_date + 185
+        );
+    }
+
+    #[tokio::test]
+    async fn discovery_commits_candidate_after_every_target_is_durably_applied() {
+        let old_date = now_seconds() - 60;
+        let store = Arc::new(InMemoryStore::new());
+        store
+            .save_sync_state(SyncState {
+                last_sync_date: old_date,
+            })
+            .await
+            .unwrap();
+        let mut host = FakeHost::new(vec![
+            skipped_result(0, 3, old_date + 30),
+            skipped_result(0, 2, old_date + 20),
+        ]);
+        host.state = proto::GetUpdatesStateResult {
+            date: old_date + 100,
+            updates_found: Some(true),
+            seq: None,
+        };
+        let sync = SyncManager::new(
+            store.clone(),
+            SyncConfig {
+                max_concurrent_bucket_fetches: 1,
+                stale_state_max_age_seconds: i64::MAX,
+                ..SyncConfig::default()
+            },
+        );
+
+        sync.begin_discovery_round(old_date + 100, true).await;
+        sync.process_realtime(&host, vec![chat_hint(7, 2), space_hint(9, 3)])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            store.sync_state().await.unwrap().last_sync_date,
+            old_date + 85
+        );
+        assert_eq!(store.sync_bucket_state(chat_key(7)).await.unwrap().seq, 2);
+        assert_eq!(
+            store
+                .sync_bucket_state(SyncBucketKey::Space {
+                    space_id: InlineId::new(9),
+                })
+                .await
+                .unwrap()
+                .seq,
+            3
+        );
+    }
+
+    #[tokio::test]
+    async fn zero_sequence_discovery_hint_requires_an_authoritative_latest_fetch() {
+        let old_date = now_seconds() - 60;
+        let store = Arc::new(InMemoryStore::new());
+        store
+            .save_sync_state(SyncState {
+                last_sync_date: old_date,
+            })
+            .await
+            .unwrap();
+        store
+            .save_sync_bucket_state(chat_key(7), SyncBucketState { seq: 5, date: 10 })
+            .await
+            .unwrap();
+        let host = FakeHost::new(vec![skipped_result(5, 6, old_date + 30)]);
+        let sync = SyncManager::new(
+            store.clone(),
+            SyncConfig {
+                stale_state_max_age_seconds: i64::MAX,
+                ..SyncConfig::default()
+            },
+        );
+
+        sync.begin_discovery_round(old_date + 100, true).await;
+        sync.process_realtime(&host, vec![chat_hint(7, 0)])
+            .await
+            .unwrap();
+
+        assert_eq!(store.sync_bucket_state(chat_key(7)).await.unwrap().seq, 6);
+        assert_eq!(
+            store.sync_state().await.unwrap().last_sync_date,
+            old_date + 85
+        );
+        assert_eq!(host.requests.lock().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn zero_sequence_discovery_hint_does_not_commit_checkpoint_before_fetch() {
+        let old_date = now_seconds() - 60;
+        let store = Arc::new(InMemoryStore::new());
+        store
+            .save_sync_state(SyncState {
+                last_sync_date: old_date,
+            })
+            .await
+            .unwrap();
+        let key = chat_key(7);
+        store
+            .save_sync_bucket_state(key, SyncBucketState { seq: 5, date: 10 })
+            .await
+            .unwrap();
+        let host = FakeHost::new(Vec::new());
+        let sync = SyncManager::new(
+            store.clone(),
+            SyncConfig {
+                stale_state_max_age_seconds: i64::MAX,
+                ..SyncConfig::default()
+            },
+        );
+
+        sync.begin_discovery_round(old_date + 100, true).await;
+        let error = sync
+            .process_realtime(&host, vec![chat_hint(7, 0)])
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.category, ClientErrorCategory::Internal);
+        assert_eq!(host.requests.lock().await.len(), 1);
+        assert_eq!(store.sync_bucket_state(key).await.unwrap().seq, 5);
+        assert_eq!(store.sync_state().await.unwrap().last_sync_date, old_date);
+    }
+
+    #[tokio::test]
+    async fn direct_bucket_progress_does_not_advance_global_date() {
+        let old_date = now_seconds() - 60;
+        let store = Arc::new(InMemoryStore::new());
+        store
+            .save_sync_state(SyncState {
+                last_sync_date: old_date,
+            })
+            .await
+            .unwrap();
+        store
+            .save_sync_bucket_state(chat_key(7), SyncBucketState { seq: 1, date: 10 })
+            .await
+            .unwrap();
+        let host = FakeHost::new(vec![updates_result(
+            vec![message_update(2, old_date + 100, 7, 102)],
+            2,
+            old_date + 100,
+            true,
+        )]);
+        let sync = SyncManager::new(store.clone(), SyncConfig::default());
+
+        sync.process_realtime(&host, vec![message_update(2, old_date + 100, 7, 102)])
+            .await
+            .unwrap();
+
+        assert_eq!(store.sync_state().await.unwrap().last_sync_date, old_date);
+        assert_eq!(store.sync_bucket_state(chat_key(7)).await.unwrap().seq, 2);
+    }
+
+    #[tokio::test]
     async fn warm_catchup_commits_progress_across_more_than_128_pages() {
         let store = Arc::new(InMemoryStore::new());
         let key = chat_key(7);
@@ -1558,6 +2168,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn catch_up_advances_past_forward_compatible_unknown_update() {
+        let store = Arc::new(InMemoryStore::new());
+        let key = chat_key(7);
+        store
+            .save_sync_bucket_state(key, SyncBucketState { seq: 1, date: 10 })
+            .await
+            .unwrap();
+        let unknown = proto::Update {
+            seq: Some(2),
+            date: Some(20),
+            update: None,
+        };
+        let host = FakeHost::new(vec![updates_result(vec![unknown], 2, 20, true)]);
+        let sync = SyncManager::new(store.clone(), SyncConfig::default());
+
+        let events = sync
+            .process_realtime(&host, vec![chat_hint(7, 2)])
+            .await
+            .unwrap();
+
+        assert!(events.is_empty());
+        assert_eq!(
+            store.sync_bucket_state(key).await.unwrap(),
+            SyncBucketState { seq: 2, date: 20 }
+        );
+        assert_eq!(host.applied.lock().await.as_slice(), &[Vec::new()]);
+        assert!(store.pending_sync_batches().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn unknown_live_update_does_not_poison_the_sync_owner() {
+        let store = Arc::new(InMemoryStore::new());
+        let host = FakeHost::new(Vec::new());
+        let sync = SyncManager::new(store, SyncConfig::default());
+        let unknown = proto::Update {
+            seq: Some(2),
+            date: Some(20),
+            update: None,
+        };
+
+        let deliveries = sync.process_realtime(&host, vec![unknown]).await.unwrap();
+
+        assert!(deliveries.is_empty());
+        assert!(host.applied.lock().await.is_empty());
+    }
+
+    #[tokio::test]
     async fn apply_failure_does_not_advance_bucket_cursor() {
         let store = Arc::new(InMemoryStore::new());
         let key = chat_key(7);
@@ -1589,6 +2246,37 @@ mod tests {
         host.fail_apply.store(false, Ordering::Relaxed);
         let recovered = sync.process_realtime(&host, Vec::new()).await.unwrap();
         assert_eq!(recovered.len(), 1);
+        assert_eq!(
+            store.sync_bucket_state(key).await.unwrap(),
+            SyncBucketState { seq: 2, date: 20 }
+        );
+        assert!(store.pending_sync_batches().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn permanent_apply_failure_replaces_bucket_and_advances_cursor() {
+        let store = Arc::new(InMemoryStore::new());
+        let key = chat_key(7);
+        store
+            .save_sync_bucket_state(key, SyncBucketState { seq: 1, date: 10 })
+            .await
+            .unwrap();
+        let host = FakeHost::new(vec![updates_result(
+            vec![message_update(2, 20, 7, 101)],
+            2,
+            20,
+            true,
+        )])
+        .permanently_failing_apply();
+        let sync = SyncManager::new(store.clone(), SyncConfig::default());
+
+        let deliveries = sync
+            .process_realtime(&host, vec![chat_hint(7, 2)])
+            .await
+            .unwrap();
+
+        assert!(deliveries.is_empty());
+        assert_eq!(host.repaired_buckets.lock().await.as_slice(), &[key]);
         assert_eq!(
             store.sync_bucket_state(key).await.unwrap(),
             SyncBucketState { seq: 2, date: 20 }
@@ -1752,6 +2440,97 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn warm_too_long_replaces_bucket_without_serially_paging_the_backlog() {
+        let store = Arc::new(InMemoryStore::new());
+        let key = chat_key(7);
+        store
+            .save_sync_bucket_state(key, SyncBucketState { seq: 1, date: 10 })
+            .await
+            .unwrap();
+        let host = FakeHost::new(vec![proto::GetUpdatesResult {
+            updates: Vec::new(),
+            seq: 10_000,
+            date: 100,
+            r#final: Some(false),
+            result_type: proto::get_updates_result::ResultType::TooLong as i32,
+            ..Default::default()
+        }]);
+        let sync = SyncManager::new(store.clone(), SyncConfig::default());
+
+        sync.process_realtime(&host, vec![chat_hint(7, 10_000)])
+            .await
+            .unwrap();
+
+        assert_eq!(host.requests.lock().await.len(), 1);
+        assert_eq!(host.repaired_buckets.lock().await.as_slice(), &[key]);
+        assert_eq!(
+            store.sync_bucket_state(key).await.unwrap(),
+            SyncBucketState {
+                seq: 10_000,
+                date: 100
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn snapshot_repair_continues_to_the_requested_hint_target() {
+        let store = Arc::new(InMemoryStore::new());
+        let key = chat_key(7);
+        store
+            .save_sync_bucket_state(key, SyncBucketState { seq: 5, date: 50 })
+            .await
+            .unwrap();
+        let host = FakeHost::new(vec![
+            proto::GetUpdatesResult {
+                updates: Vec::new(),
+                seq: 6,
+                date: 60,
+                r#final: Some(false),
+                result_type: proto::get_updates_result::ResultType::Slice as i32,
+                skipped_sequences: vec![proto::SyncSkippedSequence {
+                    seq: 6,
+                    reason: proto::sync_skipped_sequence::Reason::SnapshotRepairRequired as i32,
+                }],
+                ..Default::default()
+            },
+            skipped_result(6, 8, 80),
+        ]);
+        let sync = SyncManager::new(store.clone(), SyncConfig::default());
+
+        sync.process_realtime(&host, vec![chat_hint(7, 8)])
+            .await
+            .unwrap();
+
+        assert_eq!(host.repaired_buckets.lock().await.as_slice(), &[key]);
+        assert_eq!(host.requests.lock().await.len(), 2);
+        assert_eq!(
+            store.sync_bucket_state(key).await.unwrap(),
+            SyncBucketState { seq: 8, date: 80 }
+        );
+    }
+
+    #[tokio::test]
+    async fn sequenced_chat_permissions_advances_the_user_bucket() {
+        let store = Arc::new(InMemoryStore::new());
+        let sync = SyncManager::new(store.clone(), SyncConfig::default());
+        let host = FakeHost::new(Vec::new());
+        let update = proto::Update {
+            seq: Some(1),
+            date: Some(20),
+            update: Some(proto::update::Update::ChatPermissions(
+                proto::UpdateChatPermissions::default(),
+            )),
+        };
+
+        sync.process_realtime(&host, vec![update]).await.unwrap();
+
+        assert_eq!(
+            store.sync_bucket_state(SyncBucketKey::User).await.unwrap(),
+            SyncBucketState { seq: 1, date: 20 }
+        );
+    }
+
+    #[tokio::test]
     async fn cold_pointer_commits_lossless_events_without_an_empty_journal() {
         let store = Arc::new(InMemoryStore::new());
         let key = chat_key(7);
@@ -1848,7 +2627,7 @@ mod tests {
         assert_eq!(host.max_fetches_in_flight.load(Ordering::SeqCst), 2);
         assert_eq!(store.sync_bucket_state(chat_key(7)).await.unwrap().seq, 1);
         assert_eq!(store.sync_bucket_state(chat_key(8)).await.unwrap().seq, 1);
-        assert_eq!(store.sync_state().await.unwrap().last_sync_date, 185);
+        assert_eq!(store.sync_state().await.unwrap().last_sync_date, 0);
     }
 
     fn updates_result(
@@ -1893,6 +2672,19 @@ mod tests {
                     chat_id,
                     update_seq: seq,
                     peer_id: Some(chat_peer(chat_id)),
+                },
+            )),
+        }
+    }
+
+    fn space_hint(space_id: i64, seq: i32) -> proto::Update {
+        proto::Update {
+            seq: None,
+            date: None,
+            update: Some(proto::update::Update::SpaceHasNewUpdates(
+                proto::UpdateSpaceHasNewUpdates {
+                    space_id,
+                    update_seq: seq,
                 },
             )),
         }

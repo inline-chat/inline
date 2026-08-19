@@ -258,6 +258,33 @@ pub trait ClientStore: fmt::Debug + Send + Sync + 'static {
     /// Loads the current session.
     fn load_session(&self) -> BoxFuture<'static, StoreResult<Option<StoredSession>>>;
 
+    /// Durably marks logout before remote revocation or local purge begins.
+    ///
+    /// Custom stores must implement this lifecycle boundary. The default is
+    /// intentionally unsupported so a backend cannot begin logout without a
+    /// durable marker that prevents authority from being resurrected.
+    fn begin_logout(&self) -> BoxFuture<'static, StoreResult<()>> {
+        Box::pin(async {
+            Err(StoreError::new(
+                ClientErrorCategory::Unsupported,
+                "store does not support durable logout markers",
+            ))
+        })
+    }
+
+    /// Returns whether a durable logout purge is unfinished.
+    ///
+    /// The fail-closed default prevents startup from reconnecting a store
+    /// that cannot prove it has no interrupted logout.
+    fn logout_pending(&self) -> BoxFuture<'static, StoreResult<bool>> {
+        Box::pin(async {
+            Err(StoreError::new(
+                ClientErrorCategory::Unsupported,
+                "store does not support durable logout markers",
+            ))
+        })
+    }
+
     /// Clears the current session.
     fn clear_session(&self) -> BoxFuture<'static, StoreResult<()>>;
 
@@ -385,6 +412,17 @@ pub trait ClientStore: fmt::Debug + Send + Sync + 'static {
     /// the host consumer.
     fn pending_client_events(&self) -> BoxFuture<'static, StoreResult<Vec<ClientEventDelivery>>> {
         Box::pin(async { Ok(Vec::new()) })
+    }
+
+    /// Returns one ordered page of durable deliveries without materializing the
+    /// entire outbox. One oversized first event is returned to avoid starvation.
+    fn pending_client_events_page(
+        &self,
+        limit: usize,
+        max_bytes: usize,
+    ) -> BoxFuture<'static, StoreResult<Vec<ClientEventDelivery>>> {
+        let pending = self.pending_client_events();
+        Box::pin(async move { bounded_client_event_page(pending.await?, limit, max_bytes) })
     }
 
     /// Acknowledges one durable lossless event after the host has persisted or
@@ -661,6 +699,7 @@ pub struct InMemoryStore {
 #[derive(Debug, Default)]
 struct InMemoryStoreState {
     session: Option<StoredSession>,
+    logout_in_progress: bool,
     sync_state: SyncState,
     sync_buckets: HashMap<SyncBucketKey, SyncBucketState>,
     pending_sync_batches: HashMap<SyncBucketKey, PendingSyncBatch>,
@@ -680,6 +719,34 @@ struct InMemoryStoreState {
     reaction_snapshots: HashSet<(i64, i64)>,
     read_states: HashMap<i64, StoredReadState>,
     transactions: HashMap<String, StoredTransaction>,
+}
+
+fn bounded_client_event_page(
+    pending: Vec<ClientEventDelivery>,
+    limit: usize,
+    max_bytes: usize,
+) -> StoreResult<Vec<ClientEventDelivery>> {
+    if limit == 0 || max_bytes == 0 {
+        return Err(StoreError::internal(
+            "client event page limits must be positive",
+        ));
+    }
+    let mut page = Vec::with_capacity(limit.min(pending.len()));
+    let mut bytes = 0usize;
+    for delivery in pending.into_iter().take(limit) {
+        let event_bytes = serde_json::to_vec(&delivery.event)
+            .map_err(|error| StoreError::internal(format!("encode client event: {error}")))?
+            .len();
+        if !page.is_empty() && bytes.saturating_add(event_bytes) > max_bytes {
+            break;
+        }
+        bytes = bytes.saturating_add(event_bytes);
+        page.push(delivery);
+        if bytes >= max_bytes {
+            break;
+        }
+    }
+    Ok(page)
 }
 
 fn append_memory_client_events(
@@ -736,11 +803,14 @@ impl ClientStore for InMemoryStore {
     fn save_session(&self, session: StoredSession) -> BoxFuture<'static, StoreResult<()>> {
         let store = self.clone();
         Box::pin(async move {
-            store
-                .state
-                .lock()
-                .expect("in-memory store poisoned")
-                .session = Some(session);
+            let mut state = store.state.lock().expect("in-memory store poisoned");
+            if state.logout_in_progress {
+                return Err(StoreError::new(
+                    ClientErrorCategory::AuthRequired,
+                    "cannot save a session while logout purge is pending",
+                ));
+            }
+            state.session = Some(session);
             Ok(())
         })
     }
@@ -748,23 +818,42 @@ impl ClientStore for InMemoryStore {
     fn load_session(&self) -> BoxFuture<'static, StoreResult<Option<StoredSession>>> {
         let store = self.clone();
         Box::pin(async move {
-            Ok(store
-                .state
-                .lock()
-                .expect("in-memory store poisoned")
-                .session
-                .clone())
+            let state = store.state.lock().expect("in-memory store poisoned");
+            Ok((!state.logout_in_progress)
+                .then(|| state.session.clone())
+                .flatten())
         })
     }
 
-    fn clear_session(&self) -> BoxFuture<'static, StoreResult<()>> {
+    fn begin_logout(&self) -> BoxFuture<'static, StoreResult<()>> {
         let store = self.clone();
         Box::pin(async move {
             store
                 .state
                 .lock()
                 .expect("in-memory store poisoned")
-                .session = None;
+                .logout_in_progress = true;
+            Ok(())
+        })
+    }
+
+    fn logout_pending(&self) -> BoxFuture<'static, StoreResult<bool>> {
+        let store = self.clone();
+        Box::pin(async move {
+            Ok(store
+                .state
+                .lock()
+                .expect("in-memory store poisoned")
+                .logout_in_progress)
+        })
+    }
+
+    fn clear_session(&self) -> BoxFuture<'static, StoreResult<()>> {
+        let store = self.clone();
+        Box::pin(async move {
+            let mut state = store.state.lock().expect("in-memory store poisoned");
+            state.session = None;
+            state.logout_in_progress = false;
             Ok(())
         })
     }
@@ -774,8 +863,10 @@ impl ClientStore for InMemoryStore {
         Box::pin(async move {
             let mut state = store.state.lock().expect("in-memory store poisoned");
             let session = state.session.take();
+            let logout_in_progress = state.logout_in_progress;
             *state = InMemoryStoreState::default();
             state.session = session;
+            state.logout_in_progress = logout_in_progress;
             Ok(())
         })
     }
@@ -970,6 +1061,23 @@ impl ClientStore for InMemoryStore {
                 .expect("in-memory store poisoned")
                 .client_event_outbox
                 .clone())
+        })
+    }
+
+    fn pending_client_events_page(
+        &self,
+        limit: usize,
+        max_bytes: usize,
+    ) -> BoxFuture<'static, StoreResult<Vec<ClientEventDelivery>>> {
+        let store = self.clone();
+        Box::pin(async move {
+            let pending = store
+                .state
+                .lock()
+                .expect("in-memory store poisoned")
+                .client_event_outbox
+                .clone();
+            bounded_client_event_page(pending, limit, max_bytes)
         })
     }
 
@@ -1806,6 +1914,21 @@ impl SqliteStore {
         let auth_json = serde_json::to_string(&session.auth)
             .map_err(|error| StoreError::internal(format!("encode session auth: {error}")))?;
         let connection = self.connection.lock().expect("sqlite store poisoned");
+        let logout_in_progress = connection
+            .query_row(
+                "SELECT COALESCE(logout_in_progress, 0) FROM sessions WHERE id = 1",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(sqlite_error)?
+            .unwrap_or_default();
+        if logout_in_progress != 0 {
+            return Err(StoreError::new(
+                ClientErrorCategory::AuthRequired,
+                "cannot save a session while logout purge is pending",
+            ));
+        }
         connection
             .execute(
                 "INSERT INTO sessions (id, auth_json, account_namespace, updated_at)
@@ -1820,26 +1943,59 @@ impl SqliteStore {
         Ok(())
     }
 
+    fn begin_logout_sync(&self) -> StoreResult<()> {
+        let connection = self.connection.lock().expect("sqlite store poisoned");
+        connection
+            .execute(
+                "UPDATE sessions SET logout_in_progress = 1, updated_at = ?1 WHERE id = 1",
+                params![now_seconds()],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    fn logout_pending_sync(&self) -> StoreResult<bool> {
+        let connection = self.connection.lock().expect("sqlite store poisoned");
+        connection
+            .query_row(
+                "SELECT COALESCE(logout_in_progress, 0) FROM sessions WHERE id = 1",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map(|value| value.unwrap_or_default() != 0)
+            .map_err(sqlite_error)
+    }
+
     fn load_session_sync(&self) -> StoreResult<Option<StoredSession>> {
         let connection = self.connection.lock().expect("sqlite store poisoned");
         let row = connection
             .query_row(
-                "SELECT auth_json, account_namespace FROM sessions WHERE id = 1",
+                "SELECT auth_json, account_namespace, COALESCE(logout_in_progress, 0)
+                 FROM sessions WHERE id = 1",
                 [],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
             )
             .optional()
             .map_err(sqlite_error)?;
 
-        row.map(|(auth_json, account_namespace)| {
-            let auth = serde_json::from_str::<AuthCredential>(&auth_json)
-                .map_err(|error| StoreError::internal(format!("decode session auth: {error}")))?;
-            Ok(StoredSession {
-                auth,
-                account_namespace,
+        row.filter(|(_, _, logout_in_progress)| *logout_in_progress == 0)
+            .map(|(auth_json, account_namespace, _)| {
+                let auth = serde_json::from_str::<AuthCredential>(&auth_json).map_err(|error| {
+                    StoreError::internal(format!("decode session auth: {error}"))
+                })?;
+                Ok(StoredSession {
+                    auth,
+                    account_namespace,
+                })
             })
-        })
-        .transpose()
+            .transpose()
     }
 
     fn clear_session_sync(&self) -> StoreResult<()> {
@@ -2108,6 +2264,52 @@ impl SqliteStore {
             .map_err(sqlite_error)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(sqlite_error)
+    }
+
+    fn pending_client_events_page_sync(
+        &self,
+        limit: usize,
+        max_bytes: usize,
+    ) -> StoreResult<Vec<ClientEventDelivery>> {
+        if limit == 0 || max_bytes == 0 {
+            return Err(StoreError::internal(
+                "client event page limits must be positive",
+            ));
+        }
+        let sql_limit = i64::try_from(limit)
+            .map_err(|_| StoreError::internal("client event page limit exceeded SQLite range"))?;
+        let connection = self.connection.lock().expect("sqlite store poisoned");
+        let mut statement = connection
+            .prepare(
+                "SELECT delivery_id, event_json
+                 FROM client_event_outbox
+                 ORDER BY delivery_id ASC
+                 LIMIT ?1",
+            )
+            .map_err(sqlite_error)?;
+        let mut rows = statement.query(params![sql_limit]).map_err(sqlite_error)?;
+        let mut deliveries = Vec::with_capacity(limit);
+        let mut bytes = 0usize;
+        while let Some(row) = rows.next().map_err(sqlite_error)? {
+            let delivery_id = row.get::<_, i64>(0).map_err(sqlite_error)?;
+            let event_json = row.get::<_, String>(1).map_err(sqlite_error)?;
+            if !deliveries.is_empty() && bytes.saturating_add(event_json.len()) > max_bytes {
+                break;
+            }
+            let event = serde_json::from_str(&event_json)
+                .map_err(|error| StoreError::internal(format!("decode client event: {error}")))?;
+            deliveries.push(ClientEventDelivery {
+                delivery_id: Some(u64::try_from(delivery_id).map_err(|_| {
+                    StoreError::internal("stored client event delivery ID was invalid")
+                })?),
+                event,
+            });
+            bytes = bytes.saturating_add(event_json.len());
+            if bytes >= max_bytes {
+                break;
+            }
+        }
+        Ok(deliveries)
     }
 
     fn acknowledge_client_event_sync(&self, delivery_id: u64) -> StoreResult<()> {
@@ -3181,6 +3383,16 @@ impl ClientStore for SqliteStore {
         Box::pin(async move { store.load_session_sync() })
     }
 
+    fn begin_logout(&self) -> BoxFuture<'static, StoreResult<()>> {
+        let store = self.clone();
+        Box::pin(async move { store.begin_logout_sync() })
+    }
+
+    fn logout_pending(&self) -> BoxFuture<'static, StoreResult<bool>> {
+        let store = self.clone();
+        Box::pin(async move { store.logout_pending_sync() })
+    }
+
     fn clear_session(&self) -> BoxFuture<'static, StoreResult<()>> {
         let store = self.clone();
         Box::pin(async move { store.clear_session_sync() })
@@ -3291,6 +3503,15 @@ impl ClientStore for SqliteStore {
     fn pending_client_events(&self) -> BoxFuture<'static, StoreResult<Vec<ClientEventDelivery>>> {
         let store = self.clone();
         Box::pin(async move { store.pending_client_events_sync() })
+    }
+
+    fn pending_client_events_page(
+        &self,
+        limit: usize,
+        max_bytes: usize,
+    ) -> BoxFuture<'static, StoreResult<Vec<ClientEventDelivery>>> {
+        let store = self.clone();
+        Box::pin(async move { store.pending_client_events_page_sync(limit, max_bytes) })
     }
 
     fn acknowledge_client_event(&self, delivery_id: u64) -> BoxFuture<'static, StoreResult<()>> {
@@ -3615,6 +3836,7 @@ fn migrate_sqlite(connection: &Connection) -> StoreResult<()> {
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 auth_json TEXT NOT NULL,
                 account_namespace TEXT,
+                logout_in_progress INTEGER NOT NULL DEFAULT 0,
                 updated_at INTEGER NOT NULL
             );
 
@@ -3796,6 +4018,12 @@ fn migrate_sqlite(connection: &Connection) -> StoreResult<()> {
         )
         .map_err(sqlite_error)?;
     ensure_sqlite_column(connection, "sessions", "account_namespace", "TEXT")?;
+    ensure_sqlite_column(
+        connection,
+        "sessions",
+        "logout_in_progress",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
     ensure_sqlite_column(connection, "dialogs", "peer_user_id", "INTEGER")?;
     ensure_sqlite_column(connection, "dialogs", "emoji", "TEXT")?;
     ensure_sqlite_column(connection, "dialogs", "space_id", "INTEGER")?;
@@ -4467,6 +4695,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn in_memory_logout_marker_survives_account_purge_and_blocks_reconnect() {
+        let store = InMemoryStore::new();
+        store.save_session(session()).await.unwrap();
+
+        store.begin_logout().await.unwrap();
+        assert!(store.logout_pending().await.unwrap());
+        assert_eq!(
+            store.save_session(session()).await.unwrap_err().category,
+            ClientErrorCategory::AuthRequired
+        );
+
+        store.clear_account_data().await.unwrap();
+        assert!(store.logout_pending().await.unwrap());
+        assert!(store.load_session().await.unwrap().is_none());
+
+        store.clear_session().await.unwrap();
+        assert!(!store.logout_pending().await.unwrap());
+        assert!(store.load_session().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
     async fn in_memory_store_round_trips_sync_cursors() {
         let store = InMemoryStore::new();
         let user = SyncBucketKey::User;
@@ -4531,7 +4780,6 @@ mod tests {
             store.sync_bucket_state(space).await.unwrap(),
             SyncBucketState { seq: 6, date: 33 }
         );
-
         store.remove_sync_bucket_state(direct).await.unwrap();
         assert_eq!(
             store.sync_bucket_state(direct).await.unwrap(),
@@ -4935,6 +5183,29 @@ mod tests {
         let _ = std::fs::remove_file(path);
     }
 
+    #[tokio::test]
+    async fn sqlite_logout_marker_reopens_and_blocks_session_overwrite() {
+        let path = sqlite_temp_path("logout-marker");
+        let store = SqliteStore::open(&path).unwrap();
+        store.save_session(session()).await.unwrap();
+        store.begin_logout().await.unwrap();
+        drop(store);
+
+        let reopened = SqliteStore::open(&path).unwrap();
+        assert!(reopened.logout_pending().await.unwrap());
+        assert!(reopened.load_session().await.unwrap().is_none());
+        assert_eq!(
+            reopened.save_session(session()).await.unwrap_err().category,
+            ClientErrorCategory::AuthRequired
+        );
+        reopened.clear_account_data().await.unwrap();
+        assert!(reopened.logout_pending().await.unwrap());
+        reopened.clear_session().await.unwrap();
+        assert!(!reopened.logout_pending().await.unwrap());
+        drop(reopened);
+        let _ = std::fs::remove_file(path);
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn sqlite_store_file_permissions_are_private() {
@@ -5158,7 +5429,6 @@ mod tests {
             reopened.sync_bucket_state(space).await.unwrap(),
             SyncBucketState { seq: 13, date: 73 }
         );
-
         reopened.remove_sync_bucket_state(chat).await.unwrap();
         assert_eq!(
             reopened.sync_bucket_state(chat).await.unwrap(),
@@ -5502,6 +5772,41 @@ mod tests {
         assert!(reopened.pending_client_events().await.unwrap().is_empty());
 
         drop(reopened);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn durable_client_event_pages_leave_unreturned_rows_pending() {
+        let path = sqlite_temp_path("event-pages");
+        let store = SqliteStore::open(&path).unwrap();
+        let events = (1..=3)
+            .map(|message_id| ClientEvent::MessageDeleted {
+                chat_id: InlineId::new(7),
+                message_id: InlineId::new(message_id),
+            })
+            .collect::<Vec<_>>();
+        store.append_client_events(events).await.unwrap();
+
+        let first = store.pending_client_events_page(2, 1).await.unwrap();
+        assert_eq!(
+            first.len(),
+            1,
+            "one oversized first event must make progress"
+        );
+        store
+            .acknowledge_client_event(first[0].delivery_id.unwrap())
+            .await
+            .unwrap();
+
+        let second = store
+            .pending_client_events_page(2, usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(second.len(), 2);
+        assert!(second[0].delivery_id < second[1].delivery_id);
+        assert_eq!(store.pending_client_events().await.unwrap().len(), 2);
+
+        drop(store);
         let _ = std::fs::remove_file(path);
     }
 

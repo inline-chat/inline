@@ -6,6 +6,7 @@
 
 use std::fmt;
 
+use inline_sdk::{InlineProtocolAuthorization, InlineProtocolPublicKey};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -52,13 +53,25 @@ pub enum AuthCredential {
         /// Secret access token.
         token: AuthToken,
     },
+    /// Inline Protocol V3 credentials. The temporary key is the sole
+    /// application-session authority; the permanent key exists only to bind a
+    /// replacement after a server restart.
+    InlineProtocolV3 {
+        /// Long-lived account authorization used only for temporary-key binding.
+        permanent: InlineProtocolAuthorization,
+        /// Short-lived application-session authorization.
+        temporary: InlineProtocolAuthorization,
+        /// Pinned public key ring used for one-shot temporary-key regeneration.
+        public_keys: Vec<InlineProtocolPublicKey>,
+    },
 }
 
 impl AuthCredential {
-    /// Returns the access token for credential types that carry one.
-    pub fn access_token(&self) -> &AuthToken {
+    /// Returns the access token only when bearer/V2 owns the session.
+    pub fn access_token(&self) -> Option<&AuthToken> {
         match self {
-            Self::AccessToken { token } => token,
+            Self::AccessToken { token } => Some(token),
+            Self::InlineProtocolV3 { .. } => None,
         }
     }
 }
@@ -69,6 +82,16 @@ impl fmt::Debug for AuthCredential {
             Self::AccessToken { .. } => f
                 .debug_struct("AccessToken")
                 .field("token", &"[redacted]")
+                .finish(),
+            Self::InlineProtocolV3 {
+                permanent,
+                temporary,
+                public_keys,
+            } => f
+                .debug_struct("InlineProtocolV3")
+                .field("permanent", permanent)
+                .field("temporary", temporary)
+                .field("public_key_count", &public_keys.len())
                 .finish(),
         }
     }
@@ -1247,6 +1270,39 @@ mod tests {
         let rendered = format!("{request:?}");
         assert!(rendered.contains("[redacted]"));
         assert!(!rendered.contains("secret-namespace"));
+    }
+
+    #[test]
+    fn inline_protocol_credentials_round_trip_without_bearer_authority() {
+        let credential = AuthCredential::InlineProtocolV3 {
+            permanent: InlineProtocolAuthorization {
+                key: [1; 256],
+                key_id: [2; 8],
+                server_salt: 3,
+                temporary: false,
+                expires_at: None,
+            },
+            temporary: InlineProtocolAuthorization {
+                key: [4; 256],
+                key_id: [5; 8],
+                server_salt: 6,
+                temporary: true,
+                expires_at: Some(2_000_000_000),
+            },
+            public_keys: vec![InlineProtocolPublicKey {
+                modulus: "modulus".into(),
+                exponent: "AQAB".into(),
+                fingerprint: "42".into(),
+            }],
+        };
+
+        let encoded = serde_json::to_string(&credential).expect("serialize V3 credential");
+        let decoded: AuthCredential =
+            serde_json::from_str(&encoded).expect("deserialize V3 credential");
+
+        assert_eq!(decoded, credential);
+        assert!(decoded.access_token().is_none());
+        assert!(!format!("{decoded:?}").contains("1, 1, 1, 1"));
     }
 
     #[test]

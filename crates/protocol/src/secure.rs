@@ -5,6 +5,7 @@ use cipher::{BlockDecrypt, BlockEncrypt, KeyInit, generic_array::GenericArray};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
+use subtle::ConstantTimeEq;
 
 /// Temporary authorization-key binding construction.
 pub mod binding;
@@ -20,6 +21,8 @@ pub const MAX_PACKET_BYTES: usize = 16 * 1024 * 1024;
 pub const INLINE_RESULT_CONSTRUCTOR: u32 = 0xac3ddc54;
 /// `inline.update` TL constructor.
 pub const INLINE_UPDATE_CONSTRUCTOR: u32 = 0xdc412c98;
+/// Telegram-compatible `rpc_error` service constructor.
+pub const RPC_ERROR_CONSTRUCTOR: u32 = 0x2144_ca19;
 /// `inline.invoke` TL constructor.
 pub const INLINE_INVOKE_CONSTRUCTOR: u32 = 0xeb7d4aa6;
 /// Realtime V3 application layer.
@@ -189,6 +192,40 @@ pub fn encode_inline_update(payload: &[u8]) -> Result<Vec<u8>, InvalidEncryptedR
     ]))
 }
 
+/// Encodes a carrier-level `rpc_error` service object.
+pub fn encode_rpc_error(code: i32, message: &str) -> Result<Vec<u8>, InvalidEncryptedRecord> {
+    Ok(concat(&[
+        &RPC_ERROR_CONSTRUCTOR.to_le_bytes(),
+        &code.to_le_bytes(),
+        &encode_tl_bytes(message.as_bytes())?,
+    ]))
+}
+
+/// Decodes the status code from a carrier-level `rpc_error` service object.
+///
+/// `Ok(None)` means that the bytes are not a `rpc_error` constructor. Once the
+/// constructor is present, malformed or trailing bytes are rejected rather
+/// than being treated as an application payload.
+pub fn decode_rpc_error_code(bytes: &[u8]) -> Result<Option<i32>, InvalidEncryptedRecord> {
+    if bytes.len() < 4 {
+        return Ok(None);
+    }
+    let constructor =
+        u32::from_le_bytes(bytes[..4].try_into().map_err(|_| InvalidEncryptedRecord)?);
+    if constructor != RPC_ERROR_CONSTRUCTOR {
+        return Ok(None);
+    }
+    if bytes.len() < 8 {
+        return Err(InvalidEncryptedRecord);
+    }
+    let code = i32::from_le_bytes(bytes[4..8].try_into().map_err(|_| InvalidEncryptedRecord)?);
+    let (_, consumed) = decode_tl_bytes(&bytes[8..])?;
+    if 8 + consumed != bytes.len() {
+        return Err(InvalidEncryptedRecord);
+    }
+    Ok(Some(code))
+}
+
 /// Decodes exactly one Inline-specific TL application constructor.
 pub fn decode_inline_application_object(
     bytes: &[u8],
@@ -325,14 +362,7 @@ fn sha256(parts: &[&[u8]]) -> [u8; 32] {
 }
 
 fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
-    let mut difference = left.len() ^ right.len();
-    let length = left.len().max(right.len());
-    for index in 0..length {
-        difference |= usize::from(
-            left.get(index).copied().unwrap_or(0) ^ right.get(index).copied().unwrap_or(0),
-        );
-    }
-    difference == 0
+    left.len() == right.len() && bool::from(left.ct_eq(right))
 }
 
 /// Computes the serialized little-endian auth-key identifier bytes.
@@ -415,7 +445,7 @@ pub fn aes_ige_encrypt(
     key: &[u8; 32],
     iv: &[u8; 32],
 ) -> Result<Vec<u8>, InvalidEncryptedRecord> {
-    if plaintext.len() % 16 != 0 {
+    if plaintext.len() % 16 != 0 || 24 + plaintext.len() > MAX_PACKET_BYTES {
         return Err(InvalidEncryptedRecord);
     }
     let cipher = Aes256::new_from_slice(key).map_err(|_| InvalidEncryptedRecord)?;
@@ -479,7 +509,12 @@ pub fn encrypt_record(
     plaintext.extend_from_slice(&(fields.body.len() as i32).to_le_bytes());
     plaintext.extend_from_slice(&fields.body);
     plaintext.extend_from_slice(padding);
-    if plaintext.len() % 16 != 0 {
+    if plaintext.len() % 16 != 0
+        || !matches!(
+            plaintext.len().checked_add(24),
+            Some(record_length) if record_length <= MAX_PACKET_BYTES
+        )
+    {
         return Err(InvalidEncryptedRecord);
     }
     let msg_key = compute_v2_msg_key(auth_key, &plaintext, direction)?;
@@ -748,6 +783,18 @@ mod tests {
     }
 
     #[test]
+    fn rejects_body_when_the_complete_record_exceeds_the_carrier_limit() {
+        let fields = RecordFields {
+            server_salt: 1,
+            session_id: 2,
+            message_id: (1_700_000_000_i64 << 32) | 4,
+            sequence_number: 1,
+            body: vec![0; MAX_PACKET_BYTES],
+        };
+        assert!(encrypt_record(&[0; 256], Direction::ClientToServer, &fields, &[0; 16]).is_err());
+    }
+
+    #[test]
     fn matches_telegram_abridged_quick_ack_framing() {
         let payload = [1, 2, 3, 4];
         let encoded = encode_abridged_packet_with_quick_ack(&payload, true).unwrap();
@@ -805,6 +852,19 @@ mod tests {
                 payload: payload.to_vec()
             })
         );
+    }
+
+    #[test]
+    fn matches_carrier_rpc_error_code_without_confusing_application_payloads() {
+        let encoded = encode_rpc_error(504, "deadline").unwrap();
+        assert_eq!(decode_rpc_error_code(&encoded), Ok(Some(504)));
+        assert_eq!(
+            decode_rpc_error_code(&encode_inline_result(&[1, 2, 3]).unwrap()),
+            Ok(None)
+        );
+        let mut malformed = encoded;
+        malformed.push(0);
+        assert!(decode_rpc_error_code(&malformed).is_err());
     }
 
     #[test]

@@ -17,6 +17,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 futures-util.workspace = true
+getrandom = "0.3.4"
 inline-sdk = { version = "0.7.2", path = "../sdk" }
 log.workspace = true
 prost.workspace = true

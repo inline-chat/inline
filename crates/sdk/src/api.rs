@@ -342,7 +342,9 @@ impl ApiClient {
     }
 
     /// Uploads a local file using the Inline upload endpoint.
-    #[deprecated(note = "use native Inline Protocol upload_file_v2, upload_file_session, or upload_file_v3")]
+    #[deprecated(
+        note = "use native Inline Protocol upload_file_v2, upload_file_session, or upload_file_v3"
+    )]
     #[allow(deprecated)]
     pub async fn upload_file(
         &self,
@@ -374,7 +376,9 @@ impl ApiClient {
     }
 
     /// Uploads file bytes using the Inline upload endpoint.
-    #[deprecated(note = "use native Inline Protocol upload_file_v2, upload_file_session, or upload_file_v3")]
+    #[deprecated(
+        note = "use native Inline Protocol upload_file_v2, upload_file_session, or upload_file_v3"
+    )]
     pub async fn upload_file_bytes(
         &self,
         token: &str,
