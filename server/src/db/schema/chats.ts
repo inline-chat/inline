@@ -23,6 +23,9 @@ export const chats = pgTable(
     /** Most recent message id */
     lastMsgId: integer("last_msg_id"),
 
+    /** Highest message id ever allocated in this chat; never decreases when history is deleted. */
+    messageIdCounter: integer("message_id_counter").notNull().default(0),
+
     /** optional, if part of a space */
     spaceId: integer("space_id").references(() => spaces.id),
 

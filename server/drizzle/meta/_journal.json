@@ -862,6 +862,20 @@
       "when": 1786969312599,
       "tag": "0122_inline-native-uploads",
       "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1787131025363,
+      "tag": "0123_message-id-counter",
+      "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1787134148746,
+      "tag": "0124_message-id-counter-fence",
+      "breakpoints": true
     }
   ]
 }

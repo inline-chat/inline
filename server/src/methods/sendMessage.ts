@@ -31,6 +31,7 @@ import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
 import { getAuthorizedChat } from "@in/server/modules/authorization/legacyAccessGuards"
+import { ChatModel } from "@in/server/db/models/chats"
 
 export const Input = Type.Object({
   peerId: Optional(TInputPeerInfo),
@@ -139,7 +140,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
       throw new InlineError(InlineError.ApiError.INTERNAL)
     }
 
-    const nextId = (chat.lastMsgId ?? 0) + 1
+    const nextId = ChatModel.nextMessageId(chat)
 
     // Insert the new message
     const [message] = await tx
@@ -165,7 +166,10 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
       .returning()
 
     // Update the lastMsgId
-    await tx.update(chats).set({ lastMsgId: nextId }).where(eq(chats.id, chatId))
+    await tx
+      .update(chats)
+      .set({ lastMsgId: nextId, messageIdCounter: nextId })
+      .where(eq(chats.id, chatId))
 
     return message
   })

@@ -547,7 +547,7 @@ async function insertMessage(message: Omit<DbNewMessage, "messageId">): Promise<
       throw ModelError.ChatInvalid
     }
 
-    const nextId = (chat.lastMsgId ?? 0) + 1
+    const nextId = ChatModel.nextMessageId(chat)
 
     // Insert the new message
     const [newDbMessage] = await tx
@@ -577,6 +577,7 @@ async function insertMessage(message: Omit<DbNewMessage, "messageId">): Promise<
       .update(chats)
       .set({
         lastMsgId: nextId,
+        messageIdCounter: nextId,
         updateSeq: update.seq,
         lastUpdateDate: update.date,
       })
@@ -751,19 +752,6 @@ async function editMessage(input: EditMessageInput): Promise<{
       throw ModelError.ChatInvalid
     }
 
-    // Insert update
-    const update = await UpdatesModel.insertUpdate(tx, {
-      update: {
-        oneofKind: "editMessage",
-        editMessage: {
-          chatId: BigInt(chatId),
-          msgId: BigInt(messageId),
-        },
-      },
-      bucket: UpdateBucket.Chat,
-      entity: chat,
-    })
-
     const updatePayload: Record<string, unknown> = {
       editDate: new Date(),
       rev: sql`${messages.rev} + 1`,
@@ -794,31 +782,43 @@ async function editMessage(input: EditMessageInput): Promise<{
       }
     }
 
-    let [msgs] = await Promise.all([
-      // Edit message
-      db
-        .update(messages)
-        .set(updatePayload)
-        .where(and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)))
-        .returning(),
+    // Confirm the message mutation before allocating a durable edit update.
+    // If the message was deleted concurrently, throwing inside this
+    // transaction rolls back both the message-side work and the chat update
+    // sequence instead of committing a ghost edit update.
+    const [editedMessage] = await tx
+      .update(messages)
+      .set(updatePayload)
+      .where(and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)))
+      .returning()
 
-      // Update chat
-      tx
-        .update(chats)
-        .set({
-          updateSeq: update.seq,
-          lastUpdateDate: update.date,
-        })
-        .where(eq(chats.id, chatId)),
-    ])
+    if (!editedMessage) {
+      log.trace("message not found", { messageId, chatId })
+      throw ModelError.MessageInvalid
+    }
 
-    return { message: msgs[0], update }
+    const update = await UpdatesModel.insertUpdate(tx, {
+      update: {
+        oneofKind: "editMessage",
+        editMessage: {
+          chatId: BigInt(chatId),
+          msgId: BigInt(messageId),
+        },
+      },
+      bucket: UpdateBucket.Chat,
+      entity: chat,
+    })
+
+    await tx
+      .update(chats)
+      .set({
+        updateSeq: update.seq,
+        lastUpdateDate: update.date,
+      })
+      .where(eq(chats.id, chatId))
+
+    return { message: editedMessage, update }
   })
-
-  if (!message) {
-    log.trace("message not found", { messageId, chatId })
-    throw ModelError.MessageInvalid
-  }
 
   return { message, update }
 }

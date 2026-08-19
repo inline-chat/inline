@@ -31,12 +31,23 @@ const log = new Log("chats")
 export const ChatModel = {
   getChatFromPeer: getChatFromPeer,
   getLastMessageId: getLastMessageId,
+  nextMessageId: nextMessageId,
   refreshLastMessageId: refreshLastMessageId,
   refreshLastMessageIdTransaction: refreshLastMessageIdTransaction,
   getChatIdFromInputPeer: getChatIdFromInputPeer,
   getChatFromInputPeer: getChatFromInputPeer,
   createUserChatAndDialog: createUserChatAndDialog,
   getUserChats,
+}
+
+/**
+ * Return the next message id without ever moving backwards after history is deleted.
+ * `lastMsgId` is the current surviving-message pointer, while `messageIdCounter`
+ * is the durable allocation high-water mark. The lastMsgId fallback keeps older
+ * rows and test fixtures safe until the forward migration has populated the counter.
+ */
+export function nextMessageId(chat: Pick<DbChat, "lastMsgId" | "messageIdCounter">): number {
+  return Math.max(chat.lastMsgId ?? 0, chat.messageIdCounter ?? 0) + 1
 }
 
 /**

@@ -8,6 +8,7 @@ const chat: DbChat = {
   title: "Roadmap",
   description: null,
   lastMsgId: 7,
+  messageIdCounter: 7,
   spaceId: null,
   publicThread: null,
   threadNumber: null,

@@ -1,8 +1,11 @@
-import { afterAll, describe, expect, test, beforeAll } from "bun:test"
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test"
 import { setupTestDatabase, teardownTestDatabase, testUtils } from "../setup"
 import { MessageModel } from "@in/server/db/models/messages"
+import { db } from "@in/server/db"
+import { chats, updates, UpdateBucket } from "@in/server/db/schema"
 import { decrypt, decryptBinary } from "@in/server/modules/encryption/encryption"
 import { MessageEntities, MessageEntity_Type } from "@inline-chat/protocol/core"
+import { and, eq } from "drizzle-orm"
 
 describe("editMessage", () => {
   let userId: number
@@ -44,6 +47,53 @@ describe("editMessage", () => {
 
     expect(text).toBe("edited")
     expect(edited?.editDate).toBeDate()
+  })
+
+  test("keeps the message update on the edit transaction handle", async () => {
+    await testUtils.createTestMessage({
+      messageId: 4,
+      fromId: userId,
+      chatId: chatId,
+      text: "transactional edit",
+    })
+
+    const globalUpdate = spyOn(db, "update")
+    try {
+      await MessageModel.editMessage({
+        messageId: 4,
+        chatId,
+        text: "edited transactionally",
+      })
+    } finally {
+      globalUpdate.mockRestore()
+    }
+
+    expect(globalUpdate).not.toHaveBeenCalled()
+  })
+
+  test("does not commit an edit update when the message is absent", async () => {
+    const [chatBefore] = await db.select().from(chats).where(eq(chats.id, chatId)).limit(1)
+    const updatesBefore = await db
+      .select({ id: updates.id, seq: updates.seq })
+      .from(updates)
+      .where(and(eq(updates.bucket, UpdateBucket.Chat), eq(updates.entityId, chatId)))
+
+    await expect(
+      MessageModel.editMessage({
+        messageId: 404,
+        chatId,
+        text: "must not be committed",
+      }),
+    ).rejects.toThrow()
+
+    const [chatAfter] = await db.select().from(chats).where(eq(chats.id, chatId)).limit(1)
+    const updatesAfter = await db
+      .select({ id: updates.id, seq: updates.seq })
+      .from(updates)
+      .where(and(eq(updates.bucket, UpdateBucket.Chat), eq(updates.entityId, chatId)))
+
+    expect(chatAfter?.updateSeq).toBe(chatBefore?.updateSeq)
+    expect(updatesAfter).toEqual(updatesBefore)
   })
 
   test("edits message with entities", async () => {
