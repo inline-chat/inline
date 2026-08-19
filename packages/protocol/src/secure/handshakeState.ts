@@ -86,8 +86,14 @@ export class InlineHandshakeServer {
     nowSeconds: () => number
     authorizationKeys: ServerAuthorizationKeyStore
     dc?: number
+    generator?: number
   }) {
     if (configuration.rsaKeys.length < 1) throw new RangeError("At least one server RSA key is required")
+    validateDhParameters(
+      TELEGRAM_DH_PRIME,
+      configuration.generator ?? 3,
+      configuration.randomBytes,
+    )
   }
 
   async receive(body: Uint8Array): Promise<ServerHandshakeResult> {
@@ -138,10 +144,11 @@ export class InlineHandshakeServer {
     }
     const exponent = this.configuration.randomBytes(256)
     if (exponent.length !== 256) throw new RangeError("CSPRNG returned an invalid DH exponent")
-    const gA = deriveAuthKey(Uint8Array.of(3), exponent, TELEGRAM_DH_PRIME)
+    const generator = this.configuration.generator ?? 3
+    const gA = deriveAuthKey(Uint8Array.of(generator), exponent, TELEGRAM_DH_PRIME)
     validateDhPublicValue(gA, TELEGRAM_DH_PRIME)
     const serialized = encodeServerDhInnerData({
-      nonce: phase.nonce, serverNonce: phase.serverNonce, generator: 3,
+      nonce: phase.nonce, serverNonce: phase.serverNonce, generator,
       prime: TELEGRAM_DH_PRIME, gA, serverTime: now,
     })
     const paddingLength = (16 - ((20 + serialized.length) % 16)) % 16
@@ -216,7 +223,7 @@ type ClientPhase =
   }
   | {
     kind: "dh-result"; nonce: Uint8Array; serverNonce: Uint8Array; newNonce: Uint8Array
-    temporary: boolean; prime: Uint8Array; gA: Uint8Array; authKey: Uint8Array; exponent: Uint8Array
+    temporary: boolean; generator: number; prime: Uint8Array; gA: Uint8Array; authKey: Uint8Array; exponent: Uint8Array
     retries: number; serverTime: number
   }
   | { kind: "complete" }
@@ -242,10 +249,12 @@ export class InlineHandshakeClient {
   }
 
   receive(body: Uint8Array): ClientHandshakeResult {
-    switch (this.#phase.kind) {
-      case "pq": return { request: this.#receivePq(body, this.#phase) }
-      case "server-dh": return { request: this.#receiveServerDh(body, this.#phase) }
-      case "dh-result": return this.#receiveDhResult(body, this.#phase)
+    const phase = this.#phase
+    this.#phase = { kind: "complete" }
+    switch (phase.kind) {
+      case "pq": return { request: this.#receivePq(body, phase) }
+      case "server-dh": return { request: this.#receiveServerDh(body, phase) }
+      case "dh-result": return this.#receiveDhResult(body, phase)
       case "idle": throw new RangeError("Handshake has not started")
       case "complete": throw new RangeError("Handshake is already complete")
     }
@@ -297,17 +306,17 @@ export class InlineHandshakeClient {
     validateDhPublicValue(inner.gA, inner.prime)
     return this.#makeClientDhRequest({
       nonce: phase.nonce, serverNonce: phase.serverNonce, newNonce: phase.newNonce,
-      temporary: phase.temporary, prime: inner.prime, gA: inner.gA,
+      temporary: phase.temporary, generator: inner.generator, prime: inner.prime, gA: inner.gA,
       retries: 0, retryId: 0n, serverTime: inner.serverTime,
     })
   }
 
   #makeClientDhRequest(value: {
     nonce: Uint8Array; serverNonce: Uint8Array; newNonce: Uint8Array; temporary: boolean
-    prime: Uint8Array; gA: Uint8Array; retries: number; retryId: bigint; serverTime: number
+    generator: number; prime: Uint8Array; gA: Uint8Array; retries: number; retryId: bigint; serverTime: number
   }): Uint8Array {
     const exponent = this.configuration.randomBytes(256)
-    const gB = deriveAuthKey(Uint8Array.of(3), exponent, value.prime)
+    const gB = deriveAuthKey(Uint8Array.of(value.generator), exponent, value.prime)
     validateDhPublicValue(gB, value.prime)
     const authKey = deriveAuthKey(value.gA, exponent, value.prime)
     const serialized = encodeClientDhInnerData({
@@ -336,7 +345,7 @@ export class InlineHandshakeClient {
       if (phase.retries >= 4) throw new RangeError("Authorization-key retry limit exceeded")
       return { request: this.#makeClientDhRequest({
         nonce: phase.nonce, serverNonce: phase.serverNonce, newNonce: phase.newNonce,
-        temporary: phase.temporary, prime: phase.prime, gA: phase.gA,
+        temporary: phase.temporary, generator: phase.generator, prime: phase.prime, gA: phase.gA,
         retries: phase.retries + 1, retryId: bindRetryId(phase.authKey), serverTime: phase.serverTime,
       }) }
     }

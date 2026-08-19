@@ -23,6 +23,8 @@ message ServerUpdate {
     ServerChatUpdateInfo chat_info = 15;
     ServerChatUpdatePinnedMessages pinned_messages = 16;
     ServerChatUpdateMoved chat_moved = 21;
+    ServerChatUpdateReaction reaction = 41;
+    ServerChatUpdateDeleteReaction reaction_deleted = 42;
 
     // Space updates
     ServerSpaceUpdateRemoveMember space_remove_member = 9;
@@ -53,6 +55,7 @@ message ServerUpdate {
     ServerUserUpdateChatParticipantGroupDelete user_chat_participant_group_delete = 37;
     ServerUserUpdateChatPermissions user_chat_permissions = 39;
     ServerUserUpdateDialogCollapsedMaxId user_dialog_collapsed_max_id = 40;
+    ServerUserUpdateSettings user_settings = 43;
   }
 }
 
@@ -165,6 +168,17 @@ message ServerChatUpdateMessageAttachment {
   int64 chat_id = 1;
   int64 msg_id = 2;
   int64 attachment_id = 3;
+}
+
+// A reaction mutation is part of the chat bucket so catch-up preserves its
+// order relative to other chat mutations.
+message ServerChatUpdateReaction { Reaction reaction = 1; }
+
+message ServerChatUpdateDeleteReaction {
+  string emoji = 1;
+  int64 chat_id = 2;
+  int64 message_id = 3;
+  int64 user_id = 4;
 }
 
 // ------------------------------------------------------------
@@ -289,6 +303,11 @@ message ServerUserUpdateDialogCollapsedMaxId {
 
 // Update for a user when their profile/account fields change.
 message ServerUserUpdateUser { User user = 1; }
+
+// Update for a user when their account-wide settings change. This full
+// snapshot is kept in the durable user bucket so reconnect/catch-up preserves
+// the same order as the settings write.
+message ServerUserUpdateSettings { UserSettings settings = 1; }
 
 // ------------------------------------------------------------
 // Server-only stored payloads

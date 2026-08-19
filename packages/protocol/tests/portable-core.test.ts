@@ -69,6 +69,7 @@ import {
   encodeRpcResult,
   encodeRpcDropAnswer,
   encodeRpcDropAnswerResult,
+  encodeResPq,
   encodeServerDhParamsFail,
   encodeTlBytes,
   encryptRecord,
@@ -254,6 +255,22 @@ describe("authorization-key cryptography", () => {
     expect(tampered).not.toEqual(serverDhFailureHash(newNonce))
   })
 
+  test("poisons the client state after an unauthenticated handshake response", () => {
+    const nonce = new Uint8Array(16).fill(0x11)
+    const client = new InlineHandshakeClient({
+      rsaKeys: [],
+      randomBytes: (length) => new Uint8Array(length).fill(0x11),
+    })
+    client.begin(false)
+    expect(() => client.receive(Uint8Array.of(0))).toThrow()
+    expect(() => client.receive(encodeResPq(
+      nonce,
+      new Uint8Array(16).fill(0x22),
+      hexToBytes("17ed48941a08f981"),
+      [],
+    ))).toThrow("Handshake is already complete")
+  })
+
   test("completes permanent and temporary authorization-key handshakes", async () => {
     const { publicKey, privateKey } = generateKeyPairSync("rsa", {
       modulusLength: 2048,
@@ -270,7 +287,11 @@ describe("authorization-key cryptography", () => {
         padding: constants.RSA_NO_PADDING,
       }, ciphertext)),
     }
-    for (const temporary of [false, true]) {
+    for (const { temporary, generator } of [
+      { temporary: false, generator: 3 },
+      { temporary: true, generator: 3 },
+      { temporary: false, generator: 4 },
+    ]) {
       let serverEstablished: Uint8Array | undefined
       const server = new InlineHandshakeServer({
         rsaKeys: [serverKey],
@@ -282,6 +303,7 @@ describe("authorization-key cryptography", () => {
             return "created"
           },
         },
+        generator,
       })
       const client = new InlineHandshakeClient({
         rsaKeys: [publicProfile],
@@ -299,6 +321,21 @@ describe("authorization-key cryptography", () => {
       expect(serverEstablished).toEqual(clientEstablished)
     }
   }, 20_000)
+
+  test("rejects a server generator that is incompatible with the configured prime", () => {
+    expect(() => new InlineHandshakeServer({
+      rsaKeys: [{
+        modulus: new Uint8Array(256),
+        exponent: Uint8Array.of(1, 0, 1),
+        fingerprint: 1n,
+        rawDecrypt: () => new Uint8Array(256),
+      }],
+      randomBytes: (length) => new Uint8Array(length),
+      nowSeconds: () => 1_700_000_000,
+      authorizationKeys: { create: async () => "created" },
+      generator: 5,
+    })).toThrow("Unsafe DH parameters")
+  })
 
   test("creates and verifies only the isolated temporary-key binding proof", () => {
     const permanentAuthKey = Uint8Array.from({ length: 256 }, (_, index) => index)
@@ -389,6 +426,13 @@ describe("encrypted records", () => {
       validServerSalts: new Set([fields.serverSalt]),
       nowSeconds: 1700000000,
     })).toThrow(InvalidEncryptedRecord)
+  })
+
+  test("rejects a body whose complete encrypted record exceeds the carrier limit", () => {
+    expect(() => encryptRecord(authKey, "client-to-server", {
+      ...fields,
+      body: new Uint8Array(16 * 1024 * 1024),
+    }, new Uint8Array(16))).toThrow(RangeError)
   })
 })
 

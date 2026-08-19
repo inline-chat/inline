@@ -261,6 +261,8 @@ export const factorPq = (
   maximumAttempts = 32,
 ): { p: Uint8Array; q: Uint8Array } => {
   const value = bigEndianBytesToBigInt(pqBytes)
+  // TODO(mtproto-v2-compat): Remove this beta-only bounded integer path and
+  // factor arbitrary-precision MTProto 2.0 `pq` losslessly in every client.
   if (value <= 3n || value >= (1n << 63n)) throw new RangeError("Invalid pq challenge")
   if ((value & 1n) === 0n) return { p: Uint8Array.of(2), q: minimalBigEndian(value / 2n) }
   for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {

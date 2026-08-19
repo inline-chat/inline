@@ -207,6 +207,14 @@ export const decodeRpcResult = (body: Uint8Array): { requestMessageId: bigint; r
 export const encodeRpcError = (code: number, message: string): Uint8Array =>
   fixedBody(ServiceConstructor.rpcError, int32LE(code), encodeTlBytes(new TextEncoder().encode(message)))
 
+export const decodeRpcError = (body: Uint8Array): { code: number; message: string } => {
+  const reader = readerFor(body, ServiceConstructor.rpcError)
+  const code = reader.readInt()
+  const message = new TextDecoder().decode(reader.readBytes())
+  reader.expectEnd()
+  return { code, message }
+}
+
 export const encodeRpcDropAnswer = (requestMessageId: bigint): Uint8Array =>
   fixedBody(ServiceConstructor.rpcDropAnswer, int64LE(requestMessageId))
 

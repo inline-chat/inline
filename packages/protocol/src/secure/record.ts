@@ -55,7 +55,9 @@ export const encryptRecord = (
     int64LE(fields.serverSalt), int64LE(fields.sessionId), int64LE(fields.messageId),
     int32LE(fields.sequenceNumber), int32LE(fields.body.length), fields.body, padding,
   )
-  if (plaintext.length % 16 !== 0) throw new RangeError("Record plaintext must be block aligned")
+  if (plaintext.length % 16 !== 0 || 24 + plaintext.length > MAX_PACKET_BYTES) {
+    throw new RangeError("Record plaintext must be block aligned and fit the carrier limit")
+  }
   const msgKey = computeV2MsgKey(authKey, plaintext, direction)
   const { key, iv } = deriveV2Aes(authKey, msgKey, direction)
   return concatBytes(authKeyId(authKey), msgKey, aesIgeEncrypt(plaintext, key, iv))

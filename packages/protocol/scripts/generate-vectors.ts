@@ -84,7 +84,7 @@ const recordingRandom = (seed: number) => {
   }
 }
 
-const generateHandshakeTranscript = async (temporary: boolean) => {
+const generateHandshakeTranscript = async (temporary: boolean, generator = 3) => {
   const publicKey = makeRsaPublicKey(transcriptRsaModulus, transcriptRsaExponent)
   const serverKey = {
     ...publicKey,
@@ -106,6 +106,7 @@ const generateHandshakeTranscript = async (temporary: boolean) => {
         return "created"
       },
     },
+    generator,
   })
   const client = new InlineHandshakeClient({
     rsaKeys: [publicKey],
@@ -129,6 +130,7 @@ const generateHandshakeTranscript = async (temporary: boolean) => {
   }
   return {
     temporary,
+    generator,
     rsaModulusHex: bytesToHex(transcriptRsaModulus),
     rsaExponentHex: bytesToHex(transcriptRsaExponent),
     rsaFingerprint: publicKey.fingerprint.toString(),
@@ -201,6 +203,7 @@ const corpus = {
   handshakeTranscripts: {
     permanent: await generateHandshakeTranscript(false),
     temporary: await generateHandshakeTranscript(true),
+    generatorFour: await generateHandshakeTranscript(false, 4),
   },
   encryptedRecords: {
     clientToServer: portableCoreV1Vector,
