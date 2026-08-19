@@ -11552,10 +11552,8 @@ describe("inline/monitor", () => {
           ]),
         }),
       )
-      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
-        expect.objectContaining({
-          GroupSystemPrompt: "",
-        }),
+      expect(harness.calls.finalizeInboundContext.mock.calls[0]?.[0]).not.toHaveProperty(
+        "GroupSystemPrompt",
       )
     })
 
@@ -11915,7 +11913,7 @@ describe("inline/monitor", () => {
     const handle = await harness.monitorInlineProvider({
       cfg: {} as any,
       account: buildAccount({
-        groupPolicy: "allowlist",
+        groupPolicy: "open",
         requireMention: true,
         historyLimit: 10,
       }),

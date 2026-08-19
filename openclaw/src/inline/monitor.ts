@@ -6851,10 +6851,19 @@ export async function monitorInlineProvider(params: {
               chatId: eventChatId,
               message: msg,
             })) continue
-            scheduleInboundMessage({
-              chatId: eventChatId,
-              msg: { ...msg, mentioned: true },
-            })
+            // This is a bounded replay selected by the authoritative join
+            // timestamp, not a new live typing burst. Send it through the same
+            // semantic inbound owner immediately: the ordinary debounce timer
+            // can otherwise delay recovery beyond the join-event lifetime and
+            // make the mention disappear if the monitor stops meanwhile.
+            scheduleImmediateInboundMessage(
+              {
+                chatId: eventChatId,
+                msg: { ...msg, mentioned: true },
+              },
+              "inline join mention recovery",
+              { serializeWithChat: true },
+            )
           }
           continue
         }
