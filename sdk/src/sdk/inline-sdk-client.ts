@@ -29,13 +29,21 @@ import {
   type UploadByteSource,
 } from "@inline-chat/protocol/uploads"
 import { asInlineId, type InlineIdLike } from "../ids.js"
-import { AsyncChannel } from "../utils/async-channel.js"
-import { ProtocolClient } from "../realtime/protocol-client.js"
+import { AcknowledgedAsyncChannel } from "../utils/async-channel.js"
+import {
+  ProtocolClient,
+  ProtocolClientError,
+  type RpcCallOptions,
+  type RpcReconnectPolicy,
+} from "../realtime/protocol-client.js"
 import { WebSocketTransport } from "../realtime/ws-transport.js"
+import { InlineProtocolV3Transport } from "../realtime/v3-transport.js"
+import { INLINE_PROTOCOL_PRODUCTION_PUBLIC_KEYS } from "../realtime/production-trust-roots.js"
 import type { Transport } from "../realtime/transport.js"
 import type {
   InlineSdkAnswerBotChatSettingsParams,
   InlineSdkAnswerMessageActionParams,
+  InlineSdkAuthoritativeRepairRequest,
   InlineSdkClearChatHistoryParams,
   InlineSdkClientOptions,
   InlineSdkChatInfo,
@@ -43,12 +51,15 @@ import type {
   InlineSdkGetMessagesParams,
   InlineSdkInvokeBotChatSettingsItemParams,
   InlineSdkInvokeMessageActionParams,
+  InlineSdkLogoutResult,
   InlineSdkRequestBotChatSettingsParams,
   InlineSdkSendMessageMedia,
   InlineSdkSendMessageParams,
   InlineSdkSetBotPresenceStateParams,
   InlineSdkSetMyBotCapabilitiesParams,
   InlineSdkState,
+  InlineSdkSyncStatus,
+  InlineSdkUpdateBucketRef,
   InlineSdkUploadFileParams,
   InlineSdkUploadFileResult,
   MappedMethod,
@@ -69,7 +80,126 @@ const defaultVideoDuration = 1
 const defaultCatchUpPageLimit = 200
 const defaultCatchUpTotalLimit = 1_000
 const defaultColdStartCatchUpWindow = defaultCatchUpTotalLimit
+const inboundEventCapacity = 256
+const inboundEventCapacityBytes = 8 * 1024 * 1024
+const closeJoinTimeoutMs = 2_000
 type UpdateSource = "live" | "chat" | "space" | "user"
+
+type DiscoveryTarget = {
+  bucket: InlineSdkUpdateBucketRef
+  requirement: "through" | "latest"
+  seq?: number
+  satisfied: boolean
+}
+
+type DiscoveryRound = {
+  checkpoint?: bigint
+  updatesFound?: boolean
+  resultReceived: boolean
+  collectingHints: boolean
+  committing: boolean
+  observedHint: boolean
+  targets: Map<string, DiscoveryTarget>
+}
+
+const eventTextEncoder = new TextEncoder()
+const inboundEventByteLength = (value: unknown, ancestors = new Set<object>()): number => {
+  if (value == null) return 0
+  switch (typeof value) {
+    case "string": return eventTextEncoder.encode(value).byteLength
+    case "number":
+    case "bigint": return 8
+    case "boolean": return 1
+    case "undefined": return 0
+  }
+  if (value instanceof Uint8Array) return value.byteLength
+  if (typeof value !== "object") return 0
+  if (ancestors.has(value)) throw new Error("Inline inbound event must not contain cycles")
+  ancestors.add(value)
+  try {
+    if (Array.isArray(value)) {
+      return value.reduce((total, item) => total + inboundEventByteLength(item, ancestors), 0)
+    }
+    return Object.entries(value).reduce(
+      (total, [key, item]) => total + eventTextEncoder.encode(key).byteLength +
+        inboundEventByteLength(item, ancestors),
+      0,
+    )
+  } finally {
+    ancestors.delete(value)
+  }
+}
+
+const replaySafeRpcMethods = new Set<Method>([
+  Method.GET_ME,
+  Method.GET_PEER_PHOTO,
+  Method.GET_CHAT_HISTORY,
+  Method.GET_SPACE_MEMBERS,
+  Method.GET_CHAT_PARTICIPANTS,
+  Method.GET_CHATS,
+  Method.GET_USER_SETTINGS,
+  Method.GET_UPDATES_STATE,
+  Method.GET_CHAT,
+  Method.GET_UPDATES,
+  Method.SEARCH_MESSAGES,
+  Method.LIST_BOTS,
+  Method.REVEAL_BOT_TOKEN,
+  Method.GET_MESSAGES,
+  Method.GET_BOT_COMMANDS,
+  Method.GET_PEER_BOT_COMMANDS,
+  Method.GET_BOT_PRESENCE,
+  Method.GET_SESSIONS,
+  Method.CHECK_USERNAME,
+  Method.GET_SPACE_URL_PREVIEW_EXCLUSIONS,
+  Method.GET_USER_GROUPS,
+  Method.GET_SPACE_SETTINGS,
+  Method.GET_THREAD_REFERENCES,
+  Method.GET_THREAD_SUBTHREADS,
+  Method.GET_PEER_BOTS,
+  Method.GET_MY_BOT_CAPABILITIES,
+  Method.GET_GRID,
+  Method.GET_GRID_HOME,
+  Method.GET_EXTERNAL_PROFILE_PHOTO,
+  Method.GET_CHAT_TRANSCRIPT,
+  Method.SEARCH_EXTERNAL_RESOURCES,
+  Method.LIST_CONNECTORS,
+  Method.SEARCH_USERS,
+  Method.RESOLVE_URL_PREVIEW,
+  Method.GET_BOT_AGENT,
+  Method.LIST_BOT_AGENTS,
+  Method.GET_CONNECTOR_CONFIG,
+  Method.CREATE_UPLOAD,
+  Method.SAVE_UPLOAD_PART,
+  Method.GET_UPLOAD_STATE,
+  // The server atomically replaces the full set; the SDK also owns reconnect reconciliation.
+  Method.SET_MY_BOT_CAPABILITIES,
+])
+
+const reconnectPolicyForRpc = (
+  method: Method,
+  input: RpcCall["input"],
+): RpcReconnectPolicy => {
+  if (method === Method.SEND_MESSAGE && input.oneofKind === "sendMessage" &&
+      input.sendMessage.randomId !== undefined && input.sendMessage.randomId !== 0n) {
+    return "replay-safe"
+  }
+  return replaySafeRpcMethods.has(method) ? "replay-safe" : "never-replay"
+}
+
+const randomMessageId = (): bigint => {
+  const bytes = new Uint8Array(8)
+  globalThis.crypto.getRandomValues(bytes)
+  const value = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getBigInt64(0, true)
+  return value === 0n ? 1n : value
+}
+
+const normalizeMessageRandomId = (value: bigint | undefined): bigint => {
+  const resolved = value ?? randomMessageId()
+  if (resolved === 0n || BigInt.asIntN(64, resolved) !== resolved) {
+    throw new RangeError("sendMessage: randomId must be a non-zero signed 64-bit bigint")
+  }
+  return resolved
+}
 
 function extractFirstMessageId(updates: Update[] | undefined): bigint | null {
   for (const update of updates ?? []) {
@@ -111,23 +241,36 @@ export class InlineSdkClient {
   private readonly transport: Transport
   private readonly protocol: ProtocolClient
   private readonly uploads: NativeUploadClient
-  private readonly eventStream = new AsyncChannel<InlineInboundEvent>()
+  private readonly eventStream = new AcknowledgedAsyncChannel<InlineInboundEvent>(inboundEventCapacity, {
+    capacityBytes: inboundEventCapacityBytes,
+    byteLength: inboundEventByteLength,
+  })
 
   private started = false
   private openPromise: Promise<void> | null = null
   private openResolver: (() => void) | null = null
   private openRejecter: ((error: Error) => void) | null = null
   private authenticationError: InlineSdkAuthenticationError | null = null
+  private logoutInProgress = false
 
   private state: InlineSdkState = { version: 1 }
   private saveTimer: ReturnType<typeof setTimeout> | null = null
-  private saveInFlight: Promise<void> | null = null
+  private saveInFlight: Promise<boolean> | null = null
+  private dirtyStateRevision = 0
+  private savedStateRevision = 0
 
   private catchUpInFlightByChatId = new Map<bigint, Promise<void>>()
-  private catchUpRequestedByChatId = new Map<bigint, { endSeq: number; peer?: Peer }>()
+  private catchUpRequestedByChatId = new Map<bigint, { endSeq?: number; peer?: Peer; toLatest: boolean }>()
   private catchUpInFlightBySpaceId = new Map<bigint, Promise<void>>()
-  private catchUpRequestedBySpaceId = new Map<bigint, { endSeq: number }>()
+  private catchUpRequestedBySpaceId = new Map<bigint, { endSeq?: number; toLatest: boolean }>()
   private userCatchUpInFlight: Promise<void> | null = null
+  private peerResolutionInFlightByChatId = new Map<bigint, Promise<void>>()
+  private recoveryReconnectInFlight: Promise<void> | null = null
+  private degradedUpdateBuckets = new Map<string, InlineSdkUpdateBucketRef>()
+  private liveCursorFences = new Set<string>()
+  private discoveryRound: DiscoveryRound | null = null
+  private discoveryInFlight: Promise<void> | null = null
+  private discoveryCommitInFlight: Promise<void> | null = null
   private desiredBotCapabilities: BotCapability[] | null = null
   private desiredBotCapabilitiesRevision = 0
   private registeredBotCapabilitiesRevision = -1
@@ -140,16 +283,32 @@ export class InlineSdkClient {
     this.httpBaseUrl = normalizeHttpBaseUrl(options.baseUrl ?? defaultApiBaseUrl)
     this.fetchImpl = options.fetch ?? fetch
 
+    const v3 = options.inlineProtocol
+    if (v3 && options.transport) {
+      throw new Error("InlineSdkClient cannot combine a custom transport with Inline Protocol credentials")
+    }
     const url = resolveRealtimeUrl(this.httpBaseUrl)
-    this.transport = options.transport ?? new WebSocketTransport({ url, logger: options.logger })
+    this.transport = v3
+      ? new InlineProtocolV3Transport({
+        url: v3.realtimeUrl ?? resolveRealtimeV3Url(this.httpBaseUrl),
+        rsaPublicKeys: v3.rsaPublicKeys ?? INLINE_PROTOCOL_PRODUCTION_PUBLIC_KEYS,
+        credentials: v3.credentials,
+        requestTimeoutMs: options.rpcTimeoutMs ?? undefined,
+        logger: options.logger,
+        onCredentials: v3.onCredentials,
+      })
+      : options.transport ?? new WebSocketTransport({ url, logger: options.logger })
     const sdkVersion = getSdkVersion()
     this.protocol = new ProtocolClient({
       transport: this.transport,
       getConnectionInit: () => ({
-        token: options.token,
+        // The V3 transport consumes this local compatibility message and never transmits its
+        // empty token. Authentication is already owned by the bound authorization key.
+        token: v3 ? "" : options.token,
         layer: sdkLayer,
         ...(sdkVersion ? { clientVersion: sdkVersion } : {}),
       }),
+      processUpdates: (updates) => this.onUpdates(updates.updates),
       logger: options.logger,
       defaultRpcTimeoutMs: options.rpcTimeoutMs,
     })
@@ -162,6 +321,7 @@ export class InlineSdkClient {
 
   async connect(signal?: AbortSignal): Promise<void> {
     if (this.authenticationError) throw this.authenticationError
+    if (signal?.aborted) throw new Error("aborted")
     if (this.started) {
       // If a connection attempt is already in-flight, callers should still
       // await readiness.
@@ -169,8 +329,6 @@ export class InlineSdkClient {
       return
     }
     this.started = true
-
-    if (signal?.aborted) throw new Error("aborted")
 
     const openPromise = new Promise<void>((resolve, reject) => {
       this.openResolver = resolve
@@ -181,17 +339,12 @@ export class InlineSdkClient {
     // to unblock concurrent callers. Ensure the rejection is always handled.
     openPromise.catch(() => {})
 
-    if (signal) {
-      signal.addEventListener(
-        "abort",
-        () => {
-          // Ensure connect() doesn't hang if we're aborted before `open`.
-          this.rejectOpen(new Error("aborted"))
-          void this.close()
-        },
-        { once: true },
-      )
+    const abortConnect = () => {
+      // Ensure connect() doesn't hang if we're aborted before `open`.
+      this.rejectOpen(new Error("aborted"))
+      void this.close()
     }
+    signal?.addEventListener("abort", abortConnect, { once: true })
 
     try {
       await this.loadState()
@@ -207,6 +360,7 @@ export class InlineSdkClient {
       await this.protocol.stopTransport().catch(() => {})
       throw err
     } finally {
+      signal?.removeEventListener("abort", abortConnect)
       if (this.openPromise === openPromise) {
         this.openPromise = null
       }
@@ -220,13 +374,62 @@ export class InlineSdkClient {
     this.rejectOpen(new Error("closed"))
 
     this.eventStream.close()
-    await Promise.allSettled([
+    await settleWithin(
+      this.protocol.stopTransport(),
+      closeJoinTimeoutMs,
+      () => this.log.warn?.("Timed out stopping SDK transport during close"),
+    )
+    await settleWithin(Promise.allSettled([
       ...this.catchUpInFlightByChatId.values(),
       ...this.catchUpInFlightBySpaceId.values(),
       ...(this.userCatchUpInFlight ? [this.userCatchUpInFlight] : []),
-    ])
+      ...this.peerResolutionInFlightByChatId.values(),
+    ]), closeJoinTimeoutMs, () => this.log.warn?.("Timed out joining SDK catch-up tasks during close"))
     await this.flushStateSave()
-    await this.protocol.stopTransport()
+  }
+
+  /**
+   * Revokes the remote session best-effort and always destroys host-owned local authority.
+   * A durable credential owner is required; close() remains disconnect-only.
+   */
+  async logout(): Promise<InlineSdkLogoutResult> {
+    const owner = this.options.credentialOwner
+    if (!owner) throw new Error("logout requires a credentialOwner")
+    if (this.logoutInProgress) throw new Error("logout already in progress")
+
+    this.logoutInProgress = true
+    try {
+      await owner.beginLogout()
+      let remoteOutcome: InlineSdkLogoutResult["remoteOutcome"] = "notSent"
+      if (this.started) {
+        try {
+          await this.protocol.callRpc(Method.LOG_OUT, {
+            oneofKind: "logOut",
+            logOut: {},
+          }, {
+            reconnectPolicy: "never-replay",
+            timeoutMs: typeof this.options.rpcTimeoutMs === "number" &&
+                Number.isFinite(this.options.rpcTimeoutMs) && this.options.rpcTimeoutMs > 0
+              ? Math.min(3_000, this.options.rpcTimeoutMs)
+              : 3_000,
+          })
+          remoteOutcome = "confirmed"
+        } catch (error) {
+          remoteOutcome = error instanceof ProtocolClientError &&
+              ["not-authorized", "not-connected", "stopped", "capacity-exceeded"]
+                .includes(error.code)
+            ? "notSent"
+            : "commitUnknown"
+          this.log.warn?.("Remote logout result was not confirmed; continuing local credential destruction", error)
+        }
+      }
+      await this.close()
+      await owner.clearCredentials()
+      await owner.finishLogout()
+      return { remoteOutcome }
+    } finally {
+      this.logoutInProgress = false
+    }
   }
 
   getDiagnostics() {
@@ -235,6 +438,7 @@ export class InlineSdkClient {
       baseUrl: this.httpBaseUrl,
       authenticationErrorCode: this.authenticationError?.code ?? null,
       protocol: this.protocol.getDiagnostics(),
+      sync: this.getSyncStatus(),
     }
   }
 
@@ -253,8 +457,22 @@ export class InlineSdkClient {
       version: 1,
       ...(this.state.dateCursor != null ? { dateCursor: this.state.dateCursor } : {}),
       ...(this.state.lastSeqByChatId != null ? { lastSeqByChatId: { ...this.state.lastSeqByChatId } } : {}),
+      ...(this.state.chatPeerByChatId != null ? { chatPeerByChatId: { ...this.state.chatPeerByChatId } } : {}),
       ...(this.state.lastSeqBySpaceId != null ? { lastSeqBySpaceId: { ...this.state.lastSeqBySpaceId } } : {}),
       ...(this.state.lastUserSeq != null ? { lastUserSeq: this.state.lastUserSeq } : {}),
+    }
+  }
+
+  getSyncStatus(): InlineSdkSyncStatus {
+    return {
+      state: this.degradedUpdateBuckets.size > 0
+        ? "degraded"
+        : this.userCatchUpInFlight ||
+            this.catchUpInFlightByChatId.size > 0 ||
+            this.catchUpInFlightBySpaceId.size > 0
+          ? "syncing"
+          : "live",
+      degradedBuckets: [...this.degradedUpdateBuckets.values()],
     }
   }
 
@@ -339,6 +557,7 @@ export class InlineSdkClient {
 
     const peerId = this.inputPeerFromTarget(params, "sendMessage")
     const media = params.media != null ? toInputMedia(params.media) : undefined
+    const randomId = normalizeMessageRandomId(params.randomId)
 
     let result: RpcResultForMethod<Method.SEND_MESSAGE>
     try {
@@ -346,6 +565,7 @@ export class InlineSdkClient {
         oneofKind: "sendMessage",
         sendMessage: {
           peerId,
+          randomId,
           ...(hasText ? { message: params.text } : {}),
           ...(media != null ? { media } : {}),
           ...(params.replyToMsgId != null ? { replyToMsgId: asInlineId(params.replyToMsgId, "replyToMsgId") } : {}),
@@ -603,12 +823,12 @@ export class InlineSdkClient {
   async invokeRaw(
     method: Method,
     input: RpcCall["input"] = { oneofKind: undefined },
-    options?: { timeoutMs?: number | null },
+    options?: RpcCallOptions,
   ): Promise<RpcResult["result"]> {
     if (hasMethodMapping(method)) {
       this.assertMethodInputMatch(method, input)
     }
-    const result = await this.protocol.callRpc(method, input, options)
+    const result = await this.callRpcWithSemanticPolicy(method, input, options)
     if (hasMethodMapping(method)) {
       this.assertMethodResultMatch(method, result)
     }
@@ -620,20 +840,34 @@ export class InlineSdkClient {
   async invokeUncheckedRaw(
     method: Method,
     input: RpcCall["input"] = { oneofKind: undefined },
-    options?: { timeoutMs?: number | null },
+    options?: RpcCallOptions,
   ): Promise<RpcResult["result"]> {
-    return await this.protocol.callRpc(method, input, options)
+    return await this.callRpcWithSemanticPolicy(method, input, options)
   }
 
   async invoke<M extends MappedMethod>(
     method: M,
     input: RpcInputForMethod<M>,
-    options?: { timeoutMs?: number | null },
+    options?: RpcCallOptions,
   ): Promise<RpcResultForMethod<M>> {
     this.assertMethodInputMatch(method, input)
-    const result = await this.protocol.callRpc(method, input, options)
+    const result = await this.callRpcWithSemanticPolicy(method, input, options)
     this.assertMethodResultMatch(method, result)
     return result
+  }
+
+  private async callRpcWithSemanticPolicy(
+    method: Method,
+    input: RpcCall["input"],
+    options?: RpcCallOptions,
+  ): Promise<RpcResult["result"]> {
+    if (this.logoutInProgress && method !== Method.LOG_OUT) {
+      throw new Error("logout in progress")
+    }
+    return await this.protocol.callRpc(method, input, {
+      ...options,
+      reconnectPolicy: options?.reconnectPolicy ?? reconnectPolicyForRpc(method, input),
+    })
   }
 
   private assertMethodInputMatch(method: MappedMethod, input: RpcCall["input"]) {
@@ -676,7 +910,8 @@ export class InlineSdkClient {
             this.onAuthenticationError(event.error)
             break
           case "updates":
-            await this.onUpdates(event.updates.updates)
+            // ProtocolClient has already handed this wire-ordered batch to the
+            // SDK update owner before a following RPC result can complete.
             break
           case "bot":
             await this.onBotEvent(event.bot)
@@ -689,8 +924,14 @@ export class InlineSdkClient {
         }
       }
     })().catch((error) => {
-      this.log.error?.("SDK listener crashed", error)
-      this.rejectOpen(error instanceof Error ? error : new Error("listener-crashed"))
+      const failure = error instanceof Error ? error : new Error("listener-crashed")
+      this.log.error?.("SDK listener crashed", failure)
+      this.started = false
+      this.rejectOpen(failure)
+      this.eventStream.fail(failure)
+      void this.protocol.stopTransport().catch((stopError) => {
+        this.log.error?.("Failed to stop transport after SDK listener failure", stopError)
+      })
     })
   }
 
@@ -709,13 +950,17 @@ export class InlineSdkClient {
   }
 
   private async onOpen() {
+    this.requestCatchUpUser()
+    for (const bucket of this.degradedUpdateBuckets.values()) {
+      this.requestCatchUpForDegradedBucket(bucket)
+    }
+
     this.openResolver?.()
     this.openResolver = null
     this.openRejecter = null
 
     // Best-effort: do not block `connect()` on cursor initialization.
     void this.initializeDateCursor()
-    void this.requestCatchUpUser()
     if (this.desiredBotCapabilities != null) {
       void this.registerDesiredBotCapabilities().catch((error) => {
         this.log.warn?.("Failed to restore bot capabilities after reconnect", error)
@@ -723,11 +968,11 @@ export class InlineSdkClient {
     }
   }
 
-  private async onBotEvent(event: BotEvent): Promise<void> {
+  private onBotEvent(event: BotEvent): void {
     switch (event.event.oneofKind) {
       case "chatSettingsRequested": {
         const request = event.event.chatSettingsRequested
-        await this.eventStream.send({
+        void this.deliverEvent({
           kind: "bot.chatSettings.request",
           requestId: request.requestId,
           chatId: request.chatId,
@@ -738,7 +983,7 @@ export class InlineSdkClient {
       }
       case "chatSettingsItemInvoked": {
         const request = event.event.chatSettingsItemInvoked
-        await this.eventStream.send({
+        void this.deliverEvent({
           kind: "bot.chatSettings.item.invoke",
           requestId: request.requestId,
           chatId: request.chatId,
@@ -756,6 +1001,27 @@ export class InlineSdkClient {
   }
 
   private async initializeDateCursor() {
+    if (this.discoveryInFlight) return this.discoveryInFlight
+    if (this.discoveryCommitInFlight) return this.discoveryCommitInFlight
+
+    const round: DiscoveryRound = {
+      resultReceived: false,
+      collectingHints: true,
+      committing: false,
+      observedHint: false,
+      targets: new Map(),
+    }
+    this.discoveryRound = round
+
+    const task = this.runDateCursorDiscovery(round)
+      .finally(() => {
+        if (this.discoveryInFlight === task) this.discoveryInFlight = null
+      })
+    this.discoveryInFlight = task
+    return task
+  }
+
+  private async runDateCursorDiscovery(round: DiscoveryRound) {
     const date = this.state.dateCursor ?? nowSeconds()
     try {
       const result = await this.invoke(Method.GET_UPDATES_STATE, {
@@ -763,53 +1029,162 @@ export class InlineSdkClient {
         getUpdatesState: GetUpdatesStateInput.create({ date }),
       }, { timeoutMs: 1500 })
       const state = result.getUpdatesState as typeof result.getUpdatesState & { updatesFound?: boolean }
-      if (state.updatesFound === false) {
-        this.state.dateCursor = state.date
-        this.scheduleStateSave()
-      }
+      round.checkpoint = state.date
+      round.updatesFound = state.updatesFound
+      round.resultReceived = true
+      // ProtocolClient does not complete this RPC until every earlier
+      // wire-ordered update batch has reached this owner. Hints observed after
+      // this point belong to another server event, never to this checkpoint.
+      round.collectingHints = false
+      this.tryCommitDiscoveryRound(round)
     } catch (error) {
       // Not all deployments may support this yet; treat as best-effort.
       this.log.warn?.("GET_UPDATES_STATE failed (continuing without date cursor)", error)
+      if (this.discoveryRound === round) this.discoveryRound = null
     }
   }
 
-  private async onUpdates(updates: Update[]) {
+  private tryCommitDiscoveryRound(round: DiscoveryRound) {
+    if (this.discoveryRound !== round || !round.resultReceived || round.checkpoint == null) return
+    if (round.committing) return
+
+    const targets = [...round.targets.values()]
+    const allTargetsSatisfied = targets.every((target) => target.satisfied)
+    if (round.updatesFound === true && (!round.observedHint || !allTargetsSatisfied)) return
+    if (round.updatesFound !== false && round.updatesFound !== true) return
+    if (!allTargetsSatisfied) return
+
+    round.committing = true
+    const previousDateCursor = this.state.dateCursor
+    this.state.dateCursor = round.checkpoint
+    this.scheduleStateSave()
+    const commit = this.flushStateSave()
+      .then((saved) => {
+        if (this.discoveryRound !== round) return
+        if (saved) {
+          this.discoveryRound = null
+          return
+        }
+
+        // A checkpoint is not committed until its state-store write succeeds.
+        // Restore the old in-memory cursor so the next reconnect retries the
+        // same discovery date rather than skipping over an unpersisted round.
+        this.state.dateCursor = previousDateCursor
+        this.scheduleStateSave()
+        this.discoveryRound = null
+        this.log.warn?.("Failed to persist discovery checkpoint; preserving previous date cursor")
+      })
+      .finally(() => {
+        if (this.discoveryCommitInFlight === commit) this.discoveryCommitInFlight = null
+        round.committing = false
+      })
+    this.discoveryCommitInFlight = commit
+  }
+
+  private registerDiscoveryHint(bucket: InlineSdkUpdateBucketRef, updateSeq: number) {
+    const round = this.discoveryRound
+    if (!round || !round.collectingHints) return
+
+    round.observedHint = true
+    const key = this.updateBucketKey(bucket)
+    const existing = round.targets.get(key)
+    const through = updateSeq > 0
+    const requirement = existing?.requirement === "latest" || !through ? "latest" : "through"
+    const seq = requirement === "through"
+      ? Math.max(existing?.seq ?? 0, updateSeq)
+      : undefined
+    const target: DiscoveryTarget = existing
+      ? { ...existing, bucket: { ...existing.bucket, ...bucket }, requirement, ...(seq != null ? { seq } : {}) }
+      : { bucket, requirement, ...(seq != null ? { seq } : {}), satisfied: false }
+    round.targets.set(key, target)
+
+    if (requirement === "through" && seq != null && this.bucketCursor(bucket) >= seq) {
+      target.satisfied = true
+    }
+    this.tryCommitDiscoveryRound(round)
+  }
+
+  private bucketCursor(bucket: InlineSdkUpdateBucketRef): number {
+    switch (bucket.kind) {
+      case "user": return this.state.lastUserSeq ?? 0
+      case "chat": return this.state.lastSeqByChatId?.[bucket.chatId.toString()] ?? 0
+      case "space": return this.state.lastSeqBySpaceId?.[bucket.spaceId.toString()] ?? 0
+    }
+  }
+
+  private satisfyDiscoveryBucket(bucket: InlineSdkUpdateBucketRef, appliedSeq?: number) {
+    const round = this.discoveryRound
+    if (!round) return
+    const target = round.targets.get(this.updateBucketKey(bucket))
+    if (!target) return
+    target.satisfied = target.requirement === "latest" ||
+      (target.seq != null && (appliedSeq ?? this.bucketCursor(bucket)) >= target.seq)
+    this.tryCommitDiscoveryRound(round)
+  }
+
+  private satisfyDiscoveryThroughCursor(bucket: InlineSdkUpdateBucketRef, seq: number) {
+    const round = this.discoveryRound
+    if (!round) return
+    const target = round.targets.get(this.updateBucketKey(bucket))
+    if (!target || target.satisfied || target.requirement !== "through" || target.seq == null) return
+    if (seq >= target.seq) {
+      target.satisfied = true
+      this.tryCommitDiscoveryRound(round)
+    }
+  }
+
+  private onUpdates(updates: Update[]) {
     for (const update of updates) {
-      await this.handleUpdate(update)
+      const handled = this.handleUpdate(update, { source: "live" })
+      if (handled == null && !this.isEphemeralUpdate(update)) {
+        const buckets = this.bucketForRawUpdate(update)
+        if (buckets.length > 0) {
+          for (const bucket of buckets) {
+            this.fenceLiveCursor(bucket)
+            this.markUpdateBucketDegraded(bucket)
+            this.log.warn?.("Unsupported durable live update; bucket remains degraded and cursor is fenced", {
+              bucket: this.updateBucketKey(bucket),
+              updateKind: update.update.oneofKind,
+            })
+            this.requestCatchUpForDegradedBucket(bucket)
+          }
+        } else {
+          this.log.warn?.("Unsupported durable live update without a provable bucket identity; requesting targeted discovery", {
+            updateKind: update.update.oneofKind,
+          })
+          void this.initializeDateCursor()
+        }
+      }
     }
   }
 
-  private async handleUpdate(update: Update, options?: { source?: UpdateSource }) {
+  private handleUpdate(update: Update, options?: { source?: UpdateSource }): Promise<boolean> | null {
     const seq = update.seq ?? 0
     const date = update.date ?? 0n
 
     switch (update.update.oneofKind) {
       case "newMessage": {
         const message = update.update.newMessage.message
-        if (!message) return
-        this.bumpChatSeq(message.chatId, seq)
-        await this.eventStream.send({
+        if (!message) return null
+        return this.deliverEvent({
           kind: "message.new",
           chatId: message.chatId,
           message,
           seq,
           date,
-        })
-        return
+        }, () => this.bumpChatSeq(message.chatId, seq, options?.source))
       }
 
       case "editMessage": {
         const message = update.update.editMessage.message
-        if (!message) return
-        this.bumpChatSeq(message.chatId, seq)
-        await this.eventStream.send({
+        if (!message) return null
+        return this.deliverEvent({
           kind: "message.edit",
           chatId: message.chatId,
           message,
           seq,
           date,
-        })
-        return
+        }, () => this.bumpChatSeq(message.chatId, seq, options?.source))
       }
 
       case "deleteMessages": {
@@ -817,30 +1192,28 @@ export class InlineSdkClient {
         const chatId = payload.peerId?.type.oneofKind === "chat" ? payload.peerId.type.chat.chatId : null
         if (!chatId) {
           this.log.warn?.("Skipping deleteMessages update without chat peer", payload.peerId)
-          return
+          return null
         }
-        this.bumpChatSeq(chatId, seq)
-        await this.eventStream.send({
+        return this.deliverEvent({
           kind: "message.delete",
           chatId,
           messageIds: payload.messageIds,
           seq,
           date,
-        })
-        return
+        }, () => this.bumpChatSeq(chatId, seq, options?.source))
       }
 
       case "clearChatHistory": {
         const payload = update.update.clearChatHistory
         if (!payload.target) {
           this.log.warn?.("Skipping clearChatHistory update without target")
-          return
+          return null
         }
         if (payload.target.oneofKind === "spaceId") {
-          this.bumpSpaceSeq(payload.target.spaceId, seq)
-          await this.eventStream.send({
+          const spaceId = payload.target.spaceId
+          return this.deliverEvent({
             kind: "space.history.clear",
-            spaceId: payload.target.spaceId,
+            spaceId,
             ...(payload.beforeDate != null ? { beforeDate: payload.beforeDate } : {}),
             deleteReplyThreads: payload.deleteReplyThreads,
             deletedChatIds: payload.deletedChatIds,
@@ -848,15 +1221,13 @@ export class InlineSdkClient {
             detachedChatIds: payload.detachedChatIds,
             seq,
             date,
-          })
-          return
+          }, () => this.bumpSpaceSeq(spaceId, seq, options?.source))
         }
 
         const peerId = payload.target.oneofKind === "peerId" ? payload.target.peerId : undefined
         if (peerId?.type.oneofKind === "chat") {
           const chatId = peerId.type.chat.chatId
-          this.bumpChatSeq(chatId, seq)
-          await this.eventStream.send({
+          return this.deliverEvent({
             kind: "message.history.clear",
             chatId,
             ...(payload.beforeDate != null ? { beforeDate: payload.beforeDate } : {}),
@@ -866,12 +1237,11 @@ export class InlineSdkClient {
             detachedChatIds: payload.detachedChatIds,
             seq,
             date,
-          })
-          return
+          }, () => this.bumpChatSeq(chatId, seq, options?.source))
         }
 
         if (peerId?.type.oneofKind === "user") {
-          await this.eventStream.send({
+          return this.deliverEvent({
             kind: "message.history.clear",
             userId: peerId.type.user.userId,
             ...(payload.beforeDate != null ? { beforeDate: payload.beforeDate } : {}),
@@ -881,32 +1251,28 @@ export class InlineSdkClient {
             detachedChatIds: payload.detachedChatIds,
             seq,
             date,
-          })
-          return
+          }, () => this.bumpUserSeq(seq, options?.source))
         }
 
         this.log.warn?.("Skipping clearChatHistory update without peer target", peerId)
-        return
+        return null
       }
 
       case "updateReaction": {
         const reaction = update.update.updateReaction.reaction
-        if (!reaction) return
-        this.bumpChatSeq(reaction.chatId, seq)
-        await this.eventStream.send({
+        if (!reaction) return null
+        return this.deliverEvent({
           kind: "reaction.add",
           chatId: reaction.chatId,
           reaction,
           seq,
           date,
-        })
-        return
+        }, () => this.bumpChatSeq(reaction.chatId, seq, options?.source))
       }
 
       case "deleteReaction": {
         const payload = update.update.deleteReaction
-        this.bumpChatSeq(payload.chatId, seq)
-        await this.eventStream.send({
+        return this.deliverEvent({
           kind: "reaction.delete",
           chatId: payload.chatId,
           emoji: payload.emoji,
@@ -914,47 +1280,39 @@ export class InlineSdkClient {
           userId: payload.userId,
           seq,
           date,
-        })
-        return
+        }, () => this.bumpChatSeq(payload.chatId, seq, options?.source))
       }
 
       case "participantAdd": {
         const payload = update.update.participantAdd
-        if (options?.source !== "user" && options?.source !== "space") {
-          this.bumpChatSeq(payload.chatId, seq)
-        }
-        await this.eventStream.send({
+        return this.deliverEvent({
           kind: "chat.participant.add",
           chatId: payload.chatId,
           ...(payload.participant ? { participant: payload.participant } : {}),
           seq,
           date,
-        })
-        return
+        }, () => this.bumpChatSeq(payload.chatId, seq, options?.source))
       }
 
       case "participantDelete": {
         const payload = update.update.participantDelete
-        if (options?.source !== "user" && options?.source !== "space") {
-          this.bumpChatSeq(payload.chatId, seq)
-        }
-        await this.eventStream.send({
+        return this.deliverEvent({
           kind: "chat.participant.delete",
           chatId: payload.chatId,
           userId: payload.userId,
           seq,
           date,
-        })
-        return
+        }, () => this.bumpChatSeq(payload.chatId, seq, options?.source))
       }
 
       case "messageActionInvoked": {
         const payload = update.update.messageActionInvoked
         if (this.shouldSkipUserSeq(seq)) {
-          return
+          // The persisted user cursor is the durable acknowledgement for this
+          // already-seen update; do not turn a replay into a degraded bucket.
+          return Promise.resolve(true)
         }
-        this.bumpUserSeq(seq)
-        await this.eventStream.send({
+        return this.deliverEvent({
           kind: "message.action.invoke",
           interactionId: payload.interactionId,
           chatId: payload.chatId,
@@ -964,56 +1322,296 @@ export class InlineSdkClient {
           data: payload.data,
           seq,
           date,
-        })
-        return
+        }, () => this.bumpUserSeq(seq, options?.source))
       }
 
       case "messageActionAnswered": {
         const payload = update.update.messageActionAnswered
         if (this.shouldSkipUserSeq(seq)) {
-          return
+          // The persisted user cursor is the durable acknowledgement for this
+          // already-seen update; do not turn a replay into a degraded bucket.
+          return Promise.resolve(true)
         }
-        this.bumpUserSeq(seq)
-        await this.eventStream.send({
+        return this.deliverEvent({
           kind: "message.action.answered",
           interactionId: payload.interactionId,
           ui: payload.ui,
           seq,
           date,
-        })
-        return
+        }, () => this.bumpUserSeq(seq, options?.source))
       }
 
       case "chatHasNewUpdates": {
         const payload = update.update.chatHasNewUpdates
-        await this.eventStream.send({
+        const bucket: InlineSdkUpdateBucketRef = {
+          kind: "chat",
+          chatId: payload.chatId,
+          ...(payload.peerId ? { peer: payload.peerId } : {}),
+        }
+        this.registerDiscoveryHint(bucket, payload.updateSeq)
+        const delivery = this.deliverEvent({
           kind: "chat.hasUpdates",
           chatId: payload.chatId,
           seq,
           date,
         })
-        this.requestCatchUpChat({ chatId: payload.chatId, peer: payload.peerId, updateSeq: payload.updateSeq })
-        return
+        this.requestCatchUpChat({
+          chatId: payload.chatId,
+          peer: payload.peerId,
+          ...(payload.updateSeq > 0 ? { updateSeq: payload.updateSeq } : {}),
+        })
+        return delivery
       }
 
       case "spaceHasNewUpdates": {
         const payload = update.update.spaceHasNewUpdates
-        await this.eventStream.send({
+        this.registerDiscoveryHint({ kind: "space", spaceId: payload.spaceId }, payload.updateSeq)
+        const delivery = this.deliverEvent({
           kind: "space.hasUpdates",
           spaceId: payload.spaceId,
           seq,
           date,
         })
-        this.requestCatchUpSpace({ spaceId: payload.spaceId, updateSeq: payload.updateSeq })
-        return
+        this.requestCatchUpSpace({
+          spaceId: payload.spaceId,
+          ...(payload.updateSeq > 0 ? { updateSeq: payload.updateSeq } : {}),
+        })
+        return delivery
       }
 
       default:
+        return null
+    }
+  }
+
+  private deliverEvent(event: InlineInboundEvent, onApplied?: () => void): Promise<boolean> {
+    let acknowledged: Promise<boolean>
+    try {
+      acknowledged = this.eventStream.send(event)
+    } catch (error) {
+      const bucket = this.bucketForEvent(event)
+      if (bucket) {
+        this.fenceLiveCursor(bucket)
+        this.markUpdateBucketDegraded(bucket)
+        this.requestCatchUpAfterEventOverflow(bucket, event)
+      }
+      this.log.warn?.("Inbound event buffer overflow; durable cursor remains unchanged and transport will recover", {
+        bucket: bucket ? this.updateBucketKey(bucket) : "none",
+        error: extractErrorMessage(error),
+      })
+      this.requestRecoveryReconnect("inbound-event-buffer-overflow")
+      return Promise.resolve(false)
+    }
+    if (onApplied) {
+      void acknowledged.then((applied) => {
+        if (applied) onApplied()
+      })
+    }
+    return acknowledged
+  }
+
+  private bucketForEvent(event: InlineInboundEvent): InlineSdkUpdateBucketRef | undefined {
+    switch (event.kind) {
+      case "message.new":
+      case "message.edit":
+      case "message.delete":
+      case "reaction.add":
+      case "reaction.delete":
+      case "chat.participant.add":
+      case "chat.participant.delete":
+        return { kind: "chat", chatId: event.chatId }
+      case "message.history.clear":
+        return event.chatId != null ? { kind: "chat", chatId: event.chatId } : { kind: "user" }
+      case "space.history.clear":
+      case "space.hasUpdates":
+        return { kind: "space", spaceId: event.spaceId }
+      case "message.action.answered":
+      case "message.action.invoke":
+        return { kind: "user" }
+      case "chat.hasUpdates":
+        return { kind: "chat", chatId: event.chatId }
+      case "bot.chatSettings.request":
+      case "bot.chatSettings.item.invoke":
+        return undefined
+    }
+  }
+
+  private requestRecoveryReconnect(cause: string) {
+    if (!this.started || this.recoveryReconnectInFlight) return
+    const reconnect = this.protocol.reconnect({ skipDelay: true, cause })
+      .catch((error) => {
+        this.log.warn?.("Failed to reconnect after inbound event buffer overflow", error)
+      })
+      .finally(() => {
+        this.recoveryReconnectInFlight = null
+      })
+    this.recoveryReconnectInFlight = reconnect
+  }
+
+  private requestCatchUpAfterEventOverflow(bucket: InlineSdkUpdateBucketRef, event: InlineInboundEvent) {
+    switch (bucket.kind) {
+      case "chat": {
+        const peer = this.peerFromEvent(event) ?? this.persistedChatPeer(bucket.chatId)
+        if (peer && this.isReliableChatPeer(peer)) {
+          this.rememberChatPeer(bucket.chatId, peer)
+          this.requestCatchUpChat({ chatId: bucket.chatId, peer })
+        } else {
+          this.resolvePersistedChatPeer(bucket.chatId)
+        }
+        return
+      }
+      case "space":
+        this.requestCatchUpSpace({ spaceId: bucket.spaceId })
+        return
+      case "user":
+        this.requestCatchUpUser()
         return
     }
   }
 
-  private bumpChatSeq(chatId: bigint, seq: number) {
+  private requestCatchUpForDegradedBucket(bucket: InlineSdkUpdateBucketRef) {
+    switch (bucket.kind) {
+      case "chat":
+        if (bucket.peer && this.isReliableChatPeer(bucket.peer)) {
+          this.requestCatchUpChat({ chatId: bucket.chatId, peer: bucket.peer })
+        } else {
+          const persistedPeer = this.persistedChatPeer(bucket.chatId)
+          if (persistedPeer) this.requestCatchUpChat({ chatId: bucket.chatId, peer: persistedPeer })
+          else this.resolvePersistedChatPeer(bucket.chatId)
+        }
+        return
+      case "space":
+        this.requestCatchUpSpace({ spaceId: bucket.spaceId })
+        return
+      case "user":
+        this.requestCatchUpUser()
+        return
+    }
+  }
+
+  private isEphemeralUpdate(update: Update): boolean {
+    switch (update.update.oneofKind) {
+      case "updateMessageId":
+      case "updateComposeAction":
+      case "updateUserStatus":
+      case "updateReaction":
+      case "deleteReaction":
+      case "updateUserSettings":
+      case "newMessageNotification":
+      case "chatHasNewUpdates":
+      case "spaceHasNewUpdates":
+      case "botPresence":
+        return true
+      case undefined:
+        return true
+      default:
+        return false
+    }
+  }
+
+  private bucketForRawUpdate(update: Update): InlineSdkUpdateBucketRef[] {
+    switch (update.update.oneofKind) {
+      // Current live producers for these variants use the chat bucket. The same
+      // protobuf shapes may appear in a user GET_UPDATES page; that path already
+      // has the authoritative bucket context and never calls this classifier.
+      case "messageAttachment":
+        return [{
+          kind: "chat",
+          chatId: update.update.messageAttachment.chatId,
+          peer: update.update.messageAttachment.peerId,
+        }]
+      case "chatVisibility":
+        return [this.chatBucket(update.update.chatVisibility.chatId)]
+      case "chatInfo":
+        return [this.chatBucket(update.update.chatInfo.chatId)]
+      case "participantGroupAdd":
+        return [this.chatBucket(update.update.participantGroupAdd.chatId)]
+      case "participantGroupDelete":
+        return [this.chatBucket(update.update.participantGroupDelete.chatId)]
+      case "newChat": {
+        const chat = update.update.newChat.chat
+        return chat ? [this.chatBucket(chat.id, chat.peerId)] : []
+      }
+      case "chatMoved": {
+        const chat = update.update.chatMoved.chat
+        return chat ? [this.chatBucket(chat.id, chat.peerId)] : []
+      }
+      case "deleteChat":
+        return this.chatBucketsForPeer(update.update.deleteChat.peerId)
+      case "pinnedMessages":
+        return this.chatBucketsForPeer(update.update.pinnedMessages.peerId)
+      case "chatSkipPts":
+        return [this.chatBucket(update.update.chatSkipPts.chatId)]
+
+      case "spaceMemberDelete":
+        return [{ kind: "space", spaceId: update.update.spaceMemberDelete.spaceId }]
+      case "spaceMemberAdd": {
+        const member = update.update.spaceMemberAdd.member
+        return member ? [{ kind: "space", spaceId: member.spaceId }] : []
+      }
+      case "spaceMemberUpdate": {
+        const member = update.update.spaceMemberUpdate.member
+        return member ? [{ kind: "space", spaceId: member.spaceId }] : []
+      }
+      case "spaceSettings":
+        return [{ kind: "space", spaceId: update.update.spaceSettings.spaceId }]
+
+      case "dialogArchived":
+      case "joinSpace":
+      case "updateReadMaxId":
+      case "markAsUnread":
+      case "dialogNotificationSettings":
+      case "chatOpen":
+      case "dialogFollowMode":
+      case "updatedUser":
+      case "chatPermissions":
+      case "dialogCollapsedMaxId":
+        return [{ kind: "user" }]
+
+      default:
+        return []
+    }
+  }
+
+  private chatBucket(chatId: bigint, peer?: Peer): InlineSdkUpdateBucketRef {
+    return { kind: "chat", chatId, peer: peer ?? this.persistedChatPeer(chatId) }
+  }
+
+  private chatBucketsForPeer(peer: Peer | undefined): InlineSdkUpdateBucketRef[] {
+    if (!peer) return []
+    switch (peer.type.oneofKind) {
+      case "chat": return [this.chatBucket(peer.type.chat.chatId, peer)]
+      case "user": {
+        const userId = peer.type.user.userId.toString()
+        const matches: InlineSdkUpdateBucketRef[] = []
+        for (const [chatIdKey, persisted] of Object.entries(this.state.chatPeerByChatId ?? {})) {
+          if (persisted.kind !== "user" || persisted.id !== userId) continue
+          try {
+            const chatId = BigInt(chatIdKey)
+            matches.push({ kind: "chat", chatId, peer })
+          } catch {
+            // Ignore malformed legacy keys; the state remains recoverable through normal repair.
+          }
+        }
+        return matches
+      }
+      default: return []
+    }
+  }
+
+  private peerFromEvent(event: InlineInboundEvent): Peer | undefined {
+    switch (event.kind) {
+      case "message.new":
+      case "message.edit":
+        return event.message.peerId
+      default:
+        return undefined
+    }
+  }
+
+  private bumpChatSeq(chatId: bigint, seq: number, source?: UpdateSource) {
+    if (source === "user" || source === "space" || source === "chat") return
+    if (source === "live" && this.liveCursorFences.has(`chat:${chatId}`)) return
     if (!Number.isFinite(seq)) return
     if (!this.state.lastSeqByChatId) this.state.lastSeqByChatId = {}
     const key = chatId.toString()
@@ -1022,9 +1620,12 @@ export class InlineSdkClient {
       this.state.lastSeqByChatId[key] = seq
       this.scheduleStateSave()
     }
+    this.satisfyDiscoveryThroughCursor({ kind: "chat", chatId }, seq)
   }
 
-  private bumpSpaceSeq(spaceId: bigint, seq: number) {
+  private bumpSpaceSeq(spaceId: bigint, seq: number, source?: UpdateSource) {
+    if (source === "user" || source === "space" || source === "chat") return
+    if (source === "live" && this.liveCursorFences.has(`space:${spaceId}`)) return
     if (!Number.isFinite(seq)) return
     if (!this.state.lastSeqBySpaceId) this.state.lastSeqBySpaceId = {}
     const key = spaceId.toString()
@@ -1033,6 +1634,7 @@ export class InlineSdkClient {
       this.state.lastSeqBySpaceId[key] = seq
       this.scheduleStateSave()
     }
+    this.satisfyDiscoveryThroughCursor({ kind: "space", spaceId }, seq)
   }
 
   private shouldSkipUserSeq(seq: number) {
@@ -1041,33 +1643,38 @@ export class InlineSdkClient {
     return seq > 0 && seq <= lastUserSeq
   }
 
-  private bumpUserSeq(seq: number) {
+  private bumpUserSeq(seq: number, source?: UpdateSource) {
+    if (source === "user" || source === "space" || source === "chat") return
+    if (source === "live" && this.liveCursorFences.has("user")) return
     if (!Number.isFinite(seq) || seq <= 0) return
     const prev = this.state.lastUserSeq ?? 0
     if (seq > prev) {
       this.state.lastUserSeq = seq
       this.scheduleStateSave()
     }
+    this.satisfyDiscoveryThroughCursor({ kind: "user" }, seq)
   }
 
-  private requestCatchUpUser() {
+  private requestCatchUpUser(): Promise<void> | null {
     const lastUserSeq = this.state.lastUserSeq
     if (lastUserSeq == null && !this.options.catchUpUserFromStart) {
-      return
+      return null
     }
     if (this.userCatchUpInFlight) {
-      return
+      return this.userCatchUpInFlight
     }
 
     this.userCatchUpInFlight = this.doCatchUpUser(lastUserSeq ?? 0)
       .catch((error) => {
-        this.log.warn?.("GET_UPDATES user catch-up failed; continuing live delivery", {
+        this.markUpdateBucketDegraded({ kind: "user" })
+        this.log.warn?.("GET_UPDATES user catch-up failed; bucket remains degraded", {
           error: extractErrorMessage(error),
         })
       })
       .finally(() => {
         this.userCatchUpInFlight = null
       })
+    return this.userCatchUpInFlight
   }
 
   private async doCatchUpUser(startSeq: number) {
@@ -1092,56 +1699,57 @@ export class InlineSdkClient {
       const payload = result.getUpdates
       const deliveredSeq = Number(payload.seq ?? 0n)
       if (!Number.isSafeInteger(deliveredSeq)) {
+        this.markUpdateBucketDegraded({ kind: "user" })
         this.log.warn?.("GET_UPDATES user catch-up returned non-integer seq; aborting", { deliveredSeq })
         return
       }
 
       if (payload.resultType === GetUpdatesResult_ResultType.TOO_LONG) {
-        this.log.warn?.("GET_UPDATES user catch-up too long; fast-forwarding cursor", { seq: deliveredSeq })
-        this.bumpUserSeq(deliveredSeq)
-        if (payload.date !== 0n) {
-          this.state.dateCursor = payload.date
-        }
-        this.scheduleStateSave()
+        await this.repairTooLongBucket({ kind: "user" }, deliveredSeq, payload.date)
+        return
+      }
+      if (!payload.final && deliveredSeq <= cursor) {
+        this.markUpdateBucketDegraded({ kind: "user" })
+        this.log.warn?.("GET_UPDATES user catch-up made no progress; bucket remains degraded", {
+          cursor,
+          deliveredSeq,
+        })
         return
       }
 
-      for (const update of payload.updates) {
-        await this.handleUpdate(update, { source: "user" })
-      }
+      if (!await this.acceptCatchUpUpdates(payload.updates, "user", { kind: "user" })) return
 
       this.bumpUserSeq(deliveredSeq)
-      if (payload.date !== 0n) {
-        this.state.dateCursor = payload.date
-      }
       this.scheduleStateSave()
 
       if (payload.final) {
-        return
-      }
-      if (deliveredSeq <= cursor) {
-        this.log.warn?.("GET_UPDATES user catch-up made no progress; aborting", { cursor, deliveredSeq })
+        this.satisfyDiscoveryBucket({ kind: "user" }, deliveredSeq)
+        this.clearUpdateBucketDegraded({ kind: "user" })
         return
       }
       cursor = deliveredSeq
     }
   }
 
-  private requestCatchUpChat(params: { chatId: bigint; peer?: Peer; updateSeq: number }) {
+  private requestCatchUpChat(params: { chatId: bigint; peer?: Peer; updateSeq?: number }): Promise<void> {
+    if (params.peer) this.rememberChatPeer(params.chatId, params.peer)
     const previous = this.catchUpRequestedByChatId.get(params.chatId)
     this.catchUpRequestedByChatId.set(params.chatId, {
-      endSeq: Math.max(previous?.endSeq ?? 0, params.updateSeq),
+      ...(params.updateSeq != null || previous?.endSeq != null
+        ? { endSeq: Math.max(previous?.endSeq ?? 0, params.updateSeq ?? 0) }
+        : {}),
       peer: params.peer ?? previous?.peer,
+      toLatest: previous?.toLatest === true || params.updateSeq == null,
     })
 
-    if (this.catchUpInFlightByChatId.has(params.chatId)) {
-      return
-    }
+    const existing = this.catchUpInFlightByChatId.get(params.chatId)
+    if (existing) return existing
 
     const task = this.drainCatchUpChat(params.chatId)
       .catch((error) => {
         this.catchUpRequestedByChatId.delete(params.chatId)
-        this.log.warn?.("GET_UPDATES catch-up failed; continuing live delivery", {
+        this.markUpdateBucketDegraded({ kind: "chat", chatId: params.chatId, peer: params.peer })
+        this.log.warn?.("GET_UPDATES chat catch-up failed; bucket remains degraded", {
           chatId: params.chatId.toString(),
           error: extractErrorMessage(error),
         })
@@ -1150,6 +1758,7 @@ export class InlineSdkClient {
         this.catchUpInFlightByChatId.delete(params.chatId)
       })
     this.catchUpInFlightByChatId.set(params.chatId, task)
+    return task
   }
 
   private async drainCatchUpChat(chatId: bigint) {
@@ -1160,17 +1769,19 @@ export class InlineSdkClient {
       if (!request) return
 
       const lastSeq = this.state.lastSeqByChatId?.[key]
+      const endSeq = request.toLatest ? undefined : request.endSeq
       const startSeq =
         lastSeq ??
         // When we have no per-chat cursor yet, recover a bounded recent window
         // instead of silently treating the chat as already synchronized.
-        Math.max(0, request.endSeq - defaultColdStartCatchUpWindow)
-      if (request.endSeq <= startSeq) {
+        Math.max(0, (endSeq ?? 0) - defaultColdStartCatchUpWindow)
+      if (endSeq != null && endSeq <= startSeq) {
+        this.satisfyDiscoveryThroughCursor({ kind: "chat", chatId }, startSeq)
         this.catchUpRequestedByChatId.delete(chatId)
         return
       }
 
-      const stop = await this.doCatchUpChat(chatId, request.peer, startSeq, request.endSeq)
+      const stop = await this.doCatchUpChat(chatId, request.peer, startSeq, endSeq)
       if (stop) {
         this.catchUpRequestedByChatId.delete(chatId)
         return
@@ -1178,17 +1789,17 @@ export class InlineSdkClient {
 
       const latest = this.catchUpRequestedByChatId.get(chatId)
       const syncedSeq = this.state.lastSeqByChatId?.[key] ?? 0
-      if (!latest || latest.endSeq <= syncedSeq) {
+      if (!latest || (latest.endSeq != null && latest.endSeq <= syncedSeq)) {
         this.catchUpRequestedByChatId.delete(chatId)
         return
       }
     }
   }
 
-  private async doCatchUpChat(chatId: bigint, peer: Peer | undefined, startSeq: number, endSeq: number): Promise<boolean> {
+  private async doCatchUpChat(chatId: bigint, peer: Peer | undefined, startSeq: number, endSeq?: number): Promise<boolean> {
     let cursor = startSeq
 
-    while (cursor < endSeq) {
+    while (endSeq == null || cursor < endSeq) {
       const result = await this.invoke(Method.GET_UPDATES, {
         oneofKind: "getUpdates",
         getUpdates: GetUpdatesInput.create({
@@ -1201,7 +1812,7 @@ export class InlineSdkClient {
             },
           }),
           startSeq: BigInt(cursor),
-          seqEnd: BigInt(endSeq),
+          ...(endSeq != null ? { seqEnd: BigInt(endSeq) } : {}),
           totalLimit: defaultCatchUpTotalLimit,
           limit: defaultCatchUpPageLimit,
         }),
@@ -1210,36 +1821,39 @@ export class InlineSdkClient {
       const payload = result.getUpdates
 
       if (payload.resultType === GetUpdatesResult_ResultType.TOO_LONG) {
-        this.log.warn?.("GET_UPDATES too long; fast-forwarding cursor", { chatId: chatId.toString(), seq: payload.seq })
-        this.bumpChatSeq(chatId, endSeq)
-        if (payload.date !== 0n) {
-          this.state.dateCursor = payload.date
-        }
-        this.scheduleStateSave()
+        const deliveredSeq = Number(payload.seq ?? 0n)
+        await this.repairTooLongBucket({ kind: "chat", chatId, peer }, deliveredSeq, payload.date)
         return true
       }
 
       const deliveredSeq = Number(payload.seq ?? 0n)
       if (!Number.isSafeInteger(deliveredSeq)) {
+        this.markUpdateBucketDegraded({ kind: "chat", chatId, peer })
         this.log.warn?.("GET_UPDATES returned non-integer seq; aborting catch-up", { chatId: chatId.toString() })
         return true
       }
+      if (!payload.final && deliveredSeq <= cursor) {
+        this.markUpdateBucketDegraded({ kind: "chat", chatId, peer })
+        this.log.warn?.("GET_UPDATES made no progress; bucket remains degraded", {
+          chatId: chatId.toString(),
+          cursor,
+          deliveredSeq,
+        })
+        return true
+      }
 
-      // Mark the cursor as caught up to this slice before emitting any events.
+      if (!await this.acceptCatchUpUpdates(payload.updates, "chat", { kind: "chat", chatId, peer })) return true
+
+      // The acknowledged event stream resolves only after the consumer advances
+      // past the event. Commit this slice after every update has therefore been
+      // applied by the host, never merely after it was received from the server.
       this.bumpChatSeq(chatId, deliveredSeq)
 
-      for (const update of payload.updates) {
-        await this.handleUpdate(update, { source: "chat" })
-      }
-
-      if (payload.date !== 0n) {
-        this.state.dateCursor = payload.date
-      }
       this.scheduleStateSave()
 
-      if (payload.final) return true
-      if (deliveredSeq <= cursor) {
-        this.log.warn?.("GET_UPDATES made no progress; aborting catch-up", { chatId: chatId.toString(), cursor, deliveredSeq })
+      if (payload.final) {
+        this.satisfyDiscoveryBucket({ kind: "chat", chatId, peer }, deliveredSeq)
+        this.clearUpdateBucketDegraded({ kind: "chat", chatId, peer })
         return true
       }
       cursor = deliveredSeq
@@ -1248,20 +1862,23 @@ export class InlineSdkClient {
     return false
   }
 
-  private requestCatchUpSpace(params: { spaceId: bigint; updateSeq: number }) {
+  private requestCatchUpSpace(params: { spaceId: bigint; updateSeq?: number }): Promise<void> {
     const previous = this.catchUpRequestedBySpaceId.get(params.spaceId)
     this.catchUpRequestedBySpaceId.set(params.spaceId, {
-      endSeq: Math.max(previous?.endSeq ?? 0, params.updateSeq),
+      ...(params.updateSeq != null || previous?.endSeq != null
+        ? { endSeq: Math.max(previous?.endSeq ?? 0, params.updateSeq ?? 0) }
+        : {}),
+      toLatest: previous?.toLatest === true || params.updateSeq == null,
     })
 
-    if (this.catchUpInFlightBySpaceId.has(params.spaceId)) {
-      return
-    }
+    const existing = this.catchUpInFlightBySpaceId.get(params.spaceId)
+    if (existing) return existing
 
     const task = this.drainCatchUpSpace(params.spaceId)
       .catch((error) => {
         this.catchUpRequestedBySpaceId.delete(params.spaceId)
-        this.log.warn?.("GET_UPDATES space catch-up failed; continuing live delivery", {
+        this.markUpdateBucketDegraded({ kind: "space", spaceId: params.spaceId })
+        this.log.warn?.("GET_UPDATES space catch-up failed; bucket remains degraded", {
           spaceId: params.spaceId.toString(),
           error: extractErrorMessage(error),
         })
@@ -1270,6 +1887,7 @@ export class InlineSdkClient {
         this.catchUpInFlightBySpaceId.delete(params.spaceId)
       })
     this.catchUpInFlightBySpaceId.set(params.spaceId, task)
+    return task
   }
 
   private async drainCatchUpSpace(spaceId: bigint) {
@@ -1280,13 +1898,15 @@ export class InlineSdkClient {
       if (!request) return
 
       const lastSeq = this.state.lastSeqBySpaceId?.[key]
-      const startSeq = lastSeq ?? Math.max(0, request.endSeq - defaultColdStartCatchUpWindow)
-      if (request.endSeq <= startSeq) {
+      const endSeq = request.toLatest ? undefined : request.endSeq
+      const startSeq = lastSeq ?? Math.max(0, (endSeq ?? 0) - defaultColdStartCatchUpWindow)
+      if (endSeq != null && endSeq <= startSeq) {
+        this.satisfyDiscoveryThroughCursor({ kind: "space", spaceId }, startSeq)
         this.catchUpRequestedBySpaceId.delete(spaceId)
         return
       }
 
-      const stop = await this.doCatchUpSpace(spaceId, startSeq, request.endSeq)
+      const stop = await this.doCatchUpSpace(spaceId, startSeq, endSeq)
       if (stop) {
         this.catchUpRequestedBySpaceId.delete(spaceId)
         return
@@ -1294,17 +1914,17 @@ export class InlineSdkClient {
 
       const latest = this.catchUpRequestedBySpaceId.get(spaceId)
       const syncedSeq = this.state.lastSeqBySpaceId?.[key] ?? 0
-      if (!latest || latest.endSeq <= syncedSeq) {
+      if (!latest || (latest.endSeq != null && latest.endSeq <= syncedSeq)) {
         this.catchUpRequestedBySpaceId.delete(spaceId)
         return
       }
     }
   }
 
-  private async doCatchUpSpace(spaceId: bigint, startSeq: number, endSeq: number): Promise<boolean> {
+  private async doCatchUpSpace(spaceId: bigint, startSeq: number, endSeq?: number): Promise<boolean> {
     let cursor = startSeq
 
-    while (cursor < endSeq) {
+    while (endSeq == null || cursor < endSeq) {
       const result = await this.invoke(Method.GET_UPDATES, {
         oneofKind: "getUpdates",
         getUpdates: GetUpdatesInput.create({
@@ -1317,7 +1937,7 @@ export class InlineSdkClient {
             },
           }),
           startSeq: BigInt(cursor),
-          seqEnd: BigInt(endSeq),
+          ...(endSeq != null ? { seqEnd: BigInt(endSeq) } : {}),
           totalLimit: defaultCatchUpTotalLimit,
           limit: defaultCatchUpPageLimit,
         }),
@@ -1326,50 +1946,201 @@ export class InlineSdkClient {
       const payload = result.getUpdates
 
       if (payload.resultType === GetUpdatesResult_ResultType.TOO_LONG) {
-        this.log.warn?.("GET_UPDATES space too long; fast-forwarding cursor", {
-          spaceId: spaceId.toString(),
-          seq: payload.seq,
-        })
-        this.bumpSpaceSeq(spaceId, endSeq)
-        if (payload.date !== 0n) {
-          this.state.dateCursor = payload.date
-        }
-        this.scheduleStateSave()
+        const deliveredSeq = Number(payload.seq ?? 0n)
+        await this.repairTooLongBucket({ kind: "space", spaceId }, deliveredSeq, payload.date)
         return true
       }
 
       const deliveredSeq = Number(payload.seq ?? 0n)
       if (!Number.isSafeInteger(deliveredSeq)) {
+        this.markUpdateBucketDegraded({ kind: "space", spaceId })
         this.log.warn?.("GET_UPDATES space returned non-integer seq; aborting catch-up", {
           spaceId: spaceId.toString(),
         })
         return true
       }
-
-      this.bumpSpaceSeq(spaceId, deliveredSeq)
-
-      for (const update of payload.updates) {
-        await this.handleUpdate(update, { source: "space" })
-      }
-
-      if (payload.date !== 0n) {
-        this.state.dateCursor = payload.date
-      }
-      this.scheduleStateSave()
-
-      if (payload.final) return true
-      if (deliveredSeq <= cursor) {
-        this.log.warn?.("GET_UPDATES space made no progress; aborting catch-up", {
+      if (!payload.final && deliveredSeq <= cursor) {
+        this.markUpdateBucketDegraded({ kind: "space", spaceId })
+        this.log.warn?.("GET_UPDATES space made no progress; bucket remains degraded", {
           spaceId: spaceId.toString(),
           cursor,
           deliveredSeq,
         })
         return true
       }
+
+      if (!await this.acceptCatchUpUpdates(payload.updates, "space", { kind: "space", spaceId })) return true
+
+      this.bumpSpaceSeq(spaceId, deliveredSeq)
+
+      this.scheduleStateSave()
+
+      if (payload.final) {
+        this.satisfyDiscoveryBucket({ kind: "space", spaceId }, deliveredSeq)
+        this.clearUpdateBucketDegraded({ kind: "space", spaceId })
+        return true
+      }
       cursor = deliveredSeq
     }
 
     return false
+  }
+
+  private resolvePersistedChatPeer(chatId: bigint): Promise<void> {
+    const existing = this.peerResolutionInFlightByChatId.get(chatId)
+    if (existing) return existing
+    const task = this.getChat({ chatId })
+      .then(async (chat) => {
+        const peer = chat.peer
+        if (!peer || !this.isReliableChatPeer(peer)) {
+          throw new Error("getChat did not return a reliable peer identity")
+        }
+        this.rememberChatPeer(chatId, peer)
+        await this.requestCatchUpChat({ chatId, peer })
+      })
+      .catch((error) => {
+        this.markUpdateBucketDegraded({ kind: "chat", chatId })
+        this.log.warn?.("Unable to resolve legacy chat peer; bucket remains degraded", {
+          chatId: chatId.toString(),
+          error: extractErrorMessage(error),
+        })
+      })
+      .finally(() => {
+        this.peerResolutionInFlightByChatId.delete(chatId)
+      })
+    this.peerResolutionInFlightByChatId.set(chatId, task)
+    return task
+  }
+
+  private isReliableChatPeer(peer: Peer): boolean {
+    switch (peer.type.oneofKind) {
+      case "user": return typeof peer.type.user.userId === "bigint"
+      case "chat": return typeof peer.type.chat.chatId === "bigint"
+      default: return false
+    }
+  }
+
+  private rememberChatPeer(chatId: bigint, peer: Peer) {
+    let entry: { kind: "user" | "chat"; id: string } | undefined
+    switch (peer.type.oneofKind) {
+      case "user": entry = { kind: "user", id: peer.type.user.userId.toString() }; break
+      case "chat": entry = { kind: "chat", id: peer.type.chat.chatId.toString() }; break
+    }
+    if (!entry) return
+    const key = chatId.toString()
+    if (!this.state.chatPeerByChatId) this.state.chatPeerByChatId = {}
+    const previous = this.state.chatPeerByChatId[key]
+    if (previous?.kind === entry.kind && previous.id === entry.id) return
+    this.state.chatPeerByChatId[key] = entry
+    this.scheduleStateSave()
+  }
+
+  private persistedChatPeer(chatId: bigint): Peer | undefined {
+    const persisted = this.state.chatPeerByChatId?.[chatId.toString()]
+    if (!persisted) return undefined
+    try {
+      const id = BigInt(persisted.id)
+      if (persisted.kind === "user") return { type: { oneofKind: "user", user: { userId: id } } }
+      if (persisted.kind === "chat") return { type: { oneofKind: "chat", chat: { chatId: id } } }
+      return undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  private async repairTooLongBucket(
+    bucket: InlineSdkUpdateBucketRef,
+    serverSeq: number,
+    serverDate: bigint,
+  ): Promise<boolean> {
+    if (!Number.isSafeInteger(serverSeq) || serverSeq < 0) {
+      this.markUpdateBucketDegraded(bucket)
+      return false
+    }
+    const repair = this.options.repairUpdatesBucket
+    if (!repair) {
+      this.markUpdateBucketDegraded(bucket)
+      this.log.warn?.("GET_UPDATES exceeded bounded incremental repair; authoritative repair is required", {
+        bucket: this.updateBucketKey(bucket),
+        serverSeq,
+      })
+      return false
+    }
+
+    try {
+      const request: InlineSdkAuthoritativeRepairRequest = { bucket, serverSeq, serverDate }
+      const result = await repair(request)
+      if (!Number.isSafeInteger(result.appliedSeq) || result.appliedSeq < serverSeq) {
+        throw new Error("authoritative repair returned a cursor behind server state")
+      }
+      switch (bucket.kind) {
+        case "user": this.bumpUserSeq(result.appliedSeq); break
+        case "chat": this.bumpChatSeq(bucket.chatId, result.appliedSeq); break
+        case "space": this.bumpSpaceSeq(bucket.spaceId, result.appliedSeq); break
+      }
+      this.scheduleStateSave()
+      this.satisfyDiscoveryBucket(bucket, result.appliedSeq)
+      this.clearUpdateBucketDegraded(bucket)
+      return true
+    } catch (error) {
+      this.markUpdateBucketDegraded(bucket)
+      this.log.warn?.("Authoritative update repair failed; bucket remains degraded", {
+        bucket: this.updateBucketKey(bucket),
+        error: extractErrorMessage(error),
+      })
+      return false
+    }
+  }
+
+  private async acceptCatchUpUpdates(
+    updates: Update[],
+    source: UpdateSource,
+    bucket: InlineSdkUpdateBucketRef,
+  ): Promise<boolean> {
+    for (const update of updates) {
+      if (update.update.oneofKind === "chatSkipPts" && source === "chat") {
+        continue
+      }
+      if (update.update.oneofKind === undefined) {
+        // protobuf-ts preserves unknown fields even though an older generated
+        // oneof has no typed case for them. The surrounding GET_UPDATES page
+        // still proves the sequence coverage, so older SDKs deliberately treat
+        // this as a forward-compatible no-op and advance the page cursor.
+        continue
+      }
+      const accepted = await this.handleUpdate(update, { source })
+      if (accepted === true) continue
+
+      this.markUpdateBucketDegraded(bucket)
+      this.log.warn?.("GET_UPDATES returned an update the SDK could not durably accept; cursor remains unchanged", {
+        bucket: this.updateBucketKey(bucket),
+        updateKind: update.update.oneofKind,
+      })
+      return false
+    }
+    return true
+  }
+
+  private markUpdateBucketDegraded(bucket: InlineSdkUpdateBucketRef) {
+    this.degradedUpdateBuckets.set(this.updateBucketKey(bucket), bucket)
+  }
+
+  private fenceLiveCursor(bucket: InlineSdkUpdateBucketRef) {
+    this.liveCursorFences.add(this.updateBucketKey(bucket))
+  }
+
+  private clearUpdateBucketDegraded(bucket: InlineSdkUpdateBucketRef) {
+    const key = this.updateBucketKey(bucket)
+    this.degradedUpdateBuckets.delete(key)
+    this.liveCursorFences.delete(key)
+  }
+
+  private updateBucketKey(bucket: InlineSdkUpdateBucketRef): string {
+    switch (bucket.kind) {
+      case "user": return "user"
+      case "chat": return `chat:${bucket.chatId}`
+      case "space": return `space:${bucket.spaceId}`
+    }
   }
 
   private peerToInputPeer(peer: Peer | undefined, chatId: bigint): InputPeer {
@@ -1433,6 +2204,7 @@ export class InlineSdkClient {
   private scheduleStateSave() {
     const store = this.options.state
     if (!store) return
+    this.dirtyStateRevision++
     if (!this.started) return
     if (this.saveTimer) return
     this.saveTimer = setTimeout(() => {
@@ -1441,9 +2213,9 @@ export class InlineSdkClient {
     }, 250)
   }
 
-  private async flushStateSave() {
+  private async flushStateSave(): Promise<boolean> {
     const store = this.options.state
-    if (!store) return
+    if (!store) return true
 
     if (this.saveTimer) {
       clearTimeout(this.saveTimer)
@@ -1451,29 +2223,51 @@ export class InlineSdkClient {
     }
 
     if (this.saveInFlight) {
-      await this.saveInFlight
-      return
+      const saved = await this.saveInFlight
+      if (!saved) return false
+      if (this.savedStateRevision >= this.dirtyStateRevision) return true
+      if (this.saveInFlight) {
+        return await this.saveInFlight
+      }
     }
 
-    const snapshot: InlineSdkState = {
-      version: 1,
-      ...(this.state.dateCursor != null ? { dateCursor: this.state.dateCursor } : {}),
-      ...(this.state.lastSeqByChatId != null ? { lastSeqByChatId: { ...this.state.lastSeqByChatId } } : {}),
-      ...(this.state.lastSeqBySpaceId != null ? { lastSeqBySpaceId: { ...this.state.lastSeqBySpaceId } } : {}),
-      ...(this.state.lastUserSeq != null ? { lastUserSeq: this.state.lastUserSeq } : {}),
-    }
+    this.saveInFlight = this.drainStateSaves(store).finally(() => {
+      this.saveInFlight = null
+    })
 
-    this.saveInFlight = store
-      .save(snapshot)
-      .catch((error) => {
-        this.log.warn?.("Failed to persist SDK state", error)
-      })
-      .finally(() => {
-        this.saveInFlight = null
-      })
-
-    await this.saveInFlight
+    return await this.saveInFlight
   }
+
+  private async drainStateSaves(store: NonNullable<InlineSdkClientOptions["state"]>) {
+    while (this.savedStateRevision < this.dirtyStateRevision) {
+      const revision = this.dirtyStateRevision
+      const snapshot = this.exportState()
+      try {
+        await store.save(snapshot)
+      } catch (error) {
+        this.log.warn?.("Failed to persist SDK state", error)
+        return false
+      }
+      this.savedStateRevision = revision
+    }
+    return true
+  }
+}
+
+async function settleWithin(
+  operation: Promise<unknown>,
+  timeoutMs: number,
+  onTimeout: () => void,
+): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | null = null
+  const outcome = await Promise.race([
+    operation.then(() => "settled" as const, () => "settled" as const),
+    new Promise<"timeout">((resolve) => {
+      timeout = setTimeout(() => resolve("timeout"), timeoutMs)
+    }),
+  ])
+  if (timeout) clearTimeout(timeout)
+  if (outcome === "timeout") onTimeout()
 }
 
 function toInputMedia(media: InlineSdkSendMessageMedia): {
@@ -1573,6 +2367,8 @@ function toBlob(input: InlineSdkUploadFileParams["file"], type: string): Blob {
   return new Blob([input], { type })
 }
 
+// Retained only as a reviewable compatibility seam until the legacy multipart API is removed.
+// oxlint-disable-next-line no-unused-vars
 function toUploadMultipartFile(
   input: InlineSdkUploadFileParams["file"],
   fileName: string,
@@ -1592,12 +2388,14 @@ function sanitizeUploadFileName(raw: string | undefined): string {
   return noQuery.trim()
 }
 
+// oxlint-disable-next-line no-unused-vars
 function getBinaryInputSize(input: InlineSdkUploadFileParams["file"]): number {
   if (input instanceof Blob) return input.size
   if (input instanceof Uint8Array) return input.byteLength
   return input.byteLength
 }
 
+// oxlint-disable-next-line no-unused-vars
 function describeUploadContext(params: {
   type: "photo" | "video" | "document"
   fileName: string
@@ -1647,6 +2445,7 @@ function normalizeKeepLastDays(value: number): number {
   return value
 }
 
+// oxlint-disable-next-line no-unused-vars
 async function parseJsonResponse(response: Response): Promise<unknown> {
   const contentType = response.headers.get("content-type") ?? ""
   if (!contentType.includes("application/json")) {
@@ -1664,6 +2463,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
+// oxlint-disable-next-line no-unused-vars
 function describeUploadFailure(payload: unknown): string {
   if (typeof payload === "string") {
     const trimmed = payload.trim()
@@ -1677,6 +2477,7 @@ function describeUploadFailure(payload: unknown): string {
   return ""
 }
 
+// oxlint-disable-next-line no-unused-vars
 function parseOptionalBigInt(value: unknown, field: string): bigint | undefined {
   if (value == null) return undefined
   if (typeof value === "bigint") return value
@@ -1706,6 +2507,14 @@ const resolveRealtimeUrl = (baseUrl: string): string => {
   return url.toString()
 }
 
+const resolveRealtimeV3Url = (baseUrl: string): string => {
+  const url = new URL(baseUrl)
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
+  url.pathname = url.pathname.replace(/\/+$/, "") + "/realtime/v3"
+  return url.toString()
+}
+
+// oxlint-disable-next-line no-unused-vars
 const resolveUploadFileUrl = (baseUrl: string): URL => {
   const url = new URL(baseUrl)
   const basePath = url.pathname.replace(/\/+$/, "")

@@ -2,13 +2,32 @@ import type { ClientMessage } from "@inline-chat/protocol/core"
 import type { TransportEvent } from "./types.js"
 
 export class TransportError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly code:
+      | "capacity-exceeded"
+      | "generic"
+      | "commit-outcome-unknown"
+      | "rejected-before-execution" = "generic",
+  ) {
     super(message)
     this.name = "TransportError"
   }
 
   static notConnected() {
     return new TransportError("Transport is not connected")
+  }
+
+  static commitOutcomeUnknown(message: string) {
+    return new TransportError(message, "commit-outcome-unknown")
+  }
+
+  static capacityExceeded(message: string) {
+    return new TransportError(message, "capacity-exceeded")
+  }
+
+  static rejectedBeforeExecution(message: string) {
+    return new TransportError(message, "rejected-before-execution")
   }
 }
 

@@ -6,6 +6,12 @@ export {
 export { registerBotCapabilitiesWithRetry } from "./sdk/bot-capabilities.js"
 export type {
   InlineSdkClientOptions,
+  InlineSdkAuthoritativeRepairRequest,
+  InlineSdkAuthoritativeRepairResult,
+  InlineSdkCredentialOwner,
+  InlineSdkLogoutResult,
+  InlineSdkPersistedChatPeer,
+  InlineSdkProtocolV3Options,
   InlineSdkBotPresenceStateKind,
   InlineSdkGetMessagesParams,
   InlineSdkPeerTarget,
@@ -20,6 +26,8 @@ export type {
   InlineSdkSetMyBotCapabilitiesParams,
   InlineSdkState,
   InlineSdkStateStore,
+  InlineSdkSyncStatus,
+  InlineSdkUpdateBucketRef,
   InlineSdkUploadFileParams,
   InlineSdkUploadFileResult,
   InlineSdkUploadFileType,
@@ -55,11 +63,21 @@ export {
   type InlineProtocolPublicKey,
   type InlineProtocolV3ConnectionOptions,
 } from "./realtime/v3-connection.js"
+export { INLINE_PROTOCOL_PRODUCTION_PUBLIC_KEYS } from "./realtime/production-trust-roots.js"
 export {
   InlineRealtimeV3Client,
   type InlineProtocolV3Credentials,
   type InlineRealtimeV3ClientOptions,
 } from "./realtime/v3-client.js"
+export {
+  InlineProtocolV3Transport,
+  type InlineProtocolV3TransportOptions,
+} from "./realtime/v3-transport.js"
+export {
+  ProtocolClientError,
+  type RpcCallOptions,
+  type RpcReconnectPolicy,
+} from "./realtime/protocol-client.js"
 
 // Re-export the full protocol surface for convenience.
 export * from "@inline-chat/protocol"

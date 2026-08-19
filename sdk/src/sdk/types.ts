@@ -21,10 +21,11 @@ import type { InlineUnixSeconds } from "../time.js"
 import type { InlineSdkLogger } from "./logger.js"
 import type { Transport } from "../realtime/transport.js"
 import type { InlineSdkAuthenticationError } from "./errors.js"
+import type { InlineProtocolPublicKey } from "../realtime/v3-connection.js"
+import type { InlineProtocolV3Credentials } from "../realtime/v3-client.js"
 
-export type InlineSdkClientOptions = {
+type InlineSdkClientCommonOptions = {
   baseUrl?: string // e.g. https://api.inline.chat
-  token: string
   // Default timeout used by response-waiting RPC calls.
   // Defaults to 30_000 ms. Set to `null`, `Infinity`, or `<= 0` for no timeout.
   rpcTimeoutMs?: number | null
@@ -34,7 +35,62 @@ export type InlineSdkClientOptions = {
   transport?: Transport
   fetch?: typeof fetch
   onAuthenticationError?: (error: InlineSdkAuthenticationError) => void
+  /** Durable authority owner used by logout. close() never invokes these callbacks. */
+  credentialOwner?: InlineSdkCredentialOwner
+  /**
+   * Replaces one bucket with authoritative state when bounded incremental
+   * catch-up cannot converge. The callback must durably apply a complete
+   * bucket snapshot before returning its cursor; partial overlays must fail.
+   */
+  repairUpdatesBucket?: (
+    request: InlineSdkAuthoritativeRepairRequest,
+  ) => InlineSdkAuthoritativeRepairResult | Promise<InlineSdkAuthoritativeRepairResult>
 }
+
+export type InlineSdkCredentialOwner = {
+  beginLogout(): void | Promise<void>
+  clearCredentials(): void | Promise<void>
+  finishLogout(): void | Promise<void>
+}
+
+export type InlineSdkLogoutResult = {
+  remoteOutcome: "confirmed" | "commitUnknown" | "notSent"
+}
+
+export type InlineSdkUpdateBucketRef =
+  | { kind: "user" }
+  | { kind: "chat"; chatId: InlineId; peer?: Peer }
+  | { kind: "space"; spaceId: InlineId }
+
+export type InlineSdkAuthoritativeRepairRequest = {
+  bucket: InlineSdkUpdateBucketRef
+  serverSeq: number
+  serverDate: InlineUnixSeconds
+}
+
+export type InlineSdkAuthoritativeRepairResult = {
+  /** Cursor whose complete authoritative state the callback durably applied. */
+  appliedSeq: number
+  dateCursor?: InlineUnixSeconds
+}
+
+export type InlineSdkSyncStatus = {
+  state: "live" | "syncing" | "degraded"
+  degradedBuckets: readonly InlineSdkUpdateBucketRef[]
+}
+
+export type InlineSdkProtocolV3Options = {
+  credentials: InlineProtocolV3Credentials
+  /** Defaults to Inline's pinned overlapping production ring. Override for custom servers. */
+  rsaPublicKeys?: readonly InlineProtocolPublicKey[]
+  realtimeUrl?: string
+  onCredentials?: (credentials: InlineProtocolV3Credentials) => void | Promise<void>
+}
+
+export type InlineSdkClientOptions = InlineSdkClientCommonOptions & (
+  | { token: string; inlineProtocol?: never }
+  | { token?: never; inlineProtocol: InlineSdkProtocolV3Options }
+)
 
 export type InlineSdkChatInfo = {
   chatId: InlineId
@@ -61,6 +117,8 @@ export type InlineSdkSendMessageParams =
       userId?: never
       text?: string
       media?: InlineSdkSendMessageMedia
+      /** Stable non-zero signed 64-bit idempotency key. Generated when omitted. */
+      randomId?: bigint
       replyToMsgId?: InlineIdLike
       parseMarkdown?: boolean
       sendMode?: "silent"
@@ -72,6 +130,8 @@ export type InlineSdkSendMessageParams =
       chatId?: never
       text?: string
       media?: InlineSdkSendMessageMedia
+      /** Stable non-zero signed 64-bit idempotency key. Generated when omitted. */
+      randomId?: bigint
       replyToMsgId?: InlineIdLike
       parseMarkdown?: boolean
       sendMode?: "silent"
@@ -289,8 +349,14 @@ export type InlineSdkState = {
   version: 1
   dateCursor?: InlineUnixSeconds
   lastSeqByChatId?: Record<string, number>
+  chatPeerByChatId?: Record<string, InlineSdkPersistedChatPeer>
   lastSeqBySpaceId?: Record<string, number>
   lastUserSeq?: number
+}
+
+export type InlineSdkPersistedChatPeer = {
+  kind: "user" | "chat"
+  id: string
 }
 
 export interface InlineSdkStateStore {

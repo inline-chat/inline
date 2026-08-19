@@ -7,6 +7,7 @@ describe("state serde", () => {
       version: 1,
       dateCursor: 123n,
       lastSeqByChatId: { "10": 5 },
+      chatPeerByChatId: { "10": { kind: "user", id: "42" } },
       lastSeqBySpaceId: { "20": 7 },
       lastUserSeq: 9,
     })
@@ -15,6 +16,7 @@ describe("state serde", () => {
       version: 1,
       dateCursor: 123n,
       lastSeqByChatId: { "10": 5 },
+      chatPeerByChatId: { "10": { kind: "user", id: "42" } },
       lastSeqBySpaceId: { "20": 7 },
       lastUserSeq: 9,
     })
@@ -46,6 +48,13 @@ describe("state serde", () => {
 
   it("rejects non-object lastSeqByChatId", () => {
     expect(() => deserializeStateV1(JSON.stringify({ version: 1, lastSeqByChatId: 123 }))).toThrow("invalid state json")
+  })
+
+  it("rejects invalid persisted chat peer identities", () => {
+    expect(() => deserializeStateV1(JSON.stringify({
+      version: 1,
+      chatPeerByChatId: { "10": { kind: "channel", id: "42" } },
+    }))).toThrow("invalid state json")
   })
 
   it("rejects invalid space and user cursors", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { ConnectionError_Reason, Method, ServerProtocolMessage, Update } from "@inline-chat/protocol/core"
+import { ConnectionError_Reason, Method, RpcError_Code, ServerProtocolMessage, Update } from "@inline-chat/protocol/core"
 import { ProtocolClient, ProtocolClientError } from "./protocol-client.js"
 import { InlineSdkAuthenticationError } from "../sdk/errors.js"
 import { MockTransport } from "./mock-transport.js"
@@ -7,6 +7,7 @@ import { AsyncChannel } from "../utils/async-channel.js"
 import type { Transport } from "./transport.js"
 import type { TransportEvent } from "./types.js"
 import { ClientMessage } from "@inline-chat/protocol/core"
+import { TransportError } from "./transport.js"
 
 const waitFor = async (predicate: () => boolean, timeoutMs = 300) => {
   const start = Date.now()
@@ -105,11 +106,108 @@ describe("ProtocolClient", () => {
     await transport.emitMessage(
       ServerProtocolMessage.create({
         id: 3n,
-        body: { oneofKind: "rpcError", rpcError: { reqMsgId: rpc2.id, errorCode: 2, message: "nope", code: 401 } },
+        body: { oneofKind: "rpcError", rpcError: { reqMsgId: rpc2.id, errorCode: 1, message: "nope", code: 400 } },
       }),
     )
 
     await expect(p2).rejects.toBeInstanceOf(ProtocolClientError)
+  })
+
+  it("does not resolve a following RPC result before an earlier update batch is processed", async () => {
+    const transport = new MockTransport()
+    let releaseUpdates: (() => void) | null = null
+    const updatesProcessed = new Promise<void>((resolve) => { releaseUpdates = resolve })
+    let processingStarted = false
+    const client = new ProtocolClient({
+      transport,
+      getConnectionInit: () => ({ token: "t" }),
+      processUpdates: async () => {
+        processingStarted = true
+        await updatesProcessed
+      },
+    })
+
+    await client.startTransport()
+    await transport.connect()
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 1n,
+      body: { oneofKind: "connectionOpen", connectionOpen: {} },
+    }))
+    await waitForOpen(client)
+
+    const rpc = client.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} })
+    await waitFor(() => transport.sent.some((message) => message.body.oneofKind === "rpcCall"))
+    const rpcCall = transport.sent.find((message) => message.body.oneofKind === "rpcCall")
+    if (!rpcCall || rpcCall.body.oneofKind !== "rpcCall") throw new Error("missing rpc")
+
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 2n,
+      body: {
+        oneofKind: "message",
+        message: { payload: { oneofKind: "update", update: { updates: [Update.create({})] } } },
+      },
+    }))
+    await waitFor(() => processingStarted)
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 3n,
+      body: {
+        oneofKind: "rpcResult",
+        rpcResult: {
+          reqMsgId: rpcCall.id,
+          result: { oneofKind: "getMe", getMe: { user: { id: 1n } } },
+        },
+      },
+    }))
+
+    let settled = false
+    void rpc.then(() => { settled = true }, () => { settled = true })
+    await flushMicrotasks()
+    expect(settled).toBe(false)
+
+    releaseUpdates?.()
+    await expect(rpc).resolves.toMatchObject({ oneofKind: "getMe" })
+  })
+
+  it("keeps a method-scoped unauthenticated RPC error request-local", async () => {
+    const transport = new MockTransport()
+    const client = new ProtocolClient({
+      transport,
+      getConnectionInit: () => ({ token: "t" }),
+    })
+    await client.startTransport()
+    await transport.connect()
+    await transport.emitMessage(ServerProtocolMessage.create({
+      body: { oneofKind: "connectionOpen", connectionOpen: {} },
+    }))
+    await waitForOpen(client)
+
+    const pending = client.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} })
+    await waitFor(() => transport.sent.some((message) => message.body.oneofKind === "rpcCall"))
+    const request = transport.sent.find((message) => message.body.oneofKind === "rpcCall")!
+    await transport.emitMessage(ServerProtocolMessage.create({
+      body: {
+        oneofKind: "rpcError",
+        rpcError: { reqMsgId: request.id, errorCode: 2, message: "revoked", code: 401 },
+      },
+    }))
+
+    await expect(pending).rejects.toMatchObject({ code: "rpc-error" })
+    expect(client.getDiagnostics().terminalAuthenticationErrorCode).toBeNull()
+    expect(client.state).toBe("open")
+
+    const following = client.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} })
+    await waitFor(() => transport.sent.filter((message) => message.body.oneofKind === "rpcCall").length === 2)
+    const followingRequest = transport.sent.filter((message) => message.body.oneofKind === "rpcCall")[1]!
+    await transport.emitMessage(ServerProtocolMessage.create({
+      body: {
+        oneofKind: "rpcResult",
+        rpcResult: {
+          reqMsgId: followingRequest.id,
+          result: { oneofKind: "getMe", getMe: { user: { id: 1n } } },
+        },
+      },
+    }))
+    await expect(following).resolves.toMatchObject({ oneofKind: "getMe" })
   })
 
   it("rejects invalid rpc method values before sending", async () => {
@@ -139,6 +237,34 @@ describe("ProtocolClient", () => {
     expect(sentAfter).toBe(sentBefore)
   })
 
+  it("rejects new RPCs before execution when the pending-request budget is full", async () => {
+    const transport = new MockTransport()
+    const client = new ProtocolClient({
+      transport,
+      getConnectionInit: () => ({ token: "t" }),
+      maxPendingRpcRequests: 1,
+    })
+    await client.startTransport()
+
+    const first = client.callRpc(
+      Method.GET_ME,
+      { oneofKind: "getMe", getMe: {} },
+      { timeoutMs: null },
+    )
+    await expect(client.callRpc(
+      Method.GET_ME,
+      { oneofKind: "getMe", getMe: {} },
+      { timeoutMs: null },
+    )).rejects.toMatchObject({ code: "capacity-exceeded" })
+    expect(client.getDiagnostics()).toMatchObject({
+      pendingRpcCount: 1,
+      maxPendingRpcRequests: 1,
+    })
+
+    await client.stopTransport()
+    await expect(first).rejects.toMatchObject({ code: "stopped" })
+  })
+
   it("callRpc can time out", async () => {
     vi.useFakeTimers()
     const transport = new MockTransport()
@@ -154,7 +280,11 @@ describe("ProtocolClient", () => {
     )
     ;(client as any).state = "open"
 
-    const p = client.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} }, { timeoutMs: 10 })
+    const p = client.callRpc(
+      Method.GET_ME,
+      { oneofKind: "getMe", getMe: {} },
+      { timeoutMs: 10, reconnectPolicy: "replay-safe" },
+    )
     const settled = p.then(
       () => ({ ok: true as const }),
       (error) => ({ ok: false as const, error }),
@@ -363,7 +493,11 @@ describe("ProtocolClient", () => {
     await transport.emitMessage(ServerProtocolMessage.create({ id: 1n, body: { oneofKind: "connectionOpen", connectionOpen: {} } }))
     await waitForOpen(client)
 
-    const p = client.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} }, { timeoutMs: 10_000 })
+    const p = client.callRpc(
+      Method.GET_ME,
+      { oneofKind: "getMe", getMe: {} },
+      { timeoutMs: 10_000, reconnectPolicy: "replay-safe" },
+    )
     await waitFor(() => transport.sent.filter((m) => m.body.oneofKind === "rpcCall").length >= 1)
     const firstRpc = transport.sent.find((m) => m.body.oneofKind === "rpcCall")
     if (!firstRpc || firstRpc.body.oneofKind !== "rpcCall") throw new Error("missing first rpc")
@@ -396,6 +530,174 @@ describe("ProtocolClient", () => {
     )
 
     await expect(p).resolves.toEqual({ oneofKind: "getMe", getMe: { user: { id: 7n } } })
+  })
+
+  it("does not replay an attempted non-replayable RPC on a new connection", async () => {
+    const transport = new MockTransport()
+    const client = new ProtocolClient({
+      transport,
+      getConnectionInit: () => ({ token: "t" }),
+    })
+
+    await client.startTransport()
+    await transport.connect()
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 1n,
+      body: { oneofKind: "connectionOpen", connectionOpen: {} },
+    }))
+    await waitForOpen(client)
+
+    const pending = client.callRpc(
+      Method.DELETE_CHAT,
+      { oneofKind: "deleteChat", deleteChat: {} },
+      { timeoutMs: 10_000 },
+    )
+    await waitFor(() => transport.sent.filter((message) => message.body.oneofKind === "rpcCall").length === 1)
+
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 2n,
+      body: { oneofKind: "connectionError", connectionError: {} },
+    }))
+
+    await expect(pending).rejects.toMatchObject({ code: "commit-outcome-unknown" })
+
+    await waitFor(() => transport.state === "connecting", 1_500)
+    await transport.connect()
+    await waitFor(() => transport.sent.filter((message) => message.body.oneofKind === "connectionInit").length >= 2)
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 3n,
+      body: { oneofKind: "connectionOpen", connectionOpen: {} },
+    }))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(transport.sent.filter((message) => message.body.oneofKind === "rpcCall")).toHaveLength(1)
+  })
+
+  it("replays a non-replayable RPC rejected before transport admission", async () => {
+    const transport = new MockTransport()
+    const send = transport.send.bind(transport)
+    let rejectApplicationAdmission = true
+    vi.spyOn(transport, "send").mockImplementation(async (message) => {
+      if (message.body.oneofKind === "rpcCall" && rejectApplicationAdmission) {
+        rejectApplicationAdmission = false
+        throw TransportError.rejectedBeforeExecution("temporary authorization rotation is due")
+      }
+      await send(message)
+    })
+    const client = new ProtocolClient({
+      transport,
+      getConnectionInit: () => ({ token: "t" }),
+    })
+
+    await client.startTransport()
+    await transport.connect()
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 1n,
+      body: { oneofKind: "connectionOpen", connectionOpen: {} },
+    }))
+    await waitForOpen(client)
+
+    const pending = client.callRpc(
+      Method.DELETE_CHAT,
+      { oneofKind: "deleteChat", deleteChat: {} },
+      { timeoutMs: 10_000 },
+    )
+
+    await waitFor(() => transport.state === "connecting", 1_500)
+    expect(client.getDiagnostics().pendingRpcCount).toBe(1)
+    await transport.connect()
+    await waitFor(() => transport.sent.filter((message) => message.body.oneofKind === "connectionInit").length >= 2)
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 2n,
+      body: { oneofKind: "connectionOpen", connectionOpen: {} },
+    }))
+    await waitFor(() => transport.sent.filter((message) => message.body.oneofKind === "rpcCall").length === 1)
+    const rpc = transport.sent.find((message) => message.body.oneofKind === "rpcCall")
+    if (!rpc || rpc.body.oneofKind !== "rpcCall") throw new Error("missing rpc")
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 3n,
+      body: {
+        oneofKind: "rpcResult",
+        rpcResult: {
+          reqMsgId: rpc.id,
+          result: { oneofKind: "deleteChat", deleteChat: {} },
+        },
+      },
+    }))
+
+    await expect(pending).resolves.toEqual({ oneofKind: "deleteChat", deleteChat: {} })
+  })
+
+  it("keeps an application protobuf 504 as an ordinary RPC error", async () => {
+    const transport = new MockTransport()
+    const client = new ProtocolClient({
+      transport,
+      getConnectionInit: () => ({ token: "t" }),
+    })
+
+    await client.startTransport()
+    await transport.connect()
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 1n,
+      body: { oneofKind: "connectionOpen", connectionOpen: {} },
+    }))
+    await waitForOpen(client)
+
+    const pending = client.callRpc(
+      Method.DELETE_CHAT,
+      { oneofKind: "deleteChat", deleteChat: {} },
+      { timeoutMs: 10_000 },
+    )
+    await waitFor(() => transport.sent.some((message) => message.body.oneofKind === "rpcCall"))
+    const request = transport.sent.find((message) => message.body.oneofKind === "rpcCall")
+    if (!request) throw new Error("missing rpc request")
+
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 2n,
+      body: {
+        oneofKind: "rpcError",
+        rpcError: {
+          reqMsgId: request.id,
+          errorCode: RpcError_Code.INTERNAL_ERROR,
+          code: 504,
+          message: "deadline elapsed; commit outcome is unknown",
+        },
+      },
+    }))
+
+    await expect(pending).rejects.toMatchObject({ code: "rpc-error" })
+  })
+
+  it("keeps a carrier commit-unknown request local without reconnecting", async () => {
+    const transport = new MockTransport()
+    const send = transport.send.bind(transport)
+    vi.spyOn(transport, "send").mockImplementation(async (message) => {
+      if (message.body.oneofKind === "rpcCall") {
+        throw TransportError.commitOutcomeUnknown("carrier deadline")
+      }
+      await send(message)
+    })
+    const client = new ProtocolClient({
+      transport,
+      getConnectionInit: () => ({ token: "t" }),
+    })
+
+    await client.startTransport()
+    await transport.connect()
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 1n,
+      body: { oneofKind: "connectionOpen", connectionOpen: {} },
+    }))
+    await waitForOpen(client)
+
+    const pending = client.callRpc(
+      Method.DELETE_CHAT,
+      { oneofKind: "deleteChat", deleteChat: {} },
+      { timeoutMs: 10_000, reconnectPolicy: "replay-safe" },
+    )
+    await expect(pending).rejects.toMatchObject({ code: "commit-outcome-unknown" })
+    expect(transport.state).toBe("connected")
+    expect(transport.sent.filter((message) => message.body.oneofKind === "rpcCall")).toHaveLength(0)
   })
 
   it("schedules reconnect when authentication fails (no token)", async () => {
@@ -813,7 +1115,11 @@ describe("ProtocolClient", () => {
     await transport.emitMessage(ServerProtocolMessage.create({ id: 1n, body: { oneofKind: "connectionOpen", connectionOpen: {} } }))
     ;(client as any).state = "open"
 
-    const p = client.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} }, { timeoutMs: 10 })
+    const p = client.callRpc(
+      Method.GET_ME,
+      { oneofKind: "getMe", getMe: {} },
+      { timeoutMs: 10, reconnectPolicy: "replay-safe" },
+    )
     for (let i = 0; i < 20; i++) {
       if (transport.sent.some((m) => m.body.oneofKind === "rpcCall")) break
       await Promise.resolve()
@@ -862,7 +1168,7 @@ describe("ProtocolClient", () => {
     await expect(Promise.resolve()).resolves.toBeUndefined()
   })
 
-  it("generated ids increment within the same timestamp", async () => {
+  it("generated ids remain monotonic within the same timestamp and across clock rollback", async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date("2026-02-01T00:00:00.000Z"))
 
@@ -880,7 +1186,11 @@ describe("ProtocolClient", () => {
     const id1 = await client.sendRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} })
     const id2 = await client.sendRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} })
 
+    vi.setSystemTime(new Date("2026-01-31T23:59:59.000Z"))
+    const id3 = await client.sendRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} })
+
     expect(id2).toBe(id1 + 1n)
+    expect(id3).toBe(id2 + 1n)
 
     vi.useRealTimers()
   })

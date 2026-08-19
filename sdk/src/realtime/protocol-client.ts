@@ -1,20 +1,38 @@
-import { ClientMessage, ConnectionError_Reason, type ConnectionInit, ServerProtocolMessage } from "@inline-chat/protocol/core"
-import type { Method, RpcCall, RpcError, RpcResult } from "@inline-chat/protocol/core"
+import {
+  BotEvent,
+  ClientMessage,
+  ConnectionError_Reason,
+  RpcError,
+  RpcResult,
+  UpdatesPayload,
+  type ConnectionInit,
+  ServerProtocolMessage,
+} from "@inline-chat/protocol/core"
+import type { Method, RpcCall } from "@inline-chat/protocol/core"
 import { AsyncChannel } from "../utils/async-channel.js"
 import { PingPongService } from "./ping-pong.js"
-import type { Transport } from "./transport.js"
+import { TransportError, type Transport } from "./transport.js"
 import type { ClientEvent, ClientState } from "./types.js"
 import type { InlineSdkLogger } from "../sdk/logger.js"
 import {
+  InlineSdkAuthenticationError,
   authenticationErrorFromConnectionReason,
-  type InlineSdkAuthenticationError,
 } from "../sdk/errors.js"
 
 export type ProtocolClientOptions = {
   transport: Transport
   getConnectionInit: () => ConnectionInit | null
+  processUpdates?: (updates: UpdatesPayload) => void | Promise<void>
   logger?: InlineSdkLogger
   defaultRpcTimeoutMs?: number | null
+  maxPendingRpcRequests?: number
+}
+
+export type RpcReconnectPolicy = "never-replay" | "replay-safe"
+
+export type RpcCallOptions = {
+  timeoutMs?: number | null
+  reconnectPolicy?: RpcReconnectPolicy
 }
 
 type PendingRpcRequest = {
@@ -23,11 +41,30 @@ type PendingRpcRequest = {
   reject: (error: Error) => void
   timeout?: ReturnType<typeof setTimeout>
   timeoutMs: number | null
+  reconnectPolicy: RpcReconnectPolicy
+  attempted: boolean
   sending: boolean
 }
 
 const emptyRpcInput: RpcCall["input"] = { oneofKind: undefined }
 const defaultRpcTimeoutMs = 30_000
+const defaultMaxPendingRpcRequests = 64
+const maximumQueuedEventBytes = 8 * 1024 * 1024
+
+const clientEventByteLength = (event: ClientEvent): number => {
+  switch (event.type) {
+    case "updates":
+      return UpdatesPayload.toBinary(event.updates).byteLength
+    case "bot":
+      return BotEvent.toBinary(event.bot).byteLength
+    case "rpcResult":
+      return RpcResult.toBinary({ reqMsgId: event.msgId, result: event.rpcResult }).byteLength
+    case "rpcError":
+      return RpcError.toBinary(event.rpcError).byteLength
+    default:
+      return 32
+  }
+}
 
 const assertValidRpcMethod = (method: Method) => {
   if (typeof method !== "number" || !Number.isInteger(method) || method <= 0) {
@@ -36,7 +73,10 @@ const assertValidRpcMethod = (method: Method) => {
 }
 
 export class ProtocolClient {
-  readonly events = new AsyncChannel<ClientEvent>()
+  readonly events = new AsyncChannel<ClientEvent>(256, {
+    capacityBytes: maximumQueuedEventBytes,
+    byteLength: clientEventByteLength,
+  })
   readonly transport: Transport
   readonly pingPong: PingPongService
 
@@ -44,7 +84,9 @@ export class ProtocolClient {
 
   private readonly log: InlineSdkLogger
   private readonly getConnectionInit: () => ConnectionInit | null
+  private readonly processUpdates?: (updates: UpdatesPayload) => void | Promise<void>
   private readonly defaultRpcTimeoutMs: number | null
+  private readonly maxPendingRpcRequests: number
 
   private pendingRpcRequests = new Map<bigint, PendingRpcRequest>()
 
@@ -68,7 +110,12 @@ export class ProtocolClient {
     this.transport = options.transport
     this.log = options.logger ?? {}
     this.getConnectionInit = options.getConnectionInit
+    this.processUpdates = options.processUpdates
     this.defaultRpcTimeoutMs = normalizeRpcTimeoutMs(options.defaultRpcTimeoutMs, defaultRpcTimeoutMs)
+    this.maxPendingRpcRequests = options.maxPendingRpcRequests ?? defaultMaxPendingRpcRequests
+    if (!Number.isSafeInteger(this.maxPendingRpcRequests) || this.maxPendingRpcRequests <= 0) {
+      throw new RangeError("maxPendingRpcRequests must be a positive safe integer")
+    }
 
     this.pingPong = new PingPongService({ logger: this.log })
     this.pingPong.configure(this)
@@ -122,10 +169,15 @@ export class ProtocolClient {
   async callRpc(
     method: Method,
     input: RpcCall["input"] = emptyRpcInput,
-    options?: { timeoutMs?: number | null },
+    options?: RpcCallOptions,
   ): Promise<RpcResult["result"]> {
     if (this.terminalAuthenticationError) throw this.terminalAuthenticationError
     assertValidRpcMethod(method)
+    if (this.pendingRpcRequests.size >= this.maxPendingRpcRequests) {
+      throw new ProtocolClientError("capacity-exceeded", {
+        message: `Realtime RPC capacity ${this.maxPendingRpcRequests} exceeded`,
+      })
+    }
     const message = this.wrapMessage({
       oneofKind: "rpcCall",
       rpcCall: { method, input },
@@ -137,6 +189,8 @@ export class ProtocolClient {
         resolve,
         reject,
         timeoutMs: this.resolveRpcTimeoutMs(options?.timeoutMs),
+        reconnectPolicy: options?.reconnectPolicy ?? "never-replay",
+        attempted: false,
         sending: false,
       }
 
@@ -144,7 +198,12 @@ export class ProtocolClient {
 
       if (pending.timeoutMs !== null) {
         pending.timeout = setTimeout(() => {
-          this.failPendingRpcRequest(message.id, new ProtocolClientError("timeout"))
+          this.failPendingRpcRequest(
+            message.id,
+            pending.attempted && pending.reconnectPolicy === "never-replay"
+              ? commitOutcomeUnknownError("RPC timed out after dispatch")
+              : new ProtocolClientError("timeout"),
+          )
         }, pending.timeoutMs)
       }
 
@@ -173,8 +232,13 @@ export class ProtocolClient {
             break
         }
       }
-    })().catch((error) => {
-      this.log.error?.("Protocol client listener crashed", error)
+    })().catch(async (error) => {
+      const failure = error instanceof Error ? error : new Error(String(error))
+      this.log.error?.("Protocol client listener crashed", failure)
+      this.events.fail(failure)
+      await this.transport.stop().catch((stopError) => {
+        this.log.warn?.("Protocol transport stop after listener failure failed", stopError)
+      })
     })
   }
 
@@ -205,6 +269,7 @@ export class ProtocolClient {
         break
       case "message":
         if (message.body.message.payload.oneofKind === "update") {
+          await this.processUpdates?.(message.body.message.payload.update)
           await this.events.send({ type: "updates", updates: message.body.message.payload.update })
         } else if (message.body.message.payload.oneofKind === "bot") {
           await this.events.send({ type: "bot", bot: message.body.message.payload.bot })
@@ -271,6 +336,7 @@ export class ProtocolClient {
     this.pingPong.stop()
     this.state = "connecting"
     this.lastConnectingAt = Date.now()
+    this.failAttemptedNonReplayableRequests("Connection changed before the RPC result arrived")
     await this.events.send({ type: "connecting" })
   }
 
@@ -306,6 +372,7 @@ export class ProtocolClient {
     this.state = "connecting"
     this.lastFailureAt = Date.now()
     this.lastFailureReason = reason
+    this.failAttemptedNonReplayableRequests(`Connection failed before the RPC result arrived: ${reason}`)
 
     if (this.reconnectionTimer) {
       clearTimeout(this.reconnectionTimer)
@@ -364,7 +431,9 @@ export class ProtocolClient {
   }
 
   private generateId(): bigint {
-    const timestamp = this.currentTimestamp()
+    // Message identifiers remain unique across reconnects and local clock rollback.
+    // A late result from an older transport generation must never match a new RPC.
+    const timestamp = Math.max(this.currentTimestamp(), this.lastTimestamp)
     if (timestamp === this.lastTimestamp) {
       this.sequence = (this.sequence + 1) >>> 0
     } else {
@@ -422,6 +491,14 @@ export class ProtocolClient {
 
   private resendPendingRpcRequests() {
     for (const msgId of this.pendingRpcRequests.keys()) {
+      const pending = this.pendingRpcRequests.get(msgId)
+      if (pending?.attempted && pending.reconnectPolicy === "never-replay") {
+        this.failPendingRpcRequest(
+          msgId,
+          commitOutcomeUnknownError("Connection reopened before the RPC result arrived"),
+        )
+        continue
+      }
       this.trySendPendingRpcRequest(msgId)
     }
   }
@@ -432,11 +509,41 @@ export class ProtocolClient {
     if (this.state !== "open") return
     if (pending.sending) return
 
+    pending.attempted = true
     pending.sending = true
     void this.transport
       .send(pending.message)
       .catch((error) => {
-        this.log.warn?.("Failed to send RPC request; waiting for reconnect", error)
+        const current = this.pendingRpcRequests.get(msgId)
+        if (error instanceof TransportError && error.code === "rejected-before-execution") {
+          if (current) {
+            current.attempted = false
+            current.sending = false
+          }
+          this.log.warn?.("RPC was rejected before transport admission; waiting for reconnect", error)
+          this.handleClientFailure(`rpc rejected before execution: ${summarizeError(error)}`)
+          return
+        }
+        if (error instanceof TransportError && error.code === "commit-outcome-unknown") {
+          this.failPendingRpcRequest(msgId, commitOutcomeUnknownError(error.message))
+          return
+        }
+        if (error instanceof TransportError && error.code === "capacity-exceeded") {
+          this.failPendingRpcRequest(msgId, new ProtocolClientError("capacity-exceeded", { message: error.message }))
+          return
+        }
+        if (current?.reconnectPolicy === "never-replay") {
+          this.failPendingRpcRequest(
+            msgId,
+            commitOutcomeUnknownError(`RPC transport failed after dispatch: ${summarizeError(error)}`),
+          )
+        }
+        this.log.warn?.(
+          current?.reconnectPolicy === "replay-safe"
+            ? "Failed to send replay-safe RPC request; waiting for reconnect"
+            : "Failed to send non-replayable RPC request; commit outcome is unknown",
+          error,
+        )
         this.handleClientFailure(`rpc send failed: ${summarizeError(error)}`)
       })
       .finally(() => {
@@ -444,11 +551,19 @@ export class ProtocolClient {
       })
   }
 
+  private failAttemptedNonReplayableRequests(reason: string) {
+    for (const [msgId, pending] of this.pendingRpcRequests) {
+      if (!pending.attempted || pending.reconnectPolicy !== "never-replay") continue
+      this.failPendingRpcRequest(msgId, commitOutcomeUnknownError(reason))
+    }
+  }
+
   getDiagnostics() {
     return {
       state: this.state,
       connectionAttemptNo: this.connectionAttemptNo,
       pendingRpcCount: this.pendingRpcRequests.size,
+      maxPendingRpcRequests: this.maxPendingRpcRequests,
       lastConnectingAt: this.lastConnectingAt,
       lastOpenAt: this.lastOpenAt,
       lastTransportMessageAt: this.lastTransportMessageAt,
@@ -473,13 +588,24 @@ const normalizeRpcTimeoutMs = (timeoutMs: number | null | undefined, fallback: n
 
 export class ProtocolClientError extends Error {
   constructor(
-    code: "not-authorized" | "not-connected" | "rpc-error" | "stopped" | "timeout" | "invalid-rpc-method",
+    readonly code:
+      | "not-authorized"
+      | "not-connected"
+      | "rpc-error"
+      | "stopped"
+      | "timeout"
+      | "commit-outcome-unknown"
+      | "capacity-exceeded"
+      | "invalid-rpc-method",
     details?: { code?: number; message?: string },
   ) {
     super(details?.message ?? code)
     this.name = `ProtocolClientError:${code}`
   }
 }
+
+const commitOutcomeUnknownError = (message: string) =>
+  new ProtocolClientError("commit-outcome-unknown", { message })
 
 function summarizeError(error: unknown): string {
   if (error instanceof Error) {
