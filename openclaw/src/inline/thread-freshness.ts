@@ -11,6 +11,8 @@ export type InlineThreadFreshnessMessage = {
 
 export type InlineThreadFreshnessKind = "fresh" | "existing" | "unknown"
 
+export const INLINE_JOIN_MENTION_LOOKBACK_SECONDS = 60n
+
 export type InlineThreadFreshness<T extends InlineThreadFreshnessMessage = InlineThreadFreshnessMessage> = {
   kind: InlineThreadFreshnessKind
   preJoinMessages: T[]
@@ -23,6 +25,7 @@ export function resolveInlineThreadFreshness<T extends InlineThreadFreshnessMess
   botUserId: bigint
   botUsername?: string | null | undefined
   participantDate?: bigint | null | undefined
+  lookbackSeconds?: bigint | null | undefined
 }): InlineThreadFreshness<T> {
   if (!params.messages) {
     return {
@@ -34,7 +37,11 @@ export function resolveInlineThreadFreshness<T extends InlineThreadFreshnessMess
   }
 
   const preJoinMessages = params.messages.filter((message) => {
-    if (!isPreJoinMessage(message, params.participantDate)) return false
+    if (!isInJoinWindow(
+      message,
+      params.participantDate,
+      params.lookbackSeconds ?? INLINE_JOIN_MENTION_LOOKBACK_SECONDS,
+    )) return false
     if (isBotAuthoredMessage(message, params.botUserId)) return false
     return hasVisibleThreadContent(message)
   })
@@ -63,13 +70,15 @@ export function resolveInlineThreadFreshness<T extends InlineThreadFreshnessMess
   }
 }
 
-function isPreJoinMessage(
+function isInJoinWindow(
   message: InlineThreadFreshnessMessage,
   participantDate: bigint | null | undefined,
+  lookbackSeconds: bigint,
 ): boolean {
-  if (participantDate == null || participantDate <= 0n) return true
-  if (message.date == null || message.date <= 0n) return true
-  return message.date <= participantDate
+  if (participantDate == null || participantDate <= 0n) return false
+  if (message.date == null || message.date <= 0n) return false
+  const safeLookback = lookbackSeconds >= 0n ? lookbackSeconds : 0n
+  return message.date >= participantDate - safeLookback && message.date <= participantDate
 }
 
 function isBotAuthoredMessage(message: InlineThreadFreshnessMessage, botUserId: bigint): boolean {

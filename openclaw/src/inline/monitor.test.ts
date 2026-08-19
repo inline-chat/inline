@@ -7959,6 +7959,80 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("sends a fallback when dispatch completes without a delivery callback", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 674n,
+          message: {
+            id: 5705n,
+            date: 1_700_000_014n,
+            fromId: 42n,
+            message: "dm",
+          },
+        },
+      ],
+      chats: {
+        "674": { kind: "direct", title: "Alice" },
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 674n,
+          text: "No response generated. Please try again.",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("preserves an explicit silent skip without sending a fallback", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 675n,
+          message: {
+            id: 5706n,
+            date: 1_700_000_015n,
+            fromId: 42n,
+            message: "dm",
+          },
+        },
+      ],
+      chats: {
+        "675": { kind: "direct", title: "Alice" },
+      },
+      skipInfos: [{ reason: "silent" }],
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitForMockPromise(harness.calls.dispatchReply)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+
+    await handle.stop()
+  })
+
   it("retries a transient reply session initialization conflict", async () => {
     const harness = await setupMonitorHarness({
       events: [
@@ -11799,7 +11873,7 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("queues same-second existing bot participant-add events with prior mention guidance", async () => {
+  it("dispatches a recent pre-join mention through the normal inbound path", async () => {
     const participantDate = BigInt(Math.floor(Date.now() / 1000))
     const harness = await setupMonitorHarness({
       me: {
@@ -11829,7 +11903,7 @@ describe("inline/monitor", () => {
         "88": [
           {
             id: 5001n,
-            date: participantDate,
+            date: participantDate - 15n,
             fromId: 51n,
             message: "@inlinebot can you check this after joining?",
             out: false,
@@ -11851,26 +11925,62 @@ describe("inline/monitor", () => {
     })
 
     await waitFor(() => {
-      expect(harness.calls.enqueueSystemEvent).toHaveBeenCalledWith(
-        expect.stringContaining("Inline bot was added as a participant in #Project Room."),
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          sessionKey: "agent:main:inline:group:88",
-          contextKey: `inline:participant:added:88:777:${String(participantDate)}`,
+          RawBody: "@inlinebot can you check this after joining?",
+          WasMentioned: true,
+          ExplicitlyMentionedBot: true,
         }),
       )
-      expect(harness.calls.enqueueSystemEvent.mock.calls[0]?.[0]).toContain(
-        "#5001 Alice (@alice) id:51: @inlinebot can you check this after joining?",
-      )
-      expect(harness.calls.enqueueSystemEvent.mock.calls[0]?.[0]).toContain(
-        "The bot was mentioned before it joined.",
-      )
-      expect(harness.calls.enqueueSystemEvent.mock.calls[0]?.[0]).toContain(
-        "Prior bot mentions before join:",
-      )
     })
-    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
-    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+    expect(harness.calls.enqueueSystemEvent).not.toHaveBeenCalled()
 
+    await handle.stop()
+  })
+
+  it.each([
+    ["join then live", ["join", "message"]],
+    ["live then join", ["message", "join"]],
+  ] as const)("deduplicates recovered and live delivery: %s", async (_label, order) => {
+    const participantDate = 1_700_000_100n
+    const message = {
+      id: 5001n,
+      date: participantDate - 15n,
+      fromId: 51n,
+      message: "@inlinebot please handle this once",
+      mentioned: true,
+      out: false,
+    }
+    const joinEvent = {
+      kind: "chat.participant.add" as const,
+      chatId: 88n,
+      participant: { userId: 777n, date: participantDate },
+    }
+    const messageEvent = { kind: "message.new" as const, chatId: 88n, message }
+    const events = order.map((kind) => kind === "join" ? joinEvent : messageEvent)
+    const harness = await setupMonitorHarness({
+      me: { userId: 777n, username: "inlinebot" },
+      events,
+      chats: { "88": { kind: "group", title: "Project Room" } },
+      participants: {
+        "88": [
+          { id: 51n, username: "alice", firstName: "Alice" },
+          { id: 777n, username: "inlinebot", firstName: "Inline Bot" },
+        ],
+      },
+      historyByChat: { "88": [message] },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1))
     await handle.stop()
   })
 

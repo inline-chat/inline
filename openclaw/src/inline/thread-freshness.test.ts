@@ -146,4 +146,39 @@ describe("resolveInlineThreadFreshness", () => {
     expect(result.kind).toBe("unknown")
     expect(result.reason).toBe("history_unavailable")
   })
+
+  it("excludes messages older than the join recovery window", () => {
+    const result = resolveInlineThreadFreshness({
+      messages: [
+        {
+          id: 1n,
+          date: 1_699_999_939n,
+          fromId: 51n,
+          message: "@inlinebot this is too old",
+        },
+        {
+          id: 2n,
+          date: 1_699_999_940n,
+          fromId: 51n,
+          message: "@inlinebot this is on the boundary",
+        },
+      ],
+      botUserId: 777n,
+      botUsername: "inlinebot",
+      participantDate: 1_700_000_000n,
+    })
+
+    expect(result.priorMentionMessages.map((message) => message.id)).toEqual([2n])
+  })
+
+  it("requires an authoritative join timestamp", () => {
+    const result = resolveInlineThreadFreshness({
+      messages: [{ id: 1n, date: 1_700_000_000n, fromId: 51n, message: "@inlinebot hi" }],
+      botUserId: 777n,
+      botUsername: "inlinebot",
+    })
+
+    expect(result.kind).toBe("fresh")
+    expect(result.priorMentionMessages).toEqual([])
+  })
 })

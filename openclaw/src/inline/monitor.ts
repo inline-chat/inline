@@ -144,7 +144,10 @@ import {
   rememberInlineReplyThreadRoute,
   type InlineReplyThreadRouteRecord,
 } from "./thread-routes.js"
-import { resolveInlineThreadFreshness } from "./thread-freshness.js"
+import {
+  INLINE_JOIN_MENTION_LOOKBACK_SECONDS,
+  resolveInlineThreadFreshness,
+} from "./thread-freshness.js"
 import {
   logInboundDrop,
   resolveChannelMediaMaxBytes,
@@ -1175,40 +1178,6 @@ function buildInlineReactionContextKey(params: {
   return `inline:reaction:${params.action}:${String(params.chatId)}:${String(params.messageId)}:${String(params.senderId)}:${emoji}`
 }
 
-function describeInlineParticipantAddSystemEvent(params: {
-  channelLabel: string
-  recentLines: string[]
-  priorMentionLines: string[]
-}): string {
-  const lines = [`Inline bot was added as a participant in ${params.channelLabel}.`]
-  if (params.priorMentionLines.length > 0) {
-    lines.push(
-      "The bot was mentioned before it joined. Respond to the prior mention(s) that still need attention, then introduce yourself briefly.",
-    )
-    lines.push(`Prior bot mentions before join:\n${params.priorMentionLines.join("\n")}`)
-  } else {
-    lines.push("Introduce yourself briefly, then wait for the next user request.")
-  }
-  if (params.recentLines.length > 0) {
-    lines.push(`Recent messages before join:\n${params.recentLines.join("\n")}`)
-  }
-  return lines.join("\n")
-}
-
-function buildInlineParticipantAddContextKey(params: {
-  chatId: bigint
-  userId: bigint
-  participantDate?: bigint
-  seq?: number
-}): string {
-  return [
-    "inline:participant:added",
-    String(params.chatId),
-    String(params.userId),
-    params.participantDate != null ? String(params.participantDate) : String(params.seq ?? 0),
-  ].join(":")
-}
-
 function normalizeInlineUsername(raw: string | undefined): string | undefined {
   const trimmed = raw?.trim()
   if (!trimmed) return undefined
@@ -1463,6 +1432,35 @@ function buildInlineInboundMessageSid(params: {
     return `callback:${String(params.callbackActionEvent.targetMessageId)}:${String(params.callbackActionEvent.interactionId)}`
   }
   return String(params.msgId)
+}
+
+function claimInlineInboundMessageInstance(params: {
+  seen: Map<string, true>
+  chatId: bigint
+  message: Pick<Message, "id" | "date">
+  maximum?: number
+}): boolean {
+  const message = params.message as Message
+  const media = message.media as
+    | { media?: { oneofKind?: string }; oneofKind?: string }
+    | undefined
+  const content = [
+    String(message.fromId ?? 0n),
+    message.message ?? "",
+    String(message.replyToMsgId ?? 0n),
+    media?.media?.oneofKind ?? media?.oneofKind ?? "",
+    String(message.entities?.entities.length ?? 0),
+  ].join("\u0000")
+  const key = `${String(params.chatId)}:${String(message.id)}:${String(message.date ?? 0n)}:${content}`
+  if (params.seen.has(key)) return false
+  params.seen.set(key, true)
+  const maximum = params.maximum ?? 5_000
+  while (params.seen.size > maximum) {
+    const oldest = params.seen.keys().next().value
+    if (oldest == null) break
+    params.seen.delete(oldest)
+  }
+  return true
 }
 
 function buildInlineDebounceKey(params: {
@@ -2327,6 +2325,44 @@ async function loadChatHistoryMessages(params: {
   return result.getChatHistory.messages ?? []
 }
 
+async function loadInlineJoinWindowMessages(params: {
+  client: InlineSdkClient
+  chatId: bigint
+  participantDate: bigint
+}): Promise<Message[] | null> {
+  const cutoff = params.participantDate - INLINE_JOIN_MENTION_LOOKBACK_SECONDS
+  const messages = new Map<string, Message>()
+  let offsetId: bigint | undefined
+
+  for (;;) {
+    const page = await loadChatHistoryMessages({
+      client: params.client,
+      chatId: params.chatId,
+      limit: 100,
+      ...(offsetId != null ? { offsetId } : {}),
+    })
+    if (!page) return null
+    if (page.length === 0) break
+
+    let oldest: Message | undefined
+    let added = 0
+    for (const message of page) {
+      const key = `${String(message.id)}:${String(message.date ?? 0n)}`
+      if (!messages.has(key)) {
+        messages.set(key, message)
+        added += 1
+      }
+      if (!oldest || message.date < oldest.date || (message.date === oldest.date && message.id < oldest.id)) {
+        oldest = message
+      }
+    }
+    if (!oldest || oldest.date < cutoff || page.length < 100 || added === 0) break
+    offsetId = oldest.id
+  }
+
+  return [...messages.values()]
+}
+
 async function findChatMessageById(params: {
   client: InlineSdkClient
   chatId: bigint
@@ -3133,32 +3169,6 @@ async function buildHistoryContext(params: {
   }
 }
 
-function buildInlineRecentHistoryLines(params: {
-  messages: Message[]
-  senderProfilesById: SenderProfileLookup
-  meId: bigint
-  maxLines: number
-}): string[] {
-  if (params.maxLines <= 0) return []
-
-  return params.messages
-    .slice()
-    .sort((a, b) => {
-      const byDate = Number(a.date - b.date)
-      if (byDate !== 0) return byDate
-      if (a.id === b.id) return 0
-      return a.id < b.id ? -1 : 1
-    })
-    .map((message) => buildInlineHistoryEntryPayload({
-      message,
-      senderProfilesById: params.senderProfilesById,
-      meId: params.meId,
-    }))
-    .map((entry) => entry.line ?? entry.attachmentLine ?? entry.entityLine)
-    .filter((line): line is string => Boolean(line))
-    .slice(-params.maxLines)
-}
-
 const OPENAI_CODEX_RESPONSES_API = "openai-chatgpt-responses"
 // Mirrors OpenClaw's model-catalog visibility rule. The plugin SDK does not
 // export that predicate, so keep this union compatible with supported hosts.
@@ -3371,6 +3381,7 @@ export async function monitorInlineProvider(params: {
     },
   })
   const botMessageIdsByChat = new Map<string, string[]>()
+  const seenInboundMessageInstances = new Map<string, true>()
   const groupPendingHistories = new Map<string, InlinePendingHistoryEntry[]>()
   const inboundMediaMaxBytes = resolveInlineMediaMaxBytes({ cfg, account })
 
@@ -3627,13 +3638,18 @@ export async function monitorInlineProvider(params: {
     )
   }
 
-  const queueInlineParticipantAddSystemEvent = async (params: {
+  const recoverInlineJoinMentions = async (params: {
     chatId: bigint
     participant?: { userId?: bigint; date?: bigint }
-    seq?: number
-  }): Promise<void> => {
+    eventDate?: bigint
+  }): Promise<Message[]> => {
     const participant = params.participant
-    if (!participant || participant.userId !== meId) return
+    if (!participant || participant.userId !== meId) return []
+    const participantDate = participant.date ?? params.eventDate
+    if (participantDate == null || participantDate <= 0n) {
+      log?.warn(`[${account.accountId}] inline: cannot recover join mentions without participant date`)
+      return []
+    }
 
     const inboundAt = Date.now()
     publishStatus({
@@ -3642,18 +3658,11 @@ export async function monitorInlineProvider(params: {
       ...createTransportActivityStatusPatch(inboundAt),
     })
 
-    const ingress = await resolveInlineSystemEventContext({
-      chatId: params.chatId,
-      senderId: null,
-      eventKind: "participant.add",
-    })
-    if (!ingress) return
-
     await hydrateChatParticipants(params.chatId)
-    const recentMessages = await loadChatHistoryMessages({
+    const recentMessages = await loadInlineJoinWindowMessages({
       client,
       chatId: params.chatId,
-      limit: 10,
+      participantDate,
     }).catch((err) => {
       publishStatus({ lastError: `getChatHistory (participant add) failed: ${String(err)}` })
       return null
@@ -3662,40 +3671,16 @@ export async function monitorInlineProvider(params: {
       messages: recentMessages,
       botUserId: meId,
       botUsername,
-      participantDate: participant.date,
+      participantDate,
     })
-    if (freshness.kind !== "existing") return
-
-    const recentLines = buildInlineRecentHistoryLines({
-      messages: freshness.preJoinMessages,
-      senderProfilesById,
-      meId,
-      maxLines: 10,
-    })
-    const priorMentionLines = buildInlineRecentHistoryLines({
-      messages: freshness.priorMentionMessages,
-      senderProfilesById,
-      meId,
-      maxLines: 10,
-    })
-
-    const contextKey = buildInlineParticipantAddContextKey({
-      chatId: params.chatId,
-      userId: meId,
-      ...(participant.date != null ? { participantDate: participant.date } : {}),
-      ...(params.seq != null ? { seq: params.seq } : {}),
-    })
-    core.system.enqueueSystemEvent(
-      describeInlineParticipantAddSystemEvent({
-        channelLabel: ingress.channelLabel,
-        recentLines,
-        priorMentionLines,
-      }),
-      {
-        sessionKey: ingress.sessionKey,
-        contextKey,
-      },
-    )
+    return freshness.priorMentionMessages
+      .slice()
+      .sort((a, b) => {
+        const byDate = Number(a.date - b.date)
+        if (byDate !== 0) return byDate
+        if (a.id === b.id) return 0
+        return a.id < b.id ? -1 : 1
+      })
   }
 
   const shouldQueueInlineReactionSystemEvent = async (params: {
@@ -5471,7 +5456,9 @@ export async function monitorInlineProvider(params: {
 
     try {
       let delivered = false
+      let deliveryAttempted = false
       let skippedNonSilent = false
+      let skippedSilently = false
       let failedNonSilent = false
       let dispatchError: unknown = null
       try {
@@ -5493,6 +5480,7 @@ export async function monitorInlineProvider(params: {
               payload: InlineReplyPayload,
               info?: InlineDispatchReplyInfo,
             ) => {
+              deliveryAttempted = true
               const presenceSignal = resolveInlineBotPresenceSignal(payload)
               if (presenceSignal) {
                 botPresenceLifecycle.express(presenceSignal)
@@ -5676,7 +5664,9 @@ export async function monitorInlineProvider(params: {
               publishStatus({ lastOutboundAt: Date.now() })
             },
             onSkip: (_payload, info) => {
-              if (info?.reason !== "silent") {
+              if (info?.reason === "silent") {
+                skippedSilently = true
+              } else {
                 skippedNonSilent = true
               }
             },
@@ -5705,7 +5695,9 @@ export async function monitorInlineProvider(params: {
       if (!delivered && streamViaEditMessage && editStreamState.messageId != null) {
         delivered = true
       }
-      if (!delivered && (dispatchError != null || skippedNonSilent || failedNonSilent)) {
+      if (!delivered && !skippedSilently && (
+        !deliveryAttempted || dispatchError != null || skippedNonSilent || failedNonSilent
+      )) {
         botPresenceLifecycle.fail()
         const fallbackText =
           dispatchError != null
@@ -6747,6 +6739,11 @@ export async function monitorInlineProvider(params: {
             chatId: event.chatId,
           } as Message
           if (msg.out || msg.fromId === meId) continue
+          if (!claimInlineInboundMessageInstance({
+            seen: seenInboundMessageInstances,
+            chatId: event.chatId,
+            message: msg,
+          })) continue
           if (
             isInlineAbortRequestMessage(msg, botUsername) &&
             await isAuthorizedInlineAbortMessage({ chatId: event.chatId, msg })
@@ -6842,12 +6839,23 @@ export async function monitorInlineProvider(params: {
           const eventChatId = rawEvent["chatId"] as bigint | undefined
           if (!eventChatId) continue
           const participant = rawEvent["participant"] as { userId?: bigint; date?: bigint } | undefined
-          const seq = rawEvent["seq"] as number | undefined
-          await queueInlineParticipantAddSystemEvent({
+          const eventDate = rawEvent["date"] as bigint | undefined
+          const recovered = await recoverInlineJoinMentions({
             chatId: eventChatId,
             ...(participant ? { participant } : {}),
-            ...(seq != null ? { seq } : {}),
+            ...(eventDate != null ? { eventDate } : {}),
           })
+          for (const msg of recovered) {
+            if (!claimInlineInboundMessageInstance({
+              seen: seenInboundMessageInstances,
+              chatId: eventChatId,
+              message: msg,
+            })) continue
+            scheduleInboundMessage({
+              chatId: eventChatId,
+              msg: { ...msg, mentioned: true },
+            })
+          }
           continue
         }
 
