@@ -502,6 +502,8 @@ final class ChatRouteToolbarTitleModel {
         guard !Task.isCancelled else { return }
         apply(snapshot)
         sync()
+      } catch is CancellationError {
+        return
       } catch {
         log.error("Failed to load toolbar title snapshot", error: error)
       }
@@ -597,6 +599,8 @@ final class ChatRouteToolbarTitleModel {
       return try await db.reader.read { db in
         try ChatRenamePermission.canRename(peer: peer, currentUserId: currentUserId, db: db)
       }
+    } catch is CancellationError {
+      return false
     } catch {
       log.error("Failed to check chat rename eligibility", error: error)
       return false
