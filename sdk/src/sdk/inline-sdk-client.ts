@@ -8,6 +8,7 @@ import {
   GetMessagesInput,
   GetMeInput,
   GetUpdatesInput,
+  type GetUpdatesResult,
   GetUpdatesResult_ResultType,
   GetUpdatesStateInput,
   InputPeer,
@@ -17,6 +18,7 @@ import {
   type Peer,
   type RpcCall,
   type RpcResult,
+  SyncSkippedSequence_Reason,
   type Update,
   UpdateBucket,
   UpdateComposeAction_ComposeAction,
@@ -265,9 +267,11 @@ export class InlineSdkClient {
   private catchUpRequestedBySpaceId = new Map<bigint, { endSeq?: number; toLatest: boolean }>()
   private userCatchUpInFlight: Promise<void> | null = null
   private peerResolutionInFlightByChatId = new Map<bigint, Promise<void>>()
+  private peerResolutionRequestedByChatId = new Map<bigint, { endSeq?: number; toLatest: boolean }>()
   private recoveryReconnectInFlight: Promise<void> | null = null
   private degradedUpdateBuckets = new Map<string, InlineSdkUpdateBucketRef>()
   private liveCursorFences = new Set<string>()
+  private liveAdmittedSeqByBucket = new Map<string, number>()
   private discoveryRound: DiscoveryRound | null = null
   private discoveryInFlight: Promise<void> | null = null
   private discoveryCommitInFlight: Promise<void> | null = null
@@ -469,7 +473,8 @@ export class InlineSdkClient {
         ? "degraded"
         : this.userCatchUpInFlight ||
             this.catchUpInFlightByChatId.size > 0 ||
-            this.catchUpInFlightBySpaceId.size > 0
+            this.catchUpInFlightBySpaceId.size > 0 ||
+            this.peerResolutionInFlightByChatId.size > 0
           ? "syncing"
           : "live",
       degradedBuckets: [...this.degradedUpdateBuckets.values()],
@@ -1141,12 +1146,19 @@ export class InlineSdkClient {
         if (buckets.length > 0) {
           for (const bucket of buckets) {
             this.fenceLiveCursor(bucket)
-            this.markUpdateBucketDegraded(bucket)
-            this.log.warn?.("Unsupported durable live update; bucket remains degraded and cursor is fenced", {
-              bucket: this.updateBucketKey(bucket),
-              updateKind: update.update.oneofKind,
-            })
-            this.requestCatchUpForDegradedBucket(bucket)
+            if (this.isProjectedUpdateKind(update)) {
+              this.markUpdateBucketDegraded(bucket)
+              this.log.warn?.("Malformed projected live update; bucket remains degraded and cursor is fenced", {
+                bucket: this.updateBucketKey(bucket),
+                updateKind: update.update.oneofKind,
+              })
+            } else {
+              this.log.debug?.("Unprojected durable live update; reconciling its sequence as a no-op", {
+                bucket: this.updateBucketKey(bucket),
+                updateKind: update.update.oneofKind,
+              })
+            }
+            this.requestCatchUpForRawUpdate(bucket, update)
           }
         } else {
           this.log.warn?.("Unsupported durable live update without a provable bucket identity; requesting targeted discovery", {
@@ -1161,12 +1173,14 @@ export class InlineSdkClient {
   private handleUpdate(update: Update, options?: { source?: UpdateSource }): Promise<boolean> | null {
     const seq = update.seq ?? 0
     const date = update.date ?? 0n
+    const deliver = (event: InlineInboundEvent, onApplied?: () => void) =>
+      this.deliverEvent(event, onApplied, options?.source)
 
     switch (update.update.oneofKind) {
       case "newMessage": {
         const message = update.update.newMessage.message
         if (!message) return null
-        return this.deliverEvent({
+        return deliver({
           kind: "message.new",
           chatId: message.chatId,
           message,
@@ -1178,7 +1192,7 @@ export class InlineSdkClient {
       case "editMessage": {
         const message = update.update.editMessage.message
         if (!message) return null
-        return this.deliverEvent({
+        return deliver({
           kind: "message.edit",
           chatId: message.chatId,
           message,
@@ -1194,7 +1208,7 @@ export class InlineSdkClient {
           this.log.warn?.("Skipping deleteMessages update without chat peer", payload.peerId)
           return null
         }
-        return this.deliverEvent({
+        return deliver({
           kind: "message.delete",
           chatId,
           messageIds: payload.messageIds,
@@ -1211,7 +1225,7 @@ export class InlineSdkClient {
         }
         if (payload.target.oneofKind === "spaceId") {
           const spaceId = payload.target.spaceId
-          return this.deliverEvent({
+          return deliver({
             kind: "space.history.clear",
             spaceId,
             ...(payload.beforeDate != null ? { beforeDate: payload.beforeDate } : {}),
@@ -1227,7 +1241,7 @@ export class InlineSdkClient {
         const peerId = payload.target.oneofKind === "peerId" ? payload.target.peerId : undefined
         if (peerId?.type.oneofKind === "chat") {
           const chatId = peerId.type.chat.chatId
-          return this.deliverEvent({
+          return deliver({
             kind: "message.history.clear",
             chatId,
             ...(payload.beforeDate != null ? { beforeDate: payload.beforeDate } : {}),
@@ -1241,7 +1255,7 @@ export class InlineSdkClient {
         }
 
         if (peerId?.type.oneofKind === "user") {
-          return this.deliverEvent({
+          return deliver({
             kind: "message.history.clear",
             userId: peerId.type.user.userId,
             ...(payload.beforeDate != null ? { beforeDate: payload.beforeDate } : {}),
@@ -1261,7 +1275,7 @@ export class InlineSdkClient {
       case "updateReaction": {
         const reaction = update.update.updateReaction.reaction
         if (!reaction) return null
-        return this.deliverEvent({
+        return deliver({
           kind: "reaction.add",
           chatId: reaction.chatId,
           reaction,
@@ -1272,7 +1286,7 @@ export class InlineSdkClient {
 
       case "deleteReaction": {
         const payload = update.update.deleteReaction
-        return this.deliverEvent({
+        return deliver({
           kind: "reaction.delete",
           chatId: payload.chatId,
           emoji: payload.emoji,
@@ -1285,7 +1299,7 @@ export class InlineSdkClient {
 
       case "participantAdd": {
         const payload = update.update.participantAdd
-        return this.deliverEvent({
+        return deliver({
           kind: "chat.participant.add",
           chatId: payload.chatId,
           ...(payload.participant ? { participant: payload.participant } : {}),
@@ -1296,7 +1310,7 @@ export class InlineSdkClient {
 
       case "participantDelete": {
         const payload = update.update.participantDelete
-        return this.deliverEvent({
+        return deliver({
           kind: "chat.participant.delete",
           chatId: payload.chatId,
           userId: payload.userId,
@@ -1312,7 +1326,7 @@ export class InlineSdkClient {
           // already-seen update; do not turn a replay into a degraded bucket.
           return Promise.resolve(true)
         }
-        return this.deliverEvent({
+        return deliver({
           kind: "message.action.invoke",
           interactionId: payload.interactionId,
           chatId: payload.chatId,
@@ -1332,7 +1346,7 @@ export class InlineSdkClient {
           // already-seen update; do not turn a replay into a degraded bucket.
           return Promise.resolve(true)
         }
-        return this.deliverEvent({
+        return deliver({
           kind: "message.action.answered",
           interactionId: payload.interactionId,
           ui: payload.ui,
@@ -1349,7 +1363,7 @@ export class InlineSdkClient {
           ...(payload.peerId ? { peer: payload.peerId } : {}),
         }
         this.registerDiscoveryHint(bucket, payload.updateSeq)
-        const delivery = this.deliverEvent({
+        const delivery = deliver({
           kind: "chat.hasUpdates",
           chatId: payload.chatId,
           seq,
@@ -1366,7 +1380,7 @@ export class InlineSdkClient {
       case "spaceHasNewUpdates": {
         const payload = update.update.spaceHasNewUpdates
         this.registerDiscoveryHint({ kind: "space", spaceId: payload.spaceId }, payload.updateSeq)
-        const delivery = this.deliverEvent({
+        const delivery = deliver({
           kind: "space.hasUpdates",
           spaceId: payload.spaceId,
           seq,
@@ -1384,7 +1398,15 @@ export class InlineSdkClient {
     }
   }
 
-  private deliverEvent(event: InlineInboundEvent, onApplied?: () => void): Promise<boolean> {
+  private deliverEvent(
+    event: InlineInboundEvent,
+    onApplied?: () => void,
+    source?: UpdateSource,
+  ): Promise<boolean> {
+    if (source === "live" && !this.prepareLiveEvent(event)) {
+      return Promise.resolve(true)
+    }
+
     let acknowledged: Promise<boolean>
     try {
       acknowledged = this.eventStream.send(event)
@@ -1402,12 +1424,15 @@ export class InlineSdkClient {
       this.requestRecoveryReconnect("inbound-event-buffer-overflow")
       return Promise.resolve(false)
     }
-    if (onApplied) {
-      void acknowledged.then((applied) => {
-        if (applied) onApplied()
-      })
-    }
-    return acknowledged
+    return acknowledged.then((applied) => {
+      if (applied) {
+        onApplied?.()
+        if (source === "live") this.settleLiveEvent(event)
+      } else if (source === "live" && this.started) {
+        this.recoverLiveEvent(event, "consumer-did-not-apply")
+      }
+      return applied
+    })
   }
 
   private bucketForEvent(event: InlineInboundEvent): InlineSdkUpdateBucketRef | undefined {
@@ -1433,6 +1458,147 @@ export class InlineSdkClient {
       case "bot.chatSettings.request":
       case "bot.chatSettings.item.invoke":
         return undefined
+    }
+  }
+
+  private sequencedBucketForEvent(event: InlineInboundEvent): InlineSdkUpdateBucketRef | undefined {
+    switch (event.kind) {
+      case "bot.chatSettings.request":
+      case "bot.chatSettings.item.invoke":
+      case "chat.hasUpdates":
+      case "space.hasUpdates":
+        return undefined
+      default:
+        return this.bucketForEvent(event)
+    }
+  }
+
+  private hasBucketCursor(bucket: InlineSdkUpdateBucketRef): boolean {
+    switch (bucket.kind) {
+      case "user":
+        return this.state.lastUserSeq != null
+      case "chat":
+        return Object.prototype.hasOwnProperty.call(
+          this.state.lastSeqByChatId ?? {},
+          bucket.chatId.toString(),
+        )
+      case "space":
+        return Object.prototype.hasOwnProperty.call(
+          this.state.lastSeqBySpaceId ?? {},
+          bucket.spaceId.toString(),
+        )
+    }
+  }
+
+  private prepareLiveEvent(event: InlineInboundEvent): boolean {
+    const bucket = this.sequencedBucketForEvent(event)
+    if (!bucket) return true
+
+    const seq = "seq" in event ? event.seq : 0
+    if (!Number.isSafeInteger(seq) || seq <= 0) {
+      this.fenceLiveCursor(bucket)
+      this.markUpdateBucketDegraded(bucket)
+      this.requestCatchUpForLiveEvent(bucket, event)
+      this.log.warn?.("Durable live update has an invalid sequence; event was withheld for recovery", {
+        bucket: this.updateBucketKey(bucket),
+        seq,
+      })
+      return false
+    }
+
+    const key = this.updateBucketKey(bucket)
+    const cursor = this.bucketCursor(bucket)
+    const cursorKnown = this.hasBucketCursor(bucket)
+    const admittedSeq = this.liveAdmittedSeqByBucket.get(key)
+
+    if (cursorKnown && seq <= cursor) return false
+    if (admittedSeq != null && seq <= admittedSeq) return false
+
+    if (this.liveCursorFences.has(key)) {
+      this.recoverLiveEvent(event, "bucket-repair-in-progress")
+      return false
+    }
+
+    // Without a durable state owner, the first ordinary live event establishes
+    // an in-memory baseline. A persisted client in discovery cannot do that
+    // safely: an earlier server hint may still be in flight, so it recovers the
+    // durable range first.
+    if (!cursorKnown && admittedSeq == null &&
+        (this.discoveryRound == null || this.options.state == null)) {
+      this.liveAdmittedSeqByBucket.set(key, seq)
+      return true
+    }
+
+    const admittedThrough = Math.max(cursor, admittedSeq ?? 0)
+    if (seq === admittedThrough + 1) {
+      this.liveAdmittedSeqByBucket.set(key, seq)
+      return true
+    }
+
+    this.recoverLiveEvent(event, "sequence-gap")
+    this.log.debug?.("Durable live update crossed a sequence gap; recovering through GET_UPDATES", {
+      bucket: key,
+      cursor,
+      admittedThrough,
+      receivedSeq: seq,
+    })
+    return false
+  }
+
+  private settleLiveEvent(event: InlineInboundEvent) {
+    const bucket = this.sequencedBucketForEvent(event)
+    if (!bucket) return
+    const seq = "seq" in event ? event.seq : 0
+    const key = this.updateBucketKey(bucket)
+    if (this.liveAdmittedSeqByBucket.get(key) === seq && this.bucketCursor(bucket) >= seq) {
+      this.liveAdmittedSeqByBucket.delete(key)
+    }
+  }
+
+  private recoverLiveEvent(event: InlineInboundEvent, cause: string) {
+    const bucket = this.sequencedBucketForEvent(event)
+    if (!bucket) return
+    const key = this.updateBucketKey(bucket)
+    const seq = "seq" in event ? event.seq : 0
+    const eventSeq = Number.isSafeInteger(seq) && seq > 0 ? seq : undefined
+    const admittedSeq = this.liveAdmittedSeqByBucket.get(key)
+    const updateSeq = eventSeq != null
+      ? Math.max(eventSeq, admittedSeq ?? 0)
+      : admittedSeq
+
+    this.fenceLiveCursor(bucket)
+    if (updateSeq != null) this.registerDiscoveryHint(bucket, updateSeq)
+    this.requestCatchUpForLiveEvent(bucket, event, updateSeq)
+    this.log.debug?.("Withheld live update until its bucket converges", {
+      bucket: key,
+      cause,
+      updateSeq,
+    })
+  }
+
+  private requestCatchUpForLiveEvent(
+    bucket: InlineSdkUpdateBucketRef,
+    event: InlineInboundEvent,
+    updateSeq?: number,
+  ) {
+    switch (bucket.kind) {
+      case "chat": {
+        const peer = this.peerFromEvent(event) ?? this.persistedChatPeer(bucket.chatId)
+        if (peer && this.isReliableChatPeer(peer)) {
+          this.rememberChatPeer(bucket.chatId, peer)
+          this.requestCatchUpChat({ chatId: bucket.chatId, peer, ...(updateSeq != null ? { updateSeq } : {}) })
+        } else {
+          this.markUpdateBucketDegraded(bucket)
+          this.resolvePersistedChatPeer(bucket.chatId, updateSeq)
+        }
+        return
+      }
+      case "space":
+        this.requestCatchUpSpace({ spaceId: bucket.spaceId, ...(updateSeq != null ? { updateSeq } : {}) })
+        return
+      case "user":
+        this.requestCatchUpUser(true)
+        return
     }
   }
 
@@ -1464,7 +1630,7 @@ export class InlineSdkClient {
         this.requestCatchUpSpace({ spaceId: bucket.spaceId })
         return
       case "user":
-        this.requestCatchUpUser()
+        this.requestCatchUpUser(true)
         return
     }
   }
@@ -1484,7 +1650,29 @@ export class InlineSdkClient {
         this.requestCatchUpSpace({ spaceId: bucket.spaceId })
         return
       case "user":
-        this.requestCatchUpUser()
+        this.requestCatchUpUser(true)
+        return
+    }
+  }
+
+  private requestCatchUpForRawUpdate(bucket: InlineSdkUpdateBucketRef, update: Update) {
+    const rawSeq = update.seq
+    const updateSeq = rawSeq != null && Number.isSafeInteger(rawSeq) && rawSeq > 0 ? rawSeq : undefined
+    switch (bucket.kind) {
+      case "chat": {
+        const peer = bucket.peer ?? this.persistedChatPeer(bucket.chatId)
+        if (peer && this.isReliableChatPeer(peer)) {
+          this.requestCatchUpChat({ chatId: bucket.chatId, peer, ...(updateSeq != null ? { updateSeq } : {}) })
+        } else {
+          this.resolvePersistedChatPeer(bucket.chatId, updateSeq)
+        }
+        return
+      }
+      case "space":
+        this.requestCatchUpSpace({ spaceId: bucket.spaceId, ...(updateSeq != null ? { updateSeq } : {}) })
+        return
+      case "user":
+        this.requestCatchUpUser(true)
         return
     }
   }
@@ -1503,6 +1691,26 @@ export class InlineSdkClient {
       case "botPresence":
         return true
       case undefined:
+        return true
+      default:
+        return false
+    }
+  }
+
+  private isProjectedUpdateKind(update: Update): boolean {
+    switch (update.update.oneofKind) {
+      case "newMessage":
+      case "editMessage":
+      case "deleteMessages":
+      case "clearChatHistory":
+      case "updateReaction":
+      case "deleteReaction":
+      case "participantAdd":
+      case "participantDelete":
+      case "messageActionInvoked":
+      case "messageActionAnswered":
+      case "chatHasNewUpdates":
+      case "spaceHasNewUpdates":
         return true
       default:
         return false
@@ -1655,15 +1863,16 @@ export class InlineSdkClient {
     this.satisfyDiscoveryThroughCursor({ kind: "user" }, seq)
   }
 
-  private requestCatchUpUser(): Promise<void> | null {
+  private requestCatchUpUser(forceFromStart = false): Promise<void> | null {
     const lastUserSeq = this.state.lastUserSeq
-    if (lastUserSeq == null && !this.options.catchUpUserFromStart) {
+    if (lastUserSeq == null && !this.options.catchUpUserFromStart && !forceFromStart) {
       return null
     }
     if (this.userCatchUpInFlight) {
       return this.userCatchUpInFlight
     }
 
+    this.fenceLiveCursor({ kind: "user" })
     this.userCatchUpInFlight = this.doCatchUpUser(lastUserSeq ?? 0)
       .catch((error) => {
         this.markUpdateBucketDegraded({ kind: "user" })
@@ -1679,6 +1888,8 @@ export class InlineSdkClient {
 
   private async doCatchUpUser(startSeq: number) {
     let cursor = startSeq
+    let retainedBacklogTarget: number | undefined
+    let requestEndSeq: number | undefined
 
     while (true) {
       const result = await this.invoke(Method.GET_UPDATES, {
@@ -1691,6 +1902,7 @@ export class InlineSdkClient {
             },
           }),
           startSeq: BigInt(cursor),
+          ...(requestEndSeq != null ? { seqEnd: BigInt(requestEndSeq) } : {}),
           totalLimit: defaultCatchUpTotalLimit,
           limit: defaultCatchUpPageLimit,
         }),
@@ -1705,10 +1917,24 @@ export class InlineSdkClient {
       }
 
       if (payload.resultType === GetUpdatesResult_ResultType.TOO_LONG) {
-        await this.repairTooLongBucket({ kind: "user" }, deliveredSeq, payload.date)
+        if (this.options.repairUpdatesBucket) {
+          await this.repairUpdateBucketAuthoritatively({ kind: "user" }, deliveredSeq, payload.date)
+          return
+        }
+        const nextEnd = this.retainedBacklogSliceEnd({ kind: "user" }, cursor, deliveredSeq)
+        if (nextEnd == null) return
+        retainedBacklogTarget = Math.max(retainedBacklogTarget ?? 0, deliveredSeq)
+        requestEndSeq = nextEnd
+        continue
+      }
+      const requiresSnapshotRepair = this.validateCatchUpPage(payload, cursor, { kind: "user" })
+      if (requiresSnapshotRepair == null) return
+      if (requiresSnapshotRepair) {
+        await this.repairUpdateBucketAuthoritatively({ kind: "user" }, deliveredSeq, payload.date)
         return
       }
-      if (!payload.final && deliveredSeq <= cursor) {
+      if (deliveredSeq <= cursor &&
+        (!payload.final || (retainedBacklogTarget != null && deliveredSeq < retainedBacklogTarget))) {
         this.markUpdateBucketDegraded({ kind: "user" })
         this.log.warn?.("GET_UPDATES user catch-up made no progress; bucket remains degraded", {
           cursor,
@@ -1722,6 +1948,11 @@ export class InlineSdkClient {
       this.bumpUserSeq(deliveredSeq)
       this.scheduleStateSave()
 
+      if (payload.final && retainedBacklogTarget != null && deliveredSeq < retainedBacklogTarget) {
+        cursor = deliveredSeq
+        requestEndSeq = Math.min(retainedBacklogTarget, cursor + defaultCatchUpTotalLimit)
+        continue
+      }
       if (payload.final) {
         this.satisfyDiscoveryBucket({ kind: "user" }, deliveredSeq)
         this.clearUpdateBucketDegraded({ kind: "user" })
@@ -1733,6 +1964,7 @@ export class InlineSdkClient {
 
   private requestCatchUpChat(params: { chatId: bigint; peer?: Peer; updateSeq?: number }): Promise<void> {
     if (params.peer) this.rememberChatPeer(params.chatId, params.peer)
+    this.fenceLiveCursor({ kind: "chat", chatId: params.chatId, peer: params.peer })
     const previous = this.catchUpRequestedByChatId.get(params.chatId)
     this.catchUpRequestedByChatId.set(params.chatId, {
       ...(params.updateSeq != null || previous?.endSeq != null
@@ -1777,12 +2009,14 @@ export class InlineSdkClient {
         Math.max(0, (endSeq ?? 0) - defaultColdStartCatchUpWindow)
       if (endSeq != null && endSeq <= startSeq) {
         this.satisfyDiscoveryThroughCursor({ kind: "chat", chatId }, startSeq)
+        this.clearUpdateBucketDegraded({ kind: "chat", chatId, peer: request.peer })
         this.catchUpRequestedByChatId.delete(chatId)
         return
       }
 
       const stop = await this.doCatchUpChat(chatId, request.peer, startSeq, endSeq)
       if (stop) {
+        if (this.catchUpRequestedByChatId.get(chatId) !== request) continue
         this.catchUpRequestedByChatId.delete(chatId)
         return
       }
@@ -1798,8 +2032,10 @@ export class InlineSdkClient {
 
   private async doCatchUpChat(chatId: bigint, peer: Peer | undefined, startSeq: number, endSeq?: number): Promise<boolean> {
     let cursor = startSeq
+    let retainedBacklogTarget: number | undefined
+    let requestEndSeq = endSeq
 
-    while (endSeq == null || cursor < endSeq) {
+    while (requestEndSeq == null || cursor < requestEndSeq) {
       const result = await this.invoke(Method.GET_UPDATES, {
         oneofKind: "getUpdates",
         getUpdates: GetUpdatesInput.create({
@@ -1812,7 +2048,7 @@ export class InlineSdkClient {
             },
           }),
           startSeq: BigInt(cursor),
-          ...(endSeq != null ? { seqEnd: BigInt(endSeq) } : {}),
+          ...(requestEndSeq != null ? { seqEnd: BigInt(requestEndSeq) } : {}),
           totalLimit: defaultCatchUpTotalLimit,
           limit: defaultCatchUpPageLimit,
         }),
@@ -1822,8 +2058,15 @@ export class InlineSdkClient {
 
       if (payload.resultType === GetUpdatesResult_ResultType.TOO_LONG) {
         const deliveredSeq = Number(payload.seq ?? 0n)
-        await this.repairTooLongBucket({ kind: "chat", chatId, peer }, deliveredSeq, payload.date)
-        return true
+        if (this.options.repairUpdatesBucket) {
+          await this.repairUpdateBucketAuthoritatively({ kind: "chat", chatId, peer }, deliveredSeq, payload.date)
+          return true
+        }
+        const nextEnd = this.retainedBacklogSliceEnd({ kind: "chat", chatId, peer }, cursor, deliveredSeq)
+        if (nextEnd == null) return true
+        retainedBacklogTarget = Math.max(retainedBacklogTarget ?? 0, deliveredSeq)
+        requestEndSeq = nextEnd
+        continue
       }
 
       const deliveredSeq = Number(payload.seq ?? 0n)
@@ -1832,7 +2075,14 @@ export class InlineSdkClient {
         this.log.warn?.("GET_UPDATES returned non-integer seq; aborting catch-up", { chatId: chatId.toString() })
         return true
       }
-      if (!payload.final && deliveredSeq <= cursor) {
+      const requiresSnapshotRepair = this.validateCatchUpPage(payload, cursor, { kind: "chat", chatId, peer })
+      if (requiresSnapshotRepair == null) return true
+      if (requiresSnapshotRepair) {
+        await this.repairUpdateBucketAuthoritatively({ kind: "chat", chatId, peer }, deliveredSeq, payload.date)
+        return true
+      }
+      if (deliveredSeq <= cursor &&
+        (!payload.final || (retainedBacklogTarget != null && deliveredSeq < retainedBacklogTarget))) {
         this.markUpdateBucketDegraded({ kind: "chat", chatId, peer })
         this.log.warn?.("GET_UPDATES made no progress; bucket remains degraded", {
           chatId: chatId.toString(),
@@ -1851,6 +2101,11 @@ export class InlineSdkClient {
 
       this.scheduleStateSave()
 
+      if (payload.final && retainedBacklogTarget != null && deliveredSeq < retainedBacklogTarget) {
+        cursor = deliveredSeq
+        requestEndSeq = Math.min(retainedBacklogTarget, cursor + defaultCatchUpTotalLimit)
+        continue
+      }
       if (payload.final) {
         this.satisfyDiscoveryBucket({ kind: "chat", chatId, peer }, deliveredSeq)
         this.clearUpdateBucketDegraded({ kind: "chat", chatId, peer })
@@ -1863,6 +2118,7 @@ export class InlineSdkClient {
   }
 
   private requestCatchUpSpace(params: { spaceId: bigint; updateSeq?: number }): Promise<void> {
+    this.fenceLiveCursor({ kind: "space", spaceId: params.spaceId })
     const previous = this.catchUpRequestedBySpaceId.get(params.spaceId)
     this.catchUpRequestedBySpaceId.set(params.spaceId, {
       ...(params.updateSeq != null || previous?.endSeq != null
@@ -1902,12 +2158,14 @@ export class InlineSdkClient {
       const startSeq = lastSeq ?? Math.max(0, (endSeq ?? 0) - defaultColdStartCatchUpWindow)
       if (endSeq != null && endSeq <= startSeq) {
         this.satisfyDiscoveryThroughCursor({ kind: "space", spaceId }, startSeq)
+        this.clearUpdateBucketDegraded({ kind: "space", spaceId })
         this.catchUpRequestedBySpaceId.delete(spaceId)
         return
       }
 
       const stop = await this.doCatchUpSpace(spaceId, startSeq, endSeq)
       if (stop) {
+        if (this.catchUpRequestedBySpaceId.get(spaceId) !== request) continue
         this.catchUpRequestedBySpaceId.delete(spaceId)
         return
       }
@@ -1923,8 +2181,10 @@ export class InlineSdkClient {
 
   private async doCatchUpSpace(spaceId: bigint, startSeq: number, endSeq?: number): Promise<boolean> {
     let cursor = startSeq
+    let retainedBacklogTarget: number | undefined
+    let requestEndSeq = endSeq
 
-    while (endSeq == null || cursor < endSeq) {
+    while (requestEndSeq == null || cursor < requestEndSeq) {
       const result = await this.invoke(Method.GET_UPDATES, {
         oneofKind: "getUpdates",
         getUpdates: GetUpdatesInput.create({
@@ -1937,7 +2197,7 @@ export class InlineSdkClient {
             },
           }),
           startSeq: BigInt(cursor),
-          ...(endSeq != null ? { seqEnd: BigInt(endSeq) } : {}),
+          ...(requestEndSeq != null ? { seqEnd: BigInt(requestEndSeq) } : {}),
           totalLimit: defaultCatchUpTotalLimit,
           limit: defaultCatchUpPageLimit,
         }),
@@ -1947,8 +2207,15 @@ export class InlineSdkClient {
 
       if (payload.resultType === GetUpdatesResult_ResultType.TOO_LONG) {
         const deliveredSeq = Number(payload.seq ?? 0n)
-        await this.repairTooLongBucket({ kind: "space", spaceId }, deliveredSeq, payload.date)
-        return true
+        if (this.options.repairUpdatesBucket) {
+          await this.repairUpdateBucketAuthoritatively({ kind: "space", spaceId }, deliveredSeq, payload.date)
+          return true
+        }
+        const nextEnd = this.retainedBacklogSliceEnd({ kind: "space", spaceId }, cursor, deliveredSeq)
+        if (nextEnd == null) return true
+        retainedBacklogTarget = Math.max(retainedBacklogTarget ?? 0, deliveredSeq)
+        requestEndSeq = nextEnd
+        continue
       }
 
       const deliveredSeq = Number(payload.seq ?? 0n)
@@ -1959,7 +2226,14 @@ export class InlineSdkClient {
         })
         return true
       }
-      if (!payload.final && deliveredSeq <= cursor) {
+      const requiresSnapshotRepair = this.validateCatchUpPage(payload, cursor, { kind: "space", spaceId })
+      if (requiresSnapshotRepair == null) return true
+      if (requiresSnapshotRepair) {
+        await this.repairUpdateBucketAuthoritatively({ kind: "space", spaceId }, deliveredSeq, payload.date)
+        return true
+      }
+      if (deliveredSeq <= cursor &&
+        (!payload.final || (retainedBacklogTarget != null && deliveredSeq < retainedBacklogTarget))) {
         this.markUpdateBucketDegraded({ kind: "space", spaceId })
         this.log.warn?.("GET_UPDATES space made no progress; bucket remains degraded", {
           spaceId: spaceId.toString(),
@@ -1975,6 +2249,11 @@ export class InlineSdkClient {
 
       this.scheduleStateSave()
 
+      if (payload.final && retainedBacklogTarget != null && deliveredSeq < retainedBacklogTarget) {
+        cursor = deliveredSeq
+        requestEndSeq = Math.min(retainedBacklogTarget, cursor + defaultCatchUpTotalLimit)
+        continue
+      }
       if (payload.final) {
         this.satisfyDiscoveryBucket({ kind: "space", spaceId }, deliveredSeq)
         this.clearUpdateBucketDegraded({ kind: "space", spaceId })
@@ -1986,7 +2265,14 @@ export class InlineSdkClient {
     return false
   }
 
-  private resolvePersistedChatPeer(chatId: bigint): Promise<void> {
+  private resolvePersistedChatPeer(chatId: bigint, updateSeq?: number): Promise<void> {
+    const previous = this.peerResolutionRequestedByChatId.get(chatId)
+    this.peerResolutionRequestedByChatId.set(chatId, {
+      ...(updateSeq != null || previous?.endSeq != null
+        ? { endSeq: Math.max(previous?.endSeq ?? 0, updateSeq ?? 0) }
+        : {}),
+      toLatest: previous?.toLatest === true || updateSeq == null,
+    })
     const existing = this.peerResolutionInFlightByChatId.get(chatId)
     if (existing) return existing
     const task = this.getChat({ chatId })
@@ -1996,7 +2282,14 @@ export class InlineSdkClient {
           throw new Error("getChat did not return a reliable peer identity")
         }
         this.rememberChatPeer(chatId, peer)
-        await this.requestCatchUpChat({ chatId, peer })
+        const requested = this.peerResolutionRequestedByChatId.get(chatId)
+        await this.requestCatchUpChat({
+          chatId,
+          peer,
+          ...(requested && !requested.toLatest && requested.endSeq != null
+            ? { updateSeq: requested.endSeq }
+            : {}),
+        })
       })
       .catch((error) => {
         this.markUpdateBucketDegraded({ kind: "chat", chatId })
@@ -2007,6 +2300,7 @@ export class InlineSdkClient {
       })
       .finally(() => {
         this.peerResolutionInFlightByChatId.delete(chatId)
+        this.peerResolutionRequestedByChatId.delete(chatId)
       })
     this.peerResolutionInFlightByChatId.set(chatId, task)
     return task
@@ -2048,7 +2342,106 @@ export class InlineSdkClient {
     }
   }
 
-  private async repairTooLongBucket(
+  private retainedBacklogSliceEnd(
+    bucket: InlineSdkUpdateBucketRef,
+    cursor: number,
+    serverSeq: number,
+  ): number | undefined {
+    if (!Number.isSafeInteger(serverSeq) || serverSeq <= cursor) {
+      this.markUpdateBucketDegraded(bucket)
+      this.log.warn?.("GET_UPDATES returned an invalid retained-backlog boundary; bucket remains degraded", {
+        bucket: this.updateBucketKey(bucket),
+        cursor,
+        serverSeq,
+      })
+      return undefined
+    }
+    return Math.min(serverSeq, cursor + defaultCatchUpTotalLimit)
+  }
+
+  private validateCatchUpPage(
+    payload: GetUpdatesResult,
+    startSeq: number,
+    bucket: InlineSdkUpdateBucketRef,
+  ): boolean | undefined {
+    if (payload.resultType !== GetUpdatesResult_ResultType.SLICE &&
+      payload.resultType !== GetUpdatesResult_ResultType.EMPTY) {
+      this.markUpdateBucketDegraded(bucket)
+      this.log.warn?.("GET_UPDATES returned an invalid page result type; bucket remains degraded", {
+        bucket: this.updateBucketKey(bucket),
+        resultType: payload.resultType,
+      })
+      return undefined
+    }
+
+    const deliveredSeq = Number(payload.seq)
+    if (!Number.isSafeInteger(deliveredSeq) || deliveredSeq < startSeq) {
+      this.markUpdateBucketDegraded(bucket)
+      this.log.warn?.("GET_UPDATES page moved backwards or returned an invalid seq; bucket remains degraded", {
+        bucket: this.updateBucketKey(bucket),
+        startSeq,
+        deliveredSeq,
+      })
+      return undefined
+    }
+
+    const accounted = new Set<number>()
+    for (const update of payload.updates) {
+      const seq = update.seq
+      if (!Number.isSafeInteger(seq) || seq == null || seq <= startSeq || seq > deliveredSeq || accounted.has(seq)) {
+        this.markUpdateBucketDegraded(bucket)
+        this.log.warn?.("GET_UPDATES page included an invalid or duplicate update seq; bucket remains degraded", {
+          bucket: this.updateBucketKey(bucket),
+          seq,
+        })
+        return undefined
+      }
+      accounted.add(seq)
+    }
+
+    let requiresSnapshotRepair = false
+    for (const skipped of payload.skippedSequences) {
+      const seq = Number(skipped.seq)
+      if (!Number.isSafeInteger(seq) || seq <= startSeq || seq > deliveredSeq || accounted.has(seq)) {
+        this.markUpdateBucketDegraded(bucket)
+        this.log.warn?.("GET_UPDATES page included an invalid or duplicate skipped seq; bucket remains degraded", {
+          bucket: this.updateBucketKey(bucket),
+          seq,
+        })
+        return undefined
+      }
+      accounted.add(seq)
+      switch (skipped.reason) {
+        case SyncSkippedSequence_Reason.IRRELEVANT_TO_BUCKET:
+          break
+        case SyncSkippedSequence_Reason.SNAPSHOT_REPAIR_REQUIRED:
+          requiresSnapshotRepair = true
+          break
+        case SyncSkippedSequence_Reason.REASON_UNSPECIFIED:
+        default:
+          this.markUpdateBucketDegraded(bucket)
+          this.log.warn?.("GET_UPDATES page included an unsupported skipped-sequence reason; bucket remains degraded", {
+            bucket: this.updateBucketKey(bucket),
+            reason: skipped.reason,
+          })
+          return undefined
+      }
+    }
+
+    if (accounted.size !== deliveredSeq - startSeq) {
+      this.markUpdateBucketDegraded(bucket)
+      this.log.warn?.("GET_UPDATES page did not account for every advanced sequence; bucket remains degraded", {
+        bucket: this.updateBucketKey(bucket),
+        startSeq,
+        deliveredSeq,
+        accounted: accounted.size,
+      })
+      return undefined
+    }
+    return requiresSnapshotRepair
+  }
+
+  private async repairUpdateBucketAuthoritatively(
     bucket: InlineSdkUpdateBucketRef,
     serverSeq: number,
     serverDate: bigint,
@@ -2060,7 +2453,7 @@ export class InlineSdkClient {
     const repair = this.options.repairUpdatesBucket
     if (!repair) {
       this.markUpdateBucketDegraded(bucket)
-      this.log.warn?.("GET_UPDATES exceeded bounded incremental repair; authoritative repair is required", {
+      this.log.warn?.("GET_UPDATES requires authoritative bucket repair; bucket remains degraded", {
         bucket: this.updateBucketKey(bucket),
         serverSeq,
       })
@@ -2111,6 +2504,14 @@ export class InlineSdkClient {
       const accepted = await this.handleUpdate(update, { source })
       if (accepted === true) continue
 
+      if (!this.isProjectedUpdateKind(update)) {
+        this.log.debug?.("GET_UPDATES advanced past an update this SDK does not project", {
+          bucket: this.updateBucketKey(bucket),
+          updateKind: update.update.oneofKind,
+        })
+        continue
+      }
+
       this.markUpdateBucketDegraded(bucket)
       this.log.warn?.("GET_UPDATES returned an update the SDK could not durably accept; cursor remains unchanged", {
         bucket: this.updateBucketKey(bucket),
@@ -2133,6 +2534,7 @@ export class InlineSdkClient {
     const key = this.updateBucketKey(bucket)
     this.degradedUpdateBuckets.delete(key)
     this.liveCursorFences.delete(key)
+    this.liveAdmittedSeqByBucket.delete(key)
   }
 
   private updateBucketKey(bucket: InlineSdkUpdateBucketRef): string {
