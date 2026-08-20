@@ -1,6 +1,6 @@
 # Acceptable Use Policy
 
-Last updated: May 15, 2026.
+Last updated: August 20, 2026.
 
 This Acceptable Use Policy applies to your use of Inline. It is part of the [Terms of Service](/legal/terms). You are responsible for your own conduct, Your Content, and the behavior of users, bots, integrations, agents, and applications you connect to Inline.
 
@@ -40,7 +40,7 @@ Good-faith security research is welcome when it is non-destructive, avoids acces
 
 ## Platform Integrity
 
-Do not scrape, crawl, index, mirror, benchmark, resell, sublicense, or use Inline in a way that harms service reliability or evades product limits unless we have given written permission. Do not reverse engineer non-public APIs or interfere with the operation of clients, servers, bots, SDKs, MCP tools, or integrations.
+Do not use automated access to scrape, crawl, index, or mirror Inline in a way that harms service reliability, accesses data without authorization, or evades product limits. Do not resell or sublicense the Services, reverse engineer non-public APIs, or interfere with the operation of clients, servers, bots, SDKs, MCP tools, or integrations unless we have given written permission or applicable law permits the activity.
 
 ## Privacy and Rights
 
@@ -48,8 +48,8 @@ Do not upload or share content unless you have the rights and permissions to do 
 
 ## AI, Bots, MCP, and Automation
 
-Automated systems connected to Inline must act within the permissions granted to them. Do not use AI agents, bots, MCP tools, scripts, or integrations to bypass this policy, impersonate users, exfiltrate workspace data, make high-impact decisions without human review, or generate content that would violate this policy if a human posted it.
+Automated systems connected to Inline must act within the permissions granted to them. Do not use AI agents, bots, MCP tools, scripts, or integrations to bypass this policy, impersonate users, exfiltrate space data, make high-impact decisions without human review, or generate content that would violate this policy if a human posted it.
 
 ## Enforcement
 
-We may remove content, disable integrations, revoke tokens, rate-limit requests, suspend accounts, preserve evidence, notify workspace administrators, or contact law enforcement when we believe this policy has been violated or when needed to protect users or the Services.
+We may remove content, disable integrations, revoke tokens, rate-limit requests, suspend accounts, preserve evidence, notify space administrators, or contact law enforcement when we believe this policy has been violated or when needed to protect users or the Services.

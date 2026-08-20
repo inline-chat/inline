@@ -1,6 +1,6 @@
 # Terms of Service
 
-Last updated: May 15, 2026.
+Last updated: August 20, 2026.
 
 These Terms of Service ("Terms") govern your access to and use of Inline's websites, apps, APIs, SDKs, bot surfaces, MCP server, and related services (the "Services"). By using Inline, you agree to these Terms and our [Privacy Policy](/legal/privacy).
 
@@ -12,7 +12,7 @@ You must be legally able to use the Services and to agree to these Terms. Inline
 
 ## 2. Accounts and Security
 
-You are responsible for your account and for activity under your credentials. Keep login codes, sessions, API tokens, bot tokens, MCP grants, and integration credentials secure. Notify us promptly if you believe your account or credentials have been compromised.
+You agree to provide accurate account information and keep it current. You are responsible for your account and for activity under your credentials. Keep login codes, sessions, API tokens, bot tokens, MCP grants, and integration credentials secure. Notify us promptly if you believe your account or credentials have been compromised.
 
 We may require verification, rate-limit requests, revoke sessions, or suspend access when needed to protect users or the Services.
 
@@ -20,19 +20,21 @@ We may require verification, rate-limit requests, revoke sessions, or suspend ac
 
 Inline is under active development. Features may change, be added, or be removed. We may modify, limit, suspend, or discontinue parts of the Services at any time.
 
+Subject to these Terms, Inline grants you a limited, non-exclusive, non-transferable, revocable right to access and use the Services for their intended purposes. This right does not transfer ownership of the Services or Inline's intellectual property to you.
+
 We try to keep Inline fast and reliable, but we do not guarantee uninterrupted availability, preservation of every draft or cached item, or compatibility with every device, operating system, integration, model, or third-party service.
 
 ## 4. Your Content
 
-"Your Content" means messages, files, profile information, workspace data, prompts, bot commands, integration data, and other content you submit to or process through Inline.
+"Your Content" means messages, files, profile information, space data, prompts, bot commands, integration data, and other content you submit to or process through Inline.
 
-You retain ownership of Your Content. You grant Inline a limited, worldwide, non-exclusive license to host, store, reproduce, transmit, display, process, and otherwise use Your Content only as needed to provide, secure, support, and improve the Services and as otherwise permitted by these Terms and our [Privacy Policy](/legal/privacy).
+You retain ownership of Your Content. You grant Inline a limited, worldwide, non-exclusive license to host, store, reproduce, transmit, display, and process Your Content only as needed to provide, secure, and support the Services you use, carry out your instructions, and comply with law, as described in these Terms and our [Privacy Policy](/legal/privacy).
 
 You are responsible for Your Content and for having the rights and permissions needed to submit it to Inline and share it with other users, bots, integrations, or third-party services.
 
-## 5. Organizations and Workspaces
+## 5. Organizations and Spaces
 
-If you join a space or workspace controlled by an organization, that organization may manage access, members, settings, integrations, exports, retention choices, and content available in that workspace. Inline is not responsible for an organization's own use of information it controls.
+If you join a space controlled by an organization, that organization and its space administrators may manage access, members, settings, integrations, retention controls, and content available in that space. Inline is not responsible for an organization's own use of information it controls.
 
 ## 6. Acceptable Use
 
@@ -46,7 +48,7 @@ Do not use developer features to access content without authorization, exfiltrat
 
 ## 8. AI-Assisted Features and Integrations
 
-Some features may use third-party AI providers or user-enabled integrations such as Notion, Linear, Loom, OpenAI, or Anthropic. You are responsible for choosing to use those features, for the content you submit to them, and for reviewing their output before relying on it.
+Some features may use third-party AI providers or user-enabled integrations such as Notion, Linear, Loom, or OpenAI. You are responsible for choosing to use those features, for the content you submit to them, and for reviewing their output before relying on it.
 
 AI-generated or integration-generated output may be incomplete, inaccurate, or inappropriate for your use case. Inline does not guarantee that any particular model, provider, integration, or output will be available or suitable.
 
@@ -92,10 +94,18 @@ To the maximum extent permitted by law, Inline's total liability for all claims 
 
 You will defend, indemnify, and hold Inline harmless from claims, damages, losses, liabilities, costs, and expenses arising from Your Content, your use of the Services, your integrations or bots, your violation of these Terms, or your violation of law or third-party rights.
 
-## 17. Changes
+## 17. Changes and Electronic Notices
 
 We may update these Terms from time to time. The latest version will be posted on this page. If a change is material, we will take reasonable steps to notify users. Continued use after changes take effect means you accept the updated Terms.
 
-## 18. Contact
+You agree that we may provide service and legal notices electronically, including by email, in-product notice, or a notice posted through the Services. These communications satisfy any legal requirement that a notice be in writing, to the extent permitted by law.
+
+## 18. General
+
+These Terms, together with the policies and agreements they incorporate, are the entire agreement between you and Inline about the Services unless a separate signed agreement applies. If a provision is unenforceable, it will be modified only to the extent necessary and the remaining provisions will continue in effect. A failure to enforce a provision is not a waiver.
+
+You may not assign these Terms without Inline's written consent. Inline may assign these Terms in connection with a merger, acquisition, corporate reorganization, or sale of all or substantially all relevant assets, or by operation of law.
+
+## 19. Contact
 
 Questions about these Terms can be sent to [hey@inline.chat](mailto:hey@inline.chat).

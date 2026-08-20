@@ -1,6 +1,6 @@
 # Data Processing Addendum
 
-Last updated: May 15, 2026.
+Last updated: August 20, 2026.
 
 This Data Processing Addendum ("DPA") is incorporated into the [Terms of Service](/legal/terms) or another written agreement between Inline and the customer using the Services ("Customer"). It applies when Inline processes Customer Personal Data on behalf of Customer and that processing is subject to Data Protection Laws.
 
@@ -8,7 +8,7 @@ If Customer has a separately signed data processing agreement with Inline, that 
 
 ## 1. Definitions
 
-"Customer Personal Data" means personal data contained in Customer content, workspace data, account records, integration data, or other information that Inline processes on behalf of Customer through the Services.
+"Customer Personal Data" means personal data contained in Customer content, space data, account records, integration data, or other information that Inline processes on behalf of Customer through the Services.
 
 "Data Protection Laws" means applicable privacy and data protection laws, which may include GDPR, UK GDPR, Swiss data protection law, CCPA/CPRA, and similar laws.
 
@@ -49,11 +49,11 @@ Processing includes hosting, storing, syncing, transmitting, encrypting, decrypt
 
 ### Categories of data subjects
 
-Data subjects may include Customer's users, workspace members, invited users, message recipients, contacts shared by users, bot operators, support contacts, and people mentioned in Customer content.
+Data subjects may include Customer's users, space members, invited users, message recipients, contacts shared by users, bot operators, support contacts, and people mentioned in Customer content.
 
 ### Types of personal data
 
-Customer Personal Data may include names, usernames, email addresses, phone numbers, profile photos, time zones, user IDs, workspace and chat membership, messages, files, media, reactions, integration metadata, device/session information, IP addresses, logs, and any other personal data Customer or its users submit to the Services.
+Customer Personal Data may include names, usernames, email addresses, phone numbers, profile photos, time zones, user IDs, space and chat membership, messages, files, media, reactions, integration metadata, device/session information, IP addresses, logs, and any other personal data Customer or its users submit to the Services.
 
 ## 5. Confidentiality
 
@@ -107,7 +107,11 @@ Inline and its Subprocessors may process Customer Personal Data in the United St
 
 ## 13. CCPA and Similar Laws
 
-Where CCPA/CPRA or similar US state privacy laws apply, Inline will not sell Customer Personal Data or share Customer Personal Data for cross-context behavioral advertising. Inline will process Customer Personal Data only for the business purposes described in this DPA, the agreement, and Customer's instructions.
+Where CCPA/CPRA or similar US state privacy laws apply, the parties intend for Inline to act as a service provider, contractor, or processor, as applicable. Customer discloses Customer Personal Data to Inline only for the limited and specified purposes of providing, securing, supporting, and improving the Services as described in this DPA, the agreement, and Customer's instructions.
+
+Inline will not sell Customer Personal Data or share it for cross-context behavioral advertising. Inline will not retain, use, or disclose Customer Personal Data outside the specific purposes and direct business relationship described above, or combine it with personal data received from another source or collected through Inline's independent interaction with a data subject, except as permitted by applicable law and necessary to provide the Services.
+
+Inline will provide the same level of privacy protection required of service providers, contractors, or processors under applicable law and will notify Customer if Inline determines it can no longer meet those obligations. Customer may take reasonable and appropriate steps to monitor compliance and, after notice, to stop and remediate unauthorized use of Customer Personal Data, subject to the audit protections in Section 11.
 
 ## 14. Liability and Conflict
 
@@ -124,7 +128,7 @@ If this DPA conflicts with the Terms of Service or another agreement, this DPA c
 | Processing subject matter | Work chat, file sharing, sync, search, notifications, APIs, SDKs, bots, MCP tools, and integrations. |
 | Processing frequency | Continuous while Customer uses the Services. |
 | Processing duration | The term of Customer's use of the Services plus backup, deletion, legal, security, and dispute-resolution periods. |
-| Data subject categories | Users, workspace members, invited users, message recipients, support contacts, bot operators, and people referenced in Customer content. |
+| Data subject categories | Users, space members, invited users, message recipients, support contacts, bot operators, and people referenced in Customer content. |
 | Personal data categories | Account data, profile data, chat content, files, media, metadata, integration data, device/session data, IP addresses, logs, and support data. |
 
 ## Annex B: Contact

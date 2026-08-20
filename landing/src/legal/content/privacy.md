@@ -1,10 +1,10 @@
 # Privacy Policy
 
-Last updated: May 15, 2026.
+Last updated: August 20, 2026.
 
 Inline is a work chat app for teams and communities. This Privacy Policy explains how Inline ("Inline", "we", "us", or "our") collects, uses, shares, and protects personal information when you use our websites, apps, APIs, SDKs, bot surfaces, MCP server, and related services (the "Services").
 
-This policy covers personal information we process for our own purposes. When an organization uses Inline for its workspace, it may control some workspace content and account settings. If your account is managed by an organization, contact that organization for questions about its own privacy practices.
+This policy covers personal information we process for our own purposes. When an organization uses Inline, it may control spaces you participate in, including their content, membership, settings, integrations, and retention controls. Contact that organization for questions about its own privacy practices.
 
 ## Information We Collect
 
@@ -12,7 +12,7 @@ This policy covers personal information we process for our own purposes. When an
 
 We collect information needed to create, secure, and operate your account, such as your name, username, email address, phone number, verification status, profile photo, time zone, and account settings.
 
-### Workspace and communication content
+### Space and communication content
 
 We process content you and other users create in Inline, including spaces, chats, messages, message edits, reactions, replies, attachments, files, photos, videos, voice messages, bot commands, message actions, thread metadata, and related records needed to sync and display conversations.
 
@@ -26,7 +26,20 @@ If you connect an integration or developer surface, we process the data needed t
 
 ### Support, feedback, and website data
 
-If you contact us, join a waitlist, report a bug, or send feedback, we collect the information you provide and related context needed to respond. Our website may collect basic technical and analytics data, such as page visits, device/browser details, referral information, and approximate location inferred from IP address.
+If you contact us, join a waitlist, report a bug, or send feedback, we collect the information you provide and related context needed to respond. We also process basic website and request data, such as IP address, device/browser details, referral information, page requests, and approximate location inferred from IP address.
+
+### Website preferences and local storage
+
+Our website uses a functional cookie and local storage to remember choices you request, such as language and appearance, and to maintain a device identifier used for service requests. These technologies are not used for advertising. If we add non-essential analytics or advertising technologies, we will update this policy and provide any consent controls required by law.
+
+## Sources of Information
+
+We receive personal information:
+
+- directly from you, including through your account, content, settings, support requests, and feedback
+- from other users or organizations, such as when they invite you, communicate with you, mention you, or administer a space you participate in
+- automatically from your device and your use of the Services
+- from providers and integrations you choose, such as Apple or Google sign-in, Notion, Linear, bots, or MCP clients
 
 ## How We Use Information
 
@@ -40,19 +53,28 @@ We use personal information to:
 - debug, monitor, and improve reliability and performance
 - comply with legal obligations and enforce our legal terms
 
-We do not sell personal information. We do not use workspace messages or files for advertising.
+## Legal Bases for Processing
+
+Where EEA, UK, or Swiss data protection law applies, we rely on one or more of these legal bases:
+
+- **Contract:** to create and secure your account and provide the Services you request.
+- **Legitimate interests:** to operate, support, secure, and improve the Services; prevent abuse; communicate with users; and understand reliability and performance, where those interests are not overridden by your rights.
+- **Legal obligations:** to comply with applicable law and valid legal process.
+- **Consent:** where we ask for it for a specific optional use. You may withdraw consent at any time, without affecting processing already completed.
+
+We do not sell personal information. We do not use messages or files for advertising.
 
 ## AI and User-Enabled Integrations
 
-Some Inline features can send selected content to third-party services at your request or as part of a feature you enable. For example, Inline may use OpenAI or Anthropic for AI-assisted actions, Notion or Linear for task workflows, Loom for link preview metadata, or Apple Push Notification service for notifications.
+Some Inline features can send selected content to third-party services at your request or as part of a feature you enable. For example, Inline may use OpenAI for AI-assisted actions, Notion or Linear for task workflows, Loom for link preview metadata, or Apple Push Notification service for notifications.
 
 We limit these transfers to the information needed for the requested feature. You are responsible for the third-party services you connect and for making sure you have permission to send content to them.
 
 ## How We Share Information
 
-### Other users and workspace participants
+### Other users and space participants
 
-Inline is a communication service. Your profile, messages, reactions, files, and activity may be visible to the people in the chats, spaces, bots, or integrations you use, depending on product behavior and workspace settings.
+Inline is a communication service. Your profile, messages, reactions, files, and activity may be visible to the people in the chats, spaces, bots, or integrations you use, depending on product behavior and space settings.
 
 ### Service providers and subprocessors
 
@@ -76,7 +98,7 @@ No internet service can guarantee absolute security. If you believe you found a 
 
 ## Retention
 
-We keep account information, workspace content, and integration data for as long as needed to provide the Services, comply with legal obligations, resolve disputes, enforce agreements, and maintain security. Deleted messages, accounts, or integrations are removed from active systems according to product behavior and may remain for a limited period in backups, logs, or audit records.
+We keep account information, space content, and integration data for as long as needed to provide the Services, comply with legal obligations, resolve disputes, enforce agreements, and maintain security. Deleted messages, accounts, or integrations are removed from active systems according to product behavior and may remain for a limited period in backups, logs, or audit records.
 
 System logs, crash reports, and operational telemetry are kept only as long as reasonably needed for security, debugging, and reliability. Some operational logs are designed to expire after approximately 90 days.
 
@@ -84,11 +106,11 @@ System logs, crash reports, and operational telemetry are kept only as long as r
 
 Depending on where you live, you may have rights to access, correct, export, delete, restrict, or object to processing of your personal information. You can also opt out of non-essential communications.
 
-You can request help with privacy rights by emailing [hey@inline.chat](mailto:hey@inline.chat). We may need to verify your identity before completing a request.
+You can request help with privacy rights by emailing [hey@inline.chat](mailto:hey@inline.chat). We may need to verify your identity before completing a request. Where applicable, you may also appeal our response to a request. We will not discriminate against you for exercising applicable privacy rights.
 
 California residents may have rights under the CCPA/CPRA, including the right to know, delete, correct, and opt out of sale or sharing. Inline does not sell personal information or share personal information for cross-context behavioral advertising.
 
-European Economic Area, United Kingdom, and Swiss residents may have GDPR-style rights, including access, correction, deletion, restriction, objection, portability, and the right to lodge a complaint with a supervisory authority.
+European Economic Area, United Kingdom, and Swiss residents may have GDPR-style rights, including access, correction, deletion, restriction, objection, portability, withdrawal of consent, and the right to lodge a complaint with a supervisory authority.
 
 ## Children
 
