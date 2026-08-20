@@ -1,6 +1,7 @@
 import Auth
 import Combine
 import InlineKit
+import InlineTheme
 import InlineUI
 import Logger
 import RealtimeV2
@@ -33,6 +34,7 @@ struct ChatView: View {
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
 
   @EnvironmentObject var data: DataManager
+  @EnvironmentObject private var themeManager: ThemeManager
   @EnvironmentObject private var notificationSettings: NotificationSettingsManager
   @EnvironmentObject private var realtimeState: RealtimeState
 
@@ -114,7 +116,7 @@ struct ChatView: View {
       if !preview {
         if translationPlacement == .toolbar {
           ToolbarItem(placement: .primaryAction) {
-            TranslationButton(peer: peerId, activeColor: ThemeManager.shared.accentColor)
+            TranslationButton(peer: peerId, activeColor: themeManager.accentColor)
           }
 
           if #available(iOS 26.0, *), peerId.isPrivate {
@@ -538,7 +540,8 @@ struct ChatView: View {
         draftMessage: fullChatViewModel.chatItem?.dialog.draftMessage,
         focusMessageID: focusMessageID,
         collapsedMaxId: fullChatViewModel.chatItem?.dialog.collapsedMaxId,
-        isPreview: preview
+        isPreview: preview,
+        theme: themeManager.snapshot(variant: ThemeAppearanceVariant(colorScheme: colorScheme))
       )
       .edgesIgnoringSafeArea(.all)
     }

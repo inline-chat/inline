@@ -21,7 +21,7 @@ struct EmptyHomeView: View {
             .overlay(alignment: .center) {
               HStack(spacing: 4) {
                 Text("@dena")
-                  .foregroundStyle(ColorManager.shared.swiftUIColor)
+                  .foregroundStyle(Color.accentColor)
                   .onTapGesture {
                     navigateToUser(getDenaOrMoUserId(username: "dena"))
                   }
@@ -31,7 +31,7 @@ struct EmptyHomeView: View {
                   .foregroundColor(.secondary)
 
                 Text("@mo")
-                  .foregroundStyle(ColorManager.shared.swiftUIColor)
+                  .foregroundStyle(Color.accentColor)
                   .onTapGesture {
                     navigateToUser(getDenaOrMoUserId(username: "mo"))
                   }

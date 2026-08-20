@@ -98,6 +98,7 @@ struct SpacePickerMenu: View {
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
+    .tint(.primary)
     .accessibilityLabel(title)
   }
 

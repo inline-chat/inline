@@ -18,7 +18,7 @@ struct ChatItemRow: View {
       HStack(alignment: .center, spacing: 0) {
         HStack(alignment: .center, spacing: 5) {
           Circle()
-            .fill(hasUnread ? ColorManager.shared.swiftUIColor : .clear)
+            .fill(hasUnread ? Color.accentColor : .clear)
             .frame(width: 6, height: 6)
             .animation(.easeInOut(duration: 0.3), value: hasUnread)
           ThreadIconView(

@@ -129,7 +129,7 @@ struct DirectChatItem: View {
   var unreadAndProfileView: some View {
     HStack(alignment: .center, spacing: 5) {
       Circle()
-        .fill(hasUnreadMessages ? ColorManager.shared.swiftUIColor : .clear)
+        .fill(hasUnreadMessages ? Color.accentColor : .clear)
         .frame(width: 8, height: 8)
         .animation(.easeInOut(duration: 0.3), value: hasUnreadMessages)
 

@@ -7,36 +7,20 @@ import Logger
 import SwiftUI
 import UIKit
 
-enum MessageBubbleTailSide: Equatable {
-  case none
-  case leading
-  case trailing
-}
-
 final class MessageBubbleView: UIView {
-  // Cropped from the trailing-side full-bubble SVG. `sourceBubbleEdgeX` is the
-  // bubble edge the visible tail tucks under before mirroring for leading tails.
-  private static let sourceSize = CGSize(width: 37, height: 52.4)
-  private static let sourceBubbleEdgeX: CGFloat = 19.5183
-  private static let sourceTailBottomY: CGFloat = 51.2853
-  static let cornerRadius: CGFloat = 18
-  static let minimumBodyHeight: CGFloat = cornerRadius * 2
-
-  private static var tailDrawScale: CGFloat {
-    cornerRadius / sourceTailBottomY
-  }
-
-  private static var exposedTailWidth: CGFloat {
-    (sourceSize.width - sourceBubbleEdgeX) * tailDrawScale
-  }
+  static let cornerRadius = MessageBubbleGeometry.cornerRadius
+  static let minimumBodyHeight = MessageBubbleGeometry.minimumBodyHeight
 
   static func tailWidth(for side: MessageBubbleTailSide) -> CGFloat {
-    side == .none ? 0 : exposedTailWidth
+    MessageBubbleGeometry.tailWidth(for: side)
   }
 
   let contentView = UIView()
 
   private let fillLayer = CAShapeLayer()
+  private let lightingLayer = CAGradientLayer()
+  private var lightingAlphas: (top: CGFloat, bottom: CGFloat)?
+  private var lightingVector: (startY: CGFloat, endY: CGFloat)?
   private var colorTraitRegistration: UITraitChangeRegistration?
   private var contentLeadingConstraint: NSLayoutConstraint?
   private var contentTrailingConstraint: NSLayoutConstraint?
@@ -61,7 +45,13 @@ final class MessageBubbleView: UIView {
     layer.cornerRadius = Self.cornerRadius
     fillLayer.contentsScale = UIScreen.main.scale
     fillLayer.fillRule = .nonZero
-    layer.insertSublayer(fillLayer, at: 0)
+    fillLayer.fillColor = UIColor.black.cgColor
+
+    lightingLayer.type = .axial
+    lightingLayer.locations = [0, 1]
+    lightingLayer.isHidden = true
+    lightingLayer.mask = fillLayer
+    layer.insertSublayer(lightingLayer, at: 0)
 
     contentView.translatesAutoresizingMaskIntoConstraints = false
     contentView.backgroundColor = .clear
@@ -93,7 +83,9 @@ final class MessageBubbleView: UIView {
 
   func configure(side: MessageBubbleTailSide, animated: Bool = false) {
     guard self.side != side else { return }
-    let removedTailPath = animated && side == .none ? tailPathOnly(for: self.side, in: bounds) : nil
+    let removedTailPath = animated && side == .none
+      ? MessageBubbleGeometry.tailPathOnly(for: self.side, in: bounds)
+      : nil
     self.side = side
     updateContentInsets()
     updateShape()
@@ -109,7 +101,47 @@ final class MessageBubbleView: UIView {
   }
 
   func visiblePath() -> UIBezierPath {
-    bubblePath(in: bounds)
+    MessageBubbleGeometry.path(in: bounds, side: side)
+  }
+
+  func configureContinuousGradient(topAlpha: CGFloat, bottomAlpha: CGFloat) {
+    if let lightingAlphas,
+       abs(lightingAlphas.top - topAlpha) <= 0.0001,
+       abs(lightingAlphas.bottom - bottomAlpha) <= 0.0001 {
+      return
+    }
+
+    lightingAlphas = (topAlpha, bottomAlpha)
+    updateGradientColors()
+  }
+
+  func updateContinuousGradient(startY: CGFloat, endY: CGFloat) {
+    guard lightingAlphas != nil else { return }
+    if let lightingVector,
+       abs(lightingVector.startY - startY) <= 0.0001,
+       abs(lightingVector.endY - endY) <= 0.0001 {
+      return
+    }
+
+    lightingVector = (startY, endY)
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    lightingLayer.startPoint = CGPoint(x: 0.5, y: startY)
+    lightingLayer.endPoint = CGPoint(x: 0.5, y: endY)
+    lightingLayer.isHidden = resolvedFillColor.cgColor.alpha <= 0.01
+    CATransaction.commit()
+  }
+
+  func clearContinuousGradient() {
+    guard lightingAlphas != nil || lightingVector != nil else { return }
+    lightingAlphas = nil
+    lightingVector = nil
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    lightingLayer.startPoint = CGPoint(x: 0.5, y: 0)
+    lightingLayer.endPoint = CGPoint(x: 0.5, y: 1)
+    CATransaction.commit()
+    updateGradientColors()
   }
 
   private var resolvedFillColor: UIColor {
@@ -121,17 +153,7 @@ final class MessageBubbleView: UIView {
   }
 
   private var contentRect: CGRect {
-    contentRect(for: side, in: bounds)
-  }
-
-  private func contentRect(for side: MessageBubbleTailSide, in rect: CGRect) -> CGRect {
-    let tailWidth = Self.tailWidth(for: side)
-    return rect.inset(by: UIEdgeInsets(
-      top: 0,
-      left: side == .leading ? tailWidth : 0,
-      bottom: 0,
-      right: side == .trailing ? tailWidth : 0
-    ))
+    MessageBubbleGeometry.contentRect(for: side, in: bounds)
   }
 
   private func updateContentInsets() {
@@ -141,13 +163,27 @@ final class MessageBubbleView: UIView {
 
   private func updateShape() {
     let color = resolvedFillColor
+    let path = visiblePath().cgPath
 
     CATransaction.begin()
     CATransaction.setDisableActions(true)
+    lightingLayer.frame = bounds
     fillLayer.frame = bounds
-    fillLayer.fillColor = color.cgColor
-    fillLayer.path = visiblePath().cgPath
-    fillLayer.isHidden = color.cgColor.alpha <= 0.01
+    fillLayer.path = path
+    lightingLayer.isHidden = color.cgColor.alpha <= 0.01
+    CATransaction.commit()
+    updateGradientColors()
+  }
+
+  private func updateGradientColors() {
+    let color = resolvedFillColor
+    let top = color.mixedWithWhite(alpha: lightingAlphas?.top ?? 0)
+    let bottom = color.mixedWithWhite(alpha: lightingAlphas?.bottom ?? 0)
+
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    lightingLayer.colors = [top.cgColor, bottom.cgColor]
+    lightingLayer.isHidden = color.cgColor.alpha <= 0.01
     CATransaction.commit()
   }
 
@@ -155,22 +191,38 @@ final class MessageBubbleView: UIView {
     let color = resolvedFillColor
     guard color.cgColor.alpha > 0.01 else { return }
 
-    let fadeLayer = CAShapeLayer()
-    fadeLayer.contentsScale = UIScreen.main.scale
-    fadeLayer.fillColor = color.cgColor
+    let fadeLayer: CALayer
+    if lightingAlphas != nil {
+      let gradient = CAGradientLayer()
+      gradient.type = .axial
+      gradient.colors = lightingLayer.colors
+      gradient.locations = lightingLayer.locations
+      gradient.startPoint = lightingLayer.startPoint
+      gradient.endPoint = lightingLayer.endPoint
+
+      let tailMask = CAShapeLayer()
+      tailMask.contentsScale = UIScreen.main.scale
+      tailMask.fillColor = UIColor.black.cgColor
+      tailMask.frame = bounds
+      tailMask.path = path.cgPath
+      gradient.mask = tailMask
+      fadeLayer = gradient
+    } else {
+      let shape = CAShapeLayer()
+      shape.contentsScale = UIScreen.main.scale
+      shape.fillColor = color.cgColor
+      shape.path = path.cgPath
+      fadeLayer = shape
+    }
     fadeLayer.opacity = 1
 
     if let superview {
       let origin = convert(bounds.origin, to: superview)
-      let translatedPath = UIBezierPath(cgPath: path.cgPath)
-      translatedPath.apply(CGAffineTransform(translationX: origin.x, y: origin.y))
-      fadeLayer.frame = superview.layer.bounds
-      fadeLayer.path = translatedPath.cgPath
+      fadeLayer.frame = CGRect(origin: origin, size: bounds.size)
       superview.layer.insertSublayer(fadeLayer, above: layer)
     } else {
       fadeLayer.frame = bounds
-      fadeLayer.path = path.cgPath
-      layer.insertSublayer(fadeLayer, above: fillLayer)
+      layer.insertSublayer(fadeLayer, above: lightingLayer)
     }
 
     let animation = CABasicAnimation(keyPath: "opacity")
@@ -189,148 +241,23 @@ final class MessageBubbleView: UIView {
       fadeLayer?.removeFromSuperlayer()
     }
   }
+}
 
-  private func bubblePath(in rect: CGRect) -> UIBezierPath {
-    let contentRect = contentRect.intersection(rect)
-    guard !contentRect.isNull, contentRect.width > 0, contentRect.height > 0 else {
-      return UIBezierPath()
-    }
-
-    let path = roundedBodyPath(in: contentRect)
-    guard side != .none else { return path }
-    guard let tailRect = tailRect(for: side, contentRect: contentRect) else { return path }
-
-    path.append(tailPath(for: side, in: tailRect))
-    return path
-  }
-
-  private func roundedBodyPath(in rect: CGRect) -> UIBezierPath {
-    let radius = min(Self.cornerRadius, rect.width / 2, rect.height / 2)
-    let control = radius * 0.552_284_749_8
-    let path = UIBezierPath()
-
-    path.move(to: CGPoint(x: rect.minX + radius, y: rect.minY))
-    path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
-    path.addCurve(
-      to: CGPoint(x: rect.maxX, y: rect.minY + radius),
-      controlPoint1: CGPoint(x: rect.maxX - radius + control, y: rect.minY),
-      controlPoint2: CGPoint(x: rect.maxX, y: rect.minY + radius - control)
+private extension UIColor {
+  func mixedWithWhite(alpha: CGFloat) -> UIColor {
+    let fraction = min(max(alpha, 0), 1)
+    guard fraction > 0 else { return self }
+    var red: CGFloat = 0
+    var green: CGFloat = 0
+    var blue: CGFloat = 0
+    var colorAlpha: CGFloat = 0
+    guard getRed(&red, green: &green, blue: &blue, alpha: &colorAlpha) else { return self }
+    return UIColor(
+      red: red + (1 - red) * fraction,
+      green: green + (1 - green) * fraction,
+      blue: blue + (1 - blue) * fraction,
+      alpha: colorAlpha
     )
-    path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - radius))
-    path.addCurve(
-      to: CGPoint(x: rect.maxX - radius, y: rect.maxY),
-      controlPoint1: CGPoint(x: rect.maxX, y: rect.maxY - radius + control),
-      controlPoint2: CGPoint(x: rect.maxX - radius + control, y: rect.maxY)
-    )
-    path.addLine(to: CGPoint(x: rect.minX + radius, y: rect.maxY))
-    path.addCurve(
-      to: CGPoint(x: rect.minX, y: rect.maxY - radius),
-      controlPoint1: CGPoint(x: rect.minX + radius - control, y: rect.maxY),
-      controlPoint2: CGPoint(x: rect.minX, y: rect.maxY - radius + control)
-    )
-    path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + radius))
-    path.addCurve(
-      to: CGPoint(x: rect.minX + radius, y: rect.minY),
-      controlPoint1: CGPoint(x: rect.minX, y: rect.minY + radius - control),
-      controlPoint2: CGPoint(x: rect.minX + radius - control, y: rect.minY)
-    )
-    path.close()
-    return path
-  }
-
-  private func tailPathOnly(for side: MessageBubbleTailSide, in rect: CGRect) -> UIBezierPath? {
-    let contentRect = contentRect(for: side, in: rect)
-    guard side != .none, !contentRect.isNull, contentRect.width > 0, contentRect.height > 0 else {
-      return nil
-    }
-    guard let tailRect = tailRect(for: side, contentRect: contentRect) else { return nil }
-
-    return tailPath(for: side, in: tailRect)
-  }
-
-  private func tailRect(for side: MessageBubbleTailSide, contentRect: CGRect) -> CGRect? {
-    let drawSize = CGSize(
-      width: Self.sourceSize.width * Self.tailDrawScale,
-      height: Self.sourceSize.height * Self.tailDrawScale
-    )
-    // The source tail's top edge is scaled to the shared corner radius, so this
-    // lands its shoulder exactly on the rounded body's vertical tangent.
-    let tailY = contentRect.maxY - Self.sourceTailBottomY * Self.tailDrawScale
-
-    let tailRect: CGRect
-    switch side {
-    case .none:
-      return nil
-    case .leading:
-      tailRect = CGRect(
-        x: contentRect.minX - Self.exposedTailWidth,
-        y: tailY,
-        width: drawSize.width,
-        height: drawSize.height
-      )
-    case .trailing:
-      tailRect = CGRect(
-        x: contentRect.maxX + Self.exposedTailWidth - drawSize.width,
-        y: tailY,
-        width: drawSize.width,
-        height: drawSize.height
-      )
-    }
-
-    return tailRect
-  }
-
-  private func tailPath(for side: MessageBubbleTailSide, in rect: CGRect) -> UIBezierPath {
-    let scaleX = rect.width / Self.sourceSize.width
-    let scaleY = rect.height / Self.sourceSize.height
-
-    func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
-      let resolvedX: CGFloat = switch side {
-      case .leading:
-        rect.maxX - x * scaleX
-      case .none, .trailing:
-        rect.minX + x * scaleX
-      }
-      return CGPoint(x: resolvedX, y: rect.minY + y * scaleY)
-    }
-
-    let path = UIBezierPath()
-    path.move(to: point(19.4761, 6.9846))
-    path.addCurve(
-      to: point(19.5183, 0),
-      controlPoint1: point(19.5041, 6.3302),
-      controlPoint2: point(19.5183, 0.6611)
-    )
-    path.addLine(to: point(0, 0))
-    path.addLine(to: point(0, 39.8152))
-    path.addCurve(
-      to: point(36.1476, 50.9938),
-      controlPoint1: point(8.3867, 48.2023),
-      controlPoint2: point(22.1067, 52.3205)
-    )
-    path.addCurve(
-      to: point(36.5785, 50.7275),
-      controlPoint1: point(36.3267, 50.9769),
-      controlPoint2: point(36.4868, 50.878)
-    )
-    path.addCurve(
-      to: point(36.3805, 49.9764),
-      controlPoint1: point(36.7373, 50.4669),
-      controlPoint2: point(36.6487, 50.1307)
-    )
-    path.addLine(to: point(35.3668, 49.3821))
-    path.addCurve(
-      to: point(22.3321, 37.0489),
-      controlPoint1: point(28.7234, 45.413),
-      controlPoint2: point(24.3785, 41.3021)
-    )
-    path.addCurve(
-      to: point(19.4761, 6.9846),
-      controlPoint1: point(20.1278, 32.4675),
-      controlPoint2: point(19.1757, 22.4468)
-    )
-    path.close()
-    return side == .trailing ? path.reversing() : path
   }
 }
 
@@ -411,7 +338,7 @@ extension UIMessageView {
   func createForwardHeaderLabel() -> UILabel {
     let label = UILabel()
     label.font = .preferredFont(forTextStyle: .caption1)
-    label.textColor = ThemeManager.shared.selected.accent
+    label.textColor = theme.primary.uiColor
     label.numberOfLines = 1
     label.lineBreakMode = .byTruncatingTail
     label.setContentCompressionResistancePriority(.required, for: .vertical)

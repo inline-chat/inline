@@ -1,6 +1,7 @@
 import AppKit
 import Cocoa
 import Foundation
+import InlineTheme
 import SwiftUI
 
 // System colors: https://gist.github.com/andrejilderda/8677c565cddc969e6aae7df48622d47c
@@ -224,25 +225,22 @@ public enum Theme {
     semanticColor(role: .bubble)
   }
 
-  public static let messageBubbleGradientTopOverlayAlpha: CGFloat = 0.26
-  public static let messageBubbleGradientBottomOverlayAlpha: CGFloat = 0.02
+  public static let messageBubbleGradientTopOverlayAlpha = CGFloat(
+    ThemeCatalog.messageBubbleGradientTopOverlayAlpha
+  )
+  public static let messageBubbleGradientBottomOverlayAlpha = CGFloat(
+    ThemeCatalog.messageBubbleGradientBottomOverlayAlpha
+  )
 
   public static func messageBubbleGradientOverlayAlphas(
     variant: ThemeAppearanceVariant,
     outgoing: Bool
   ) -> (top: CGFloat, bottom: CGFloat) {
-    guard variant == .dark else {
-      return (messageBubbleGradientTopOverlayAlpha, messageBubbleGradientBottomOverlayAlpha)
-    }
-
-    // Dark bubbles need a quieter lighting range than Light. Incoming neutral
-    // surfaces take less white than outgoing colored surfaces so they do not
-    // swing from washed out at the top to nearly black at the bottom.
-    let strength: CGFloat = outgoing ? 0.6 : 0.4
-    return (
-      messageBubbleGradientTopOverlayAlpha * strength,
-      messageBubbleGradientBottomOverlayAlpha * strength
+    let alphas = ThemeCatalog.messageBubbleGradientOverlayAlphas(
+      variant: variant,
+      outgoing: outgoing
     )
+    return (CGFloat(alphas.top), CGFloat(alphas.bottom))
   }
 
   public static func messageBubbleGradientOverlayAlphas(
@@ -268,9 +266,11 @@ public enum Theme {
     variant: ThemeAppearanceVariant,
     outgoing: Bool
   ) -> CGFloat {
-    let progress = min(max(fraction, 0), 1)
-    let alphas = messageBubbleGradientOverlayAlphas(variant: variant, outgoing: outgoing)
-    return alphas.top + (alphas.bottom - alphas.top) * progress
+    CGFloat(ThemeCatalog.messageBubbleGradientOverlayAlpha(
+      atViewportFraction: Double(fraction),
+      variant: variant,
+      outgoing: outgoing
+    ))
   }
 
   public static var messageBubbleSecondaryBgColor: NSColor {
@@ -286,20 +286,7 @@ public enum Theme {
     variant: ThemeAppearanceVariant,
     userDefaults: UserDefaults = .standard
   ) -> ThemeColorValue {
-    if preset == .system {
-      if variant == .light {
-        return .init(rgb: 0xECECEC)
-      }
-    }
-
-    // Incoming bubbles are a neutral supporting surface, not a third authored
-    // theme color. Styled Light themes share a clean gray; every dark theme uses
-    // OpenCode V2's neutral grey-900. Combined with the quieter Dark incoming
-    // lighting, its midpoint stays close to the earlier lower-window tone.
-    if variant == .light {
-      return .init(rgb: 0xEAEAEA)
-    }
-    return .init(rgb: 0x2E2E2E)
+    ThemeCatalog.secondaryBubble(preset: preset, variant: variant)
   }
 
   public static var messageBubbleSecondaryTextColor: NSColor {
@@ -438,85 +425,14 @@ public enum Theme {
     preset: AppThemePreset,
     variant: ThemeAppearanceVariant
   ) -> ThemePalette {
-    switch (preset, variant) {
-    // User-supplied iMessage bottom capture for light; Apple system blue for dark.
-    case (.system, .light):
-      ThemePalette(
-        primary: .init(rgb: 0x00A7F8),
-        canvas: .init(nsColor: .windowBackgroundColor, appearance: variant.nsAppearance)
+    ThemeCatalog.palette(
+      preset: preset,
+      variant: variant,
+      systemCanvas: ThemeColorValue(
+        nsColor: .windowBackgroundColor,
+        appearance: variant.nsAppearance
       )
-    case (.system, .dark):
-      ThemePalette(
-        primary: .init(rgb: 0x0A84FF),
-        canvas: .init(nsColor: .windowBackgroundColor, appearance: variant.nsAppearance)
-      )
-    // OpenCode Lucent Orng: https://github.com/anomalyco/opencode
-    case (.sunset, .light):
-      ThemePalette(
-        primary: .init(rgb: 0xC94D24),
-        canvas: .init(rgb: 0xFFF5F0)
-      )
-    case (.sunset, .dark):
-      ThemePalette(
-        primary: .init(rgb: 0xC94D24),
-        canvas: .init(rgb: 0x2A1A15)
-      )
-    // GitHub Primer default light/dark canvases and action blue.
-    case (.midnight, .light):
-      ThemePalette(
-        primary: .init(rgb: 0x0969DA),
-        canvas: .init(rgb: 0xFFFFFF)
-      )
-    case (.midnight, .dark):
-      ThemePalette(
-        primary: .init(rgb: 0x0969DA),
-        canvas: .init(rgb: 0x0D1117)
-      )
-    // Linear Ash surface/text pair; its dark canvas comes from Linear Midnight.
-    case (.ash, .light):
-      ThemePalette(
-        primary: .init(rgb: 0x44494D),
-        canvas: .init(rgb: 0xFFFFFF)
-      )
-    case (.ash, .dark):
-      ThemePalette(
-        primary: .init(rgb: 0x44494D),
-        canvas: .init(rgb: 0x151516)
-      )
-    // Flexoki palette by Steph Ango: https://github.com/kepano/flexoki (MIT).
-    case (.flexoki, .light):
-      ThemePalette(
-        primary: .init(rgb: 0x205EA6),
-        canvas: .init(rgb: 0xFFFCF0)
-      )
-    case (.flexoki, .dark):
-      ThemePalette(
-        primary: .init(rgb: 0x205EA6),
-        canvas: .init(rgb: 0x100F0F)
-      )
-    // Linear Pale primary with its Barbie Dreamhouse and Pale surfaces.
-    case (.pastel, .light):
-      ThemePalette(
-        primary: .init(rgb: 0x7D57C1),
-        canvas: .init(rgb: 0xE2DAF1)
-      )
-    case (.pastel, .dark):
-      ThemePalette(
-        primary: .init(rgb: 0x7D57C1),
-        canvas: .init(rgb: 0x292D3E)
-      )
-    // OpenCode V2 purple-700 with OC-2 neutral endpoints.
-    case (.neonNoir, .light):
-      ThemePalette(
-        primary: .init(rgb: 0x623BE2),
-        canvas: .init(rgb: 0xF7F7F7)
-      )
-    case (.neonNoir, .dark):
-      ThemePalette(
-        primary: .init(rgb: 0x623BE2),
-        canvas: .init(rgb: 0x080808)
-      )
-    }
+    )
   }
 
   // MARK: - Devtools

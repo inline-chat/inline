@@ -4,6 +4,7 @@ import Combine
 import GRDB
 import InlineIOSUI
 import InlineKit
+import InlineTheme
 import struct InlineProtocol.MessageAction
 import struct InlineProtocol.MessageActionRow
 import struct InlineProtocol.MessageEntities
@@ -32,6 +33,7 @@ class UIMessageView: UIView {
   let displayMode: MessageDisplayMode
   private let maximumBubbleContentWidth: CGFloat
   private var bubbleTailSide: MessageBubbleTailSide
+  private(set) var theme: IOSThemeSnapshot
   private var translationCancellable: AnyCancellable?
   private var messageActionLoadingCancellable: AnyCancellable?
   private var messageActionAnsweredCancellable: AnyCancellable?
@@ -85,24 +87,24 @@ class UIMessageView: UIView {
     } else if outgoing {
       // Show red bubble for failed messages using theme-aware color
       if message.status == .failed {
-        ThemeManager.shared.selected.failedBubbleBackground
+        UIColor.systemRed
       } else {
-        ThemeManager.shared.selected.bubbleBackground
+        theme.outgoingBubble.uiColor
       }
     } else {
-      ThemeManager.shared.selected.incomingBubbleBackground
+      theme.incomingBubble.uiColor
     }
   }
 
   var textColor: UIColor {
-    MessageRichTextRenderer.primaryColor(for: outgoing)
+    outgoing ? .white : theme.incomingText.uiColor
   }
 
   private var forwardHeaderTextColor: UIColor {
     if outgoing, bubbleColor != .clear {
       return .white
     }
-    return ThemeManager.shared.selected.accent
+    return theme.primary.uiColor
   }
 
   private var forwardHeaderTitle: String {
@@ -180,6 +182,13 @@ class UIMessageView: UIView {
       && message.forwardFromUserId == nil
       && message.repliedToMessageId == nil
   }
+
+  private lazy var supportsContinuousBubbleGradient =
+    !message.isServiceMessage &&
+    message.status != .failed &&
+    !isEmojiOnlyMessage &&
+    !isSticker &&
+    !shouldClearBubbleForMedia
 
   var isSticker: Bool {
     fullMessage.message.isSticker == true
@@ -353,7 +362,7 @@ class UIMessageView: UIView {
   }
 
   private var transparentOutgoingReactionOverrides: (primary: UIColor, secondary: UIColor) {
-    let baseColor = ThemeManager.shared.selected.reactionIncomingSecoundry ?? .systemGray5
+    let baseColor = theme.incomingBubble.uiColor
     let primary = darkenedColor(baseColor, amount: 0.08)
     let secondary = darkenedColor(baseColor, amount: 0.04)
     return (primary, secondary)
@@ -446,6 +455,7 @@ class UIMessageView: UIView {
     displayMode: MessageDisplayMode = .normal,
     bubbleTailSide: MessageBubbleTailSide = .none,
     maximumBubbleContentWidth: CGFloat,
+    theme: IOSThemeSnapshot,
     animatedReactionEmoji: String? = nil
   ) {
     self.fullMessage = fullMessage
@@ -453,6 +463,7 @@ class UIMessageView: UIView {
     self.displayMode = displayMode
     self.bubbleTailSide = bubbleTailSide
     self.maximumBubbleContentWidth = maximumBubbleContentWidth
+    self.theme = theme
     self.pendingAnimatedReactionEmoji = animatedReactionEmoji
 
     super.init(frame: .zero)
@@ -617,7 +628,7 @@ class UIMessageView: UIView {
   private func serviceTextColor(for tone: MessageServiceDisplaySegment.Tone) -> UIColor {
     switch tone {
       case .secondary:
-        return ThemeManager.shared.selected.secondaryTextColor ?? .secondaryLabel
+        return theme.incomingSecondaryText.uiColor
       case .tertiary:
         return .tertiaryLabel
     }
@@ -665,6 +676,36 @@ class UIMessageView: UIView {
 
   public func refreshAppearance() {
     setupAppearance()
+  }
+
+  func applyTheme(_ theme: IOSThemeSnapshot) {
+    guard self.theme != theme else { return }
+    self.theme = theme
+    if message.isServiceMessage {
+      serviceLabel.attributedText = serviceAttributedText()
+      return
+    }
+    setupAppearance()
+    forwardHeaderLabel.textColor = forwardHeaderTextColor
+  }
+
+  func updateContinuousBubbleGradient(in viewport: UIView) {
+    guard supportsContinuousBubbleGradient else { return }
+
+    let bubbleFrame = bubbleView.convert(bubbleView.bounds, to: viewport).standardized
+    let viewportBounds = viewport.bounds.standardized
+    guard bubbleFrame.height > 0, viewportBounds.height > 0 else { return }
+
+    guard let vector = ThemeCatalog.bubbleGradientVector(
+      bubbleMinY: Double(bubbleFrame.minY),
+      bubbleHeight: Double(bubbleFrame.height),
+      viewportMinY: Double(viewportBounds.minY),
+      viewportHeight: Double(viewportBounds.height)
+    ) else { return }
+    bubbleView.updateContinuousGradient(
+      startY: CGFloat(vector.startY),
+      endY: CGFloat(vector.endY)
+    )
   }
 
   func reset() {
@@ -2215,6 +2256,16 @@ class UIMessageView: UIView {
     bubbleView.backgroundColor = bubbleColor
     updateBubbleShape()
 
+    if !supportsContinuousBubbleGradient {
+      bubbleView.clearContinuousGradient()
+    } else {
+      let lighting = outgoing ? theme.outgoingLighting : theme.incomingLighting
+      bubbleView.configureContinuousGradient(
+        topAlpha: CGFloat(lighting.top),
+        bottomAlpha: CGFloat(lighting.bottom)
+      )
+    }
+
     messageLabel.attributedText = attributedMessageText()
   }
 
@@ -2239,7 +2290,7 @@ class UIMessageView: UIView {
     return width
   }()
 
-  private lazy var attributedMessageCacheKey: NSString? = {
+  private var attributedMessageCacheKey: NSString? {
     guard let text = fullMessage.displayText else { return nil }
 
     let entities = fullMessage.translationEntities ?? fullMessage.message.entities
@@ -2247,9 +2298,11 @@ class UIMessageView: UIView {
       "\(entities)",
       "\(message.stableId)",
       text,
-      MessageRichTextRenderer.cacheKey(for: outgoing),
+      theme.preset.rawValue,
+      theme.variant.rawValue,
+      outgoing ? "outgoing" : "incoming",
     ].joined(separator: "-") as NSString
-  }()
+  }
 
   private func attributedMessageText() -> NSAttributedString? {
     guard let text = fullMessage.displayText,
@@ -2274,7 +2327,11 @@ class UIMessageView: UIView {
       entities: entities,
       configuration: .init(
         font: font,
-        palette: MessageRichTextRenderer.palette(for: outgoing),
+        palette: .init(
+          primaryColor: textColor,
+          linkColor: outgoing ? .white : theme.primary.uiColor,
+          secondaryColor: outgoing ? UIColor.white.withAlphaComponent(0.7) : theme.incomingSecondaryText.uiColor
+        ),
         codeBlockBackgroundColor: codeBlockBackgroundColor,
         inlineCodeBackgroundColor: inlineCodeBackgroundColor
       )
@@ -2342,7 +2399,7 @@ class UIMessageView: UIView {
     // Use centralized LinkDetector for consistent link detection
     LinkDetector.shared.applyLinkStyling(
       to: attributedString,
-      linkColor: MessageRichTextRenderer.linkColor(for: outgoing)
+      linkColor: outgoing ? .white : theme.primary.uiColor
     )
   }
 

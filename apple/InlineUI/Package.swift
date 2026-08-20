@@ -20,6 +20,7 @@ let package = Package(
   ],
 
   products: [
+    .library(name: "InlineTheme", targets: ["InlineTheme"]),
     .library(name: "InlineAvatarRendering", targets: ["InlineAvatarRendering"]),
     .library(name: "InlineIntents", targets: ["InlineIntents"]),
     .library(name: "InlineUI", targets: ["InlineUI"]),
@@ -37,6 +38,12 @@ let package = Package(
   ],
 
   targets: [
+    .target(
+      name: "InlineTheme",
+      dependencies: [],
+      swiftSettings: swiftSettings
+    ),
+
     .target(
       name: "InlineAvatarRendering",
       dependencies: [
@@ -104,6 +111,12 @@ let package = Package(
     .testTarget(
       name: "InlineUITests",
       dependencies: ["InlineUI", "EmojiAutocomplete", "TextProcessing", "Translation"],
+      swiftSettings: swiftSettings
+    ),
+
+    .testTarget(
+      name: "InlineThemeTests",
+      dependencies: ["InlineTheme"],
       swiftSettings: swiftSettings
     ),
 

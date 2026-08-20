@@ -126,7 +126,7 @@ struct Spinner: View {
   @State private var isRotating = false
   @State private var trimEnd = 0.75
 
-  var color: Color = ColorManager.shared.swiftUIColor
+  var color: Color = .accentColor
   var secondaryColor: Color? = nil
   var lineWidth: CGFloat = 3
   var size: CGFloat = 50

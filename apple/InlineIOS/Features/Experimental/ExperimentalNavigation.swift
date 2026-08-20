@@ -323,6 +323,7 @@ struct ExperimentalHomeView: View {
   @AppStorage private var pinnedExpanded: Bool
 
   @EnvironmentObject private var homeListStore: ExperimentalHomeListStore
+  @EnvironmentObject private var themeManager: ThemeManager
 
   @AppStorage(ExperimentalHomePreferenceKeys.chatItemRenderMode)
   private var chatItemRenderModeRaw = ExperimentalHomeChatItemRenderMode.twoLineLastMessage.rawValue
@@ -409,9 +410,13 @@ struct ExperimentalHomeView: View {
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(Color(.systemBackground))
+    .background(homeCanvas)
     .navigationBarTitleDisplayMode(.inline)
     .navigationTitle(initialTab == .archived ? Text("Archived Chats") : Text(""))
+  }
+
+  private var homeCanvas: Color {
+    Color(themeManager.selected.backgroundColor)
   }
 
   private var chatItemRenderMode: ExperimentalHomeChatItemRenderMode {
@@ -543,6 +548,8 @@ private struct ExperimentalChatListView: View {
           }
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color.clear)
         .contentMargins(.top, listTopContentMargin, for: .scrollContent)
         .contentMargins(.bottom, 32, for: .scrollContent)
         .listSectionSpacing(.custom(listSectionSpacing))
@@ -646,6 +653,7 @@ private struct ExperimentalChatListView: View {
         // Keep spacing inside the link so its tap and context-menu source
         // cover the complete native List row rather than only its contents.
         .listRowInsets(EdgeInsets())
+        .listRowBackground(Color.clear)
     }
   }
 
@@ -1394,7 +1402,6 @@ private struct ExperimentalEmptyStateView: View {
         .padding(.horizontal, 24)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(Color(.systemBackground))
   }
 }
 
@@ -1407,7 +1414,6 @@ private struct ExperimentalLoadingStateView: View {
         .foregroundStyle(.secondary)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(Color(.systemBackground))
   }
 }
 
@@ -1434,7 +1440,6 @@ private struct ExperimentalInboxEmptyStateView: View {
     }
     .padding(.horizontal, 24)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(Color(.systemBackground))
   }
 }
 
@@ -1447,7 +1452,6 @@ private struct ExperimentalInlineLogoEmptyStateView: View {
       .opacity(0.09)
       .accessibilityHidden(true)
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .background(Color(.systemBackground))
   }
 }
 

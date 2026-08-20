@@ -180,6 +180,6 @@ struct ReactionsView: View {
     ])
   }
   .padding(12)
-  .background(ColorManager.shared.swiftUIColor)
+  .background(Color.accentColor)
   .cornerRadius(18)
 }

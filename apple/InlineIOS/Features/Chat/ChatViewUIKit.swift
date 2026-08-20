@@ -9,6 +9,7 @@ public class ChatContainerView: UIView {
   let spaceId: Int64?
   private var collapsedMaxId: Int64?
   private let isPreview: Bool
+  private(set) var theme: IOSThemeSnapshot
   private var lastAppliedDraftSignature: DraftSignature?
   private var lastRequestedFocusMessageID: Int64?
 
@@ -46,7 +47,8 @@ public class ChatContainerView: UIView {
       spaceId: spaceId,
       collapsedMaxId: collapsedMaxId,
       isPreview: isPreview,
-      sendAnimationCoordinator: sendAnimationCoordinator
+      sendAnimationCoordinator: sendAnimationCoordinator,
+      theme: theme
     )
     if !isPreview {
       collectionView.onScrollAffordanceChanged = { [weak self] state in
@@ -149,13 +151,15 @@ public class ChatContainerView: UIView {
     chatId: Int64?,
     spaceId: Int64?,
     collapsedMaxId: Int64? = nil,
-    isPreview: Bool = false
+    isPreview: Bool = false,
+    theme: IOSThemeSnapshot
   ) {
     self.peerId = peerId
     self.chatId = chatId
     self.spaceId = spaceId
     self.collapsedMaxId = collapsedMaxId
     self.isPreview = isPreview
+    self.theme = theme
 
     super.init(frame: .zero)
     setupViews()
@@ -209,10 +213,22 @@ public class ChatContainerView: UIView {
     messagesCollectionView.setCollapsedMaxId(collapsedMaxId)
   }
 
+  func applyTheme(_ theme: IOSThemeSnapshot) {
+    guard self.theme != theme else { return }
+    self.theme = theme
+    backgroundColor = theme.chatCanvas.uiColor
+    tintColor = theme.primary.uiColor
+    composeView.tintColor = theme.primary.uiColor
+    pinnedHeaderView.tintColor = theme.primary.uiColor
+    scrollButton.tintColor = theme.primary.uiColor
+    messagesCollectionView.applyTheme(theme)
+  }
+
   private var mentionCompletionHeightConstraint: NSLayoutConstraint!
 
   private func setupViews() {
-    backgroundColor = ThemeManager.shared.selected.backgroundColor
+    backgroundColor = theme.chatCanvas.uiColor
+    tintColor = theme.primary.uiColor
 
     addSubview(messagesCollectionView)
     sendAnimationCoordinator?.setSourceLayoutView(messagesCollectionView)
@@ -820,6 +836,7 @@ struct ChatViewUIKit: UIViewRepresentable {
   let focusMessageID: Int64?
   let collapsedMaxId: Int64?
   let isPreview: Bool
+  let theme: IOSThemeSnapshot
 
   func makeUIView(context _: Context) -> ChatContainerView {
     let view = ChatContainerView(
@@ -827,7 +844,8 @@ struct ChatViewUIKit: UIViewRepresentable {
       chatId: chatId,
       spaceId: spaceId,
       collapsedMaxId: collapsedMaxId,
-      isPreview: isPreview
+      isPreview: isPreview,
+      theme: theme
     )
     if !isPreview {
       view.loadDraftIfNeeded(draftMessage)
@@ -841,6 +859,7 @@ struct ChatViewUIKit: UIViewRepresentable {
   }
 
   func updateUIView(_ view: ChatContainerView, context _: Context) {
+    view.applyTheme(theme)
     view.setCollapsedMaxId(collapsedMaxId)
     if !isPreview {
       view.loadDraftIfNeeded(draftMessage)

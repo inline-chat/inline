@@ -1,57 +1,20 @@
 import AppKit
 import Foundation
+import InlineTheme
 
-public enum AppThemePreset: String, CaseIterable, Codable, Identifiable, Sendable {
-  case system
-  case sunset
-  case midnight
-  case ash
-  case flexoki
-  case pastel
-  case neonNoir = "neon-noir"
+public typealias AppThemePreset = InlineTheme.AppThemePreset
+public typealias ThemeAppearanceVariant = InlineTheme.ThemeAppearanceVariant
+public typealias ThemeColorRole = InlineTheme.ThemeColorRole
+public typealias ThemeSeedRole = InlineTheme.ThemeSeedRole
+public typealias ThemeColorValue = InlineTheme.ThemeColorValue
+public typealias ThemePalette = InlineTheme.ThemePalette
 
-  public var id: String { rawValue }
-
-  public var title: String {
-    switch self {
-    case .system:
-      "System"
-    case .sunset:
-      "Sunset"
-    case .midnight:
-      "Midnight"
-    case .ash:
-      "Ash"
-    case .flexoki:
-      "Flexoki"
-    case .pastel:
-      "Pastel"
-    case .neonNoir:
-      "Neon Noir"
-    }
-  }
-}
-
-public enum ThemeAppearanceVariant: String, CaseIterable, Codable, Identifiable, Sendable {
-  case light
-  case dark
-
-  public var id: String { rawValue }
-
-  public var title: String {
-    switch self {
-    case .light:
-      "Light"
-    case .dark:
-      "Dark"
-    }
-  }
-
-  public init(appearance: NSAppearance) {
+public extension ThemeAppearanceVariant {
+  init(appearance: NSAppearance) {
     self = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .dark : .light
   }
 
-  public var nsAppearance: NSAppearance {
+  var nsAppearance: NSAppearance {
     guard let appearance = NSAppearance(named: self == .dark ? .darkAqua : .aqua) else {
       preconditionFailure("Built-in Aqua appearance is unavailable")
     }
@@ -59,77 +22,8 @@ public enum ThemeAppearanceVariant: String, CaseIterable, Codable, Identifiable,
   }
 }
 
-public enum ThemeColorRole: String, CaseIterable, Codable, Identifiable, Sendable {
-  case accent
-  case prominent
-  case bubble
-  case background
-
-  public var id: String { rawValue }
-
-  public var title: String {
-    switch self {
-    case .accent:
-      "Accent"
-    case .prominent:
-      "Prominent"
-    case .bubble:
-      "Outgoing Bubble"
-    case .background:
-      "Background"
-    }
-  }
-}
-
-/// The only colors authored by a theme. Semantic roles remain internal aliases.
-public enum ThemeSeedRole: String, CaseIterable, Codable, Identifiable, Sendable {
-  case primary
-  case canvas
-
-  public var id: String { rawValue }
-
-  public var title: String {
-    switch self {
-    case .primary:
-      "Primary"
-    case .canvas:
-      "Window"
-    }
-  }
-}
-
-public struct ThemeColorValue: Codable, Equatable, Sendable {
-  public let red: Double
-  public let green: Double
-  public let blue: Double
-  public let alpha: Double
-
-  public init(red: Double, green: Double, blue: Double, alpha: Double = 1) {
-    self.red = red.clamped(to: 0 ... 1)
-    self.green = green.clamped(to: 0 ... 1)
-    self.blue = blue.clamped(to: 0 ... 1)
-    self.alpha = alpha.clamped(to: 0 ... 1)
-  }
-
-  public init(rgb: UInt32, alpha: Double = 1) {
-    self.init(
-      red: Double((rgb >> 16) & 0xFF) / 255,
-      green: Double((rgb >> 8) & 0xFF) / 255,
-      blue: Double(rgb & 0xFF) / 255,
-      alpha: alpha
-    )
-  }
-
-  public init?(hexRGB: String) {
-    let value = hexRGB.trimmingCharacters(in: .whitespacesAndNewlines)
-    let digits = value.hasPrefix("#") ? String(value.dropFirst()) : value
-    guard digits.count == 6,
-          let rgb = UInt32(digits, radix: 16)
-    else { return nil }
-    self.init(rgb: rgb)
-  }
-
-  public init(nsColor: NSColor, appearance: NSAppearance) {
+public extension ThemeColorValue {
+  init(nsColor: NSColor, appearance: NSAppearance) {
     let color = nsColor.resolvedThemeColor(with: appearance)
     self.init(
       red: Double(color.redComponent),
@@ -139,101 +33,13 @@ public struct ThemeColorValue: Codable, Equatable, Sendable {
     )
   }
 
-  public var nsColor: NSColor {
+  var nsColor: NSColor {
     NSColor(
       srgbRed: CGFloat(red),
       green: CGFloat(green),
       blue: CGFloat(blue),
       alpha: CGFloat(alpha)
     )
-  }
-
-  public var hexRGB: String {
-    String(
-      format: "#%02X%02X%02X",
-      Int((red * 255).rounded()),
-      Int((green * 255).rounded()),
-      Int((blue * 255).rounded())
-    )
-  }
-}
-
-public struct ThemePalette: Codable, Equatable, Sendable {
-  public var primary: ThemeColorValue
-  public var canvas: ThemeColorValue
-
-  public init(
-    primary: ThemeColorValue,
-    canvas: ThemeColorValue
-  ) {
-    self.primary = primary
-    self.canvas = canvas
-  }
-
-  public var accent: ThemeColorValue {
-    get { primary }
-    set { primary = newValue }
-  }
-
-  public var prominent: ThemeColorValue {
-    get { primary }
-    set { primary = newValue }
-  }
-
-  public var bubble: ThemeColorValue {
-    get { primary }
-    set { primary = newValue }
-  }
-
-  public var background: ThemeColorValue {
-    get { canvas }
-    set { canvas = newValue }
-  }
-
-  public subscript(seed role: ThemeSeedRole) -> ThemeColorValue {
-    get {
-      switch role {
-      case .primary:
-        primary
-      case .canvas:
-        canvas
-      }
-    }
-    set {
-      switch role {
-      case .primary:
-        primary = newValue
-      case .canvas:
-        canvas = newValue
-      }
-    }
-  }
-
-  public subscript(role: ThemeColorRole) -> ThemeColorValue {
-    get {
-      switch role {
-      case .accent:
-        accent
-      case .prominent:
-        prominent
-      case .bubble:
-        bubble
-      case .background:
-        background
-      }
-    }
-    set {
-      switch role {
-      case .accent:
-        accent = newValue
-      case .prominent:
-        prominent = newValue
-      case .bubble:
-        bubble = newValue
-      case .background:
-        background = newValue
-      }
-    }
   }
 }
 
@@ -532,11 +338,5 @@ extension NSColor {
       resolved = usingColorSpace(.sRGB) ?? usingColorSpace(.deviceRGB) ?? self
     }
     return resolved
-  }
-}
-
-private extension Double {
-  func clamped(to range: ClosedRange<Self>) -> Self {
-    min(max(self, range.lowerBound), range.upperBound)
   }
 }

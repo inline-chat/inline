@@ -80,7 +80,9 @@ let package = Package(
 
     .target(
       name: "MacTheme",
-      dependencies: [],
+      dependencies: [
+        .product(name: "InlineTheme", package: "InlineUI"),
+      ],
       swiftSettings: swiftSettings
     ),
 

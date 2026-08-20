@@ -21,6 +21,7 @@ private struct InlineSceneRoot: View {
   let appDelegate: AppDelegate
 
   @State private var router: Router
+  @StateObject private var themeManager = ThemeManager.shared
   @State private var sceneID = UUID()
   @State private var didRestoreScene = false
   @ObservedObject private var auth = Auth.shared
@@ -43,6 +44,7 @@ private struct InlineSceneRoot: View {
       .environment(\.realtime, Realtime.shared)
       .environment(\.transactions, Transactions.shared)
       .environment(router)
+      .environmentObject(themeManager)
       .appDatabase(AppDatabase.shared)
       .environmentObject(appDelegate.notificationHandler)
       .environmentObject(appDelegate.nav)

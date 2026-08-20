@@ -1,5 +1,6 @@
 import InlineKit
 import InlineIOSUI
+import InlineTheme
 import InlineUI
 import Logger
 import SwiftUI
@@ -38,6 +39,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   private var selfSizingHeightStabilizer = SelfSizingHeightStabilizer()
   private var selfSizingTraitSignature: SelfSizingTraitSignature?
   private var collectionWidth: CGFloat = 0
+  private var theme: IOSThemeSnapshot?
 
   // MARK: - Props
 
@@ -117,7 +119,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     spaceId: Int64?,
     collectionWidth: CGFloat,
     displayMode: MessageDisplayMode = .normal,
-    animateTail: Bool = true
+    animateTail: Bool = true,
+    theme: IOSThemeSnapshot
   ) {
     let newOutgoing = message.message.out == true
     var animatedReactionEmoji: String?
@@ -126,6 +129,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
       if prevText == message.displayText, self.message == message,
          self.firstInGroup == firstInGroup, self.lastInGroup == lastInGroup,
          self.spaceId == spaceId, outgoing == newOutgoing, self.displayMode == displayMode,
+         self.theme == theme,
          abs(self.collectionWidth - collectionWidth) <= 0.5 {
         // skip only if everything is exact match including outgoing state and layout width
         return
@@ -139,6 +143,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
            spaceId == self.spaceId,
            outgoing == newOutgoing,
            displayMode == self.displayMode,
+           self.theme == theme,
            let messageView,
            messageView.canUpdateReactionsInPlace(to: message) {
           prevText = message.displayText
@@ -152,6 +157,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
       }
 
       if abs(self.collectionWidth - collectionWidth) <= 0.5,
+         self.theme == theme,
          canUpdateBubbleTailOnly(
         with: message,
         firstInGroup: firstInGroup,
@@ -178,6 +184,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     self.spaceId = spaceId
     self.collectionWidth = collectionWidth
     self.displayMode = displayMode
+    self.theme = theme
     isThread = message.peerId.isThread
     outgoing = newOutgoing
     canReply = message.canReply && displayMode != .threadAnchor
@@ -512,6 +519,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     // Clear cached values to force reconfiguration
     prevText = nil
     message = nil
+    theme = nil
     resetSelfSizingState()
 
     // Reset delegate
@@ -629,12 +637,9 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     guard !isServiceMessage else { return }
     let bubble = messageView.bubbleView
     let originalColor = bubble.backgroundColor ?? .systemGray6
-    let isEmojiOrSticker = messageView.isEmojiOnlyMessage || messageView.isSticker
-    // let highlightColor = isEmojiOrSticker ? ThemeManager.shared.selected.accent.withAlphaComponent(0.3) :
-    // originalColor
-    let highlightColor = messageView.outgoing ? ThemeManager.shared.selected.bubbleBackground
-      .lighten(by: 0.3)
-      : ThemeManager.shared.selected.accent.withAlphaComponent(0.4)
+    let highlightColor = messageView.outgoing
+      ? (theme?.outgoingBubble.uiColor ?? .systemBlue).lighten(by: 0.3)
+      : (theme?.primary.uiColor ?? .systemBlue).withAlphaComponent(0.4)
     messageView.highlightMediaOverlay()
     UIView.animate(withDuration: 0.18, animations: {
       bubble.backgroundColor = highlightColor
@@ -1021,12 +1026,14 @@ extension MessageCollectionViewCell {
   }
 
   func setupBaseMessageConstraints(animatedReactionEmoji: String? = nil) {
+    guard let theme else { return }
     let newMessageView = UIMessageView(
       fullMessage: message,
       spaceId: spaceId,
       displayMode: displayMode,
       bubbleTailSide: bubbleTailSide,
       maximumBubbleContentWidth: maximumBubbleContentWidth,
+      theme: theme,
       animatedReactionEmoji: animatedReactionEmoji
     )
     newMessageView.translatesAutoresizingMaskIntoConstraints = false
@@ -1095,6 +1102,16 @@ extension MessageCollectionViewCell {
     avatarView = nil
     avatarSpacerView?.removeFromSuperview()
     avatarSpacerView = nil
+  }
+
+  func applyTheme(_ theme: IOSThemeSnapshot) {
+    guard self.theme != theme else { return }
+    self.theme = theme
+    messageView?.applyTheme(theme)
+  }
+
+  func updateContinuousBubbleGradient(in viewport: UIView) {
+    messageView?.updateContinuousBubbleGradient(in: viewport)
   }
 }
 

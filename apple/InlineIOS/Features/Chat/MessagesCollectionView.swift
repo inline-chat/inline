@@ -3,6 +3,7 @@ import Combine
 import ContextMenuAccessoryStructs
 import GRDB
 import InlineKit
+import InlineTheme
 import InlineUI
 import Logger
 import Nuke
@@ -30,6 +31,7 @@ final class MessagesCollectionView: UICollectionView {
   private var chatId: Int64
   private var spaceId: Int64?
   private let isPreview: Bool
+  private var theme: IOSThemeSnapshot
   private var coordinator: Coordinator
   private var isContextMenuOpen = false
   private var lastKnownNavBarHeight: CGFloat = 0
@@ -52,19 +54,22 @@ final class MessagesCollectionView: UICollectionView {
     spaceId: Int64?,
     collapsedMaxId: Int64? = nil,
     isPreview: Bool = false,
-    sendAnimationCoordinator: SendMessageAnimationCoordinator? = nil
+    sendAnimationCoordinator: SendMessageAnimationCoordinator? = nil,
+    theme: IOSThemeSnapshot
   ) {
     self.peerId = peerId
     self.chatId = chatId
     self.spaceId = spaceId
     self.isPreview = isPreview
+    self.theme = theme
     let coordinator = Coordinator(
       peerId: peerId,
       chatId: chatId,
       spaceId: spaceId,
       collapsedMaxId: collapsedMaxId,
       isPreview: isPreview,
-      sendAnimationCoordinator: sendAnimationCoordinator
+      sendAnimationCoordinator: sendAnimationCoordinator,
+      theme: theme
     )
     self.coordinator = coordinator
     let layout = MessagesCollectionView.createLayout { [weak coordinator] sectionIndex in
@@ -82,6 +87,13 @@ final class MessagesCollectionView: UICollectionView {
 
   func setCollapsedMaxId(_ collapsedMaxId: Int64?) {
     coordinator.setCollapsedMaxId(collapsedMaxId)
+  }
+
+  func applyTheme(_ theme: IOSThemeSnapshot) {
+    guard self.theme != theme else { return }
+    self.theme = theme
+    coordinator.applyTheme(theme)
+    syncVisibleBubbleGradients()
   }
 
   func collapseHistory(maxID: Int64?) async throws {
@@ -145,6 +157,7 @@ final class MessagesCollectionView: UICollectionView {
       updateContentInsets()
       coordinator.attachAvatarOverlay(over: self, parent: findViewController())
       coordinator.syncAvatarOverlay(animate: false)
+      syncVisibleBubbleGradients()
     }
   }
 
@@ -152,6 +165,21 @@ final class MessagesCollectionView: UICollectionView {
     super.layoutSubviews()
     coordinator.syncAvatarOverlay(animate: false)
     reconcileScrollAffordance()
+    syncVisibleBubbleGradients()
+  }
+
+  fileprivate func syncVisibleBubbleGradients() {
+    guard let viewport = superview else { return }
+    // Convert through the upright container so UIKit absorbs both the collection
+    // and cell inversions. The bubble must never derive this phase from contentOffset.
+    for case let cell as MessageCollectionViewCell in visibleCells {
+      cell.updateContinuousBubbleGradient(in: viewport)
+    }
+  }
+
+  fileprivate func syncBubbleGradient(for cell: MessageCollectionViewCell) {
+    guard let viewport = superview else { return }
+    cell.updateContinuousBubbleGradient(in: viewport)
   }
 
   deinit {
@@ -982,6 +1010,7 @@ private extension MessagesCollectionView {
     private let chatId: Int64
     private let spaceId: Int64?
     private let isPreview: Bool
+    private var theme: IOSThemeSnapshot
     private weak var collectionContextMenu: UIContextMenuInteraction?
     private var cancellables = Set<AnyCancellable>()
     private var updateWorkItem: DispatchWorkItem?
@@ -1037,6 +1066,12 @@ private extension MessagesCollectionView {
       willDisplay cell: UICollectionViewCell,
       forItemAt indexPath: IndexPath
     ) {
+      defer {
+        if let messagesCollectionView = collectionView as? MessagesCollectionView,
+           let cell = cell as? MessageCollectionViewCell {
+          messagesCollectionView.syncBubbleGradient(for: cell)
+        }
+      }
       guard let item = item(at: indexPath) else {
         cell.alpha = 1
         if let cell = cell as? MessageCollectionViewCell {
@@ -1798,6 +1833,7 @@ private extension MessagesCollectionView {
     ) -> SendMessageAnimationTarget? {
       SendMessageAnimationActions.performWithoutAnimation {
         currentCollectionView?.layoutIfNeeded()
+        (currentCollectionView as? MessagesCollectionView)?.syncBubbleGradient(for: cell)
         cell.stabilizeSendAnimationTargetForSnapshot()
       }
 
@@ -2027,12 +2063,14 @@ private extension MessagesCollectionView {
       spaceId: Int64?,
       collapsedMaxId: Int64? = nil,
       isPreview: Bool = false,
-      sendAnimationCoordinator: SendMessageAnimationCoordinator? = nil
+      sendAnimationCoordinator: SendMessageAnimationCoordinator? = nil,
+      theme: IOSThemeSnapshot
     ) {
       self.peerId = peerId
       self.chatId = chatId
       self.spaceId = spaceId
       self.isPreview = isPreview
+      self.theme = theme
       self.sendAnimationCoordinator = sendAnimationCoordinator
       viewModel = MessagesSectionedViewModel(
         peer: peerId,
@@ -2072,6 +2110,15 @@ private extension MessagesCollectionView {
         // Setup NotionTaskManager delegate
         setupNotionTaskManager()
         ensureThreadAnchorCachedIfNeeded()
+      }
+    }
+
+    func applyTheme(_ theme: IOSThemeSnapshot) {
+      guard self.theme != theme else { return }
+      self.theme = theme
+      guard let collectionView = currentCollectionView as? MessagesCollectionView else { return }
+      for case let cell as MessageCollectionViewCell in collectionView.visibleCells {
+        cell.applyTheme(theme)
       }
     }
 
@@ -2266,7 +2313,8 @@ private extension MessagesCollectionView {
             spaceId: currentSpaceId,
             collectionWidth: self.currentCollectionView?.bounds.width ?? 0,
             displayMode: displayMode,
-            animateTail: true
+            animateTail: true,
+            theme: self.theme
           )
         }
 
@@ -2761,7 +2809,8 @@ private extension MessagesCollectionView {
           spaceId: spaceId,
           collectionWidth: collectionView.bounds.width,
           displayMode: displayMode,
-          animateTail: animateTail
+          animateTail: animateTail,
+          theme: theme
         )
       }
     }
@@ -3372,7 +3421,7 @@ private extension MessagesCollectionView {
 
       let updates = {
         sender.transform = CGAffineTransform(scaleX: 0.95, y: 0.95)
-        sender.backgroundColor = ColorManager.shared.reactionItemColor.withAlphaComponent(0.3)
+        sender.backgroundColor = self.theme.primary.uiColor.withAlphaComponent(0.3)
       }
       guard !UIAccessibility.isReduceMotionEnabled else {
         UIView.performWithoutAnimation(updates)

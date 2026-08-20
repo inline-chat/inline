@@ -1,3 +1,4 @@
+import InlineTheme
 import SwiftUI
 import UIKit
 
@@ -44,57 +45,181 @@ protocol ThemeConfig {
   var name: String { get }
 }
 
-class ThemeManager: ObservableObject {
+struct IOSThemeSnapshot: Equatable {
+  let preset: AppThemePreset
+  let variant: ThemeAppearanceVariant
+  let primary: ThemeColorValue
+  let chatCanvas: ThemeColorValue
+  let outgoingBubble: ThemeColorValue
+  let incomingBubble: ThemeColorValue
+  let incomingText: ThemeColorValue
+  let incomingSecondaryText: ThemeColorValue
+  let outgoingLighting: ThemeBubbleLightingAlphas
+  let incomingLighting: ThemeBubbleLightingAlphas
+
+  static func resolve(
+    preset: AppThemePreset,
+    variant: ThemeAppearanceVariant
+  ) -> Self {
+    let nativeCanvas = ThemeColorValue(rgb: variant == .dark ? 0x000000 : 0xFFFFFF)
+    let palette = ThemeCatalog.palette(
+      preset: preset,
+      variant: variant,
+      systemCanvas: nativeCanvas
+    )
+    let chatCanvas = preset == .system
+      ? nativeCanvas
+      : nativeCanvas.blended(with: palette.canvas, amount: variant == .dark ? 0.189 : 0.126)
+
+    return Self(
+      preset: preset,
+      variant: variant,
+      primary: palette.primary,
+      chatCanvas: chatCanvas,
+      outgoingBubble: palette.bubble,
+      incomingBubble: ThemeCatalog.secondaryBubble(preset: preset, variant: variant),
+      incomingText: .init(rgb: variant == .dark ? 0xFFFFFF : 0x000000),
+      incomingSecondaryText: .init(
+        rgb: variant == .dark ? 0xFFFFFF : 0x000000,
+        alpha: variant == .dark ? 0.7 : 0.58
+      ),
+      outgoingLighting: ThemeCatalog.messageBubbleGradientOverlayAlphas(
+        variant: variant,
+        outgoing: true
+      ),
+      incomingLighting: ThemeCatalog.messageBubbleGradientOverlayAlphas(
+        variant: variant,
+        outgoing: false
+      )
+    )
+  }
+}
+
+final class ThemeManager: ObservableObject {
   static let shared = ThemeManager()
 
-  static let themes: [ThemeConfig] = [
-    Default(),
-    CatppuccinMocha(),
-    PeonyPink(),
-    Orchid(),
-  ]
+  static let themes: [SharedThemeConfig] = AppThemePreset.allCases.map(SharedThemeConfig.init)
 
   private let defaults = UserDefaults.standard
-  private let currentThemeKey = "selected_theme_id"
+  private let selectedPresetKey = "iosAppThemePreset"
+  private let legacyThemeKey = "selected_theme_id"
 
-  @Published var selected: ThemeConfig {
+  @Published private(set) var selectedPreset: AppThemePreset {
     didSet {
-      saveCurrentTheme()
+      defaults.set(selectedPreset.rawValue, forKey: selectedPresetKey)
     }
   }
 
   init() {
-    if let savedThemeID = defaults.string(forKey: currentThemeKey),
-       let savedTheme = Self.findTheme(withID: savedThemeID)
-    {
-      selected = savedTheme
+    if let savedPreset = defaults.string(forKey: selectedPresetKey),
+       let preset = AppThemePreset(rawValue: savedPreset) {
+      selectedPreset = preset
     } else {
-      selected = Default()
+      let legacyIdentifier = defaults.string(forKey: legacyThemeKey)
+      selectedPreset = AppThemePreset(migratingLegacyIOSIdentifier: legacyIdentifier)
+      if legacyIdentifier != nil {
+        defaults.set(selectedPreset.rawValue, forKey: selectedPresetKey)
+      }
     }
   }
 
-  private func saveCurrentTheme() {
-    defaults.set(selected.id, forKey: currentThemeKey)
+  var selected: ThemeConfig {
+    SharedThemeConfig(preset: selectedPreset)
+  }
+
+  func snapshot(variant: ThemeAppearanceVariant) -> IOSThemeSnapshot {
+    .resolve(preset: selectedPreset, variant: variant)
   }
 
   func switchToTheme(_ theme: ThemeConfig) {
-    selected = theme
+    switchToTheme(withID: theme.id)
   }
 
   func switchToTheme(withID id: String) {
-    if let theme = Self.findTheme(withID: id) {
-      selected = theme
-    }
+    guard let preset = AppThemePreset(rawValue: id), preset != selectedPreset else { return }
+    selectedPreset = preset
   }
 
   func resetToDefaultTheme() {
-    selected = Default()
+    selectedPreset = .system
   }
 
   // MARK: - Helper Methods
 
   static func findTheme(withID id: String) -> ThemeConfig? {
     themes.first { $0.id == id }
+  }
+}
+
+struct SharedThemeConfig: ThemeConfig {
+  let preset: AppThemePreset
+
+  private func dynamicColor(_ keyPath: KeyPath<IOSThemeSnapshot, ThemeColorValue>) -> UIColor {
+    UIColor { traits in
+      IOSThemeSnapshot.resolve(
+        preset: preset,
+        variant: traits.userInterfaceStyle == .dark ? .dark : .light
+      )[keyPath: keyPath].uiColor
+    }
+  }
+
+  var backgroundColor: UIColor { dynamicColor(\.chatCanvas) }
+  var accent: UIColor { dynamicColor(\.primary) }
+  var bubbleBackground: UIColor { dynamicColor(\.outgoingBubble) }
+  var incomingBubbleBackground: UIColor { dynamicColor(\.incomingBubble) }
+  var failedBubbleBackground: UIColor { .systemRed }
+  var primaryTextColor: UIColor? { dynamicColor(\.incomingText) }
+  var secondaryTextColor: UIColor? { dynamicColor(\.incomingSecondaryText) }
+  var reactionOutgoingPrimary: UIColor? { UIColor.white.withAlphaComponent(0.2) }
+  var reactionOutgoingSecoundry: UIColor? { UIColor.white.withAlphaComponent(0.12) }
+  var reactionIncomingPrimary: UIColor? { accent.withAlphaComponent(0.18) }
+  var reactionIncomingSecoundry: UIColor? { incomingBubbleBackground }
+  var documentIconBackground: UIColor? { accent.withAlphaComponent(0.16) }
+  var listRowBackground: UIColor? { nil }
+  var listSeparatorColor: UIColor? { nil }
+  var navigationBarBackground: UIColor? { nil }
+  var toolbarBackground: UIColor? { nil }
+  var surfaceBackground: UIColor? { nil }
+  var surfaceSecondary: UIColor? { nil }
+  var textPrimary: UIColor? { nil }
+  var textSecondary: UIColor? { nil }
+  var textTertiary: UIColor? { nil }
+  var borderColor: UIColor? { nil }
+  var overlayBackground: UIColor? { nil }
+  var cardBackground: UIColor? { nil }
+  var searchBarBackground: UIColor? { nil }
+  var buttonBackground: UIColor? { accent }
+  var buttonSecondaryBackground: UIColor? { nil }
+  var sheetTintColor: UIColor? { accent }
+  var logoutRed: UIColor { .systemRed }
+  var id: String { preset.rawValue }
+  var name: String { preset.title }
+}
+
+extension ThemeAppearanceVariant {
+  init(colorScheme: ColorScheme) {
+    self = colorScheme == .dark ? .dark : .light
+  }
+}
+
+extension ThemeColorValue {
+  var uiColor: UIColor {
+    UIColor(
+      red: CGFloat(red),
+      green: CGFloat(green),
+      blue: CGFloat(blue),
+      alpha: CGFloat(alpha)
+    )
+  }
+
+  fileprivate func blended(with other: ThemeColorValue, amount: Double) -> ThemeColorValue {
+    let fraction = min(max(amount, 0), 1)
+    return ThemeColorValue(
+      red: red + (other.red - red) * fraction,
+      green: green + (other.green - green) * fraction,
+      blue: blue + (other.blue - blue) * fraction,
+      alpha: alpha + (other.alpha - alpha) * fraction
+    )
   }
 }
 
