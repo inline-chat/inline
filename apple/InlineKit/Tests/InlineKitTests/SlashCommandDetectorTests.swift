@@ -69,6 +69,20 @@ struct SlashCommandDetectorTests {
     #expect(result == nil)
   }
 
+  @Test("does not detect slash command inside a URL path")
+  func doesNotDetectInsideURLPath() {
+    let detector = SlashCommandDetector()
+    let text = "/web/something"
+    let attributed = NSAttributedString(string: text)
+
+    let result = detector.detectSlashCommandAt(
+      cursorPosition: (text as NSString).length,
+      in: attributed
+    )
+
+    #expect(result == nil)
+  }
+
   @Test("replacement range includes the active slash query")
   func replacementRangeIncludesActiveQuery() {
     let detector = SlashCommandDetector()

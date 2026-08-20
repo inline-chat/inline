@@ -905,6 +905,18 @@ struct ProcessEntitiesTests {
     #expect(result.entities.entities.contains { $0.type == .botCommand } == false)
   }
 
+  @Test("Do not detect the first segment of a URL path as a bot command")
+  func testRejectBotCommandInsideURLPath() {
+    let text = "Open /web/something"
+    let attributedString = NSAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.primaryColor]
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+    #expect(result.entities.entities.contains { $0.type == .botCommand } == false)
+  }
+
   @Test("Do not detect bot command inside inline code")
   func testRejectBotCommandInsideInlineCode() {
     let text = "Use `/start` today"

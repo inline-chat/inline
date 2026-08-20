@@ -1368,6 +1368,10 @@ public class ProcessEntities {
       }
     }
 
+    if cursor < nsText.length, nsText.character(at: cursor) == 47 {
+      return nil
+    }
+
     return NSRange(location: index, length: cursor - index)
   }
 

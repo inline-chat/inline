@@ -43,6 +43,10 @@ export const botCommandEntities = (text: string): MessageEntity[] => {
       }
     }
 
+    if (text[end] === "/") {
+      continue
+    }
+
     entities.push({
       type: MessageEntity_Type.BOT_COMMAND,
       offset: BigInt(i),

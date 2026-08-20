@@ -263,6 +263,12 @@ describe("translation2 entity toMd/fromMd", () => {
     expect(types).toContain(MessageEntity_Type.PHONE_NUMBER)
   })
 
+  test("does not detect the first segment of a URL path as a bot command", () => {
+    const parsed = fromMd("Open /web/something")
+
+    expect(parsed.entities.entities.some((entity) => entity.type === MessageEntity_Type.BOT_COMMAND)).toBe(false)
+  })
+
   test("does not detect literal entities inside code", () => {
     const parsed = fromMd("`Email a@b.com and run /start`")
 

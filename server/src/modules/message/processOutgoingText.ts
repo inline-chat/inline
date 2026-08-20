@@ -93,6 +93,10 @@ const extractBotCommandCandidates = (text: string): BotCommandCandidate[] => {
       }
     }
 
+    if (text[end] === "/") {
+      continue
+    }
+
     candidates.push({
       offset: i,
       length: end - i,

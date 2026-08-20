@@ -458,6 +458,15 @@ describe("processOutgoingText", () => {
     expect(result.entities).toBeUndefined()
   })
 
+  test("does not parse the first segment of a URL path as a bot command", async () => {
+    const result = await processOutgoingText({
+      text: "Open /web/something",
+      entities: undefined,
+    })
+
+    expect(result.entities).toBeUndefined()
+  })
+
   test("keeps bot command offsets in utf16 coordinates", async () => {
     const result = await processOutgoingText({
       text: "😀 /start",
