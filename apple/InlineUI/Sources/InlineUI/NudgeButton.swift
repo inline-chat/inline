@@ -206,7 +206,6 @@ private struct MacNudgeToolbarButton: View {
       Image(systemName: NudgeButtonState.nudgeIconName)
         .font(.system(size: 16, weight: .regular))
         .imageScale(.medium)
-        .frame(width: 24, height: 24)
     }
     .overlay {
       NudgeHoldProgressRing(progress: holdProgress, size: 26, lineWidth: 2)
