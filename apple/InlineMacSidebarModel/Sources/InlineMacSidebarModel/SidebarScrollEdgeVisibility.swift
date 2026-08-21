@@ -28,7 +28,9 @@ public struct SidebarUnreadViewportEntry<ID: Hashable>: Equatable {
   public let id: ID
   public let minimumY: Double
   public let maximumY: Double
-  public let isProminentUnread: Bool
+  public let prominentUnreadCount: Int
+
+  public var isProminentUnread: Bool { prominentUnreadCount > 0 }
 
   public init(
     id: ID,
@@ -39,7 +41,19 @@ public struct SidebarUnreadViewportEntry<ID: Hashable>: Equatable {
     self.id = id
     self.minimumY = minimumY
     self.maximumY = maximumY
-    self.isProminentUnread = isProminentUnread
+    prominentUnreadCount = isProminentUnread ? 1 : 0
+  }
+
+  public init(
+    id: ID,
+    minimumY: Double,
+    maximumY: Double,
+    prominentUnreadCount: Int
+  ) {
+    self.id = id
+    self.minimumY = minimumY
+    self.maximumY = maximumY
+    self.prominentUnreadCount = max(prominentUnreadCount, 0)
   }
 }
 
@@ -89,10 +103,10 @@ public enum SidebarUnreadViewportResolver {
 
     for entry in entries where entry.isProminentUnread {
       if entry.maximumY <= viewportStart {
-        countAbove += 1
+        countAbove += entry.prominentUnreadCount
         nearestAboveID = entry.id
       } else if entry.minimumY >= viewportEnd {
-        countBelow += 1
+        countBelow += entry.prominentUnreadCount
         nearestBelowID = nearestBelowID ?? entry.id
       }
     }

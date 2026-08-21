@@ -13,7 +13,8 @@ public struct SidebarCollectionActivityOrdering<
     stableIDs: [NodeID]
   ) {
     stableIndexByID = Dictionary(
-      uniqueKeysWithValues: stableIDs.enumerated().map { ($0.element, $0.offset) }
+      stableIDs.enumerated().map { ($0.element, $0.offset) },
+      uniquingKeysWith: { first, _ in first }
     )
     var cached: [NodeID: Activity] = [:]
     var visiting = Set<NodeID>()

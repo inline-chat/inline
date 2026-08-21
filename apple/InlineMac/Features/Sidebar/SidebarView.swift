@@ -33,7 +33,6 @@ struct SidebarView: View {
   @Environment(\.dependencies) private var dependencies
   @Environment(\.mainWindowID) private var mainWindowID
   @Environment(\.nav) var nav
-  @Environment(\.realtime) private var realtime
   @Environment(\.appearsActive) private var appearsActive
   @Environment(\.colorScheme) private var colorScheme
   @Environment(UnreadCountsModel.self) private var unreadCounts
@@ -49,10 +48,10 @@ struct SidebarView: View {
   @State private var isHomeHovering = false
   @State private var isLocationHovering = false
   @State private var isArchiveVisible = false
-  @State private var legacyApiState: RealtimeAPIState = Realtime.shared.apiState
   @State private var showConnectedState = false
   @State private var hideConnectedTask: Task<Void, Never>?
   @State private var pendingSpaceAction: SidebarSpacePendingAction?
+  @State private var sidebarRenameItem: SidebarViewModel.Item?
   @State private var fetchingDialogSpaceIds = Set<Int64>()
   @State private var sidebarDrag = SidebarDragViewModel()
   @State private var cleanupOwnerID = UUID()
@@ -66,8 +65,11 @@ struct SidebarView: View {
   @State private var appKitScrollRequest: SidebarCollectionScrollRequest?
   @State private var appKitScrollRequestToken = 0
   @State private var collapsedAppKitThreadParentIDs = Set<ChatListItem.Identifier>()
+  @State private var collapsedAppKitFolderIDs = Set<Int64>()
   @State private var collapsedAppKitSections = Set<SidebarCollectionRow.SectionHeader>()
   @State private var detachedAppKitReplyIDs = Set<ChatListItem.Identifier>()
+  @State private var pendingClosedSidebarItemIDs = Set<ChatListItem.Identifier>()
+  @State private var pendingRemovedFolderIDs = Set<Int64>()
   @State private var appKitPresentationStateUserID: Int64?
   @Environment(SidebarViewModel.self) private var viewModel
   private let isCollapsed: Bool
@@ -82,6 +84,7 @@ struct SidebarView: View {
     _appKitPresentationStateUserID = State(initialValue: userID)
     _detachedAppKitReplyIDs = State(initialValue: store.detachedReplyIDs(userID: userID))
     _collapsedAppKitThreadParentIDs = State(initialValue: store.collapsedParentIDs(userID: userID))
+    _collapsedAppKitFolderIDs = State(initialValue: store.collapsedFolderIDs(userID: userID))
     _collapsedAppKitSections = State(initialValue: store.collapsedSections(userID: userID))
   }
 
@@ -101,6 +104,9 @@ struct SidebarView: View {
         }
       } message: { pending in
         Text(pending.action.confirmationMessage(spaceName: pending.space.displayName))
+      }
+      .sheet(item: $sidebarRenameItem) { item in
+        RenameChatSheet(peer: item.peerId, initialTitle: item.title)
       }
   }
 
@@ -155,6 +161,7 @@ struct SidebarView: View {
     }
     .onChange(of: selectedPeer, initial: true) { _, _ in
       viewModel.setTemporaryPeer(preferredTemporarySidebarPeer)
+      revealCurrentSidebarSelectionInHierarchy()
     }
     .onChange(of: nav.selectedSpaceId, initial: true) { oldSpaceId, spaceId in
       if oldSpaceId != spaceId {
@@ -182,6 +189,8 @@ struct SidebarView: View {
     .onChange(of: auth.currentUserId, initial: true) { oldUserID, userID in
       if oldUserID != userID {
         cancelSidebarDropImports()
+        pendingClosedSidebarItemIDs.removeAll()
+        pendingRemovedFolderIDs.removeAll()
       }
       settings.resolveSidebarModeForCurrentAccount()
       appKitExternalDropGeneration = UUID()
@@ -200,13 +209,17 @@ struct SidebarView: View {
     .onChange(of: cleanupPreconditionSnapshot, initial: true) { _, _ in
       refreshSidebarCleanup()
     }
-    .onChange(of: visibleItems.map(\.peerId)) { _, _ in
+    .onChange(of: sourceVisibleItems.map(\.id)) { _, _ in
+      prunePendingSidebarCloses()
       pruneVisibleSidebarItems()
-      revealCurrentReplyThreadInHierarchy()
+      revealCurrentSidebarSelectionInHierarchy()
+    }
+    .onChange(of: viewModel.folders.map(\.id)) { _, folderIDs in
+      pendingRemovedFolderIDs.formIntersection(folderIDs)
     }
     .onChange(of: dependencies?.nav3?.currentReplyThreadPeer, initial: true) { _, _ in
       viewModel.setTemporaryPeer(preferredTemporarySidebarPeer)
-      revealCurrentReplyThreadInHierarchy()
+      revealCurrentSidebarSelectionInHierarchy()
     }
     .onChange(of: viewModel.spaces.map(\.id)) { _, _ in
       validateSelectedSpace()
@@ -227,17 +240,11 @@ struct SidebarView: View {
     .onAppear {
       unreadCounts.start()
       syncUnreadCountsScope(spaceId: nav.selectedSpaceId)
-      legacyApiState = realtime.apiState
       handleRealtimeConnectionStateChange(realtimeState.connectionState)
       refreshSidebarCleanup()
     }
     .onChange(of: sidebarNavigationSignature, initial: true) { _, _ in
       registerSidebarNavigation()
-    }
-    .onReceive(realtime.apiStatePublisher) { state in
-      let oldState = legacyApiState
-      legacyApiState = state
-      handleLegacyApiStateChange(from: oldState, to: state)
     }
     .onChange(of: realtimeState.connectionState) { _, state in
       handleRealtimeConnectionStateChange(state)
@@ -294,11 +301,13 @@ struct SidebarView: View {
       reorderPolicy: effectiveSidebarSort == .recentActivity ? .pinningOnly : .manual,
       scrollRequest: appKitScrollRequest,
       renderState: appKitRenderState,
+      renderer: settings.nativeSidebarRowsEnabled ? .appKit : .swiftUI,
       content: appKitContent,
+      nativeContent: nativeAppKitContent,
       dragPreviewContent: appKitDragPreviewContent,
       actions: SidebarCollectionActions(
         move: applyAppKitSidebarMove,
-        toggleDisclosure: toggleAppKitThreadParent,
+        toggleDisclosure: toggleAppKitNode,
         externalDropTarget: makeAppKitExternalDropTarget,
         externalDropTargetChanged: { appKitExternalDropTargetID = $0 },
         performExternalDrop: performAppKitExternalDrop
@@ -321,6 +330,7 @@ struct SidebarView: View {
       archiveVisible: isArchiveVisible,
       externalDropTargetID: appKitExternalDropTargetID,
       preview: SidebarCollectionRenderState.Preview(
+        renderer: settings.nativeSidebarRowsEnabled ? .appKit : .swiftUI,
         itemSize: settings.sidebarItemSize.rawValue,
         unreadBadgeStyle: settings.unreadBadgeStyle.rawValue,
         colorScheme: String(describing: colorScheme),
@@ -357,7 +367,10 @@ struct SidebarView: View {
       ))
     }
 
-    if settings.sidebarAsInbox == false, isArchiveVisible == false {
+    let configuration = sidebarPresentationConfiguration
+    if configuration.newThreadPlacement == .beforeContent,
+       settings.sidebarAsInbox == false,
+       isArchiveVisible == false {
       rows.append(SidebarCollectionRow(
         id: .newThread,
         kind: .newThread,
@@ -365,35 +378,44 @@ struct SidebarView: View {
       ))
     }
 
-    let projectedItems = tree?.projectedItems() ?? []
-    let pinnedItems = projectedItems.filter { $0.lane == .pinned }
-    let contentItems = projectedItems.filter { $0.lane == .normal }
-    let pinnedExpanded = collapsedAppKitSections.contains(.pinned) == false
-    let contentExpanded = collapsedAppKitSections.contains(.content) == false
+    let projectedNodes = tree?.projectedNodes() ?? []
+    let pinnedNodes = projectedNodes.filter { $0.lane == .pinned }
+    let contentNodes = projectedNodes.filter { $0.lane == .normal }
+    let pinnedExpanded = configuration.sectionHeaders.pinned == false
+      || collapsedAppKitSections.contains(.pinned) == false
+    let contentExpanded = configuration.sectionHeaders.content == false
+      || collapsedAppKitSections.contains(.content) == false
     let isAllChatsMode = settings.sidebarAsInbox == false && isArchiveVisible == false
 
-    if pinnedItems.isEmpty == false {
-      rows.append(.sectionHeader(.pinned, isExpanded: pinnedExpanded))
+    if pinnedNodes.isEmpty == false {
+      rows.append(.sectionHeader(
+        .pinned,
+        isExpanded: pinnedExpanded,
+        height: configuration.sectionHeaders.pinned
+          ? SidebarCollectionRow.spacedSectionHeaderHeight
+          : 0
+      ))
       if pinnedExpanded {
-        appendAppKitChatRows(pinnedItems, to: &rows)
+        appendAppKitRows(pinnedNodes, to: &rows)
+      } else if let selectedItem = selectedAppKitItem(
+        in: pinnedNodes.compactMap(\.projectedItem)
+      ) {
+        appendAppKitChatRows([selectedItem], to: &rows)
       }
     }
     if isAllChatsMode {
       rows.append(contentsOf: SidebarCollectionRow.timelineRows(
-        contentItems,
+        contentNodes.compactMap(\.projectedItem),
         chatRowHeight: chatRowHeight
       ))
     } else {
-      rows.append(.sectionHeader(.content, isExpanded: contentExpanded))
-      if settings.sidebarAsInbox,
-         isArchiveVisible == false,
-         openChatPlacement == .top {
-        rows.append(SidebarCollectionRow(
-          id: .newThread,
-          kind: .newThread,
-          height: chatRowHeight
-        ))
-      }
+      rows.append(.sectionHeader(
+        .content,
+        isExpanded: contentExpanded,
+        height: configuration.sectionHeaders.content
+          ? SidebarCollectionRow.spacedSectionHeaderHeight
+          : 0
+      ))
     }
     if contentExpanded, isAllChatsMode == false {
       if isArchiveVisible, shouldShowEmptyState {
@@ -403,12 +425,28 @@ struct SidebarView: View {
           height: chatRowHeight
         ))
       } else {
-        appendAppKitChatRows(contentItems, to: &rows)
+        if configuration.newThreadPlacement == .beforeContent,
+           settings.sidebarAsInbox,
+           isArchiveVisible == false {
+          rows.append(SidebarCollectionRow(
+            id: .newThread,
+            kind: .newThread,
+            height: chatRowHeight
+          ))
+        }
+        appendAppKitRows(contentNodes, to: &rows)
       }
+    } else if isAllChatsMode == false,
+              let selectedItem = selectedAppKitItem(
+                in: contentNodes.compactMap(\.projectedItem)
+              ) {
+      appendAppKitChatRows([selectedItem], to: &rows)
     }
 
-    if settings.sidebarAsInbox,
-       isArchiveVisible || openChatPlacement == .bottom {
+    if configuration.newThreadPlacement == .afterContent,
+       settings.sidebarAsInbox,
+       isArchiveVisible || contentExpanded,
+       isArchiveVisible == false {
       rows.append(SidebarCollectionRow(
         id: .newThread,
         kind: .newThread,
@@ -417,6 +455,26 @@ struct SidebarView: View {
     }
 
     return rows
+  }
+
+  private var sidebarPresentationConfiguration: SidebarPresentationConfiguration {
+    if isArchiveVisible { return .archived }
+    if settings.sidebarAsInbox { return .inbox(openPlacement: openChatPlacement) }
+    return .allChats
+  }
+
+  /// Keep the active destination reachable when its app-owned section is
+  /// collapsed. A reply pane is the most specific active destination, so it
+  /// wins over its parent chat when both peers are present in the same lane.
+  private func selectedAppKitItem(
+    in items: [SidebarProjectedItem]
+  ) -> SidebarProjectedItem? {
+    if let replyPeer = dependencies?.nav3?.currentReplyThreadPeer,
+       let replyItem = items.first(where: { $0.item.peerId == replyPeer }) {
+      return replyItem
+    }
+    guard let selectedPeer else { return nil }
+    return items.first { $0.item.peerId == selectedPeer }
   }
 
   private func appendAppKitChatRows(
@@ -432,9 +490,32 @@ struct SidebarView: View {
     }
   }
 
+  private func appendAppKitRows(
+    _ nodes: [SidebarProjectedNode],
+    to rows: inout [SidebarCollectionRow]
+  ) {
+    for node in nodes {
+      switch node {
+      case let .chat(item):
+        rows.append(SidebarCollectionRow(
+          id: .chat(item.id),
+          kind: .chat(item),
+          height: settings.sidebarItemSize.rowHeight
+        ))
+      case let .folder(folder):
+        rows.append(SidebarCollectionRow(
+          id: .folder(folder.id),
+          kind: .folder(folder),
+          height: settings.sidebarItemSize.rowHeight
+        ))
+      }
+    }
+  }
+
   private func appKitContent(
     for row: SidebarCollectionRow,
-    context: SidebarCollectionRowRenderContext
+    context: SidebarCollectionRowRenderContext,
+    hostState: SidebarCollectionRowHostState? = nil
   ) -> AnyView {
     let content: AnyView = switch row.kind {
     case .allChats:
@@ -451,7 +532,11 @@ struct SidebarView: View {
           .padding(.bottom, 4)
       )
     case let .sectionHeader(section, isExpanded):
-      AnyView(appKitSectionHeader(section, isExpanded: isExpanded))
+      AnyView(appKitSectionHeader(
+        section,
+        isExpanded: context.disclosureExpandedOverride ?? isExpanded,
+        hostState: context.disclosureExpandedOverride == nil ? hostState : nil
+      ))
     case let .timelineHeader(period):
       AnyView(SidebarCollectionTimelineHeaderView(
         title: ChatListTimelinePeriodTitle.string(
@@ -464,7 +549,15 @@ struct SidebarView: View {
         dimsInstruction: context.dimsPinDropInstruction
       ))
     case let .chat(item):
-      AnyView(appKitChatRow(item))
+      AnyView(appKitChatRow(
+        item,
+        disclosureExpandedOverride: context.disclosureExpandedOverride
+      ))
+    case let .folder(folder):
+      AnyView(appKitFolderRow(
+        folder,
+        disclosureExpandedOverride: context.disclosureExpandedOverride
+      ))
     case .newThread:
       AnyView(newThreadRow(usesFullWidthCollectionLayout: true))
     case .emptyState:
@@ -478,6 +571,235 @@ struct SidebarView: View {
         .environment(\.colorScheme, colorScheme)
         .tint(Color(nsColor: Theme.accentColor))
     )
+  }
+
+  private func nativeAppKitContent(
+    for row: SidebarCollectionRow,
+    context: SidebarCollectionRowRenderContext
+  ) -> SidebarNativeRowConfiguration {
+    let content: SidebarNativeRowConfiguration.Content = switch row.kind {
+    case .allChats:
+      .navigation(SidebarNativeRowConfiguration.Navigation(
+        title: "All Chats",
+        systemImage: "text.bubble",
+        iconStyle: .standard,
+        selected: nav.currentRoute == .allChats || nav.currentRoute == .archivedChats,
+        titleDimmed: sidebarTitlesDimmed,
+        size: .compact,
+        prominentUnreadCount: unreadCounts.scopedUnopenedProminentUnreadCount,
+        otherUnreadCount: unreadCounts.scopedUnopenedOtherUnreadCount,
+        avatars: [],
+        accessibilityValue: nativeAllChatsUnreadAccessibilityValue,
+        action: openAllChats
+      ))
+    case .grid:
+      .navigation(SidebarNativeRowConfiguration.Navigation(
+        title: "Grid",
+        systemImage: "square.grid.2x2",
+        iconStyle: .standard,
+        selected: nativeGridIsSelected,
+        titleDimmed: sidebarTitlesDimmed,
+        size: .compact,
+        prominentUnreadCount: 0,
+        otherUnreadCount: 0,
+        avatars: nativeGridAvatars.map(SidebarNativeRowConfiguration.Avatar.init),
+        accessibilityValue: "",
+        action: nativeGridAction
+      ))
+    case .archiveHeader:
+      .header(SidebarNativeRowConfiguration.Header(
+        title: "Archived",
+        style: .archive,
+        isExpanded: nil,
+        topSpacing: 0,
+        onToggle: nil,
+        onCleanUp: nil,
+        onCloseAll: nil
+      ))
+    case let .sectionHeader(section, isExpanded):
+      .header(SidebarNativeRowConfiguration.Header(
+        title: section.title(
+          sidebarAsInbox: settings.sidebarAsInbox,
+          archiveVisible: isArchiveVisible
+        ),
+        style: .section,
+        isExpanded: context.disclosureExpandedOverride ?? isExpanded,
+        topSpacing: SidebarCollectionRow.sectionTopSpacing,
+        onToggle: { toggleAppKitSection(section) },
+        onCleanUp: nativeSectionSupportsCleanup(section) ? cleanUpOpenChats : nil,
+        onCloseAll: nativeSectionSupportsCleanup(section) ? closeAllOpenChats : nil
+      ))
+    case let .timelineHeader(period):
+      .header(SidebarNativeRowConfiguration.Header(
+        title: ChatListTimelinePeriodTitle.string(
+          for: period,
+          calendar: .autoupdatingCurrent
+        ),
+        style: .timeline,
+        isExpanded: nil,
+        topSpacing: 0,
+        onToggle: nil,
+        onCleanUp: nil,
+        onCloseAll: nil
+      ))
+    case .pinDropGuide:
+      .pinDropGuide(SidebarNativeRowConfiguration.PinDropGuide(
+        dimsInstruction: context.dimsPinDropInstruction
+      ))
+    case let .chat(projectedItem):
+      .chat(nativeChatConfiguration(
+        projectedItem,
+        forceHoverAppearance: context.forceHoverAppearance,
+        disclosureExpandedOverride: context.disclosureExpandedOverride
+      ))
+    case let .folder(folder):
+      .folder(SidebarNativeRowConfiguration.Folder(
+        presentation: .init(folder),
+        titleDimmed: sidebarTitlesDimmed,
+        size: settings.sidebarItemSize,
+        disclosureExpanded: context.disclosureExpandedOverride ?? folder.isExpanded,
+        forceHoverAppearance: context.forceHoverAppearance,
+        actions: .init(
+          toggleDisclosure: { toggleAppKitFolder(folder.id) },
+          close: { removeFolder(folder, disposition: .closeDialogs) },
+          ungroup: { removeFolder(folder, disposition: .keepDialogs) }
+        )
+      ))
+    case .newThread:
+      .navigation(SidebarNativeRowConfiguration.Navigation(
+        title: "New thread",
+        systemImage: "square.and.pencil",
+        iconStyle: .newThread,
+        selected: false,
+        titleDimmed: settings.sidebarAsInbox ? true : sidebarTitlesDimmed,
+        size: settings.sidebarAsInbox ? settings.sidebarItemSize : .compact,
+        prominentUnreadCount: 0,
+        otherUnreadCount: 0,
+        avatars: [],
+        accessibilityValue: "",
+        action: createNewThread
+      ))
+    case .emptyState:
+      .emptyState(SidebarNativeRowConfiguration.EmptyState(
+        title: isArchiveVisible ? "No archived chats" : "No chats",
+        systemImage: isArchiveVisible ? "archivebox" : "bubble.left",
+        actionTitle: isArchiveVisible ? nil : "New thread",
+        action: isArchiveVisible ? nil : createNewThread
+      ))
+    }
+    return SidebarNativeRowConfiguration(
+      rowID: row.id,
+      content: content,
+      animatesChanges: !context.suppressesAnimations
+    )
+  }
+
+  private func nativeChatConfiguration(
+    _ projectedItem: SidebarProjectedItem,
+    forceHoverAppearance: Bool = false,
+    disclosureExpandedOverride: Bool? = nil
+  ) -> SidebarNativeRowConfiguration.Chat {
+    let item = projectedItem.item
+    let selected = selectedPeer == item.peerId
+      || dependencies?.nav3?.currentReplyThreadPeer == item.peerId
+    return SidebarNativeRowConfiguration.Chat(
+      presentation: SidebarNativeRowConfiguration.ChatPresentation(item),
+      selected: selected,
+      titleDimmed: sidebarTitlesDimmed,
+      size: settings.sidebarItemSize,
+      unreadBadgeStyle: settings.unreadBadgeStyle,
+      showsCloseButton: appKitShowsCloseButton(for: item),
+      isTemporary: isTemporaryItem(item),
+      isDropTargeted: appKitExternalDropTargetID == projectedItem.id,
+      forceHoverAppearance: forceHoverAppearance,
+      indentationLevel: min(projectedItem.depth, 3),
+      showsIcon: projectedItem.showsIcon,
+      disclosureExpanded: projectedItem.isExpandable
+        ? (disclosureExpandedOverride ?? projectedItem.isExpanded)
+        : nil,
+      actions: SidebarNativeRowConfiguration.ChatActions(
+        open: { openChat(item) },
+        close: { closeChat(item) },
+        persist: { persistTemporaryChat(item) },
+        toggleDisclosure: { toggleAppKitThreadParent(projectedItem.id) },
+        openInNewTab: {
+          MainWindowOpenCoordinator.shared.openTab(.chat(peer: item.peerId))
+        },
+        openInNewWindow: {
+          MainWindowOpenCoordinator.shared.openNewWindow(.chat(peer: item.peerId))
+        },
+        rename: { sidebarRenameItem = item },
+        togglePin: { SidebarChatRowActionRunner.togglePin(item) },
+        toggleReadUnread: {
+          SidebarChatRowActionRunner.toggleReadUnread(
+            item,
+            dependencies: dependencies
+          )
+        },
+        folderMenu: { sidebarFolderMenu(for: item) }
+      )
+    )
+  }
+
+  private func appKitFolderRow(
+    _ folder: SidebarProjectedFolder,
+    disclosureExpandedOverride: Bool? = nil
+  ) -> some View {
+    SidebarFolderItemView(
+      title: folder.title,
+      childCount: folder.childCount,
+      unreadCount: folder.unreadCount,
+      isExpanded: disclosureExpandedOverride ?? folder.isExpanded,
+      titleDimmed: sidebarTitlesDimmed,
+      size: settings.sidebarItemSize,
+      onToggle: { toggleAppKitFolder(folder.id) },
+      onClose: { removeFolder(folder, disposition: .closeDialogs) },
+      onUngroup: { removeFolder(folder, disposition: .keepDialogs) }
+    )
+    .equatable()
+  }
+
+  private var nativeGridAvatars: [InlineKit.User] {
+    if let spaceID = nav.selectedSpaceId {
+      return gridStore.recentAvatars(spaceID: spaceID).map { InlineKit.User(from: $0.user) }
+    }
+    return homeGridAvatars
+  }
+
+  private var nativeGridIsSelected: Bool {
+    if let spaceID = nav.selectedSpaceId {
+      return nav.currentRoute == .grid(spaceId: spaceID)
+    }
+    return isAnyHomeGridSelected
+  }
+
+  private var nativeGridAction: () -> Void {
+    if let spaceID = nav.selectedSpaceId {
+      return { openGrid(spaceID: spaceID) }
+    }
+    if let home = homeGridSpaces.first {
+      return { openGrid(spaceID: home.spaceID) }
+    }
+    return {}
+  }
+
+  private func nativeSectionSupportsCleanup(
+    _ section: SidebarCollectionRow.SectionHeader
+  ) -> Bool {
+    section == .content && settings.sidebarAsInbox && !isArchiveVisible
+  }
+
+  private var nativeAllChatsUnreadAccessibilityValue: String {
+    let prominent = unreadCounts.scopedUnopenedProminentUnreadCount
+    let other = unreadCounts.scopedUnopenedOtherUnreadCount
+    var parts: [String] = []
+    if prominent > 0 {
+      parts.append("\(prominent) prominent unread chat\(prominent == 1 ? "" : "s")")
+    }
+    if other > 0 {
+      parts.append("\(other) other unread chat\(other == 1 ? "" : "s")")
+    }
+    return parts.isEmpty ? "" : "\(parts.joined(separator: " and ")) not in sidebar"
   }
 
   private func appKitDragPreviewContent(for row: SidebarCollectionRow) -> AnyView {
@@ -515,7 +837,10 @@ struct SidebarView: View {
     )
   }
 
-  private func appKitChatRow(_ projectedItem: SidebarProjectedItem) -> some View {
+  private func appKitChatRow(
+    _ projectedItem: SidebarProjectedItem,
+    disclosureExpandedOverride: Bool? = nil
+  ) -> some View {
     let item = projectedItem.item
     let isSelected = selectedPeer == item.peerId
       || dependencies?.nav3?.currentReplyThreadPeer == item.peerId
@@ -535,7 +860,9 @@ struct SidebarView: View {
         isDropTargeted: appKitExternalDropTargetID == projectedItem.id,
         indentationLevel: min(projectedItem.depth, 3),
         showsIcon: projectedItem.showsIcon,
-        disclosureExpanded: projectedItem.isExpandable ? projectedItem.isExpanded : nil,
+        disclosureExpanded: projectedItem.isExpandable
+          ? (disclosureExpandedOverride ?? projectedItem.isExpanded)
+          : nil,
         usesFullWidthCollectionLayout: true,
         onOpen: {
           openChat(item)
@@ -548,7 +875,8 @@ struct SidebarView: View {
         },
         onToggleDisclosure: {
           toggleAppKitThreadParent(projectedItem.id)
-        }
+        },
+        folderMenu: { sidebarFolderMenu(for: item) }
       )
       .equatable()
       .simultaneousGesture(TapGesture(count: 2).onEnded {
@@ -565,14 +893,16 @@ struct SidebarView: View {
 
   private func appKitSectionHeader(
     _ section: SidebarCollectionRow.SectionHeader,
-    isExpanded: Bool
+    isExpanded: Bool,
+    hostState: SidebarCollectionRowHostState?
   ) -> some View {
     SidebarCollectionSectionHeaderView(
       title: section.title(
         sidebarAsInbox: settings.sidebarAsInbox,
         archiveVisible: isArchiveVisible
       ),
-      isExpanded: isExpanded,
+      initialIsExpanded: isExpanded,
+      hostState: hostState,
       topSpacing: SidebarCollectionRow.sectionTopSpacing,
       cleanupMenu: appKitSectionCleanupMenu(section),
       onToggle: { toggleAppKitSection(section) }
@@ -1023,6 +1353,7 @@ struct SidebarView: View {
       onCreateSpace: {
         nav.open(.createSpace)
       },
+      onNewFolder: canCreateFolder ? createEmptyFolder : nil,
       onNewThread: {
         createNewThread()
       },
@@ -1105,8 +1436,12 @@ struct SidebarView: View {
     dependencies?.nav3?.currentReplyThreadPeer ?? selectedPeer
   }
 
-  private var visibleItems: [SidebarViewModel.Item] {
+  private var sourceVisibleItems: [SidebarViewModel.Item] {
     isArchiveVisible ? viewModel.archivedItems : viewModel.activeItems
+  }
+
+  private var visibleItems: [SidebarViewModel.Item] {
+    sourceVisibleItems.filter { pendingClosedSidebarItemIDs.contains($0.id) == false }
   }
 
   private var visiblePinnedItems: [SidebarViewModel.Item] {
@@ -1144,9 +1479,11 @@ struct SidebarView: View {
     SidebarCollectionProjection.sidebarTree(
       pinnedItems: visiblePinnedItems,
       normalItems: visibleNormalSourceItems,
+      folders: viewModel.folders.filter { pendingRemovedFolderIDs.contains($0.id) == false },
       collapsedParentIDs: collapsedAppKitThreadParentIDs,
+      collapsedFolderIDs: collapsedAppKitFolderIDs,
       detachedReplyIDs: detachedAppKitReplyIDs,
-      nestingPolicy: settings.sidebarAsInbox ? .replyThreads : .flat,
+      nestingPolicy: sidebarPresentationConfiguration.nesting,
       sortMode: effectiveSidebarSort
     )
   }
@@ -1184,36 +1521,265 @@ struct SidebarView: View {
     )
   }
 
+  private func toggleAppKitNode(_ id: SidebarCollectionNodeID) {
+    switch id {
+    case let .chat(chatID):
+      toggleAppKitThreadParent(chatID)
+    case let .folder(folderID):
+      toggleAppKitFolder(folderID)
+    }
+  }
+
+  private func toggleAppKitFolder(_ id: Int64) {
+    let visibleRowsBefore = appKitRows.count
+    let expanded: Bool
+    if collapsedAppKitFolderIDs.remove(id) == nil {
+      collapsedAppKitFolderIDs.insert(id)
+      expanded = false
+    } else {
+      expanded = true
+    }
+    persistCollapsedAppKitFolderIDs()
+    sidebarInteractionLog.info(
+      "collapse folder expanded=\(expanded) visibleRowsBefore=\(visibleRowsBefore) "
+        + "visibleRowsAfter=\(appKitRows.count)"
+    )
+  }
+
+  private func sidebarFolderMenu(
+    for item: SidebarViewModel.Item
+  ) -> SidebarChatFolderMenu? {
+    guard settings.sidebarAsInbox,
+          isArchiveVisible == false,
+          nav.selectedSpaceId == nil,
+          item.chatType == .privateChat,
+          isTemporaryItem(item) == false
+    else { return nil }
+
+    let destinations = viewModel.folders
+      .filter { folder in
+        pendingRemovedFolderIDs.contains(folder.id) == false
+          && folder.id != item.folderID
+      }
+      .map { folder in
+        let title = folder.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return SidebarChatFolderMenu.Destination(
+          id: folder.id,
+          title: title.flatMap { $0.isEmpty ? nil : $0 } ?? "Untitled Folder",
+          move: { moveChat(item, toFolder: folder.id) }
+        )
+      }
+    return SidebarChatFolderMenu(
+      destinations: destinations,
+      create: { createFolder(containing: item) },
+      removeFromFolder: item.folderID == nil ? nil : { moveChatToRoot(item) }
+    )
+  }
+
+  private func createFolder(containing item: SidebarViewModel.Item) {
+    createFolder(peers: [item.peerId])
+  }
+
+  private func createEmptyFolder() {
+    createFolder(peers: [])
+  }
+
+  private func createFolder(peers: [Peer]) {
+    guard let dependencies else { return }
+    Task(priority: .userInitiated) {
+      do {
+        _ = try await dependencies.realtimeV2.send(.createDialogFolder(
+          title: nil,
+          peers: peers
+        ))
+      } catch {
+        sidebarInteractionLog.error("folder creation failed", error: error)
+        ToastCenter.shared.showError("Couldn’t create the folder. Please try again.")
+      }
+    }
+  }
+
+  private var canCreateFolder: Bool {
+    settings.sidebarAsInbox && isArchiveVisible == false && nav.selectedSpaceId == nil
+  }
+
+  private func moveChat(_ item: SidebarViewModel.Item, toFolder folderID: Int64) {
+    guard let order = orderForAppending(toFolder: folderID, moving: item) else {
+      ToastCenter.shared.showError("That folder’s order needs to refresh before moving this chat.")
+      return
+    }
+    persistFolderMembership(item, order: order, destination: .folder(folderID))
+  }
+
+  private func moveChatToRoot(_ item: SidebarViewModel.Item) {
+    let tree = appKitSidebarTree
+    let roots = tree.snapshot.sections.first(where: { $0.id == .normal })?.rootIDs
+      .filter { $0 != .chat(item.id) } ?? []
+    let previousOrder = roots.last.flatMap {
+      tree.trailingPersistedOrder(for: $0, lane: .normal)
+    }
+    guard let order = safeSidebarInsertionOrder(
+      hasPrevious: roots.isEmpty == false,
+      previousOrder: previousOrder,
+      hasNext: false,
+      nextOrder: nil
+    ) else {
+      ToastCenter.shared.showError("Sidebar order needs to refresh before moving this chat.")
+      return
+    }
+    persistFolderMembership(item, order: order, destination: .root)
+  }
+
+  private func orderForAppending(
+    toFolder folderID: Int64,
+    moving item: SidebarViewModel.Item
+  ) -> String? {
+    let tree = appKitSidebarTree
+    let folderNodeID = SidebarCollectionNodeID.folder(folderID)
+    guard let folderNode = tree.snapshot.nodes[folderNodeID],
+          let folderOrder = tree.persistedOrder(for: folderNodeID, lane: .normal),
+          let roots = tree.snapshot.sections.first(where: { $0.id == .normal })?.rootIDs,
+          let folderIndex = roots.firstIndex(of: folderNodeID)
+    else { return nil }
+    let childIDs = folderNode.childIDs.filter { $0 != .chat(item.id) }
+    let previousOrder = childIDs.last.flatMap {
+      tree.persistedOrder(for: $0, lane: .normal)
+    } ?? folderOrder
+    let nextIndex = roots.index(after: folderIndex)
+    let nextNodeID = nextIndex < roots.endIndex ? roots[nextIndex] : nil
+    let nextOrder = nextNodeID.flatMap { tree.persistedOrder(for: $0, lane: .normal) }
+    return safeSidebarInsertionOrder(
+      hasPrevious: true,
+      previousOrder: previousOrder,
+      hasNext: nextNodeID != nil,
+      nextOrder: nextOrder
+    )
+  }
+
+  private func persistFolderMembership(
+    _ item: SidebarViewModel.Item,
+    order: String,
+    destination: DialogOrderDestination
+  ) {
+    guard let dependencies else { return }
+    Task(priority: .userInitiated) {
+      do {
+        _ = try await dependencies.realtimeV2.send(.updateDialogOrder(
+          peerId: item.peerId,
+          order: order,
+          pinned: false,
+          destination: destination
+        ))
+      } catch {
+        sidebarInteractionLog.error("folder membership update failed", error: error)
+        ToastCenter.shared.showError("Couldn’t move that chat. Please try again.")
+      }
+    }
+  }
+
+  private func removeFolder(
+    _ folder: SidebarProjectedFolder,
+    disposition: DeleteDialogFolderTransaction.Disposition
+  ) {
+    guard pendingRemovedFolderIDs.contains(folder.id) == false else { return }
+    // Snapshot the model source, not the expanded row projection, so a
+    // collapsed folder still restores every child.
+    let childItems = sourceVisibleItems.filter { $0.folderID == folder.id }
+    let childIDs = childItems.map(\.id)
+    pendingRemovedFolderIDs.insert(folder.id)
+    if disposition == .closeDialogs {
+      pendingClosedSidebarItemIDs.formUnion(childIDs)
+    }
+
+    guard let dependencies else {
+      pendingRemovedFolderIDs.remove(folder.id)
+      pendingClosedSidebarItemIDs.subtract(childIDs)
+      return
+    }
+    let undoIntent = disposition == .closeDialogs
+      ? dependencies.appUndo.beginIntent()
+      : nil
+    let closedChats = childItems.map { item in
+      AppUndoHistory.ClosedChat(
+        peer: item.peerId,
+        order: item.order,
+        pinnedOrder: item.pinnedOrder,
+        restoresNestedPin: false
+      )
+    }
+    if disposition == .closeDialogs {
+      for child in childItems {
+        closeActiveRouteIfNeeded(peer: child.peerId, dependencies: dependencies)
+      }
+    }
+    Task(priority: .userInitiated) {
+      do {
+        _ = try await dependencies.realtimeV2.send(.deleteDialogFolder(
+          folderId: folder.id,
+          disposition: disposition
+        ))
+        if let undoIntent {
+          dependencies.appUndo.recordClosedFolder(
+            folderID: folder.id,
+            title: folder.folder.title,
+            order: folder.folder.order,
+            chats: closedChats,
+            intent: undoIntent
+          )
+        }
+      } catch {
+        pendingRemovedFolderIDs.remove(folder.id)
+        pendingClosedSidebarItemIDs.subtract(childIDs)
+        ToastCenter.shared.showError("Couldn’t update the folder. Please try again.")
+        sidebarInteractionLog.error("folder removal failed", error: error)
+      }
+    }
+  }
+
   private func toggleAppKitSection(_ section: SidebarCollectionRow.SectionHeader) {
     if collapsedAppKitSections.remove(section) == nil {
       collapsedAppKitSections.insert(section)
     }
     persistCollapsedAppKitSections()
-    resetSidebarVisibility()
     sidebarInteractionLog.info(
       "section collapse section=\(section.rawValue) expanded="
         + "\(collapsedAppKitSections.contains(section) == false)"
     )
   }
 
-  private func revealCurrentReplyThreadInHierarchy() {
-    guard let peer = dependencies?.nav3?.currentReplyThreadPeer,
-          let thread = visibleItems.first(where: { $0.peerId == peer }),
-          let parentChatID = thread.parentChatId,
-          let parent = visibleItems.first(where: { $0.chatId == parentChatID })
+  private func revealCurrentSidebarSelectionInHierarchy() {
+    guard let peer = dependencies?.nav3?.currentReplyThreadPeer ?? selectedPeer,
+          let selected = visibleItems.first(where: { $0.peerId == peer })
     else { return }
-
     let tree = appKitSidebarTree
-    let projectedLane = tree.snapshot.sectionID(containing: thread.id).flatMap { $0 }
+    let selectedNodeID = SidebarCollectionNodeID.chat(selected.id)
+    let projectedLane = tree.snapshot.sectionID(containing: selectedNodeID).flatMap { $0 }
     let section: SidebarCollectionRow.SectionHeader = projectedLane == .pinned
       ? .pinned
       : .content
     if collapsedAppKitSections.remove(section) != nil {
       persistCollapsedAppKitSections()
     }
-    guard tree.snapshot.parentID(of: thread.id) == parent.id else { return }
-    if collapsedAppKitThreadParentIDs.remove(parent.id) != nil {
+
+    var parentID = tree.snapshot.parentID(of: selectedNodeID)
+    var changedThreads = false
+    var changedFolders = false
+    while let currentParentID = parentID {
+      switch currentParentID {
+      case let .chat(chatID):
+        changedThreads = collapsedAppKitThreadParentIDs.remove(chatID) != nil
+          || changedThreads
+      case let .folder(folderID):
+        changedFolders = collapsedAppKitFolderIDs.remove(folderID) != nil
+          || changedFolders
+      }
+      parentID = tree.snapshot.parentID(of: currentParentID)
+    }
+    if changedThreads {
       persistCollapsedAppKitThreadParentIDs()
+    }
+    if changedFolders {
+      persistCollapsedAppKitFolderIDs()
     }
   }
 
@@ -1333,10 +1899,6 @@ struct SidebarView: View {
   private var sidebarConnectionState: SidebarConnectionDisplayState? {
     guard !isCollapsed else { return nil }
 
-    if legacyApiState == .waitingForNetwork {
-      return .waitingForNetwork
-    }
-
     if realtimeState.connectionState == .connected {
       return showConnectedState ? .connected : nil
     }
@@ -1440,8 +2002,11 @@ struct SidebarView: View {
   ) -> SidebarCollectionExternalDropTarget? {
     let tree = appKitSidebarTree
     guard let item = tree.itemByID[id] else { return nil }
-    let parentPeer = tree.snapshot.parentID(of: id)
-      .flatMap { tree.itemByID[$0]?.peerId }
+    let parentPeer = tree.snapshot.parentID(of: .chat(id))
+      .flatMap { parentID -> Peer? in
+        guard case let .chat(parentChatID) = parentID else { return nil }
+        return tree.itemByID[parentChatID]?.peerId
+      }
     return SidebarCollectionExternalDropTarget(
       rowID: id,
       peer: item.peerId,
@@ -1678,7 +2243,7 @@ struct SidebarView: View {
     }
   }
 
-  private func closeChat(_ item: SidebarViewModel.Item) {
+  private func closeChat(_ item: SidebarViewModel.Item, recordsUndo: Bool = true) {
     guard settings.sidebarAsInbox else { return }
 
     if isTemporaryItem(item) {
@@ -1689,11 +2254,25 @@ struct SidebarView: View {
     guard let dependencies else { return }
 
     let itemsToClose = appKitAttachedGroupItems(startingAt: item)
+    let itemIDsToClose = Set(itemsToClose.map(\.id))
+    guard pendingClosedSidebarItemIDs.isDisjoint(with: itemIDsToClose) else {
+      sidebarInteractionLog.debug("ignored repeated close while the existing request is pending")
+      return
+    }
+    let undoIntent = recordsUndo ? dependencies.appUndo.beginIntent() : nil
+
+    // The dialog model remains authoritative, but waiting for its realtime
+    // observation kept a successfully clicked row fully interactive for
+    // several seconds. Project the pending mutation immediately so the first
+    // click owns one close animation and cannot enqueue duplicate requests.
+    pendingClosedSidebarItemIDs.formUnion(itemIDsToClose)
     for itemToClose in itemsToClose {
       closeActiveRouteIfNeeded(peer: itemToClose.peerId, dependencies: dependencies)
     }
 
     Task(priority: .userInitiated) {
+      var failedItemIDs = Set<ChatListItem.Identifier>()
+      var closedChats: [AppUndoHistory.ClosedChat] = []
       for itemToClose in itemsToClose {
         do {
           if itemToClose.pinned, itemToClose.parentChatId != nil {
@@ -1705,11 +2284,36 @@ struct SidebarView: View {
           _ = try await dependencies.realtimeV2.send(
             .updateDialogOpen(peerId: itemToClose.peerId, open: false)
           )
+          closedChats.append(AppUndoHistory.ClosedChat(
+            peer: itemToClose.peerId,
+            order: itemToClose.order,
+            pinnedOrder: itemToClose.pinnedOrder,
+            restoresNestedPin: itemToClose.pinned && itemToClose.parentChatId != nil
+          ))
         } catch {
+          failedItemIDs.insert(itemToClose.id)
           Log.shared.error("Failed to close chat in sidebar", error: error)
         }
       }
+      if let undoIntent {
+        dependencies.appUndo.recordClosedChats(closedChats, intent: undoIntent)
+      }
+      guard failedItemIDs.isEmpty == false else { return }
+      await MainActor.run {
+        pendingClosedSidebarItemIDs.subtract(failedItemIDs)
+        ToastCenter.shared.showError(
+          failedItemIDs.count == 1
+            ? "Couldn’t close that chat"
+            : "Some chats couldn’t be closed"
+        )
+      }
     }
+  }
+
+  private func prunePendingSidebarCloses() {
+    guard pendingClosedSidebarItemIDs.isEmpty == false else { return }
+    let sourceIDs = Set(sourceVisibleItems.map(\.id))
+    pendingClosedSidebarItemIDs.formIntersection(sourceIDs)
   }
 
   private func cleanUpOpenChats() {
@@ -1736,7 +2340,7 @@ struct SidebarView: View {
       .map(\.item)
 
     for item in rootItems {
-      closeChat(item)
+      closeChat(item, recordsUndo: false)
     }
   }
 
@@ -1751,7 +2355,7 @@ struct SidebarView: View {
       collapsedParentIDs: [],
       detachedReplyIDs: detachedAppKitReplyIDs,
       nestingPolicy: .replyThreads
-    )
+    ).compactMap(\.projectedItem)
     guard let startIndex = projectedItems.firstIndex(where: { $0.id == item.id }) else {
       return [item]
     }
@@ -1840,6 +2444,48 @@ struct SidebarView: View {
   }
 
   private func applyAppKitSidebarMove(
+    _ intent: SidebarCollectionMoveIntent,
+    completion: @escaping @MainActor @Sendable (Bool) -> Void
+  ) {
+    switch intent {
+    case let .chat(move):
+      applyAppKitChatMove(move, completion: completion)
+    case let .folder(move):
+      applyAppKitFolderMove(move, completion: completion)
+    }
+  }
+
+  private func applyAppKitFolderMove(
+    _ move: SidebarCollectionFolderMove,
+    completion: @escaping @MainActor @Sendable (Bool) -> Void
+  ) {
+    guard let dependencies,
+          let order = safeSidebarInsertionOrder(
+            hasPrevious: move.hasPreviousOrder,
+            previousOrder: move.previousOrder,
+            hasNext: move.hasNextOrder,
+            nextOrder: move.nextOrder
+          )
+    else {
+      sidebarInteractionLog.error("folder reorder rejected because destination orders are invalid")
+      completion(false)
+      return
+    }
+    Task(priority: .userInitiated) {
+      do {
+        _ = try await dependencies.realtimeV2.send(.updateDialogFolder(
+          folderId: move.folder.id,
+          order: order
+        ))
+        completion(true)
+      } catch {
+        sidebarInteractionLog.error("folder reorder persistence failed", error: error)
+        completion(false)
+      }
+    }
+  }
+
+  private func applyAppKitChatMove(
     _ move: SidebarCollectionMove,
     completion: @escaping @MainActor @Sendable (Bool) -> Void
   ) {
@@ -1847,7 +2493,7 @@ struct SidebarView: View {
       guard SidebarCollectionReorderPolicy.pinningOnly.allowsMove(
         sourceIsRoot: move.sourceIsRoot,
         changesSection: move.sourceLane != move.targetLane,
-        changesParent: move.hierarchyChange != nil
+        changesParent: move.hierarchyChange != nil || move.dialogDestination != nil
       )
       else {
         sidebarInteractionLog.error("rejected manual reorder in recent-activity mode")
@@ -1880,12 +2526,28 @@ struct SidebarView: View {
       )
     }
 
-    applySidebarOrder(
-      move.targetItems,
+    guard let targetOrder = safeSidebarInsertionOrder(
+      hasPrevious: move.hasPreviousOrder,
+      previousOrder: move.previousOrder,
+      hasNext: move.hasNextOrder,
+      nextOrder: move.nextOrder
+    ) else {
+      if move.hierarchyChange != nil {
+        detachedAppKitReplyIDs = detachedReplyIDsBeforeMove
+        persistDetachedAppKitReplyIDs()
+      }
+      sidebarInteractionLog.error("reorder rejected because destination orders are incomplete")
+      completion(false)
+      return
+    }
+
+    persistSidebarOrder(
       movedItem: move.movedItem,
-      newIndex: move.newIndex,
+      targetOrder: targetOrder,
       sourceLane: move.sourceLane,
       targetLane: move.targetLane,
+      destination: move.dialogDestination,
+      targetIndex: move.newIndex,
       onFailure: move.hierarchyChange == nil ? nil : {
         detachedAppKitReplyIDs = detachedReplyIDsBeforeMove
         persistDetachedAppKitReplyIDs()
@@ -1935,6 +2597,13 @@ struct SidebarView: View {
     )
   }
 
+  private func persistCollapsedAppKitFolderIDs() {
+    SidebarPresentationStateStore().setCollapsedFolderIDs(
+      collapsedAppKitFolderIDs,
+      userID: appKitPresentationStateUserID
+    )
+  }
+
   private func persistCollapsedAppKitSections() {
     SidebarPresentationStateStore().setCollapsedSections(
       collapsedAppKitSections,
@@ -1948,6 +2617,7 @@ struct SidebarView: View {
     let store = SidebarPresentationStateStore()
     detachedAppKitReplyIDs = store.detachedReplyIDs(userID: userID)
     collapsedAppKitThreadParentIDs = store.collapsedParentIDs(userID: userID)
+    collapsedAppKitFolderIDs = store.collapsedFolderIDs(userID: userID)
     collapsedAppKitSections = store.collapsedSections(userID: userID)
   }
 
@@ -1960,11 +2630,6 @@ struct SidebarView: View {
     onFailure: (@MainActor @Sendable () -> Void)? = nil,
     completion: (@MainActor @Sendable (Bool) -> Void)? = nil
   ) {
-    guard let dependencies else {
-      onFailure?()
-      completion?(false)
-      return
-    }
     let movedItemIsTemporary = isTemporaryItem(movedItem)
     let orderItems = movedItemIsTemporary ? reorderedItems : reorderedItems.filter { isTemporaryItem($0) == false }
     guard let orderIndex = orderItems.firstIndex(where: { $0.id == movedItem.id }) else {
@@ -1990,16 +2655,46 @@ struct SidebarView: View {
       return
     }
 
+    persistSidebarOrder(
+      movedItem: movedItem,
+      targetOrder: targetOrder,
+      sourceLane: sourceLane,
+      targetLane: targetLane,
+      destination: nil,
+      targetIndex: newIndex,
+      onFailure: onFailure,
+      completion: completion
+    )
+  }
+
+  private func persistSidebarOrder(
+    movedItem: SidebarViewModel.Item,
+    targetOrder: String,
+    sourceLane: SidebarOrderLane,
+    targetLane: SidebarOrderLane,
+    destination: DialogOrderDestination?,
+    targetIndex: Int,
+    onFailure: (@MainActor @Sendable () -> Void)? = nil,
+    completion: (@MainActor @Sendable (Bool) -> Void)? = nil
+  ) {
+    guard let dependencies else {
+      onFailure?()
+      completion?(false)
+      return
+    }
+    let movedItemIsTemporary = isTemporaryItem(movedItem)
+
     let isCrossLaneMove = sourceLane != targetLane
     guard targetOrder != targetLane.order(for: movedItem)
       || isCrossLaneMove
       || movedItemIsTemporary
+      || destination != nil
     else {
       completion?(true)
       return
     }
     sidebarInteractionLog.info(
-      "reorder commit targetIndex=\(newIndex) sourceLane=\(sourceLane.rawValue) "
+      "reorder commit targetIndex=\(targetIndex) sourceLane=\(sourceLane.rawValue) "
         + "targetLane=\(targetLane.rawValue) updates=1 "
         + "temporary=\(movedItemIsTemporary)"
     )
@@ -2011,13 +2706,15 @@ struct SidebarView: View {
             _ = try await dependencies.realtimeV2.send(.updateDialogOrder(
               peerId: movedItem.peerId,
               order: targetOrder,
-              pinned: false
+              pinned: false,
+              destination: destination
             ))
           case .pinned:
             _ = try await dependencies.realtimeV2.send(.updateDialogOrder(
               peerId: movedItem.peerId,
               pinnedOrder: targetOrder,
-              pinned: true
+              pinned: true,
+              destination: destination
             ))
           }
         } else {
@@ -2025,17 +2722,19 @@ struct SidebarView: View {
           case .normal:
             _ = try await dependencies.realtimeV2.send(.updateDialogOrder(
               peerId: movedItem.peerId,
-              order: targetOrder
+              order: targetOrder,
+              destination: destination
             ))
           case .pinned:
             _ = try await dependencies.realtimeV2.send(.updateDialogOrder(
               peerId: movedItem.peerId,
-              pinnedOrder: targetOrder
+              pinnedOrder: targetOrder,
+              destination: destination
             ))
           }
         }
         sidebarInteractionLog.info(
-          "reorder persisted targetIndex=\(newIndex) targetLane=\(targetLane.rawValue) "
+          "reorder persisted targetIndex=\(targetIndex) targetLane=\(targetLane.rawValue) "
             + "updates=1"
         )
         completion?(true)
@@ -2061,10 +2760,27 @@ struct SidebarView: View {
   ) -> String? {
     let previousOrder = lane.order(for: previousItem)
     let nextOrder = lane.order(for: nextItem)
-    return SidebarCollectionOrderPlanner.insertionOrder(
+    return safeSidebarInsertionOrder(
       hasPrevious: previousItem != nil,
       previousOrder: previousOrder,
       hasNext: nextItem != nil,
+      nextOrder: nextOrder
+    )
+  }
+
+  private func safeSidebarInsertionOrder(
+    hasPrevious: Bool,
+    previousOrder: String?,
+    hasNext: Bool,
+    nextOrder: String?
+  ) -> String? {
+    guard previousOrder.map(FractionalIndex.isValid) ?? true,
+          nextOrder.map(FractionalIndex.isValid) ?? true
+    else { return nil }
+    return SidebarCollectionOrderPlanner.insertionOrder(
+      hasPrevious: hasPrevious,
+      previousOrder: previousOrder,
+      hasNext: hasNext,
       nextOrder: nextOrder,
       between: FractionalIndex.between
     )
@@ -2353,22 +3069,7 @@ struct SidebarView: View {
     }
   }
 
-  private func handleLegacyApiStateChange(from oldState: RealtimeAPIState, to state: RealtimeAPIState) {
-    if state == .waitingForNetwork {
-      hideConnectedTask?.cancel()
-      hideConnectedTask = nil
-      showConnectedState = false
-      return
-    }
-
-    if oldState == .waitingForNetwork, state == .connected, realtimeState.connectionState == .connected {
-      showConnectedTemporarily()
-    }
-  }
-
   private func showConnectedTemporarily() {
-    guard legacyApiState != .waitingForNetwork else { return }
-
     showConnectedState = true
     hideConnectedTask?.cancel()
     hideConnectedTask = Task { @MainActor in
@@ -2383,6 +3084,7 @@ struct SidebarView: View {
       hideConnectedTask = nil
     }
   }
+
 }
 
 #Preview {
@@ -2628,13 +3330,14 @@ private struct SidebarGridRowContent: View {
   }
 }
 
-private struct SidebarActionRowIcon: View {
+struct SidebarActionRowIcon: View {
   let systemImage: String
   let size: SidebarItemSize
+  var weight: Font.Weight = .medium
 
   var body: some View {
     Image(systemName: systemImage)
-      .font(.system(size: 13, weight: .medium))
+      .font(.system(size: 13, weight: weight))
       .foregroundStyle(.secondary)
       .frame(width: size.iconSize, height: size.iconSize)
   }
@@ -2903,9 +3606,11 @@ private struct SidebarNewThreadRow: View {
   }
 
   private var icon: some View {
-    Image(systemName: "square.and.pencil")
-      .font(.system(size: 13, weight: .regular))
-      .foregroundStyle(.secondary)
+    SidebarActionRowIcon(
+      systemImage: "square.and.pencil",
+      size: size,
+      weight: .regular
+    )
   }
 
   private var outerHorizontalPadding: CGFloat {

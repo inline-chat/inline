@@ -77,4 +77,24 @@ struct SidebarScrollEdgeVisibilityTests {
     #expect(result.above == nil)
     #expect(result.below == nil)
   }
+
+  @Test("collapsed containers contribute their complete prominent unread count")
+  func weightedContainerUnreadCount() {
+    let entries = [
+      SidebarUnreadViewportEntry(
+        id: "folder",
+        minimumY: 100,
+        maximumY: 130,
+        prominentUnreadCount: 3
+      ),
+    ]
+
+    let result = SidebarUnreadViewportResolver.resolve(
+      entries: entries,
+      viewportStart: 0,
+      viewportLength: 80
+    )
+
+    #expect(result.below == .init(count: 3, targetID: "folder"))
+  }
 }

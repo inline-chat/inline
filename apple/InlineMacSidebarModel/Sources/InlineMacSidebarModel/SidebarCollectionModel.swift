@@ -2,8 +2,8 @@ import Foundation
 
 /// Describes which nodes a sidebar container may own in the presentation tree.
 ///
-/// A reply-thread parent uses ``semanticParentOnly``. A future user folder can
-/// use ``any`` without changing the tree, slot, or move machinery.
+/// A reply-thread parent uses ``semanticParentOnly``. A user folder uses
+/// ``any`` without changing the tree, slot, or move machinery.
 public enum SidebarCollectionChildPolicy: Hashable, Sendable {
   case none
   case semanticParentOnly
@@ -178,6 +178,19 @@ public struct SidebarCollectionSnapshot<
 
   private let parentByNodeID: [NodeID: NodeID]
   private let sectionByNodeID: [NodeID: SectionID]
+
+  /// A nonthrowing crash-safe fallback for a projection that rejected corrupt
+  /// source data. Empty sections cannot violate placement or hierarchy rules.
+  public init(emptySectionIDs: [SectionID]) {
+    var seen = Set<SectionID>()
+    sections = emptySectionIDs.compactMap { id in
+      guard seen.insert(id).inserted else { return nil }
+      return SidebarCollectionSection(id: id, rootIDs: [])
+    }
+    nodes = [:]
+    parentByNodeID = [:]
+    sectionByNodeID = [:]
+  }
 
   public init(
     sections: [SidebarCollectionSection<NodeID, SectionID>],

@@ -36,4 +36,15 @@ struct SidebarCollectionActivityOrderingTests {
 
     #expect(ordering.ordered(["first", "second"]) == ["second", "first"])
   }
+
+  @Test("duplicate stable identifiers keep the first coordinate without trapping")
+  func duplicateStableIDsAreSafe() {
+    let ordering = SidebarCollectionActivityOrdering(
+      childrenByParentID: [:],
+      activityByNodeID: ["first": 10, "second": 10],
+      stableIDs: ["second", "first", "second"]
+    )
+
+    #expect(ordering.ordered(["first", "second"]) == ["second", "first"])
+  }
 }

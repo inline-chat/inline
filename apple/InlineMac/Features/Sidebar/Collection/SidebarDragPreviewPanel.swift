@@ -9,6 +9,8 @@ final class SidebarDragPreviewPanel {
   private let panel: NSPanel
   private weak var ownerWindow: NSWindow?
   private var hostingView: NSHostingView<AnyView>?
+  private var nativeView: SidebarNativeDragPreviewView?
+  private var nativeContent: ((SidebarCollectionRow) -> SidebarNativeRowConfiguration)?
 
   init() {
     panel = NSPanel(
@@ -28,24 +30,42 @@ final class SidebarDragPreviewPanel {
   func show(
     rows: [SidebarCollectionRow],
     content: @escaping (SidebarCollectionRow) -> AnyView,
+    nativeContent: ((SidebarCollectionRow) -> SidebarNativeRowConfiguration)?,
     horizontalBleed: CGFloat,
     ownerWindow: NSWindow,
     frame: CGRect
   ) {
     let panelFrame = frame.insetBy(dx: -horizontalBleed, dy: 0)
-    let preview = preview(
-      rows: rows,
-      content: content,
-      horizontalBleed: horizontalBleed,
-      frame: frame
-    )
-    let hostingView = NSHostingView(rootView: preview)
-    hostingView.frame = CGRect(origin: .zero, size: panelFrame.size)
-    hostingView.autoresizingMask = [.width, .height]
-    hostingView.appearance = ownerWindow.appearance
+    if let nativeContent {
+      let nativeView = SidebarNativeDragPreviewView()
+      nativeView.frame = CGRect(origin: .zero, size: panelFrame.size)
+      nativeView.autoresizingMask = [.width, .height]
+      nativeView.appearance = ownerWindow.appearance
+      nativeView.configure(
+        rows: rows,
+        content: nativeContent,
+        horizontalBleed: horizontalBleed
+      )
+      panel.contentView = nativeView
+      self.nativeView = nativeView
+      hostingView = nil
+    } else {
+      let preview = preview(
+        rows: rows,
+        content: content,
+        horizontalBleed: horizontalBleed,
+        frame: frame
+      )
+      let hostingView = NSHostingView(rootView: preview)
+      hostingView.frame = CGRect(origin: .zero, size: panelFrame.size)
+      hostingView.autoresizingMask = [.width, .height]
+      hostingView.appearance = ownerWindow.appearance
+      panel.contentView = hostingView
+      self.hostingView = hostingView
+      nativeView = nil
+    }
     panel.appearance = ownerWindow.appearance
-    panel.contentView = hostingView
-    self.hostingView = hostingView
+    self.nativeContent = nativeContent
     self.ownerWindow = ownerWindow
     panel.setFrame(panelFrame, display: true)
     ownerWindow.addChildWindow(panel, ordered: .above)
@@ -61,7 +81,6 @@ final class SidebarDragPreviewPanel {
     horizontalBleed: CGFloat,
     width: CGFloat
   ) {
-    guard let hostingView else { return }
     let contentFrame = CGRect(x: 0, y: 0, width: width, height: row.height)
     let panelSize = CGSize(width: width + horizontalBleed * 2, height: row.height)
     let oldFrame = panel.frame
@@ -71,13 +90,24 @@ final class SidebarDragPreviewPanel {
       width: panelSize.width,
       height: panelSize.height
     )
-    hostingView.rootView = preview(
-      rows: [row],
-      content: content,
-      horizontalBleed: horizontalBleed,
-      frame: contentFrame
-    )
-    hostingView.frame = CGRect(origin: .zero, size: panelSize)
+    if let nativeView, let nativeContent {
+      nativeView.frame = CGRect(origin: .zero, size: panelSize)
+      nativeView.configure(
+        rows: [row],
+        content: nativeContent,
+        horizontalBleed: horizontalBleed
+      )
+    } else if let hostingView {
+      hostingView.rootView = preview(
+        rows: [row],
+        content: content,
+        horizontalBleed: horizontalBleed,
+        frame: contentFrame
+      )
+      hostingView.frame = CGRect(origin: .zero, size: panelSize)
+    } else {
+      return
+    }
     panel.setFrame(nextFrame, display: true)
   }
 
@@ -110,6 +140,8 @@ final class SidebarDragPreviewPanel {
     ownerWindow?.removeChildWindow(panel)
     ownerWindow = nil
     hostingView = nil
+    nativeView = nil
+    nativeContent = nil
     panel.contentView = nil
   }
 
@@ -133,5 +165,52 @@ final class SidebarDragPreviewPanel {
       .frame(width: panelFrame.width, height: panelFrame.height)
       .environment(\.controlActiveState, .key)
     )
+  }
+}
+
+/// Frozen lifted rows use the same AppKit renderer as live collection items,
+/// without becoming a second semantic or interaction owner.
+@MainActor
+private final class SidebarNativeDragPreviewView: NSView {
+  private var rows: [SidebarCollectionRow] = []
+  private var rowViews: [SidebarNativeRowView] = []
+  private var horizontalBleed: CGFloat = 0
+
+  override var isFlipped: Bool { true }
+
+  func configure(
+    rows: [SidebarCollectionRow],
+    content: (SidebarCollectionRow) -> SidebarNativeRowConfiguration,
+    horizontalBleed: CGFloat
+  ) {
+    rowViews.forEach { view in
+      view.prepareForReuse()
+      view.removeFromSuperview()
+    }
+    self.rows = rows
+    self.horizontalBleed = horizontalBleed
+    rowViews = rows.map { row in
+      let view = SidebarNativeRowView()
+      view.configure(content(row))
+      view.setLayoutVisibility(true)
+      addSubview(view)
+      return view
+    }
+    needsLayout = true
+  }
+
+  override func layout() {
+    super.layout()
+    var y: CGFloat = 0
+    let width = max(bounds.width - horizontalBleed * 2, 0)
+    for (row, view) in zip(rows, rowViews) {
+      view.frame = CGRect(
+        x: horizontalBleed,
+        y: y,
+        width: width,
+        height: row.height
+      )
+      y += row.height
+    }
   }
 }

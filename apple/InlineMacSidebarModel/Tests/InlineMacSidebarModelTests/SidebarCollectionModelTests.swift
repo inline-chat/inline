@@ -311,6 +311,55 @@ struct SidebarCollectionMoveTests {
     #expect(moved.visibleProjection().map(\.id) == [.folder, .rootB])
   }
 
+  @Test("folder collapse retains complete membership and expands as one projection")
+  func folderCollapseIsPresentationOnly() throws {
+    let collapsed = try TestSnapshot(
+      sections: [section(.normal, [.folder, .rootC])],
+      nodes: [
+        node(.folder, childPolicy: .any, childIDs: [.rootB, .replyA1], isExpanded: false),
+        node(.rootB),
+        node(.replyA1),
+        node(.rootC),
+      ]
+    )
+
+    #expect(collapsed.visibleProjection().map(\.id) == [.folder, .rootC])
+    #expect(try collapsed.dragGroup(for: .folder).attachedNodeIDs == [
+      .folder, .rootB, .replyA1,
+    ])
+
+    let expanded = try collapsed.settingExpanded(true, for: .folder)
+    #expect(expanded.visibleProjection().map(\.id) == [
+      .folder, .rootB, .replyA1, .rootC,
+    ])
+    #expect(expanded.parentID(of: .rootB) == .folder)
+    #expect(expanded.parentID(of: .replyA1) == .folder)
+  }
+
+  @Test("moving a root into a folder is one atomic value transition")
+  func folderDropIsAtomic() throws {
+    let snapshot = try TestSnapshot(
+      sections: [section(.normal, [.folder, .rootB, .rootC])],
+      nodes: [
+        node(.folder, childPolicy: .any, childIDs: [.replyA1]),
+        node(.replyA1),
+        node(.rootB),
+        node(.rootC),
+      ]
+    )
+
+    let moved = try snapshot.moving(
+      .rootB,
+      to: slot(.normal, parentID: .folder)
+    )
+
+    #expect(rootIDs(moved, sectionID: .normal) == [.folder, .rootC])
+    #expect(moved.nodes[.folder]?.childIDs == [.replyA1, .rootB])
+    #expect(moved.visibleProjection().map(\.id) == [
+      .folder, .replyA1, .rootB, .rootC,
+    ])
+  }
+
   @Test("moving a nested reply to pinned root detaches and pins in one intent")
   func detachesIntoPinnedSection() throws {
     let snapshot = try standardSnapshot()

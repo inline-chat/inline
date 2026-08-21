@@ -33,6 +33,7 @@ final class SidebarViewModel {
     let open: Bool
     let order: String?
     let pinnedOrder: String?
+    let folderID: Int64?
     let lastActivityAt: Date
     let identity: ChatListIdentityDescriptor?
     let chatType: ChatType?
@@ -65,6 +66,7 @@ final class SidebarViewModel {
       open = snapshot.isOpen
       order = snapshot.order
       pinnedOrder = snapshot.pinnedOrder
+      folderID = snapshot.folderID
       lastActivityAt = snapshot.lastUpdatedAt ?? .distantPast
       identity = snapshot.identity
       chatType = snapshot.chatType
@@ -73,9 +75,27 @@ final class SidebarViewModel {
     }
   }
 
+  struct Folder: Equatable, Identifiable {
+    let id: Int64
+    let title: String?
+    let order: String
+
+    init(_ folder: DialogFolder) {
+      id = folder.id
+      title = folder.title
+      order = folder.order
+    }
+  }
+
+  private struct SourceSnapshot: Equatable {
+    let chats: [ChatListItemSnapshot]
+    let folders: [Folder]
+  }
+
   var activeItems: [Item] = []
   var archivedItems: [Item] = []
   var temporaryItems: [Item] = []
+  var folders: [Folder] = []
   var isChatProjectionReady = false
   var hasResolvedSpaces = false
   var spaces: [Space] = []
@@ -273,6 +293,7 @@ final class SidebarViewModel {
     activeItems = []
     archivedItems = []
     temporaryItems = []
+    folders = []
     errorText = nil
 
     os_log(
@@ -316,14 +337,21 @@ final class SidebarViewModel {
 
     chatsCancellable = ValueObservation
       .tracking { db in
-        try ChatListDatabaseQuery.fetchSnapshots(
+        let chats = try ChatListDatabaseQuery.fetchSnapshots(
           db,
           spaceID: source.spaceId,
           includeSpaceChatsInHome: true,
           translationLanguage: UserLocale.getCurrentLanguage()
         )
+        let folders = source.spaceId == nil && source.isInbox
+          ? try DialogFolder.order(DialogFolder.Columns.order, DialogFolder.Columns.id)
+            .fetchAll(db)
+            .map(Folder.init)
+          : []
+        return SourceSnapshot(chats: chats, folders: folders)
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
+      .removeDuplicates()
       .sink(
         receiveCompletion: { [weak self] completion in
           guard let self else { return }
@@ -354,7 +382,7 @@ final class SidebarViewModel {
           )
           scheduleChatsObservationRetry(for: source)
         },
-        receiveValue: { [weak self] snapshots in
+        receiveValue: { [weak self] sourceSnapshot in
           guard let self,
                 self.source == source,
                 chatsObservationGeneration == generation
@@ -362,7 +390,10 @@ final class SidebarViewModel {
           let previousActive = activeItems
           let previousArchived = archivedItems
           let previousTemporary = temporaryItems
-          self.snapshots = snapshots
+          self.snapshots = sourceSnapshot.chats
+          if folders != sourceSnapshot.folders {
+            folders = sourceSnapshot.folders
+          }
           chatsRetryAttempt = 0
           chatsRetryTask?.cancel()
           chatsRetryTask = nil
@@ -374,8 +405,8 @@ final class SidebarViewModel {
           let elapsedMilliseconds = Int(
             ((ProcessInfo.processInfo.systemUptime - startedAt) * 1_000).rounded()
           )
-          let openCount = snapshots.lazy.filter(\.isOpen).count
-          let pinnedCount = snapshots.lazy.filter(\.isPinned).count
+          let openCount = sourceSnapshot.chats.lazy.filter(\.isOpen).count
+          let pinnedCount = sourceSnapshot.chats.lazy.filter(\.isPinned).count
           let membershipChanged = previousActive.map(\.id) != activeItems.map(\.id)
             || previousArchived.map(\.id) != archivedItems.map(\.id)
             || previousTemporary.map(\.id) != temporaryItems.map(\.id)
@@ -389,7 +420,7 @@ final class SidebarViewModel {
             generation,
             source.diagnosticCode as NSString,
             elapsedMilliseconds,
-            snapshots.count,
+            sourceSnapshot.chats.count,
             openCount,
             pinnedCount,
             activeItems.count,
@@ -404,7 +435,7 @@ final class SidebarViewModel {
             name: "SidebarModelPublish",
             "generation=%{public}d snapshots=%{public}d active=%{public}d temporary=%{public}d",
             generation,
-            snapshots.count,
+            sourceSnapshot.chats.count,
             activeItems.count,
             temporaryItems.count
           )

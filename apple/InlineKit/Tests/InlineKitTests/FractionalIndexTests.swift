@@ -27,5 +27,12 @@ struct FractionalIndexTests {
 
     #expect(before < first)
   }
-}
 
+  @Test("validates persisted keys before callers enter the trapping generator")
+  func validatesKeys() {
+    #expect(FractionalIndex.isValid("0Az"))
+    #expect(FractionalIndex.isValid("") == false)
+    #expect(FractionalIndex.isValid("a-") == false)
+    #expect(FractionalIndex.isValid("é") == false)
+  }
+}

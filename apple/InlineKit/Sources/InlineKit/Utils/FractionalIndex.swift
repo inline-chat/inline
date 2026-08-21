@@ -5,6 +5,10 @@ public enum FractionalIndex {
   private static let maxDigit = alphabet.count - 1
   private static let digitMap = Dictionary(uniqueKeysWithValues: alphabet.enumerated().map { ($0.element, $0.offset) })
 
+  public static func isValid(_ value: String) -> Bool {
+    value.isEmpty == false && value.utf8.allSatisfy { digitMap[$0] != nil }
+  }
+
   public static func between(_ left: String?, _ right: String?) -> String {
     if let left, let right {
       precondition(left < right, "left fractional index must be lower than right")
@@ -64,4 +68,3 @@ public enum FractionalIndex {
     return digit
   }
 }
-

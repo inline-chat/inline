@@ -1,18 +1,51 @@
 import AppKit
 import SwiftUI
 
+/// One non-overshooting motion curve for every sidebar disclosure affordance.
+/// The short duration keeps collection reflow responsive while the strong
+/// ease-out removes the rigid midpoint acceleration of `easeInOut`.
+enum SidebarDisclosureMotion {
+  static let duration: TimeInterval = 0.18
+  static let minimumRetargetDuration: TimeInterval = 0.08
+  static let controlPoint1 = (x: 0.2, y: 0.8)
+  static let controlPoint2 = (x: 0.2, y: 1.0)
+
+  static var animation: Animation {
+    .timingCurve(
+      controlPoint1.x,
+      controlPoint1.y,
+      controlPoint2.x,
+      controlPoint2.y,
+      duration: duration
+    )
+  }
+}
+
+/// Shared SwiftUI/AppKit geometry for logical section headers. The collection
+/// owns a full-width row, so these values are measured from that row boundary.
+enum SidebarSectionHeaderMetrics {
+  static let leadingInset = Theme.sidebarItemInnerSpacing + 8
+  static let trailingInset: CGFloat = 7
+  static let controlSize: CGFloat = 24
+}
+
 /// SwiftUI-hosted content for the collection's app-owned logical sections.
 /// Geometry and identity remain collection-owned; this view owns only the
 /// native-looking title and disclosure interaction.
 struct SidebarCollectionSectionHeaderView: View {
   let title: String
-  let isExpanded: Bool
+  let initialIsExpanded: Bool
+  let hostState: SidebarCollectionRowHostState?
   let topSpacing: CGFloat
   let cleanupMenu: SidebarOpenChatsCleanupMenu?
   let onToggle: () -> Void
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var isHovered = false
+
+  private var isExpanded: Bool {
+    hostState?.sectionIsExpanded ?? initialIsExpanded
+  }
 
   var body: some View {
     HStack(alignment: .center, spacing: 0) {
@@ -34,14 +67,12 @@ struct SidebarCollectionSectionHeaderView: View {
       }
 
       Button(action: onToggle) {
-        Image(systemName: "chevron.right")
-          .font(.system(size: 9, weight: .semibold))
-          .foregroundStyle(.tertiary)
-          .rotationEffect(.degrees(isExpanded ? 90 : 0))
-          .frame(width: 24, height: 24)
-          .contentShape(Rectangle())
-          .opacity(isHovered ? 1 : 0)
-          .animation(disclosureAnimation, value: isExpanded)
+        SidebarSectionChevronIcon(
+          isExpanded: isExpanded,
+          animates: !reduceMotion
+        )
+          .opacity(isExpanded && isHovered == false ? 0 : 1)
+          .animation(reduceMotion ? nil : .easeInOut(duration: 0.1), value: isExpanded)
           .animation(reduceMotion ? nil : .easeInOut(duration: 0.1), value: isHovered)
       }
       .buttonStyle(.plain)
@@ -49,16 +80,12 @@ struct SidebarCollectionSectionHeaderView: View {
     }
     // Match the row identity axis and keep the larger disclosure target's
     // center on the same 19-point trailing axis as compact accessories.
-    .padding(.leading, Theme.sidebarItemInnerSpacing + 8)
-    .padding(.trailing, 7)
+    .padding(.leading, SidebarSectionHeaderMetrics.leadingInset)
+    .padding(.trailing, SidebarSectionHeaderMetrics.trailingInset)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     .padding(.top, topSpacing)
     .contentShape(Rectangle())
     .onHover { isHovered = $0 }
-  }
-
-  private var disclosureAnimation: Animation? {
-    reduceMotion ? nil : .easeOut(duration: 0.1)
   }
 }
 
@@ -72,8 +99,8 @@ struct SidebarCollectionTimelineHeaderView: View {
       .font(.system(size: 11, weight: .medium))
       .foregroundStyle(.secondary)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-      .padding(.leading, Theme.sidebarItemInnerSpacing + 8)
-      .padding(.trailing, 7)
+      .padding(.leading, SidebarSectionHeaderMetrics.leadingInset)
+      .padding(.trailing, SidebarSectionHeaderMetrics.trailingInset)
       .accessibilityAddTraits(.isHeader)
   }
 }
@@ -92,17 +119,38 @@ struct SidebarOpenChatsCleanupMenu: View {
         Label("Close All", systemImage: "xmark.circle")
       }
     } label: {
-      Image(systemName: "eraser.line.dashed")
-        .font(.system(size: 10, weight: .medium))
-        .foregroundStyle(.tertiary)
-        .frame(width: 24, height: 24)
-        .contentShape(Rectangle())
+      SidebarSectionCleanupIcon()
     }
     .menuStyle(.button)
     .buttonStyle(.plain)
     .menuIndicator(.hidden)
     .help("Open Chats Cleanup")
     .accessibilityLabel("Open Chats Cleanup")
+  }
+}
+
+struct SidebarSectionChevronIcon: View {
+  let isExpanded: Bool
+  let animates: Bool
+
+  var body: some View {
+    Image(systemName: "chevron.right")
+      .font(.system(size: 9, weight: .semibold))
+      .foregroundStyle(.tertiary)
+      .rotationEffect(.degrees(isExpanded ? 90 : 0))
+      .animation(animates ? SidebarDisclosureMotion.animation : nil, value: isExpanded)
+      .frame(width: 24, height: 24)
+      .contentShape(Rectangle())
+  }
+}
+
+struct SidebarSectionCleanupIcon: View {
+  var body: some View {
+    Image(systemName: "eraser.line.dashed")
+      .font(.system(size: 10, weight: .medium))
+      .foregroundStyle(.tertiary)
+      .frame(width: 24, height: 24)
+      .contentShape(Rectangle())
   }
 }
 

@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import InlineMacSidebarModel
 import InlineMacUI
 import Logger
 import OSLog
@@ -19,7 +20,16 @@ struct SidebarCollectionBody: NSViewControllerRepresentable {
   let reorderPolicy: SidebarCollectionReorderPolicy
   let scrollRequest: SidebarCollectionScrollRequest?
   let renderState: SidebarCollectionRenderState
-  let content: (SidebarCollectionRow, SidebarCollectionRowRenderContext) -> AnyView
+  let renderer: SidebarCollectionRowRenderer
+  let content: (
+    SidebarCollectionRow,
+    SidebarCollectionRowRenderContext,
+    SidebarCollectionRowHostState
+  ) -> AnyView
+  let nativeContent: (
+    SidebarCollectionRow,
+    SidebarCollectionRowRenderContext
+  ) -> SidebarNativeRowConfiguration
   let dragPreviewContent: (SidebarCollectionRow) -> AnyView
   let actions: SidebarCollectionActions
 
@@ -31,10 +41,12 @@ struct SidebarCollectionBody: NSViewControllerRepresentable {
         tree: tree,
         isContentReady: isContentReady,
         reorderPolicy: reorderPolicy,
-        renderState: renderState
+        renderState: renderState,
+        renderer: renderer
       ),
       scrollRequest: scrollRequest,
       content: content,
+      nativeContent: nativeContent,
       dragPreviewContent: dragPreviewContent,
       actions: actions
     )
@@ -48,10 +60,12 @@ struct SidebarCollectionBody: NSViewControllerRepresentable {
         tree: tree,
         isContentReady: isContentReady,
         reorderPolicy: reorderPolicy,
-        renderState: renderState
+        renderState: renderState,
+        renderer: renderer
       ),
       scrollRequest: scrollRequest,
       content: content,
+      nativeContent: nativeContent,
       dragPreviewContent: dragPreviewContent,
       actions: actions
     )
@@ -66,7 +80,7 @@ struct SidebarCollectionBody: NSViewControllerRepresentable {
 }
 
 private struct SidebarCollectionUnreadButtonHost: View {
-  let state: SidebarUnreadViewportDirection<ChatListItem.Identifier>?
+  let state: SidebarUnreadViewportDirection<SidebarCollectionNodeID>?
   let direction: SidebarUnreadBelowButton.Direction
   let action: () -> Void
 
@@ -91,6 +105,23 @@ private struct SidebarCollectionBodyInput {
   let isContentReady: Bool
   let reorderPolicy: SidebarCollectionReorderPolicy
   let renderState: SidebarCollectionRenderState
+  let renderer: SidebarCollectionRowRenderer
+}
+
+@MainActor
+private final class SidebarCollectionRootView: NSView {
+  var liveResizeDidStart: (() -> Void)?
+  var liveResizeDidEnd: (() -> Void)?
+
+  override func viewWillStartLiveResize() {
+    super.viewWillStartLiveResize()
+    liveResizeDidStart?()
+  }
+
+  override func viewDidEndLiveResize() {
+    super.viewDidEndLiveResize()
+    liveResizeDidEnd?()
+  }
 }
 
 @MainActor
@@ -100,11 +131,11 @@ final class SidebarCollectionBodyController: NSViewController {
   }
 
   private typealias ModelSlot = SidebarCollectionSlot<
-    ChatListItem.Identifier,
+    SidebarCollectionNodeID,
     SidebarOrderLane?
   >
   private typealias OptimisticState = SidebarCollectionOptimisticState<
-    ChatListItem.Identifier,
+    SidebarCollectionNodeID,
     SidebarOrderLane?
   >
 
@@ -150,8 +181,88 @@ final class SidebarCollectionBodyController: NSViewController {
   }
 
   private struct ProjectedHitGuide {
-    let item: SidebarProjectedItem
+    let nodeID: SidebarCollectionNodeID
+    let parentID: SidebarCollectionNodeID?
+    let isContainer: Bool
     let middleY: CGFloat
+  }
+
+  private struct ProjectedRootGuide {
+    let rowID: SidebarCollectionRow.ID
+    let nodeID: SidebarCollectionNodeID
+    let orderLane: SidebarOrderLane
+  }
+
+  private enum ReorderSource {
+    case chat(SidebarProjectedItem)
+    case folder(SidebarProjectedFolder)
+
+    init?(_ row: SidebarCollectionRow) {
+      switch row.kind {
+      case let .chat(item): self = .chat(item)
+      case let .folder(folder): self = .folder(folder)
+      default: return nil
+      }
+    }
+
+    var nodeID: SidebarCollectionNodeID {
+      switch self {
+      case let .chat(item): item.nodeID
+      case let .folder(folder): folder.nodeID
+      }
+    }
+
+    var rowID: SidebarCollectionRow.ID {
+      switch self {
+      case let .chat(item): .chat(item.id)
+      case let .folder(folder): .folder(folder.id)
+      }
+    }
+
+    var orderLane: SidebarOrderLane? {
+      switch self {
+      case let .chat(item): item.orderLane
+      case let .folder(folder): folder.lane
+      }
+    }
+
+    var lane: SidebarOrderLane? {
+      switch self {
+      case let .chat(item): item.lane
+      case let .folder(folder): folder.lane
+      }
+    }
+
+    var parentID: SidebarCollectionNodeID? {
+      guard case let .chat(item) = self else { return nil }
+      return item.parentID
+    }
+
+    var chat: SidebarProjectedItem? {
+      guard case let .chat(item) = self else { return nil }
+      return item
+    }
+
+    var isExpandable: Bool {
+      switch self {
+      case let .chat(item): item.isExpandable
+      case let .folder(folder): folder.childCount > 0
+      }
+    }
+
+    var isExpanded: Bool {
+      switch self {
+      case let .chat(item): item.isExpanded
+      case let .folder(folder): folder.isExpanded
+      }
+    }
+
+    func supports(_ policy: SidebarCollectionReorderPolicy) -> Bool {
+      switch self {
+      case .chat: true
+      case .folder: policy == .manual
+      }
+    }
   }
 
   private struct ReducedRows {
@@ -168,9 +279,9 @@ final class SidebarCollectionBodyController: NSViewController {
 
   private struct ReorderSession {
     let id: UUID
-    let source: SidebarProjectedItem
+    let source: ReorderSource
     let tree: SidebarCollectionTree
-    let dragGroup: SidebarCollectionDragGroup<ChatListItem.Identifier>
+    let dragGroup: SidebarCollectionDragGroup<SidebarCollectionNodeID>
     let legalSlots: Set<ModelSlot>
     let originalRows: [SidebarCollectionRow]
     let originalRowIDs: [SidebarCollectionRow.ID]
@@ -228,6 +339,29 @@ final class SidebarCollectionBodyController: NSViewController {
     let offsetFromViewportTop: CGFloat
   }
 
+  private struct ActiveDisclosureTransition {
+    enum Phase: Equatable {
+      case stagingExpansion
+      case animating
+      case committingCollapse
+    }
+
+    let owner: SidebarCollectionDisclosureDescriptor.Owner
+    let identity: SidebarCollectionDisclosurePlan<SidebarCollectionRow.ID>
+    let geometry: SidebarCollectionDisclosureGeometry
+    var expandedPresentation: SidebarBodyPresentation
+    var collapsedPresentation: SidebarBodyPresentation
+    var targetProgress: CGFloat
+    var animationToken: UUID
+    var completions: [() -> Void]
+    let viewportAnchor: ViewportAnchor?
+    var phase: Phase
+
+    var targetPresentation: SidebarBodyPresentation {
+      targetProgress > 0.5 ? expandedPresentation : collapsedPresentation
+    }
+  }
+
   private enum VisibleRefreshScope {
     case none
     case rowIDs(Set<SidebarCollectionRow.ID>)
@@ -238,6 +372,7 @@ final class SidebarCollectionBodyController: NSViewController {
   private let scrollView = NSScrollView()
   private let collectionView = SidebarExternalDropCollectionView()
   private let layout = SidebarCollectionBodyLayout()
+  private let disclosureAnimator = SidebarCollectionDisclosureAnimator()
   private let previewPanel = SidebarDragPreviewPanel()
   private let topScrollEdgeView = NSView()
   private let bottomScrollEdgeView = NSView()
@@ -260,6 +395,7 @@ final class SidebarCollectionBodyController: NSViewController {
   private var transitionRowByID: [SidebarCollectionRow.ID: SidebarCollectionRow] = [:]
   private var configuredLayoutDrag: SidebarBodyLayoutDrag?
   private var configuredEmptyPinned: SidebarCollectionEmptyPinnedLayoutState?
+  private var configuredLayoutDisclosure: SidebarBodyLayoutDisclosure?
   private var configuredSettlingSourceIDs: Set<SidebarCollectionRow.ID> = []
   private var reorderPolicy = SidebarCollectionReorderPolicy.manual
   private var latestRenderState: SidebarCollectionRenderState?
@@ -267,15 +403,31 @@ final class SidebarCollectionBodyController: NSViewController {
   private var hasCompletedViewLayout = false
   private var hasAppliedInitialSnapshot = false
   private var snapshotApplyInFlight = false
+  private var snapshotApplyOwnsAnimations = false
   private var isCompletingDisplayUpdate = false
   private var inFlightGeneration: Int?
   private var inFlightViewportAnchor: ViewportAnchor?
   private var inFlightCompletions: [() -> Void] = []
   private var inFlightRefreshScope = VisibleRefreshScope.none
+  private var inFlightRequiresSettledReload = false
   private var pendingDisplayUpdate: SidebarBodyDisplayUpdate?
+  private var disclosureTransition: ActiveDisclosureTransition?
   private var modeTransitionAnimationTask: Task<Void, Never>?
   private var suppressesModeTransitionAnimations = false
-  private var content: ((SidebarCollectionRow, SidebarCollectionRowRenderContext) -> AnyView)?
+  private var isLiveResizingSidebar = false
+  private var isSidebarLiveResizeActive: Bool {
+    isLiveResizingSidebar || (isViewLoaded && view.inLiveResize)
+  }
+  private var content: ((
+    SidebarCollectionRow,
+    SidebarCollectionRowRenderContext,
+    SidebarCollectionRowHostState
+  ) -> AnyView)?
+  private var nativeContent: ((
+    SidebarCollectionRow,
+    SidebarCollectionRowRenderContext
+  ) -> SidebarNativeRowConfiguration)?
+  private var renderer = SidebarCollectionRowRenderer.swiftUI
   private var dragPreviewContent: ((SidebarCollectionRow) -> AnyView)?
   private var actions: SidebarCollectionActions?
   private var reorderSession: ReorderSession?
@@ -286,8 +438,11 @@ final class SidebarCollectionBodyController: NSViewController {
   private var currentScrollRequest: SidebarCollectionScrollRequest?
   private var lastScrollRequestToken: Int?
   private var lastUnreadViewportState: SidebarUnreadViewportResolution<
-    ChatListItem.Identifier
+    SidebarCollectionNodeID
   >?
+  private var unreadViewportEntries: [
+    SidebarUnreadViewportEntry<SidebarCollectionNodeID>
+  ]?
   private var boundsObserver: NSObjectProtocol?
   private var frameObserver: NSObjectProtocol?
   private var lastViewportSize: CGSize?
@@ -308,8 +463,41 @@ final class SidebarCollectionBodyController: NSViewController {
   // MARK: - View lifecycle
 
   override func loadView() {
-    let root = NSView()
+    let root = SidebarCollectionRootView()
+    root.liveResizeDidStart = { [weak self] in
+      self?.beginSidebarLiveResize()
+    }
+    root.liveResizeDidEnd = { [weak self] in
+      self?.endSidebarLiveResize()
+    }
+    collectionView.delegate = self
+    layout.minimumLineSpacing = 0
+    layout.minimumInteritemSpacing = 0
+    layout.sectionInset = NSEdgeInsets(top: 0, left: 0, bottom: 20, right: 0)
+    #if DEBUG
+    if SidebarCollectionTransitionDiagnostics.usesVanillaFlowLayout {
+      let flowLayout = NSCollectionViewFlowLayout()
+      flowLayout.minimumLineSpacing = 0
+      flowLayout.minimumInteritemSpacing = 0
+      flowLayout.sectionInset = NSEdgeInsets(
+        top: 0,
+        left: Theme.sidebarNativeDefaultEdgeInsets,
+        bottom: 20,
+        right: Theme.sidebarNativeDefaultEdgeInsets
+      )
+      collectionView.collectionViewLayout = flowLayout
+      os_log(
+        .info,
+        log: SidebarCollectionTransitionDiagnostics.log,
+        "component=collection event=vanilla-flow-control enabled=1"
+      )
+    } else {
+      collectionView.collectionViewLayout = layout
+    }
+    #else
     collectionView.collectionViewLayout = layout
+    #endif
+    disclosureAnimator.install(in: collectionView)
     collectionView.backgroundColors = [.clear]
     // Route selection is navigation-owned and each hosted row exposes its own
     // accessibility action and context menu. Mirroring that single selection
@@ -329,6 +517,11 @@ final class SidebarCollectionBodyController: NSViewController {
     }
 
     scrollView.drawsBackground = false
+    // A legacy scroller consumes document width only after enough rows appear,
+    // shifting trailing controls underneath a stationary pointer between a
+    // collapsed and expanded section. The sidebar owns stable row geometry;
+    // render the modern scroller as an overlay instead of relaying out rows.
+    scrollView.scrollerStyle = .overlay
     scrollView.hasVerticalScroller = true
     scrollView.autohidesScrollers = true
     scrollView.documentView = collectionView
@@ -375,8 +568,14 @@ final class SidebarCollectionBodyController: NSViewController {
 
       item.configure(
         row: row,
-        content: content(row, renderContext(for: row)),
+        content: { hostState in
+          content(row, self.renderContext(for: row), hostState)
+        },
+        nativeConfiguration: self.renderer == .appKit
+          ? self.nativeContent?(row, self.renderContext(for: row))
+          : nil,
         isLayoutVisible: isLayoutVisible(at: indexPath),
+        preservesCollectionTransition: self.snapshotApplyOwnsAnimations,
         panHandler: { [weak self] rowID, state, location, translation in
           self?.handlePan(
             rowID: rowID,
@@ -417,12 +616,18 @@ final class SidebarCollectionBodyController: NSViewController {
   }
 
   func prepareForRemoval() {
+    modeTransitionAnimationTask?.cancel()
+    modeTransitionAnimationTask = nil
+    suppressesModeTransitionAnimations = false
+    scheduledVerificationGeneration = nil
+    isLiveResizingSidebar = false
     stopAutoscroll()
     removeCancellationHooks()
     clearPendingMoves()
     localSettle = nil
     endExternalDrop(sequence: nil)
     reorderSession = nil
+    cancelDisclosureTransition()
     if let presentation {
       configureLayout(for: presentation)
       collectionView.needsLayout = true
@@ -466,10 +671,15 @@ final class SidebarCollectionBodyController: NSViewController {
 
   private func viewportBoundsDidChange() {
     updateUnreadViewportButtons()
-    updateScrollEdges(animated: true)
+    updateScrollEdges(animated: !isSidebarLiveResizeActive)
   }
 
   private func viewportFrameDidChange() {
+    // NavigationSplitView divider drags resize this viewport without putting
+    // the window itself in AppKit's `inLiveResize` state. Finish any active
+    // row-height transition before applying the new width so the collection
+    // never interpolates disclosure geometry while the divider is moving.
+    settleDisclosureForGeometryResizeIfNeeded()
     synchronizeCollectionWidthWithViewport()
     // A frame change is part of the same AppKit display transaction. Deferring
     // materialization to the next run-loop turn lets the compositor expose a
@@ -521,6 +731,7 @@ final class SidebarCollectionBodyController: NSViewController {
     scrollEdgeVisibility = next
 
     let shouldAnimate = animated
+      && !isSidebarLiveResizeActive
       && NSWorkspace.shared.accessibilityDisplayShouldReduceMotion == false
     NSAnimationContext.runAnimationGroup { context in
       context.duration = shouldAnimate ? 0.14 : 0
@@ -542,13 +753,59 @@ final class SidebarCollectionBodyController: NSViewController {
     guard widthChanged || heightChanged else { return }
 
     lastViewportSize = viewportSize
-    if widthChanged {
-      var documentFrame = collectionView.frame
-      documentFrame.size.width = viewportSize.width
-      collectionView.frame = documentFrame
+    let updates = {
+      if widthChanged {
+        var documentFrame = self.collectionView.frame
+        documentFrame.size.width = viewportSize.width
+        self.collectionView.frame = documentFrame
+      }
+      self.collectionView.collectionViewLayout?.invalidateLayout()
+      self.collectionView.needsLayout = true
+      self.collectionView.layoutSubtreeIfNeeded()
     }
-    collectionView.collectionViewLayout?.invalidateLayout()
-    collectionView.needsLayout = true
+    // Frame notifications cover both window live-resize and SwiftUI's split
+    // divider. Always establish a zero-duration AppKit transaction here; a
+    // surrounding SwiftUI animation must not interpolate native row frames.
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0
+      context.allowsImplicitAnimation = false
+      updates()
+    }
+  }
+
+  private func beginSidebarLiveResize() {
+    guard !isLiveResizingSidebar else { return }
+    isLiveResizingSidebar = true
+    settleDisclosureForGeometryResizeIfNeeded()
+    refreshVisibleContent(.all)
+    synchronizeCollectionWidthWithViewport()
+    updateScrollEdges(animated: false)
+  }
+
+  private func endSidebarLiveResize() {
+    guard isLiveResizingSidebar else { return }
+    isLiveResizingSidebar = false
+    synchronizeCollectionWidthWithViewport()
+    collectionView.layoutSubtreeIfNeeded()
+    collectionView.displayIfNeeded()
+    refreshVisibleContent(.all)
+    updateScrollEdges(animated: false)
+    updateUnreadViewportButtons(force: true)
+  }
+
+  private func settleDisclosureForGeometryResizeIfNeeded() {
+    guard let transition = disclosureTransition,
+          transition.phase == .animating
+    else { return }
+    disclosureAnimator.reset()
+    if transition.targetProgress > 0.5 {
+      finishDisclosureTransition(
+        target: transition.expandedPresentation,
+        transition: transition
+      )
+    } else {
+      commitCollapsedDisclosureSnapshot()
+    }
   }
 
   // MARK: - SwiftUI input and diffable presentation
@@ -556,11 +813,21 @@ final class SidebarCollectionBodyController: NSViewController {
   fileprivate func update(
     input: SidebarCollectionBodyInput,
     scrollRequest: SidebarCollectionScrollRequest?,
-    content: @escaping (SidebarCollectionRow, SidebarCollectionRowRenderContext) -> AnyView,
+    content: @escaping (
+      SidebarCollectionRow,
+      SidebarCollectionRowRenderContext,
+      SidebarCollectionRowHostState
+    ) -> AnyView,
+    nativeContent: @escaping (
+      SidebarCollectionRow,
+      SidebarCollectionRowRenderContext
+    ) -> SidebarNativeRowConfiguration,
     dragPreviewContent: @escaping (SidebarCollectionRow) -> AnyView,
     actions: SidebarCollectionActions
   ) {
     self.content = content
+    self.nativeContent = nativeContent
+    self.renderer = input.renderer
     self.dragPreviewContent = dragPreviewContent
     self.actions = actions
     currentScrollRequest = scrollRequest
@@ -620,11 +887,12 @@ final class SidebarCollectionBodyController: NSViewController {
       // collection identity, or reconfigure geometry under the recognizer.
       // Membership changes invalidate the preview's frozen group; unrelated
       // order/content changes are rebased once the gesture ends.
-      let latestGroup = try? tree.snapshot.dragGroup(for: session.source.id)
-      let sourceParentChanged = tree.snapshot.parentID(of: session.source.id)
-        != session.tree.snapshot.parentID(of: session.source.id)
-      let sourceSectionChanged = tree.snapshot.sectionID(containing: session.source.id)
-        != session.tree.snapshot.sectionID(containing: session.source.id)
+      let sourceNodeID = session.source.nodeID
+      let latestGroup = try? tree.snapshot.dragGroup(for: sourceNodeID)
+      let sourceParentChanged = tree.snapshot.parentID(of: sourceNodeID)
+        != session.tree.snapshot.parentID(of: sourceNodeID)
+      let sourceSectionChanged = tree.snapshot.sectionID(containing: sourceNodeID)
+        != session.tree.snapshot.sectionID(containing: sourceNodeID)
       if latestGroup != session.dragGroup || sourceParentChanged || sourceSectionChanged {
         cancelReorder(animated: false, reason: "drag-group-update")
         handleScrollRequestIfPossible()
@@ -673,9 +941,8 @@ final class SidebarCollectionBodyController: NSViewController {
     handleScrollRequestIfPossible()
   }
 
-  /// Section disclosure is still an identifier-changing snapshot, but the
-  /// collection layout gives it accordion-specific insertion/removal geometry
-  /// so it never falls back to the generic overlapping row fade.
+  /// Keep a semantic reason for diagnostics while routing section disclosure
+  /// through the same ordinary row-diff path as reply-thread disclosure.
   private func sectionDisclosureChanged(
     from previousRows: [SidebarCollectionRow],
     to nextRows: [SidebarCollectionRow]
@@ -760,6 +1027,11 @@ final class SidebarCollectionBodyController: NSViewController {
       animated: animatingDifferences
     )
 
+    if disclosureTransition != nil {
+      handleDisplayUpdateDuringDisclosure(update)
+      return
+    }
+
     guard dataSource != nil else {
       pendingDisplayUpdate = coalescing(pendingDisplayUpdate, with: update)
       return
@@ -777,7 +1049,21 @@ final class SidebarCollectionBodyController: NSViewController {
 
     if snapshotApplyInFlight {
       if nextPresentation.orderedIDs == presentation?.orderedIDs {
-        applyContentUpdateDuringSnapshot(update)
+        let rendererChanged = presentation.map {
+          $0.renderState.preview.renderer != nextPresentation.renderState.preview.renderer
+        } ?? false
+        if rendererChanged || layoutGeometryChanged(
+          from: presentation,
+          to: nextPresentation
+        ) || layoutInteractionConfigurationChanged {
+          // Diffable owns item identity until its completion. Renderer swaps
+          // and geometry changes replace reusable subtrees or row frames, so
+          // coalesce them for the next atomic scene instead of mutating the
+          // collection under an in-flight snapshot.
+          pendingDisplayUpdate = coalescing(pendingDisplayUpdate, with: update)
+        } else {
+          applyContentUpdateDuringSnapshot(update)
+        }
       } else {
         pendingDisplayUpdate = coalescing(pendingDisplayUpdate, with: update)
         log.debug(
@@ -816,6 +1102,22 @@ final class SidebarCollectionBodyController: NSViewController {
 
     let next = update.presentation
     if hasAppliedInitialSnapshot,
+       update.animatingDifferences,
+       !isSidebarLiveResizeActive,
+       NSWorkspace.shared.accessibilityDisplayShouldReduceMotion == false,
+       reorderSession == nil,
+       let previous = presentation,
+       let descriptor = SidebarCollectionDisclosureDescriptor.make(
+         from: previous,
+         to: next
+       ), case .chat = descriptor.owner {
+      // Nested reply groups need the interruptible shared-boundary animator.
+      // Section disclosure intentionally stays on the collection view's
+      // ordinary row diff so a selected survivor can reflow naturally.
+      performDisclosureDisplayUpdate(update, descriptor: descriptor)
+      return
+    }
+    if hasAppliedInitialSnapshot,
        dataSource.snapshot().itemIdentifiers == next.orderedIDs {
       applyContentOnlyUpdate(update)
       return
@@ -823,25 +1125,57 @@ final class SidebarCollectionBodyController: NSViewController {
 
     let previousPresentation = presentation
     let previousRows = previousPresentation?.rowByID ?? [:]
+    let animate = hasAppliedInitialSnapshot
+      && update.animatingDifferences
+      && !isSidebarLiveResizeActive
+      && NSWorkspace.shared.accessibilityDisplayShouldReduceMotion == false
     inFlightViewportAnchor = update.reason == "optimistic-drop"
       ? nil
       : captureViewportAnchor(survivingIn: Set(next.orderedIDs))
+    #if DEBUG
+    traceTransitionScene(
+      event: "snapshot-before-layout",
+      generation: next.generation,
+      reason: update.reason
+    )
+    #endif
     transitionRowByID = previousRows.merging(next.rowByID) { _, latest in latest }
-    layout.prepareTransition(from: previousPresentation, to: next)
+    var refreshScope = refreshScope(from: previousPresentation, to: next)
     presentation = next
-    configureLayout(for: next)
-    inFlightRefreshScope = refreshScope(from: previousPresentation, to: next)
+    if update.reason == "section-disclosure" {
+      let headerIDs = changedSectionHeaderIDs(
+        from: previousPresentation,
+        to: next
+      )
+      // The header survives disclosure. Refresh it while the source layout is
+      // still authoritative so its chevron starts with the row transaction,
+      // then keep completion from assigning the same SwiftUI host again.
+      refreshVisibleContent(.rowIDs(headerIDs))
+      refreshScope = removing(headerIDs, from: refreshScope)
+    }
+    // Configure the destination projection without invalidating the source
+    // scene ahead of the diffable transaction. The concrete flow layout owns
+    // source/destination caching and invalidates itself as the snapshot applies.
+    configureLayout(for: next, invalidatesLayout: false)
+    inFlightRefreshScope = refreshScope
 
     var snapshot = NSDiffableDataSourceSnapshot<Section, SidebarCollectionRow.ID>()
     snapshot.appendSections([.main])
     snapshot.appendItems(next.orderedIDs, toSection: .main)
 
     snapshotApplyInFlight = true
+    snapshotApplyOwnsAnimations = animate
     inFlightGeneration = next.generation
     inFlightCompletions.append(contentsOf: update.completions)
-    let animate = hasAppliedInitialSnapshot
-      && update.animatingDifferences
-      && NSWorkspace.shared.accessibilityDisplayShouldReduceMotion == false
+    inFlightRequiresSettledReload = hasAppliedInitialSnapshot && animate == false
+    disableInteractionForRowsLeavingSnapshot(next.orderedIDs)
+    #if DEBUG
+    traceTransitionScene(
+      event: "snapshot-before-apply",
+      generation: next.generation,
+      reason: update.reason
+    )
+    #endif
     log.debug(
       "presentation #\(next.generation) apply reason=\(update.reason) "
         + "rows=\(next.rows.count) animated=\(animate)"
@@ -869,15 +1203,536 @@ final class SidebarCollectionBodyController: NSViewController {
       collectionView.layoutSubtreeIfNeeded()
       collectionView.displayIfNeeded()
       completeDisplayUpdate(generation: next.generation)
+    } else if animate, update.reason == "section-disclosure" {
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = SidebarDisclosureMotion.duration
+        context.timingFunction = CAMediaTimingFunction(
+          controlPoints: Float(SidebarDisclosureMotion.controlPoint1.x),
+          Float(SidebarDisclosureMotion.controlPoint1.y),
+          Float(SidebarDisclosureMotion.controlPoint2.x),
+          Float(SidebarDisclosureMotion.controlPoint2.y)
+        )
+        dataSource.apply(snapshot, animatingDifferences: true) { [weak self] in
+          self?.completeDisplayUpdate(generation: next.generation)
+        }
+      }
+    } else if animate {
+      // Close, insertion, and ordinary model updates use AppKit's default
+      // collection animation. There is no close-specific snapshot or fade.
+      dataSource.apply(snapshot, animatingDifferences: true) { [weak self] in
+        self?.completeDisplayUpdate(generation: next.generation)
+      }
     } else {
-      dataSource.apply(snapshot, animatingDifferences: animate) { [weak self] in
+      dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
         self?.completeDisplayUpdate(generation: next.generation)
       }
     }
   }
 
+  private func performDisclosureDisplayUpdate(
+    _ update: SidebarBodyDisplayUpdate,
+    descriptor: SidebarCollectionDisclosureDescriptor
+  ) {
+    guard let dataSource else {
+      pendingDisplayUpdate = coalescing(pendingDisplayUpdate, with: update)
+      return
+    }
+
+    let previousPresentation = presentation
+    let target = update.presentation
+    let liveExpanded = descriptor.liveExpandedPresentation(merging: target)
+    let affectedIDs = Set(descriptor.identity.affectedIDs)
+    let trailingIDs = Set(descriptor.identity.trailingIDs)
+    let requiresExpandedSnapshot = dataSource.snapshot().itemIdentifiers
+      != liveExpanded.orderedIDs
+    let estimatedHeight = descriptor.identity.affectedIDs.reduce(CGFloat.zero) { height, rowID in
+      height + (liveExpanded.rowByID[rowID]?.height ?? 0)
+    }
+    guard estimatedHeight > 0.5 else {
+      performDisplayUpdate(atomicUpdate(from: update))
+      return
+    }
+
+    let provisionalLayout = SidebarBodyLayoutDisclosure(
+      affectedIDs: affectedIDs,
+      trailingIDs: trailingIDs,
+      collapsedOffsetY: -estimatedHeight,
+      hidesAffectedRows: requiresExpandedSnapshot
+    )
+    let viewportAnchor = captureViewportAnchor(rowID: descriptor.ownerID)
+    transitionRowByID = liveExpanded.rowByID
+    presentation = liveExpanded
+    configureLayout(for: liveExpanded, disclosure: provisionalLayout)
+
+    collectionView.needsLayout = true
+    collectionView.layoutSubtreeIfNeeded()
+
+    guard let geometry = disclosureGeometry(
+      ownerID: descriptor.ownerID,
+      affectedIDs: affectedIDs,
+      trailingIDs: trailingIDs,
+      expectedHeight: estimatedHeight,
+      presentation: liveExpanded
+    )
+    else {
+      configureLayout(for: liveExpanded)
+      collectionView.needsLayout = true
+      disclosureAnimator.reset()
+      performDisplayUpdate(atomicUpdate(from: update))
+      return
+    }
+
+    var refresh = refreshScope(from: previousPresentation, to: liveExpanded)
+    refresh = removing(affectedIDs.union([descriptor.ownerID]), from: refresh)
+    refreshVisibleContent(refresh)
+
+    let initialProgress: CGFloat = descriptor.targetProgress > 0.5 ? 0 : 1
+    let transition = ActiveDisclosureTransition(
+      owner: descriptor.owner,
+      identity: descriptor.identity,
+      geometry: geometry,
+      expandedPresentation: liveExpanded,
+      collapsedPresentation: descriptor.collapsedPresentation,
+      targetProgress: descriptor.targetProgress,
+      animationToken: UUID(),
+      completions: update.completions,
+      viewportAnchor: viewportAnchor,
+      phase: requiresExpandedSnapshot ? .stagingExpansion : .animating
+    )
+    disclosureTransition = transition
+
+    if requiresExpandedSnapshot {
+      var snapshot = NSDiffableDataSourceSnapshot<Section, SidebarCollectionRow.ID>()
+      snapshot.appendSections([.main])
+      snapshot.appendItems(liveExpanded.orderedIDs, toSection: .main)
+      let stagingToken = transition.animationToken
+      snapshotApplyInFlight = true
+      snapshotApplyOwnsAnimations = false
+      dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
+        self?.continueStagedDisclosure(token: stagingToken)
+      }
+      tracePresentation(
+        event: "disclosure-stage",
+        presentation: target,
+        reason: update.reason,
+        animated: false
+      )
+      return
+    }
+
+    startDisclosureAnimation(initialProgress: initialProgress)
+    tracePresentation(
+      event: "disclosure-apply",
+      presentation: target,
+      reason: update.reason,
+      animated: true
+    )
+  }
+
+  private func continueStagedDisclosure(token: UUID) {
+    snapshotApplyInFlight = false
+    snapshotApplyOwnsAnimations = false
+    guard let transition = disclosureTransition,
+          transition.phase == .stagingExpansion,
+          transition.animationToken == token
+    else { return }
+
+    // A structural update that cannot join this disclosure may arrive while
+    // diffable is staging the expanded membership. The staging snapshot is
+    // now authoritative and AppKit is idle, so settle that scene atomically;
+    // `finishDisclosureTransition` will immediately apply the queued update.
+    if pendingDisplayUpdate != nil {
+      finishDisclosureTransition(
+        target: transition.expandedPresentation,
+        transition: transition
+      )
+      return
+    }
+
+    guard transition.targetProgress > 0.5 else {
+      commitCollapsedDisclosureSnapshot()
+      return
+    }
+    startDisclosureAnimation(initialProgress: 0)
+  }
+
+  private func startDisclosureAnimation(initialProgress: CGFloat) {
+    guard var transition = disclosureTransition else { return }
+    if isSidebarLiveResizeActive {
+      disclosureAnimator.reset()
+      if transition.targetProgress > 0.5 {
+        finishDisclosureTransition(
+          target: transition.expandedPresentation,
+          transition: transition
+        )
+      } else {
+        commitCollapsedDisclosureSnapshot()
+      }
+      return
+    }
+    // Diffable staging can take a frame. Keep the surviving owner on its
+    // source state until the body clock is ready, then start its SwiftUI
+    // chevron animation in the same display turn as the clipped content.
+    refreshVisibleContent(.rowIDs([transition.identity.ownerID]))
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    configureLayout(
+      for: transition.expandedPresentation,
+      disclosure: transition.geometry.layoutState()
+    )
+    collectionView.needsLayout = true
+    collectionView.layoutSubtreeIfNeeded()
+    let token = disclosureAnimator.begin(
+      geometry: transition.geometry,
+      initialProgress: initialProgress,
+      targetProgress: transition.targetProgress
+    ) { [weak self] token in
+      self?.completeDisclosureAnimation(token: token)
+    }
+    CATransaction.commit()
+    transition.phase = .animating
+    transition.animationToken = token
+    disclosureTransition = transition
+  }
+
+  private func handleDisplayUpdateDuringDisclosure(
+    _ update: SidebarBodyDisplayUpdate
+  ) {
+    guard var transition = disclosureTransition,
+          let requestedProgress = disclosureProgress(
+            owner: transition.owner,
+            in: update.presentation
+          )
+    else {
+      abortDisclosureTransition(for: update)
+      return
+    }
+
+    let expectedIDs = requestedProgress > 0.5
+      ? transition.identity.expandedIDs
+      : transition.identity.collapsedIDs
+    guard update.presentation.orderedIDs == expectedIDs else {
+      abortDisclosureTransition(for: update)
+      return
+    }
+
+    let previousLive = presentation
+    if requestedProgress > 0.5 {
+      transition.expandedPresentation = update.presentation
+    } else {
+      transition.collapsedPresentation = update.presentation
+    }
+    let latestTarget = update.presentation
+    let liveExpanded = SidebarBodyPresentation(
+      generation: latestTarget.generation,
+      rows: transition.expandedPresentation.rows.map {
+        latestTarget.rowByID[$0.id] ?? $0
+      },
+      renderState: latestTarget.renderState
+    )
+    transition.expandedPresentation = liveExpanded
+    transition.completions.append(contentsOf: update.completions)
+    let directionChanged = abs(transition.targetProgress - requestedProgress) > 0.001
+    transition.targetProgress = requestedProgress
+    if transition.phase == .committingCollapse {
+      disclosureTransition = transition
+      if directionChanged {
+        tracePresentation(
+          event: "disclosure-reverse-during-commit",
+          presentation: update.presentation,
+          reason: update.reason,
+          animated: false
+        )
+      }
+      return
+    }
+
+    // Render the surviving owner's chevron from the requested target while
+    // the expanded presentation remains installed solely for transition
+    // geometry. This keeps visual state and action semantics in one direction.
+    disclosureTransition = transition
+    presentation = liveExpanded
+    transitionRowByID = liveExpanded.rowByID.merging(
+      transition.collapsedPresentation.rowByID
+    ) { current, _ in current }
+    configureLayout(
+      for: liveExpanded,
+      disclosure: transition.geometry.layoutState(
+        hidesAffectedRows: transition.phase == .stagingExpansion
+      )
+    )
+    collectionView.needsLayout = true
+    collectionView.layoutSubtreeIfNeeded()
+    refreshVisibleContent(refreshScope(from: previousLive, to: liveExpanded))
+    guard directionChanged else { return }
+    guard transition.phase == .animating else {
+      tracePresentation(
+        event: "disclosure-reverse-during-stage",
+        presentation: update.presentation,
+        reason: update.reason,
+        animated: false
+      )
+      return
+    }
+    let token = disclosureAnimator.retarget(to: requestedProgress) { [weak self] token in
+      self?.completeDisclosureAnimation(token: token)
+    }
+    disclosureTransition?.animationToken = token
+    tracePresentation(
+      event: "disclosure-reverse",
+      presentation: update.presentation,
+      reason: update.reason,
+      animated: true
+    )
+  }
+
+  private func completeDisclosureAnimation(token: UUID) {
+    guard let transition = disclosureTransition,
+          transition.phase == .animating,
+          transition.animationToken == token,
+          dataSource != nil
+    else { return }
+
+    let target = transition.targetPresentation
+    guard transition.targetProgress > 0.5 else {
+      commitCollapsedDisclosureSnapshot()
+      return
+    }
+    finishDisclosureTransition(target: target, transition: transition)
+  }
+
+  private func commitCollapsedDisclosureSnapshot() {
+    guard var transition = disclosureTransition, let dataSource else { return }
+    let target = transition.collapsedPresentation
+    if dataSource.snapshot().itemIdentifiers == target.orderedIDs {
+      finishDisclosureTransition(target: target, transition: transition)
+      return
+    }
+
+    transition.phase = .committingCollapse
+    disclosureTransition = transition
+    var snapshot = NSDiffableDataSourceSnapshot<Section, SidebarCollectionRow.ID>()
+    snapshot.appendSections([.main])
+    snapshot.appendItems(target.orderedIDs, toSection: .main)
+    snapshotApplyInFlight = true
+    snapshotApplyOwnsAnimations = false
+    disableInteractionForRowsLeavingSnapshot(target.orderedIDs)
+    dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
+      self?.completeCollapsedDisclosureCommit()
+    }
+  }
+
+  private func completeCollapsedDisclosureCommit() {
+    snapshotApplyInFlight = false
+    snapshotApplyOwnsAnimations = false
+    guard var transition = disclosureTransition,
+          transition.phase == .committingCollapse
+    else { return }
+
+    // Mixed structural updates are held until diffable has finished owning
+    // the collapsed commit. Do not restart the custom clock ahead of a newer
+    // queued presentation.
+    if pendingDisplayUpdate != nil {
+      transition.targetProgress = 0
+      finishDisclosureTransition(
+        target: transition.collapsedPresentation,
+        transition: transition
+      )
+      return
+    }
+
+    guard transition.targetProgress <= 0.5 else {
+      let restart = SidebarBodyDisplayUpdate(
+        presentation: transition.expandedPresentation,
+        reason: "disclosure-restart-after-commit",
+        animatingDifferences: true,
+        completions: transition.completions
+      )
+      transition.targetProgress = 0
+      transition.completions = []
+      pendingDisplayUpdate = coalescing(pendingDisplayUpdate, with: restart)
+      finishDisclosureTransition(
+        target: transition.collapsedPresentation,
+        transition: transition
+      )
+      return
+    }
+    finishDisclosureTransition(
+      target: transition.collapsedPresentation,
+      transition: transition
+    )
+  }
+
+  private func finishDisclosureTransition(
+    target: SidebarBodyPresentation,
+    transition: ActiveDisclosureTransition
+  ) {
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    disclosureAnimator.reset()
+    disclosureTransition = nil
+    presentation = target
+    transitionRowByID = target.rowByID
+    configureLayout(for: target)
+    collectionView.needsLayout = true
+    collectionView.layoutSubtreeIfNeeded()
+    CATransaction.commit()
+
+    reconcileSettledVisibleItems(
+      generation: target.generation,
+      forceReload: transition.phase == .committingCollapse
+    )
+
+    restoreViewportAnchor(transition.viewportAnchor)
+    updateScrollEdges(animated: false)
+    let completions = transition.completions
+    isCompletingDisplayUpdate = true
+    completions.forEach { $0() }
+    isCompletingDisplayUpdate = false
+
+    let nextUpdate = pendingDisplayUpdate
+    pendingDisplayUpdate = nil
+    if let nextUpdate {
+      performDisplayUpdate(nextUpdate)
+    } else {
+      validatePresentationInvariants(context: "disclosure-complete")
+      updateUnreadViewportButtons(force: true)
+      handleScrollRequestIfPossible()
+      schedulePresentationVerification(generation: target.generation)
+    }
+    tracePresentation(
+      event: "disclosure-complete",
+      presentation: target,
+      reason: "settled",
+      animated: false
+    )
+  }
+
+  private func abortDisclosureTransition(for update: SidebarBodyDisplayUpdate) {
+    if snapshotApplyInFlight, var transition = disclosureTransition {
+      let atomic = SidebarBodyDisplayUpdate(
+        presentation: update.presentation,
+        reason: "\(update.reason)-after-disclosure-commit",
+        animatingDifferences: false,
+        completions: transition.completions + update.completions
+      )
+      transition.completions = []
+      disclosureTransition = transition
+      pendingDisplayUpdate = coalescing(pendingDisplayUpdate, with: atomic)
+      return
+    }
+
+    let completions = disclosureTransition?.completions ?? []
+    cancelDisclosureTransition()
+    let atomic = SidebarBodyDisplayUpdate(
+      presentation: update.presentation,
+      reason: "\(update.reason)-after-disclosure-cancel",
+      animatingDifferences: false,
+      completions: completions + update.completions
+    )
+    performDisplayUpdate(atomic)
+  }
+
+  private func cancelDisclosureTransition() {
+    guard disclosureTransition != nil else {
+      disclosureAnimator.reset()
+      return
+    }
+    disclosureAnimator.reset()
+    disclosureTransition = nil
+    if let presentation {
+      configureLayout(for: presentation)
+      collectionView.needsLayout = true
+      collectionView.layoutSubtreeIfNeeded()
+    }
+  }
+
+  private func atomicUpdate(
+    from update: SidebarBodyDisplayUpdate
+  ) -> SidebarBodyDisplayUpdate {
+    SidebarBodyDisplayUpdate(
+      presentation: update.presentation,
+      reason: "\(update.reason)-atomic-fallback",
+      animatingDifferences: false,
+      completions: update.completions
+    )
+  }
+
+  private func disclosureProgress(
+    owner: SidebarCollectionDisclosureDescriptor.Owner,
+    in presentation: SidebarBodyPresentation
+  ) -> CGFloat? {
+    switch owner {
+    case let .section(section):
+      guard let isExpanded = presentation.rowByID[.sectionHeader(section)]?
+        .sectionHeader?.isExpanded
+      else { return nil }
+      return isExpanded ? 1 : 0
+    case let .chat(id):
+      guard let item = presentation.rowByID[.chat(id)]?.projectedItem,
+            item.isExpandable
+      else { return nil }
+      return item.isExpanded ? 1 : 0
+    case let .folder(id):
+      guard let folder = presentation.rowByID[.folder(id)]?.projectedFolder,
+            folder.childCount > 0
+      else { return nil }
+      return folder.isExpanded ? 1 : 0
+    }
+  }
+
+  private func disclosureGeometry(
+    ownerID: SidebarCollectionRow.ID,
+    affectedIDs: Set<SidebarCollectionRow.ID>,
+    trailingIDs: Set<SidebarCollectionRow.ID>,
+    expectedHeight: CGFloat,
+    presentation: SidebarBodyPresentation
+  ) -> SidebarCollectionDisclosureGeometry? {
+    guard let ownerIndex = presentation.orderedIDs.firstIndex(of: ownerID),
+          let ownerFrame = layout.layoutAttributesForItem(
+            at: IndexPath(item: ownerIndex, section: 0)
+          )?.frame
+    else { return nil }
+
+    var frames: [SidebarCollectionRow.ID: CGRect] = [:]
+    for (index, rowID) in presentation.orderedIDs.enumerated() {
+      guard affectedIDs.contains(rowID) || trailingIDs.contains(rowID) || rowID == ownerID,
+            let frame = layout.layoutAttributesForItem(
+              at: IndexPath(item: index, section: 0)
+            )?.frame
+      else { continue }
+      frames[rowID] = frame
+    }
+    var cursorY = ownerFrame.maxY
+    for rowID in presentation.orderedIDs where affectedIDs.contains(rowID) {
+      guard let frame = frames[rowID], abs(frame.minY - cursorY) <= 0.75 else {
+        return nil
+      }
+      cursorY = frame.maxY
+    }
+    let height = cursorY - ownerFrame.maxY
+    guard height > 0.5, abs(height - expectedHeight) <= 0.75 else { return nil }
+    return SidebarCollectionDisclosureGeometry(
+      affectedIDs: affectedIDs,
+      trailingIDs: trailingIDs,
+      expandedFrames: frames,
+      groupTopY: ownerFrame.maxY,
+      height: height
+    )
+  }
+
+  private func visibleItem(
+    for rowID: SidebarCollectionRow.ID
+  ) -> SidebarCollectionBodyItem? {
+    collectionView.visibleItems().compactMap { $0 as? SidebarCollectionBodyItem }
+      .first(where: { $0.representedRowID == rowID })
+  }
+
   private func applyContentOnlyUpdate(_ update: SidebarBodyDisplayUpdate) {
     let previousPresentation = presentation
+    if unreadViewportInputsChanged(from: previousPresentation, to: update.presentation) {
+      unreadViewportEntries = nil
+    }
     let geometryChanged = layoutGeometryChanged(
       from: previousPresentation,
       to: update.presentation
@@ -908,6 +1763,9 @@ final class SidebarCollectionBodyController: NSViewController {
     }
     inFlightCompletions.append(contentsOf: update.completions)
     let previousPresentation = presentation
+    if unreadViewportInputsChanged(from: previousPresentation, to: update.presentation) {
+      unreadViewportEntries = nil
+    }
     presentation = update.presentation
     inFlightRefreshScope = mergeRefreshScopes(
       inFlightRefreshScope,
@@ -934,7 +1792,16 @@ final class SidebarCollectionBodyController: NSViewController {
       return
     }
 
+    #if DEBUG
+    traceTransitionScene(
+      event: "snapshot-completion-entry",
+      generation: generation,
+      reason: "completion"
+    )
+    #endif
+
     snapshotApplyInFlight = false
+    snapshotApplyOwnsAnimations = false
     inFlightGeneration = nil
     hasAppliedInitialSnapshot = true
     let completedPresentation = presentation
@@ -946,6 +1813,18 @@ final class SidebarCollectionBodyController: NSViewController {
     // disclosure cannot refresh its surviving header against transitional
     // hidden attributes and leave that header blank or non-interactive.
     collectionView.layoutSubtreeIfNeeded()
+    reconcileSettledVisibleItems(
+      generation: generation,
+      forceReload: inFlightRequiresSettledReload
+    )
+    #if DEBUG
+    traceTransitionScene(
+      event: "snapshot-after-reconcile",
+      generation: generation,
+      reason: "completion"
+    )
+    #endif
+    inFlightRequiresSettledReload = false
     refreshVisibleContent(refreshScope)
     restoreViewportAnchor(inFlightViewportAnchor)
     inFlightViewportAnchor = nil
@@ -999,6 +1878,7 @@ final class SidebarCollectionBodyController: NSViewController {
 
   private func performPendingDisplayUpdateIfNeeded() {
     guard snapshotApplyInFlight == false,
+          disclosureTransition == nil,
           isCompletingDisplayUpdate == false,
           let pendingDisplayUpdate,
           dataSource != nil,
@@ -1020,6 +1900,7 @@ final class SidebarCollectionBodyController: NSViewController {
     animated: Bool
   ) {
     var chatCount = 0
+    var folderCount = 0
     var headerCount = 0
     var guideCount = 0
     var chromeCount = 0
@@ -1027,6 +1908,8 @@ final class SidebarCollectionBodyController: NSViewController {
       switch row.kind {
       case .chat:
         chatCount += 1
+      case .folder:
+        folderCount += 1
       case .sectionHeader, .timelineHeader, .archiveHeader:
         headerCount += 1
       case .pinDropGuide:
@@ -1039,12 +1922,13 @@ final class SidebarCollectionBodyController: NSViewController {
     os_log(
       .info,
       log: Self.diagnostics,
-      "component=collection event=%{public}@ generation=%{public}d reason=%{public}@ rows=%{public}d chats=%{public}d headers=%{public}d guides=%{public}d chrome=%{public}d animated=%{public}d viewport-w=%{public}d viewport-h=%{public}d",
+      "component=collection event=%{public}@ generation=%{public}d reason=%{public}@ rows=%{public}d chats=%{public}d folders=%{public}d headers=%{public}d guides=%{public}d chrome=%{public}d animated=%{public}d viewport-w=%{public}d viewport-h=%{public}d",
       event as NSString,
       presentation.generation,
       reason as NSString,
       presentation.rows.count,
       chatCount,
+      folderCount,
       headerCount,
       guideCount,
       chromeCount,
@@ -1053,6 +1937,29 @@ final class SidebarCollectionBodyController: NSViewController {
       Int(viewport.height.rounded())
     )
   }
+
+  #if DEBUG
+  private func traceTransitionScene(
+    event: String,
+    generation: Int,
+    reason: String
+  ) {
+    os_log(
+      .debug,
+      log: SidebarCollectionTransitionDiagnostics.log,
+      "component=collection event=%{public}@ generation=%{public}d reason=%{public}@ snapshot-in-flight=%{public}d snapshot-owns-animations=%{public}d visible-items=%{public}d",
+      event as NSString,
+      generation,
+      reason as NSString,
+      snapshotApplyInFlight ? 1 : 0,
+      snapshotApplyOwnsAnimations ? 1 : 0,
+      collectionView.visibleItems().count
+    )
+    for case let item as SidebarCollectionBodyItem in collectionView.visibleItems() {
+      item.traceTransitionState(event: event)
+    }
+  }
+  #endif
 
   private func traceViewport(event: String) {
     let viewport = scrollView.contentView.bounds
@@ -1087,7 +1994,10 @@ final class SidebarCollectionBodyController: NSViewController {
 
   private func verifyPresentationMaterialization(generation: Int) {
     guard let dataSource, let presentation else { return }
-    guard reorderSession == nil, localSettle == nil else { return }
+    guard reorderSession == nil,
+          localSettle == nil,
+          disclosureTransition == nil
+    else { return }
     let snapshotCount = dataSource.snapshot().itemIdentifiers.count
     let expectedCount = presentation.orderedIDs.count
     let representedIndexPaths = Set(collectionView.visibleItems().compactMap {
@@ -1104,23 +2014,33 @@ final class SidebarCollectionBodyController: NSViewController {
       }
     )
     let missingVisibleCount = expectedVisibleIndexPaths.subtracting(representedIndexPaths).count
+    let noninteractiveVisibleCount = collectionView.visibleItems().reduce(into: 0) { count, candidate in
+      guard let item = candidate as? SidebarCollectionBodyItem,
+            let indexPath = collectionView.indexPath(for: item),
+            expectedVisibleIndexPaths.contains(indexPath),
+            item.acceptsPointerInteraction == false
+      else { return }
+      count += 1
+    }
     let visibleCount = representedIndexPaths.count
     let snapshotMatches = snapshotCount == expectedCount
     let geometryValid = viewport.width > 1
       && viewport.height > 1
       && abs(collectionView.frame.width - viewport.width) <= 1
 
-    if snapshotMatches == false || geometryValid == false || missingVisibleCount > 0 {
+    if snapshotMatches == false || geometryValid == false || missingVisibleCount > 0
+      || noninteractiveVisibleCount > 0 {
       os_log(
         .error,
         log: Self.diagnostics,
-        "component=collection event=verification-failed generation=%{public}d expected=%{public}d snapshot=%{public}d expected-visible=%{public}d visible-items=%{public}d missing-visible=%{public}d geometry-valid=%{public}d viewport-w=%{public}d viewport-h=%{public}d document-w=%{public}d",
+        "component=collection event=verification-failed generation=%{public}d expected=%{public}d snapshot=%{public}d expected-visible=%{public}d visible-items=%{public}d missing-visible=%{public}d noninteractive-visible=%{public}d geometry-valid=%{public}d viewport-w=%{public}d viewport-h=%{public}d document-w=%{public}d",
         generation,
         expectedCount,
         snapshotCount,
         expectedVisibleIndexPaths.count,
         visibleCount,
         missingVisibleCount,
+        noninteractiveVisibleCount,
         geometryValid ? 1 : 0,
         Int(viewport.width.rounded()),
         Int(viewport.height.rounded()),
@@ -1130,11 +2050,12 @@ final class SidebarCollectionBodyController: NSViewController {
         .event,
         log: Self.signposts,
         name: "SidebarPresentationDefect",
-        "generation=%{public}d expected=%{public}d snapshot=%{public}d missingVisible=%{public}d",
+        "generation=%{public}d expected=%{public}d snapshot=%{public}d missingVisible=%{public}d noninteractiveVisible=%{public}d",
         generation,
         expectedCount,
         snapshotCount,
-        missingVisibleCount
+        missingVisibleCount,
+        noninteractiveVisibleCount
       )
     } else {
       os_log(
@@ -1147,6 +2068,62 @@ final class SidebarCollectionBodyController: NSViewController {
         visibleCount
       )
     }
+  }
+
+  /// Diffable completion means its model transaction is settled, but AppKit
+  /// can still retain an outgoing reusable item or a stale presentation layer
+  /// at a moved index path. That produces both the double-painted navigation
+  /// rows and the visible-but-noninteractive rows caught by diagnostics. Keep
+  /// normal animated updates intact; rematerialize only a proven bad settled
+  /// scene, plus the deliberately atomic mode/resize and collapse commits.
+  private func reconcileSettledVisibleItems(
+    generation: Int,
+    forceReload: Bool
+  ) {
+    guard let dataSource, let presentation else { return }
+
+    var seenIndexPaths = Set<IndexPath>()
+    var invalidItemCount = 0
+    for case let item as SidebarCollectionBodyItem in collectionView.visibleItems() {
+      guard let indexPath = collectionView.indexPath(for: item),
+            let expectedRowID = dataSource.itemIdentifier(for: indexPath)
+      else {
+        invalidItemCount += 1
+        continue
+      }
+      if seenIndexPaths.insert(indexPath).inserted == false
+        || item.representedRowID != expectedRowID
+        || (isLayoutVisible(at: indexPath) && item.acceptsPointerInteraction == false) {
+        invalidItemCount += 1
+      }
+    }
+
+    guard forceReload || invalidItemCount > 0 else { return }
+    os_log(
+      invalidItemCount > 0 ? .error : .info,
+      log: Self.diagnostics,
+      "component=collection event=settled-rematerialize generation=%{public}d rows=%{public}d invalid-visible=%{public}d forced=%{public}d",
+      generation,
+      presentation.rows.count,
+      invalidItemCount,
+      forceReload ? 1 : 0
+    )
+
+    // `reloadData()` refreshes semantic ownership, but AppKit can preserve the
+    // model/presentation frame animation of a surviving reusable item (for
+    // example Grid moving from index 0 to 1). Cancel both the pre-reload and
+    // rematerialized item layers so an atomic update cannot keep painting the
+    // old slot after its snapshot is already authoritative.
+    for case let item as SidebarCollectionBodyItem in collectionView.visibleItems() {
+      item.clearDisclosurePresentation()
+    }
+    collectionView.reloadData()
+    collectionView.needsLayout = true
+    collectionView.layoutSubtreeIfNeeded()
+    for case let item as SidebarCollectionBodyItem in collectionView.visibleItems() {
+      item.clearDisclosurePresentation()
+    }
+    collectionView.displayIfNeeded()
   }
 
   // MARK: - Hosted row refresh
@@ -1165,9 +2142,15 @@ final class SidebarCollectionBodyController: NSViewController {
       else { continue }
       item.configure(
         row: row,
-        content: content(row, renderContext(for: row)),
+        content: { hostState in
+          content(row, self.renderContext(for: row), hostState)
+        },
+        nativeConfiguration: renderer == .appKit
+          ? nativeContent?(row, renderContext(for: row))
+          : nil,
         isLayoutVisible: collectionView.indexPath(for: item).map(isLayoutVisible(at:))
           ?? true,
+        preservesCollectionTransition: snapshotApplyOwnsAnimations,
         panHandler: { [weak self] rowID, state, location, translation in
           self?.handlePan(
             rowID: rowID,
@@ -1197,15 +2180,36 @@ final class SidebarCollectionBodyController: NSViewController {
   private func renderContext(
     for row: SidebarCollectionRow
   ) -> SidebarCollectionRowRenderContext {
-    guard row.id == .pinDropGuide else { return .idle }
+    let disclosureExpandedOverride: Bool? = if let transition = disclosureTransition,
+                                               transition.identity.ownerID == row.id {
+      transition.targetProgress > 0.5
+    } else {
+      nil
+    }
     return SidebarCollectionRowRenderContext(
-      dimsPinDropInstruction: reorderSession?.pinDropInstructionIsDimmed == true
+      dimsPinDropInstruction: row.id == .pinDropGuide
+        && reorderSession?.pinDropInstructionIsDimmed == true,
+      forceHoverAppearance: false,
+      disclosureExpandedOverride: disclosureExpandedOverride,
+      suppressesAnimations: isSidebarLiveResizeActive
     )
   }
 
   private func isLayoutVisible(at indexPath: IndexPath) -> Bool {
     guard let attributes = layout.layoutAttributesForItem(at: indexPath) else { return true }
     return attributes.alpha > 0.01 && attributes.frame.height > 0.5
+  }
+
+  private func disableInteractionForRowsLeavingSnapshot(
+    _ retainedRowIDs: [SidebarCollectionRow.ID]
+  ) {
+    let retained = Set(retainedRowIDs)
+    for case let item as SidebarCollectionBodyItem in collectionView.visibleItems() {
+      guard let rowID = item.representedRowID,
+            retained.contains(rowID) == false
+      else { continue }
+      item.disableInteractionForSnapshotRemoval()
+    }
   }
 
   private func mergeRefreshScopes(
@@ -1222,6 +2226,35 @@ final class SidebarCollectionBodyController: NSViewController {
     }
   }
 
+  private func removing(
+    _ rowIDs: Set<SidebarCollectionRow.ID>,
+    from scope: VisibleRefreshScope
+  ) -> VisibleRefreshScope {
+    guard rowIDs.isEmpty == false else { return scope }
+    switch scope {
+    case .none, .all:
+      return scope
+    case let .rowIDs(scopeIDs):
+      let remaining = scopeIDs.subtracting(rowIDs)
+      return remaining.isEmpty ? .none : .rowIDs(remaining)
+    }
+  }
+
+  private func changedSectionHeaderIDs(
+    from previous: SidebarBodyPresentation?,
+    to next: SidebarBodyPresentation
+  ) -> Set<SidebarCollectionRow.ID> {
+    guard let previous else { return [] }
+    return Set(SidebarCollectionRow.SectionHeader.allCases.compactMap { section in
+      let rowID = SidebarCollectionRow.ID.sectionHeader(section)
+      guard let previousHeader = previous.rowByID[rowID],
+            let nextHeader = next.rowByID[rowID],
+            previousHeader != nextHeader
+      else { return nil }
+      return rowID
+    })
+  }
+
   private func refreshScope(
     from previous: SidebarBodyPresentation?,
     to next: SidebarBodyPresentation
@@ -1236,12 +2269,14 @@ final class SidebarCollectionBodyController: NSViewController {
       || oldRenderState.preview.itemSize != newRenderState.preview.itemSize
       || oldRenderState.preview.unreadBadgeStyle != newRenderState.preview.unreadBadgeStyle
       || oldRenderState.preview.colorScheme != newRenderState.preview.colorScheme
-      || oldRenderState.preview.themeRevision != newRenderState.preview.themeRevision {
+      || oldRenderState.preview.themeRevision != newRenderState.preview.themeRevision
+      || oldRenderState.preview.renderer != newRenderState.preview.renderer {
       return .all
     }
 
-    var rowIDs = Set(next.rows.compactMap { row in
-      previous.rowByID[row.id] == row ? nil : row.id
+    var rowIDs = Set<SidebarCollectionRow.ID>(next.rows.compactMap { row in
+      guard let previousRow = previous.rowByID[row.id] else { return nil }
+      return previousRow == row ? nil : row.id
     })
 
     if oldRenderState.allChatsSelected != newRenderState.allChatsSelected
@@ -1303,7 +2338,28 @@ final class SidebarCollectionBodyController: NSViewController {
     return zip(previous.rows, next.rows).contains { oldRow, newRow in
       oldRow.id != newRow.id
         || oldRow.height != newRow.height
-        || oldRow.projectedItem?.lane != newRow.projectedItem?.lane
+        || oldRow.presentationLane != newRow.presentationLane
+    }
+  }
+
+  private func unreadViewportInputsChanged(
+    from previous: SidebarBodyPresentation?,
+    to next: SidebarBodyPresentation
+  ) -> Bool {
+    guard let previous,
+          previous.orderedIDs == next.orderedIDs
+    else { return true }
+    return next.rows.contains { row in
+      if let item = row.projectedItem,
+         let oldItem = previous.rowByID[row.id]?.projectedItem {
+        return item.item.unread != oldItem.item.unread
+          || item.item.prominentUnreadDot != oldItem.item.prominentUnreadDot
+      }
+      if let folder = row.projectedFolder,
+         let oldFolder = previous.rowByID[row.id]?.projectedFolder {
+        return folder.prominentUnreadCount != oldFolder.prominentUnreadCount
+      }
+      return false
     }
   }
 
@@ -1313,7 +2369,7 @@ final class SidebarCollectionBodyController: NSViewController {
       .first(where: { $0.id == .pinned })?
       .rootIDs ?? []
     let hidesPinnedHeader = proposal.targetLane != .pinned
-      && pinnedRootIDs == [session.source.id]
+      && pinnedRootIDs == [session.source.nodeID]
     return SidebarBodyLayoutDrag(
       sourceIDs: Set(session.draggedBlockIDs),
       destinationIndex: proposal.destinationIndex,
@@ -1337,25 +2393,41 @@ final class SidebarCollectionBodyController: NSViewController {
     )
   }
 
-  private func configureLayout(for presentation: SidebarBodyPresentation) {
+  private func configureLayout(
+    for presentation: SidebarBodyPresentation,
+    disclosure: SidebarBodyLayoutDisclosure? = nil,
+    invalidatesLayout: Bool = true
+  ) {
+    unreadViewportEntries = nil
     let drag = currentLayoutDrag
     let emptyPinned = currentEmptyPinnedLayout
     let settlingSourceIDs = localSettle?.sourceIDs ?? []
     configuredLayoutDrag = drag
     configuredEmptyPinned = emptyPinned
+    configuredLayoutDisclosure = disclosure
     configuredSettlingSourceIDs = settlingSourceIDs
     layout.configure(
       presentation: presentation,
       drag: drag,
       emptyPinned: emptyPinned,
-      settlingSourceIDs: settlingSourceIDs
+      disclosure: disclosure,
+      settlingSourceIDs: settlingSourceIDs,
+      invalidatesLayout: invalidatesLayout
     )
   }
 
   private var layoutInteractionConfigurationChanged: Bool {
     configuredLayoutDrag != currentLayoutDrag
       || configuredEmptyPinned != currentEmptyPinnedLayout
+      || configuredLayoutDisclosure != currentDisclosureLayout
       || configuredSettlingSourceIDs != (localSettle?.sourceIDs ?? [])
+  }
+
+  private var currentDisclosureLayout: SidebarBodyLayoutDisclosure? {
+    guard let transition = disclosureTransition else { return nil }
+    return transition.geometry.layoutState(
+      hidesAffectedRows: transition.phase == .stagingExpansion
+    )
   }
 
   private var previewHorizontalBleed: CGFloat {
@@ -1391,6 +2463,7 @@ final class SidebarCollectionBodyController: NSViewController {
   private func updateExternalDrop(_ sender: NSDraggingInfo) -> NSDragOperation {
     guard supportsExternalAttachments(sender.draggingPasteboard),
           reorderSession == nil,
+          disclosureTransition == nil,
           let targetID = externalDropTarget(at: sender.draggingLocation),
           let target = actions?.externalDropTarget(targetID)
     else {
@@ -1476,9 +2549,12 @@ final class SidebarCollectionBodyController: NSViewController {
     guard reorderSession == nil,
           localSettle == nil,
           snapshotApplyInFlight == false,
+          disclosureTransition == nil,
           isCompletingDisplayUpdate == false,
           pendingDisplayUpdate == nil,
-          let source = rowForHosting(rowID)?.projectedItem,
+          let sourceRow = rowForHosting(rowID),
+          let source = ReorderSource(sourceRow),
+          source.supports(reorderPolicy),
           source.orderLane != nil,
           reorderPolicy == .manual || source.parentID == nil,
           // A reply inherited into a pinned parent's presentation lane keeps
@@ -1486,34 +2562,49 @@ final class SidebarCollectionBodyController: NSViewController {
           // decoupled, do not offer a drag whose apparent move would also
           // mutate pin state or immediately snap back into the parent.
           source.parentID == nil || source.orderLane == source.lane,
-          let dragGroup = try? tree.snapshot.dragGroup(for: source.id),
-          let allLegalSlots = try? tree.snapshot.legalSlots(for: source.id),
+          let dragGroup = try? tree.snapshot.dragGroup(for: source.nodeID),
+          let allLegalSlots = try? tree.snapshot.legalSlots(for: source.nodeID),
           let window = collectionView.window
     else { return }
 
     // Pinned parents own their reply presentation. Same-lane replies may
     // still reorder as siblings, but a root destination would claim to detach
     // and then immediately be overridden by the projection invariant.
-    let legalSlots = source.parentID != nil && source.lane == .pinned
-      ? allLegalSlots.filter { $0.parentID == source.parentID }
-      : allLegalSlots
+    let legalSlots: [ModelSlot]
+    switch source {
+    case .folder:
+      // Dialog folders are one-level root containers. The generic `.any`
+      // child policy accepts chats, but must never imply nested folders.
+      legalSlots = allLegalSlots.filter {
+        $0.sectionID == .normal && $0.parentID == nil
+      }
+    case let .chat(item):
+      legalSlots = item.parentID != nil && item.lane == .pinned
+        ? allLegalSlots.filter { $0.parentID == item.parentID }
+        : allLegalSlots
+    }
 
     collectionView.layoutSubtreeIfNeeded()
     let rowIDs = displayRows.map(\.id)
-    let blockIDs = dragGroup.visibleNodeIDs.map { SidebarCollectionRow.ID.chat($0) }
+    let blockIDs = dragGroup.visibleNodeIDs.compactMap(rowID(for:))
     let stableFrames: [SidebarCollectionRow.ID: CGRect] = Dictionary(
       uniqueKeysWithValues: rowIDs.enumerated().compactMap { index, id -> (SidebarCollectionRow.ID, CGRect)? in
-      guard let frame = layout.layoutAttributesForItem(
-        at: IndexPath(item: index, section: 0)
-      )?.frame else { return nil }
-      return (id, frame)
+        guard let frame = layout.layoutAttributesForItem(
+          at: IndexPath(item: index, section: 0)
+        )?.frame else { return nil }
+        return (id, frame)
       }
     )
     let projectedHitGuides = displayRows.compactMap { row -> ProjectedHitGuide? in
-      guard let item = row.projectedItem,
+      guard let nodeID = row.projectedNodeID,
             let frame = stableFrames[row.id]
       else { return nil }
-      return ProjectedHitGuide(item: item, middleY: frame.midY)
+      return ProjectedHitGuide(
+        nodeID: nodeID,
+        parentID: row.presentationParentID,
+        isContainer: tree.snapshot.nodes[nodeID]?.childPolicy != SidebarCollectionChildPolicy.none,
+        middleY: frame.midY
+      )
     }
     guard let groupFrame = frameUnion(for: blockIDs, frames: stableFrames),
           let dragPreviewContent
@@ -1537,7 +2628,7 @@ final class SidebarCollectionBodyController: NSViewController {
       .first(where: { $0.id == .normal })?
       .rootIDs
       .lazy
-      .compactMap { stableFrames[.chat($0)] }
+      .compactMap { self.rowID(for: $0).flatMap { stableFrames[$0] } }
       .first
     let id = UUID()
     var session = ReorderSession(
@@ -1571,19 +2662,17 @@ final class SidebarCollectionBodyController: NSViewController {
     session.rawRootProposals = rootProposals(session: session).filter {
       session.legalSlots.contains($0.slot)
     }
-    if reorderPolicy == .manual, let parentID = source.semanticParentID {
-      session.rawChildProposals = childProposals(
-        parentID: parentID,
-        session: session
-      ).filter {
-        session.legalSlots.contains($0.slot)
-      }
+    if reorderPolicy == .manual {
+      let containerIDs = Set(allLegalSlots.compactMap(\.parentID))
+      session.rawChildProposals = containerIDs.flatMap { parentID in
+        childProposals(parentID: parentID, session: session)
+      }.filter { session.legalSlots.contains($0.slot) }
     }
     refreshProposalGroups(session: &session)
-    session.originalProposal = (
-      session.rootProposals.proposals + session.childProposals.proposals
-    ).first {
-      session.tree.snapshot.isNode(session.source.id, at: $0.slot)
+    let allProposals: [Proposal] = session.rootProposals.proposals
+      + session.childProposals.proposals
+    session.originalProposal = allProposals.first { proposal in
+      session.tree.snapshot.isNode(session.source.nodeID, at: proposal.slot)
     }
     guard let originalProposal = session.originalProposal else {
       log.error(
@@ -1596,9 +2685,17 @@ final class SidebarCollectionBodyController: NSViewController {
     session.proposal = originalProposal
     _ = updateEmptyPinnedSectionVisibility(session: &session)
     reorderSession = session
+    let nativeDragPreviewContent: (
+      (SidebarCollectionRow) -> SidebarNativeRowConfiguration
+    )? = if renderer == .appKit, let nativeContent {
+      { row in nativeContent(row, .dragPreview) }
+    } else {
+      nil
+    }
     previewPanel.show(
       rows: blockIDs.compactMap { session.rowByID[$0] },
       content: dragPreviewContent,
+      nativeContent: nativeDragPreviewContent,
       horizontalBleed: previewHorizontalBleed,
       ownerWindow: window,
       frame: previewFrame(for: session)
@@ -1606,12 +2703,14 @@ final class SidebarCollectionBodyController: NSViewController {
     updateLayoutForReorder(animated: false)
     installCancellationHooks()
     startAutoscroll()
+    let dragID = String(id.uuidString.prefix(6))
+    let visibleCount = session.dragGroup.visibleNodeIDs.count
+    let attachedCount = session.dragGroup.attachedNodeIDs.count
+    let startsCollapsed = source.isExpandable && source.isExpanded == false
+    let policyDescription = String(describing: reorderPolicy)
     log.info(
-      "drag[\(String(id.uuidString.prefix(6)))] began visibleRows="
-        + "\(session.dragGroup.visibleNodeIDs.count) attachedRows="
-        + "\(session.dragGroup.attachedNodeIDs.count) "
-        + "collapsed=\(source.isExpandable && source.isExpanded == false)"
-        + " policy=\(String(describing: reorderPolicy))"
+      "drag[\(dragID)] began visibleRows=\(visibleCount) attachedRows=\(attachedCount) "
+        + "collapsed=\(startsCollapsed) policy=\(policyDescription)"
     )
   }
 
@@ -1692,9 +2791,9 @@ final class SidebarCollectionBodyController: NSViewController {
     do {
       try state.beginMove(
         id: session.id,
-        sourceID: session.source.id,
+        sourceID: session.source.nodeID,
         destination: proposal.slot,
-        scope: moveScope(for: session, proposal: proposal)
+        scope: .attachedSubtree
       )
     } catch {
       log.error(
@@ -1709,28 +2808,15 @@ final class SidebarCollectionBodyController: NSViewController {
     stopAutoscroll()
     removeCancellationHooks()
 
-    let scope = moveScope(for: session, proposal: proposal)
-    let settleTargetScreenFrame: CGRect
-    if scope == .sourceOnly,
-       let sourceHeight = session.rowByID[.chat(session.source.id)]?.height {
-      // The pointer phase keeps the immutable group-sized hole. At mouse-up,
-      // source-only pinning narrows both preview and destination around their
-      // shared top edge so the panel never expands into an empty group frame.
-      settleTargetScreenFrame = CGRect(
-        x: targetScreenFrame.minX,
-        y: targetScreenFrame.maxY - sourceHeight,
-        width: targetScreenFrame.width,
-        height: sourceHeight
-      )
-    } else {
-      settleTargetScreenFrame = targetScreenFrame
-    }
-    let settlingSourceIDs: Set<SidebarCollectionRow.ID> = scope == .sourceOnly
-      ? [.chat(session.source.id)]
-      : Set(session.draggedBlockIDs)
+    // Pin persistence changes only the source dialog, but the sidebar's
+    // presentation tree still owns its semantic reply subtree. Keep those two
+    // scopes separate: the optimistic collection scene and lifted preview move
+    // the complete visible group on frame one, while `collectionMove` retains
+    // the root-only persistence contract for a cross-lane transfer.
+    let settlingSourceIDs = Set(session.draggedBlockIDs)
     let pending = PendingMove(
       id: session.id,
-      sourceID: .chat(session.source.id),
+      sourceID: session.source.rowID,
       sourceIDs: settlingSourceIDs,
       targetLane: proposal.targetLane
     )
@@ -1770,18 +2856,8 @@ final class SidebarCollectionBodyController: NSViewController {
       "drag[\(String(session.id.uuidString.prefix(6)))] dropped "
         + "destination=\(String(describing: proposal.slot))"
     )
-    if scope == .sourceOnly,
-       let sourceRow = finalRows.first(where: { $0.id == .chat(session.source.id) }),
-       let dragPreviewContent {
-      previewPanel.showSourceOnly(
-        row: sourceRow,
-        content: dragPreviewContent,
-        horizontalBleed: previewHorizontalBleed,
-        width: session.initialPreviewFrame.width
-      )
-    }
     previewPanel.settle(
-      to: settleTargetScreenFrame,
+      to: targetScreenFrame,
       horizontalBleed: previewHorizontalBleed
     ) { [weak self] in
       self?.markLocalSettlePreviewFinished(id: session.id)
@@ -2001,33 +3077,55 @@ final class SidebarCollectionBodyController: NSViewController {
     let rowHeight = baseRows.first(where: { $0.projectedItem != nil })?.height
       ?? baseRows.first(where: { $0.id == .newThread })?.height
       ?? 44
-    let projectedItems = tree
+    let projectedNodes = tree
       .replacing(snapshot: snapshot)
-      .projectedItems(orderLaneOverrides: laneOverrides)
-    func chatRows(_ items: [SidebarProjectedItem]) -> [SidebarCollectionRow] {
-      items.map { projectedItem in
-        SidebarCollectionRow(
-          id: .chat(projectedItem.id),
-          kind: .chat(projectedItem),
-          height: rowHeight
-        )
+      .projectedNodes(orderLaneOverrides: laneOverrides)
+    func nodeRows(_ nodes: [SidebarProjectedNode]) -> [SidebarCollectionRow] {
+      nodes.map { node in
+        switch node {
+        case let .chat(item):
+          SidebarCollectionRow(
+            id: .chat(item.id),
+            kind: .chat(item),
+            height: baseRows.first(where: { $0.id == .chat(item.id) })?.height ?? rowHeight
+          )
+        case let .folder(folder):
+          SidebarCollectionRow(
+            id: .folder(folder.id),
+            kind: .folder(folder),
+            height: baseRows.first(where: { $0.id == .folder(folder.id) })?.height ?? rowHeight
+          )
+        }
       }
     }
-    let pinnedRows = chatRows(projectedItems.filter { $0.lane == .pinned })
-    let contentItems = projectedItems.filter { $0.lane == .normal }
+    let pinnedRows = nodeRows(projectedNodes.filter { $0.lane == .pinned })
+    let contentNodes = projectedNodes.filter { $0.lane == .normal }
     let usesTimelineSections = baseRows.contains {
       $0.id == .sectionHeader(.content)
     } == false
     let contentRows = usesTimelineSections
-      ? SidebarCollectionRow.timelineRows(contentItems, chatRowHeight: rowHeight)
-      : chatRows(contentItems)
+      ? SidebarCollectionRow.timelineRows(
+        contentNodes.compactMap(\.projectedItem),
+        chatRowHeight: rowHeight
+      )
+      : nodeRows(contentNodes)
     let pinnedExpanded = baseRows.first(where: { $0.id == .sectionHeader(.pinned) })?
       .sectionHeader?.isExpanded ?? true
     let contentExpanded = baseRows.first(where: { $0.id == .sectionHeader(.content) })?
       .sectionHeader?.isExpanded ?? true
+    // Optimistic moves rebuild chat membership, but the base projection still
+    // owns whether New Thread leads or trails the content lane.
+    let newThreadIndex = baseRows.firstIndex(where: { $0.id == .newThread })
+    let newThreadRow = newThreadIndex.map { baseRows[$0] }
+    let newThreadLeadsContent = newThreadLeadsContent(in: baseRows)
     var logicalRows: [SidebarCollectionRow] = []
     if pinnedRows.isEmpty == false {
-      logicalRows.append(.sectionHeader(.pinned, isExpanded: pinnedExpanded))
+      logicalRows.append(.sectionHeader(
+        .pinned,
+        isExpanded: pinnedExpanded,
+        height: baseRows.first(where: { $0.id == .sectionHeader(.pinned) })?.height
+          ?? SidebarCollectionRow.spacedSectionHeaderHeight
+      ))
       if pinnedExpanded {
         logicalRows.append(contentsOf: pinnedRows)
       }
@@ -2038,19 +3136,33 @@ final class SidebarCollectionBodyController: NSViewController {
       logicalRows.append(.pinDropGuide())
     }
     if usesTimelineSections {
+      if newThreadLeadsContent, let newThreadRow {
+        logicalRows.append(newThreadRow)
+      }
       logicalRows.append(contentsOf: contentRows)
     } else {
-      logicalRows.append(.sectionHeader(.content, isExpanded: contentExpanded))
+      logicalRows.append(.sectionHeader(
+        .content,
+        isExpanded: contentExpanded,
+        height: baseRows.first(where: { $0.id == .sectionHeader(.content) })?.height
+          ?? SidebarCollectionRow.spacedSectionHeaderHeight
+      ))
+      if newThreadLeadsContent, let newThreadRow {
+        logicalRows.append(newThreadRow)
+      }
       if contentExpanded {
         logicalRows.append(contentsOf: contentRows)
       }
+    }
+    if newThreadLeadsContent == false, let newThreadRow {
+      logicalRows.append(newThreadRow)
     }
 
     var result: [SidebarCollectionRow] = []
     var insertedLogicalRows = false
     for row in baseRows {
-      if row.projectedItem != nil || row.isSectionHeader || row.isTimelineHeader
-        || row.id == .pinDropGuide {
+      if row.projectedNodeID != nil || row.isSectionHeader || row.isTimelineHeader
+        || row.id == .pinDropGuide || row.id == .newThread {
         if insertedLogicalRows == false {
           result.append(contentsOf: logicalRows)
           insertedLogicalRows = true
@@ -2075,7 +3187,7 @@ final class SidebarCollectionBodyController: NSViewController {
     var stableRows = rows
     let insertionIndex = rows.firstIndex(where: { $0.id == .sectionHeader(.content) })
       ?? rows.firstIndex(where: \.isTimelineHeader)
-      ?? rows.firstIndex(where: { $0.projectedItem != nil })
+      ?? rows.firstIndex(where: { $0.projectedNodeID != nil })
       ?? rows.endIndex
     stableRows.insert(contentsOf: [
       .sectionHeader(.pinned, isExpanded: true, height: 0),
@@ -2255,6 +3367,16 @@ final class SidebarCollectionBodyController: NSViewController {
       }
   }
 
+  private func captureViewportAnchor(
+    rowID: SidebarCollectionRow.ID
+  ) -> ViewportAnchor? {
+    guard let item = visibleItem(for: rowID) else { return nil }
+    return ViewportAnchor(
+      rowID: rowID,
+      offsetFromViewportTop: item.view.frame.minY - scrollView.contentView.bounds.minY
+    )
+  }
+
   private func restoreViewportAnchor(_ anchor: ViewportAnchor?) {
     guard let anchor,
           let dataSource,
@@ -2335,9 +3457,8 @@ final class SidebarCollectionBodyController: NSViewController {
 
   private func nearestProposal(at point: CGPoint, session: ReorderSession) -> Proposal? {
     let candidates: ProposalGroup
-    if prefersChildDestination(at: point, session: session),
-       session.childProposals.isEmpty == false {
-      candidates = session.childProposals
+    if let childCandidates = childProposalGroup(at: point, session: session) {
+      candidates = childCandidates
     } else {
       candidates = rootProposals(at: point, session: session)
     }
@@ -2389,28 +3510,43 @@ final class SidebarCollectionBodyController: NSViewController {
     return proposals.isEmpty ? session.rootProposals : proposals
   }
 
-  private func prefersChildDestination(
+  private func childProposalGroup(
     at point: CGPoint,
     session: ReorderSession
-  ) -> Bool {
-    guard let parentID = session.source.semanticParentID,
-          point.x >= childDropIndentThreshold,
-          let target = closestProjectedItem(toY: point.y, session: session)
-    else { return false }
+  ) -> ProposalGroup? {
+    guard point.x >= childDropIndentThreshold,
+          let target = closestProjectedGuide(toY: point.y, session: session)
+    else { return nil }
 
-    return target.id == parentID
-      || target.parentID == parentID
-      || target.id == session.source.id
+    let availableParentIDs = Set(session.childProposals.proposals.compactMap { $0.slot.parentID })
+    let parentID: SidebarCollectionNodeID?
+    if target.isContainer, availableParentIDs.contains(target.nodeID) {
+      parentID = target.nodeID
+    } else if let targetParentID = target.parentID,
+              availableParentIDs.contains(targetParentID) {
+      parentID = targetParentID
+    } else if target.nodeID == session.source.nodeID,
+              let sourceParentID = session.source.parentID,
+              availableParentIDs.contains(sourceParentID) {
+      parentID = sourceParentID
+    } else {
+      parentID = nil
+    }
+    guard let parentID else { return nil }
+    let proposals = session.childProposals.proposals.filter {
+      $0.slot.parentID == parentID
+    }
+    return proposals.isEmpty ? nil : ProposalGroup(proposals)
   }
 
   private var childDropIndentThreshold: CGFloat {
     Theme.sidebarNativeDefaultEdgeInsets + Theme.sidebarItemInnerSpacing + 12
   }
 
-  private func closestProjectedItem(
+  private func closestProjectedGuide(
     toY y: CGFloat,
     session: ReorderSession
-  ) -> SidebarProjectedItem? {
+  ) -> ProjectedHitGuide? {
     let guides = session.projectedHitGuides
     guard guides.isEmpty == false else { return nil }
 
@@ -2428,7 +3564,7 @@ final class SidebarCollectionBodyController: NSViewController {
     return [lower - 1, lower]
       .filter { guides.indices.contains($0) }
       .min { abs(guides[$0].middleY - y) < abs(guides[$1].middleY - y) }
-      .map { guides[$0].item }
+      .map { guides[$0] }
   }
 
   private func rootProposals(session: ReorderSession) -> [Proposal] {
@@ -2436,15 +3572,18 @@ final class SidebarCollectionBodyController: NSViewController {
       removing: Set(session.draggedBlockIDs),
       from: session.originalRowIDs
     )
-    let roots = reducedRows.ids.compactMap { rowID ->
-      (SidebarCollectionRow.ID, SidebarProjectedItem)? in
-      guard let item = session.rowByID[rowID]?.projectedItem, item.parentID == nil else {
+    let roots = reducedRows.ids.compactMap { rowID -> ProjectedRootGuide? in
+      guard let row = session.rowByID[rowID],
+            let nodeID = row.projectedNodeID,
+            row.presentationParentID == nil,
+            let orderLane = session.tree.orderLaneByID[nodeID] ?? row.presentationLane
+      else {
         return nil
       }
-      return (rowID, item)
+      return ProjectedRootGuide(rowID: rowID, nodeID: nodeID, orderLane: orderLane)
     }
-    let pinned = roots.filter { $0.1.orderLane == .pinned }
-    let normal = roots.filter { $0.1.orderLane == .normal }
+    let pinned = roots.filter { $0.orderLane == .pinned }
+    let normal = roots.filter { $0.orderLane == .normal }
     var proposals: [Proposal] = []
     let firstGuideY = firstRootGuideY(roots, session: session)
 
@@ -2482,16 +3621,16 @@ final class SidebarCollectionBodyController: NSViewController {
     let targetLane: SidebarOrderLane = sourceLane == .pinned ? .normal : .pinned
     let sourceProposal = proposals.first { proposal in
       proposal.targetLane == sourceLane
-        && session.tree.snapshot.isNode(session.source.id, at: proposal.slot)
+        && session.tree.snapshot.isNode(session.source.nodeID, at: proposal.slot)
     }
 
     let targetRoots = session.tree.snapshot.sections
       .first(where: { $0.id == targetLane })?
       .rootIDs
-      .filter { $0 != session.source.id } ?? []
+      .filter { $0 != session.source.nodeID } ?? []
     let beforeSiblingID = targetRoots.first { targetID in
       groupIsOrderedBefore(
-        session.source.id,
+        session.source.nodeID,
         targetID,
         tree: session.tree
       )
@@ -2512,8 +3651,8 @@ final class SidebarCollectionBodyController: NSViewController {
   }
 
   private func groupIsOrderedBefore(
-    _ lhs: ChatListItem.Identifier,
-    _ rhs: ChatListItem.Identifier,
+    _ lhs: SidebarCollectionNodeID,
+    _ rhs: SidebarCollectionNodeID,
     tree: SidebarCollectionTree
   ) -> Bool {
     let lhsActivity = groupActivity(lhs, tree: tree)
@@ -2521,24 +3660,23 @@ final class SidebarCollectionBodyController: NSViewController {
     if lhsActivity != rhsActivity {
       return lhsActivity > rhsActivity
     }
-    if lhs.rawValue != rhs.rawValue {
-      return lhs.rawValue > rhs.rawValue
-    }
-    return lhs.kind.rawValue > rhs.kind.rawValue
+    return String(describing: lhs) > String(describing: rhs)
   }
 
   private func groupActivity(
-    _ rootID: ChatListItem.Identifier,
+    _ rootID: SidebarCollectionNodeID,
     tree: SidebarCollectionTree
   ) -> Date {
     let group = try? tree.snapshot.dragGroup(for: rootID)
-    return group?.attachedNodeIDs.compactMap { tree.itemByID[$0]?.lastActivityAt }.max()
-      ?? tree.itemByID[rootID]?.lastActivityAt
+    return group?.attachedNodeIDs.compactMap { nodeID in
+      nodeID.chatID.flatMap { tree.itemByID[$0]?.lastActivityAt }
+    }.max()
+      ?? rootID.chatID.flatMap { tree.itemByID[$0]?.lastActivityAt }
       ?? .distantPast
   }
 
   private func appendRootProposals(
-    roots: [(SidebarCollectionRow.ID, SidebarProjectedItem)],
+    roots: [ProjectedRootGuide],
     lane: SidebarOrderLane,
     fallbackGuideY: CGFloat,
     reducedRows: ReducedRows,
@@ -2551,12 +3689,14 @@ final class SidebarCollectionBodyController: NSViewController {
       case .pinned:
         insertionIndex = emptyLaneInsertionIndex(
           .pinned,
-          in: reducedRows.ids
+          in: reducedRows.ids,
+          rows: session.originalRows
         )
       case .normal:
         insertionIndex = emptyLaneInsertionIndex(
           .normal,
-          in: reducedRows.ids
+          in: reducedRows.ids,
+          rows: session.originalRows
         )
       }
       proposals.append(makeProposal(
@@ -2569,12 +3709,12 @@ final class SidebarCollectionBodyController: NSViewController {
       return
     }
 
-    for (rowID, item) in roots {
-      guard let insertionIndex = reducedRows.indexByID[rowID],
-            let frame = subtreeFrame(for: rowID, session: session)
+    for root in roots {
+      guard let insertionIndex = reducedRows.indexByID[root.rowID],
+            let frame = subtreeFrame(for: root.rowID, session: session)
       else { continue }
       proposals.append(makeProposal(
-        slot: ModelSlot(sectionID: lane, parentID: nil, beforeSiblingID: item.id),
+        slot: ModelSlot(sectionID: lane, parentID: nil, beforeSiblingID: root.nodeID),
         insertionIndex: insertionIndex,
         guideY: frame.minY,
         targetLane: lane,
@@ -2583,8 +3723,8 @@ final class SidebarCollectionBodyController: NSViewController {
     }
 
     guard let last = roots.last,
-          let lastIndex = reducedRows.indexByID[last.0],
-          let frame = subtreeFrame(for: last.0, session: session)
+          let lastIndex = reducedRows.indexByID[last.rowID],
+          let frame = subtreeFrame(for: last.rowID, session: session)
     else { return }
     proposals.append(makeProposal(
       slot: ModelSlot(sectionID: lane, parentID: nil, beforeSiblingID: nil),
@@ -2627,7 +3767,8 @@ final class SidebarCollectionBodyController: NSViewController {
 
   private func emptyLaneInsertionIndex(
     _ lane: SidebarOrderLane,
-    in rowIDs: [SidebarCollectionRow.ID]
+    in rowIDs: [SidebarCollectionRow.ID],
+    rows: [SidebarCollectionRow]
   ) -> Int {
     switch lane {
     case .pinned:
@@ -2639,11 +3780,45 @@ final class SidebarCollectionBodyController: NSViewController {
           guard case .timelineHeader = id else { return false }
           return true
         })
-        ?? firstChatIndex(in: rowIDs, rows: displayRows)
+        ?? firstChatIndex(in: rowIDs, rows: rows)
     case .normal:
-      return rowIDs.firstIndex(of: .sectionHeader(.content)).map { $0 + 1 }
-        ?? indexAfterLastChat(in: rowIDs, rows: displayRows)
+      let chatInsertionIndex = rowIDs.firstIndex(of: .sectionHeader(.content)).map { $0 + 1 }
+        ?? indexAfterLastChat(in: rowIDs, rows: rows)
+      guard newThreadLeadsContent(in: rows),
+            let newThreadIndex = rowIDs.firstIndex(of: .newThread)
+      else { return chatInsertionIndex }
+      // New Thread is fixed Open chrome, not a reorderable chat. When lifting
+      // the lane's only chat, reserve the empty-lane hole after this action so
+      // it never gets pushed to the trailing edge of the list.
+      return max(chatInsertionIndex, newThreadIndex + 1)
     }
+  }
+
+  private func newThreadLeadsContent(
+    in rows: [SidebarCollectionRow]
+  ) -> Bool {
+    guard let newThreadIndex = rows.firstIndex(where: { $0.id == .newThread }) else {
+      return false
+    }
+    let usesTimelineSections = rows.contains {
+      $0.id == .sectionHeader(.content)
+    } == false
+    if usesTimelineSections {
+      let firstTimelineIndex = rows.firstIndex(where: { $0.isTimelineHeader })
+        ?? rows.firstIndex(where: { $0.presentationLane == .normal })
+        ?? rows.endIndex
+      return newThreadIndex < firstTimelineIndex
+    }
+
+    let contentHeaderIndex = rows.firstIndex(where: {
+      $0.id == .sectionHeader(.content)
+    })
+    let firstContentRowIndex = rows.indices.first { index in
+      guard contentHeaderIndex.map({ index > $0 }) ?? true else { return false }
+      let row = rows[index]
+      return row.presentationLane == .normal || row.id == .emptyState
+    } ?? rows.endIndex
+    return newThreadIndex < firstContentRowIndex
   }
 
   private func sectionHeaderFrame(
@@ -2667,11 +3842,11 @@ final class SidebarCollectionBodyController: NSViewController {
     in rows: [SidebarCollectionRow]
   ) -> SidebarCollectionRow.ID? {
     rows.first(where: \.isTimelineHeader)?.id
-      ?? rows.first(where: { $0.projectedItem?.lane == .normal })?.id
+      ?? rows.first(where: { $0.presentationLane == .normal })?.id
   }
 
   private func childProposals(
-    parentID: ChatListItem.Identifier,
+    parentID: SidebarCollectionNodeID,
     session: ReorderSession
   ) -> [Proposal] {
     let block = Set(session.draggedBlockIDs)
@@ -2679,38 +3854,43 @@ final class SidebarCollectionBodyController: NSViewController {
     let reducedIndexByID = Dictionary(
       uniqueKeysWithValues: reducedIDs.enumerated().map { ($0.element, $0.offset) }
     )
-    let siblings = reducedIDs.compactMap { rowID -> (SidebarCollectionRow.ID, SidebarProjectedItem)? in
-      guard let item = session.rowByID[rowID]?.projectedItem, item.parentID == parentID else {
+    let siblings = reducedIDs.compactMap { rowID ->
+      (rowID: SidebarCollectionRow.ID, nodeID: SidebarCollectionNodeID, lane: SidebarOrderLane)? in
+      guard let row = session.rowByID[rowID],
+            let nodeID = row.projectedNodeID,
+            row.presentationParentID == parentID,
+            let lane = session.tree.orderLaneByID[nodeID]
+              ?? row.presentationLane
+              ?? session.source.orderLane
+      else {
         return nil
       }
-      return (rowID, item)
+      return (rowID, nodeID, lane)
     }
     var proposals: [Proposal] = []
-    let parentRowID = rowID(for: parentID)
+    guard let parentRowID = rowID(for: parentID) else { return [] }
     let sectionID = session.tree.snapshot.sectionID(containing: parentID) ?? nil
 
-    for (rowID, item) in siblings {
-      guard let index = reducedIndexByID[rowID],
-            let frame = session.stableFrames[rowID],
-            let targetLane = item.orderLane ?? session.source.orderLane
+    for sibling in siblings {
+      guard let index = reducedIndexByID[sibling.rowID],
+            let frame = session.stableFrames[sibling.rowID]
       else { continue }
       proposals.append(makeProposal(
         slot: ModelSlot(
           sectionID: sectionID,
           parentID: parentID,
-          beforeSiblingID: item.id
+          beforeSiblingID: sibling.nodeID
         ),
         insertionIndex: index,
         guideY: frame.minY,
-        targetLane: targetLane,
+        targetLane: sibling.lane,
         reducedIDs: reducedIDs
       ))
     }
 
     if let last = siblings.last,
-       let index = reducedIndexByID[last.0],
-       let frame = subtreeFrame(for: last.0, session: session),
-       let targetLane = last.1.orderLane ?? session.source.orderLane {
+       let index = reducedIndexByID[last.rowID],
+       let frame = subtreeFrame(for: last.rowID, session: session) {
       proposals.append(makeProposal(
         slot: ModelSlot(
           sectionID: sectionID,
@@ -2723,13 +3903,13 @@ final class SidebarCollectionBodyController: NSViewController {
           rowByID: session.rowByID
         ),
         guideY: frame.maxY,
-        targetLane: targetLane,
+        targetLane: last.lane,
         reducedIDs: reducedIDs
       ))
     } else if let parentIndex = reducedIndexByID[parentRowID],
               let parentFrame = session.stableFrames[parentRowID],
-              let parent = session.rowByID[parentRowID]?.projectedItem,
-              let targetLane = session.source.orderLane ?? parent.orderLane {
+              let targetLane = session.rowByID[parentRowID]?.presentationLane
+                ?? session.source.orderLane {
       proposals.append(makeProposal(
         slot: ModelSlot(
           sectionID: sectionID,
@@ -2782,7 +3962,7 @@ final class SidebarCollectionBodyController: NSViewController {
       ProposalLayoutMode(
         revealsEmptyPinnedSection: revealsEmptyPinnedSection,
         hidesPinnedHeader: proposal.targetLane != .pinned
-          && pinnedRootIDs == [session.source.id]
+          && pinnedRootIDs == [session.source.nodeID]
       )
     })
     let slotPositionsByMode = Dictionary(uniqueKeysWithValues: modes.map { mode in
@@ -2801,7 +3981,7 @@ final class SidebarCollectionBodyController: NSViewController {
       let mode = ProposalLayoutMode(
         revealsEmptyPinnedSection: revealsEmptyPinnedSection,
         hidesPinnedHeader: proposal.targetLane != .pinned
-          && pinnedRootIDs == [session.source.id]
+          && pinnedRootIDs == [session.source.nodeID]
       )
       return Proposal(
         slot: proposal.slot,
@@ -2931,19 +4111,19 @@ final class SidebarCollectionBodyController: NSViewController {
   }
 
   private func firstRootGuideY(
-    _ roots: [(SidebarCollectionRow.ID, SidebarProjectedItem)],
+    _ roots: [ProjectedRootGuide],
     session: ReorderSession
   ) -> CGFloat {
-    roots.first.flatMap { subtreeFrame(for: $0.0, session: session)?.minY }
+    roots.first.flatMap { subtreeFrame(for: $0.rowID, session: session)?.minY }
       ?? frameUnion(for: session.draggedBlockIDs, frames: session.stableFrames)?.minY
       ?? 0
   }
 
   private func lastRootGuideY(
-    _ roots: [(SidebarCollectionRow.ID, SidebarProjectedItem)],
+    _ roots: [ProjectedRootGuide],
     session: ReorderSession
   ) -> CGFloat {
-    roots.last.flatMap { subtreeFrame(for: $0.0, session: session)?.maxY }
+    roots.last.flatMap { subtreeFrame(for: $0.rowID, session: session)?.maxY }
       ?? frameUnion(for: session.draggedBlockIDs, frames: session.stableFrames)?.maxY
       ?? 0
   }
@@ -2953,15 +4133,15 @@ final class SidebarCollectionBodyController: NSViewController {
     session: ReorderSession
   ) -> CGRect? {
     guard let index = session.indexByRowID[rowID],
-          let source = session.rowByID[rowID]?.projectedItem
+          let sourceDepth = session.rowByID[rowID]?.presentationDepth
     else { return nil }
     var frame: CGRect?
     var cursor = index
     while session.originalRowIDs.indices.contains(cursor) {
       let currentID = session.originalRowIDs[cursor]
       if cursor != index {
-        guard let item = session.rowByID[currentID]?.projectedItem,
-              item.depth > source.depth else { break }
+        guard let depth = session.rowByID[currentID]?.presentationDepth,
+              depth > sourceDepth else { break }
       }
       if let currentFrame = session.stableFrames[currentID] {
         frame = frame.map { $0.union(currentFrame) } ?? currentFrame
@@ -2978,7 +4158,7 @@ final class SidebarCollectionBodyController: NSViewController {
   ) -> Int {
     SidebarCollectionVisibleOutline.indexAfterSubtree(
       startingAt: start,
-      depths: rowIDs.map { rowByID[$0]?.projectedItem?.depth }
+      depths: rowIDs.map { rowByID[$0]?.presentationDepth }
     )
   }
 
@@ -2986,7 +4166,7 @@ final class SidebarCollectionBodyController: NSViewController {
     in rowIDs: [SidebarCollectionRow.ID],
     rows: [SidebarCollectionRow]
   ) -> Int {
-    let chatRowIDs = Set(rows.lazy.filter { $0.projectedItem != nil }.map(\.id))
+    let chatRowIDs = Set(rows.lazy.filter { $0.projectedNodeID != nil }.map(\.id))
     return rowIDs.firstIndex { chatRowIDs.contains($0) }
       ?? rowIDs.firstIndex(where: isTrailingRow) ?? rowIDs.count
   }
@@ -2995,7 +4175,7 @@ final class SidebarCollectionBodyController: NSViewController {
     in rowIDs: [SidebarCollectionRow.ID],
     rows: [SidebarCollectionRow]
   ) -> Int {
-    let chatRowIDs = Set(rows.lazy.filter { $0.projectedItem != nil }.map(\.id))
+    let chatRowIDs = Set(rows.lazy.filter { $0.projectedNodeID != nil }.map(\.id))
     return rowIDs.lastIndex { chatRowIDs.contains($0) }.map { $0 + 1 }
       ?? firstChatIndex(in: rowIDs, rows: rows)
   }
@@ -3009,30 +4189,34 @@ final class SidebarCollectionBodyController: NSViewController {
     }
   }
 
-  private func rowID(for id: ChatListItem.Identifier) -> SidebarCollectionRow.ID {
-    .chat(id)
+  private func rowID(for id: SidebarCollectionNodeID) -> SidebarCollectionRow.ID? {
+    switch id {
+    case let .chat(chatID): .chat(chatID)
+    case let .folder(folderID): .folder(folderID)
+    }
   }
 
   private func collectionMove(
     for session: ReorderSession,
     proposal: Proposal,
     tree: SidebarCollectionTree
-  ) -> SidebarCollectionMove? {
-    guard let sourceLane = tree.orderLaneByID[session.source.id] ?? session.source.orderLane,
+  ) -> SidebarCollectionMoveIntent? {
+    let sourceNodeID = session.source.nodeID
+    guard let sourceLane = tree.orderLaneByID[sourceNodeID] ?? session.source.orderLane,
           session.legalSlots.contains(proposal.slot),
           let moved = try? tree.snapshot.moving(
-            session.source.id,
+            sourceNodeID,
             to: proposal.slot,
-            scope: moveScope(for: session, proposal: proposal)
+            scope: persistenceMoveScope(for: session, proposal: proposal)
           )
     else { return nil }
 
-    if tree.snapshot.isNode(session.source.id, at: proposal.slot),
+    if tree.snapshot.isNode(sourceNodeID, at: proposal.slot),
        sourceLane == proposal.targetLane {
       return nil
     }
 
-    let siblingIDs: [ChatListItem.Identifier]
+    let siblingIDs: [SidebarCollectionNodeID]
     if let parentID = proposal.slot.parentID {
       guard let parent = moved.nodes[parentID] else { return nil }
       siblingIDs = parent.childIDs
@@ -3042,39 +4226,87 @@ final class SidebarCollectionBodyController: NSViewController {
       }) else { return nil }
       siblingIDs = section.rootIDs
     }
-    guard let newIndex = siblingIDs.firstIndex(of: session.source.id) else { return nil }
-    let targetItems = siblingIDs.compactMap { tree.itemByID[$0] }
-    guard targetItems.count == siblingIDs.count else { return nil }
+    guard let newIndex = siblingIDs.firstIndex(of: sourceNodeID) else { return nil }
+    let targetItems = siblingIDs.compactMap { nodeID in
+      nodeID.chatID.flatMap { tree.itemByID[$0] }
+    }
+    let previousNodeID = newIndex > siblingIDs.startIndex
+      ? siblingIDs[siblingIDs.index(before: newIndex)]
+      : nil
+    let nextIndex = siblingIDs.index(after: newIndex)
+    let nextNodeID = nextIndex < siblingIDs.endIndex ? siblingIDs[nextIndex] : nil
+    let hasPreviousOrder = previousNodeID != nil
+    let previousOrder = previousNodeID.flatMap {
+      tree.trailingPersistedOrder(for: $0, lane: proposal.targetLane)
+    }
+    let hasNextOrder = nextNodeID != nil
+    let nextOrder = nextNodeID.flatMap {
+      tree.persistedOrder(for: $0, lane: proposal.targetLane)
+    }
 
-    let currentParentID = tree.snapshot.parentID(of: session.source.id)
+    if case let .folder(folder) = session.source {
+      guard proposal.targetLane == .normal,
+            proposal.slot.parentID == nil,
+            session.reorderPolicy == .manual
+      else { return nil }
+      return .folder(SidebarCollectionFolderMove(
+        folder: folder.folder,
+        newIndex: newIndex,
+        hasPreviousOrder: hasPreviousOrder,
+        previousOrder: previousOrder,
+        hasNextOrder: hasNextOrder,
+        nextOrder: nextOrder
+      ))
+    }
+
+    guard case let .chat(source) = session.source else { return nil }
+
+    let currentParentID = tree.snapshot.parentID(of: sourceNodeID)
     let hierarchyChange: SidebarCollectionMove.HierarchyChange?
-    if let destinationParentID = proposal.slot.parentID,
-       currentParentID != destinationParentID {
-      hierarchyChange = .attach(session.source.id, parentID: destinationParentID)
-    } else if proposal.slot.parentID == nil, currentParentID != nil {
-      hierarchyChange = .detach(session.source.id)
+    if case let .chat(destinationParentID)? = proposal.slot.parentID,
+       currentParentID != proposal.slot.parentID,
+       source.semanticParentID == destinationParentID {
+      hierarchyChange = .attach(source.id, parentID: destinationParentID)
+    } else if case .chat? = currentParentID, proposal.slot.parentID == nil {
+      hierarchyChange = .detach(source.id)
     } else {
       hierarchyChange = nil
+    }
+    let dialogDestination: DialogOrderDestination? = switch (
+      currentParentID?.folderID,
+      proposal.slot.parentID?.folderID
+    ) {
+    case let (current, destination?) where current != destination:
+      .folder(destination)
+    case (_?, nil):
+      .root
+    default:
+      nil
     }
 
     guard session.reorderPolicy.allowsMove(
       sourceIsRoot: currentParentID == nil,
       changesSection: sourceLane != proposal.targetLane,
-      changesParent: hierarchyChange != nil
+      changesParent: hierarchyChange != nil || dialogDestination != nil
     ) else { return nil }
 
-    return SidebarCollectionMove(
+    return .chat(SidebarCollectionMove(
       targetItems: targetItems,
-      movedItem: tree.itemByID[session.source.id] ?? session.source.item,
+      movedItem: tree.itemByID[source.id] ?? source.item,
       sourceIsRoot: currentParentID == nil,
       newIndex: newIndex,
+      hasPreviousOrder: hasPreviousOrder,
+      previousOrder: previousOrder,
+      hasNextOrder: hasNextOrder,
+      nextOrder: nextOrder,
       sourceLane: sourceLane,
       targetLane: proposal.targetLane,
-      hierarchyChange: hierarchyChange
-    )
+      hierarchyChange: hierarchyChange,
+      dialogDestination: dialogDestination
+    ))
   }
 
-  private func moveScope(
+  private func persistenceMoveScope(
     for session: ReorderSession,
     proposal: Proposal
   ) -> SidebarCollectionMoveScope {
@@ -3189,6 +4421,7 @@ final class SidebarCollectionBodyController: NSViewController {
 
   private func handleScrollRequestIfPossible() {
     guard snapshotApplyInFlight == false,
+          disclosureTransition == nil,
           isCompletingDisplayUpdate == false,
           pendingDisplayUpdate == nil,
           reorderSession == nil,
@@ -3196,10 +4429,10 @@ final class SidebarCollectionBodyController: NSViewController {
           request.token != lastScrollRequestToken,
           let dataSource
     else { return }
-    lastScrollRequestToken = request.token
     guard let index = dataSource.snapshot().itemIdentifiers.firstIndex(
       of: .chat(request.itemID)
     ) else { return }
+    lastScrollRequestToken = request.token
     collectionView.scrollToItems(
       at: [IndexPath(item: index, section: 0)],
       scrollPosition: .centeredVertically
@@ -3209,28 +4442,39 @@ final class SidebarCollectionBodyController: NSViewController {
   private func updateUnreadViewportButtons(force: Bool = false) {
     guard reorderSession == nil,
           snapshotApplyInFlight == false,
+          disclosureTransition == nil,
           isCompletingDisplayUpdate == false,
           pendingDisplayUpdate == nil,
           let presentation
     else { return }
     let visibleRect = collectionView.visibleRect
-    var entries: [SidebarUnreadViewportEntry<ChatListItem.Identifier>] = []
-    entries.reserveCapacity(presentation.rows.count)
-    for (index, row) in presentation.rows.enumerated() {
-      guard let projectedItem = row.projectedItem,
-            let attributes = layout.layoutAttributesForItem(
-              at: IndexPath(item: index, section: 0)
-            ),
-            attributes.alpha > 0.01,
-            attributes.frame.height > 0
-      else { continue }
-      entries.append(SidebarUnreadViewportEntry(
-        id: projectedItem.id,
-        minimumY: Double(attributes.frame.minY),
-        maximumY: Double(attributes.frame.maxY),
-        isProminentUnread: projectedItem.item.unread
-          && projectedItem.item.prominentUnreadDot
-      ))
+    let entries: [SidebarUnreadViewportEntry<SidebarCollectionNodeID>]
+    if let unreadViewportEntries {
+      entries = unreadViewportEntries
+    } else {
+      var nextEntries: [SidebarUnreadViewportEntry<SidebarCollectionNodeID>] = []
+      nextEntries.reserveCapacity(presentation.rows.count)
+      for (index, row) in presentation.rows.enumerated() {
+        guard let nodeID = row.projectedNodeID,
+              let attributes = layout.layoutAttributesForItem(
+                at: IndexPath(item: index, section: 0)
+              ),
+              attributes.alpha > 0.01,
+              attributes.frame.height > 0
+        else { continue }
+        nextEntries.append(SidebarUnreadViewportEntry(
+          id: nodeID,
+          minimumY: Double(attributes.frame.minY),
+          maximumY: Double(attributes.frame.maxY),
+          prominentUnreadCount: row.projectedItem.map {
+            $0.item.unread && $0.item.prominentUnreadDot ? 1 : 0
+          } ?? row.projectedFolder.map {
+            $0.isExpanded ? 0 : $0.prominentUnreadCount
+          } ?? 0
+        ))
+      }
+      unreadViewportEntries = nextEntries
+      entries = nextEntries
     }
     let state = SidebarUnreadViewportResolver.resolve(
       entries: entries,
@@ -3255,7 +4499,7 @@ final class SidebarCollectionBodyController: NSViewController {
   }
 
   private func updateUnreadButtonHosts(
-    _ state: SidebarUnreadViewportResolution<ChatListItem.Identifier>
+    _ state: SidebarUnreadViewportResolution<SidebarCollectionNodeID>
   ) {
     unreadAboveHost?.rootView = SidebarCollectionUnreadButtonHost(
       state: state.above,
@@ -3276,12 +4520,11 @@ final class SidebarCollectionBodyController: NSViewController {
   }
 
   private func scrollToUnread(
-    _ unread: SidebarUnreadViewportDirection<ChatListItem.Identifier>
+    _ unread: SidebarUnreadViewportDirection<SidebarCollectionNodeID>
   ) {
     guard let dataSource,
-          let index = dataSource.snapshot().itemIdentifiers.firstIndex(
-            of: .chat(unread.targetID)
-          )
+          let rowID = rowID(for: unread.targetID),
+          let index = dataSource.snapshot().itemIdentifiers.firstIndex(of: rowID)
     else { return }
     collectionView.scrollToItems(
       at: [IndexPath(item: index, section: 0)],
@@ -3292,6 +4535,7 @@ final class SidebarCollectionBodyController: NSViewController {
   private func validatePresentationInvariants(context: String) {
 #if DEBUG
     guard snapshotApplyInFlight == false,
+          disclosureTransition == nil,
           isCompletingDisplayUpdate == false,
           pendingDisplayUpdate == nil,
           let presentation,
@@ -3312,5 +4556,23 @@ final class SidebarCollectionBodyController: NSViewController {
       )
     }
 #endif
+  }
+}
+
+extension SidebarCollectionBodyController: NSCollectionViewDelegateFlowLayout {
+  func collectionView(
+    _ collectionView: NSCollectionView,
+    layout proposedLayout: NSCollectionViewLayout,
+    sizeForItemAt indexPath: IndexPath
+  ) -> NSSize {
+    let rowID = dataSource?.itemIdentifier(for: indexPath)
+    let row = rowID.flatMap { presentation?.rowByID[$0] ?? transitionRowByID[$0] }
+    let horizontalInset = proposedLayout === layout
+      ? 0
+      : Theme.sidebarNativeDefaultEdgeInsets
+    return NSSize(
+      width: max(collectionView.bounds.width - horizontalInset * 2, 1),
+      height: row?.height ?? 44
+    )
   }
 }

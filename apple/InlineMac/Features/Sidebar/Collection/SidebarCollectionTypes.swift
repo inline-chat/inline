@@ -1,6 +1,51 @@
 import AppKit
 import InlineKit
 
+enum SidebarCollectionRowRenderer: String, Equatable {
+  case swiftUI
+  case appKit
+}
+
+struct SidebarPresentationConfiguration: Equatable {
+  enum NewThreadPlacement: Equatable {
+    case beforeContent
+    case afterContent
+    case hidden
+  }
+
+  struct SectionHeaders: Equatable {
+    var pinned: Bool
+    var content: Bool
+
+    static let visible = Self(pinned: true, content: true)
+    static let hidden = Self(pinned: false, content: false)
+  }
+
+  var sectionHeaders: SectionHeaders
+  var newThreadPlacement: NewThreadPlacement
+  var nesting: SidebarCollectionNestingPolicy
+
+  static func inbox(openPlacement: DialogOpenPlacement) -> Self {
+    Self(
+      sectionHeaders: .visible,
+      newThreadPlacement: openPlacement == .top ? .beforeContent : .afterContent,
+      nesting: .inbox
+    )
+  }
+
+  static let allChats = Self(
+    sectionHeaders: .visible,
+    newThreadPlacement: .beforeContent,
+    nesting: .flat
+  )
+
+  static let archived = Self(
+    sectionHeaders: .visible,
+    newThreadPlacement: .hidden,
+    nesting: .flat
+  )
+}
+
 /// Shared boundary between the SwiftUI sidebar orchestrator and collection
 /// body. Keep these contracts independent of controller-specific drag and
 /// layout machinery.
@@ -39,6 +84,7 @@ struct SidebarCollectionRow: Equatable, Identifiable {
     case timelineHeader(ChatListTimelinePeriod)
     case pinDropGuide
     case chat(ChatListItem.Identifier)
+    case folder(Int64)
     case newThread
     case emptyState
   }
@@ -51,6 +97,7 @@ struct SidebarCollectionRow: Equatable, Identifiable {
     case timelineHeader(ChatListTimelinePeriod)
     case pinDropGuide
     case chat(SidebarProjectedItem)
+    case folder(SidebarProjectedFolder)
     case newThread
     case emptyState
   }
@@ -62,6 +109,39 @@ struct SidebarCollectionRow: Equatable, Identifiable {
   var projectedItem: SidebarProjectedItem? {
     guard case let .chat(projectedItem) = kind else { return nil }
     return projectedItem
+  }
+
+  var projectedFolder: SidebarProjectedFolder? {
+    guard case let .folder(folder) = kind else { return nil }
+    return folder
+  }
+
+  var projectedNodeID: SidebarCollectionNodeID? {
+    switch kind {
+    case let .chat(item): item.nodeID
+    case let .folder(folder): folder.nodeID
+    default: nil
+    }
+  }
+
+  var presentationParentID: SidebarCollectionNodeID? {
+    projectedItem?.parentID
+  }
+
+  var presentationDepth: Int? {
+    switch kind {
+    case let .chat(item): item.depth
+    case let .folder(folder): folder.depth
+    default: nil
+    }
+  }
+
+  var presentationLane: SidebarOrderLane? {
+    switch kind {
+    case let .chat(item): item.lane
+    case let .folder(folder): folder.lane
+    default: nil
+    }
   }
 
   var isSectionHeader: Bool {
@@ -78,7 +158,8 @@ struct SidebarCollectionRow: Equatable, Identifiable {
   /// each SwiftUI row applies its own visual inset inside that stable boundary.
   var usesFullWidthCollectionLayout: Bool {
     switch id {
-    case .allChats, .grid, .sectionHeader, .timelineHeader, .pinDropGuide, .chat, .newThread:
+    case .allChats, .grid, .sectionHeader, .timelineHeader, .pinDropGuide, .chat, .folder,
+         .newThread:
       true
     case .archiveHeader, .emptyState:
       false
@@ -151,6 +232,7 @@ struct SidebarCollectionScrollRequest: Equatable {
 
 struct SidebarCollectionRenderState: Equatable {
   struct Preview: Equatable {
+    let renderer: SidebarCollectionRowRenderer
     let itemSize: String
     let unreadBadgeStyle: String
     let colorScheme: String
@@ -177,8 +259,22 @@ struct SidebarCollectionRenderState: Equatable {
 /// row an explicit projection of the controller's current scene.
 struct SidebarCollectionRowRenderContext: Equatable {
   let dimsPinDropInstruction: Bool
+  let forceHoverAppearance: Bool
+  let disclosureExpandedOverride: Bool?
+  let suppressesAnimations: Bool
 
-  static let idle = Self(dimsPinDropInstruction: false)
+  static let idle = Self(
+    dimsPinDropInstruction: false,
+    forceHoverAppearance: false,
+    disclosureExpandedOverride: nil,
+    suppressesAnimations: false
+  )
+  static let dragPreview = Self(
+    dimsPinDropInstruction: false,
+    forceHoverAppearance: true,
+    disclosureExpandedOverride: nil,
+    suppressesAnimations: true
+  )
 }
 
 struct SidebarCollectionMove {
@@ -191,9 +287,30 @@ struct SidebarCollectionMove {
   let movedItem: SidebarViewModel.Item
   let sourceIsRoot: Bool
   let newIndex: Int
+  let hasPreviousOrder: Bool
+  let previousOrder: String?
+  let hasNextOrder: Bool
+  let nextOrder: String?
   let sourceLane: SidebarOrderLane
   let targetLane: SidebarOrderLane
   let hierarchyChange: HierarchyChange?
+  /// `nil` keeps current folder membership. Root/folder values are persisted
+  /// by the same atomic dialog-order RPC as the fractional order.
+  let dialogDestination: DialogOrderDestination?
+}
+
+struct SidebarCollectionFolderMove {
+  let folder: SidebarViewModel.Folder
+  let newIndex: Int
+  let hasPreviousOrder: Bool
+  let previousOrder: String?
+  let hasNextOrder: Bool
+  let nextOrder: String?
+}
+
+enum SidebarCollectionMoveIntent {
+  case chat(SidebarCollectionMove)
+  case folder(SidebarCollectionFolderMove)
 }
 
 /// Immutable semantic destination captured while an external drag is hovering.
@@ -209,10 +326,10 @@ struct SidebarCollectionExternalDropTarget: Hashable {
 
 struct SidebarCollectionActions {
   let move: (
-    SidebarCollectionMove,
+    SidebarCollectionMoveIntent,
     @escaping @MainActor @Sendable (Bool) -> Void
   ) -> Void
-  let toggleDisclosure: (ChatListItem.Identifier) -> Void
+  let toggleDisclosure: (SidebarCollectionNodeID) -> Void
   let externalDropTarget: (
     ChatListItem.Identifier
   ) -> SidebarCollectionExternalDropTarget?

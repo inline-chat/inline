@@ -41,6 +41,7 @@ struct SidebarFooterView: View {
   let onToggleArchive: () -> Void
   let onSearch: () -> Void
   let onCreateSpace: () -> Void
+  let onNewFolder: (() -> Void)?
   let onNewThread: () -> Void
   let onInvite: () -> Void
   let onOpenDocs: () -> Void
@@ -150,6 +151,12 @@ struct SidebarFooterView: View {
         ) {
           Button(action: onCreateSpace) {
             Label("Create Space", systemImage: "square.grid.2x2")
+          }
+
+          if let onNewFolder {
+            Button(action: onNewFolder) {
+              Label("New Folder", systemImage: "folder.badge.plus")
+            }
           }
 
           Button(action: onNewThread) {

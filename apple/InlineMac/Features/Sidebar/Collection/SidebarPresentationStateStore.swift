@@ -38,6 +38,16 @@ struct SidebarPresentationStateStore {
     setIdentifiers(ids, forKey: key("collapsedParentIDs", userID: userID))
   }
 
+  func collapsedFolderIDs(userID: Int64?) -> Set<Int64> {
+    let values = defaults.array(forKey: key("collapsedFolderIDs", userID: userID)) as? [NSNumber]
+      ?? []
+    return Set(values.map(\.int64Value))
+  }
+
+  func setCollapsedFolderIDs(_ ids: Set<Int64>, userID: Int64?) {
+    defaults.set(ids.sorted(), forKey: key("collapsedFolderIDs", userID: userID))
+  }
+
   func collapsedSections(
     userID: Int64?
   ) -> Set<SidebarCollectionRow.SectionHeader> {

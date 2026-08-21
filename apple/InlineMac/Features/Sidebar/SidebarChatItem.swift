@@ -47,6 +47,18 @@ enum SidebarItemSize: String, CaseIterable, Identifiable {
   }
 }
 
+struct SidebarChatFolderMenu {
+  struct Destination: Identifiable {
+    let id: Int64
+    let title: String
+    let move: () -> Void
+  }
+
+  let destinations: [Destination]
+  let create: () -> Void
+  let removeFromFolder: (() -> Void)?
+}
+
 struct SidebarChatItemView: Equatable, View {
   let item: SidebarViewModel.Item
   let selected: Bool
@@ -67,6 +79,7 @@ struct SidebarChatItemView: Equatable, View {
   var onClose: (() -> Void)?
   var onPersist: (() -> Void)?
   var onToggleDisclosure: (() -> Void)?
+  var folderMenu: (() -> SidebarChatFolderMenu?)?
 
   // Env and State
   @Environment(\.nav) private var nav
@@ -303,6 +316,29 @@ struct SidebarChatItemView: Equatable, View {
           )
         }
 
+        if let folderMenu = folderMenu?() {
+          Divider()
+
+          Menu("Move to Folder", systemImage: "folder") {
+            ForEach(folderMenu.destinations) { destination in
+              Button(destination.title, action: destination.move)
+            }
+            if folderMenu.destinations.isEmpty {
+              Text("No other folders")
+            }
+          }
+
+          Button("New Folder with Chat", systemImage: "folder.badge.plus") {
+            folderMenu.create()
+          }
+
+          if let removeFromFolder = folderMenu.removeFromFolder {
+            Button("Remove from Folder", systemImage: "folder.badge.minus") {
+              removeFromFolder()
+            }
+          }
+        }
+
         // Note(mo): Having archive is confusing
         // Button {
         //   toggleArchive()
@@ -370,10 +406,7 @@ struct SidebarChatItemView: Equatable, View {
 
   private var closeButton: some View {
     Button(action: close) {
-      Image(systemName: "xmark")
-        .font(.system(size: 9, weight: .semibold))
-        .foregroundStyle(.secondary)
-        .frame(width: 16, height: 16)
+      SidebarChatCloseIcon()
     }
     .buttonStyle(SidebarCloseButtonStyle(isHovered: isCloseHovered))
     .help("Close")
@@ -395,13 +428,11 @@ struct SidebarChatItemView: Equatable, View {
     Button {
       onToggleDisclosure?()
     } label: {
-      Image(systemName: "chevron.right")
-        .font(.system(size: 6.5, weight: .bold))
-        .foregroundStyle(.secondary)
-        .rotationEffect(.degrees(disclosureExpanded == true ? 90 : 0))
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.16), value: disclosureExpanded)
-        .frame(width: 24, height: rowHeight)
-        .contentShape(.interaction, .rect)
+      SidebarChatDisclosureIcon(
+        isExpanded: disclosureExpanded == true,
+        rowHeight: rowHeight,
+        animates: !reduceMotion
+      )
     }
     .buttonStyle(.plain)
     .offset(x: (Theme.sidebarItemInnerSpacing - 24) / 2)
@@ -521,29 +552,11 @@ struct SidebarChatItemView: Equatable, View {
   }
 
   private func togglePin() {
-    Task(priority: .userInitiated) {
-      do {
-        try await DataManager.shared.updateDialog(peerId: peerId, pinned: !item.pinned)
-      } catch {
-        Log.shared.error("Failed to update pin status", error: error)
-      }
-    }
+    SidebarChatRowActionRunner.togglePin(item)
   }
 
   private func toggleReadUnread() {
-    Task(priority: .userInitiated) {
-      do {
-        if item.unread {
-          UnreadManager.shared.readAll(peerId, chatId: item.chatId)
-          return
-        }
-
-        guard let dependencies else { return }
-        try await dependencies.realtimeV2.send(.markAsUnread(peerId: peerId))
-      } catch {
-        Log.shared.error("Failed to update read/unread status", error: error)
-      }
-    }
+    SidebarChatRowActionRunner.toggleReadUnread(item, dependencies: dependencies)
   }
 
   private func toggleArchive() {
@@ -567,8 +580,72 @@ struct SidebarChatItemView: Equatable, View {
   }
 }
 
+@MainActor
+enum SidebarChatRowActionRunner {
+  static func togglePin(_ item: SidebarViewModel.Item) {
+    Task(priority: .userInitiated) {
+      do {
+        try await DataManager.shared.updateDialog(
+          peerId: item.peerId,
+          pinned: !item.pinned
+        )
+      } catch {
+        Log.shared.error("Failed to update pin status", error: error)
+      }
+    }
+  }
+
+  static func toggleReadUnread(
+    _ item: SidebarViewModel.Item,
+    dependencies: AppDependencies?
+  ) {
+    Task(priority: .userInitiated) {
+      do {
+        if item.unread {
+          UnreadManager.shared.readAll(item.peerId, chatId: item.chatId)
+          return
+        }
+
+        guard let dependencies else { return }
+        try await dependencies.realtimeV2.send(.markAsUnread(peerId: item.peerId))
+      } catch {
+        Log.shared.error("Failed to update read/unread status", error: error)
+      }
+    }
+  }
+}
+
 private enum SidebarChatItemAccessory {
   case unread
+}
+
+/// Shared by the SwiftUI and experimental AppKit row renderers so symbol
+/// metrics cannot drift between them.
+struct SidebarChatCloseIcon: View {
+  var body: some View {
+    Image(systemName: "xmark")
+      .font(.system(size: 9, weight: .semibold))
+      .foregroundStyle(.secondary)
+      .frame(width: 16, height: 16)
+  }
+}
+
+/// Shared by the SwiftUI and experimental AppKit row renderers. AppKit owns
+/// the hit target while SwiftUI continues to own the exact symbol rendering.
+struct SidebarChatDisclosureIcon: View {
+  let isExpanded: Bool
+  let rowHeight: CGFloat
+  let animates: Bool
+
+  var body: some View {
+    Image(systemName: "chevron.right")
+      .font(.system(size: 6.5, weight: .bold))
+      .foregroundStyle(.secondary)
+      .rotationEffect(.degrees(isExpanded ? 90 : 0))
+      .animation(animates ? SidebarDisclosureMotion.animation : nil, value: isExpanded)
+      .frame(width: 24, height: rowHeight)
+      .contentShape(.interaction, .rect)
+  }
 }
 
 @MainActor
