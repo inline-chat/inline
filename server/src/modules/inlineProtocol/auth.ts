@@ -2,27 +2,27 @@ import {
   AuthBeginResult_Delivery,
   type AuthBeginRequest,
   type AuthBeginResult,
+  type AuthBeginBrowserRequest,
+  type AuthBeginBrowserResult,
+  type AuthBrowserStatusRequest,
+  type AuthBrowserStatusResult,
   type AuthCompleteRequest,
   type AuthCompleteResult,
 } from "@inline-chat/protocol/core"
 import { and, count, eq, gte, inArray, isNull, or, sql } from "drizzle-orm"
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto"
+import { randomBytes, timingSafeEqual } from "node:crypto"
 import { db } from "@in/server/db"
 import {
   inlineProtocolAuthChallenges,
-  inlineProtocolAuthKeys,
-  sessions,
 } from "@in/server/db/schema"
 import { encodeUser } from "@in/server/realtime/encoders/encodeUser"
-import { encrypt } from "@in/server/modules/encryption/encryption"
-import { normalizeAuthClientType } from "@in/server/modules/auth/clientType"
 import { getOrCreateUserByEmailForSignup } from "@in/server/modules/auth/signupInvites"
 import { getOrCreateUserByPhoneForSignup } from "@in/server/modules/auth/signupInvites"
 import { normalizeEmail } from "@in/server/utils/normalize"
 import { sendEmail } from "@in/server/utils/email"
 import { prelude } from "@in/server/libs/prelude"
 import parsePhoneNumber from "libphonenumber-js"
-import { isValidEmail, validateIanaTimezone, validateUpToFourSegementSemver } from "@in/server/utils/validate"
+import { isValidEmail } from "@in/server/utils/validate"
 import { InlineError } from "@in/server/types/errors"
 import type { InlineProtocolApplicationContext } from "./application"
 import {
@@ -33,6 +33,11 @@ import {
 import type { InlineProtocolSecretKeyRing } from "./keyCipher"
 import { InlineProtocolChallengeCipher } from "./challengeCipher"
 import { DEMO_CODE, DEMO_CODE2, DEMO_EMAIL, DEMO_EMAIL2 } from "@in/server/env"
+import { authorizeInlineProtocolKey } from "./authorizeKey"
+import {
+  beginInlineProtocolBrowserLogin,
+  inlineProtocolBrowserLoginStatus,
+} from "@in/server/modules/auth/hostedLogin/service"
 
 const CHALLENGE_TTL_MS = 10 * 60 * 1_000
 const RATE_WINDOW_MS = 10 * 60 * 1_000
@@ -82,9 +87,6 @@ const requirePermanentUnauthorised = (context: InlineProtocolApplicationContext)
   return context.authorization.authKeyId
 }
 
-const validateClientVersion = (value: string | undefined): string | undefined =>
-  validateUpToFourSegementSemver(value ?? "") ? value : undefined
-
 type NormalizedIdentifier = {
   value: string
   delivery: "email" | "sms"
@@ -116,6 +118,51 @@ export class InlineProtocolAuthOperations {
     const pepper = this.pepperRing.keys.get(this.pepperRing.activeId)
     if (!pepper) throw new RangeError("Inline Protocol active auth pepper is absent")
     return pepper
+  }
+
+  async beginBrowser(
+    request: AuthBeginBrowserRequest,
+    context: InlineProtocolApplicationContext,
+  ): Promise<AuthBeginBrowserResult> {
+    const authKeyId = requirePermanentUnauthorised(context)
+    const client = request.client
+      ? Object.fromEntries(Object.entries({
+        deviceId: boundedString(request.client.deviceId, MAX_DEVICE_ID_BYTES),
+        clientType: boundedString(request.client.clientType, MAX_CLIENT_TYPE_BYTES),
+        clientVersion: boundedString(request.client.clientVersion, MAX_VERSION_BYTES),
+        osVersion: boundedString(request.client.osVersion, MAX_VERSION_BYTES),
+        deviceName: boundedString(request.client.deviceName, MAX_DEVICE_NAME_BYTES),
+      }).filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].length > 0))
+      : {}
+    const result = await beginInlineProtocolBrowserLogin({ authKeyId, client })
+    return {
+      loginTransactionId: result.loginTransactionId,
+      browserUrl: result.browserUrl,
+      verificationCode: result.verificationCode,
+      expiresAt: BigInt(Math.floor(result.expiresAt.getTime() / 1_000)),
+    }
+  }
+
+  async browserStatus(
+    request: AuthBrowserStatusRequest,
+    context: InlineProtocolApplicationContext,
+  ): Promise<AuthBrowserStatusResult> {
+    const authKeyId = requirePermanentUnauthorised(context)
+    const status = await inlineProtocolBrowserLoginStatus({
+      transactionId: request.loginTransactionId,
+      authKeyId,
+    })
+    if (status.kind === "pending") return { state: { oneofKind: "pending", pending: {} } }
+    if (status.kind === "cancelled") return { state: { oneofKind: "cancelled", cancelled: {} } }
+    return {
+      state: {
+        oneofKind: "authorized",
+        authorized: {
+          user: encodeUser({ user: status.user, viewerUserId: status.user.id }),
+          accountSessionId: BigInt(status.accountSessionId),
+        },
+      },
+    }
   }
 
   async begin(request: AuthBeginRequest, context: InlineProtocolApplicationContext): Promise<AuthBeginResult> {
@@ -240,14 +287,6 @@ export class InlineProtocolAuthOperations {
     }
 
     const client = challenge.client
-    const clientType = normalizeAuthClientType(client["clientType"], "inlineProtocol.authComplete") ?? "api"
-    const timeZone = validateIanaTimezone(request.timeZone ?? "") ? request.timeZone : undefined
-    const personalData = encrypt(JSON.stringify({
-      timezone: timeZone,
-      deviceName: client["deviceName"],
-      ip: context.metadata?.ip,
-    }))
-    const tokenHash = createHash("sha256").update(randomBytes(32)).digest("hex")
     let completed
     try {
       completed = await db.transaction(async (tx) => {
@@ -260,40 +299,16 @@ export class InlineProtocolAuthOperations {
         const user = challenge.delivery === "sms"
           ? (await getOrCreateUserByPhoneForSignup(identifier, request.inviteCode, tx)).user
           : (await getOrCreateUserByEmailForSignup(identifier, request.inviteCode, tx)).user
-        const deviceId = client["deviceId"]
-        if (deviceId) {
-          await tx.update(sessions).set({ revoked: now, deviceId: null }).where(and(
-            eq(sessions.userId, user.id),
-            eq(sessions.deviceId, deviceId),
-          ))
-        }
-        const accountSession = (await tx.insert(sessions).values({
+        const { accountSessionId } = await authorizeInlineProtocolKey({
+          tx,
+          authKeyId,
           userId: user.id,
-          tokenHash,
-          revoked: null,
-          active: false,
-          personalDataEncrypted: personalData.encrypted,
-          personalDataIv: personalData.iv,
-          personalDataTag: personalData.authTag,
-          deviceId: deviceId ?? null,
-          clientType,
-          clientVersion: validateClientVersion(client["clientVersion"]) ?? null,
-          osVersion: validateClientVersion(client["osVersion"]) ?? null,
-          date: now,
-          lastActive: now,
-        }).returning({ id: sessions.id }))[0]
-        if (!accountSession) throw new InlineError(InlineError.ApiError.INTERNAL)
-        const authorized = await tx.update(inlineProtocolAuthKeys).set({
-          userId: user.id,
-          accountSessionId: accountSession.id,
-          authorizedAt: now,
-          lastUsedAt: now,
-        }).where(and(
-          eq(inlineProtocolAuthKeys.authKeyId, Buffer.from(authKeyId)),
-          isNull(inlineProtocolAuthKeys.revokedAt),
-          isNull(inlineProtocolAuthKeys.userId),
-        )).returning({ authKeyId: inlineProtocolAuthKeys.authKeyId })
-        if (authorized.length !== 1) throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
+          client,
+          ip: context.metadata?.ip,
+          timeZone: request.timeZone,
+          now,
+        })
+        const accountSession = { id: accountSessionId }
         return { user, accountSession }
       })
     } catch (error) {

@@ -22,6 +22,7 @@ export const ProviderAuthModel = {
     appCallbackScheme?: string
     appCodeChallenge?: string
     oauthAuthRequestId?: string
+    loginTransactionId?: string
     client: ProviderAuthClient
     expiresAt: Date
   }): Promise<DbProviderAuthAttempt> {

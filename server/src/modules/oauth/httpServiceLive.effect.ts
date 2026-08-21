@@ -5,6 +5,7 @@ import {
 import {
   handleAuthorizationServerMetadata,
   handleAuthorizeConsent,
+  handleAuthorizeContinue,
   handleAuthorizeSendEmailCode,
   handleAuthorizeSendSmsCode,
   handleAuthorizeVerifyEmailCode,
@@ -21,6 +22,13 @@ import {
   handleProviderVerifyEmailCode,
   prepareAuthorizeRequest,
 } from "./httpHandlers"
+import {
+  handleHostedLoginGet,
+  handleHostedLoginSendEmail,
+  handleHostedLoginSendSms,
+  handleHostedLoginVerifyEmail,
+  handleHostedLoginVerifySms,
+} from "@in/server/modules/auth/hostedLogin/httpHandlers"
 import {
   OAuthHttpService,
 } from "./httpService.effect"
@@ -46,6 +54,7 @@ export const OAuthHttpServiceLive = Layer.effect(
             rateLimiter,
           ),
         authorize: prepareAuthorizeRequest,
+        authorizeContinue: handleAuthorizeContinue,
         sendEmailCode: (request, body, clientIp) =>
           handleAuthorizeSendEmailCode(
             request,
@@ -93,6 +102,11 @@ export const OAuthHttpServiceLive = Layer.effect(
           handleProviderSendEmailCode(body, clientIp, rateLimiter),
         providerVerifyEmailCode: handleProviderVerifyEmailCode,
         providerRedeem: handleProviderRedeem,
+        hostedLoginGet: handleHostedLoginGet,
+        hostedLoginSendEmail: handleHostedLoginSendEmail,
+        hostedLoginVerifyEmail: handleHostedLoginVerifyEmail,
+        hostedLoginSendSms: handleHostedLoginSendSms,
+        hostedLoginVerifySms: handleHostedLoginVerifySms,
       }),
     ),
   ),

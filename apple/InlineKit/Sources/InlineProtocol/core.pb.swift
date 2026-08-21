@@ -16983,6 +16983,22 @@ public nonisolated struct RealtimeV3Request: Sendable {
     set {body = .connectionInit(newValue)}
   }
 
+  public var authBeginBrowser: AuthBeginBrowserRequest {
+    get {
+      if case .authBeginBrowser(let v)? = body {return v}
+      return AuthBeginBrowserRequest()
+    }
+    set {body = .authBeginBrowser(newValue)}
+  }
+
+  public var authBrowserStatus: AuthBrowserStatusRequest {
+    get {
+      if case .authBrowserStatus(let v)? = body {return v}
+      return AuthBrowserStatusRequest()
+    }
+    set {body = .authBrowserStatus(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Body: Equatable, Sendable {
@@ -16994,6 +17010,8 @@ public nonisolated struct RealtimeV3Request: Sendable {
     /// NOTE: This field was marked as deprecated in the .proto file.
     case finishHTTPUpload(FinishHttpUploadRequest)
     case connectionInit(ConnectionInit)
+    case authBeginBrowser(AuthBeginBrowserRequest)
+    case authBrowserStatus(AuthBrowserStatusRequest)
 
   }
 
@@ -17057,6 +17075,22 @@ public nonisolated struct RealtimeV3Response: Sendable {
     set {body = .finishHTTPUpload(newValue)}
   }
 
+  public var authBeginBrowser: AuthBeginBrowserResult {
+    get {
+      if case .authBeginBrowser(let v)? = body {return v}
+      return AuthBeginBrowserResult()
+    }
+    set {body = .authBeginBrowser(newValue)}
+  }
+
+  public var authBrowserStatus: AuthBrowserStatusResult {
+    get {
+      if case .authBrowserStatus(let v)? = body {return v}
+      return AuthBrowserStatusResult()
+    }
+    set {body = .authBrowserStatus(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Body: Equatable, Sendable {
@@ -17068,6 +17102,8 @@ public nonisolated struct RealtimeV3Response: Sendable {
     case createHTTPUpload(CreateHttpUploadResult)
     /// NOTE: This field was marked as deprecated in the .proto file.
     case finishHTTPUpload(FinishHttpUploadResult)
+    case authBeginBrowser(AuthBeginBrowserResult)
+    case authBrowserStatus(AuthBrowserStatusResult)
 
   }
 
@@ -17355,6 +17391,120 @@ public nonisolated struct AuthCompleteResult: Sendable {
     case inviteRequired(AuthInviteRequired)
 
   }
+
+  public init() {}
+}
+
+public nonisolated struct AuthBeginBrowserRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var client: ClientInfo {
+    get {_client ?? ClientInfo()}
+    set {_client = newValue}
+  }
+  /// Returns true if `client` has been explicitly set.
+  public var hasClient: Bool {self._client != nil}
+  /// Clears the value of `client`. Subsequent reads from it will return its default value.
+  public mutating func clearClient() {self._client = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _client: ClientInfo? = nil
+}
+
+public nonisolated struct AuthBeginBrowserResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var loginTransactionID: String = String()
+
+  public var browserURL: String = String()
+
+  public var verificationCode: String = String()
+
+  public var expiresAt: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct AuthBrowserStatusRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var loginTransactionID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct AuthBrowserStatusResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var state: AuthBrowserStatusResult.OneOf_State? = nil
+
+  public var pending: AuthBrowserPending {
+    get {
+      if case .pending(let v)? = state {return v}
+      return AuthBrowserPending()
+    }
+    set {state = .pending(newValue)}
+  }
+
+  public var authorized: AuthAuthorized {
+    get {
+      if case .authorized(let v)? = state {return v}
+      return AuthAuthorized()
+    }
+    set {state = .authorized(newValue)}
+  }
+
+  public var cancelled: AuthBrowserCancelled {
+    get {
+      if case .cancelled(let v)? = state {return v}
+      return AuthBrowserCancelled()
+    }
+    set {state = .cancelled(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum OneOf_State: Equatable, Sendable {
+    case pending(AuthBrowserPending)
+    case authorized(AuthAuthorized)
+    case cancelled(AuthBrowserCancelled)
+
+  }
+
+  public init() {}
+}
+
+public nonisolated struct AuthBrowserPending: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct AuthBrowserCancelled: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 }
@@ -42281,7 +42431,7 @@ nonisolated extension BotChatSettingsItemInvoked: SwiftProtobuf.Message, SwiftPr
 
 nonisolated extension RealtimeV3Request: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RealtimeV3Request"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}rpc\0\u{3}auth_begin\0\u{3}auth_complete\0\u{3}create_http_upload\0\u{3}finish_http_upload\0\u{3}connection_init\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}rpc\0\u{3}auth_begin\0\u{3}auth_complete\0\u{3}create_http_upload\0\u{3}finish_http_upload\0\u{3}connection_init\0\u{3}auth_begin_browser\0\u{3}auth_browser_status\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -42367,6 +42517,32 @@ nonisolated extension RealtimeV3Request: SwiftProtobuf.Message, SwiftProtobuf._M
           self.body = .connectionInit(v)
         }
       }()
+      case 7: try {
+        var v: AuthBeginBrowserRequest?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .authBeginBrowser(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .authBeginBrowser(v)
+        }
+      }()
+      case 8: try {
+        var v: AuthBrowserStatusRequest?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .authBrowserStatus(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .authBrowserStatus(v)
+        }
+      }()
       default: break
       }
     }
@@ -42402,6 +42578,14 @@ nonisolated extension RealtimeV3Request: SwiftProtobuf.Message, SwiftProtobuf._M
       guard case .connectionInit(let v)? = self.body else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
     }()
+    case .authBeginBrowser?: try {
+      guard case .authBeginBrowser(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+    }()
+    case .authBrowserStatus?: try {
+      guard case .authBrowserStatus(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -42416,7 +42600,7 @@ nonisolated extension RealtimeV3Request: SwiftProtobuf.Message, SwiftProtobuf._M
 
 nonisolated extension RealtimeV3Response: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RealtimeV3Response"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}rpc_result\0\u{3}rpc_error\0\u{3}auth_begin\0\u{3}auth_complete\0\u{3}create_http_upload\0\u{3}finish_http_upload\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}rpc_result\0\u{3}rpc_error\0\u{3}auth_begin\0\u{3}auth_complete\0\u{3}create_http_upload\0\u{3}finish_http_upload\0\u{3}auth_begin_browser\0\u{3}auth_browser_status\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -42502,6 +42686,32 @@ nonisolated extension RealtimeV3Response: SwiftProtobuf.Message, SwiftProtobuf._
           self.body = .finishHTTPUpload(v)
         }
       }()
+      case 7: try {
+        var v: AuthBeginBrowserResult?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .authBeginBrowser(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .authBeginBrowser(v)
+        }
+      }()
+      case 8: try {
+        var v: AuthBrowserStatusResult?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .authBrowserStatus(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .authBrowserStatus(v)
+        }
+      }()
       default: break
       }
     }
@@ -42536,6 +42746,14 @@ nonisolated extension RealtimeV3Response: SwiftProtobuf.Message, SwiftProtobuf._
     case .finishHTTPUpload?: try {
       guard case .finishHTTPUpload(let v)? = self.body else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+    }()
+    case .authBeginBrowser?: try {
+      guard case .authBeginBrowser(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+    }()
+    case .authBrowserStatus?: try {
+      guard case .authBrowserStatus(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
     }()
     case nil: break
     }
@@ -42917,6 +43135,237 @@ nonisolated extension AuthCompleteResult: SwiftProtobuf.Message, SwiftProtobuf._
 
   public static func ==(lhs: AuthCompleteResult, rhs: AuthCompleteResult) -> Bool {
     if lhs.state != rhs.state {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AuthBeginBrowserRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AuthBeginBrowserRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}client\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._client) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._client {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AuthBeginBrowserRequest, rhs: AuthBeginBrowserRequest) -> Bool {
+    if lhs._client != rhs._client {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AuthBeginBrowserResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AuthBeginBrowserResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}login_transaction_id\0\u{3}browser_url\0\u{3}verification_code\0\u{3}expires_at\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.loginTransactionID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.browserURL) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.verificationCode) }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self.expiresAt) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.loginTransactionID.isEmpty {
+      try visitor.visitSingularStringField(value: self.loginTransactionID, fieldNumber: 1)
+    }
+    if !self.browserURL.isEmpty {
+      try visitor.visitSingularStringField(value: self.browserURL, fieldNumber: 2)
+    }
+    if !self.verificationCode.isEmpty {
+      try visitor.visitSingularStringField(value: self.verificationCode, fieldNumber: 3)
+    }
+    if self.expiresAt != 0 {
+      try visitor.visitSingularInt64Field(value: self.expiresAt, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AuthBeginBrowserResult, rhs: AuthBeginBrowserResult) -> Bool {
+    if lhs.loginTransactionID != rhs.loginTransactionID {return false}
+    if lhs.browserURL != rhs.browserURL {return false}
+    if lhs.verificationCode != rhs.verificationCode {return false}
+    if lhs.expiresAt != rhs.expiresAt {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AuthBrowserStatusRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AuthBrowserStatusRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}login_transaction_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.loginTransactionID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.loginTransactionID.isEmpty {
+      try visitor.visitSingularStringField(value: self.loginTransactionID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AuthBrowserStatusRequest, rhs: AuthBrowserStatusRequest) -> Bool {
+    if lhs.loginTransactionID != rhs.loginTransactionID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AuthBrowserStatusResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AuthBrowserStatusResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}pending\0\u{1}authorized\0\u{1}cancelled\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: AuthBrowserPending?
+        var hadOneofValue = false
+        if let current = self.state {
+          hadOneofValue = true
+          if case .pending(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.state = .pending(v)
+        }
+      }()
+      case 2: try {
+        var v: AuthAuthorized?
+        var hadOneofValue = false
+        if let current = self.state {
+          hadOneofValue = true
+          if case .authorized(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.state = .authorized(v)
+        }
+      }()
+      case 3: try {
+        var v: AuthBrowserCancelled?
+        var hadOneofValue = false
+        if let current = self.state {
+          hadOneofValue = true
+          if case .cancelled(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.state = .cancelled(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    switch self.state {
+    case .pending?: try {
+      guard case .pending(let v)? = self.state else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    }()
+    case .authorized?: try {
+      guard case .authorized(let v)? = self.state else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    }()
+    case .cancelled?: try {
+      guard case .cancelled(let v)? = self.state else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    }()
+    case nil: break
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AuthBrowserStatusResult, rhs: AuthBrowserStatusResult) -> Bool {
+    if lhs.state != rhs.state {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AuthBrowserPending: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AuthBrowserPending"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AuthBrowserPending, rhs: AuthBrowserPending) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AuthBrowserCancelled: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AuthBrowserCancelled"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AuthBrowserCancelled, rhs: AuthBrowserCancelled) -> Bool {
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

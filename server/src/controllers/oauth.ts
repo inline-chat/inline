@@ -2,6 +2,7 @@ import { Elysia } from "elysia"
 import {
   handleAuthorizationServerMetadata,
   handleAuthorizeConsent,
+  handleAuthorizeContinue,
   handleAuthorizeSendEmailCode,
   handleAuthorizeSendSmsCode,
   handleAuthorizeVerifyEmailCode,
@@ -20,6 +21,13 @@ import {
 } from "@in/server/modules/oauth/httpHandlers"
 import { OAuthHandlerFailure } from "@in/server/modules/oauth/httpHandlerFailure"
 import { Log } from "@in/server/utils/log"
+import {
+  handleHostedLoginGet,
+  handleHostedLoginSendEmail,
+  handleHostedLoginSendSms,
+  handleHostedLoginVerifyEmail,
+  handleHostedLoginVerifySms,
+} from "@in/server/modules/auth/hostedLogin/httpHandlers"
 
 const executeLegacyOAuth = async (
   run: () => Response | Promise<Response>,
@@ -51,6 +59,15 @@ const legacyOAuthClientIp = (
 }
 
 export const oauth = new Elysia({ name: "oauth" })
+  .get("/v1/auth/login", ({ request }) => handleHostedLoginGet(request))
+  .post("/v1/auth/login/send-email-code", ({ request, body }) =>
+    handleHostedLoginSendEmail(request, body, legacyOAuthClientIp(request)))
+  .post("/v1/auth/login/verify-email-code", ({ request, body }) =>
+    handleHostedLoginVerifyEmail(request, body, legacyOAuthClientIp(request)))
+  .post("/v1/auth/login/send-sms-code", ({ request, body }) =>
+    handleHostedLoginSendSms(request, body, legacyOAuthClientIp(request)))
+  .post("/v1/auth/login/verify-phone-code", ({ request, body }) =>
+    handleHostedLoginVerifySms(request, body, legacyOAuthClientIp(request)))
   .get("/v1/auth/provider/start", ({ request }) =>
     executeLegacyOAuth(() => handleProviderStart(request, legacyOAuthClientIp(request))),
   )
@@ -104,6 +121,9 @@ export const oauth = new Elysia({ name: "oauth" })
     executeLegacyOAuth(() =>
       prepareAuthorizeRequest(request),
     ),
+  )
+  .get("/oauth/authorize/continue", ({ request }) =>
+    executeLegacyOAuth(() => handleAuthorizeContinue(request)),
   )
   .post("/oauth/authorize/send-email-code", ({ request, body }) =>
     executeLegacyOAuth(() =>

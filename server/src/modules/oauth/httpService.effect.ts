@@ -8,6 +8,7 @@ export type OAuthHttpOperation =
   | "metadata"
   | "register"
   | "authorize"
+  | "authorizeContinue"
   | "sendEmailCode"
   | "verifyEmailCode"
   | "sendSmsCode"
@@ -23,6 +24,11 @@ export type OAuthHttpOperation =
   | "providerSendEmailCode"
   | "providerVerifyEmailCode"
   | "providerRedeem"
+  | "hostedLoginGet"
+  | "hostedLoginSendEmail"
+  | "hostedLoginVerifyEmail"
+  | "hostedLoginSendSms"
+  | "hostedLoginVerifySms"
 
 export interface OAuthHttpInput {
   readonly request: Request

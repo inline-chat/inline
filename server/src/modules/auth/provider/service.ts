@@ -33,7 +33,7 @@ const log = new Log("providerAuth")
 
 export type ProviderLoginResult = {
   userId: number
-  token: string
+  token?: string
   user: ReturnType<typeof encodeFullUserInfo>
 }
 
@@ -55,6 +55,7 @@ export async function beginProviderAuth(input: {
   appCallbackScheme?: string
   appCodeChallenge?: string
   oauthAuthRequestId?: string
+  loginTransactionId?: string
   client: ProviderAuthClient
 }): Promise<URL> {
   if (input.purpose === "app" && (!input.appCallbackScheme || !input.appCodeChallenge)) {
@@ -78,6 +79,7 @@ export async function beginProviderAuth(input: {
     appCallbackScheme: input.appCallbackScheme,
     appCodeChallenge: input.appCodeChallenge,
     oauthAuthRequestId: input.oauthAuthRequestId,
+    loginTransactionId: input.loginTransactionId,
     client: input.client,
     expiresAt: new Date(Date.now() + config.attemptTtlMs),
   })
@@ -126,7 +128,7 @@ export async function completeProviderCallback(input: {
   const subjectHash = hashProviderSecret(`${claims.provider}\0${claims.subject}`)
   const existingUserId = await ProviderAuthModel.findIdentity(claims.provider, subjectHash)
   if (existingUserId) {
-    const result = await createProviderSession(existingUserId, attempt.client)
+    const result = await createProviderResult(attempt, existingUserId)
     const updated = await storeCompletedAttempt(attempt, result)
     return { kind: "login", attempt: updated, result }
   }
@@ -213,6 +215,23 @@ export async function attachProviderAfterEmailVerification(input: {
   return storeCompletedAttempt(input.attempt, input.result)
 }
 
+export async function attachProviderAfterEmailProof(input: {
+  attempt: DbProviderAuthAttempt
+  userId: number
+}): Promise<{ attempt: DbProviderAuthAttempt; result: ProviderLoginResult }> {
+  if (!input.attempt.subjectHash) throw new Error("Provider identity is unavailable")
+  const userId = await ProviderAuthModel.attachIdentity({
+    provider: input.attempt.provider,
+    subjectHash: input.attempt.subjectHash,
+    userId: input.userId,
+  })
+  if (userId !== input.userId) throw new Error("Provider identity belongs to another Inline account")
+  await applyProviderProfile(userId, decryptClaims(input.attempt))
+  const result = await createProviderResult(input.attempt, userId)
+  const attempt = await storeCompletedAttempt(input.attempt, result)
+  return { attempt, result }
+}
+
 export async function redeemProviderTicket(
   ticket: string,
   appCodeVerifier: string,
@@ -284,7 +303,7 @@ async function resolveTrustedClaims(
     const { user } = await getOrCreateUserByEmailForSignup(claims.email!, inviteCode)
     const ownerId = await ProviderAuthModel.attachIdentity({ provider: claims.provider, subjectHash, userId: user.id })
     await applyProviderProfile(ownerId, claims)
-    const result = await createProviderSession(ownerId, attempt.client)
+    const result = await createProviderResult(attempt, ownerId)
     const updated = await storeCompletedAttempt(attempt, result)
     return { kind: "login", attempt: updated, result }
   } catch (error) {
@@ -321,6 +340,15 @@ async function createProviderSession(userId: number, client: ProviderAuthClient)
     osVersion: client.osVersion && validateUpToFourSegementSemver(client.osVersion) ? client.osVersion : undefined,
   })
   return { userId, token, user: encodeFullUserInfo(user) }
+}
+
+async function createProviderResult(
+  attempt: DbProviderAuthAttempt,
+  userId: number,
+): Promise<ProviderLoginResult> {
+  if (attempt.purpose !== "hosted_login") return createProviderSession(userId, attempt.client)
+  const user = await loadActiveProviderUser(userId)
+  return { userId, user: encodeFullUserInfo(user) }
 }
 
 async function applyProviderProfile(userId: number, claims: ProviderClaims): Promise<void> {
@@ -372,7 +400,7 @@ async function storeCompletedAttempt(
     status: "complete",
     continuationHash: null,
     inlineUserId: result.userId,
-    inlineTokenEncrypted: Encryption2.encrypt(Buffer.from(result.token)),
+    inlineTokenEncrypted: result.token ? Encryption2.encrypt(Buffer.from(result.token)) : null,
   })
 }
 

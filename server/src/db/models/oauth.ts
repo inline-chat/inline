@@ -27,6 +27,7 @@ export type OauthAuthRequest = {
   csrfToken: string
   deviceId: string
   inlineUserId: number | null
+  authMethod: "email" | "phone" | "google" | "apple" | null
   email: string | null
   phoneNumber: string | null
   challengeToken: string | null
@@ -44,7 +45,7 @@ export type OauthGrant = {
   spaceIds: bigint[]
   allowDms: boolean
   allowHomeThreads: boolean
-  inlineTokenEncrypted: Buffer
+  inlineTokenEncrypted: Buffer | null
   createdAtMs: number
   revokedAtMs: number | null
 }
@@ -111,6 +112,7 @@ function mapAuthRequest(row: typeof oauthAuthRequests.$inferSelect): OauthAuthRe
     csrfToken: row.csrfToken,
     deviceId: row.deviceId,
     inlineUserId: row.inlineUserId,
+    authMethod: row.authMethod as OauthAuthRequest["authMethod"],
     email: row.email,
     phoneNumber: row.phoneNumber,
     challengeToken: row.challengeToken,
@@ -271,11 +273,16 @@ export const OauthModel = {
   async setAuthRequestInlineSession(input: {
     id: string
     inlineUserId: number
-    inlineTokenEncrypted: Buffer
+    inlineTokenEncrypted?: Buffer
+    authMethod?: OauthAuthRequest["authMethod"]
   }): Promise<void> {
     await db
       .update(oauthAuthRequests)
-      .set({ inlineUserId: input.inlineUserId, inlineTokenEncrypted: input.inlineTokenEncrypted })
+      .set({
+        inlineUserId: input.inlineUserId,
+        inlineTokenEncrypted: input.inlineTokenEncrypted,
+        authMethod: input.authMethod,
+      })
       .where(eq(oauthAuthRequests.id, input.id))
   },
 
@@ -292,7 +299,7 @@ export const OauthModel = {
     spaceIds: bigint[]
     allowDms: boolean
     allowHomeThreads: boolean
-    inlineTokenEncrypted: Buffer
+    inlineTokenEncrypted?: Buffer | null
     nowMs: number
   }): Promise<OauthGrant> {
     const [inserted] = await db

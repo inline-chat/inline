@@ -1,6 +1,10 @@
 import type {
   AuthBeginRequest,
   AuthBeginResult,
+  AuthBeginBrowserRequest,
+  AuthBeginBrowserResult,
+  AuthBrowserStatusRequest,
+  AuthBrowserStatusResult,
   AuthCompleteRequest,
   AuthCompleteResult,
 } from "@inline-chat/protocol/core"
@@ -19,5 +23,13 @@ export class InlineProtocolOperations implements InlineProtocolApplicationOperat
 
   authComplete(input: AuthCompleteRequest, context: InlineProtocolApplicationContext): Promise<AuthCompleteResult> {
     return this.auth.complete(input, context)
+  }
+
+  authBeginBrowser(input: AuthBeginBrowserRequest, context: InlineProtocolApplicationContext): Promise<AuthBeginBrowserResult> {
+    return this.auth.beginBrowser(input, context)
+  }
+
+  authBrowserStatus(input: AuthBrowserStatusRequest, context: InlineProtocolApplicationContext): Promise<AuthBrowserStatusResult> {
+    return this.auth.browserStatus(input, context)
   }
 }

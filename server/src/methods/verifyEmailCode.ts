@@ -1,6 +1,4 @@
-import { isValidEmail, validateIanaTimezone, validateUpToFourSegementSemver } from "@in/server/utils/validate"
-import { InlineError } from "@in/server/types/errors"
-import { normalizeEmail } from "@in/server/utils/normalize"
+import { validateIanaTimezone, validateUpToFourSegementSemver } from "@in/server/utils/validate"
 import { Log } from "@in/server/utils/log"
 import { generateToken } from "@in/server/utils/auth"
 import { type Static, Type } from "@sinclair/typebox"
@@ -9,16 +7,12 @@ import { encodeUserInfo, TUserInfo } from "@in/server/api-types"
 import { type IPInfoResponse } from "@in/server/libs/ipinfo"
 import { SessionsModel } from "@in/server/db/models/sessions"
 import { sendBotEvent } from "@in/server/modules/bot-events"
-import { DEMO_CODE, DEMO_CODE2, DEMO_EMAIL, DEMO_EMAIL2 } from "@in/server/env"
 import { maskEmail } from "@in/server/utils/privacy"
-import { verifyEmailLoginChallenge } from "@in/server/modules/auth/emailLoginChallenges"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
-import { getOrCreateUserByEmailForSignup, isSignupComplete } from "@in/server/modules/auth/signupInvites"
+import { isSignupComplete } from "@in/server/modules/auth/signupInvites"
 import { normalizeAuthClientType } from "@in/server/modules/auth/clientType"
-import { db } from "@in/server/db"
-import { users } from "@in/server/db/schema"
-import { eq } from "drizzle-orm"
 import { syncTimeZoneForElectedAppleSession } from "@in/server/modules/users/timeZoneSync"
+import { verifyEmailAccountProof } from "@in/server/modules/auth/contactProof"
 
 export const Input = Type.Object({
   email: Type.String(),
@@ -46,18 +40,6 @@ export const handler = async (
   context: UnauthenticatedHandlerContext,
 ): Promise<Static<typeof Response>> => {
   const requestIp = context.ip
-  if (input.code === "") {
-    throw new InlineError(InlineError.ApiError.EMAIL_CODE_EMPTY)
-  }
-
-  if (input.code.length < 6) {
-    throw new InlineError(InlineError.ApiError.EMAIL_CODE_INVALID)
-  }
-
-  if (isValidEmail(input.email) === false) {
-    throw new InlineError(InlineError.ApiError.EMAIL_INVALID)
-  }
-
   const clientType = normalizeAuthClientType(input.clientType, "verifyEmailCode")
 
   if (!input.deviceId) {
@@ -68,24 +50,9 @@ export const handler = async (
     })
   }
 
-  let email = normalizeEmail(input.email)
-
-  // add random delay to limit bruteforce
-  await new Promise((resolve) => setTimeout(resolve, Math.random() * 1000))
-
-  // Record contact proof before account/session mutation so a missing later checkpoint locates where the flow stopped.
-  await verifyCode(email, input.code, input.challengeToken)
-
-  const confirmedUser = await db
-    .select()
-    .from(users)
-    .where(eq(users.email, email))
-    .limit(1)
-    .then(([user]) => user)
-    .catch((error) => {
-      Log.shared.error("Failed to load user for email confirmation alert", { error })
-      return undefined
-    })
+  const proof = await verifyEmailAccountProof(input)
+  const email = proof.identifier
+  const confirmedUser = proof.user
   BotAlerts.authContactConfirmed({
     contact: { type: "email", value: email },
     user: confirmedUser,
@@ -117,18 +84,7 @@ export const handler = async (
   let osVersion = validateUpToFourSegementSemver(input.osVersion ?? "") ? input.osVersion ?? undefined : undefined
 
   // create or fetch user by email
-  let { user, created } = await getOrCreateUserByEmailForSignup(email, input.inviteCode)
-
-  if (!user) {
-    throw new InlineError(
-      InlineError.ApiError.INTERNAL,
-      {
-        cause: new Error(
-          "Email verification did not resolve a user.",
-        ),
-      },
-    )
-  }
+  let { user, created } = proof
 
   let userId = user.id
 
@@ -185,33 +141,6 @@ export const handler = async (
 
 /// HELPER FUNCTIONS ///
 
-const verifyCode = async (email: string, code: string, challengeToken?: string): Promise<true> => {
-  if (email && code && email === DEMO_EMAIL && code === DEMO_CODE) {
-    sendTelegramEventForDemoAccount()
-    return true
-  }
-
-  if (email && code && email === DEMO_EMAIL2 && code === DEMO_CODE2) {
-    sendTelegramEventForDemoAccount2()
-    return true
-  }
-
-  const verified = await verifyEmailLoginChallenge({ email, code, challengeToken })
-  if (!verified) {
-    throw new InlineError(InlineError.ApiError.EMAIL_CODE_INVALID)
-  }
-
-  return true
-}
-
 function sendTelegramEvent(email: string) {
   sendBotEvent(`New user verified email: \n${maskEmail(email)}\n\n🍓🫡☕️`)
-}
-
-function sendTelegramEventForDemoAccount() {
-  sendBotEvent(`🤐 Someone logged in with demo account`)
-}
-
-function sendTelegramEventForDemoAccount2() {
-  sendBotEvent(`🤐 The special one logged in with the demo account 🎊`)
 }

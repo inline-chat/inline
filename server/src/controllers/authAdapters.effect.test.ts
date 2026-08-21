@@ -38,6 +38,7 @@ const makeOAuthHandlers = (
   metadata: () => unused("metadata"),
   register: async () => unused("register"),
   authorize: async () => unused("authorize"),
+  authorizeContinue: async () => unused("authorizeContinue"),
   sendEmailCode: async () => unused("sendEmailCode"),
   verifyEmailCode: async () => unused("verifyEmailCode"),
   sendSmsCode: async () => unused("sendSmsCode"),
@@ -53,6 +54,11 @@ const makeOAuthHandlers = (
   providerSendEmailCode: async () => unused("providerSendEmailCode"),
   providerVerifyEmailCode: async () => unused("providerVerifyEmailCode"),
   providerRedeem: async () => unused("providerRedeem"),
+  hostedLoginGet: async () => unused("hostedLoginGet"),
+  hostedLoginSendEmail: async () => unused("hostedLoginSendEmail"),
+  hostedLoginVerifyEmail: async () => unused("hostedLoginVerifyEmail"),
+  hostedLoginSendSms: async () => unused("hostedLoginSendSms"),
+  hostedLoginVerifySms: async () => unused("hostedLoginVerifySms"),
   ...overrides,
 })
 

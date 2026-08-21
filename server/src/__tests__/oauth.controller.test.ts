@@ -7,8 +7,6 @@ import { sha256Base64Url, sha256Hex } from "@inline-chat/oauth-core"
 import { db } from "@in/server/db"
 import { oauthAuthRequests } from "@in/server/db/schema"
 import { inArray } from "drizzle-orm"
-import { InMemoryRateLimiter } from "@in/server/modules/oauth/rateLimiter"
-import { handleAuthorizeSendSmsCode } from "@in/server/modules/oauth/httpHandlers"
 
 function extractSetCookieValue(setCookie: string | null): string {
   if (!setCookie) throw new Error("missing set-cookie")
@@ -64,7 +62,7 @@ describe("OAuth controller", () => {
     expect(remaining).toEqual([{ id: liveId }])
   })
 
-  it("renders branded email and phone sign-in and stores one active challenge", async () => {
+  it("redirects OAuth into the shared hosted login chooser", async () => {
     const registerRes = await app.handle(
       new Request("http://localhost/oauth/register", {
         method: "POST",
@@ -90,80 +88,24 @@ describe("OAuth controller", () => {
     authorizeUrl.searchParams.set("code_challenge_method", "S256")
 
     const authorizeRes = await app.handle(new Request(authorizeUrl.toString(), { method: "GET" }))
-    expect(authorizeRes.status).toBe(200)
-
-    const cookie = extractSetCookieValue(authorizeRes.headers.get("set-cookie"))
+    expect(authorizeRes.status).toBe(303)
+    const oauthCookie = extractSetCookieValue(authorizeRes.headers.get("set-cookie"))
     expect(authorizeRes.headers.get("set-cookie")).toContain("Path=/;")
-    const authorizeHtml = await authorizeRes.text()
-    const csrf = extractHidden(authorizeHtml, "csrf")
-
-    expect(authorizeHtml).toContain("Use the email address or phone number linked to your Inline account.")
-    expect(authorizeHtml).toContain('action="/oauth/authorize/send-sms-code"')
-    expect(authorizeHtml).toContain("provider=google&amp;purpose=mcp_oauth")
-    expect(authorizeHtml).toContain("provider=apple&amp;purpose=mcp_oauth")
-    expect(authorizeHtml).toContain('class="brand"')
-    expect(authorizeHtml).not.toContain("<script")
-    expect(authorizeHtml).not.toContain("https://")
-
-    const invalidPhoneForm = new FormData()
-    invalidPhoneForm.set("csrf", csrf)
-    invalidPhoneForm.set("phone_number", "not-a-phone-number")
-    const invalidPhoneRes = await app.handle(
-      new Request("http://localhost/oauth/authorize/send-sms-code", {
-        method: "POST",
-        headers: { cookie },
-        body: invalidPhoneForm,
-      }),
-    )
-    expect(invalidPhoneRes.status).toBe(400)
-    expect(await invalidPhoneRes.text()).toContain("Enter a valid phone number with country code.")
-
-    const sendForm = new FormData()
-    sendForm.set("csrf", csrf)
-    sendForm.set("email", "oauth-user@example.com")
-
-    const sendRes = await app.handle(
-      new Request("http://localhost/oauth/authorize/send-email-code", {
-        method: "POST",
-        headers: { cookie },
-        body: sendForm,
-      }),
-    )
-
-    expect(sendRes.status).toBe(200)
-
-    const authRequestId = cookie.split("=", 2)[1]!
-    const authRequest = await OauthModel.getAuthRequest(authRequestId, Date.now())
-    expect(authRequest?.email).toBe("oauth-user@example.com")
-    expect(authRequest?.phoneNumber).toBeNull()
-    expect(typeof authRequest?.challengeToken).toBe("string")
-
-    const phoneForm = new FormData()
-    phoneForm.set("csrf", csrf)
-    phoneForm.set("phone_number", "+1 202 555 0123")
-    const phoneRes = await handleAuthorizeSendSmsCode(
-      new Request("http://localhost/oauth/authorize/send-sms-code", {
-        method: "POST",
-        headers: { cookie },
-        body: phoneForm,
-      }),
-      phoneForm,
-      "127.0.0.1",
-      new InMemoryRateLimiter(),
-      async () => ({
-        existingUser: true,
-        needsInviteCode: false,
-        phoneNumber: "+12025550123",
-        formattedPhoneNumber: "+1 202 555 0123",
-      }),
-    )
-    expect(phoneRes.status).toBe(200)
-    expect(await phoneRes.text()).toContain('action="/oauth/authorize/verify-sms-code"')
-
-    const phoneAuthRequest = await OauthModel.getAuthRequest(authRequestId, Date.now())
-    expect(phoneAuthRequest?.email).toBeNull()
-    expect(phoneAuthRequest?.phoneNumber).toBe("+12025550123")
-    expect(phoneAuthRequest?.challengeToken).toBeNull()
+    const location = authorizeRes.headers.get("location")
+    expect(location).toContain("/v1/auth/login?capability=")
+    const establishRes = await app.handle(new Request(location!, { headers: { cookie: oauthCookie } }))
+    expect(establishRes.status).toBe(303)
+    const hostedCookies = establishRes.headers.getSetCookie().map(extractSetCookieValue)
+    const cookie = [oauthCookie, ...hostedCookies].join("; ")
+    const chooserRes = await app.handle(new Request("http://localhost/v1/auth/login", { headers: { cookie } }))
+    expect(chooserRes.status).toBe(200)
+    const chooserHtml = await chooserRes.text()
+    expect(extractHidden(chooserHtml, "csrf").length).toBeGreaterThan(20)
+    expect(chooserHtml).toContain('action="/v1/auth/login/send-email-code"')
+    expect(chooserHtml).toContain('action="/v1/auth/login/send-sms-code"')
+    expect(chooserHtml).toContain("provider=google&amp;purpose=hosted_login")
+    expect(chooserHtml).toContain("provider=apple&amp;purpose=hosted_login")
+    expect(chooserHtml).not.toContain("<script")
   })
 
   it("issues two-hour access and 180-day refresh tokens without requiring offline_access", async () => {

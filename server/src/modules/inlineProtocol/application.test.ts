@@ -20,6 +20,8 @@ describe("Inline Protocol application ordering", () => {
       operations: {
         authBegin: async () => { throw new InlineProtocolApplicationOutputOverloaded() },
         authComplete: async () => ({ state: { oneofKind: undefined } }),
+        authBeginBrowser: async () => ({ loginTransactionId: "", browserUrl: "", verificationCode: "", expiresAt: 0n }),
+        authBrowserStatus: async () => ({ state: { oneofKind: undefined } }),
       },
     })
     let executionStarted = false
@@ -57,6 +59,8 @@ describe("Inline Protocol application ordering", () => {
           throw reason
         },
         authComplete: async () => ({ state: { oneofKind: undefined } }),
+        authBeginBrowser: async () => ({ loginTransactionId: "", browserUrl: "", verificationCode: "", expiresAt: 0n }),
+        authBrowserStatus: async () => ({ state: { oneofKind: undefined } }),
       },
     })
     let executionStarted = false

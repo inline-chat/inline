@@ -8,17 +8,13 @@ import { encodeUserInfo, TUserInfo } from "@in/server/api-types"
 import { type IPInfoResponse } from "@in/server/libs/ipinfo"
 import { generateToken } from "@in/server/utils/auth"
 import { SessionsModel } from "@in/server/db/models/sessions"
-import parsePhoneNumber from "libphonenumber-js"
-import { prelude } from "@in/server/libs/prelude"
 import { sendBotEvent } from "@in/server/modules/bot-events"
 import { maskPhoneNumber } from "@in/server/utils/privacy"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
-import { getOrCreateUserByPhoneForSignup, isSignupComplete } from "@in/server/modules/auth/signupInvites"
+import { isSignupComplete } from "@in/server/modules/auth/signupInvites"
 import { normalizeAuthClientType } from "@in/server/modules/auth/clientType"
-import { db } from "@in/server/db"
-import { users } from "@in/server/db/schema"
-import { eq } from "drizzle-orm"
 import { syncTimeZoneForElectedAppleSession } from "@in/server/modules/users/timeZoneSync"
+import { verifyPhoneAccountProof } from "@in/server/modules/auth/contactProof"
 
 export const Input = Type.Object({
   phoneNumber: Type.String(),
@@ -48,17 +44,6 @@ export const handler = async (
     const requestIp = context.ip
     const clientType = normalizeAuthClientType(input.clientType, "verifySmsCode")
 
-    // verify formatting
-    // if (isValidPhoneNumber(input.phoneNumber) === false) {
-    //   throw new InlineError(InlineError.ApiError.PHONE_INVALID)
-    // }
-
-    // parse phone number
-    const phoneNumber = parsePhoneNumber(input.phoneNumber)
-    if (!phoneNumber?.isValid()) {
-      throw new InlineError(InlineError.ApiError.PHONE_INVALID)
-    }
-
     if (!input.deviceId) {
       Log.shared.warn("Missing deviceId on verifySmsCode", {
         clientType,
@@ -67,26 +52,11 @@ export const handler = async (
       })
     }
 
-    let formattedPhoneNumber = phoneNumber.number
-
-    // send sms code
-    let response = await prelude.checkCode(formattedPhoneNumber, input.code)
-
-    if (response?.status !== "success") {
-      throw new InlineError(InlineError.ApiError.SMS_CODE_INVALID)
-    }
+    const proof = await verifyPhoneAccountProof(input)
+    const formattedPhoneNumber = proof.identifier
 
     // Record contact proof before account/session mutation so a missing later checkpoint locates where the flow stopped.
-    const confirmedUser = await db
-      .select()
-      .from(users)
-      .where(eq(users.phoneNumber, formattedPhoneNumber))
-      .limit(1)
-      .then(([user]) => user)
-      .catch((error) => {
-        Log.shared.error("Failed to load user for phone confirmation alert", { error })
-        return undefined
-      })
+    const confirmedUser = proof.user
     BotAlerts.authContactConfirmed({
       contact: { type: "phone", value: formattedPhoneNumber },
       user: confirmedUser,
@@ -122,18 +92,7 @@ export const handler = async (
     let osVersion = validateUpToFourSegementSemver(input.osVersion ?? "") ? input.osVersion ?? undefined : undefined
 
     // create or fetch user by phone
-    let { user, created } = await getOrCreateUserByPhoneForSignup(formattedPhoneNumber, input.inviteCode)
-
-    if (!user) {
-      throw new InlineError(
-        InlineError.ApiError.INTERNAL,
-        {
-          cause: new Error(
-            "Phone verification did not resolve a user.",
-          ),
-        },
-      )
-    }
+    let { user, created } = proof
 
     let userId = user.id
 

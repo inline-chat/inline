@@ -101,6 +101,7 @@ const OAuthPhonePayload = Schema.Struct({
 const OAuthVerificationPayload = Schema.Struct({
   csrf: OptionalString,
   code: OptionalString,
+  invite_code: OptionalString,
 }).annotate({
   identifier: "OAuthEmailVerificationForm",
 })
@@ -247,6 +248,7 @@ const OAuthEmptyObject = Schema.Struct({}).annotate({
 const OAuthRedirect = HttpApiSchema.NoContent.pipe(
   HttpApiSchema.status(302),
 )
+const OAuthSeeOther = HttpApiSchema.NoContent.pipe(HttpApiSchema.status(303))
 
 const oauthJsonErrors = [
   jsonErrorAt(400),
@@ -337,6 +339,41 @@ const oauthOperationDocs = ({
 
 const OAuthEndpointGroup = HttpApiGroup.make("oauth")
   .add(
+    HttpApiEndpoint.get("hostedLoginGet", "/v1/auth/login", {
+      query: { capability: OptionalString },
+      success: [OAuthHtml, OAuthSeeOther],
+      error: oauthHtmlErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("hostedLoginSendEmail", "/v1/auth/login/send-email-code", {
+      payload: oauthPayloads(OAuthEmailPayload),
+      success: OAuthHtml,
+      error: oauthHtmlErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("hostedLoginVerifyEmail", "/v1/auth/login/verify-email-code", {
+      payload: oauthPayloads(OAuthVerificationPayload),
+      success: [OAuthHtml, OAuthSeeOther],
+      error: oauthHtmlErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("hostedLoginSendSms", "/v1/auth/login/send-sms-code", {
+      payload: oauthPayloads(OAuthPhonePayload),
+      success: OAuthHtml,
+      error: oauthHtmlErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("hostedLoginVerifySms", "/v1/auth/login/verify-phone-code", {
+      payload: oauthPayloads(OAuthVerificationPayload),
+      success: [OAuthHtml, OAuthSeeOther],
+      error: oauthHtmlErrors,
+    }),
+  )
+  .add(
     HttpApiEndpoint.get("providerStart", "/v1/auth/provider/start", {
       query: {
         provider: OptionalString,
@@ -357,21 +394,21 @@ const OAuthEndpointGroup = HttpApiGroup.make("oauth")
   .add(
     HttpApiEndpoint.get("providerCallbackGoogle", "/v1/auth/provider/callback/google", {
       query: { state: OptionalString, code: OptionalString, error: OptionalString },
-      success: [OAuthHtml, OAuthRedirect],
+      success: [OAuthHtml, OAuthRedirect, OAuthSeeOther],
       error: oauthHtmlErrors,
     }),
   )
   .add(
     HttpApiEndpoint.post("providerCallbackApple", "/v1/auth/provider/callback/apple", {
       payload: oauthPayloads(ProviderAppleCallbackPayload),
-      success: [OAuthHtml, OAuthRedirect],
+      success: [OAuthHtml, OAuthRedirect, OAuthSeeOther],
       error: oauthHtmlErrors,
     }),
   )
   .add(
     HttpApiEndpoint.post("providerContinueInvite", "/v1/auth/provider/continue-invite", {
       payload: oauthPayloads(ProviderContinuationPayload),
-      success: [OAuthHtml, OAuthRedirect],
+      success: [OAuthHtml, OAuthRedirect, OAuthSeeOther],
       error: oauthHtmlErrors,
     }),
   )
@@ -385,7 +422,7 @@ const OAuthEndpointGroup = HttpApiGroup.make("oauth")
   .add(
     HttpApiEndpoint.post("providerVerifyEmailCode", "/v1/auth/provider/verify-email-code", {
       payload: oauthPayloads(ProviderContinuationPayload),
-      success: [OAuthHtml, OAuthRedirect],
+      success: [OAuthHtml, OAuthRedirect, OAuthSeeOther],
       error: oauthHtmlErrors,
     }),
   )
@@ -453,7 +490,7 @@ const OAuthEndpointGroup = HttpApiGroup.make("oauth")
   .add(
     HttpApiEndpoint.get("oauthAuthorize", "/oauth/authorize", {
       query: OAuthAuthorizeQuery,
-      success: OAuthHtml,
+      success: [OAuthHtml, OAuthSeeOther],
       error: oauthJsonErrors,
     }).annotateMerge(
       oauthOperationDocs({
@@ -467,9 +504,15 @@ const OAuthEndpointGroup = HttpApiGroup.make("oauth")
     ),
   )
   .add(
+    HttpApiEndpoint.get("oauthAuthorizeContinue", "/oauth/authorize/continue", {
+      success: OAuthHtml,
+      error: oauthHtmlErrors,
+    }),
+  )
+  .add(
     HttpApiEndpoint.get("oauthAuthorizeAlias", "/authorize", {
       query: OAuthAuthorizeQuery,
-      success: OAuthHtml,
+      success: [OAuthHtml, OAuthSeeOther],
       error: oauthJsonErrors,
     }).annotateMerge(
       oauthOperationDocs({
@@ -764,6 +807,25 @@ const oauthResponseContracts: Readonly<
     ReadonlyArray<OAuthResponseVariant>
   >
 > = {
+  hostedLoginGet: [
+    htmlVariant(200, ["cache-control"]),
+    { status: 303, mediaType: "none", requiredHeaders: ["location", "set-cookie", "cache-control"] },
+    ...oauthHtmlErrorVariants,
+  ],
+  hostedLoginSendEmail: [htmlVariant(200, ["cache-control"]), badRequestVariant, ...oauthHtmlErrorVariants],
+  hostedLoginVerifyEmail: [
+    htmlVariant(200, ["cache-control"]),
+    { status: 303, mediaType: "none", requiredHeaders: ["location", "cache-control"] },
+    badRequestVariant,
+    ...oauthHtmlErrorVariants,
+  ],
+  hostedLoginSendSms: [htmlVariant(200, ["cache-control"]), badRequestVariant, ...oauthHtmlErrorVariants],
+  hostedLoginVerifySms: [
+    htmlVariant(200, ["cache-control"]),
+    { status: 303, mediaType: "none", requiredHeaders: ["location", "cache-control"] },
+    badRequestVariant,
+    ...oauthHtmlErrorVariants,
+  ],
   providerStart: [
     { status: 302, mediaType: "none", requiredHeaders: ["location", "cache-control"] },
     ...oauthHtmlErrorVariants,
@@ -771,17 +833,20 @@ const oauthResponseContracts: Readonly<
   providerCallbackGoogle: [
     htmlVariant(200, ["cache-control"]),
     { status: 302, mediaType: "none", requiredHeaders: ["location", "cache-control"] },
+    { status: 303, mediaType: "none", requiredHeaders: ["location", "cache-control"] },
     ...oauthHtmlErrorVariants,
   ],
   providerCallbackApple: [
     htmlVariant(200, ["cache-control"]),
     { status: 302, mediaType: "none", requiredHeaders: ["location", "cache-control"] },
+    { status: 303, mediaType: "none", requiredHeaders: ["location", "cache-control"] },
     badRequestVariant,
     ...oauthHtmlErrorVariants,
   ],
   providerContinueInvite: [
     htmlVariant(200, ["cache-control"]),
     { status: 302, mediaType: "none", requiredHeaders: ["location", "cache-control"] },
+    { status: 303, mediaType: "none", requiredHeaders: ["location", "cache-control"] },
     badRequestVariant,
     ...oauthHtmlErrorVariants,
   ],
@@ -793,6 +858,7 @@ const oauthResponseContracts: Readonly<
   providerVerifyEmailCode: [
     htmlVariant(200, ["cache-control"]),
     { status: 302, mediaType: "none", requiredHeaders: ["location", "cache-control"] },
+    { status: 303, mediaType: "none", requiredHeaders: ["location", "cache-control"] },
     badRequestVariant,
     ...oauthHtmlErrorVariants,
   ],
@@ -816,8 +882,10 @@ const oauthResponseContracts: Readonly<
       "cache-control",
       "set-cookie",
     ]),
+    { status: 303, mediaType: "none", requiredHeaders: ["location", "set-cookie", "cache-control"] },
     ...oauthErrorVariants,
   ],
+  authorizeContinue: [htmlVariant(200, ["cache-control"]), ...oauthHtmlErrorVariants],
   sendEmailCode: [
     htmlVariant(200, ["cache-control"]),
     badRequestVariant,

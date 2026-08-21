@@ -33,10 +33,6 @@ import {
   Input as VerifySmsCodeInput,
   Response as VerifySmsCodeResponse,
 } from "@in/server/methods/verifySmsCode"
-import { handler as getSpacesHandler } from "@in/server/methods/getSpaces"
-import {
-  getUserIdFromToken,
-} from "@in/server/modules/auth/sessionAuthentication"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
 import { Value } from "@sinclair/typebox/value"
 import { randomBytes, timingSafeEqual } from "node:crypto"
@@ -45,11 +41,12 @@ import { Log } from "@in/server/utils/log"
 import { OAuthHandlerFailure } from "./httpHandlerFailure"
 import parsePhoneNumber from "libphonenumber-js"
 import { db } from "@in/server/db"
-import { users, type DbProviderAuthAttempt } from "@in/server/db/schema"
-import { eq } from "drizzle-orm"
+import { members, spaces, users, type DbProviderAuthAttempt } from "@in/server/db/schema"
+import { and, eq, isNull } from "drizzle-orm"
 import { ProviderAuthModel } from "@in/server/db/models/providerAuth"
 import {
   attachProviderAfterEmailVerification,
+  attachProviderAfterEmailProof,
   beginProviderAuth,
   claimProviderEmailAttempt,
   completeProviderCallback,
@@ -62,6 +59,12 @@ import {
   supportedAppCallbackScheme,
   type ProviderLoginResult,
 } from "@in/server/modules/auth/provider/service"
+import {
+  completionResponse,
+  requireHostedLoginTransaction,
+} from "@in/server/modules/auth/hostedLogin/httpHandlers"
+import { beginOAuthHostedLogin, completeHostedLogin } from "@in/server/modules/auth/hostedLogin/service"
+import { verifyEmailAccountProof } from "@in/server/modules/auth/contactProof"
 import { isValidAppCodeChallenge } from "@in/server/modules/auth/provider/appHandoff"
 
 const config = oauthConfig()
@@ -495,15 +498,12 @@ async function getAuthRequestFromCookie(req: Request): Promise<Awaited<ReturnTyp
   return await OauthModel.getAuthRequest(id, Date.now())
 }
 
-async function getSpacesForToken(token: string): Promise<Array<{ id: number; name: string }>> {
-  const { userId, sessionId } = await getUserIdFromToken(token)
-  const spaces = await getSpacesHandler(undefined as never, {
-    currentUserId: userId,
-    currentSessionId: sessionId,
-    ip: undefined,
-  })
-
-  return spaces.spaces.map((space) => ({ id: space.id, name: space.name }))
+async function getSpacesForUser(userId: number): Promise<Array<{ id: number; name: string }>> {
+  const rows = await db.select({ id: spaces.id, name: spaces.name }).from(members).innerJoin(
+    spaces,
+    and(eq(spaces.id, members.spaceId), isNull(spaces.deleted)),
+  ).where(eq(members.userId, userId))
+  return rows
 }
 
 export async function completeAuthorizeSignIn(
@@ -514,7 +514,7 @@ export async function completeAuthorizeSignIn(
   const token = String((verifyResult as Record<string, unknown>)["token"] ?? "")
   const userId = Number((verifyResult as Record<string, unknown>)["userId"] ?? 0)
 
-  if (!token || !Number.isInteger(userId) || userId <= 0) {
+  if (!Number.isInteger(userId) || userId <= 0) {
     const response = html(500, renderPage("Error", `<div class="error">Invalid login session.</div>`))
     throw new OAuthHandlerFailure(
       `OAuth ${method} verification returned an invalid login session.`,
@@ -525,9 +525,9 @@ export async function completeAuthorizeSignIn(
     )
   }
 
-  let encryptedToken: Buffer
+  let encryptedToken: Buffer | undefined
   try {
-    encryptedToken = Encryption2.encrypt(Buffer.from(token, "utf8"))
+    encryptedToken = token ? Encryption2.encrypt(Buffer.from(token, "utf8")) : undefined
   } catch (cause) {
     const response = html(500, renderPage("Error", `<div class="error">Server misconfigured.</div>`))
     throw new OAuthHandlerFailure(
@@ -540,11 +540,12 @@ export async function completeAuthorizeSignIn(
     id: authRequest.id,
     inlineUserId: userId,
     inlineTokenEncrypted: encryptedToken,
+    authMethod: method,
   })
 
   let spaces: Array<{ id: number; name: string }> = []
   try {
-    spaces = await getSpacesForToken(token)
+    spaces = await getSpacesForUser(userId)
   } catch (cause) {
     const response = html(502, renderPage("Error", `<div class="error">Failed to load spaces.</div>`))
     throw new OAuthHandlerFailure(
@@ -585,6 +586,18 @@ export async function completeAuthorizeSignIn(
 </form>`,
     ),
     { "cache-control": "no-store" },
+  )
+}
+
+export async function handleAuthorizeContinue(req: Request): Promise<Response> {
+  const authRequest = await getAuthRequestFromCookie(req)
+  if (!authRequest?.inlineUserId || !authRequest.authMethod) {
+    return html(400, renderPage("Error", `<div class="error">Sign-in expired. Please try again.</div>`))
+  }
+  return completeAuthorizeSignIn(
+    authRequest,
+    { userId: authRequest.inlineUserId },
+    authRequest.authMethod,
   )
 }
 
@@ -692,47 +705,18 @@ export async function handleAuthorizeGet(url: URL): Promise<Response> {
     expiresAtMs: nowMs + config.authRequestTtlMs,
   })
 
-  const cookie = setCookieHeader(authRequestCookieName(), authRequestId)
-  const signInDescription = client.clientName?.trim()
-    ? `Continue to <strong>${escapeHtml(client.clientName.trim())}</strong> using the email address or phone number linked to your Inline account.`
-    : "Use the email address or phone number linked to your Inline account."
-
-  return html(
-    200,
-    renderPage(
-      "Sign in to Inline",
-      `
-<p class="intro">${signInDescription}</p>
-<div class="provider-methods">
-  <a class="provider-button" href="/v1/auth/provider/start?provider=google&amp;purpose=mcp_oauth"><span class="provider-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path fill="#4285F4" d="M21.6 12.23c0-.71-.06-1.4-.18-2.07H12v3.91h5.38a4.6 4.6 0 0 1-2 3.02v2.54h3.24c1.9-1.75 2.98-4.33 2.98-7.4z"/><path fill="#34A853" d="M12 22c2.7 0 4.97-.9 6.62-2.43l-3.24-2.54c-.9.6-2.05.96-3.38.96-2.61 0-4.82-1.76-5.61-4.13H3.04v2.62A10 10 0 0 0 12 22z"/><path fill="#FBBC05" d="M6.39 13.86A6 6 0 0 1 6.08 12c0-.65.11-1.28.31-1.86V7.52H3.04A10 10 0 0 0 2 12c0 1.61.38 3.13 1.04 4.48l3.35-2.62z"/><path fill="#EA4335" d="M12 6.01c1.47 0 2.79.51 3.83 1.5l2.87-2.88A9.64 9.64 0 0 0 12 2a10 10 0 0 0-8.96 5.52l3.35 2.62C7.18 7.77 9.39 6.01 12 6.01z"/></svg></span><span>Continue with Google</span></a>
-  <a class="provider-button" href="/v1/auth/provider/start?provider=apple&amp;purpose=mcp_oauth"><span class="provider-mark" aria-hidden="true"></span><span>Continue with Apple</span></a>
-</div>
-<div class="divider">or</div>
-<div class="method-tabs" role="radiogroup" aria-label="Sign-in method">
-  <label><input id="method-email" type="radio" name="sign-in-method" checked />Email</label>
-  <label><input id="method-phone" type="radio" name="sign-in-method" />Phone</label>
-</div>
-<form class="sign-in-method email-method" method="post" action="/oauth/authorize/send-email-code">
-  <input type="hidden" name="csrf" value="${escapeHtml(csrfToken)}" />
-  <label>Email address
-    <input name="email" type="email" autocomplete="email" placeholder="you@example.com" required autofocus />
-  </label>
-  <button type="submit">Continue with email</button>
-</form>
-<form class="sign-in-method phone-method" method="post" action="/oauth/authorize/send-sms-code">
-  <input type="hidden" name="csrf" value="${escapeHtml(csrfToken)}" />
-  <label>Phone number
-    <input name="phone_number" type="tel" inputmode="tel" autocomplete="tel" placeholder="+1 202 555 0123" required />
-  </label>
-  <button type="submit">Continue with phone</button>
-</form>
-<div class="muted">We’ll send you a 6-digit verification code.</div>`,
-    ),
-    {
-      "set-cookie": cookie,
+  const login = await beginOAuthHostedLogin({
+    oauthAuthRequestId: authRequestId,
+    client: { clientType: "web", deviceId, deviceName: client.clientName ?? "OAuth" },
+  })
+  return new Response(null, {
+    status: 303,
+    headers: {
+      location: login.browserUrl,
+      "set-cookie": setCookieHeader(authRequestCookieName(), authRequestId),
       "cache-control": "no-store",
     },
-  )
+  })
 }
 
 export async function handleAuthorizeSendEmailCode(
@@ -1134,7 +1118,7 @@ export async function handleAuthorizeConsent(req: Request, body: unknown): Promi
     return html(400, renderPage("Error", `<div class="error">Session expired. Please try again.</div>`))
   }
 
-  if (!authRequest.inlineTokenEncrypted || !authRequest.inlineUserId) {
+  if (!authRequest.inlineUserId) {
     return html(400, renderPage("Error", `<div class="error">Not signed in.</div>`))
   }
 
@@ -1151,20 +1135,9 @@ export async function handleAuthorizeConsent(req: Request, body: unknown): Promi
     return html(400, renderPage("Error", `<div class="error">Select at least one space, DMs, or home threads.</div>`))
   }
 
-  let token: string
-  try {
-    token = Encryption2.decryptToString(authRequest.inlineTokenEncrypted)
-  } catch (cause) {
-    const response = html(400, renderPage("Error", `<div class="error">Invalid session.</div>`))
-    throw new OAuthHandlerFailure(
-      "OAuth consent session decryption failed.",
-      { cause, response },
-    )
-  }
-
   let availableSpaces: Array<{ id: number; name: string }> = []
   try {
-    availableSpaces = await getSpacesForToken(token)
+    availableSpaces = await getSpacesForUser(authRequest.inlineUserId)
   } catch (cause) {
     const response = html(502, renderPage("Error", `<div class="error">Failed to load spaces.</div>`))
     throw new OAuthHandlerFailure(
@@ -1395,6 +1368,9 @@ export async function handleIntrospect(req: Request, body: unknown): Promise<Res
     return json(401, { active: false })
   }
 
+  if (!result.grant.inlineTokenEncrypted) {
+    return json(500, { error: "invalid_grant_session" })
+  }
   let inlineToken: string
   try {
     inlineToken = Encryption2.decryptToString(result.grant.inlineTokenEncrypted)
@@ -1442,7 +1418,8 @@ export async function handleProviderStart(
   const url = new URL(request.url)
   const provider = url.searchParams.get("provider")
   const purpose = url.searchParams.get("purpose")
-  if ((provider !== "google" && provider !== "apple") || (purpose !== "app" && purpose !== "mcp_oauth")) {
+  if ((provider !== "google" && provider !== "apple") ||
+    (purpose !== "app" && purpose !== "mcp_oauth" && purpose !== "hosted_login")) {
     return html(400, renderPage("Sign-in error", `<div class="error">Invalid sign-in request.</div>`))
   }
   for (const [name, limit] of PROVIDER_CLIENT_METADATA_LIMITS) {
@@ -1453,6 +1430,19 @@ export async function handleProviderStart(
   scheduleProviderCleanup(nowMs)
 
   try {
+    if (purpose === "hosted_login") {
+      const transaction = await requireHostedLoginTransaction(request)
+      if (!transaction) {
+        return html(400, renderPage("Sign-in expired", `<div class="error">Start the sign-in again.</div>`))
+      }
+      const providerUrl = await beginProviderAuth({
+        provider,
+        purpose,
+        loginTransactionId: transaction.id,
+        client: { ...transaction.client, clientType: "web", deviceName: "Hosted login" },
+      })
+      return new Response(null, { status: 302, headers: { location: providerUrl.toString(), "cache-control": "no-store" } })
+    }
     if (purpose === "mcp_oauth") {
       const authRequest = await getAuthRequestFromCookie(request)
       if (!authRequest) {
@@ -1670,6 +1660,15 @@ export async function handleProviderVerifyEmailCode(body: unknown, clientIp?: st
     const attempt = await claimProviderEmailAttempt(attemptId, continuation)
     claimed = true
     if (!attempt.confirmationEmail || !attempt.challengeToken) throw new Error("Email challenge is missing")
+    if (attempt.purpose === "hosted_login") {
+      const proof = await verifyEmailAccountProof({
+        email: attempt.confirmationEmail,
+        code: readParam(body, "code"),
+        challengeToken: attempt.challengeToken,
+      })
+      const completed = await attachProviderAfterEmailProof({ attempt, userId: proof.user.id })
+      return finishProviderBrowserLogin(completed.attempt, completed.result)
+    }
     const result = await verifyEmailCodeHandler({
       email: attempt.confirmationEmail,
       code: readParam(body, "code"),
@@ -1737,6 +1736,14 @@ async function finishProviderBrowserLogin(
   attempt: DbProviderAuthAttempt,
   result: ProviderLoginResult,
 ): Promise<Response> {
+  if (attempt.purpose === "hosted_login") {
+    if (!attempt.loginTransactionId) throw new Error("Hosted login transaction is missing")
+    const completed = await completeHostedLogin({
+      transactionId: attempt.loginTransactionId,
+      account: { userId: result.userId, method: attempt.provider },
+    })
+    return completionResponse(completed.targetKind)
+  }
   if (attempt.purpose === "app") {
     const ticket = await issueAppTicket(attempt)
     const location = `${attempt.appCallbackScheme}://auth/provider?ticket=${encodeURIComponent(ticket)}`

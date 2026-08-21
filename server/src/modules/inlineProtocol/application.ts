@@ -6,6 +6,10 @@ import {
   RpcError_Code,
   type AuthBeginRequest,
   type AuthBeginResult,
+  type AuthBeginBrowserRequest,
+  type AuthBeginBrowserResult,
+  type AuthBrowserStatusRequest,
+  type AuthBrowserStatusResult,
   type AuthCompleteRequest,
   type AuthCompleteResult,
   type InputPeer,
@@ -35,6 +39,8 @@ export type InlineProtocolApplicationContext = {
 export interface InlineProtocolApplicationOperations {
   authBegin(input: AuthBeginRequest, context: InlineProtocolApplicationContext): Promise<AuthBeginResult>
   authComplete(input: AuthCompleteRequest, context: InlineProtocolApplicationContext): Promise<AuthCompleteResult>
+  authBeginBrowser(input: AuthBeginBrowserRequest, context: InlineProtocolApplicationContext): Promise<AuthBeginBrowserResult>
+  authBrowserStatus(input: AuthBrowserStatusRequest, context: InlineProtocolApplicationContext): Promise<AuthBrowserStatusResult>
 }
 
 const unauthorizedResponse = (): Uint8Array => RealtimeV3Response.toBinary({
@@ -205,6 +211,25 @@ export const makeInlineProtocolApplicationDispatcher = (input: {
               kind: "result",
               payload: RealtimeV3Response.toBinary({
                 body: { oneofKind: "authComplete", authComplete: result },
+              }),
+            }
+          }
+          if (request.body.oneofKind === "authBeginBrowser") {
+            markExecutionStarted()
+            const result = await input.operations.authBeginBrowser(request.body.authBeginBrowser, context)
+            return {
+              kind: "result",
+              payload: RealtimeV3Response.toBinary({
+                body: { oneofKind: "authBeginBrowser", authBeginBrowser: result },
+              }),
+            }
+          }
+          if (request.body.oneofKind === "authBrowserStatus") {
+            const result = await input.operations.authBrowserStatus(request.body.authBrowserStatus, context)
+            return {
+              kind: "result",
+              payload: RealtimeV3Response.toBinary({
+                body: { oneofKind: "authBrowserStatus", authBrowserStatus: result },
               }),
             }
           }

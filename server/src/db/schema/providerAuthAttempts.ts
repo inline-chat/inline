@@ -1,6 +1,7 @@
 import { bytea, creationDate } from "@in/server/db/schema/common"
 import { accountProvider } from "@in/server/db/schema/accountIdentities"
 import { oauthAuthRequests } from "@in/server/db/schema/oauth"
+import { loginTransactions } from "@in/server/db/schema/loginTransactions"
 import { users } from "@in/server/db/schema/users"
 import {
   foreignKey,
@@ -14,7 +15,7 @@ import {
   varchar,
 } from "drizzle-orm/pg-core"
 
-export const providerAuthPurpose = pgEnum("provider_auth_purpose", ["app", "mcp_oauth"])
+export const providerAuthPurpose = pgEnum("provider_auth_purpose", ["app", "mcp_oauth", "hosted_login"])
 export const providerAuthStatus = pgEnum("provider_auth_status", [
   "pending_provider",
   "pending_invite",
@@ -51,6 +52,7 @@ export const providerAuthAttempts = pgTable(
     appCallbackScheme: varchar("app_callback_scheme", { length: 64 }),
     appCodeChallenge: varchar("app_code_challenge", { length: 64 }),
     oauthAuthRequestId: varchar("oauth_auth_request_id", { length: 128 }),
+    loginTransactionId: varchar("login_transaction_id", { length: 128 }),
     client: jsonb().$type<ProviderAuthClient>().notNull(),
     inlineUserId: integer("inline_user_id").references(() => users.id),
     inlineTokenEncrypted: bytea("inline_token_encrypted"),
@@ -72,6 +74,13 @@ export const providerAuthAttempts = pgTable(
       table.oauthAuthRequestId,
     ),
     providerAuthAttemptsInlineUserIdx: index("provider_auth_attempts_inline_user_idx").on(table.inlineUserId),
+    providerAuthAttemptsLoginTransactionFk: foreignKey({
+      name: "provider_auth_attempts_login_transaction_fk",
+      columns: [table.loginTransactionId],
+      foreignColumns: [loginTransactions.id],
+    }).onDelete("cascade"),
+    providerAuthAttemptsLoginTransactionIdx: index("provider_auth_attempts_login_transaction_idx")
+      .on(table.loginTransactionId),
   }),
 )
 

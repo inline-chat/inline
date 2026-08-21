@@ -19,6 +19,7 @@ export interface OAuthHttpHandlers {
     clientIp?: string,
   ) => Promise<Response>
   readonly authorize: (request: Request) => Promise<Response>
+  readonly authorizeContinue: (request: Request) => Promise<Response>
   readonly sendEmailCode: (
     request: Request,
     body: unknown,
@@ -60,6 +61,11 @@ export interface OAuthHttpHandlers {
   readonly providerSendEmailCode: (body: unknown, clientIp?: string) => Promise<Response>
   readonly providerVerifyEmailCode: (body: unknown, clientIp?: string) => Promise<Response>
   readonly providerRedeem: (body: unknown) => Promise<Response>
+  readonly hostedLoginGet: (request: Request) => Promise<Response>
+  readonly hostedLoginSendEmail: (request: Request, body: unknown, clientIp?: string) => Promise<Response>
+  readonly hostedLoginVerifyEmail: (request: Request, body: unknown, clientIp?: string) => Promise<Response>
+  readonly hostedLoginSendSms: (request: Request, body: unknown, clientIp?: string) => Promise<Response>
+  readonly hostedLoginVerifySms: (request: Request, body: unknown, clientIp?: string) => Promise<Response>
 }
 
 const badRequest = (): Response =>
@@ -84,12 +90,14 @@ const execute = async (
   if (operation === "authorize") {
     return handlers.authorize(request)
   }
+  if (operation === "authorizeContinue") return handlers.authorizeContinue(request)
   if (operation === "providerStart") {
     return handlers.providerStart(request, clientIp)
   }
   if (operation === "providerCallbackGoogle") {
     return handlers.providerCallbackGoogle(request)
   }
+  if (operation === "hostedLoginGet") return handlers.hostedLoginGet(request)
 
   let body: unknown
   try {
@@ -134,6 +142,14 @@ const execute = async (
       return handlers.providerVerifyEmailCode(body, clientIp)
     case "providerRedeem":
       return handlers.providerRedeem(body)
+    case "hostedLoginSendEmail":
+      return handlers.hostedLoginSendEmail(request, body, clientIp)
+    case "hostedLoginVerifyEmail":
+      return handlers.hostedLoginVerifyEmail(request, body, clientIp)
+    case "hostedLoginSendSms":
+      return handlers.hostedLoginSendSms(request, body, clientIp)
+    case "hostedLoginVerifySms":
+      return handlers.hostedLoginVerifySms(request, body, clientIp)
   }
 }
 

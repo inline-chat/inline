@@ -58,10 +58,16 @@ export const AuthApiGroup = HttpApiGroup.make("auth").add(
   OAuthEndpoints.providerSendEmailCode,
   OAuthEndpoints.providerVerifyEmailCode,
   OAuthEndpoints.providerRedeem,
+  OAuthEndpoints.hostedLoginGet,
+  OAuthEndpoints.hostedLoginSendEmail,
+  OAuthEndpoints.hostedLoginVerifyEmail,
+  OAuthEndpoints.hostedLoginSendSms,
+  OAuthEndpoints.hostedLoginVerifySms,
   OAuthEndpoints.oauthMetadata,
   OAuthEndpoints.oauthRegister,
   OAuthEndpoints.oauthRegisterAlias,
   OAuthEndpoints.oauthAuthorize,
+  OAuthEndpoints.oauthAuthorizeContinue,
   OAuthEndpoints.oauthAuthorizeAlias,
   OAuthEndpoints.oauthSendEmailCode,
   OAuthEndpoints.oauthVerifyEmailCode,
@@ -204,6 +210,21 @@ export const makeAuthRouteGroup = () => {
         .handleRaw("providerStart", ({ request }) =>
           execute(executeOAuth("providerStart", request)),
         )
+        .handleRaw("hostedLoginGet", ({ request }) =>
+          execute(executeOAuth("hostedLoginGet", request)),
+        )
+        .handleRaw("hostedLoginSendEmail", ({ request }) =>
+          execute(executeOAuth("hostedLoginSendEmail", request)),
+        )
+        .handleRaw("hostedLoginVerifyEmail", ({ request }) =>
+          execute(executeOAuth("hostedLoginVerifyEmail", request)),
+        )
+        .handleRaw("hostedLoginSendSms", ({ request }) =>
+          execute(executeOAuth("hostedLoginSendSms", request)),
+        )
+        .handleRaw("hostedLoginVerifySms", ({ request }) =>
+          execute(executeOAuth("hostedLoginVerifySms", request)),
+        )
         .handleRaw("providerCallbackGoogle", ({ request }) =>
           execute(executeOAuth("providerCallbackGoogle", request)),
         )
@@ -253,6 +274,9 @@ export const makeAuthRouteGroup = () => {
               request,
             ),
           ),
+        )
+        .handleRaw("oauthAuthorizeContinue", ({ request }) =>
+          execute(executeOAuth("authorizeContinue", request)),
         )
         .handleRaw("oauthAuthorizeAlias", ({ request }) =>
           execute(
