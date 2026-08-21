@@ -229,6 +229,9 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case cancelUpload // = 121
   case updateSession // = 122
   case updateDialogArchived // = 123
+  case createDialogFolder // = 124
+  case updateDialogFolder // = 125
+  case deleteDialogFolder // = 126
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -360,6 +363,9 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 121: self = .cancelUpload
     case 122: self = .updateSession
     case 123: self = .updateDialogArchived
+    case 124: self = .createDialogFolder
+    case 125: self = .updateDialogFolder
+    case 126: self = .deleteDialogFolder
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -489,6 +495,9 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .cancelUpload: return 121
     case .updateSession: return 122
     case .updateDialogArchived: return 123
+    case .createDialogFolder: return 124
+    case .updateDialogFolder: return 125
+    case .deleteDialogFolder: return 126
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -618,6 +627,9 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .cancelUpload,
     .updateSession,
     .updateDialogArchived,
+    .createDialogFolder,
+    .updateDialogFolder,
+    .deleteDialogFolder,
   ]
 
 }
@@ -820,6 +832,44 @@ public nonisolated enum PushNotificationProvider: SwiftProtobuf.Enum, Swift.Case
     .unspecified,
     .apns,
     .expoAndroid,
+  ]
+
+}
+
+public nonisolated enum DeleteDialogFolderDisposition: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case closeDialogs // = 1
+  case keepDialogs // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .closeDialogs
+    case 2: self = .keepDialogs
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .closeDialogs: return 1
+    case .keepDialogs: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [DeleteDialogFolderDisposition] = [
+    .unspecified,
+    .closeDialogs,
+    .keepDialogs,
   ]
 
 }
@@ -2471,11 +2521,47 @@ public nonisolated struct Dialog: @unchecked Sendable {
   /// Clears the value of `collapsedMaxID`. Subsequent reads from it will return its default value.
   public mutating func clearCollapsedMaxID() {_uniqueStorage()._collapsedMaxID = nil}
 
+  /// Optional personal dialog folder. Unsupported clients continue rendering the dialog flat.
+  public var folderID: Int64 {
+    get {_storage._folderID ?? 0}
+    set {_uniqueStorage()._folderID = newValue}
+  }
+  /// Returns true if `folderID` has been explicitly set.
+  public var hasFolderID: Bool {_storage._folderID != nil}
+  /// Clears the value of `folderID`. Subsequent reads from it will return its default value.
+  public mutating func clearFolderID() {_uniqueStorage()._folderID = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+public nonisolated struct DialogFolder: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var id: Int64 = 0
+
+  public var title: String {
+    get {_title ?? String()}
+    set {_title = newValue}
+  }
+  /// Returns true if `title` has been explicitly set.
+  public var hasTitle: Bool {self._title != nil}
+  /// Clears the value of `title`. Subsequent reads from it will return its default value.
+  public mutating func clearTitle() {self._title = nil}
+
+  /// Uses the same fractional ordering coordinate as Dialog.order.
+  public var order: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _title: String? = nil
 }
 
 /// Effective actions the current user may take on a chat.
@@ -5875,6 +5961,30 @@ public nonisolated struct RpcCall: Sendable {
     set {input = .updateDialogArchived(newValue)}
   }
 
+  public var createDialogFolder: CreateDialogFolderInput {
+    get {
+      if case .createDialogFolder(let v)? = input {return v}
+      return CreateDialogFolderInput()
+    }
+    set {input = .createDialogFolder(newValue)}
+  }
+
+  public var updateDialogFolder: UpdateDialogFolderInput {
+    get {
+      if case .updateDialogFolder(let v)? = input {return v}
+      return UpdateDialogFolderInput()
+    }
+    set {input = .updateDialogFolder(newValue)}
+  }
+
+  public var deleteDialogFolder: DeleteDialogFolderInput {
+    get {
+      if case .deleteDialogFolder(let v)? = input {return v}
+      return DeleteDialogFolderInput()
+    }
+    set {input = .deleteDialogFolder(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Input: Equatable, Sendable {
@@ -6000,6 +6110,9 @@ public nonisolated struct RpcCall: Sendable {
     case cancelUpload(CancelUploadInput)
     case updateSession(UpdateSessionInput)
     case updateDialogArchived(UpdateDialogArchivedInput)
+    case createDialogFolder(CreateDialogFolderInput)
+    case updateDialogFolder(UpdateDialogFolderInput)
+    case deleteDialogFolder(DeleteDialogFolderInput)
 
   }
 
@@ -6997,6 +7110,30 @@ public nonisolated struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .updateDialogArchived(newValue)}
   }
 
+  public var createDialogFolder: CreateDialogFolderResult {
+    get {
+      if case .createDialogFolder(let v)? = _storage._result {return v}
+      return CreateDialogFolderResult()
+    }
+    set {_uniqueStorage()._result = .createDialogFolder(newValue)}
+  }
+
+  public var updateDialogFolder: UpdateDialogFolderResult {
+    get {
+      if case .updateDialogFolder(let v)? = _storage._result {return v}
+      return UpdateDialogFolderResult()
+    }
+    set {_uniqueStorage()._result = .updateDialogFolder(newValue)}
+  }
+
+  public var deleteDialogFolder: DeleteDialogFolderResult {
+    get {
+      if case .deleteDialogFolder(let v)? = _storage._result {return v}
+      return DeleteDialogFolderResult()
+    }
+    set {_uniqueStorage()._result = .deleteDialogFolder(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Result: Equatable, Sendable {
@@ -7122,6 +7259,9 @@ public nonisolated struct RpcResult: @unchecked Sendable {
     case cancelUpload(CancelUploadResult)
     case updateSession(UpdateSessionResult)
     case updateDialogArchived(UpdateDialogArchivedResult)
+    case createDialogFolder(CreateDialogFolderResult)
+    case updateDialogFolder(UpdateDialogFolderResult)
+    case deleteDialogFolder(DeleteDialogFolderResult)
 
   }
 
@@ -8661,6 +8801,16 @@ public nonisolated struct UpdateDialogOrderInput: Sendable {
   /// Clears the value of `pinned`. Subsequent reads from it will return its default value.
   public mutating func clearPinned() {self._pinned = nil}
 
+  /// Optional placement change. Omit to leave folder membership unchanged.
+  public var destination: DialogFolderDestination {
+    get {_destination ?? DialogFolderDestination()}
+    set {_destination = newValue}
+  }
+  /// Returns true if `destination` has been explicitly set.
+  public var hasDestination: Bool {self._destination != nil}
+  /// Clears the value of `destination`. Subsequent reads from it will return its default value.
+  public mutating func clearDestination() {self._destination = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -8669,6 +8819,45 @@ public nonisolated struct UpdateDialogOrderInput: Sendable {
   fileprivate var _order: String? = nil
   fileprivate var _pinnedOrder: String? = nil
   fileprivate var _pinned: Bool? = nil
+  fileprivate var _destination: DialogFolderDestination? = nil
+}
+
+public nonisolated struct DialogFolderDestination: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var destination: DialogFolderDestination.OneOf_Destination? = nil
+
+  /// Move the dialog to the root open lane.
+  public var root: Bool {
+    get {
+      if case .root(let v)? = destination {return v}
+      return false
+    }
+    set {destination = .root(newValue)}
+  }
+
+  /// Move the dialog into this folder.
+  public var folderID: Int64 {
+    get {
+      if case .folderID(let v)? = destination {return v}
+      return 0
+    }
+    set {destination = .folderID(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum OneOf_Destination: Equatable, Sendable {
+    /// Move the dialog to the root open lane.
+    case root(Bool)
+    /// Move the dialog into this folder.
+    case folderID(Int64)
+
+  }
+
+  public init() {}
 }
 
 public nonisolated struct UpdateDialogOrderResult: @unchecked Sendable {
@@ -10871,6 +11060,160 @@ public nonisolated struct UpdateDialogArchivedResult: Sendable {
   public init() {}
 }
 
+public nonisolated struct CreateDialogFolderInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var title: String {
+    get {_title ?? String()}
+    set {_title = newValue}
+  }
+  /// Returns true if `title` has been explicitly set.
+  public var hasTitle: Bool {self._title != nil}
+  /// Clears the value of `title`. Subsequent reads from it will return its default value.
+  public mutating func clearTitle() {self._title = nil}
+
+  public var peers: [InputPeer] = []
+
+  public var order: String {
+    get {_order ?? String()}
+    set {_order = newValue}
+  }
+  /// Returns true if `order` has been explicitly set.
+  public var hasOrder: Bool {self._order != nil}
+  /// Clears the value of `order`. Subsequent reads from it will return its default value.
+  public mutating func clearOrder() {self._order = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _title: String? = nil
+  fileprivate var _order: String? = nil
+}
+
+public nonisolated struct CreateDialogFolderResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var folder: DialogFolder {
+    get {_folder ?? DialogFolder()}
+    set {_folder = newValue}
+  }
+  /// Returns true if `folder` has been explicitly set.
+  public var hasFolder: Bool {self._folder != nil}
+  /// Clears the value of `folder`. Subsequent reads from it will return its default value.
+  public mutating func clearFolder() {self._folder = nil}
+
+  public var dialogs: [Dialog] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _folder: DialogFolder? = nil
+}
+
+public nonisolated struct UpdateDialogFolderInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var folderID: Int64 = 0
+
+  public var titleUpdate: UpdateDialogFolderInput.OneOf_TitleUpdate? = nil
+
+  public var title: String {
+    get {
+      if case .title(let v)? = titleUpdate {return v}
+      return String()
+    }
+    set {titleUpdate = .title(newValue)}
+  }
+
+  public var clearTitle_p: Bool {
+    get {
+      if case .clearTitle_p(let v)? = titleUpdate {return v}
+      return false
+    }
+    set {titleUpdate = .clearTitle_p(newValue)}
+  }
+
+  public var order: String {
+    get {_order ?? String()}
+    set {_order = newValue}
+  }
+  /// Returns true if `order` has been explicitly set.
+  public var hasOrder: Bool {self._order != nil}
+  /// Clears the value of `order`. Subsequent reads from it will return its default value.
+  public mutating func clearOrder() {self._order = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum OneOf_TitleUpdate: Equatable, Sendable {
+    case title(String)
+    case clearTitle_p(Bool)
+
+  }
+
+  public init() {}
+
+  fileprivate var _order: String? = nil
+}
+
+public nonisolated struct UpdateDialogFolderResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var folder: DialogFolder {
+    get {_folder ?? DialogFolder()}
+    set {_folder = newValue}
+  }
+  /// Returns true if `folder` has been explicitly set.
+  public var hasFolder: Bool {self._folder != nil}
+  /// Clears the value of `folder`. Subsequent reads from it will return its default value.
+  public mutating func clearFolder() {self._folder = nil}
+
+  public var dialogs: [Dialog] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _folder: DialogFolder? = nil
+}
+
+public nonisolated struct DeleteDialogFolderInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var folderID: Int64 = 0
+
+  public var disposition: DeleteDialogFolderDisposition = .unspecified
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct DeleteDialogFolderResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var folderID: Int64 = 0
+
+  public var dialogs: [Dialog] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 public nonisolated struct GetChatsInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -10900,6 +11243,9 @@ public nonisolated struct GetChatsResult: Sendable {
 
   /// Messages referenced in the chats
   public var messages: [Message] = []
+
+  /// Personal dialog folders. Dialogs remain present for unsupported clients.
+  public var folders: [DialogFolder] = []
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -13641,6 +13987,14 @@ public nonisolated struct Update: Sendable {
     set {update = .dialogCollapsedMaxID(newValue)}
   }
 
+  public var dialogFolder: UpdateDialogFolder {
+    get {
+      if case .dialogFolder(let v)? = update {return v}
+      return UpdateDialogFolder()
+    }
+    set {update = .dialogFolder(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Update: Equatable, Sendable {
@@ -13696,6 +14050,7 @@ public nonisolated struct Update: Sendable {
     case spaceSettings(UpdateSpaceSettings)
     case chatPermissions(UpdateChatPermissions)
     case dialogCollapsedMaxID(UpdateDialogCollapsedMaxId)
+    case dialogFolder(UpdateDialogFolder)
 
   }
 
@@ -13703,6 +14058,43 @@ public nonisolated struct Update: Sendable {
 
   fileprivate var _seq: Int32? = nil
   fileprivate var _date: Int64? = nil
+}
+
+public nonisolated struct UpdateDialogFolder: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var folderChange: UpdateDialogFolder.OneOf_FolderChange? = nil
+
+  public var folder: DialogFolder {
+    get {
+      if case .folder(let v)? = folderChange {return v}
+      return DialogFolder()
+    }
+    set {folderChange = .folder(newValue)}
+  }
+
+  public var deletedFolderID: Int64 {
+    get {
+      if case .deletedFolderID(let v)? = folderChange {return v}
+      return 0
+    }
+    set {folderChange = .deletedFolderID(newValue)}
+  }
+
+  /// Complete authoritative dialog snapshots changed by this folder mutation.
+  public var dialogs: [Dialog] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum OneOf_FolderChange: Equatable, Sendable {
+    case folder(DialogFolder)
+    case deletedFolderID(Int64)
+
+  }
+
+  public init() {}
 }
 
 public nonisolated struct UpdateSpaceHasNewUpdates: Sendable {
@@ -17514,7 +17906,7 @@ nonisolated extension MessageSendMode: SwiftProtobuf._ProtoNameProviding {
 }
 
 nonisolated extension Method: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNSPECIFIED\0\u{1}GET_ME\0\u{1}SEND_MESSAGE\0\u{1}GET_PEER_PHOTO\0\u{1}DELETE_MESSAGES\0\u{1}GET_CHAT_HISTORY\0\u{1}ADD_REACTION\0\u{1}DELETE_REACTION\0\u{1}EDIT_MESSAGE\0\u{1}CREATE_CHAT\0\u{1}GET_SPACE_MEMBERS\0\u{1}DELETE_CHAT\0\u{1}INVITE_TO_SPACE\0\u{1}GET_CHAT_PARTICIPANTS\0\u{1}ADD_CHAT_PARTICIPANT\0\u{1}REMOVE_CHAT_PARTICIPANT\0\u{1}TRANSLATE_MESSAGES\0\u{1}GET_CHATS\0\u{1}UPDATE_USER_SETTINGS\0\u{1}GET_USER_SETTINGS\0\u{1}SEND_COMPOSE_ACTION\0\u{1}CREATE_BOT\0\u{1}DELETE_MEMBER\0\u{1}MARK_AS_UNREAD\0\u{1}GET_UPDATES_STATE\0\u{1}GET_CHAT\0\u{1}GET_UPDATES\0\u{1}UPDATE_MEMBER_ACCESS\0\u{1}SEARCH_MESSAGES\0\u{1}FORWARD_MESSAGES\0\u{1}UPDATE_CHAT_VISIBILITY\0\u{1}PIN_MESSAGE\0\u{1}UPDATE_CHAT_INFO\0\u{1}LIST_BOTS\0\u{1}REVEAL_BOT_TOKEN\0\u{1}MOVE_THREAD\0\u{1}ROTATE_BOT_TOKEN\0\u{1}UPDATE_BOT_PROFILE\0\u{1}GET_MESSAGES\0\u{1}UPDATE_DIALOG_NOTIFICATION_SETTINGS\0\u{1}READ_MESSAGES\0\u{1}REGISTER_DEVICE\0\u{1}CREATE_SUBTHREAD\0\u{1}GET_BOT_COMMANDS\0\u{1}SET_BOT_COMMANDS\0\u{1}GET_PEER_BOT_COMMANDS\0\u{1}SHOW_IN_CHAT_LIST\0\u{1}RESERVE_CHAT_IDS\0\u{1}INVOKE_MESSAGE_ACTION\0\u{1}ANSWER_MESSAGE_ACTION\0\u{1}REVOKE_SESSION\0\u{1}UPDATE_DIALOG_OPEN\0\u{1}UPDATE_DIALOG_ORDER\0\u{1}CLEAR_CHAT_HISTORY\0\u{1}DELETE_BOT\0\u{1}DELETE_MESSAGE_ATTACHMENT\0\u{1}SET_BOT_AVATAR\0\u{1}CLEAR_BOT_AVATAR\0\u{1}GET_BOT_PRESENCE\0\u{1}SET_BOT_PRESENCE_STATE\0\u{1}UPDATE_DIALOG_FOLLOW_MODE\0\u{1}GET_SESSIONS\0\u{1}CHECK_USERNAME\0\u{1}CHANGE_USERNAME\0\u{1}UPDATE_PROFILE\0\u{1}GET_SPACE_URL_PREVIEW_EXCLUSIONS\0\u{1}ADD_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}REMOVE_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}GET_USER_GROUPS\0\u{1}CREATE_USER_GROUP\0\u{1}UPDATE_USER_GROUP\0\u{1}DELETE_USER_GROUP\0\u{1}GET_SPACE_SETTINGS\0\u{1}TOGGLE_SPACE_GRID\0\u{1}GET_THREAD_REFERENCES\0\u{1}GET_THREAD_SUBTHREADS\0\u{1}GET_PEER_BOTS\0\u{1}GET_MY_BOT_CAPABILITIES\0\u{1}SET_MY_BOT_CAPABILITIES\0\u{1}REQUEST_BOT_CHAT_SETTINGS\0\u{1}INVOKE_BOT_CHAT_SETTINGS_ITEM\0\u{1}ANSWER_BOT_CHAT_SETTINGS\0\u{2}\u{2}GET_GRID\0\u{1}CREATE_GRID_ROOM\0\u{1}JOIN_GRID_ROOM\0\u{1}LEAVE_GRID_ROOM\0\u{1}SET_GRID_ROOM_TITLE\0\u{1}SET_GRID_ROOM_LOCKED\0\u{1}DELETE_GRID_ROOM\0\u{1}PREPARE_GRID_CONNECTION\0\u{1}SET_GRID_AVATAR_MICROPHONE_ENABLED\0\u{1}GET_GRID_HOME\0\u{1}CREATE_CLI_SESSION\0\u{1}SET_PROFILE_PHOTO\0\u{1}GET_EXTERNAL_PROFILE_PHOTO\0\u{1}GET_CHAT_TRANSCRIPT\0\u{1}SEARCH_EXTERNAL_RESOURCES\0\u{1}JOIN_PUBLIC_SPACE\0\u{1}COLLAPSE_HISTORY\0\u{1}LIST_CONNECTORS\0\u{1}PREPARE_CONNECTOR_OAUTH\0\u{1}DISCONNECT_CONNECTOR\0\u{1}SEARCH_USERS\0\u{1}INVITE_TO_INLINE\0\u{1}RESOLVE_URL_PREVIEW\0\u{1}CREATE_BOT_AGENT\0\u{1}GET_BOT_AGENT\0\u{1}LIST_BOT_AGENTS\0\u{1}CREATE_SPACE\0\u{1}DELETE_SPACE\0\u{1}LEAVE_SPACE\0\u{1}GET_CONNECTOR_CONFIG\0\u{1}SET_CONNECTOR_CONFIG\0\u{1}CREATE_EXTERNAL_TASK\0\u{1}UNREGISTER_DEVICE\0\u{1}LOG_OUT\0\u{1}CREATE_UPLOAD\0\u{1}SAVE_UPLOAD_PART\0\u{1}GET_UPLOAD_STATE\0\u{1}FINISH_UPLOAD\0\u{1}CANCEL_UPLOAD\0\u{1}UPDATE_SESSION\0\u{1}UPDATE_DIALOG_ARCHIVED\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNSPECIFIED\0\u{1}GET_ME\0\u{1}SEND_MESSAGE\0\u{1}GET_PEER_PHOTO\0\u{1}DELETE_MESSAGES\0\u{1}GET_CHAT_HISTORY\0\u{1}ADD_REACTION\0\u{1}DELETE_REACTION\0\u{1}EDIT_MESSAGE\0\u{1}CREATE_CHAT\0\u{1}GET_SPACE_MEMBERS\0\u{1}DELETE_CHAT\0\u{1}INVITE_TO_SPACE\0\u{1}GET_CHAT_PARTICIPANTS\0\u{1}ADD_CHAT_PARTICIPANT\0\u{1}REMOVE_CHAT_PARTICIPANT\0\u{1}TRANSLATE_MESSAGES\0\u{1}GET_CHATS\0\u{1}UPDATE_USER_SETTINGS\0\u{1}GET_USER_SETTINGS\0\u{1}SEND_COMPOSE_ACTION\0\u{1}CREATE_BOT\0\u{1}DELETE_MEMBER\0\u{1}MARK_AS_UNREAD\0\u{1}GET_UPDATES_STATE\0\u{1}GET_CHAT\0\u{1}GET_UPDATES\0\u{1}UPDATE_MEMBER_ACCESS\0\u{1}SEARCH_MESSAGES\0\u{1}FORWARD_MESSAGES\0\u{1}UPDATE_CHAT_VISIBILITY\0\u{1}PIN_MESSAGE\0\u{1}UPDATE_CHAT_INFO\0\u{1}LIST_BOTS\0\u{1}REVEAL_BOT_TOKEN\0\u{1}MOVE_THREAD\0\u{1}ROTATE_BOT_TOKEN\0\u{1}UPDATE_BOT_PROFILE\0\u{1}GET_MESSAGES\0\u{1}UPDATE_DIALOG_NOTIFICATION_SETTINGS\0\u{1}READ_MESSAGES\0\u{1}REGISTER_DEVICE\0\u{1}CREATE_SUBTHREAD\0\u{1}GET_BOT_COMMANDS\0\u{1}SET_BOT_COMMANDS\0\u{1}GET_PEER_BOT_COMMANDS\0\u{1}SHOW_IN_CHAT_LIST\0\u{1}RESERVE_CHAT_IDS\0\u{1}INVOKE_MESSAGE_ACTION\0\u{1}ANSWER_MESSAGE_ACTION\0\u{1}REVOKE_SESSION\0\u{1}UPDATE_DIALOG_OPEN\0\u{1}UPDATE_DIALOG_ORDER\0\u{1}CLEAR_CHAT_HISTORY\0\u{1}DELETE_BOT\0\u{1}DELETE_MESSAGE_ATTACHMENT\0\u{1}SET_BOT_AVATAR\0\u{1}CLEAR_BOT_AVATAR\0\u{1}GET_BOT_PRESENCE\0\u{1}SET_BOT_PRESENCE_STATE\0\u{1}UPDATE_DIALOG_FOLLOW_MODE\0\u{1}GET_SESSIONS\0\u{1}CHECK_USERNAME\0\u{1}CHANGE_USERNAME\0\u{1}UPDATE_PROFILE\0\u{1}GET_SPACE_URL_PREVIEW_EXCLUSIONS\0\u{1}ADD_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}REMOVE_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}GET_USER_GROUPS\0\u{1}CREATE_USER_GROUP\0\u{1}UPDATE_USER_GROUP\0\u{1}DELETE_USER_GROUP\0\u{1}GET_SPACE_SETTINGS\0\u{1}TOGGLE_SPACE_GRID\0\u{1}GET_THREAD_REFERENCES\0\u{1}GET_THREAD_SUBTHREADS\0\u{1}GET_PEER_BOTS\0\u{1}GET_MY_BOT_CAPABILITIES\0\u{1}SET_MY_BOT_CAPABILITIES\0\u{1}REQUEST_BOT_CHAT_SETTINGS\0\u{1}INVOKE_BOT_CHAT_SETTINGS_ITEM\0\u{1}ANSWER_BOT_CHAT_SETTINGS\0\u{2}\u{2}GET_GRID\0\u{1}CREATE_GRID_ROOM\0\u{1}JOIN_GRID_ROOM\0\u{1}LEAVE_GRID_ROOM\0\u{1}SET_GRID_ROOM_TITLE\0\u{1}SET_GRID_ROOM_LOCKED\0\u{1}DELETE_GRID_ROOM\0\u{1}PREPARE_GRID_CONNECTION\0\u{1}SET_GRID_AVATAR_MICROPHONE_ENABLED\0\u{1}GET_GRID_HOME\0\u{1}CREATE_CLI_SESSION\0\u{1}SET_PROFILE_PHOTO\0\u{1}GET_EXTERNAL_PROFILE_PHOTO\0\u{1}GET_CHAT_TRANSCRIPT\0\u{1}SEARCH_EXTERNAL_RESOURCES\0\u{1}JOIN_PUBLIC_SPACE\0\u{1}COLLAPSE_HISTORY\0\u{1}LIST_CONNECTORS\0\u{1}PREPARE_CONNECTOR_OAUTH\0\u{1}DISCONNECT_CONNECTOR\0\u{1}SEARCH_USERS\0\u{1}INVITE_TO_INLINE\0\u{1}RESOLVE_URL_PREVIEW\0\u{1}CREATE_BOT_AGENT\0\u{1}GET_BOT_AGENT\0\u{1}LIST_BOT_AGENTS\0\u{1}CREATE_SPACE\0\u{1}DELETE_SPACE\0\u{1}LEAVE_SPACE\0\u{1}GET_CONNECTOR_CONFIG\0\u{1}SET_CONNECTOR_CONFIG\0\u{1}CREATE_EXTERNAL_TASK\0\u{1}UNREGISTER_DEVICE\0\u{1}LOG_OUT\0\u{1}CREATE_UPLOAD\0\u{1}SAVE_UPLOAD_PART\0\u{1}GET_UPLOAD_STATE\0\u{1}FINISH_UPLOAD\0\u{1}CANCEL_UPLOAD\0\u{1}UPDATE_SESSION\0\u{1}UPDATE_DIALOG_ARCHIVED\0\u{1}CREATE_DIALOG_FOLDER\0\u{1}UPDATE_DIALOG_FOLDER\0\u{1}DELETE_DIALOG_FOLDER\0")
 }
 
 nonisolated extension GridConnectionUnavailableReason: SwiftProtobuf._ProtoNameProviding {
@@ -17535,6 +17927,10 @@ nonisolated extension ExternalProfilePhotoStatus: SwiftProtobuf._ProtoNameProvid
 
 nonisolated extension PushNotificationProvider: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0PUSH_NOTIFICATION_PROVIDER_UNSPECIFIED\0\u{1}PUSH_NOTIFICATION_PROVIDER_APNS\0\u{1}PUSH_NOTIFICATION_PROVIDER_EXPO_ANDROID\0")
+}
+
+nonisolated extension DeleteDialogFolderDisposition: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0DELETE_DIALOG_FOLDER_DISPOSITION_UNSPECIFIED\0\u{1}CLOSE_DIALOGS\0\u{1}KEEP_DIALOGS\0")
 }
 
 nonisolated extension GetChatHistoryMode: SwiftProtobuf._ProtoNameProviding {
@@ -19124,6 +19520,7 @@ nonisolated extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
     var _pinnedOrder: String? = nil
     var _followMode: DialogFollowMode? = nil
     var _collapsedMaxID: Int64? = nil
+    var _folderID: Int64? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -19151,6 +19548,7 @@ nonisolated extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
       _pinnedOrder = source._pinnedOrder
       _followMode = source._followMode
       _collapsedMaxID = source._collapsedMaxID
+      _folderID = source._folderID
     }
   }
 
@@ -19186,6 +19584,7 @@ nonisolated extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
         case 15: try { try decoder.decodeSingularStringField(value: &_storage._pinnedOrder) }()
         case 16: try { try decoder.decodeSingularEnumField(value: &_storage._followMode) }()
         case 17: try { try decoder.decodeSingularInt64Field(value: &_storage._collapsedMaxID) }()
+        case 18: try { try decoder.decodeSingularInt64Field(value: &_storage._folderID) }()
         default: break
         }
       }
@@ -19249,6 +19648,9 @@ nonisolated extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
       try { if let v = _storage._collapsedMaxID {
         try visitor.visitSingularInt64Field(value: v, fieldNumber: 17)
       } }()
+      try { if let v = _storage._folderID {
+        try visitor.visitSingularInt64Field(value: v, fieldNumber: 18)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -19275,10 +19677,55 @@ nonisolated extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
         if _storage._pinnedOrder != rhs_storage._pinnedOrder {return false}
         if _storage._followMode != rhs_storage._followMode {return false}
         if _storage._collapsedMaxID != rhs_storage._collapsedMaxID {return false}
+        if _storage._folderID != rhs_storage._folderID {return false}
         return true
       }
       if !storagesAreEqual {return false}
     }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension DialogFolder: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "DialogFolder"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}title\0\u{1}order\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.id) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._title) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.order) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.id != 0 {
+      try visitor.visitSingularInt64Field(value: self.id, fieldNumber: 1)
+    }
+    try { if let v = self._title {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
+    if !self.order.isEmpty {
+      try visitor.visitSingularStringField(value: self.order, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: DialogFolder, rhs: DialogFolder) -> Bool {
+    if lhs.id != rhs.id {return false}
+    if lhs._title != rhs._title {return false}
+    if lhs.order != rhs.order {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -22329,7 +22776,7 @@ nonisolated extension RpcError.Code: SwiftProtobuf._ProtoNameProviding {
 
 nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RpcCall"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}method\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{c}S\u{1}\u{1}")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}method\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{c}S\u{1}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23924,6 +24371,45 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
           self.input = .updateDialogArchived(v)
         }
       }()
+      case 125: try {
+        var v: CreateDialogFolderInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .createDialogFolder(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .createDialogFolder(v)
+        }
+      }()
+      case 126: try {
+        var v: UpdateDialogFolderInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .updateDialogFolder(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .updateDialogFolder(v)
+        }
+      }()
+      case 127: try {
+        var v: DeleteDialogFolderInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .deleteDialogFolder(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .deleteDialogFolder(v)
+        }
+      }()
       default: break
       }
     }
@@ -24426,6 +24912,18 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       guard case .updateDialogArchived(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 124)
     }()
+    case .createDialogFolder?: try {
+      guard case .createDialogFolder(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 125)
+    }()
+    case .updateDialogFolder?: try {
+      guard case .updateDialogFolder(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 126)
+    }()
+    case .deleteDialogFolder?: try {
+      guard case .deleteDialogFolder(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 127)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -24441,7 +24939,7 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
 
 nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RpcResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}req_msg_id\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{c}S\u{1}\u{1}")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}req_msg_id\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{c}S\u{1}\u{1}")
 
   fileprivate class _StorageClass {
     var _reqMsgID: UInt64 = 0
@@ -26063,6 +26561,45 @@ nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
             _storage._result = .updateDialogArchived(v)
           }
         }()
+        case 125: try {
+          var v: CreateDialogFolderResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .createDialogFolder(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .createDialogFolder(v)
+          }
+        }()
+        case 126: try {
+          var v: UpdateDialogFolderResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .updateDialogFolder(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .updateDialogFolder(v)
+          }
+        }()
+        case 127: try {
+          var v: DeleteDialogFolderResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .deleteDialogFolder(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .deleteDialogFolder(v)
+          }
+        }()
         default: break
         }
       }
@@ -26566,6 +27103,18 @@ nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
       case .updateDialogArchived?: try {
         guard case .updateDialogArchived(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 124)
+      }()
+      case .createDialogFolder?: try {
+        guard case .createDialogFolder(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 125)
+      }()
+      case .updateDialogFolder?: try {
+        guard case .updateDialogFolder(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 126)
+      }()
+      case .deleteDialogFolder?: try {
+        guard case .deleteDialogFolder(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 127)
       }()
       case nil: break
       }
@@ -29282,6 +29831,64 @@ nonisolated extension UpdateDialogOrderInput: SwiftProtobuf.Message, SwiftProtob
     if lhs._order != rhs._order {return false}
     if lhs._pinnedOrder != rhs._pinnedOrder {return false}
     if lhs._pinned != rhs._pinned {return false}
+    if lhs._destination != rhs._destination {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension DialogFolderDestination: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "DialogFolderDestination"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}root\0\u{3}folder_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: Bool?
+        try decoder.decodeSingularBoolField(value: &v)
+        if let v = v {
+          if self.destination != nil {try decoder.handleConflictingOneOf()}
+          self.destination = .root(v)
+        }
+      }()
+      case 2: try {
+        var v: Int64?
+        try decoder.decodeSingularInt64Field(value: &v)
+        if let v = v {
+          if self.destination != nil {try decoder.handleConflictingOneOf()}
+          self.destination = .folderID(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    switch self.destination {
+    case .root?: try {
+      guard case .root(let v)? = self.destination else { preconditionFailure() }
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 1)
+    }()
+    case .folderID?: try {
+      guard case .folderID(let v)? = self.destination else { preconditionFailure() }
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 2)
+    }()
+    case nil: break
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: DialogFolderDestination, rhs: DialogFolderDestination) -> Bool {
+    if lhs.destination != rhs.destination {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -32647,6 +33254,265 @@ nonisolated extension UpdateDialogArchivedResult: SwiftProtobuf.Message, SwiftPr
   }
 }
 
+nonisolated extension CreateDialogFolderInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "CreateDialogFolderInput"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}title\0\u{1}peers\0\u{1}order\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self._title) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.peers) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._order) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._title {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 1)
+    } }()
+    if !self.peers.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.peers, fieldNumber: 2)
+    }
+    try { if let v = self._order {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: CreateDialogFolderInput, rhs: CreateDialogFolderInput) -> Bool {
+    if lhs._title != rhs._title {return false}
+    if lhs.peers != rhs.peers {return false}
+    if lhs._order != rhs._order {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension CreateDialogFolderResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "CreateDialogFolderResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}folder\0\u{1}dialogs\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._folder) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.dialogs) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._folder {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if !self.dialogs.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.dialogs, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: CreateDialogFolderResult, rhs: CreateDialogFolderResult) -> Bool {
+    if lhs._folder != rhs._folder {return false}
+    if lhs.dialogs != rhs.dialogs {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension UpdateDialogFolderInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateDialogFolderInput"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}folder_id\0\u{1}title\0\u{3}clear_title\0\u{1}order\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.folderID) }()
+      case 2: try {
+        var v: String?
+        try decoder.decodeSingularStringField(value: &v)
+        if let v = v {
+          if self.titleUpdate != nil {try decoder.handleConflictingOneOf()}
+          self.titleUpdate = .title(v)
+        }
+      }()
+      case 3: try {
+        var v: Bool?
+        try decoder.decodeSingularBoolField(value: &v)
+        if let v = v {
+          if self.titleUpdate != nil {try decoder.handleConflictingOneOf()}
+          self.titleUpdate = .clearTitle_p(v)
+        }
+      }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self._order) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.folderID != 0 {
+      try visitor.visitSingularInt64Field(value: self.folderID, fieldNumber: 1)
+    }
+    switch self.titleUpdate {
+    case .title?: try {
+      guard case .title(let v)? = self.titleUpdate else { preconditionFailure() }
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    }()
+    case .clearTitle_p?: try {
+      guard case .clearTitle_p(let v)? = self.titleUpdate else { preconditionFailure() }
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 3)
+    }()
+    case nil: break
+    }
+    try { if let v = self._order {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 4)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateDialogFolderInput, rhs: UpdateDialogFolderInput) -> Bool {
+    if lhs.folderID != rhs.folderID {return false}
+    if lhs.titleUpdate != rhs.titleUpdate {return false}
+    if lhs._order != rhs._order {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension UpdateDialogFolderResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateDialogFolderResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}folder\0\u{1}dialogs\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._folder) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.dialogs) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._folder {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if !self.dialogs.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.dialogs, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateDialogFolderResult, rhs: UpdateDialogFolderResult) -> Bool {
+    if lhs._folder != rhs._folder {return false}
+    if lhs.dialogs != rhs.dialogs {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension DeleteDialogFolderInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "DeleteDialogFolderInput"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}folder_id\0\u{1}disposition\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.folderID) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.disposition) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.folderID != 0 {
+      try visitor.visitSingularInt64Field(value: self.folderID, fieldNumber: 1)
+    }
+    if self.disposition != .unspecified {
+      try visitor.visitSingularEnumField(value: self.disposition, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: DeleteDialogFolderInput, rhs: DeleteDialogFolderInput) -> Bool {
+    if lhs.folderID != rhs.folderID {return false}
+    if lhs.disposition != rhs.disposition {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension DeleteDialogFolderResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "DeleteDialogFolderResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}folder_id\0\u{1}dialogs\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.folderID) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.dialogs) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.folderID != 0 {
+      try visitor.visitSingularInt64Field(value: self.folderID, fieldNumber: 1)
+    }
+    if !self.dialogs.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.dialogs, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: DeleteDialogFolderResult, rhs: DeleteDialogFolderResult) -> Bool {
+    if lhs.folderID != rhs.folderID {return false}
+    if lhs.dialogs != rhs.dialogs {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
 nonisolated extension GetChatsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetChatsInput"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
@@ -32668,7 +33534,7 @@ nonisolated extension GetChatsInput: SwiftProtobuf.Message, SwiftProtobuf._Messa
 
 nonisolated extension GetChatsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetChatsResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}dialogs\0\u{1}chats\0\u{1}spaces\0\u{1}users\0\u{1}messages\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}dialogs\0\u{1}chats\0\u{1}spaces\0\u{1}users\0\u{1}messages\0\u{1}folders\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -32681,6 +33547,7 @@ nonisolated extension GetChatsResult: SwiftProtobuf.Message, SwiftProtobuf._Mess
       case 3: try { try decoder.decodeRepeatedMessageField(value: &self.spaces) }()
       case 4: try { try decoder.decodeRepeatedMessageField(value: &self.users) }()
       case 5: try { try decoder.decodeRepeatedMessageField(value: &self.messages) }()
+      case 6: try { try decoder.decodeRepeatedMessageField(value: &self.folders) }()
       default: break
       }
     }
@@ -32702,6 +33569,9 @@ nonisolated extension GetChatsResult: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if !self.messages.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.messages, fieldNumber: 5)
     }
+    if !self.folders.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.folders, fieldNumber: 6)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -32711,6 +33581,7 @@ nonisolated extension GetChatsResult: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if lhs.spaces != rhs.spaces {return false}
     if lhs.users != rhs.users {return false}
     if lhs.messages != rhs.messages {return false}
+    if lhs.folders != rhs.folders {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -36740,6 +37611,19 @@ nonisolated extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
           self.update = .dialogCollapsedMaxID(v)
         }
       }()
+      case 46: try {
+        var v: UpdateDialogFolder?
+        var hadOneofValue = false
+        if let current = self.update {
+          hadOneofValue = true
+          if case .dialogFolder(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.update = .dialogFolder(v)
+        }
+      }()
       default: break
       }
     }
@@ -36925,6 +37809,10 @@ nonisolated extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
       guard case .dialogCollapsedMaxID(let v)? = self.update else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 45)
     }()
+    case .dialogFolder?: try {
+      guard case .dialogFolder(let v)? = self.update else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 46)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -36934,6 +37822,73 @@ nonisolated extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
     if lhs._seq != rhs._seq {return false}
     if lhs._date != rhs._date {return false}
     if lhs.update != rhs.update {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension UpdateDialogFolder: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateDialogFolder"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}folder\0\u{3}deleted_folder_id\0\u{1}dialogs\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: DialogFolder?
+        var hadOneofValue = false
+        if let current = self.folderChange {
+          hadOneofValue = true
+          if case .folder(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.folderChange = .folder(v)
+        }
+      }()
+      case 2: try {
+        var v: Int64?
+        try decoder.decodeSingularInt64Field(value: &v)
+        if let v = v {
+          if self.folderChange != nil {try decoder.handleConflictingOneOf()}
+          self.folderChange = .deletedFolderID(v)
+        }
+      }()
+      case 3: try { try decoder.decodeRepeatedMessageField(value: &self.dialogs) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    switch self.folderChange {
+    case .folder?: try {
+      guard case .folder(let v)? = self.folderChange else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    }()
+    case .deletedFolderID?: try {
+      guard case .deletedFolderID(let v)? = self.folderChange else { preconditionFailure() }
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 2)
+    }()
+    case nil: break
+    }
+    if !self.dialogs.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.dialogs, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateDialogFolder, rhs: UpdateDialogFolder) -> Bool {
+    if lhs.folderChange != rhs.folderChange {return false}
+    if lhs.dialogs != rhs.dialogs {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

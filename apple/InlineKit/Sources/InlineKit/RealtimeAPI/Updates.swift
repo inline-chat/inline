@@ -171,6 +171,9 @@ public actor UpdatesEngine: Sendable {
         case let .dialogCollapsedMaxID(dialogCollapsedMaxID):
           try dialogCollapsedMaxID.apply(db)
 
+        case let .dialogFolder(dialogFolder):
+          try dialogFolder.apply(db)
+
         case let .chatOpen(chatOpen):
           try chatOpen.apply(db)
 
@@ -692,6 +695,7 @@ enum RealtimeUpdateDiagnostics {
     case .spaceSettings: return "spaceSettings"
     case .chatPermissions: return "chatPermissions"
     case .dialogCollapsedMaxID: return "dialogCollapsedMaxID"
+    case .dialogFolder: return "dialogFolder"
     }
   }
 }

@@ -286,6 +286,12 @@ export interface ServerUpdate {
          */
         userSettings: ServerUserUpdateSettings;
     } | {
+        oneofKind: "userDialogFolder";
+        /**
+         * @generated from protobuf field: server.ServerUserUpdateDialogFolder user_dialog_folder = 44;
+         */
+        userDialogFolder: ServerUserUpdateDialogFolder;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -904,6 +910,35 @@ export interface ServerUserUpdateSettings {
      */
     settings?: UserSettings;
 }
+/**
+ * Atomic personal folder definition/membership projection for a user.
+ *
+ * @generated from protobuf message server.ServerUserUpdateDialogFolder
+ */
+export interface ServerUserUpdateDialogFolder {
+    /**
+     * @generated from protobuf oneof: folder_change
+     */
+    folderChange: {
+        oneofKind: "folder";
+        /**
+         * @generated from protobuf field: DialogFolder folder = 1;
+         */
+        folder: DialogFolder;
+    } | {
+        oneofKind: "deletedFolderId";
+        /**
+         * @generated from protobuf field: int64 deleted_folder_id = 2;
+         */
+        deletedFolderId: bigint;
+    } | {
+        oneofKind: undefined;
+    };
+    /**
+     * @generated from protobuf field: repeated Dialog dialogs = 3;
+     */
+    dialogs: Dialog[];
+}
 // ------------------------------------------------------------
 // Server-only stored payloads
 // ------------------------------------------------------------
@@ -1080,7 +1115,8 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 37, name: "user_chat_participant_group_delete", kind: "message", oneof: "update", T: () => ServerUserUpdateChatParticipantGroupDelete },
             { no: 39, name: "user_chat_permissions", kind: "message", oneof: "update", T: () => ServerUserUpdateChatPermissions },
             { no: 40, name: "user_dialog_collapsed_max_id", kind: "message", oneof: "update", T: () => ServerUserUpdateDialogCollapsedMaxId },
-            { no: 43, name: "user_settings", kind: "message", oneof: "update", T: () => ServerUserUpdateSettings }
+            { no: 43, name: "user_settings", kind: "message", oneof: "update", T: () => ServerUserUpdateSettings },
+            { no: 44, name: "user_dialog_folder", kind: "message", oneof: "update", T: () => ServerUserUpdateDialogFolder }
         ]);
     }
     create(value?: PartialMessage<ServerUpdate>): ServerUpdate {
@@ -1343,6 +1379,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                         userSettings: ServerUserUpdateSettings.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userSettings)
                     };
                     break;
+                case /* server.ServerUserUpdateDialogFolder user_dialog_folder */ 44:
+                    message.update = {
+                        oneofKind: "userDialogFolder",
+                        userDialogFolder: ServerUserUpdateDialogFolder.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userDialogFolder)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -1481,6 +1523,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* server.ServerUserUpdateSettings user_settings = 43; */
         if (message.update.oneofKind === "userSettings")
             ServerUserUpdateSettings.internalBinaryWrite(message.update.userSettings, writer.tag(43, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerUserUpdateDialogFolder user_dialog_folder = 44; */
+        if (message.update.oneofKind === "userDialogFolder")
+            ServerUserUpdateDialogFolder.internalBinaryWrite(message.update.userDialogFolder, writer.tag(44, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -3608,6 +3653,74 @@ class ServerUserUpdateSettings$Type extends MessageType<ServerUserUpdateSettings
  * @generated MessageType for protobuf message server.ServerUserUpdateSettings
  */
 export const ServerUserUpdateSettings = new ServerUserUpdateSettings$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerUserUpdateDialogFolder$Type extends MessageType<ServerUserUpdateDialogFolder> {
+    constructor() {
+        super("server.ServerUserUpdateDialogFolder", [
+            { no: 1, name: "folder", kind: "message", oneof: "folderChange", T: () => DialogFolder },
+            { no: 2, name: "deleted_folder_id", kind: "scalar", oneof: "folderChange", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "dialogs", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Dialog }
+        ]);
+    }
+    create(value?: PartialMessage<ServerUserUpdateDialogFolder>): ServerUserUpdateDialogFolder {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.folderChange = { oneofKind: undefined };
+        message.dialogs = [];
+        if (value !== undefined)
+            reflectionMergePartial<ServerUserUpdateDialogFolder>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerUserUpdateDialogFolder): ServerUserUpdateDialogFolder {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* DialogFolder folder */ 1:
+                    message.folderChange = {
+                        oneofKind: "folder",
+                        folder: DialogFolder.internalBinaryRead(reader, reader.uint32(), options, (message.folderChange as any).folder)
+                    };
+                    break;
+                case /* int64 deleted_folder_id */ 2:
+                    message.folderChange = {
+                        oneofKind: "deletedFolderId",
+                        deletedFolderId: reader.int64().toBigInt()
+                    };
+                    break;
+                case /* repeated Dialog dialogs */ 3:
+                    message.dialogs.push(Dialog.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerUserUpdateDialogFolder, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* DialogFolder folder = 1; */
+        if (message.folderChange.oneofKind === "folder")
+            DialogFolder.internalBinaryWrite(message.folderChange.folder, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* int64 deleted_folder_id = 2; */
+        if (message.folderChange.oneofKind === "deletedFolderId")
+            writer.tag(2, WireType.Varint).int64(message.folderChange.deletedFolderId);
+        /* repeated Dialog dialogs = 3; */
+        for (let i = 0; i < message.dialogs.length; i++)
+            Dialog.internalBinaryWrite(message.dialogs[i], writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerUserUpdateDialogFolder
+ */
+export const ServerUserUpdateDialogFolder = new ServerUserUpdateDialogFolder$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class StoredSpaceSettings$Type extends MessageType<StoredSpaceSettings> {
     constructor() {

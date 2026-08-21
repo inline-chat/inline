@@ -102,6 +102,11 @@ public struct GetChatsTransaction: Transaction2 {
       _ = try updatedChat.saveFull(db)
     }
 
+    // Save folders before dialogs so dialog foreign keys resolve in the same snapshot.
+    for folder in result.folders {
+      try folder.saveFull(db)
+    }
+
     // Save dialogs
     for dialog in result.dialogs {
       try dialog.saveFull(db)

@@ -128,6 +128,7 @@ public struct ChatListItemSnapshot: Identifiable, Codable, Hashable, Sendable {
   public let openedDate: Date?
   public let order: String?
   public let pinnedOrder: String?
+  public let folderID: Int64?
   public let chatType: ChatType?
   public let chatCreatedBy: Int64?
   public let chatIsPublic: Bool?
@@ -160,6 +161,7 @@ public struct ChatListItemSnapshot: Identifiable, Codable, Hashable, Sendable {
     openedDate: Date? = nil,
     order: String? = nil,
     pinnedOrder: String? = nil,
+    folderID: Int64? = nil,
     chatType: ChatType? = nil,
     chatCreatedBy: Int64? = nil,
     chatIsPublic: Bool? = nil,
@@ -191,6 +193,7 @@ public struct ChatListItemSnapshot: Identifiable, Codable, Hashable, Sendable {
     self.openedDate = openedDate
     self.order = order
     self.pinnedOrder = pinnedOrder
+    self.folderID = folderID
     self.chatType = chatType
     self.chatCreatedBy = chatCreatedBy
     self.chatIsPublic = chatIsPublic

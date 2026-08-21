@@ -30,6 +30,7 @@ struct ChatListDatabaseRow {
     case openedDate
     case normalOrder
     case pinnedOrder
+    case folderID
     case followMode
     case chatCreatedBy
     case chatIsPublic

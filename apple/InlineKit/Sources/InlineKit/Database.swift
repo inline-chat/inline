@@ -947,6 +947,24 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("dialog folders") { db in
+      try db.create(table: "dialogFolder") { table in
+        table.column("id", .integer).primaryKey()
+        table.column("title", .text)
+        table.column("order", .text).notNull()
+      }
+      try db.create(index: "dialogFolder_order_idx", on: "dialogFolder", columns: ["order"])
+      try db.alter(table: "dialog") { table in
+        table.add(column: "folderId", .integer)
+          .references("dialogFolder", onDelete: .setNull)
+      }
+      try db.create(
+        index: "dialog_folderId_order_idx",
+        on: "dialog",
+        columns: ["folderId", "order"]
+      )
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

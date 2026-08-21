@@ -25,6 +25,7 @@ const baseDialog: DbDialog = {
   notificationSettings: null,
   followMode: null,
   collapsedMaxId: null,
+  folderId: null,
 }
 
 const encode = (overrides: Partial<DbDialog> = {}) =>

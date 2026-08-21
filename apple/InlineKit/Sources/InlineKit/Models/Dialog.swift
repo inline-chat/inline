@@ -18,6 +18,7 @@ public struct ApiDialog: Codable, Hashable, Sendable {
   public var openedDate: Int64?
   public var order: String?
   public var pinnedOrder: String?
+  public var folderId: Int64?
   public var sidebarVisible: Bool?
   public var chatListHidden: Bool?
   public var collapsedMaxId: Int64?
@@ -46,6 +47,8 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
   public var openedDate: Date?
   public var order: String?
   public var pinnedOrder: String?
+  /// Personal folder membership. Folder and child dialogs share the `order` coordinate.
+  public var folderId: Int64? = nil
   /// True when this dialog should not be shown as its own chat row in chat lists.
   public var chatListHidden: Bool? = nil
   /// Reply-thread automatic surfacing policy; nil means relevance-only default.
@@ -71,6 +74,7 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
     case openedDate
     case order
     case pinnedOrder
+    case folderId
     case chatListHidden
     case followMode
     case collapsedMaxId
@@ -94,6 +98,7 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
     public static let openedDate = Column(CodingKeys.openedDate)
     public static let order = Column(CodingKeys.order)
     public static let pinnedOrder = Column(CodingKeys.pinnedOrder)
+    public static let folderId = Column(CodingKeys.folderId)
     public static let chatListHidden = Column(CodingKeys.chatListHidden)
     public static let followMode = Column(CodingKeys.followMode)
     public static let collapsedMaxId = Column(CodingKeys.collapsedMaxId)
@@ -121,6 +126,11 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
   )
   public var chat: QueryInterfaceRequest<Chat> {
     request(for: Dialog.chat)
+  }
+
+  public static let folder = belongsTo(DialogFolder.self)
+  public var folder: QueryInterfaceRequest<DialogFolder> {
+    request(for: Dialog.folder)
   }
 
   public static let peerThread = belongsTo(
@@ -158,6 +168,7 @@ public extension Dialog {
     openedDate = from.openedDate.map { Date(timeIntervalSince1970: TimeInterval($0)) }
     order = from.order
     pinnedOrder = from.pinnedOrder
+    folderId = from.folderId
     chatListHidden = Self.chatListHidden(from: from.chatListHidden, sidebarVisible: from.sidebarVisible)
     followMode = nil
     collapsedMaxId = from.collapsedMaxId
@@ -185,6 +196,7 @@ public extension Dialog {
     openedDate = nil
     order = nil
     pinnedOrder = nil
+    folderId = nil
     chatListHidden = nil
     followMode = nil
     collapsedMaxId = nil
@@ -214,6 +226,7 @@ public extension Dialog {
     openedDate = nil
     order = nil
     pinnedOrder = nil
+    folderId = nil
     chatListHidden = nil
     followMode = nil
     collapsedMaxId = nil
@@ -247,6 +260,7 @@ public extension Dialog {
     openedDate = from.hasOpenedDate ? Date(timeIntervalSince1970: TimeInterval(from.openedDate)) : nil
     order = from.hasOrder ? from.order : nil
     pinnedOrder = from.hasPinnedOrder ? from.pinnedOrder : nil
+    folderId = from.hasFolderID ? from.folderID : nil
     if from.hasChatListHidden {
       chatListHidden = from.chatListHidden
     } else if from.hasSidebarVisible {
@@ -373,6 +387,9 @@ public extension ApiDialog {
       if pinnedOrder == nil {
         dialog.pinnedOrder = existing.pinnedOrder
       }
+      if folderId == nil {
+        dialog.folderId = existing.folderId
+      }
       if chatListHidden == nil, sidebarVisible == nil {
         dialog.chatListHidden = existing.chatListHidden
       }
@@ -458,6 +475,9 @@ private extension Dialog {
     if let spaceId, try Space.fetchOne(db, id: spaceId) == nil {
       self.spaceId = nil
     }
+    if let folderId, try DialogFolder.fetchOne(db, id: folderId) == nil {
+      self.folderId = nil
+    }
   }
 }
 
@@ -501,15 +521,27 @@ public extension Dialog {
     _ db: Database,
     placement: DialogOpenPlacement
   ) throws -> String {
-    try edgeOrder(
-      db,
-      column: "order",
-      filter: """
-      AND "open" = 1
-      AND ("pinned" IS NULL OR "pinned" = 0)
-      """,
-      placement: placement
-    )
+    let direction = placement == .top ? "ASC" : "DESC"
+    let edge = try SQLRequest<String>(sql: """
+      SELECT "order" FROM (
+        SELECT "order"
+        FROM "dialog"
+        WHERE "order" IS NOT NULL
+          AND "open" = 1
+          AND ("pinned" IS NULL OR "pinned" = 0)
+          AND "folderId" IS NULL
+        UNION ALL
+        SELECT "order" FROM "dialogFolder"
+      )
+      ORDER BY "order" \(direction)
+      LIMIT 1
+      """).fetchOne(db)
+    switch placement {
+    case .top:
+      return FractionalIndex.before(edge)
+    case .bottom:
+      return FractionalIndex.after(edge)
+    }
   }
 
   static func nextPinnedOrder(_ db: Database) throws -> String {

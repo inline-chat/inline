@@ -636,6 +636,7 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
       case "userChatParticipantGroupDelete":
       case "userChatPermissions":
       case "userSettings":
+      case "userDialogFolder":
         inflatedUpdates.push(chatSkipPts(update, chatId))
         break
       case undefined:
@@ -913,6 +914,12 @@ async function buildUserSidecarsForUpdates(input: UserSidecarsForUpdatesInput): 
 
       case "dialogCollapsedMaxId":
         collectPeerSidecarRefs(update.update.dialogCollapsedMaxId.peerId, { chatIds, userIds, spaceIds })
+        break
+
+      case "dialogFolder":
+        for (const dialog of update.update.dialogFolder.dialogs) {
+          collectPeerSidecarRefs(dialog.peer, { chatIds, userIds, spaceIds })
+        }
         break
 
       case "chatOpen":
@@ -1368,6 +1375,7 @@ function convertSpaceUpdate(update: DecryptedUpdate, options?: { sanitizeUsers?:
     case "userChatParticipantGroupDelete":
     case "userChatPermissions":
     case "userSettings":
+    case "userDialogFolder":
       return null
     case undefined:
       throw new Error(`Space sync update ${update.seq} has no payload`)
@@ -1598,6 +1606,19 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
           oneofKind: "updateUserSettings",
           updateUserSettings: {
             settings: payload.userSettings.settings,
+          },
+        },
+      }
+
+    case "userDialogFolder":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "dialogFolder",
+          dialogFolder: {
+            folderChange: payload.userDialogFolder.folderChange,
+            dialogs: payload.userDialogFolder.dialogs,
           },
         },
       }

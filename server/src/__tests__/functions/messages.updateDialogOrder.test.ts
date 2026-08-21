@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { and, eq } from "drizzle-orm"
 import type { InputPeer } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
-import { dialogs } from "@in/server/db/schema"
+import { dialogFolders, dialogs } from "@in/server/db/schema"
 import { updateDialogOrder } from "@in/server/functions/messages.updateDialogOrder"
 import { setupTestLifecycle, testUtils } from "../setup"
 
@@ -217,5 +217,44 @@ describe("messages.updateDialogOrder", () => {
     const pinnedOrders = results.map((result) => result.dialog.pinnedOrder)
 
     expect(new Set(pinnedOrders).size).toBe(pinnedOrders.length)
+  })
+
+  test("moves a DM into a folder and pinning moves it back to the root", async () => {
+    const userA = await testUtils.createUser("dialog-order-folder-a@example.com")
+    const userB = await testUtils.createUser("dialog-order-folder-b@example.com")
+    const { chat } = await testUtils.createPrivateChatWithOptionalDialog({
+      userA,
+      userB,
+      createDialogForUserA: true,
+      createDialogForUserB: false,
+    })
+    const [folder] = await db
+      .insert(dialogFolders)
+      .values({ userId: userA.id, title: null, order: "a" })
+      .returning()
+    if (!folder) throw new Error("Failed to create folder")
+
+    const moved = await updateDialogOrder(
+      {
+        peerId: peerUser(userB.id),
+        destination: { destination: { oneofKind: "folderId", folderId: BigInt(folder.id) } },
+      },
+      testUtils.functionContext({ userId: userA.id, sessionId: 11 }),
+    )
+    expect(moved.dialog.folderId).toBe(BigInt(folder.id))
+    expect(moved.dialog.open).toBe(true)
+    expect(moved.dialog.pinned).toBe(false)
+
+    const pinned = await updateDialogOrder(
+      { peerId: peerUser(userB.id), pinned: true },
+      testUtils.functionContext({ userId: userA.id, sessionId: 11 }),
+    )
+    expect(pinned.dialog.folderId).toBeUndefined()
+
+    const [stored] = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, userA.id)))
+    expect(stored?.folderId).toBeNull()
   })
 })

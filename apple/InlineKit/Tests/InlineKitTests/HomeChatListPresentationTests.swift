@@ -30,8 +30,10 @@ struct HomeChatListPresentationTests {
     let chatID: Int64 = 821
     let firstMessageID: Int64 = 822
     let secondMessageID: Int64 = 823
+    let folderID: Int64 = 824
 
     try await database.dbWriter.write { db in
+      try DialogFolder(id: folderID, title: "Teammates", order: "a").insert(db)
       var user = User(id: userID, email: nil, firstName: "Amy")
       user.profileFileUniqueId = "avatar-v1"
       try user.insert(db)
@@ -61,6 +63,7 @@ struct HomeChatListPresentationTests {
       dialog.chatId = chatID
       dialog.open = true
       dialog.order = "a"
+      dialog.folderId = folderID
       try dialog.insert(db)
     }
 
@@ -88,6 +91,7 @@ struct HomeChatListPresentationTests {
     #expect(initial.previewText == "First preview")
     #expect(initial.unreadCount == 0)
     #expect(initial.order == "a")
+    #expect(initial.folderID == folderID)
     #expect(initial.identity?.userDescriptor?.stableAvatarIdentity == "unique:avatar-v1")
 
     try await database.dbWriter.write { db in
@@ -144,6 +148,7 @@ struct HomeChatListPresentationTests {
     #expect(updated.isPinned)
     #expect(updated.order == "b")
     #expect(updated.pinnedOrder == "p")
+    #expect(updated.folderID == folderID)
     #expect(updated.identity?.userDescriptor?.stableAvatarIdentity == "unique:avatar-v2")
     #expect(recorder.errorDescription == nil)
   }

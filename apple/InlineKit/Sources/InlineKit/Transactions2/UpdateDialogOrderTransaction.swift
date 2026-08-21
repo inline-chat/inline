@@ -4,6 +4,11 @@ import InlineProtocol
 import Logger
 import RealtimeV2
 
+public enum DialogOrderDestination: Sendable, Codable, Equatable {
+  case root
+  case folder(Int64)
+}
+
 public struct UpdateDialogOrderTransaction: Transaction2 {
   public var method: InlineProtocol.Method = .updateDialogOrder
   public var context: Context
@@ -14,6 +19,7 @@ public struct UpdateDialogOrderTransaction: Transaction2 {
     let order: String?
     let pinnedOrder: String?
     let pinned: Bool?
+    let destination: DialogOrderDestination?
     let intentId: String?
   }
 
@@ -23,12 +29,19 @@ public struct UpdateDialogOrderTransaction: Transaction2 {
 
   private var log = Log.scoped("Transactions/UpdateDialogOrder")
 
-  public init(peerId: Peer, order: String? = nil, pinnedOrder: String? = nil, pinned: Bool? = nil) {
+  public init(
+    peerId: Peer,
+    order: String? = nil,
+    pinnedOrder: String? = nil,
+    pinned: Bool? = nil,
+    destination: DialogOrderDestination? = nil
+  ) {
     context = Context(
       peerId: peerId,
       order: order,
       pinnedOrder: pinnedOrder,
       pinned: pinned,
+      destination: destination,
       intentId: UUID().uuidString
     )
   }
@@ -44,6 +57,14 @@ public struct UpdateDialogOrderTransaction: Transaction2 {
       }
       if let pinned = context.pinned {
         $0.pinned = pinned
+      }
+      if let destination = context.destination {
+        $0.destination = .with {
+          switch destination {
+          case .root: $0.root = true
+          case let .folder(folderId): $0.folderID = folderId
+          }
+        }
       }
     })
   }
@@ -122,6 +143,7 @@ public struct UpdateDialogOrderTransaction: Transaction2 {
         dialog.pinnedOrder = original.pinnedOrder
         dialog.archived = original.archived
         dialog.chatListHidden = original.chatListHidden
+        dialog.folderId = original.folderId
         try dialog.save(db, onConflict: .replace)
       }
     } catch {
@@ -138,10 +160,24 @@ public struct UpdateDialogOrderTransaction: Transaction2 {
       dialog.pinnedOrder = pinnedOrder
     }
 
+    if let destination = context.destination {
+      switch destination {
+      case .root:
+        dialog.folderId = nil
+      case let .folder(folderId):
+        dialog.folderId = folderId
+        dialog.pinned = false
+      }
+      dialog.open = true
+      dialog.archived = false
+      dialog.chatListHidden = nil
+    }
+
     guard let pinned = context.pinned else { return }
 
     dialog.pinned = pinned
     if pinned {
+      dialog.folderId = nil
       if dialog.order == nil {
         dialog.order = try Dialog.nextSidebarOrder(db)
       }
@@ -167,8 +203,15 @@ public extension Transaction2 where Self == UpdateDialogOrderTransaction {
     peerId: Peer,
     order: String? = nil,
     pinnedOrder: String? = nil,
-    pinned: Bool? = nil
+    pinned: Bool? = nil,
+    destination: DialogOrderDestination? = nil
   ) -> UpdateDialogOrderTransaction {
-    UpdateDialogOrderTransaction(peerId: peerId, order: order, pinnedOrder: pinnedOrder, pinned: pinned)
+    UpdateDialogOrderTransaction(
+      peerId: peerId,
+      order: order,
+      pinnedOrder: pinnedOrder,
+      pinned: pinned,
+      destination: destination
+    )
   }
 }

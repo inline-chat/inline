@@ -83,6 +83,11 @@ import { showInChatList } from "@in/server/realtime/handlers/messages.showInChat
 import { updateDialogOpen } from "@in/server/realtime/handlers/messages.updateDialogOpen"
 import { updateDialogOrder } from "@in/server/realtime/handlers/messages.updateDialogOrder"
 import {
+  createDialogFolderHandler,
+  deleteDialogFolderHandler,
+  updateDialogFolderHandler,
+} from "@in/server/realtime/handlers/messages.dialogFolders"
+import {
   addSpaceUrlPreviewExclusionHandler,
   getSpaceUrlPreviewExclusionsHandler,
   removeSpaceUrlPreviewExclusionHandler,
@@ -880,6 +885,24 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       const result = await updateDialogOrder(call.input.updateDialogOrder, handlerContext)
       return { oneofKind: "updateDialogOrder", updateDialogOrder: result }
+    }
+
+    case Method.CREATE_DIALOG_FOLDER: {
+      if (call.input.oneofKind !== "createDialogFolder") throw RealtimeRpcError.BadRequest()
+      const result = await createDialogFolderHandler(call.input.createDialogFolder, handlerContext)
+      return { oneofKind: "createDialogFolder", createDialogFolder: result }
+    }
+
+    case Method.UPDATE_DIALOG_FOLDER: {
+      if (call.input.oneofKind !== "updateDialogFolder") throw RealtimeRpcError.BadRequest()
+      const result = await updateDialogFolderHandler(call.input.updateDialogFolder, handlerContext)
+      return { oneofKind: "updateDialogFolder", updateDialogFolder: result }
+    }
+
+    case Method.DELETE_DIALOG_FOLDER: {
+      if (call.input.oneofKind !== "deleteDialogFolder") throw RealtimeRpcError.BadRequest()
+      const result = await deleteDialogFolderHandler(call.input.deleteDialogFolder, handlerContext)
+      return { oneofKind: "deleteDialogFolder", deleteDialogFolder: result }
     }
 
     case Method.RESERVE_CHAT_IDS: {

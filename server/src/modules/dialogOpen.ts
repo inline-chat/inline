@@ -1,7 +1,7 @@
 import { db } from "@in/server/db"
 import { UsersModel } from "@in/server/db/models/users"
 import type { Transaction } from "@in/server/db/types"
-import { chats, dialogs, users, type DbChat, type DbDialog, type DbNewDialog } from "@in/server/db/schema"
+import { chats, dialogFolders, dialogs, users, type DbChat, type DbDialog, type DbNewDialog } from "@in/server/db/schema"
 import { and, asc, desc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm"
 import { FractionalIndex } from "@in/server/modules/fractionalIndex"
 
@@ -91,7 +91,11 @@ export async function dialogOrderForPlacement(
   const laneFilter =
     lane === "pinned"
       ? eq(dialogs.pinned, true)
-      : and(eq(dialogs.open, true), or(isNull(dialogs.pinned), eq(dialogs.pinned, false)))
+      : and(
+          eq(dialogs.open, true),
+          or(isNull(dialogs.pinned), eq(dialogs.pinned, false)),
+          isNull(dialogs.folderId),
+        )
   const [edgeDialog] = await tx
     .select({ order: column })
     .from(dialogs)
@@ -99,7 +103,23 @@ export async function dialogOrderForPlacement(
     .orderBy(placement === "top" ? asc(column) : desc(column))
     .limit(1)
 
-  return dialogOrderAtPlacement(edgeDialog?.order, placement, preferredOrder)
+  let edgeOrder = edgeDialog?.order
+  if (lane === "sidebar") {
+    const [edgeFolder] = await tx
+      .select({ order: dialogFolders.order })
+      .from(dialogFolders)
+      .where(eq(dialogFolders.userId, userId))
+      .orderBy(placement === "top" ? asc(dialogFolders.order) : desc(dialogFolders.order))
+      .limit(1)
+    if (
+      edgeFolder?.order != null &&
+      (edgeOrder == null || (placement === "top" ? edgeFolder.order < edgeOrder : edgeFolder.order > edgeOrder))
+    ) {
+      edgeOrder = edgeFolder.order
+    }
+  }
+
+  return dialogOrderAtPlacement(edgeOrder, placement, preferredOrder)
 }
 
 export function dialogOrderAtPlacement(
@@ -248,10 +268,13 @@ export async function setDialogOpenForUsers(input: {
       }
     } else {
       const persistCloseUserIds = existingDialogs
-        .filter((dialog) => dialog.open !== false || dialog.openedDate != null || dialog.order != null)
+        .filter(
+          (dialog) =>
+            dialog.open !== false || dialog.openedDate != null || dialog.order != null || dialog.folderId != null,
+        )
         .map((dialog) => dialog.userId)
       const changedCloseUserIds = existingDialogs
-        .filter((dialog) => effectiveDialogOpenForDialog(dialog))
+        .filter((dialog) => effectiveDialogOpenForDialog(dialog) || dialog.folderId != null)
         .map((dialog) => dialog.userId)
       const missingUserIds = userIds.filter((userId) => !existingUserIds.has(userId))
 
@@ -262,6 +285,7 @@ export async function setDialogOpenForUsers(input: {
             open: false,
             openedDate: null,
             order: null,
+            folderId: null,
           })
           .where(and(eq(dialogs.chatId, input.chat.id), inArray(dialogs.userId, persistCloseUserIds)))
         changedCloseUserIds.forEach((userId) => changedUserIds.add(userId))

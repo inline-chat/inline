@@ -16,6 +16,7 @@ import { encodeChatParticipant } from "./encodeChatParticipant"
 import { encodeUserSettings } from "./encodeUserSettings"
 import { encodeVoice } from "./encodeVoice"
 import { encodeBotAvatar } from "./encodeBotAvatar"
+import { encodeDialogFolder } from "./encodeDialogFolder"
 export const Encoders = {
   photoLegacy: encodePhotoLegacy,
   message: encodeMessage,
@@ -38,4 +39,5 @@ export const Encoders = {
   chatParticipant: encodeChatParticipant,
   userSettings: encodeUserSettings,
   botAvatar: encodeBotAvatar,
+  dialogFolder: encodeDialogFolder,
 }

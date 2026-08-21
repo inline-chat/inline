@@ -883,6 +883,13 @@
       "when": 1787149333819,
       "tag": "0125_rich-content-blocks",
       "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "7",
+      "when": 1787210512271,
+      "tag": "0126_dialog-folders",
+      "breakpoints": true
     }
   ]
 }

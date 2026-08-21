@@ -1,10 +1,11 @@
-import { pgTable, boolean, unique, integer, text, bytea, index, timestamp } from "drizzle-orm/pg-core"
+import { pgTable, boolean, unique, integer, text, bytea, index, timestamp, foreignKey } from "drizzle-orm/pg-core"
 import { users } from "./users"
 import { spaces } from "./spaces"
 import { relations } from "drizzle-orm/_relations"
 import { chats } from "./chats"
 import { creationDate } from "@in/server/db/schema/common"
 import { serial } from "drizzle-orm/pg-core"
+import { dialogFolders } from "./dialogFolders"
 
 export const dialogs = pgTable(
   "dialogs",
@@ -77,6 +78,9 @@ export const dialogs = pgTable(
 
     /** Personal history-collapse boundary; messages at or below this ID stay hidden. */
     collapsedMaxId: integer("collapsed_max_id"),
+
+    /** Optional personal folder containing this dialog. */
+    folderId: integer("folder_id"),
   },
   (table) => ({
     chatIdUserIdUnique: unique("chat_id_user_id_unique").on(table.chatId, table.userId),
@@ -84,6 +88,16 @@ export const dialogs = pgTable(
     userIdPeerUserIdIndex: index("dialogs_user_id_peer_user_id_idx").on(table.userId, table.peerUserId),
     userIdOrderIndex: index("dialogs_user_id_order_idx").on(table.userId, table.order),
     userIdPinnedOrderIndex: index("dialogs_user_id_pinned_order_idx").on(table.userId, table.pinnedOrder),
+    userIdFolderIdOrderIndex: index("dialogs_user_id_folder_id_order_idx").on(
+      table.userId,
+      table.folderId,
+      table.order,
+    ),
+    folderOwnerForeignKey: foreignKey({
+      columns: [table.folderId, table.userId],
+      foreignColumns: [dialogFolders.id, dialogFolders.userId],
+      name: "dialogs_folder_id_user_id_dialog_folders_id_user_id_fk",
+    }).onDelete("restrict"),
   }),
 )
 
@@ -101,6 +115,11 @@ export const dialogsRelations = relations(dialogs, ({ one }) => ({
   user: one(users, {
     fields: [dialogs.userId],
     references: [users.id],
+  }),
+
+  folder: one(dialogFolders, {
+    fields: [dialogs.folderId, dialogs.userId],
+    references: [dialogFolders.id, dialogFolders.userId],
   }),
 }))
 

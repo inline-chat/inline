@@ -1,4 +1,4 @@
-import type { Chat, Dialog, Message, Space, User } from "@inline-chat/protocol/core"
+import type { Chat, Dialog, DialogFolder, Message, Space, User } from "@inline-chat/protocol/core"
 import { MessageModel } from "@in/server/db/models/messages"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
@@ -20,6 +20,7 @@ import {
 import { DialogsModel } from "@in/server/db/models/dialogs"
 import { encodePeerFromChat } from "@in/server/realtime/encoders/encodePeer"
 import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
+import { getDialogFolders } from "@in/server/modules/dialogFolders"
 
 type Input = {}
 
@@ -29,6 +30,7 @@ type Output = {
   spaces: Space[]
   users: User[]
   messages: Message[]
+  folders: DialogFolder[]
 }
 
 const log = new Log("functions.getChats")
@@ -135,6 +137,7 @@ async function ensurePrivateChatsForSpaceMembers(currentUserId: number): Promise
 
 export const getChats = async (input: Input, context: FunctionContext): Promise<Output> => {
   const currentUserId = context.currentUserId
+  const foldersList = await getDialogFolders(currentUserId)
 
   // TEMPORARY UNTIL getChats is integrated into the clients
   // TODO: DELETE ONCE getChats is integrated into the clients) also remove the tests
@@ -470,6 +473,7 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
     spaces: encodedSpaces,
     users: encodedUsers,
     messages: messagesList,
+    folders: foldersList.map(Encoders.dialogFolder),
   }
 }
 

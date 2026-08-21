@@ -65,6 +65,9 @@ public enum TransactionTypeRegistry {
       case is ShowInChatListTransaction: "show_in_chat_list"
       case is UpdateDialogOpenTransaction: "update_dialog_open"
       case is UpdateDialogOrderTransaction: "update_dialog_order"
+      case is CreateDialogFolderTransaction: "create_dialog_folder"
+      case is UpdateDialogFolderTransaction: "update_dialog_folder"
+      case is DeleteDialogFolderTransaction: "delete_dialog_folder"
       default: "unknown"
     }
   }
@@ -141,6 +144,12 @@ public enum TransactionTypeRegistry {
         return try decoder.decode(UpdateDialogOpenTransaction.self, from: data)
       case "update_dialog_order":
         return try decoder.decode(UpdateDialogOrderTransaction.self, from: data)
+      case "create_dialog_folder":
+        return try decoder.decode(CreateDialogFolderTransaction.self, from: data)
+      case "update_dialog_folder":
+        return try decoder.decode(UpdateDialogFolderTransaction.self, from: data)
+      case "delete_dialog_folder":
+        return try decoder.decode(DeleteDialogFolderTransaction.self, from: data)
       default: throw TransactionTypeError.unknownTransactionType(type)
     }
   }

@@ -8,6 +8,7 @@ export const relations = defineRelations(
     chatIdReservations: schema.chatIdReservations,
     chatParticipants: schema.chatParticipants,
     dialogs: schema.dialogs,
+    dialogFolders: schema.dialogFolders,
     messages: schema.messages,
     users: schema.users,
     integrations: schema.integrations,
@@ -60,6 +61,7 @@ export const relations = defineRelations(
       botMessageRoutes: r.many.botMessageRoutes(),
       chatIdReservations: r.many.chatIdReservations(),
       userGroupMemberships: r.many.userGroupMembers(),
+      dialogFolders: r.many.dialogFolders(),
     },
 
     chatIdReservations: {
@@ -197,6 +199,19 @@ export const relations = defineRelations(
         to: r.users.id,
         optional: true,
       }),
+      folder: r.one.dialogFolders({
+        from: [r.dialogs.folderId, r.dialogs.userId],
+        to: [r.dialogFolders.id, r.dialogFolders.userId],
+        optional: true,
+      }),
+    },
+
+    dialogFolders: {
+      user: r.one.users({
+        from: r.dialogFolders.userId,
+        to: r.users.id,
+      }),
+      dialogs: r.many.dialogs(),
     },
 
     // Message relations - handles message content and metadata

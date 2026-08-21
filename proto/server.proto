@@ -56,6 +56,7 @@ message ServerUpdate {
     ServerUserUpdateChatPermissions user_chat_permissions = 39;
     ServerUserUpdateDialogCollapsedMaxId user_dialog_collapsed_max_id = 40;
     ServerUserUpdateSettings user_settings = 43;
+    ServerUserUpdateDialogFolder user_dialog_folder = 44;
   }
 }
 
@@ -308,6 +309,15 @@ message ServerUserUpdateUser { User user = 1; }
 // snapshot is kept in the durable user bucket so reconnect/catch-up preserves
 // the same order as the settings write.
 message ServerUserUpdateSettings { UserSettings settings = 1; }
+
+// Atomic personal folder definition/membership projection for a user.
+message ServerUserUpdateDialogFolder {
+  oneof folder_change {
+    DialogFolder folder = 1;
+    int64 deleted_folder_id = 2;
+  }
+  repeated Dialog dialogs = 3;
+}
 
 // ------------------------------------------------------------
 // Server-only stored payloads

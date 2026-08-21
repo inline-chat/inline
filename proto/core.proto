@@ -249,6 +249,15 @@ message Dialog {
   optional DialogFollowMode follow_mode = 16;
   // Personal history-collapse boundary; messages at or below this ID stay hidden.
   optional int64 collapsed_max_id = 17;
+  // Optional personal dialog folder. Unsupported clients continue rendering the dialog flat.
+  optional int64 folder_id = 18;
+}
+
+message DialogFolder {
+  int64 id = 1;
+  optional string title = 2;
+  // Uses the same fractional ordering coordinate as Dialog.order.
+  string order = 3;
 }
 
 enum DialogFollowMode {
@@ -1128,6 +1137,9 @@ enum Method {
   CANCEL_UPLOAD = 121;
   UPDATE_SESSION = 122;
   UPDATE_DIALOG_ARCHIVED = 123;
+  CREATE_DIALOG_FOLDER = 124;
+  UPDATE_DIALOG_FOLDER = 125;
+  DELETE_DIALOG_FOLDER = 126;
 }
 
 message RpcCall {
@@ -1256,6 +1268,9 @@ message RpcCall {
     CancelUploadInput cancelUpload = 122;
     UpdateSessionInput updateSession = 123;
     UpdateDialogArchivedInput updateDialogArchived = 124;
+    CreateDialogFolderInput createDialogFolder = 125;
+    UpdateDialogFolderInput updateDialogFolder = 126;
+    DeleteDialogFolderInput deleteDialogFolder = 127;
   }
 }
 
@@ -1386,6 +1401,9 @@ message RpcResult {
     CancelUploadResult cancelUpload = 122;
     UpdateSessionResult updateSession = 123;
     UpdateDialogArchivedResult updateDialogArchived = 124;
+    CreateDialogFolderResult createDialogFolder = 125;
+    UpdateDialogFolderResult updateDialogFolder = 126;
+    DeleteDialogFolderResult deleteDialogFolder = 127;
   }
 }
 
@@ -1807,6 +1825,18 @@ message UpdateDialogOrderInput {
 
   // Optional pin state change when reordering across sidebar lanes.
   optional bool pinned = 4;
+
+  // Optional placement change. Omit to leave folder membership unchanged.
+  optional DialogFolderDestination destination = 5;
+}
+
+message DialogFolderDestination {
+  oneof destination {
+    // Move the dialog to the root open lane.
+    bool root = 1;
+    // Move the dialog into this folder.
+    int64 folder_id = 2;
+  }
 }
 
 message UpdateDialogOrderResult {
@@ -2301,6 +2331,47 @@ message UpdateDialogArchivedInput {
 
 message UpdateDialogArchivedResult { repeated Update updates = 1; }
 
+message CreateDialogFolderInput {
+  optional string title = 1;
+  repeated InputPeer peers = 2;
+  optional string order = 3;
+}
+
+message CreateDialogFolderResult {
+  DialogFolder folder = 1;
+  repeated Dialog dialogs = 2;
+}
+
+message UpdateDialogFolderInput {
+  int64 folder_id = 1;
+  oneof title_update {
+    string title = 2;
+    bool clear_title = 3;
+  }
+  optional string order = 4;
+}
+
+message UpdateDialogFolderResult {
+  DialogFolder folder = 1;
+  repeated Dialog dialogs = 2;
+}
+
+enum DeleteDialogFolderDisposition {
+  DELETE_DIALOG_FOLDER_DISPOSITION_UNSPECIFIED = 0;
+  CLOSE_DIALOGS = 1;
+  KEEP_DIALOGS = 2;
+}
+
+message DeleteDialogFolderInput {
+  int64 folder_id = 1;
+  DeleteDialogFolderDisposition disposition = 2;
+}
+
+message DeleteDialogFolderResult {
+  int64 folder_id = 1;
+  repeated Dialog dialogs = 2;
+}
+
 message GetChatsInput {}
 
 message GetChatsResult {
@@ -2318,6 +2389,9 @@ message GetChatsResult {
 
   // Messages referenced in the chats
   repeated Message messages = 5;
+
+  // Personal dialog folders. Dialogs remain present for unsupported clients.
+  repeated DialogFolder folders = 6;
 }
 
 message TranslateMessagesInput {
@@ -2996,7 +3070,17 @@ message Update {
     UpdateSpaceSettings space_settings = 43;
     UpdateChatPermissions chat_permissions = 44;
     UpdateDialogCollapsedMaxId dialog_collapsed_max_id = 45;
+    UpdateDialogFolder dialog_folder = 46;
   }
+}
+
+message UpdateDialogFolder {
+  oneof folder_change {
+    DialogFolder folder = 1;
+    int64 deleted_folder_id = 2;
+  }
+  // Complete authoritative dialog snapshots changed by this folder mutation.
+  repeated Dialog dialogs = 3;
 }
 
 message UpdateSpaceHasNewUpdates {

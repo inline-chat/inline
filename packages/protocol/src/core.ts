@@ -753,6 +753,31 @@ export interface Dialog {
      * @generated from protobuf field: optional int64 collapsed_max_id = 17;
      */
     collapsedMaxId?: bigint;
+    /**
+     * Optional personal dialog folder. Unsupported clients continue rendering the dialog flat.
+     *
+     * @generated from protobuf field: optional int64 folder_id = 18;
+     */
+    folderId?: bigint;
+}
+/**
+ * @generated from protobuf message DialogFolder
+ */
+export interface DialogFolder {
+    /**
+     * @generated from protobuf field: int64 id = 1;
+     */
+    id: bigint;
+    /**
+     * @generated from protobuf field: optional string title = 2;
+     */
+    title?: string;
+    /**
+     * Uses the same fractional ordering coordinate as Dialog.order.
+     *
+     * @generated from protobuf field: string order = 3;
+     */
+    order: string;
 }
 /**
  * Effective actions the current user may take on a chat.
@@ -3295,6 +3320,24 @@ export interface RpcCall {
          */
         updateDialogArchived: UpdateDialogArchivedInput;
     } | {
+        oneofKind: "createDialogFolder";
+        /**
+         * @generated from protobuf field: CreateDialogFolderInput createDialogFolder = 125;
+         */
+        createDialogFolder: CreateDialogFolderInput;
+    } | {
+        oneofKind: "updateDialogFolder";
+        /**
+         * @generated from protobuf field: UpdateDialogFolderInput updateDialogFolder = 126;
+         */
+        updateDialogFolder: UpdateDialogFolderInput;
+    } | {
+        oneofKind: "deleteDialogFolder";
+        /**
+         * @generated from protobuf field: DeleteDialogFolderInput deleteDialogFolder = 127;
+         */
+        deleteDialogFolder: DeleteDialogFolderInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -4041,6 +4084,24 @@ export interface RpcResult {
          * @generated from protobuf field: UpdateDialogArchivedResult updateDialogArchived = 124;
          */
         updateDialogArchived: UpdateDialogArchivedResult;
+    } | {
+        oneofKind: "createDialogFolder";
+        /**
+         * @generated from protobuf field: CreateDialogFolderResult createDialogFolder = 125;
+         */
+        createDialogFolder: CreateDialogFolderResult;
+    } | {
+        oneofKind: "updateDialogFolder";
+        /**
+         * @generated from protobuf field: UpdateDialogFolderResult updateDialogFolder = 126;
+         */
+        updateDialogFolder: UpdateDialogFolderResult;
+    } | {
+        oneofKind: "deleteDialogFolder";
+        /**
+         * @generated from protobuf field: DeleteDialogFolderResult deleteDialogFolder = 127;
+         */
+        deleteDialogFolder: DeleteDialogFolderResult;
     } | {
         oneofKind: undefined;
     };
@@ -5132,6 +5193,39 @@ export interface UpdateDialogOrderInput {
      * @generated from protobuf field: optional bool pinned = 4;
      */
     pinned?: boolean;
+    /**
+     * Optional placement change. Omit to leave folder membership unchanged.
+     *
+     * @generated from protobuf field: optional DialogFolderDestination destination = 5;
+     */
+    destination?: DialogFolderDestination;
+}
+/**
+ * @generated from protobuf message DialogFolderDestination
+ */
+export interface DialogFolderDestination {
+    /**
+     * @generated from protobuf oneof: destination
+     */
+    destination: {
+        oneofKind: "root";
+        /**
+         * Move the dialog to the root open lane.
+         *
+         * @generated from protobuf field: bool root = 1;
+         */
+        root: boolean;
+    } | {
+        oneofKind: "folderId";
+        /**
+         * Move the dialog into this folder.
+         *
+         * @generated from protobuf field: int64 folder_id = 2;
+         */
+        folderId: bigint;
+    } | {
+        oneofKind: undefined;
+    };
 }
 /**
  * @generated from protobuf message UpdateDialogOrderResult
@@ -6448,6 +6542,106 @@ export interface UpdateDialogArchivedResult {
     updates: Update[];
 }
 /**
+ * @generated from protobuf message CreateDialogFolderInput
+ */
+export interface CreateDialogFolderInput {
+    /**
+     * @generated from protobuf field: optional string title = 1;
+     */
+    title?: string;
+    /**
+     * @generated from protobuf field: repeated InputPeer peers = 2;
+     */
+    peers: InputPeer[];
+    /**
+     * @generated from protobuf field: optional string order = 3;
+     */
+    order?: string;
+}
+/**
+ * @generated from protobuf message CreateDialogFolderResult
+ */
+export interface CreateDialogFolderResult {
+    /**
+     * @generated from protobuf field: DialogFolder folder = 1;
+     */
+    folder?: DialogFolder;
+    /**
+     * @generated from protobuf field: repeated Dialog dialogs = 2;
+     */
+    dialogs: Dialog[];
+}
+/**
+ * @generated from protobuf message UpdateDialogFolderInput
+ */
+export interface UpdateDialogFolderInput {
+    /**
+     * @generated from protobuf field: int64 folder_id = 1;
+     */
+    folderId: bigint;
+    /**
+     * @generated from protobuf oneof: title_update
+     */
+    titleUpdate: {
+        oneofKind: "title";
+        /**
+         * @generated from protobuf field: string title = 2;
+         */
+        title: string;
+    } | {
+        oneofKind: "clearTitle";
+        /**
+         * @generated from protobuf field: bool clear_title = 3;
+         */
+        clearTitle: boolean;
+    } | {
+        oneofKind: undefined;
+    };
+    /**
+     * @generated from protobuf field: optional string order = 4;
+     */
+    order?: string;
+}
+/**
+ * @generated from protobuf message UpdateDialogFolderResult
+ */
+export interface UpdateDialogFolderResult {
+    /**
+     * @generated from protobuf field: DialogFolder folder = 1;
+     */
+    folder?: DialogFolder;
+    /**
+     * @generated from protobuf field: repeated Dialog dialogs = 2;
+     */
+    dialogs: Dialog[];
+}
+/**
+ * @generated from protobuf message DeleteDialogFolderInput
+ */
+export interface DeleteDialogFolderInput {
+    /**
+     * @generated from protobuf field: int64 folder_id = 1;
+     */
+    folderId: bigint;
+    /**
+     * @generated from protobuf field: DeleteDialogFolderDisposition disposition = 2;
+     */
+    disposition: DeleteDialogFolderDisposition;
+}
+/**
+ * @generated from protobuf message DeleteDialogFolderResult
+ */
+export interface DeleteDialogFolderResult {
+    /**
+     * @generated from protobuf field: int64 folder_id = 1;
+     */
+    folderId: bigint;
+    /**
+     * @generated from protobuf field: repeated Dialog dialogs = 2;
+     */
+    dialogs: Dialog[];
+}
+/**
  * @generated from protobuf message GetChatsInput
  */
 export interface GetChatsInput {
@@ -6486,6 +6680,12 @@ export interface GetChatsResult {
      * @generated from protobuf field: repeated Message messages = 5;
      */
     messages: Message[];
+    /**
+     * Personal dialog folders. Dialogs remain present for unsupported clients.
+     *
+     * @generated from protobuf field: repeated DialogFolder folders = 6;
+     */
+    folders: DialogFolder[];
 }
 /**
  * @generated from protobuf message TranslateMessagesInput
@@ -8264,8 +8464,43 @@ export interface Update {
          */
         dialogCollapsedMaxId: UpdateDialogCollapsedMaxId;
     } | {
+        oneofKind: "dialogFolder";
+        /**
+         * @generated from protobuf field: UpdateDialogFolder dialog_folder = 46;
+         */
+        dialogFolder: UpdateDialogFolder;
+    } | {
         oneofKind: undefined;
     };
+}
+/**
+ * @generated from protobuf message UpdateDialogFolder
+ */
+export interface UpdateDialogFolder {
+    /**
+     * @generated from protobuf oneof: folder_change
+     */
+    folderChange: {
+        oneofKind: "folder";
+        /**
+         * @generated from protobuf field: DialogFolder folder = 1;
+         */
+        folder: DialogFolder;
+    } | {
+        oneofKind: "deletedFolderId";
+        /**
+         * @generated from protobuf field: int64 deleted_folder_id = 2;
+         */
+        deletedFolderId: bigint;
+    } | {
+        oneofKind: undefined;
+    };
+    /**
+     * Complete authoritative dialog snapshots changed by this folder mutation.
+     *
+     * @generated from protobuf field: repeated Dialog dialogs = 3;
+     */
+    dialogs: Dialog[];
 }
 /**
  * @generated from protobuf message UpdateSpaceHasNewUpdates
@@ -11331,7 +11566,19 @@ export enum Method {
     /**
      * @generated from protobuf enum value: UPDATE_DIALOG_ARCHIVED = 123;
      */
-    UPDATE_DIALOG_ARCHIVED = 123
+    UPDATE_DIALOG_ARCHIVED = 123,
+    /**
+     * @generated from protobuf enum value: CREATE_DIALOG_FOLDER = 124;
+     */
+    CREATE_DIALOG_FOLDER = 124,
+    /**
+     * @generated from protobuf enum value: UPDATE_DIALOG_FOLDER = 125;
+     */
+    UPDATE_DIALOG_FOLDER = 125,
+    /**
+     * @generated from protobuf enum value: DELETE_DIALOG_FOLDER = 126;
+     */
+    DELETE_DIALOG_FOLDER = 126
 }
 /**
  * @generated from protobuf enum GridConnectionUnavailableReason
@@ -11429,6 +11676,23 @@ export enum PushNotificationProvider {
      * @generated from protobuf enum value: PUSH_NOTIFICATION_PROVIDER_EXPO_ANDROID = 2;
      */
     EXPO_ANDROID = 2
+}
+/**
+ * @generated from protobuf enum DeleteDialogFolderDisposition
+ */
+export enum DeleteDialogFolderDisposition {
+    /**
+     * @generated from protobuf enum value: DELETE_DIALOG_FOLDER_DISPOSITION_UNSPECIFIED = 0;
+     */
+    DELETE_DIALOG_FOLDER_DISPOSITION_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: CLOSE_DIALOGS = 1;
+     */
+    CLOSE_DIALOGS = 1,
+    /**
+     * @generated from protobuf enum value: KEEP_DIALOGS = 2;
+     */
+    KEEP_DIALOGS = 2
 }
 /**
  * @generated from protobuf enum GetChatHistoryMode
@@ -13442,6 +13706,9 @@ class Dialog$Type extends MessageType<Dialog> {
                 case /* optional int64 collapsed_max_id */ 17:
                     message.collapsedMaxId = reader.int64().toBigInt();
                     break;
+                case /* optional int64 folder_id */ 18:
+                    message.folderId = reader.int64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -13505,6 +13772,9 @@ class Dialog$Type extends MessageType<Dialog> {
         /* optional int64 collapsed_max_id = 17; */
         if (message.collapsedMaxId !== undefined)
             writer.tag(17, WireType.Varint).int64(message.collapsedMaxId);
+        /* optional int64 folder_id = 18; */
+        if (message.folderId !== undefined)
+            writer.tag(18, WireType.Varint).int64(message.folderId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -13515,6 +13785,68 @@ class Dialog$Type extends MessageType<Dialog> {
  * @generated MessageType for protobuf message Dialog
  */
 export const Dialog = new Dialog$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class DialogFolder$Type extends MessageType<DialogFolder> {
+    constructor() {
+        super("DialogFolder", [
+            { no: 1, name: "id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "order", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<DialogFolder>): DialogFolder {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.id = 0n;
+        message.order = "";
+        if (value !== undefined)
+            reflectionMergePartial<DialogFolder>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: DialogFolder): DialogFolder {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 id */ 1:
+                    message.id = reader.int64().toBigInt();
+                    break;
+                case /* optional string title */ 2:
+                    message.title = reader.string();
+                    break;
+                case /* string order */ 3:
+                    message.order = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: DialogFolder, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 id = 1; */
+        if (message.id !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.id);
+        /* optional string title = 2; */
+        if (message.title !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.title);
+        /* string order = 3; */
+        if (message.order !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.order);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message DialogFolder
+ */
+export const DialogFolder = new DialogFolder$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ChatPermissions$Type extends MessageType<ChatPermissions> {
     constructor() {
@@ -17473,7 +17805,10 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 121, name: "finishUpload", kind: "message", oneof: "input", T: () => FinishUploadInput },
             { no: 122, name: "cancelUpload", kind: "message", oneof: "input", T: () => CancelUploadInput },
             { no: 123, name: "updateSession", kind: "message", oneof: "input", T: () => UpdateSessionInput },
-            { no: 124, name: "updateDialogArchived", kind: "message", oneof: "input", T: () => UpdateDialogArchivedInput }
+            { no: 124, name: "updateDialogArchived", kind: "message", oneof: "input", T: () => UpdateDialogArchivedInput },
+            { no: 125, name: "createDialogFolder", kind: "message", oneof: "input", T: () => CreateDialogFolderInput },
+            { no: 126, name: "updateDialogFolder", kind: "message", oneof: "input", T: () => UpdateDialogFolderInput },
+            { no: 127, name: "deleteDialogFolder", kind: "message", oneof: "input", T: () => DeleteDialogFolderInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -18224,6 +18559,24 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         updateDialogArchived: UpdateDialogArchivedInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).updateDialogArchived)
                     };
                     break;
+                case /* CreateDialogFolderInput createDialogFolder */ 125:
+                    message.input = {
+                        oneofKind: "createDialogFolder",
+                        createDialogFolder: CreateDialogFolderInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).createDialogFolder)
+                    };
+                    break;
+                case /* UpdateDialogFolderInput updateDialogFolder */ 126:
+                    message.input = {
+                        oneofKind: "updateDialogFolder",
+                        updateDialogFolder: UpdateDialogFolderInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).updateDialogFolder)
+                    };
+                    break;
+                case /* DeleteDialogFolderInput deleteDialogFolder */ 127:
+                    message.input = {
+                        oneofKind: "deleteDialogFolder",
+                        deleteDialogFolder: DeleteDialogFolderInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).deleteDialogFolder)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -18605,6 +18958,15 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* UpdateDialogArchivedInput updateDialogArchived = 124; */
         if (message.input.oneofKind === "updateDialogArchived")
             UpdateDialogArchivedInput.internalBinaryWrite(message.input.updateDialogArchived, writer.tag(124, WireType.LengthDelimited).fork(), options).join();
+        /* CreateDialogFolderInput createDialogFolder = 125; */
+        if (message.input.oneofKind === "createDialogFolder")
+            CreateDialogFolderInput.internalBinaryWrite(message.input.createDialogFolder, writer.tag(125, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateDialogFolderInput updateDialogFolder = 126; */
+        if (message.input.oneofKind === "updateDialogFolder")
+            UpdateDialogFolderInput.internalBinaryWrite(message.input.updateDialogFolder, writer.tag(126, WireType.LengthDelimited).fork(), options).join();
+        /* DeleteDialogFolderInput deleteDialogFolder = 127; */
+        if (message.input.oneofKind === "deleteDialogFolder")
+            DeleteDialogFolderInput.internalBinaryWrite(message.input.deleteDialogFolder, writer.tag(127, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -18741,7 +19103,10 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 121, name: "finishUpload", kind: "message", oneof: "result", T: () => FinishUploadResult },
             { no: 122, name: "cancelUpload", kind: "message", oneof: "result", T: () => CancelUploadResult },
             { no: 123, name: "updateSession", kind: "message", oneof: "result", T: () => UpdateSessionResult },
-            { no: 124, name: "updateDialogArchived", kind: "message", oneof: "result", T: () => UpdateDialogArchivedResult }
+            { no: 124, name: "updateDialogArchived", kind: "message", oneof: "result", T: () => UpdateDialogArchivedResult },
+            { no: 125, name: "createDialogFolder", kind: "message", oneof: "result", T: () => CreateDialogFolderResult },
+            { no: 126, name: "updateDialogFolder", kind: "message", oneof: "result", T: () => UpdateDialogFolderResult },
+            { no: 127, name: "deleteDialogFolder", kind: "message", oneof: "result", T: () => DeleteDialogFolderResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -19492,6 +19857,24 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         updateDialogArchived: UpdateDialogArchivedResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).updateDialogArchived)
                     };
                     break;
+                case /* CreateDialogFolderResult createDialogFolder */ 125:
+                    message.result = {
+                        oneofKind: "createDialogFolder",
+                        createDialogFolder: CreateDialogFolderResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).createDialogFolder)
+                    };
+                    break;
+                case /* UpdateDialogFolderResult updateDialogFolder */ 126:
+                    message.result = {
+                        oneofKind: "updateDialogFolder",
+                        updateDialogFolder: UpdateDialogFolderResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).updateDialogFolder)
+                    };
+                    break;
+                case /* DeleteDialogFolderResult deleteDialogFolder */ 127:
+                    message.result = {
+                        oneofKind: "deleteDialogFolder",
+                        deleteDialogFolder: DeleteDialogFolderResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).deleteDialogFolder)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -19873,6 +20256,15 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* UpdateDialogArchivedResult updateDialogArchived = 124; */
         if (message.result.oneofKind === "updateDialogArchived")
             UpdateDialogArchivedResult.internalBinaryWrite(message.result.updateDialogArchived, writer.tag(124, WireType.LengthDelimited).fork(), options).join();
+        /* CreateDialogFolderResult createDialogFolder = 125; */
+        if (message.result.oneofKind === "createDialogFolder")
+            CreateDialogFolderResult.internalBinaryWrite(message.result.createDialogFolder, writer.tag(125, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateDialogFolderResult updateDialogFolder = 126; */
+        if (message.result.oneofKind === "updateDialogFolder")
+            UpdateDialogFolderResult.internalBinaryWrite(message.result.updateDialogFolder, writer.tag(126, WireType.LengthDelimited).fork(), options).join();
+        /* DeleteDialogFolderResult deleteDialogFolder = 127; */
+        if (message.result.oneofKind === "deleteDialogFolder")
+            DeleteDialogFolderResult.internalBinaryWrite(message.result.deleteDialogFolder, writer.tag(127, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -23478,7 +23870,8 @@ class UpdateDialogOrderInput$Type extends MessageType<UpdateDialogOrderInput> {
             { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
             { no: 2, name: "order", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "pinned_order", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 4, name: "pinned", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 4, name: "pinned", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 5, name: "destination", kind: "message", T: () => DialogFolderDestination }
         ]);
     }
     create(value?: PartialMessage<UpdateDialogOrderInput>): UpdateDialogOrderInput {
@@ -23504,6 +23897,9 @@ class UpdateDialogOrderInput$Type extends MessageType<UpdateDialogOrderInput> {
                 case /* optional bool pinned */ 4:
                     message.pinned = reader.bool();
                     break;
+                case /* optional DialogFolderDestination destination */ 5:
+                    message.destination = DialogFolderDestination.internalBinaryRead(reader, reader.uint32(), options, message.destination);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -23528,6 +23924,9 @@ class UpdateDialogOrderInput$Type extends MessageType<UpdateDialogOrderInput> {
         /* optional bool pinned = 4; */
         if (message.pinned !== undefined)
             writer.tag(4, WireType.Varint).bool(message.pinned);
+        /* optional DialogFolderDestination destination = 5; */
+        if (message.destination)
+            DialogFolderDestination.internalBinaryWrite(message.destination, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -23538,6 +23937,66 @@ class UpdateDialogOrderInput$Type extends MessageType<UpdateDialogOrderInput> {
  * @generated MessageType for protobuf message UpdateDialogOrderInput
  */
 export const UpdateDialogOrderInput = new UpdateDialogOrderInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class DialogFolderDestination$Type extends MessageType<DialogFolderDestination> {
+    constructor() {
+        super("DialogFolderDestination", [
+            { no: 1, name: "root", kind: "scalar", oneof: "destination", T: 8 /*ScalarType.BOOL*/ },
+            { no: 2, name: "folder_id", kind: "scalar", oneof: "destination", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<DialogFolderDestination>): DialogFolderDestination {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.destination = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<DialogFolderDestination>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: DialogFolderDestination): DialogFolderDestination {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool root */ 1:
+                    message.destination = {
+                        oneofKind: "root",
+                        root: reader.bool()
+                    };
+                    break;
+                case /* int64 folder_id */ 2:
+                    message.destination = {
+                        oneofKind: "folderId",
+                        folderId: reader.int64().toBigInt()
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: DialogFolderDestination, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool root = 1; */
+        if (message.destination.oneofKind === "root")
+            writer.tag(1, WireType.Varint).bool(message.destination.root);
+        /* int64 folder_id = 2; */
+        if (message.destination.oneofKind === "folderId")
+            writer.tag(2, WireType.Varint).int64(message.destination.folderId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message DialogFolderDestination
+ */
+export const DialogFolderDestination = new DialogFolderDestination$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UpdateDialogOrderResult$Type extends MessageType<UpdateDialogOrderResult> {
     constructor() {
@@ -28279,6 +28738,360 @@ class UpdateDialogArchivedResult$Type extends MessageType<UpdateDialogArchivedRe
  */
 export const UpdateDialogArchivedResult = new UpdateDialogArchivedResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class CreateDialogFolderInput$Type extends MessageType<CreateDialogFolderInput> {
+    constructor() {
+        super("CreateDialogFolderInput", [
+            { no: 1, name: "title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "peers", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => InputPeer },
+            { no: 3, name: "order", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<CreateDialogFolderInput>): CreateDialogFolderInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.peers = [];
+        if (value !== undefined)
+            reflectionMergePartial<CreateDialogFolderInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CreateDialogFolderInput): CreateDialogFolderInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional string title */ 1:
+                    message.title = reader.string();
+                    break;
+                case /* repeated InputPeer peers */ 2:
+                    message.peers.push(InputPeer.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional string order */ 3:
+                    message.order = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CreateDialogFolderInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional string title = 1; */
+        if (message.title !== undefined)
+            writer.tag(1, WireType.LengthDelimited).string(message.title);
+        /* repeated InputPeer peers = 2; */
+        for (let i = 0; i < message.peers.length; i++)
+            InputPeer.internalBinaryWrite(message.peers[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional string order = 3; */
+        if (message.order !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.order);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message CreateDialogFolderInput
+ */
+export const CreateDialogFolderInput = new CreateDialogFolderInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CreateDialogFolderResult$Type extends MessageType<CreateDialogFolderResult> {
+    constructor() {
+        super("CreateDialogFolderResult", [
+            { no: 1, name: "folder", kind: "message", T: () => DialogFolder },
+            { no: 2, name: "dialogs", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Dialog }
+        ]);
+    }
+    create(value?: PartialMessage<CreateDialogFolderResult>): CreateDialogFolderResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.dialogs = [];
+        if (value !== undefined)
+            reflectionMergePartial<CreateDialogFolderResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CreateDialogFolderResult): CreateDialogFolderResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* DialogFolder folder */ 1:
+                    message.folder = DialogFolder.internalBinaryRead(reader, reader.uint32(), options, message.folder);
+                    break;
+                case /* repeated Dialog dialogs */ 2:
+                    message.dialogs.push(Dialog.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CreateDialogFolderResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* DialogFolder folder = 1; */
+        if (message.folder)
+            DialogFolder.internalBinaryWrite(message.folder, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Dialog dialogs = 2; */
+        for (let i = 0; i < message.dialogs.length; i++)
+            Dialog.internalBinaryWrite(message.dialogs[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message CreateDialogFolderResult
+ */
+export const CreateDialogFolderResult = new CreateDialogFolderResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateDialogFolderInput$Type extends MessageType<UpdateDialogFolderInput> {
+    constructor() {
+        super("UpdateDialogFolderInput", [
+            { no: 1, name: "folder_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "title", kind: "scalar", oneof: "titleUpdate", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "clear_title", kind: "scalar", oneof: "titleUpdate", T: 8 /*ScalarType.BOOL*/ },
+            { no: 4, name: "order", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateDialogFolderInput>): UpdateDialogFolderInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.folderId = 0n;
+        message.titleUpdate = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<UpdateDialogFolderInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateDialogFolderInput): UpdateDialogFolderInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 folder_id */ 1:
+                    message.folderId = reader.int64().toBigInt();
+                    break;
+                case /* string title */ 2:
+                    message.titleUpdate = {
+                        oneofKind: "title",
+                        title: reader.string()
+                    };
+                    break;
+                case /* bool clear_title */ 3:
+                    message.titleUpdate = {
+                        oneofKind: "clearTitle",
+                        clearTitle: reader.bool()
+                    };
+                    break;
+                case /* optional string order */ 4:
+                    message.order = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateDialogFolderInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 folder_id = 1; */
+        if (message.folderId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.folderId);
+        /* string title = 2; */
+        if (message.titleUpdate.oneofKind === "title")
+            writer.tag(2, WireType.LengthDelimited).string(message.titleUpdate.title);
+        /* bool clear_title = 3; */
+        if (message.titleUpdate.oneofKind === "clearTitle")
+            writer.tag(3, WireType.Varint).bool(message.titleUpdate.clearTitle);
+        /* optional string order = 4; */
+        if (message.order !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.order);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateDialogFolderInput
+ */
+export const UpdateDialogFolderInput = new UpdateDialogFolderInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateDialogFolderResult$Type extends MessageType<UpdateDialogFolderResult> {
+    constructor() {
+        super("UpdateDialogFolderResult", [
+            { no: 1, name: "folder", kind: "message", T: () => DialogFolder },
+            { no: 2, name: "dialogs", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Dialog }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateDialogFolderResult>): UpdateDialogFolderResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.dialogs = [];
+        if (value !== undefined)
+            reflectionMergePartial<UpdateDialogFolderResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateDialogFolderResult): UpdateDialogFolderResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* DialogFolder folder */ 1:
+                    message.folder = DialogFolder.internalBinaryRead(reader, reader.uint32(), options, message.folder);
+                    break;
+                case /* repeated Dialog dialogs */ 2:
+                    message.dialogs.push(Dialog.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateDialogFolderResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* DialogFolder folder = 1; */
+        if (message.folder)
+            DialogFolder.internalBinaryWrite(message.folder, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Dialog dialogs = 2; */
+        for (let i = 0; i < message.dialogs.length; i++)
+            Dialog.internalBinaryWrite(message.dialogs[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateDialogFolderResult
+ */
+export const UpdateDialogFolderResult = new UpdateDialogFolderResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class DeleteDialogFolderInput$Type extends MessageType<DeleteDialogFolderInput> {
+    constructor() {
+        super("DeleteDialogFolderInput", [
+            { no: 1, name: "folder_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "disposition", kind: "enum", T: () => ["DeleteDialogFolderDisposition", DeleteDialogFolderDisposition] }
+        ]);
+    }
+    create(value?: PartialMessage<DeleteDialogFolderInput>): DeleteDialogFolderInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.folderId = 0n;
+        message.disposition = 0;
+        if (value !== undefined)
+            reflectionMergePartial<DeleteDialogFolderInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: DeleteDialogFolderInput): DeleteDialogFolderInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 folder_id */ 1:
+                    message.folderId = reader.int64().toBigInt();
+                    break;
+                case /* DeleteDialogFolderDisposition disposition */ 2:
+                    message.disposition = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: DeleteDialogFolderInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 folder_id = 1; */
+        if (message.folderId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.folderId);
+        /* DeleteDialogFolderDisposition disposition = 2; */
+        if (message.disposition !== 0)
+            writer.tag(2, WireType.Varint).int32(message.disposition);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message DeleteDialogFolderInput
+ */
+export const DeleteDialogFolderInput = new DeleteDialogFolderInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class DeleteDialogFolderResult$Type extends MessageType<DeleteDialogFolderResult> {
+    constructor() {
+        super("DeleteDialogFolderResult", [
+            { no: 1, name: "folder_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "dialogs", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Dialog }
+        ]);
+    }
+    create(value?: PartialMessage<DeleteDialogFolderResult>): DeleteDialogFolderResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.folderId = 0n;
+        message.dialogs = [];
+        if (value !== undefined)
+            reflectionMergePartial<DeleteDialogFolderResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: DeleteDialogFolderResult): DeleteDialogFolderResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 folder_id */ 1:
+                    message.folderId = reader.int64().toBigInt();
+                    break;
+                case /* repeated Dialog dialogs */ 2:
+                    message.dialogs.push(Dialog.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: DeleteDialogFolderResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 folder_id = 1; */
+        if (message.folderId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.folderId);
+        /* repeated Dialog dialogs = 2; */
+        for (let i = 0; i < message.dialogs.length; i++)
+            Dialog.internalBinaryWrite(message.dialogs[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message DeleteDialogFolderResult
+ */
+export const DeleteDialogFolderResult = new DeleteDialogFolderResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class GetChatsInput$Type extends MessageType<GetChatsInput> {
     constructor() {
         super("GetChatsInput", []);
@@ -28311,7 +29124,8 @@ class GetChatsResult$Type extends MessageType<GetChatsResult> {
             { no: 2, name: "chats", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Chat },
             { no: 3, name: "spaces", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Space },
             { no: 4, name: "users", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => User },
-            { no: 5, name: "messages", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Message }
+            { no: 5, name: "messages", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Message },
+            { no: 6, name: "folders", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => DialogFolder }
         ]);
     }
     create(value?: PartialMessage<GetChatsResult>): GetChatsResult {
@@ -28321,6 +29135,7 @@ class GetChatsResult$Type extends MessageType<GetChatsResult> {
         message.spaces = [];
         message.users = [];
         message.messages = [];
+        message.folders = [];
         if (value !== undefined)
             reflectionMergePartial<GetChatsResult>(this, message, value);
         return message;
@@ -28344,6 +29159,9 @@ class GetChatsResult$Type extends MessageType<GetChatsResult> {
                     break;
                 case /* repeated Message messages */ 5:
                     message.messages.push(Message.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated DialogFolder folders */ 6:
+                    message.folders.push(DialogFolder.internalBinaryRead(reader, reader.uint32(), options));
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -28372,6 +29190,9 @@ class GetChatsResult$Type extends MessageType<GetChatsResult> {
         /* repeated Message messages = 5; */
         for (let i = 0; i < message.messages.length; i++)
             Message.internalBinaryWrite(message.messages[i], writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        /* repeated DialogFolder folders = 6; */
+        for (let i = 0; i < message.folders.length; i++)
+            DialogFolder.internalBinaryWrite(message.folders[i], writer.tag(6, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -33194,7 +34015,8 @@ class Update$Type extends MessageType<Update> {
             { no: 42, name: "participant_group_delete", kind: "message", oneof: "update", T: () => UpdateChatParticipantGroupDelete },
             { no: 43, name: "space_settings", kind: "message", oneof: "update", T: () => UpdateSpaceSettings },
             { no: 44, name: "chat_permissions", kind: "message", oneof: "update", T: () => UpdateChatPermissions },
-            { no: 45, name: "dialog_collapsed_max_id", kind: "message", oneof: "update", T: () => UpdateDialogCollapsedMaxId }
+            { no: 45, name: "dialog_collapsed_max_id", kind: "message", oneof: "update", T: () => UpdateDialogCollapsedMaxId },
+            { no: 46, name: "dialog_folder", kind: "message", oneof: "update", T: () => UpdateDialogFolder }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -33467,6 +34289,12 @@ class Update$Type extends MessageType<Update> {
                         dialogCollapsedMaxId: UpdateDialogCollapsedMaxId.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).dialogCollapsedMaxId)
                     };
                     break;
+                case /* UpdateDialogFolder dialog_folder */ 46:
+                    message.update = {
+                        oneofKind: "dialogFolder",
+                        dialogFolder: UpdateDialogFolder.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).dialogFolder)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -33611,6 +34439,9 @@ class Update$Type extends MessageType<Update> {
         /* UpdateDialogCollapsedMaxId dialog_collapsed_max_id = 45; */
         if (message.update.oneofKind === "dialogCollapsedMaxId")
             UpdateDialogCollapsedMaxId.internalBinaryWrite(message.update.dialogCollapsedMaxId, writer.tag(45, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateDialogFolder dialog_folder = 46; */
+        if (message.update.oneofKind === "dialogFolder")
+            UpdateDialogFolder.internalBinaryWrite(message.update.dialogFolder, writer.tag(46, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -33621,6 +34452,74 @@ class Update$Type extends MessageType<Update> {
  * @generated MessageType for protobuf message Update
  */
 export const Update = new Update$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateDialogFolder$Type extends MessageType<UpdateDialogFolder> {
+    constructor() {
+        super("UpdateDialogFolder", [
+            { no: 1, name: "folder", kind: "message", oneof: "folderChange", T: () => DialogFolder },
+            { no: 2, name: "deleted_folder_id", kind: "scalar", oneof: "folderChange", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "dialogs", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Dialog }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateDialogFolder>): UpdateDialogFolder {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.folderChange = { oneofKind: undefined };
+        message.dialogs = [];
+        if (value !== undefined)
+            reflectionMergePartial<UpdateDialogFolder>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateDialogFolder): UpdateDialogFolder {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* DialogFolder folder */ 1:
+                    message.folderChange = {
+                        oneofKind: "folder",
+                        folder: DialogFolder.internalBinaryRead(reader, reader.uint32(), options, (message.folderChange as any).folder)
+                    };
+                    break;
+                case /* int64 deleted_folder_id */ 2:
+                    message.folderChange = {
+                        oneofKind: "deletedFolderId",
+                        deletedFolderId: reader.int64().toBigInt()
+                    };
+                    break;
+                case /* repeated Dialog dialogs */ 3:
+                    message.dialogs.push(Dialog.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateDialogFolder, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* DialogFolder folder = 1; */
+        if (message.folderChange.oneofKind === "folder")
+            DialogFolder.internalBinaryWrite(message.folderChange.folder, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* int64 deleted_folder_id = 2; */
+        if (message.folderChange.oneofKind === "deletedFolderId")
+            writer.tag(2, WireType.Varint).int64(message.folderChange.deletedFolderId);
+        /* repeated Dialog dialogs = 3; */
+        for (let i = 0; i < message.dialogs.length; i++)
+            Dialog.internalBinaryWrite(message.dialogs[i], writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateDialogFolder
+ */
+export const UpdateDialogFolder = new UpdateDialogFolder$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UpdateSpaceHasNewUpdates$Type extends MessageType<UpdateSpaceHasNewUpdates> {
     constructor() {
