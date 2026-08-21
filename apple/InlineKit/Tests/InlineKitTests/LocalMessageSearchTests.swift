@@ -125,6 +125,11 @@ struct LocalMessageSearchTests {
       try seedBase(db)
       try seedMessage(db, chatId: chatId, messageId: 1, text: "clearable keyword")
       try AppDatabase.clearTables(db)
+
+      for table in ["user", "space", "chat", "dialog", "message", "messageTextFts"] {
+        let remaining = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM \"\(table)\"")
+        #expect(remaining == 0)
+      }
     }
 
     var results = try await LocalMessageSearch.search(
@@ -145,6 +150,44 @@ struct LocalMessageSearchTests {
       options: LocalMessageSearchOptions(limit: 10)
     )
     #expect(results.map(\.messageId) == [2])
+  }
+
+  @Test("clear tables rolls back and identifies the failing phase")
+  func clearTablesRollsBackOnFailure() async throws {
+    let (queue, _) = try makeInMemoryDB()
+
+    try await queue.write { db in
+      try seedBase(db)
+      try db.execute(
+        sql: """
+        CREATE TRIGGER prevent_logout_user_delete
+        BEFORE DELETE ON user
+        BEGIN
+          SELECT RAISE(ABORT, 'simulated logout failure');
+        END
+        """
+      )
+    }
+
+    do {
+      try await queue.write { db in
+        try AppDatabase.clearTables(db)
+      }
+      Issue.record("Expected logout cleanup to fail")
+    } catch let error as AppDatabase.LogoutCleanupError {
+      #expect(error.phase == .deleteRows)
+      #expect(error.table == "user")
+      #expect(error.localizedDescription.contains("simulated logout failure"))
+    }
+
+    try await queue.read { db in
+      let userCount = try User.fetchCount(db)
+      let spaceCount = try Space.fetchCount(db)
+      let chatCount = try Chat.fetchCount(db)
+      #expect(userCount == 1)
+      #expect(spaceCount == 1)
+      #expect(chatCount == 1)
+    }
   }
 
   @Test("short and invalid queries do not search")

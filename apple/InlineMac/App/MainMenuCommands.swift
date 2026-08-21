@@ -172,25 +172,26 @@ enum AppRecoveryActions {
   static func clearCache(confirming: Bool) {
     if confirming {
       let alert = NSAlert()
-      alert.messageText = "Clear Cache"
-      alert.informativeText = "This clears local cached app data and sync state. Inline will reload your account from the server."
+      alert.messageText = "Reset Local Data"
+      alert.informativeText =
+        "This is a last-resort recovery before reinstalling Inline. It clears this Mac’s database, sync state, pending actions, and downloads, then reloads your account from the server."
       alert.addButton(withTitle: "Cancel")
       alert.alertStyle = .warning
-      let clearButton = alert.addButton(withTitle: "Clear Cache")
+      let clearButton = alert.addButton(withTitle: "Reset Local Data")
       clearButton.hasDestructiveAction = true
       guard alert.runModal() == .alertSecondButtonReturn else { return }
     }
 
     Task { @MainActor in
       guard let appDelegate = NSApp.delegate as? AppDelegate else {
-        ToastCenter.shared.showError("Failed to clear cache")
+        ToastCenter.shared.showError("Failed to reset local data")
         return
       }
       do {
-        try await appDelegate.clearCacheAndResetApp()
-        ToastCenter.shared.showSuccess("Cache cleared")
+        try await appDelegate.resetLocalDataAndReload()
+        ToastCenter.shared.showSuccess("Local data reset")
       } catch {
-        ToastCenter.shared.showError("Failed to clear cache")
+        ToastCenter.shared.showError("Failed to reset local data")
       }
     }
   }

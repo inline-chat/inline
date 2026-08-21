@@ -42,6 +42,16 @@ struct ContentView2: View {
         )
       }
     }
+    .task {
+      guard await auth.hasPendingLogout() else { return }
+      await LogoutPerformer.perform(
+        notifyServer: false,
+        mainRouter: mainViewRouter,
+        navigation: navigation,
+        onboardingNavigation: onboardingNav,
+        router: router
+      )
+    }
     .toastView()
   }
 

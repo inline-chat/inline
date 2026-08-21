@@ -215,6 +215,20 @@ public actor RealtimeV2 {
     log.info("Stopped realtime account generation")
   }
 
+  /// Restarts account work after an in-place local-data reset that preserved authentication.
+  public func resumeAfterLocalDataReset() async {
+    guard let accountID = auth.userId() else {
+      log.warning("Local-data reset resume skipped because authentication is unavailable")
+      return
+    }
+
+    acceptsTransactions = true
+    await transitionTransactionOwner(to: accountID)
+    await connectionManager.setAuthAvailable(true)
+    await startTransport()
+    log.info("Resumed realtime account generation after local-data reset")
+  }
+
   /// Stops process-owned work before application teardown without deleting
   /// durable transactions or sync checkpoints needed by the next launch.
   public func prepareForTermination() async {

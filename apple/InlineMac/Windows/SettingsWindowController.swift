@@ -26,6 +26,11 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
     shared?.showWindow(sender)
   }
 
+  static func closeIfOpen() {
+    shared?.close()
+    shared = nil
+  }
+
   init(
     dependencies: AppDependencies,
     selectedCategory: SettingsCategory = .general

@@ -308,7 +308,7 @@ final class Auth2StoreTests {
     #expect(e2 == .logout)
   }
 
-  @Test("pending logout blocks restart authentication and resumes credential destruction")
+  @Test("pending logout blocks restart authentication until app cleanup completes")
   func pendingLogoutBlocksRestartAndDestroysCredentials() async throws {
     let h = Harness()
     h.resetStorage()
@@ -327,6 +327,9 @@ final class Auth2StoreTests {
     await recovered.recoverInterruptedLogoutIfNeeded()
 
     #expect(AuthKeychainConfig.mockGetData("inline_protocol_credentials_v1", namespace: h.namespace) == nil)
+    #expect(await recovered.hasPendingLogout() == true)
+
+    await recovered.logOut()
     #expect(await recovered.hasPendingLogout() == false)
   }
 

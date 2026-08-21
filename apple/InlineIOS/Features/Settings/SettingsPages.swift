@@ -236,6 +236,8 @@ struct DataStorageSettingsView: View {
       }
 
       ClearCacheSettingsSection()
+
+      ResetLocalDataSettingsSection()
     }
     .listStyle(.insetGrouped)
     .navigationTitle("Data & Storage")

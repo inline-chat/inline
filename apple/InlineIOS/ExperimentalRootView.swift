@@ -88,6 +88,16 @@ struct ExperimentalRootView: View {
         )
       }
     }
+    .task {
+      guard await Auth.shared.hasPendingLogout() else { return }
+      await LogoutPerformer.perform(
+        notifyServer: false,
+        mainRouter: mainViewRouter,
+        navigation: navigation,
+        onboardingNavigation: onboardingNavigation,
+        router: router
+      )
+    }
     .toastView()
   }
 

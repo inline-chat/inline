@@ -912,7 +912,7 @@ final class AppMenu: NSObject {
     helpMenu.addItem(NSMenuItem.separator())
 
     let clearCacheItem = NSMenuItem(
-      title: "Clear Cache…",
+      title: "Reset Local Data…",
       action: #selector(clearCache(_:)),
       keyEquivalent: ""
     )

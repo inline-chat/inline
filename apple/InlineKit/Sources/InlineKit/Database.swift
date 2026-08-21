@@ -981,6 +981,28 @@ public extension AppDatabase {
 // MARK: - Database Configuration
 
 public extension AppDatabase {
+  struct LogoutCleanupError: Error, LocalizedError, Sendable {
+    enum Phase: String, Equatable, Sendable {
+      case discoverTables = "discover_tables"
+      case deleteRows = "delete_rows"
+      case resetSequence = "reset_sequence"
+      case verifyEmpty = "verify_empty"
+      case rotatePassphrase = "rotate_passphrase"
+    }
+
+    let phase: Phase
+    let table: String?
+    let reason: String
+
+    public var errorDescription: String? {
+      var details = "phase=\(phase.rawValue)"
+      if let table {
+        details += " table=\(table)"
+      }
+      return "Database logout cleanup failed \(details) reason=\(reason)"
+    }
+  }
+
   /// - parameter base: A base configuration.
   static func makeConfiguration(_ base: Configuration = Configuration()) -> Configuration {
     // Default configuration: prefer the stable database key if available; fall back to legacy "123".
@@ -1018,7 +1040,7 @@ public extension AppDatabase {
   }
 
   static func clearDB() throws {
-    _ = try AppDatabase.shared.dbWriter.write { db in
+    try AppDatabase.shared.dbWriter.write { db in
       try clearTables(db)
     }
 
@@ -1030,25 +1052,58 @@ public extension AppDatabase {
   }
 
   internal static func clearTables(_ db: Database) throws {
-    try db.execute(sql: "PRAGMA foreign_keys = OFF")
-    defer {
-      try? db.execute(sql: "PRAGMA foreign_keys = ON")
+    let ftsTables: Set<String>
+    let tables: [String]
+    do {
+      ftsTables = try ftsTableNamesToSkip(db)
+      tables = try String.fetchAll(
+        db,
+        sql: """
+        SELECT name FROM sqlite_master
+        WHERE type = 'table'
+        AND name NOT LIKE 'sqlite_%'
+        AND name NOT LIKE 'grdb_%'
+        """
+      )
+    } catch {
+      throw logoutCleanupError(phase: .discoverTables, error: error)
     }
 
-    let ftsTables = try ftsTableNamesToSkip(db)
-    let tables = try String.fetchAll(
-      db,
-      sql: """
-      SELECT name FROM sqlite_master
-      WHERE type = 'table'
-      AND name NOT LIKE 'sqlite_%'
-      AND name NOT LIKE 'grdb_%'
-      """
-    )
-
     for table in tables where !ftsTables.contains(table) {
-      try db.execute(sql: "DELETE FROM \(quotedIdentifier(table))")
-      try db.execute(sql: "DELETE FROM sqlite_sequence WHERE name = ?", arguments: [table])
+      do {
+        try db.execute(sql: "DELETE FROM \(quotedIdentifier(table))")
+      } catch {
+        throw logoutCleanupError(phase: .deleteRows, table: table, error: error)
+      }
+      do {
+        try db.execute(sql: "DELETE FROM sqlite_sequence WHERE name = ?", arguments: [table])
+      } catch {
+        throw logoutCleanupError(phase: .resetSequence, table: table, error: error)
+      }
+    }
+
+    let ftsVirtualTables = ftsVirtualTableNames(in: ftsTables)
+    let verifiableTables = tables.filter { table in
+      !ftsTables.contains(table) || ftsVirtualTables.contains(table)
+    }
+    for table in verifiableTables {
+      do {
+        let remaining = try Int.fetchOne(
+          db,
+          sql: "SELECT COUNT(*) FROM \(quotedIdentifier(table))"
+        ) ?? 0
+        guard remaining == 0 else {
+          throw LogoutCleanupError(
+            phase: .verifyEmpty,
+            table: table,
+            reason: "remaining_rows=\(remaining)"
+          )
+        }
+      } catch let error as LogoutCleanupError {
+        throw error
+      } catch {
+        throw logoutCleanupError(phase: .verifyEmpty, table: table, error: error)
+      }
     }
   }
 
@@ -1072,19 +1127,47 @@ public extension AppDatabase {
     return names
   }
 
+  private static func ftsVirtualTableNames(in skippedNames: Set<String>) -> Set<String> {
+    let shadowSuffixes = ["_data", "_idx", "_docsize", "_config", "_content"]
+    return Set(skippedNames.filter { name in
+      !shadowSuffixes.contains(where: name.hasSuffix)
+    })
+  }
+
+  private static func logoutCleanupError(
+    phase: LogoutCleanupError.Phase,
+    table: String? = nil,
+    error: any Error
+  ) -> LogoutCleanupError {
+    LogoutCleanupError(
+      phase: phase,
+      table: table,
+      reason: "\(type(of: error)): \(error.localizedDescription)"
+    )
+  }
+
   private static func quotedIdentifier(_ value: String) -> String {
     "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
   }
 
   static func loggedOut() throws {
-    try clearDB()
+    do {
+      try clearDB()
 
-    // Reset the database passphrase to a default value
-    switch DatabaseKeyStore.getOrCreate() {
-    case .available(let key):
-      try AppDatabase.changePassphrase(key)
-    default:
-      try AppDatabase.changePassphrase("123")
+      do {
+        // Reset the database passphrase to a default value
+        switch DatabaseKeyStore.getOrCreate() {
+        case .available(let key):
+          try AppDatabase.changePassphrase(key)
+        default:
+          try AppDatabase.changePassphrase("123")
+        }
+      } catch {
+        throw logoutCleanupError(phase: .rotatePassphrase, error: error)
+      }
+    } catch {
+      log.error(error.localizedDescription, error: error)
+      throw error
     }
   }
 

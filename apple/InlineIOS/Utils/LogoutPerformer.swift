@@ -59,13 +59,14 @@ enum LogoutPerformer {
       router.reset()
     }
 
-    await Auth.shared.logOut()
-
     do {
       try AppDatabase.loggedOut()
     } catch {
       Log.shared.error("Local database logout cleanup failed: \(error.localizedDescription)")
+      return
     }
+
+    await Auth.shared.logOut()
 
     await MainActor.run {
       mainRouter.setRoute(route: .onboarding)

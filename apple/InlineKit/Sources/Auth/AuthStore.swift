@@ -373,17 +373,23 @@ actor AuthStore {
 
   func recoverInterruptedLogoutIfNeeded() async {
     guard hasPendingLogout() else { return }
-    await logOut()
+    await destroyCredentials(completingPendingLogout: false)
   }
 
   func logOut() async {
+    await destroyCredentials(completingPendingLogout: true)
+  }
+
+  private func destroyCredentials(completingPendingLogout: Bool) async {
     beginLogout()
     if mocked {
       AuthKeychainConfig.mockDelete(Self.legacyTokenKey, namespace: namespace)
       AuthKeychainConfig.mockDelete(Self.credentialsV2Key, namespace: namespace)
       AuthKeychainConfig.mockDelete(Self.inlineProtocolCredentialsKey, namespace: namespace)
       UserDefaults.standard.removeObject(forKey: userDefaultsKey)
-      UserDefaults.standard.removeObject(forKey: logoutPendingKey)
+      if completingPendingLogout {
+        UserDefaults.standard.removeObject(forKey: logoutPendingKey)
+      }
 
       log.info("AUTH2_LOGOUT mocked")
       await update(AuthSnapshot(status: .unauthenticated, didHydrate: true))
@@ -396,10 +402,12 @@ actor AuthStore {
       fallbackDeleted = Self.deleteCredentials(from: fallbackKeychain)
     }
     UserDefaults.standard.removeObject(forKey: userDefaultsKey)
-    if primaryDeleted, fallbackDeleted {
+    if primaryDeleted, fallbackDeleted, completingPendingLogout {
       UserDefaults.standard.removeObject(forKey: logoutPendingKey)
     } else {
-      log.error("AUTH2_LOGOUT credential deletion incomplete; retaining logout marker")
+      if !primaryDeleted || !fallbackDeleted {
+        log.error("AUTH2_LOGOUT credential deletion incomplete; retaining logout marker")
+      }
     }
 
     log.info("AUTH2_LOGOUT")

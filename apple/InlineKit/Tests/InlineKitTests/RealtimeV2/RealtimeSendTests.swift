@@ -8,6 +8,38 @@ import Testing
 
 @Suite("RealtimeV2.Send", .serialized)
 final class RealtimeSendTests {
+  @Test("local-data reset resumes the authenticated transaction owner")
+  func testLocalDataResetResume() async throws {
+    await SendTestRecorder.shared.reset()
+
+    let auth = Auth.mocked(authenticated: true)
+    let transport = MockTransport()
+    let realtime = RealtimeV2(
+      transport: transport,
+      auth: auth.handle,
+      applyUpdates: SendTestApplyUpdates(),
+      syncStorage: SendTestSyncStorage()
+    )
+
+    await realtime.loggedOut()
+
+    let blockedID = UUID()
+    _ = await realtime.sendQueued(SendTestTransaction(id: blockedID))
+    #expect(await transport.sentMessages.isEmpty)
+
+    await realtime.resumeAfterLocalDataReset()
+
+    let resumedID = UUID()
+    _ = await realtime.sendQueued(SendTestTransaction(id: resumedID))
+    #expect(await SendTestRecorder.shared.didRunOptimistic(resumedID))
+    let dispatched = await waitForCondition(timeout: .seconds(2)) {
+      await !transport.sentMessages.isEmpty
+    }
+    #expect(dispatched)
+
+    await realtime.loggedOut()
+  }
+
   @Test("authenticated sendQueued runs optimistic immediately")
   func testAuthenticatedSendQueuedRunsOptimisticImmediately() async throws {
     await SendTestRecorder.shared.reset()

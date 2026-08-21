@@ -38,6 +38,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   @MainActor private var terminationTask: Task<Void, Never>?
   @MainActor private var terminationDeadlineTask: Task<Void, Never>?
   @MainActor private var didReplyToTermination = false
+  @MainActor private var isLoggingOut = false
 
   private let installLocationPrompt = AppInstallLocationPrompt()
   private let launchAtLoginController = LaunchAtLoginController()
@@ -86,6 +87,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     Task { @MainActor in
       self.dependencies.unreadCounts.start()
       self.dockBadgeService.start()
+    }
+    Task { @MainActor [weak self] in
+      guard await Auth.shared.hasPendingLogout() else { return }
+      await self?.performLogOut(notifyServer: false)
     }
     // Register for URL events
     NSAppleEventManager.shared().setEventHandler(
@@ -507,7 +512,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   @MainActor
-  func clearCacheAndResetApp() async throws {
+  func resetLocalDataAndReload() async throws {
     let restoreRoute = TopLevelRoute.initial(for: Auth.shared.getStatus())
 
     dependencies.session.reset()
@@ -517,16 +522,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     await Task.yield()
 
     do {
-      await Api.realtime.clearSyncState()
-      Transactions.shared.clearAll()
+      await Api.realtime.loggedOut()
+      await dependencies.realtime.loggedOut()
+      await FileUploader.shared.cancelAll()
+      await FileCache.shared.cancelAllDownloads()
+      await FileDownloader.shared.resetSession()
+      NotionTaskService.shared.resetSession()
+      await Drafts2.shared.resetForAccountChange()
+      await QuickSearchUsageStore.shared.clearCurrentAccount()
+      await Transactions.shared.clearAllAndWait()
       ObjectCache.shared.clear()
       try await FileCache.shared.clearCache()
       await dependencies.commandBarCatalog.reset()
       try AppDatabase.clearDB()
     } catch {
+      await Api.realtime.resumeAfterLocalDataReset()
+      await dependencies.realtime.start()
       dependencies.viewModel.navigate(restoreRoute)
       throw error
     }
+
+    await Api.realtime.resumeAfterLocalDataReset()
+    await dependencies.realtime.start()
+    dependencies.appUndo.clear()
 
     dependencies.navigation.reset()
     dependencies.nav.reset()
@@ -812,6 +830,13 @@ extension AppDelegate {
 
   @MainActor
   func performLogOut(notifyServer: Bool = true) async {
+    guard !isLoggingOut else { return }
+    isLoggingOut = true
+    defer {
+      LoggingOutWindowController.dismiss()
+      isLoggingOut = false
+    }
+
     let mediaShutdown = await dependencies.gridRuntime.prepareForLogout()
     guard mediaShutdown.isLocallyQuiescent else {
       log.error(
@@ -828,18 +853,11 @@ extension AppDelegate {
     }
 
     await Auth.shared.beginLogout()
-
-    // Navigate outside of the app
-    dependencies.viewModel.navigate(.onboarding)
-
-    // Reset internal navigation
-    dependencies.navigation.reset()
-    dependencies.nav.reset()
-
-    MainWindowOpenCoordinator.shared.openOnboarding()
+    LoggingOutWindowController.show()
+    await Task.yield()
 
     if notifyServer {
-      try? await InlineRPCClient.shared.logout()
+      await notifyServerLogout()
     }
 
     Analytics.logout()
@@ -860,15 +878,61 @@ extension AppDelegate {
     ObjectCache.shared.clear()
     dependencies.session.reset()
 
-    // Clear database
-    try? AppDatabase.loggedOut()
+    do {
+      try AppDatabase.loggedOut()
+    } catch {
+      log.error(
+        "Logout stopped because local database cleanup failed profile=\(ProjectConfig.userProfile ?? "default") reason=\(error.localizedDescription)",
+        error: error
+      )
+      LoggingOutWindowController.dismiss()
+      presentLogoutCleanupFailureAlert()
+      return
+    }
 
-    // Clear creds
     dependencies.appUndo.clear()
     await Auth.shared.logOut()
 
+    SettingsWindowController.closeIfOpen()
+    dependencies.navigation.reset()
+    dependencies.nav.reset()
+    dependencies.viewModel.navigate(.onboarding)
+    MainWindowOpenCoordinator.shared.openOnboarding()
+  }
+
+  private func notifyServerLogout() async {
+    do {
+      try await withThrowingTaskGroup(of: Void.self) { group in
+        group.addTask {
+          try await InlineRPCClient.shared.logout()
+        }
+        group.addTask {
+          try await Task.sleep(for: .seconds(2))
+          throw LogoutNotificationTimeoutError()
+        }
+
+        _ = try await group.next()
+        group.cancelAll()
+      }
+    } catch {
+      log.warning(
+        "Server logout notification did not complete; continuing local logout reason=\(type(of: error))"
+      )
+    }
+  }
+
+  private func presentLogoutCleanupFailureAlert() {
+    let alert = NSAlert()
+    alert.alertStyle = .critical
+    alert.messageText = "Inline couldn’t finish logging out"
+    alert.informativeText =
+      "Your local data could not be cleared, so Inline kept this logout pending. Quit and reopen Inline to try again safely."
+    alert.addButton(withTitle: "OK")
+    alert.runModal()
   }
 }
+
+private struct LogoutNotificationTimeoutError: Error {}
 
 // MARK: - URL Scheme Handling
 
