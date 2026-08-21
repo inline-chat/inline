@@ -16292,10 +16292,10 @@ class Message$Type extends MessageType<Message> {
                 case /* optional MessageService service_message */ 22:
                     message.serviceMessage = MessageService.internalBinaryRead(reader, reader.uint32(), options, message.serviceMessage);
                     break;
-                default:
                 case /* optional BlockContent block_content */ 23:
                     message.blockContent = BlockContent.internalBinaryRead(reader, reader.uint32(), options, message.blockContent);
                     break;
+                default:
                     let u = options.readUnknownField;
                     if (u === "throw")
                         throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
@@ -16376,10 +16376,10 @@ class Message$Type extends MessageType<Message> {
         /* optional MessageService service_message = 22; */
         if (message.serviceMessage)
             MessageService.internalBinaryWrite(message.serviceMessage, writer.tag(22, WireType.LengthDelimited).fork(), options).join();
-        let u = options.writeUnknownFields;
         /* optional BlockContent block_content = 23; */
         if (message.blockContent)
             BlockContent.internalBinaryWrite(message.blockContent, writer.tag(23, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
         return writer;
