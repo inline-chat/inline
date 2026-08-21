@@ -401,7 +401,8 @@ struct ChatRouteView: View {
       ChatMenuActions.toggleArchive(
         peer: peer,
         isArchived: dialog?.archived == true,
-        spaceID: dialog?.spaceId
+        spaceID: dialog?.spaceId,
+        dependencies: dependencies
       )
     }
   }

@@ -864,6 +864,7 @@ extension AppDelegate {
     try? AppDatabase.loggedOut()
 
     // Clear creds
+    dependencies.appUndo.clear()
     await Auth.shared.logOut()
 
   }

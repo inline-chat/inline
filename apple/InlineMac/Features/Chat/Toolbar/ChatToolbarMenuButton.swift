@@ -101,7 +101,8 @@ struct ChatToolbarMenuButton: View {
         ChatMenuActions.toggleArchive(
           peer: peer,
           isArchived: model.state.isArchived,
-          spaceID: dependencies.activeSpaceId
+          spaceID: dependencies.activeSpaceId,
+          dependencies: dependencies
         )
       }
 

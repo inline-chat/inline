@@ -143,14 +143,23 @@ enum ChatMenuActions {
     }
   }
 
-  static func toggleArchive(peer: Peer, isArchived: Bool, spaceID: Int64?) {
+  static func toggleArchive(
+    peer: Peer,
+    isArchived: Bool,
+    spaceID: Int64?,
+    dependencies: AppDependencies
+  ) {
     Task(priority: .userInitiated) {
       do {
-        try await DataManager.shared.updateDialog(
-          peerId: peer,
-          archived: !isArchived,
-          spaceId: spaceID
-        )
+        if isArchived {
+          try await DataManager.shared.updateDialog(
+            peerId: peer,
+            archived: false,
+            spaceId: spaceID
+          )
+        } else {
+          try await dependencies.appUndo.archiveChat(peer: peer, spaceID: spaceID)
+        }
       } catch {
         await MainActor.run { ToastCenter.shared.showError("Failed to update archive") }
       }

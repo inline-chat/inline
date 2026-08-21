@@ -20,6 +20,8 @@ final class AppMenu: NSObject {
   static let shared = AppMenu()
   private let mainMenu = NSMenu()
   private var dependencies: AppDependencies?
+  private weak var undoMenuItem: NSMenuItem?
+  private weak var redoMenuItem: NSMenuItem?
   private weak var cliInstallerMenuItem: NSMenuItem?
   private var cliInstallerMenuItemEnabled = true
   private weak var tabBarMenuItem: NSMenuItem?
@@ -227,16 +229,23 @@ final class AppMenu: NSObject {
     mainMenu.addItem(editMenuItem)
 
     // Undo/Redo
-    editMenu.addItem(
-      withTitle: "Undo",
-      action: Selector(("undo:")),
+    let undoItem = NSMenuItem(
+      title: "Undo",
+      action: #selector(performUndo(_:)),
       keyEquivalent: "z"
     )
-    editMenu.addItem(
-      withTitle: "Redo",
-      action: Selector(("redo:")),
+    undoItem.target = self
+    editMenu.addItem(undoItem)
+    undoMenuItem = undoItem
+
+    let redoItem = NSMenuItem(
+      title: "Redo",
+      action: #selector(performRedo(_:)),
       keyEquivalent: "Z"
     )
+    redoItem.target = self
+    editMenu.addItem(redoItem)
+    redoMenuItem = redoItem
 
     editMenu.addItem(NSMenuItem.separator())
 
@@ -1018,6 +1027,46 @@ final class AppMenu: NSObject {
     NSApp.keyWindow ?? NSApp.mainWindow
   }
 
+  @objc private func performUndo(_ sender: Any?) {
+    performUndoTransition(.undo, sender: sender)
+  }
+
+  @objc private func performRedo(_ sender: Any?) {
+    performUndoTransition(.redo, sender: sender)
+  }
+
+  private func performUndoTransition(_ direction: UndoDirection, sender: Any?) {
+    guard let window = activeWindow() else { return }
+    if window.firstResponder is any NSTextInputClient {
+      // Never fall through to semantic history from an editor. Even if native
+      // undo has no target or fails, the application action stays untouched.
+      _ = NSApp.sendAction(direction.nativeSelector, to: nil, from: sender)
+      return
+    }
+
+    guard let dependencies else { return }
+    Task {
+      switch direction {
+      case .undo:
+        await dependencies.appUndo.undo(using: dependencies)
+      case .redo:
+        await dependencies.appUndo.redo(using: dependencies)
+      }
+    }
+  }
+
+  private enum UndoDirection {
+    case undo
+    case redo
+
+    var nativeSelector: Selector {
+      switch self {
+      case .undo: Selector(("undo:"))
+      case .redo: Selector(("redo:"))
+      }
+    }
+  }
+
   private func tabOverviewWindow() -> NSWindow? {
     let candidates = [activeWindow()] + NSApp.windows
     return candidates.compactMap { $0 }.first { ($0.tabGroup?.windows.count ?? 0) > 1 }
@@ -1365,6 +1414,13 @@ extension AppMenu: NSMenuItemValidation {
       return true
     }
 
+    if menuItem === undoMenuItem {
+      return validateUndoMenuItem(menuItem, direction: .undo, dependencies: dependencies)
+    }
+    if menuItem === redoMenuItem {
+      return validateUndoMenuItem(menuItem, direction: .redo, dependencies: dependencies)
+    }
+
     if let command = ChatMenuCommand(rawValue: menuItem.tag), chatMenuItems[command] === menuItem {
       guard let context = MainWindowOpenCoordinator.shared.activeChatMenuContext else {
         menuItem.title = ChatMenuContext.placeholderTitle(for: command)
@@ -1492,5 +1548,32 @@ extension AppMenu: NSMenuItemValidation {
     }
 
     return true
+  }
+
+  private func validateUndoMenuItem(
+    _ menuItem: NSMenuItem,
+    direction: UndoDirection,
+    dependencies: AppDependencies
+  ) -> Bool {
+    if let window = activeWindow(), window.firstResponder is any NSTextInputClient {
+      let undoManager = window.firstResponder?.undoManager ?? window.undoManager
+      switch direction {
+      case .undo:
+        menuItem.title = undoManager?.undoMenuItemTitle ?? "Undo"
+        return undoManager?.canUndo == true
+      case .redo:
+        menuItem.title = undoManager?.redoMenuItemTitle ?? "Redo"
+        return undoManager?.canRedo == true
+      }
+    }
+
+    switch direction {
+    case .undo:
+      menuItem.title = dependencies.appUndo.undoMenuTitle
+      return dependencies.appUndo.canUndo
+    case .redo:
+      menuItem.title = dependencies.appUndo.redoMenuTitle
+      return dependencies.appUndo.canRedo
+    }
   }
 }

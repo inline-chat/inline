@@ -1239,11 +1239,22 @@ private struct ChatListRow: View {
   private func toggleArchive() {
     Task(priority: .userInitiated) {
       do {
-        try await DataManager.shared.updateDialog(
-          peerId: peerId,
-          archived: !item.archived,
-          spaceId: item.spaceId
-        )
+        if item.archived {
+          try await DataManager.shared.updateDialog(
+            peerId: peerId,
+            archived: false,
+            spaceId: item.spaceId
+          )
+        } else if let dependencies {
+          try await dependencies.appUndo.archiveChat(peer: peerId, spaceID: item.spaceId)
+        } else {
+          try await DataManager.shared.updateDialog(
+            peerId: peerId,
+            archived: true,
+            spaceId: item.spaceId,
+            deleteEmptyThreadIfArchiving: false
+          )
+        }
 
         if item.archived == false, isSelectedInCurrentNavigation {
           await MainActor.run {

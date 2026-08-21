@@ -29,6 +29,7 @@ public struct AppDependencies {
   let userSettings = INUserSettings.current
   let gridRuntime = GridRuntime.shared
   let commandBarCatalog = CommandBarCatalogService(database: AppDatabase.shared)
+  let appUndo = AppUndoHistory()
   var grid: GridRoomService { gridRuntime.rooms }
 
   // Per window
