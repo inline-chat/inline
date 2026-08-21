@@ -1,3 +1,4 @@
+import InlineMacUI
 import SwiftUI
 
 enum SidebarFooterMetrics {
@@ -73,6 +74,7 @@ struct SidebarFooterView: View {
           symbolName: "magnifyingglass",
           accessibilityLabel: "Search",
           tint: iconTint,
+          shortcut: .command("K"),
           action: onSearch
         )
       }
@@ -133,7 +135,10 @@ struct SidebarFooterView: View {
         NotificationSettingsButton(style: .sidebarFooter)
           .buttonStyle(SidebarFooterButtonStyle(isHovering: isNotificationHovering))
           .accessibilityLabel("Notifications")
-          .help("Notifications")
+          .inlineTooltip(
+            "Notifications",
+            placement: .above
+          )
           .onHover { isNotificationHovering = $0 }
       }
 
@@ -173,6 +178,7 @@ private struct SidebarFooterButton: View {
   let symbolName: String
   let accessibilityLabel: String
   let tint: Color
+  var shortcut: InlineTooltipShortcut?
   let action: () -> Void
 
   @State private var isHovering = false
@@ -183,7 +189,11 @@ private struct SidebarFooterButton: View {
     }
     .buttonStyle(SidebarFooterButtonStyle(isHovering: isHovering))
     .accessibilityLabel(accessibilityLabel)
-    .help(accessibilityLabel)
+    .inlineTooltip(
+      verbatim: accessibilityLabel,
+      shortcut: shortcut,
+      placement: .above
+    )
     .onHover { isHovering = $0 }
   }
 }
@@ -205,7 +215,10 @@ private struct SidebarFooterMenu<MenuContent: View>: View {
     .buttonStyle(SidebarFooterButtonStyle(isHovering: isHovering))
     .menuIndicator(.hidden)
     .accessibilityLabel(accessibilityLabel)
-    .help(accessibilityLabel)
+    .inlineTooltip(
+      verbatim: accessibilityLabel,
+      placement: .above
+    )
     .onHover { isHovering = $0 }
   }
 }

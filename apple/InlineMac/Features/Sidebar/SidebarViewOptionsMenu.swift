@@ -1,4 +1,5 @@
 import AppKit
+import InlineMacUI
 import SwiftUI
 
 /// Native owner for the described view-options menu. AppKit provides native
@@ -22,16 +23,20 @@ struct SidebarViewOptionsMenuButton: NSViewRepresentable {
     )
     button.imageScaling = .scaleProportionallyDown
     button.contentTintColor = .tertiaryLabelColor
-    button.toolTip = "View options"
     button.setAccessibilityLabel("View options")
     button.target = context.coordinator
     button.action = #selector(Coordinator.showMenu(_:))
+    button.setInlineTooltip("View options", placement: .above)
     return button
   }
 
   func updateNSView(_ button: SidebarNativeMenuButton, context: Context) {
     context.coordinator.configuration = self
     button.contentTintColor = .tertiaryLabelColor
+  }
+
+  static func dismantleNSView(_ button: SidebarNativeMenuButton, coordinator: Coordinator) {
+    button.removeInlineTooltip()
   }
 
   @MainActor

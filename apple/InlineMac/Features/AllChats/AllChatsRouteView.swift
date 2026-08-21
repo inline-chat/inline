@@ -768,7 +768,10 @@ private struct NewThreadListRow: View {
       .background(background)
     }
     .buttonStyle(.plain)
-    .help("New Thread")
+    .inlineTooltip(
+      "New thread",
+      shortcut: .command("N")
+    )
     .accessibilityLabel("New Thread")
     .accessibilityAddTraits(.isButton)
     .onHover { isHovered = $0 }

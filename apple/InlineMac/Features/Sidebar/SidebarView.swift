@@ -898,6 +898,10 @@ struct SidebarView: View {
     .buttonStyle(.plain)
     .focusEffectDisabled(true)
     .menuIndicator(.hidden)
+    .inlineTooltip(
+      "Switch space",
+      placement: .cursor
+    )
     .onHover { isLocationHovering = $0 }
     .contextMenu {
       if let selectedSpace {
@@ -2890,7 +2894,10 @@ private struct SidebarNewThreadRow: View {
       .padding(.vertical, SidebarCollectionRow.itemVisualEdgeInset)
     }
     .buttonStyle(.plain)
-    .help("New Thread")
+    .inlineTooltip(
+      "New thread",
+      shortcut: .command("N")
+    )
     .accessibilityLabel("New Thread")
     .onHover { isHovered = $0 }
   }
