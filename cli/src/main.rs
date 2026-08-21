@@ -579,7 +579,7 @@ struct BridgeDevObserveTypingArgs {
 
 #[derive(Subcommand)]
 enum AuthCommand {
-    #[command(about = "Log in via email or phone code")]
+    #[command(about = "Log in via the browser, Inline for Mac, email, or phone")]
     Login(AuthLoginArgs),
     #[command(about = "Show the currently authenticated user")]
     Me,
@@ -589,6 +589,20 @@ enum AuthCommand {
 
 #[derive(Args, Clone)]
 pub(crate) struct AuthLoginArgs {
+    #[arg(
+        long,
+        help = "Sign in using Inline's hosted browser flow",
+        conflicts_with_all = ["email", "phone", "send_code", "code", "code_stdin", "challenge_token", "mac_app_bootstrap"]
+    )]
+    browser: bool,
+
+    #[arg(
+        long,
+        help = "Print the hosted sign-in URL without opening it",
+        requires = "browser"
+    )]
+    no_open: bool,
+
     #[arg(
         long,
         help = "Email address to send the login code to",
@@ -636,7 +650,7 @@ pub(crate) struct AuthLoginArgs {
     #[arg(
       long,
       hide = true,
-      conflicts_with_all = ["email", "phone", "send_code", "code", "code_stdin", "challenge_token"]
+      conflicts_with_all = ["email", "phone", "send_code", "code", "code_stdin", "challenge_token", "browser", "no_open"]
     )]
     mac_app_bootstrap: bool,
 
@@ -1790,8 +1804,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
     let auth_store = AuthStore::new(config.secrets_path.clone(), config.api_base_url.clone());
     let local_db = LocalDb::new(config.state_path.clone(), config.api_base_url.clone());
     if auth_store.logout_pending()? {
-        auth_store.complete_logout()?;
         local_db.clear_current_user()?;
+        auth_store.complete_logout()?;
     }
     let api = ApiClient::try_new(config.api_base_url.clone())?;
     let skip_update_check = matches!(
@@ -1873,6 +1887,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             None => {
                                 handle_login(
                                     AuthLoginArgs {
+                                        browser: false,
+                                        no_open: false,
                                         email: None,
                                         phone: None,
                                         send_code: false,
@@ -4204,6 +4220,8 @@ async fn run_agents_setup_command(
         None => {
             handle_login(
                 AuthLoginArgs {
+                    browser: false,
+                    no_open: false,
                     email: None,
                     phone: None,
                     send_code: false,
@@ -4271,8 +4289,8 @@ async fn perform_auth_logout(
         };
         let _ = tokio::time::timeout(Duration::from_secs(3), remote_logout).await;
     }
-    auth_store.complete_logout()?;
     local_db.clear_current_user()?;
+    auth_store.complete_logout()?;
     Ok(build_auth_logout_output(env_token_present))
 }
 
@@ -5406,6 +5424,8 @@ mod cli_parsing_tests {
 
         let err = handle_login(
             AuthLoginArgs {
+                browser: false,
+                no_open: false,
                 email: Some("agent@example.com".to_string()),
                 phone: None,
                 send_code: false,
@@ -5435,6 +5455,8 @@ mod cli_parsing_tests {
     #[test]
     fn login_contact_conflicts_are_structured_invalid_args() {
         let args = AuthLoginArgs {
+            browser: false,
+            no_open: false,
             email: Some("a@example.com".to_string()),
             phone: Some("+15551234567".to_string()),
             send_code: false,
@@ -5451,6 +5473,26 @@ mod cli_parsing_tests {
         assert_eq!(cli_err.code, "invalid_args");
         assert!(cli_err.message.contains("--email"));
         assert!(cli_err.message.contains("--phone"));
+    }
+
+    #[test]
+    fn browser_login_flags_are_explicit_and_conflict_with_terminal_phases() {
+        let cli = Cli::try_parse_from(["inline", "login", "--browser", "--no-open"]).unwrap();
+        let Command::Login(args) = cli.command else {
+            panic!("expected login command");
+        };
+        assert!(args.browser);
+        assert!(args.no_open);
+        assert!(
+            Cli::try_parse_from([
+                "inline",
+                "login",
+                "--browser",
+                "--email",
+                "agent@example.com",
+            ])
+            .is_err()
+        );
     }
 
     #[test]

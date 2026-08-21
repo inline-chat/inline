@@ -3691,6 +3691,8 @@ message RealtimeV3Request {
     CreateHttpUploadRequest create_http_upload = 4 [deprecated = true];
     FinishHttpUploadRequest finish_http_upload = 5 [deprecated = true];
     ConnectionInit connection_init = 6;
+    AuthBeginBrowserRequest auth_begin_browser = 7;
+    AuthBrowserStatusRequest auth_browser_status = 8;
   }
 }
 
@@ -3702,6 +3704,8 @@ message RealtimeV3Response {
     AuthCompleteResult auth_complete = 4;
     CreateHttpUploadResult create_http_upload = 5 [deprecated = true];
     FinishHttpUploadResult finish_http_upload = 6 [deprecated = true];
+    AuthBeginBrowserResult auth_begin_browser = 7;
+    AuthBrowserStatusResult auth_browser_status = 8;
   }
 }
 
@@ -3755,6 +3759,32 @@ message AuthCompleteResult {
     AuthInviteRequired invite_required = 2;
   }
 }
+
+message AuthBeginBrowserRequest {
+  ClientInfo client = 1;
+}
+
+message AuthBeginBrowserResult {
+  string login_transaction_id = 1;
+  string browser_url = 2;
+  string verification_code = 3;
+  int64 expires_at = 4;
+}
+
+message AuthBrowserStatusRequest {
+  string login_transaction_id = 1;
+}
+
+message AuthBrowserStatusResult {
+  oneof state {
+    AuthBrowserPending pending = 1;
+    AuthAuthorized authorized = 2;
+    AuthBrowserCancelled cancelled = 3;
+  }
+}
+
+message AuthBrowserPending {}
+message AuthBrowserCancelled {}
 
 enum HttpUploadKind {
   HTTP_UPLOAD_KIND_UNSPECIFIED = 0;

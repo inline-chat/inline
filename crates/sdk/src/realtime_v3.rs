@@ -592,6 +592,44 @@ impl InlineProtocolV3Connection {
         }
     }
 
+    /// Begins a provider-neutral hosted browser login bound to this permanent key.
+    pub async fn auth_begin_browser(
+        &mut self,
+        request: proto::AuthBeginBrowserRequest,
+    ) -> Result<proto::AuthBeginBrowserResult, InlineProtocolV3Error> {
+        use proto::realtime_v3_request::Body as Request;
+        use proto::realtime_v3_response::Body as Response;
+        match response_body(
+            self.invoke(proto::RealtimeV3Request {
+                body: Some(Request::AuthBeginBrowser(request)),
+            })
+            .await?,
+        )? {
+            Response::AuthBeginBrowser(result) => Ok(result),
+            Response::RpcError(error) => Err(rpc_error(error)),
+            _ => Err(InlineProtocolV3Error::UnexpectedResponse),
+        }
+    }
+
+    /// Polls a hosted browser login that is bound to this permanent key.
+    pub async fn auth_browser_status(
+        &mut self,
+        request: proto::AuthBrowserStatusRequest,
+    ) -> Result<proto::AuthBrowserStatusResult, InlineProtocolV3Error> {
+        use proto::realtime_v3_request::Body as Request;
+        use proto::realtime_v3_response::Body as Response;
+        match response_body(
+            self.invoke(proto::RealtimeV3Request {
+                body: Some(Request::AuthBrowserStatus(request)),
+            })
+            .await?,
+        )? {
+            Response::AuthBrowserStatus(result) => Ok(result),
+            Response::RpcError(error) => Err(rpc_error(error)),
+            _ => Err(InlineProtocolV3Error::UnexpectedResponse),
+        }
+    }
+
     /// Calls an existing Inline RPC through the V3 application bridge.
     pub async fn call_rpc(
         &mut self,
@@ -1069,7 +1107,7 @@ pub(crate) async fn run_inline_protocol_v3_session(
                 break;
             }
             command = commands.recv(), if !rotation_requested => {
-                let Some(SessionCommand::Invoke { method, input, attempted, response }) = command else {
+                let Some(SessionCommand::Invoke { method, input, admission, attempted, response }) = command else {
                     break;
                 };
                 // The timer and command can become ready in the same select
@@ -1079,6 +1117,9 @@ pub(crate) async fn run_inline_protocol_v3_session(
                 if connection.temporary_key_rotation_due() {
                     rotation_requested = true;
                     let _ = response.send(Err(RealtimeError::ConnectionClosed));
+                    continue;
+                }
+                if !crate::realtime::admit_session_command(&admission) {
                     continue;
                 }
                 let request = proto::RealtimeV3Request {
@@ -1398,6 +1439,15 @@ fn carrier_realtime_rpc_error(code: i32) -> crate::realtime::RealtimeError {
     if code == 504 {
         return crate::realtime::RealtimeError::CommitOutcomeUnknown;
     }
+    if code == 503 {
+        return crate::realtime::RealtimeError::RpcError {
+            code,
+            error_code: proto::rpc_error::Code::Unknown as i32,
+            error_name: "REJECTED_BEFORE_EXECUTION".into(),
+            message: "Realtime application rejected before execution".into(),
+            friendly: "Realtime application rejected before execution (status 503)".into(),
+        };
+    }
     crate::realtime::RealtimeError::InlineProtocol {
         message: format!("Inline Protocol carrier error {code}"),
     }
@@ -1515,6 +1565,17 @@ mod tests {
         assert!(matches!(
             carrier_rpc_error(code.unwrap()),
             InlineProtocolV3Error::CommitOutcomeUnknown
+        ));
+    }
+
+    #[test]
+    fn carrier_preexecution_rejection_remains_request_local() {
+        let payload = inline_protocol::secure::encode_rpc_error(503, "overloaded").unwrap();
+        let code = decode_rpc_error_code(&payload).unwrap();
+        assert_eq!(code, Some(503));
+        assert!(matches!(
+            carrier_rpc_error(code.unwrap()),
+            InlineProtocolV3Error::Rpc { status: 503, .. }
         ));
     }
 
@@ -1720,6 +1781,36 @@ mod tests {
         assert!(matches!(
             decode_session_rpc_response(&payload),
             Ok(Err(crate::realtime::RealtimeError::CommitOutcomeUnknown))
+        ));
+
+        let result = proto::RealtimeV3Response {
+            body: Some(proto::realtime_v3_response::Body::RpcResult(
+                proto::RpcResult {
+                    req_msg_id: 0,
+                    result: Some(proto::rpc_result::Result::GetMe(
+                        proto::GetMeResult::default(),
+                    )),
+                },
+            )),
+        };
+        let encoded =
+            inline_protocol::secure::encode_inline_result(&result.encode_to_vec()).unwrap();
+        assert!(matches!(
+            decode_session_rpc_response(&encoded),
+            Ok(Ok(proto::rpc_result::Result::GetMe(_)))
+        ));
+    }
+
+    #[test]
+    fn carrier_preexecution_rejection_does_not_poison_multiplexed_decoder() {
+        let payload = inline_protocol::secure::encode_rpc_error(503, "overloaded").unwrap();
+        assert!(matches!(
+            decode_session_rpc_response(&payload),
+            Ok(Err(crate::realtime::RealtimeError::RpcError {
+                code: 503,
+                error_name,
+                ..
+            })) if error_name == "REJECTED_BEFORE_EXECUTION"
         ));
 
         let result = proto::RealtimeV3Response {

@@ -1,6 +1,8 @@
 use dialoguer::{Input, Select};
 use serde::Serialize;
 use std::io::{self, IsTerminal, Read};
+use std::process::Command;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::auth::AuthStore;
 use crate::errors::CliError;
@@ -60,6 +62,10 @@ pub(crate) async fn handle_login(
     json: bool,
     json_format: JsonFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if args.browser {
+        return handle_browser_login(&args, auth_store, realtime_url, local_db, json, json_format)
+            .await;
+    }
     if !args.mac_app_bootstrap && (args.send_code || args.code.is_some() || args.code_stdin) {
         return handle_inline_protocol_login(
             &args,
@@ -77,7 +83,7 @@ pub(crate) async fn handle_login(
     let challenge_token = args.challenge_token.clone();
     let mac_app_bootstrap = args.mac_app_bootstrap;
     let expected_user_id = args.expected_user_id;
-    let mut contact = contact_from_args(args)?;
+    let mut contact = contact_from_args(args.clone())?;
 
     if mac_app_bootstrap {
         if !json {
@@ -209,7 +215,11 @@ pub(crate) async fn handle_login(
     let auth_metadata = client_info::auth_metadata(&device_id, device_name.as_deref());
 
     if contact.is_none() && mac_app_auth::supporting_app_available() {
-        let options = ["Continue with Inline for Mac", "Use email or phone"];
+        let options = [
+            "Continue with Inline for Mac",
+            "Continue in browser",
+            "Use email or phone in terminal",
+        ];
         let selection = Select::new().items(&options).default(0).interact()?;
         if selection == 0 {
             println!("Opening Inline for Mac for approval…");
@@ -248,6 +258,29 @@ pub(crate) async fn handle_login(
                 }
             }
             println!("Continue with email or phone instead.");
+        } else if selection == 1 {
+            return handle_browser_login(
+                &args,
+                auth_store,
+                realtime_url,
+                local_db,
+                false,
+                json_format,
+            )
+            .await;
+        }
+    } else if contact.is_none() {
+        let options = ["Continue in browser", "Use email or phone in terminal"];
+        if Select::new().items(&options).default(0).interact()? == 0 {
+            return handle_browser_login(
+                &args,
+                auth_store,
+                realtime_url,
+                local_db,
+                false,
+                json_format,
+            )
+            .await;
         }
     }
 
@@ -300,6 +333,130 @@ pub(crate) async fn handle_login(
             }
         }
     }
+}
+
+async fn handle_browser_login(
+    args: &AuthLoginArgs,
+    auth_store: &AuthStore,
+    realtime_url: &str,
+    local_db: &LocalDb,
+    json: bool,
+    json_format: JsonFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let v3_url = format!("{}/v3", realtime_url.trim_end_matches('/'));
+    let keys = client_info::resolve_inline_protocol_public_ring()?;
+    let mut permanent = client_info::connect_inline_protocol_fresh(&v3_url, keys, false).await?;
+    let permanent_authorization = permanent.authorization();
+    let login = permanent
+        .auth_begin_browser(proto::AuthBeginBrowserRequest {
+            client: Some(inline_protocol_client_info(auth_store)?),
+        })
+        .await?;
+
+    if json {
+        eprintln!("Open this URL to sign in:\n{}", login.browser_url);
+        eprintln!(
+            "Confirm this code in the browser: {}",
+            login.verification_code
+        );
+    } else {
+        println!("Open this URL to sign in:\n{}", login.browser_url);
+        println!(
+            "Confirm this code in the browser: {}",
+            login.verification_code
+        );
+    }
+    if !args.no_open {
+        if let Err(error) = open_system_browser(&login.browser_url) {
+            eprintln!("Could not open the browser automatically: {error}");
+        }
+    }
+
+    loop {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
+        if now >= login.expires_at {
+            return Err(CliError::invalid_args(
+                "browser sign-in expired; run inline login --browser again",
+            )
+            .into());
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let status = permanent
+            .auth_browser_status(proto::AuthBrowserStatusRequest {
+                login_transaction_id: login.login_transaction_id.clone(),
+            })
+            .await?;
+        match status.state {
+            Some(proto::auth_browser_status_result::State::Pending(_)) => continue,
+            Some(proto::auth_browser_status_result::State::Cancelled(_)) => {
+                return Err(
+                    CliError::invalid_args("browser sign-in was cancelled or expired").into(),
+                );
+            }
+            Some(proto::auth_browser_status_result::State::Authorized(authorized)) => {
+                let keys = client_info::resolve_inline_protocol_public_ring()?;
+                let mut temporary =
+                    client_info::connect_inline_protocol_fresh(&v3_url, keys, true).await?;
+                temporary.bind_temporary(&permanent_authorization).await?;
+                auth_store.store_inline_protocol_authorizations(
+                    &permanent_authorization,
+                    &temporary.authorization(),
+                )?;
+                let user = match authorized.user {
+                    Some(user) => user,
+                    None => temporary
+                        .call(proto::GetMeInput {})
+                        .await?
+                        .user
+                        .ok_or_else(|| {
+                            CliError::unexpected_api_response("getMe", "missing user")
+                        })?,
+                };
+                local_db.set_current_user(user.clone())?;
+                let output = AuthLoginOutput {
+                    status: "authenticated",
+                    user_id: user.id,
+                    token_saved: false,
+                    profile_loaded: true,
+                    user: Some(user),
+                    warning: None,
+                };
+                if json {
+                    output::print_json(&output, json_format)?;
+                } else if let Some(user) = output.user.as_ref() {
+                    println!("Welcome, {}.", user_display_name(user));
+                }
+                return Ok(());
+            }
+            None => {
+                return Err(CliError::unexpected_api_response(
+                    "authBrowserStatus",
+                    "missing state",
+                )
+                .into());
+            }
+        }
+    }
+}
+
+fn open_system_browser(url: &str) -> io::Result<()> {
+    #[cfg(target_os = "macos")]
+    let mut command = Command::new("open");
+    #[cfg(target_os = "linux")]
+    let mut command = Command::new("xdg-open");
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut value = Command::new("cmd");
+        value.args(["/C", "start", ""]);
+        value
+    };
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    return Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "opening a browser is unsupported on this platform",
+    ));
+    command.arg(url).spawn()?.wait()?;
+    Ok(())
 }
 
 async fn handle_inline_protocol_login(
@@ -888,6 +1045,8 @@ mod tests {
         let local_db = LocalDb::new(state_path.clone(), api_url.clone());
         handle_login(
             AuthLoginArgs {
+                browser: false,
+                no_open: false,
                 email: Some("agent@example.com".to_string()),
                 phone: None,
                 send_code: true,
@@ -916,6 +1075,8 @@ mod tests {
         let local_db = LocalDb::new(state_path.clone(), api_url.clone());
         handle_login(
             AuthLoginArgs {
+                browser: false,
+                no_open: false,
                 email: Some("agent@example.com".to_string()),
                 phone: None,
                 send_code: false,

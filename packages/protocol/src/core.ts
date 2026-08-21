@@ -10159,6 +10159,18 @@ export interface RealtimeV3Request {
          */
         connectionInit: ConnectionInit;
     } | {
+        oneofKind: "authBeginBrowser";
+        /**
+         * @generated from protobuf field: AuthBeginBrowserRequest auth_begin_browser = 7;
+         */
+        authBeginBrowser: AuthBeginBrowserRequest;
+    } | {
+        oneofKind: "authBrowserStatus";
+        /**
+         * @generated from protobuf field: AuthBrowserStatusRequest auth_browser_status = 8;
+         */
+        authBrowserStatus: AuthBrowserStatusRequest;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -10207,6 +10219,18 @@ export interface RealtimeV3Response {
          * @generated from protobuf field: FinishHttpUploadResult finish_http_upload = 6 [deprecated = true];
          */
         finishHttpUpload: FinishHttpUploadResult;
+    } | {
+        oneofKind: "authBeginBrowser";
+        /**
+         * @generated from protobuf field: AuthBeginBrowserResult auth_begin_browser = 7;
+         */
+        authBeginBrowser: AuthBeginBrowserResult;
+    } | {
+        oneofKind: "authBrowserStatus";
+        /**
+         * @generated from protobuf field: AuthBrowserStatusResult auth_browser_status = 8;
+         */
+        authBrowserStatus: AuthBrowserStatusResult;
     } | {
         oneofKind: undefined;
     };
@@ -10371,6 +10395,84 @@ export interface AuthCompleteResult {
     } | {
         oneofKind: undefined;
     };
+}
+/**
+ * @generated from protobuf message AuthBeginBrowserRequest
+ */
+export interface AuthBeginBrowserRequest {
+    /**
+     * @generated from protobuf field: ClientInfo client = 1;
+     */
+    client?: ClientInfo;
+}
+/**
+ * @generated from protobuf message AuthBeginBrowserResult
+ */
+export interface AuthBeginBrowserResult {
+    /**
+     * @generated from protobuf field: string login_transaction_id = 1;
+     */
+    loginTransactionId: string;
+    /**
+     * @generated from protobuf field: string browser_url = 2;
+     */
+    browserUrl: string;
+    /**
+     * @generated from protobuf field: string verification_code = 3;
+     */
+    verificationCode: string;
+    /**
+     * @generated from protobuf field: int64 expires_at = 4;
+     */
+    expiresAt: bigint;
+}
+/**
+ * @generated from protobuf message AuthBrowserStatusRequest
+ */
+export interface AuthBrowserStatusRequest {
+    /**
+     * @generated from protobuf field: string login_transaction_id = 1;
+     */
+    loginTransactionId: string;
+}
+/**
+ * @generated from protobuf message AuthBrowserStatusResult
+ */
+export interface AuthBrowserStatusResult {
+    /**
+     * @generated from protobuf oneof: state
+     */
+    state: {
+        oneofKind: "pending";
+        /**
+         * @generated from protobuf field: AuthBrowserPending pending = 1;
+         */
+        pending: AuthBrowserPending;
+    } | {
+        oneofKind: "authorized";
+        /**
+         * @generated from protobuf field: AuthAuthorized authorized = 2;
+         */
+        authorized: AuthAuthorized;
+    } | {
+        oneofKind: "cancelled";
+        /**
+         * @generated from protobuf field: AuthBrowserCancelled cancelled = 3;
+         */
+        cancelled: AuthBrowserCancelled;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
+ * @generated from protobuf message AuthBrowserPending
+ */
+export interface AuthBrowserPending {
+}
+/**
+ * @generated from protobuf message AuthBrowserCancelled
+ */
+export interface AuthBrowserCancelled {
 }
 /**
  * @generated from protobuf message CreateHttpUploadRequest
@@ -39379,7 +39481,9 @@ class RealtimeV3Request$Type extends MessageType<RealtimeV3Request> {
             { no: 3, name: "auth_complete", kind: "message", oneof: "body", T: () => AuthCompleteRequest },
             { no: 4, name: "create_http_upload", kind: "message", oneof: "body", T: () => CreateHttpUploadRequest },
             { no: 5, name: "finish_http_upload", kind: "message", oneof: "body", T: () => FinishHttpUploadRequest },
-            { no: 6, name: "connection_init", kind: "message", oneof: "body", T: () => ConnectionInit }
+            { no: 6, name: "connection_init", kind: "message", oneof: "body", T: () => ConnectionInit },
+            { no: 7, name: "auth_begin_browser", kind: "message", oneof: "body", T: () => AuthBeginBrowserRequest },
+            { no: 8, name: "auth_browser_status", kind: "message", oneof: "body", T: () => AuthBrowserStatusRequest }
         ]);
     }
     create(value?: PartialMessage<RealtimeV3Request>): RealtimeV3Request {
@@ -39430,6 +39534,18 @@ class RealtimeV3Request$Type extends MessageType<RealtimeV3Request> {
                         connectionInit: ConnectionInit.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).connectionInit)
                     };
                     break;
+                case /* AuthBeginBrowserRequest auth_begin_browser */ 7:
+                    message.body = {
+                        oneofKind: "authBeginBrowser",
+                        authBeginBrowser: AuthBeginBrowserRequest.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).authBeginBrowser)
+                    };
+                    break;
+                case /* AuthBrowserStatusRequest auth_browser_status */ 8:
+                    message.body = {
+                        oneofKind: "authBrowserStatus",
+                        authBrowserStatus: AuthBrowserStatusRequest.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).authBrowserStatus)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -39460,6 +39576,12 @@ class RealtimeV3Request$Type extends MessageType<RealtimeV3Request> {
         /* ConnectionInit connection_init = 6; */
         if (message.body.oneofKind === "connectionInit")
             ConnectionInit.internalBinaryWrite(message.body.connectionInit, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        /* AuthBeginBrowserRequest auth_begin_browser = 7; */
+        if (message.body.oneofKind === "authBeginBrowser")
+            AuthBeginBrowserRequest.internalBinaryWrite(message.body.authBeginBrowser, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
+        /* AuthBrowserStatusRequest auth_browser_status = 8; */
+        if (message.body.oneofKind === "authBrowserStatus")
+            AuthBrowserStatusRequest.internalBinaryWrite(message.body.authBrowserStatus, writer.tag(8, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -39479,7 +39601,9 @@ class RealtimeV3Response$Type extends MessageType<RealtimeV3Response> {
             { no: 3, name: "auth_begin", kind: "message", oneof: "body", T: () => AuthBeginResult },
             { no: 4, name: "auth_complete", kind: "message", oneof: "body", T: () => AuthCompleteResult },
             { no: 5, name: "create_http_upload", kind: "message", oneof: "body", T: () => CreateHttpUploadResult },
-            { no: 6, name: "finish_http_upload", kind: "message", oneof: "body", T: () => FinishHttpUploadResult }
+            { no: 6, name: "finish_http_upload", kind: "message", oneof: "body", T: () => FinishHttpUploadResult },
+            { no: 7, name: "auth_begin_browser", kind: "message", oneof: "body", T: () => AuthBeginBrowserResult },
+            { no: 8, name: "auth_browser_status", kind: "message", oneof: "body", T: () => AuthBrowserStatusResult }
         ]);
     }
     create(value?: PartialMessage<RealtimeV3Response>): RealtimeV3Response {
@@ -39530,6 +39654,18 @@ class RealtimeV3Response$Type extends MessageType<RealtimeV3Response> {
                         finishHttpUpload: FinishHttpUploadResult.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).finishHttpUpload)
                     };
                     break;
+                case /* AuthBeginBrowserResult auth_begin_browser */ 7:
+                    message.body = {
+                        oneofKind: "authBeginBrowser",
+                        authBeginBrowser: AuthBeginBrowserResult.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).authBeginBrowser)
+                    };
+                    break;
+                case /* AuthBrowserStatusResult auth_browser_status */ 8:
+                    message.body = {
+                        oneofKind: "authBrowserStatus",
+                        authBrowserStatus: AuthBrowserStatusResult.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).authBrowserStatus)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -39560,6 +39696,12 @@ class RealtimeV3Response$Type extends MessageType<RealtimeV3Response> {
         /* FinishHttpUploadResult finish_http_upload = 6 [deprecated = true]; */
         if (message.body.oneofKind === "finishHttpUpload")
             FinishHttpUploadResult.internalBinaryWrite(message.body.finishHttpUpload, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        /* AuthBeginBrowserResult auth_begin_browser = 7; */
+        if (message.body.oneofKind === "authBeginBrowser")
+            AuthBeginBrowserResult.internalBinaryWrite(message.body.authBeginBrowser, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
+        /* AuthBrowserStatusResult auth_browser_status = 8; */
+        if (message.body.oneofKind === "authBrowserStatus")
+            AuthBrowserStatusResult.internalBinaryWrite(message.body.authBrowserStatus, writer.tag(8, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -40036,6 +40178,290 @@ class AuthCompleteResult$Type extends MessageType<AuthCompleteResult> {
  * @generated MessageType for protobuf message AuthCompleteResult
  */
 export const AuthCompleteResult = new AuthCompleteResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AuthBeginBrowserRequest$Type extends MessageType<AuthBeginBrowserRequest> {
+    constructor() {
+        super("AuthBeginBrowserRequest", [
+            { no: 1, name: "client", kind: "message", T: () => ClientInfo }
+        ]);
+    }
+    create(value?: PartialMessage<AuthBeginBrowserRequest>): AuthBeginBrowserRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<AuthBeginBrowserRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuthBeginBrowserRequest): AuthBeginBrowserRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* ClientInfo client */ 1:
+                    message.client = ClientInfo.internalBinaryRead(reader, reader.uint32(), options, message.client);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AuthBeginBrowserRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* ClientInfo client = 1; */
+        if (message.client)
+            ClientInfo.internalBinaryWrite(message.client, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AuthBeginBrowserRequest
+ */
+export const AuthBeginBrowserRequest = new AuthBeginBrowserRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AuthBeginBrowserResult$Type extends MessageType<AuthBeginBrowserResult> {
+    constructor() {
+        super("AuthBeginBrowserResult", [
+            { no: 1, name: "login_transaction_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "browser_url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "verification_code", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "expires_at", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AuthBeginBrowserResult>): AuthBeginBrowserResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.loginTransactionId = "";
+        message.browserUrl = "";
+        message.verificationCode = "";
+        message.expiresAt = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<AuthBeginBrowserResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuthBeginBrowserResult): AuthBeginBrowserResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string login_transaction_id */ 1:
+                    message.loginTransactionId = reader.string();
+                    break;
+                case /* string browser_url */ 2:
+                    message.browserUrl = reader.string();
+                    break;
+                case /* string verification_code */ 3:
+                    message.verificationCode = reader.string();
+                    break;
+                case /* int64 expires_at */ 4:
+                    message.expiresAt = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AuthBeginBrowserResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string login_transaction_id = 1; */
+        if (message.loginTransactionId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.loginTransactionId);
+        /* string browser_url = 2; */
+        if (message.browserUrl !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.browserUrl);
+        /* string verification_code = 3; */
+        if (message.verificationCode !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.verificationCode);
+        /* int64 expires_at = 4; */
+        if (message.expiresAt !== 0n)
+            writer.tag(4, WireType.Varint).int64(message.expiresAt);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AuthBeginBrowserResult
+ */
+export const AuthBeginBrowserResult = new AuthBeginBrowserResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AuthBrowserStatusRequest$Type extends MessageType<AuthBrowserStatusRequest> {
+    constructor() {
+        super("AuthBrowserStatusRequest", [
+            { no: 1, name: "login_transaction_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AuthBrowserStatusRequest>): AuthBrowserStatusRequest {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.loginTransactionId = "";
+        if (value !== undefined)
+            reflectionMergePartial<AuthBrowserStatusRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuthBrowserStatusRequest): AuthBrowserStatusRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string login_transaction_id */ 1:
+                    message.loginTransactionId = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AuthBrowserStatusRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string login_transaction_id = 1; */
+        if (message.loginTransactionId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.loginTransactionId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AuthBrowserStatusRequest
+ */
+export const AuthBrowserStatusRequest = new AuthBrowserStatusRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AuthBrowserStatusResult$Type extends MessageType<AuthBrowserStatusResult> {
+    constructor() {
+        super("AuthBrowserStatusResult", [
+            { no: 1, name: "pending", kind: "message", oneof: "state", T: () => AuthBrowserPending },
+            { no: 2, name: "authorized", kind: "message", oneof: "state", T: () => AuthAuthorized },
+            { no: 3, name: "cancelled", kind: "message", oneof: "state", T: () => AuthBrowserCancelled }
+        ]);
+    }
+    create(value?: PartialMessage<AuthBrowserStatusResult>): AuthBrowserStatusResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.state = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<AuthBrowserStatusResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuthBrowserStatusResult): AuthBrowserStatusResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* AuthBrowserPending pending */ 1:
+                    message.state = {
+                        oneofKind: "pending",
+                        pending: AuthBrowserPending.internalBinaryRead(reader, reader.uint32(), options, (message.state as any).pending)
+                    };
+                    break;
+                case /* AuthAuthorized authorized */ 2:
+                    message.state = {
+                        oneofKind: "authorized",
+                        authorized: AuthAuthorized.internalBinaryRead(reader, reader.uint32(), options, (message.state as any).authorized)
+                    };
+                    break;
+                case /* AuthBrowserCancelled cancelled */ 3:
+                    message.state = {
+                        oneofKind: "cancelled",
+                        cancelled: AuthBrowserCancelled.internalBinaryRead(reader, reader.uint32(), options, (message.state as any).cancelled)
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AuthBrowserStatusResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* AuthBrowserPending pending = 1; */
+        if (message.state.oneofKind === "pending")
+            AuthBrowserPending.internalBinaryWrite(message.state.pending, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* AuthAuthorized authorized = 2; */
+        if (message.state.oneofKind === "authorized")
+            AuthAuthorized.internalBinaryWrite(message.state.authorized, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* AuthBrowserCancelled cancelled = 3; */
+        if (message.state.oneofKind === "cancelled")
+            AuthBrowserCancelled.internalBinaryWrite(message.state.cancelled, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AuthBrowserStatusResult
+ */
+export const AuthBrowserStatusResult = new AuthBrowserStatusResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AuthBrowserPending$Type extends MessageType<AuthBrowserPending> {
+    constructor() {
+        super("AuthBrowserPending", []);
+    }
+    create(value?: PartialMessage<AuthBrowserPending>): AuthBrowserPending {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<AuthBrowserPending>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuthBrowserPending): AuthBrowserPending {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: AuthBrowserPending, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AuthBrowserPending
+ */
+export const AuthBrowserPending = new AuthBrowserPending$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AuthBrowserCancelled$Type extends MessageType<AuthBrowserCancelled> {
+    constructor() {
+        super("AuthBrowserCancelled", []);
+    }
+    create(value?: PartialMessage<AuthBrowserCancelled>): AuthBrowserCancelled {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<AuthBrowserCancelled>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AuthBrowserCancelled): AuthBrowserCancelled {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: AuthBrowserCancelled, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AuthBrowserCancelled
+ */
+export const AuthBrowserCancelled = new AuthBrowserCancelled$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class CreateHttpUploadRequest$Type extends MessageType<CreateHttpUploadRequest> {
     constructor() {
