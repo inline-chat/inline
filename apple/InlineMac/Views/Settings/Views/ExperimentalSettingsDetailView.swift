@@ -1,22 +1,21 @@
 import SwiftUI
 
 struct ExperimentalSettingsDetailView: View {
+  @StateObject private var settings = AppSettings.shared
+
   var body: some View {
     Form {
       Section {
-        SettingsEmptyRow(
-          "No Experimental Features",
-          description: "Experimental controls will appear here when they are available.",
-          systemImage: "testtube.2"
-        )
+        Toggle(isOn: $settings.richContentRendererEnabled) {
+          SettingsRowLabel(
+            "Rich Content Renderer",
+            description: "Render supported agent Markdown as native rich-content blocks in messages."
+          )
+        }
       } header: {
-        SettingsSectionHeader("Experimental")
+        SettingsSectionHeader("Messages")
       }
     }
     .settingsFormStyle()
   }
-}
-
-#Preview {
-  ExperimentalSettingsDetailView()
 }

@@ -57,6 +57,7 @@ enum ServiceMessageRowLayout {
       avatar: nil,
       bubble: zeroPlan,
       text: nil,
+      richBlockContent: nil,
       photo: nil,
       video: nil,
       document: nil,

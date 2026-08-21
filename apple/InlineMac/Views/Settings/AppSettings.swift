@@ -171,6 +171,7 @@ final class AppSettings: ObservableObject {
   static let sidebarCleanupIntervalKey = "sidebarCleanupInterval"
   static let sidebarItemSizeKey = "sidebarItemSize"
   static let sidebarModeKey = "sidebarMode"
+  static let richContentRendererEnabledKey = "experimental.richContentRendererEnabled"
   static let sidebarSortKey = "sidebarSort"
   static let messageDoubleClickActionKey = "messageDoubleClickAction"
   static let messageHoldActionKey = "messageHoldAction"
@@ -378,6 +379,15 @@ final class AppSettings: ObservableObject {
 
   // MARK: - Experimental Settings
 
+  @Published var richContentRendererEnabled: Bool {
+    didSet {
+      UserDefaults.standard.set(
+        richContentRendererEnabled,
+        forKey: Self.richContentRendererEnabledKey
+      )
+    }
+  }
+
   @Published var showMainTabStrip: Bool {
     didSet {
       UserDefaults.standard.set(showMainTabStrip, forKey: "showMainTabStrip")
@@ -471,6 +481,9 @@ final class AppSettings: ObservableObject {
       unreadBadgeStyle = .defaultValue
     }
     showMainTabStrip = UserDefaults.standard.object(forKey: "showMainTabStrip") as? Bool ?? false
+    richContentRendererEnabled = UserDefaults.standard.object(
+      forKey: Self.richContentRendererEnabledKey
+    ) as? Bool ?? false
     let storedMode = (persistentDefaults?[Self.sidebarModeKey] as? String)
       .flatMap(SidebarMode.init(rawValue:))
     let legacyInbox = persistentDefaults?[ExperimentalFeatureFlags.sidebarAsInboxKey] as? Bool

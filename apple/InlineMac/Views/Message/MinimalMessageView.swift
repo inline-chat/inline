@@ -269,6 +269,15 @@ class MinimalMessageViewAppKit: NSView {
     )
   }
 
+  private var richBlockPalette: RichBlockPalette {
+    .init(
+      primary: textColor,
+      secondary: secondaryTextColor,
+      tertiary: .tertiaryLabelColor,
+      link: linkColor
+    )
+  }
+
   private var richTextStyleKey: String {
     "minimal-default"
   }
@@ -848,6 +857,8 @@ class MinimalMessageViewAppKit: NSView {
       return textView
     }
   }()
+
+  private var richBlockContentView: RichBlockContentView?
 
   private var reactionsView: MessageReactionsView?
   // The second mouse-down event is a reliable double-click boundary even when
@@ -2830,10 +2841,12 @@ class MinimalMessageViewAppKit: NSView {
     let translationEntities = fullMessage.translationEntities
     let text = translationText ?? fullMessage.message.text ?? ""
     let entities = translationEntities ?? fullMessage.message.entities
+    let richBlockPlan = props.layout.richBlockContent
+    let blockContent = richBlockPlan == nil ? nil : fullMessage.message.blockContent
 
     // From Cache
 
-    if
+    if richBlockPlan == nil,
       let cachedAttributedString = CacheAttrs.shared.get(
         message: fullMessage,
         renderStyle: .minimal,
@@ -2886,6 +2899,54 @@ class MinimalMessageViewAppKit: NSView {
       styleKey: richTextStyleKey,
       value: attributedString
     )
+
+    if let richBlockPlan, let blockContent {
+      let richView = richBlockContentView ?? {
+        let view = RichBlockContentView(frame: .zero)
+        richBlockContentView = view
+        return view
+      }()
+      let wasAttached = richView.superview != nil
+      richView.menu = menu
+      richView.onTextEntityClick = { [weak self] hit, text in
+        self?.handleTextEntityClick(hit, attributedString: text) ?? false
+      }
+      richView.onDisclosureToggle = { [weak self] path, expanded in
+        guard let self else { return }
+        RichBlockMessageActions.toggleDisclosure(
+          path: path,
+          expanded: expanded,
+          message: self.fullMessage.message
+        )
+      }
+      textView.setMessageAttributedString(
+        NSAttributedString(),
+        isRtl: props.isRtl,
+        layoutSize: props.layout.text?.size ?? .zero,
+        useTextKit2: useTextKit2
+      )
+      if richView.superview !== textView {
+        richView.removeFromSuperview()
+        textView.addSubview(richView)
+      }
+      richView.frame = CGRect(origin: .zero, size: richBlockPlan.size)
+      richView.update(
+        plan: richBlockPlan,
+        content: blockContent,
+        attributedText: attributedString,
+        baseFontSize: props.layout.fontSize,
+        palette: richBlockPalette,
+        relatedMessage: fullMessage.message,
+        codePresentation: props.richBlockCodePresentation,
+        renderStyle: .minimal,
+        animated: wasAttached
+      )
+      detectedLinks = []
+      return
+    }
+
+    richBlockContentView?.prepareForReuse()
+    richBlockContentView?.removeFromSuperview()
     textView.setMessageAttributedString(
       attributedString,
       isRtl: props.isRtl,
@@ -2898,6 +2959,7 @@ class MinimalMessageViewAppKit: NSView {
 
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
+    richBlockContentView?.setContentVisible(window != nil)
 
     if window == nil {
       updateHoverState(false)
@@ -3838,6 +3900,13 @@ class MinimalMessageViewAppKit: NSView {
       disableTextRelayout: true
     )
 
+    if let richBlockPlan = props.layout.richBlockContent,
+       let richBlockContentView
+    {
+      richBlockContentView.frame = CGRect(origin: .zero, size: richBlockPlan.size)
+      richBlockContentView.applyLayout(richBlockPlan, animated: false)
+    }
+
     // if hasReactions {
     updateReactionsSizes()
     // }
@@ -3903,6 +3972,14 @@ class MinimalMessageViewAppKit: NSView {
   private var didReachThreshold = false
 
   override func scrollWheel(with event: NSEvent) {
+    if richBlockContentView?.consumeNestedHorizontalScroll(event) == true {
+      layer?.transform = CATransform3DIdentity
+      swipeAnimationView?.alphaValue = 0
+      isSwipeInProgress = false
+      hasTriggerHapticFeedback = false
+      didReachThreshold = false
+      return
+    }
     // Do not allow swipe-to-reply if message cannot be replied to
     if !fullMessage.canReply || isAnchorMessage {
       // Ensure UI is reset and pass through
@@ -4484,7 +4561,7 @@ extension MinimalMessageViewAppKit: NSGestureRecognizerDelegate {
 
 // MARK: - NSTextViewDelegate
 
-extension MinimalMessageViewAppKit: NSTextViewDelegate {
+extension MinimalMessageViewAppKit: NSTextViewDelegate, RichBlockTextMenuProviding {
   func textViewDidChangeSelection(_ notification: Notification) {
     guard let textView = notification.object as? NSTextView else { return }
     guard textView.selectedRanges.contains(where: { $0.rangeValue.length > 0 }) else { return }
@@ -4495,6 +4572,16 @@ extension MinimalMessageViewAppKit: NSTextViewDelegate {
   func textView(_: NSTextView, menu: NSMenu, for _: NSEvent, at charIndex: Int) -> NSMenu? {
     let linkURL = linkURLForContextMenu(at: charIndex)
     return createMenu(context: .textView, nativeMenu: menu, linkURL: linkURL)
+  }
+
+  func richBlockTextMenu(
+    nativeMenu: NSMenu,
+    event _: NSEvent,
+    characterIndex: Int,
+    attributedText: NSAttributedString
+  ) -> NSMenu? {
+    let linkURL = linkURL(at: characterIndex, in: attributedText)
+    return createMenu(context: .textView, nativeMenu: nativeMenu, linkURL: linkURL)
   }
 
   // func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {

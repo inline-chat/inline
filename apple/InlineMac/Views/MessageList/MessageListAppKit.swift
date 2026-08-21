@@ -162,6 +162,12 @@ class MessageListAppKit: NSViewController {
 
     sizeCalculator.prepareForUse()
     rebuildRowItems()
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(richBlockDisclosureStateDidChange),
+      name: .richBlockDisclosureStateDidChange,
+      object: RichBlockLocalStateStore.shared
+    )
 
     // observe data
     chatRows.observe { [weak self] update in
@@ -1412,6 +1418,30 @@ class MessageListAppKit: NSViewController {
       name: NSScrollView.didEndLiveScrollNotification,
       object: scrollView
     )
+  }
+
+  @objc private func richBlockDisclosureStateDidChange(_ notification: Notification) {
+    guard !isDisposed,
+          AppSettings.shared.richContentRendererEnabled,
+          let stableID = notification.userInfo?["messageStableID"] as? Int64,
+          stableID != 0,
+          let row = chatRows.rowIndex(forMessageStableId: stableID),
+          row >= 0,
+          row < tableView.numberOfRows
+    else { return }
+
+    let rows = IndexSet(integer: row)
+    NSAnimationContext.runAnimationGroup { [weak self] context in
+      guard let self else { return }
+      context.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.16
+      tableView.beginUpdates()
+      tableView.reloadData(forRowIndexes: rows, columnIndexes: IndexSet(integer: 0))
+      tableView.noteHeightOfRows(withIndexesChanged: rows)
+      tableView.endUpdates()
+    } completionHandler: { [weak self] in
+      self?.syncAvatarOverlayAfterTableLayout()
+      self?.refreshMessageHoverAfterGeometryChange()
+    }
   }
 
   private var liveResizeObserver: NSObjectProtocol?

@@ -59,6 +59,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     case videoId
     case documentId
     case contentPayload
+    case blockContentPayload
     case transactionId
     case isSticker
     case hasLink
@@ -121,10 +122,17 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   public var videoId: Int64?
   public var documentId: Int64?
   public var contentPayload: Client_MessageContentPayload?
+  /// Dedicated structural payload. Kept separate from `contentPayload` so chat-list
+  /// projections do not decode or carry the potentially large block tree.
+  public var blockContentPayload: BlockContentPayload?
   public var transactionId: String?
   public var isSticker: Bool?
   public var hasLink: Bool?
   public var entities: MessageEntities?
+
+  public var blockContent: InlineProtocol.BlockContent? {
+    blockContentPayload?.content
+  }
 
   public var actions: InlineProtocol.MessageActions? {
     get {
@@ -185,6 +193,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     public static let videoId = Column(CodingKeys.videoId)
     public static let documentId = Column(CodingKeys.documentId)
     public static let contentPayload = Column(CodingKeys.contentPayload)
+    public static let blockContentPayload = Column(CodingKeys.blockContentPayload)
     public static let hasLink = Column(CodingKeys.hasLink)
     public static let entities = Column(CodingKeys.entities)
   }
@@ -328,6 +337,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     videoId: Int64? = nil,
     documentId: Int64? = nil,
     contentPayload: Client_MessageContentPayload? = nil,
+    blockContentPayload: BlockContentPayload? = nil,
     actions: InlineProtocol.MessageActions? = nil,
     transactionId: String? = nil,
     isSticker: Bool? = nil,
@@ -358,6 +368,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     self.videoId = videoId
     self.documentId = documentId
     self.contentPayload = contentPayload
+    self.blockContentPayload = blockContentPayload
     if let actions {
       self.actions = actions
     }
@@ -425,6 +436,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       videoId: from.media.video.hasVideo ? from.media.video.video.id : nil,
       documentId: from.media.document.hasDocument ? from.media.document.document.id : nil,
       contentPayload: Self.contentPayload(from: from),
+      blockContentPayload: from.hasBlockContent ? BlockContentPayload(from.blockContent) : nil,
       actions: from.hasActions ? from.actions : nil,
       isSticker: from.isSticker,
       hasLink: from.hasHasLink_p ? from.hasLink_p : nil,
@@ -609,6 +621,59 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     }
 
     return hasContentPayload(payload) ? payload : nil
+  }
+
+  private static func materializeBlockPhotos(
+    _ db: Database,
+    blocks: [InlineProtocol.Block]
+  ) throws {
+    var materializedPhotoIDs = Set<Int64>()
+    try materializeBlockPhotos(db, blocks: blocks, materializedPhotoIDs: &materializedPhotoIDs)
+  }
+
+  private static func materializeBlockPhotos(
+    _ db: Database,
+    blocks: [InlineProtocol.Block],
+    materializedPhotoIDs: inout Set<Int64>
+  ) throws {
+    for block in blocks {
+      switch block.kind {
+      case let .image(image):
+        try materializeBlockPhoto(db, image: image, materializedPhotoIDs: &materializedPhotoIDs)
+      case let .album(album):
+        for image in album.images {
+          try materializeBlockPhoto(db, image: image, materializedPhotoIDs: &materializedPhotoIDs)
+        }
+      case let .list(list):
+        for item in list.items {
+          try materializeBlockPhotos(db, blocks: item.children, materializedPhotoIDs: &materializedPhotoIDs)
+        }
+      case let .disclosure(disclosure):
+        try materializeBlockPhotos(
+          db,
+          blocks: disclosure.children,
+          materializedPhotoIDs: &materializedPhotoIDs
+        )
+      case let .quote(quote):
+        try materializeBlockPhotos(
+          db,
+          blocks: quote.children,
+          materializedPhotoIDs: &materializedPhotoIDs
+        )
+      case .paragraph, .heading, .code, .separator, .footer, .table, nil:
+        break
+      }
+    }
+  }
+
+  private static func materializeBlockPhoto(
+    _ db: Database,
+    image: InlineProtocol.BlockImage,
+    materializedPhotoIDs: inout Set<Int64>
+  ) throws {
+    guard case let .ready(photo)? = image.state, photo.id > 0 else { return }
+    guard materializedPhotoIDs.insert(photo.id).inserted else { return }
+    try Photo.savePhotoFromProtocol(db, photo: photo)
   }
 
   private static func mergedContentPayload(
@@ -953,7 +1018,8 @@ public extension Message {
   mutating func saveMessage(
     _ db: Database,
     onConflict: Database.ConflictResolution = .abort,
-    publishChanges: Bool = false
+    publishChanges: Bool = false,
+    preserveExistingBlockContentWhenMissing: Bool = true
   ) throws -> Message {
     var isExisting = false
 
@@ -967,6 +1033,9 @@ public extension Message {
         documentId = documentId ?? existing.documentId
         videoId = videoId ?? existing.videoId
         contentPayload = Message.mergedContentPayload(incoming: contentPayload, existing: existing.contentPayload)
+        if preserveExistingBlockContentWhenMissing, blockContentPayload == nil {
+          blockContentPayload = existing.blockContentPayload
+        }
         hasLink = hasLink ?? existing.hasLink
         entities = entities ?? existing.entities
         rev = max(rev, existing.rev)
@@ -1020,6 +1089,7 @@ public extension ApiMessage {
       message.fileId = existing.fileId
       message.text = existing.text
       message.contentPayload = existing.contentPayload
+      message.blockContentPayload = existing.blockContentPayload
       message.actions = existing.actions
       message.transactionId = existing.transactionId
       message.hasLink = existing.hasLink
@@ -1064,6 +1134,23 @@ public extension ApiMessage {
   }
 }
 
+enum ProtocolMessageSaveDisposition: Equatable, Sendable {
+  case inserted
+  case newer
+  case equal
+  case stale
+
+  var isAccepted: Bool {
+    self != .stale
+  }
+}
+
+struct ProtocolMessageSaveResult: Equatable, Sendable {
+  let message: Message
+  let disposition: ProtocolMessageSaveDisposition
+  let textOrEntitiesChanged: Bool
+}
+
 public extension Message {
   static func save(
     _ db: Database,
@@ -1071,15 +1158,60 @@ public extension Message {
     publishChanges: Bool = false,
     materializeMissingReferences: Bool = false
   ) throws -> Message {
+    try saveWithResult(
+      db,
+      protocolMessage: protocolMessage,
+      publishChanges: publishChanges,
+      materializeMissingReferences: materializeMissingReferences
+    ).message
+  }
+
+  internal static func saveWithResult(
+    _ db: Database,
+    protocolMessage: InlineProtocol.Message,
+    publishChanges: Bool = false,
+    materializeMissingReferences: Bool = false
+  ) throws -> ProtocolMessageSaveResult {
+    let id = protocolMessage.id
+    let chatId = protocolMessage.chatID
+    let existing = try Message.fetchOne(db, key: ["messageId": id, "chatId": chatId])
+    let disposition = protocolSaveDisposition(
+      protocolMessage: protocolMessage,
+      existing: existing
+    )
+
+    // A lower revision, or an unversioned snapshot after a versioned one, is a
+    // complete no-op. This check intentionally precedes reference/media
+    // materialization so stale snapshots cannot mutate side tables.
+    if disposition == .stale, let existing {
+      return ProtocolMessageSaveResult(
+        message: existing,
+        disposition: .stale,
+        textOrEntitiesChanged: false
+      )
+    }
+
     if materializeMissingReferences {
       try ensureLocalReferences(db, protocolMessage: protocolMessage)
     }
 
-    let id = protocolMessage.id
-    let chatId = protocolMessage.chatID
-    let existing = try? Message.fetchOne(db, key: ["messageId": id, "chatId": chatId])
     let isUpdate = existing != nil
     var message = Message(from: protocolMessage)
+    let textOrEntitiesChanged = existing.map {
+      $0.text != message.text || $0.entities != message.entities
+    } ?? false
+
+    if protocolMessage.hasBlockContent {
+      do {
+        try materializeBlockPhotos(db, blocks: protocolMessage.blockContent.blocks)
+      } catch {
+        // Rich content is an additive projection. A malformed or temporarily
+        // unmaterializable photo must not prevent the ordinary message from
+        // being stored and rendered through its text/entities fallback.
+        Self.log.error("Failed to materialize rich-content photos", error: error)
+        message.blockContentPayload = nil
+      }
+    }
     message.pinned = try PinnedMessage.isPinned(db, chatId: chatId, messageId: id)
 
     if let existing {
@@ -1094,7 +1226,6 @@ public extension Message {
       message.isSticker = message.isSticker ?? existing.isSticker
       message.hasLink = message.hasLink ?? existing.hasLink
       message.editDate = message.editDate ?? existing.editDate
-      message.rev = max(message.rev, existing.rev)
       message.repliedToMessageId = message.repliedToMessageId ?? existing.repliedToMessageId
       message.forwardFromPeerUserId = message.forwardFromPeerUserId ?? existing.forwardFromPeerUserId
       message.forwardFromPeerThreadId = message.forwardFromPeerThreadId ?? existing.forwardFromPeerThreadId
@@ -1127,14 +1258,18 @@ public extension Message {
         }
       }
 
-      try message.saveMessage(db, publishChanges: false) // publish is below
+      message = try message.saveMessage(
+        db,
+        publishChanges: false,
+        preserveExistingBlockContentWhenMissing: false
+      ) // publish is below
     } else {
       // Process media attachments if present
       if protocolMessage.hasMedia {
         try processMediaAttachments(db, protocolMessage: protocolMessage, message: &message)
       }
 
-      let message = try message.saveMessage(db, publishChanges: false) // publish is below
+      message = try message.saveMessage(db, publishChanges: false) // publish is below
 
       if protocolMessage.hasReactions {
         for reaction in protocolMessage.reactions.reactions {
@@ -1169,7 +1304,25 @@ public extension Message {
       }
     }
 
-    return message
+    return ProtocolMessageSaveResult(
+      message: message,
+      disposition: disposition,
+      textOrEntitiesChanged: textOrEntitiesChanged
+    )
+  }
+
+  private static func protocolSaveDisposition(
+    protocolMessage: InlineProtocol.Message,
+    existing: Message?
+  ) -> ProtocolMessageSaveDisposition {
+    guard let existing else { return .inserted }
+
+    guard protocolMessage.hasRev else {
+      return existing.rev > 0 ? .stale : .equal
+    }
+    if protocolMessage.rev < existing.rev { return .stale }
+    if protocolMessage.rev > existing.rev { return .newer }
+    return .equal
   }
 
   private static func ensureLocalReferences(_ db: Database, protocolMessage: InlineProtocol.Message) throws {

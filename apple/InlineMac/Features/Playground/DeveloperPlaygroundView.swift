@@ -7,6 +7,7 @@ struct DeveloperPlaygroundView: View {
   @State private var selectedScope: DeveloperPlaygroundScope? = .notifications
   @State private var appearance = DeveloperPlaygroundAppearance.system
   @State private var inviteLayout = DeveloperInviteLayout.focused
+  @State private var messageConfiguration = DeveloperMessagePlaygroundConfiguration()
 
   var body: some View {
     NavigationSplitView {
@@ -45,11 +46,7 @@ struct DeveloperPlaygroundView: View {
       case .notifications:
         DeveloperPlaygroundNotificationView()
       case .messageViews:
-        ContentUnavailableView(
-          "Message Views",
-          systemImage: "bubble.left.and.bubble.right",
-          description: Text("Durable message fixtures will live here.")
-        )
+        DeveloperPlaygroundMessageView(configuration: $messageConfiguration)
       case nil:
         ContentUnavailableView(
           "Select a playground",
@@ -63,7 +60,8 @@ struct DeveloperPlaygroundView: View {
       DeveloperPlaygroundInspector(
         appearance: $appearance,
         selectedScope: selectedScope,
-        inviteLayout: $inviteLayout
+        inviteLayout: $inviteLayout,
+        messageConfiguration: $messageConfiguration
       )
         .inspectorColumnWidth(min: 200, ideal: 220, max: 280)
     }
@@ -140,6 +138,7 @@ private struct DeveloperPlaygroundInspector: View {
   @Binding var appearance: DeveloperPlaygroundAppearance
   let selectedScope: DeveloperPlaygroundScope?
   @Binding var inviteLayout: DeveloperInviteLayout
+  @Binding var messageConfiguration: DeveloperMessagePlaygroundConfiguration
 
   var body: some View {
     Form {
@@ -166,6 +165,10 @@ private struct DeveloperPlaygroundInspector: View {
             .font(.caption)
             .foregroundStyle(.secondary)
         }
+      }
+
+      if selectedScope == .messageViews {
+        DeveloperMessagePlaygroundInspector(configuration: $messageConfiguration)
       }
     }
     .formStyle(.grouped)

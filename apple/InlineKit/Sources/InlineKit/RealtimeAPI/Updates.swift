@@ -87,8 +87,14 @@ public actor UpdatesEngine: Sendable {
 
         case let .editMessage(editMessage):
           if source == .syncCatchup {
-            try editMessage.apply(db, publishChanges: false, materializeMissingReferences: true)
-            reloadPeers.insert(editMessage.message.peerID.toPeer())
+            let accepted = try editMessage.apply(
+              db,
+              publishChanges: false,
+              materializeMissingReferences: true
+            )
+            if accepted {
+              reloadPeers.insert(editMessage.message.peerID.toPeer())
+            }
           } else {
             try editMessage.apply(db, publishChanges: true, materializeMissingReferences: true)
           }
@@ -999,11 +1005,21 @@ extension InlineProtocol.UpdateUserStatus {
         nil
     }
 
+    let lastOnline: Date?
+    if status.lastOnline.hasDate {
+      lastOnline = User.lastOnlineDate(from: status.lastOnline.date)
+      if lastOnline == nil {
+        Log.scoped("UserPresence").error("Rejected invalid last-online Unix timestamp")
+      }
+    } else {
+      lastOnline = nil
+    }
+
     try User.filter(id: userID).updateAll(
       db,
       [
         Column("online").set(to: onlineBoolean),
-        Column("lastOnline").set(to: status.lastOnline.hasDate ? status.lastOnline.date : nil),
+        Column("lastOnline").set(to: lastOnline),
       ]
     )
   }
@@ -1206,36 +1222,43 @@ extension InlineProtocol.UpdateDeleteReaction {
 }
 
 extension InlineProtocol.UpdateEditMessage {
-  func apply(_ db: Database) throws {
+  @discardableResult
+  func apply(_ db: Database) throws -> Bool {
     try apply(db, publishChanges: true)
   }
 
-  func apply(_ db: Database, publishChanges: Bool, materializeMissingReferences: Bool = false) throws {
-    // Delete stale translations for this message since the text has changed
-    try Translation
-      .filter(Column("messageId") == message.id)
-      .filter(Column("chatId") == message.chatID)
-      .deleteAll(db)
-
-    _ = try Message.save(
+  @discardableResult
+  func apply(
+    _ db: Database,
+    publishChanges: Bool,
+    materializeMissingReferences: Bool = false
+  ) throws -> Bool {
+    let result = try Message.saveWithResult(
       db,
       protocolMessage: message,
       publishChanges: publishChanges,
       materializeMissingReferences: materializeMissingReferences
     )
 
-    if publishChanges {
-      db.afterNextTransaction { _ in
-        Task { @MainActor in
-          MessagesPublisher.shared.messageUpdatedWithId(
-            messageId: message.id,
-            chatId: message.chatID,
-            peer: message.peerID.toPeer(),
-            animated: false
-          )
-        }
-      }
+    guard result.disposition.isAccepted else { return false }
+
+    let translations = Translation
+      .filter(Translation.Columns.messageId == message.id)
+      .filter(Translation.Columns.chatId == message.chatID)
+    if result.textOrEntitiesChanged {
+      // The source text changed, so existing translations are no longer valid.
+      try translations.deleteAll(db)
+    } else if result.disposition == .newer {
+      // A block/media-only edit may advance the message revision without
+      // invalidating its translation. Keep revision-gated projections aligned.
+      try translations.updateAll(
+        db,
+        Translation.Columns.msgRev.set(to: result.message.rev)
+      )
     }
+
+    // Message.saveWithResult owns the single post-commit publisher update.
+    return true
   }
 }
 
@@ -1666,6 +1689,28 @@ extension InlineProtocol.UpdateChatOpen {
     var updatedChat = Chat(from: chat)
     try updatedChat.saveWithValidLastMsg(db)
     _ = try dialog.saveFull(db)
+  }
+}
+
+extension InlineProtocol.UpdateDialogFolder {
+  func apply(_ db: Database) throws {
+    switch folderChange {
+    case let .folder(folder):
+      try folder.saveFull(db)
+      for dialog in dialogs {
+        try dialog.saveFull(db)
+      }
+    case let .deletedFolderID(folderID):
+      for dialog in dialogs {
+        try dialog.saveFull(db)
+      }
+      try DialogFolder.deleteOne(db, key: folderID)
+    case .none:
+      // Membership-only moves still carry complete changed dialogs.
+      for dialog in dialogs {
+        try dialog.saveFull(db)
+      }
+    }
   }
 }
 

@@ -80,7 +80,9 @@ struct ChatRouteView: View {
       .ignoresSafeArea(.all, edges: .vertical)
       // MessageListAppKit captures its render style at construction. Replacing the
       // controller avoids mutating a live message renderer when the setting changes.
-      .id("chat-\(peer.toString())-\(settings.messageRenderStyle.rawValue)")
+      .id(
+        "chat-\(peer.toString())-\(settings.messageRenderStyle.rawValue)-rich:\(settings.richContentRendererEnabled)"
+      )
       .frame(minWidth: Theme.chatViewMinWidth, maxWidth: .infinity, maxHeight: .infinity)
       .chatScrollEdgeEffect()
       .navigationTitle(navigationTitle.isEmpty ? fallbackTitle : navigationTitle)

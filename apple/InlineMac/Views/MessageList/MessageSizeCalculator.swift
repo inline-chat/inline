@@ -38,7 +38,7 @@ class MessageSizeCalculator {
   static let extraSafeWidth = 0.0
 
   static let maxMessageWidth: CGFloat = Theme.messageMaxWidth
-  static let minimalMaxMessageWidth: CGFloat = 700
+  static let minimalMaxMessageWidth: CGFloat = 600
   static let minimalAvatarSize: CGFloat = 30
   static let minimalMediaMaxWidth: CGFloat = 350
   static let minimalMediaMaxHeight: CGFloat = 300
@@ -307,6 +307,7 @@ class MessageSizeCalculator {
 
     /// text
     var text: LayoutPlan?
+    var richBlockContent: RichBlockLayoutPlan?
 
     /// photo is always above text
     var photo: LayoutPlan?
@@ -389,6 +390,20 @@ class MessageSizeCalculator {
     private var attachmentConstraintTopology: [(URLPreviewAttachmentLayout.Mode?, UrlPreviewLargeStyle?)] {
       attachmentItems.map { item in
         (item.urlPreview?.mode, item.urlPreview?.largeStyle)
+      }
+    }
+
+    func hasSameRichBlockTopology(as other: LayoutPlans) -> Bool {
+      switch (richBlockContent, other.richBlockContent) {
+      case (nil, nil):
+        true
+      case let (lhs?, rhs?):
+        lhs.nodes.count == rhs.nodes.count
+          && zip(lhs.nodes, rhs.nodes).allSatisfy { left, right in
+            left.path == right.path && left.reuseKind == right.reuseKind
+          }
+      case (.some, nil), (nil, .some):
+        false
       }
     }
 
@@ -694,9 +709,15 @@ class MessageSizeCalculator {
   func calculateBubbleSize(
     for message: FullMessage,
     with props: MessageViewInputProps,
-    tableWidth width: CGFloat
+    tableWidth width: CGFloat,
+    richContentRendererOverride: Bool? = nil
   ) -> (NSSize, NSSize, NSSize?, LayoutPlans) {
-    calculateBubbleSizeInternal(for: message, with: props, tableWidth: width)
+    calculateBubbleSizeInternal(
+      for: message,
+      with: props,
+      tableWidth: width,
+      richContentRendererEnabled: richContentRendererOverride ?? AppSettings.shared.richContentRendererEnabled
+    )
   }
 
   // MARK: - Minimal Sizing
@@ -704,22 +725,39 @@ class MessageSizeCalculator {
   func calculateMinimalSize(
     for message: FullMessage,
     with props: MessageViewInputProps,
-    tableWidth width: CGFloat
+    tableWidth width: CGFloat,
+    richContentRendererOverride: Bool? = nil
   ) -> (NSSize, NSSize, NSSize?, LayoutPlans) {
-    calculateMinimalSizeInternal(for: message, with: props, tableWidth: width)
+    calculateMinimalSizeInternal(
+      for: message,
+      with: props,
+      tableWidth: width,
+      richContentRendererEnabled: richContentRendererOverride ?? AppSettings.shared.richContentRendererEnabled
+    )
   }
 
   // Backward-compatible entrypoint for existing call sites.
   func calculateSize(
     for message: FullMessage,
     with props: MessageViewInputProps,
-    tableWidth width: CGFloat
+    tableWidth width: CGFloat,
+    richContentRendererOverride: Bool? = nil
   ) -> (NSSize, NSSize, NSSize?, LayoutPlans) {
     switch props.renderStyle {
     case .bubble:
-      return calculateBubbleSize(for: message, with: props, tableWidth: width)
+      return calculateBubbleSize(
+        for: message,
+        with: props,
+        tableWidth: width,
+        richContentRendererOverride: richContentRendererOverride
+      )
     case .minimal:
-      return calculateMinimalSize(for: message, with: props, tableWidth: width)
+      return calculateMinimalSize(
+        for: message,
+        with: props,
+        tableWidth: width,
+        richContentRendererOverride: richContentRendererOverride
+      )
     }
   }
 
@@ -739,7 +777,8 @@ class MessageSizeCalculator {
   private func calculateBubbleSizeInternal(
     for message: FullMessage,
     with props: MessageViewInputProps,
-    tableWidth width: CGFloat
+    tableWidth width: CGFloat,
+    richContentRendererEnabled: Bool
   ) -> (NSSize, NSSize, NSSize?, LayoutPlans) {
     #if DEBUG
     let start = CFAbsoluteTimeGetCurrent()
@@ -764,6 +803,7 @@ class MessageSizeCalculator {
     var isSingleLine = false
     var isSticker = message.message.isSticker == true
     var textSize: CGSize?
+    var richBlockPlan: RichBlockLayoutPlan?
     var photoSize: CGSize?
     var videoSize: CGSize?
     let isTextOnly: Bool = hasText && !hasMedia && !hasDocument && !hasAttachments && !hasReplyThreadSummary
@@ -935,13 +975,35 @@ class MessageSizeCalculator {
     log.trace("availableWidth \(availableWidth) for text \(text)")
     #endif
 
+    if richContentRendererEnabled,
+       message.translationText == nil,
+       let blockContentPayload = message.message.blockContentPayload
+    {
+      let richContentInset = hasBubbleColor ? bubbleContentHorizontalInset : 0
+      let richViewportWidth = max(1, availableWidth + richContentInset * 2)
+      richBlockPlan = RichBlockLayoutPlanner.shared.plan(
+        content: blockContentPayload.content,
+        contentCacheSignature: blockContentPayload.cacheSignature,
+        contentByteCount: blockContentPayload.byteCount,
+        attributedText: attributedString,
+        availableWidth: richViewportWidth,
+        contentHorizontalInset: richContentInset,
+        baseFontSize: fontSize,
+        disclosureOverrides: RichBlockLocalStateStore.shared.disclosureOverrides(for: message.message)
+      )
+      if let richBlockPlan {
+        textSize = richBlockPlan.size
+        isSingleLine = false
+      }
+    }
+
     let cacheKey_ = cacheKey(
       for: message,
       width: availableWidth,
       props: props,
       actionRows: renderableActionRows
     )
-    if let cachedTextSize = textHeightCache.object(forKey: cacheKey_)?.sizeValue {
+    if richBlockPlan == nil, let cachedTextSize = textHeightCache.object(forKey: cacheKey_)?.sizeValue {
       textSize = cachedTextSize
       #if DEBUG
       log.trace("text size cache hit \(message.message.messageId)")
@@ -959,7 +1021,8 @@ class MessageSizeCalculator {
     // MARK: Calculate text size if caches are missed
 
     // Shared logic
-    if hasText,
+    if richBlockPlan == nil,
+       hasText,
        textSize == nil,
        !emojiMessage,
        let minTextWidth = getTextWidthIfSingleLine(message, availableWidth: availableWidth)
@@ -1094,7 +1157,7 @@ class MessageSizeCalculator {
       let textHeight = max(textHeight, heightForSingleLineText())
       var textTopSpacing: CGFloat = 0
       var textBottomSpacing: CGFloat = 0
-      let textSidePadding = hasBubbleColor ? bubbleContentHorizontalInset : 0
+      let textSidePadding = richBlockPlan == nil && hasBubbleColor ? bubbleContentHorizontalInset : 0
 
       // If just text
       if !hasMedia, !hasReply, !hasForwardHeader {
@@ -1105,6 +1168,9 @@ class MessageSizeCalculator {
         textBottomSpacing += Theme.messageTextOnlyVerticalInsets
       } else {
         textBottomSpacing += Theme.messageTextAndTimeSpacing
+      }
+      if richBlockPlan?.trailingTextLine != nil, hasBubbleColor {
+        textBottomSpacing += 3
       }
 
       // Offset added height to keep bubble height unchanged
@@ -1240,8 +1306,12 @@ class MessageSizeCalculator {
     if hasReactions {
       reactionsOutsideBubble = !hasText && (photoPlan != nil || videoPlan != nil)
       let defaultReactionHorizontalInset: CGFloat = 8.0
-      let reactionLeadingInset = textPlan?.spacing.left ?? defaultReactionHorizontalInset
-      let reactionTrailingInset = textPlan?.spacing.right ?? defaultReactionHorizontalInset
+      let reactionLeadingInset = richBlockPlan == nil
+        ? (textPlan?.spacing.left ?? defaultReactionHorizontalInset)
+        : bubbleContentHorizontalInset
+      let reactionTrailingInset = richBlockPlan == nil
+        ? (textPlan?.spacing.right ?? defaultReactionHorizontalInset)
+        : bubbleContentHorizontalInset
       let reactionsInsets: NSEdgeInsets = if reactionsOutsideBubble {
         .zero
       } else if emojiMessage {
@@ -1360,8 +1430,21 @@ class MessageSizeCalculator {
         timePlan.size.width +
         timePlan.spacing.right
     }
-    let maxBubbleWidth = availableWidth + (textPlan?.spacing.horizontalTotal ?? 0)
+    let maxBubbleWidth = richBlockPlan?.size.width
+      ?? (availableWidth + (textPlan?.spacing.horizontalTotal ?? 0))
     let timeSharesReactionRow = sharedReactionTimeWidth.map { $0 <= maxBubbleWidth } ?? false
+    let timeSharesRichFooter: Bool = if let trailing = richBlockPlan?.trailingTextLine,
+      let timePlan,
+      !trailing.isRTL,
+      !hasReactions,
+      !hasAttachments,
+      !hasReplyThreadSummary
+    {
+      trailing.usedWidth + 6 + timePlan.size.width + timePlan.spacing.right
+        <= (richBlockPlan?.size.width ?? availableWidth)
+    } else {
+      false
+    }
 
     // MARK: - Bubble
 
@@ -1426,7 +1509,7 @@ class MessageSizeCalculator {
       }
     }
     if let timePlan {
-      if !isSingleLine, hasText, !timeSharesReactionRow {
+      if !isSingleLine, hasText, !timeSharesReactionRow, !timeSharesRichFooter {
         bubbleHeight += timePlan.size.height
         bubbleHeight += timePlan.spacing.verticalTotal // ??? probably too much
       }
@@ -1569,6 +1652,7 @@ class MessageSizeCalculator {
       avatar: avatarPlan,
       bubble: bubblePlan,
       text: textPlan,
+      richBlockContent: richBlockPlan,
       photo: photoPlan,
       video: videoPlan,
       document: documentPlan,
@@ -1603,7 +1687,7 @@ class MessageSizeCalculator {
     // Fitting width
     let size = NSSize(width: plan.totalWidth, height: plan.totalHeight)
 
-    if let textSize {
+    if richBlockPlan == nil, let textSize {
       textHeightCache.setObject(NSValue(size: textSize), forKey: cacheKey_)
     }
     lastHeightForRow.setObject(NSValue(size: size), forKey: NSString(string: "\(message.id)"))
@@ -1614,7 +1698,8 @@ class MessageSizeCalculator {
   private func calculateMinimalSizeInternal(
     for message: FullMessage,
     with props: MessageViewInputProps,
-    tableWidth width: CGFloat
+    tableWidth width: CGFloat,
+    richContentRendererEnabled: Bool
   ) -> (NSSize, NSSize, NSSize?, LayoutPlans) {
     let hasText = message.message.text != nil
     let text = message.displayText ?? emptyFallback
@@ -1632,6 +1717,7 @@ class MessageSizeCalculator {
     let hasActionRows = !renderableActionRows.isEmpty
     let isOutgoing = message.message.out == true
     var textSize: CGSize?
+    var richBlockPlan: RichBlockLayoutPlan?
     var photoSize: CGSize?
     var videoSize: CGSize?
 
@@ -1670,6 +1756,24 @@ class MessageSizeCalculator {
     let textAvailableWidth = max(1, parentAvailableWidth)
     var documentWidth: CGFloat?
     var attachmentsWidth: CGFloat?
+
+    if richContentRendererEnabled,
+       message.translationText == nil,
+       let blockContentPayload = message.message.blockContentPayload
+    {
+      richBlockPlan = RichBlockLayoutPlanner.shared.plan(
+        content: blockContentPayload.content,
+        contentCacheSignature: blockContentPayload.cacheSignature,
+        contentByteCount: blockContentPayload.byteCount,
+        attributedText: attributedString,
+        availableWidth: textAvailableWidth,
+        baseFontSize: fontSize,
+        disclosureOverrides: RichBlockLocalStateStore.shared.disclosureOverrides(for: message.message)
+      )
+      if let richBlockPlan {
+        textSize = richBlockPlan.size
+      }
+    }
 
     if hasMedia {
       var mediaIntrinsicWidth: CGFloat = 0
@@ -1752,11 +1856,11 @@ class MessageSizeCalculator {
       props: props,
       actionRows: renderableActionRows
     )
-    if let cachedTextSize = textHeightCache.object(forKey: cacheKey_)?.sizeValue {
+    if richBlockPlan == nil, let cachedTextSize = textHeightCache.object(forKey: cacheKey_)?.sizeValue {
       textSize = cachedTextSize
     }
 
-    if hasText, text.isEmpty {
+    if richBlockPlan == nil, hasText, text.isEmpty {
       textSize = CGSize(width: 1, height: heightForSingleLineText())
     }
 
@@ -2134,6 +2238,7 @@ class MessageSizeCalculator {
       avatar: avatarPlan,
       bubble: bubblePlan,
       text: textPlan,
+      richBlockContent: richBlockPlan,
       photo: photoPlan,
       video: videoPlan,
       document: documentPlan,
@@ -2159,7 +2264,7 @@ class MessageSizeCalculator {
     plan.wrapper.size.height += plan.topMostContentTopSpacing
 
     let size = NSSize(width: plan.totalWidth, height: plan.totalHeight)
-    if let textSize {
+    if richBlockPlan == nil, let textSize {
       textHeightCache.setObject(NSValue(size: textSize), forKey: cacheKey_)
     }
     lastHeightForRow.setObject(NSValue(size: size), forKey: NSString(string: "\(message.id)"))

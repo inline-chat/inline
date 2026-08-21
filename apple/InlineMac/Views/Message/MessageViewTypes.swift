@@ -52,6 +52,7 @@ struct MessageViewProps: Equatable, Codable, Hashable {
   var interactionMode: MessageInteractionMode = .normal
   var replyThreadTitle: String? = nil
   var usesAvatarOverlay: Bool = true
+  var richBlockCodePresentation: RichBlockCodePresentation = .syntaxHighlighted
   var layout: MessageSizeCalculator.LayoutPlans
 
   func equalExceptSize(_ rhs: MessageViewProps) -> Bool {
@@ -66,6 +67,7 @@ struct MessageViewProps: Equatable, Codable, Hashable {
       interactionMode == rhs.interactionMode &&
       replyThreadTitle == rhs.replyThreadTitle &&
       usesAvatarOverlay == rhs.usesAvatarOverlay &&
+      richBlockCodePresentation == rhs.richBlockCodePresentation &&
       translated == rhs.translated
   }
 }

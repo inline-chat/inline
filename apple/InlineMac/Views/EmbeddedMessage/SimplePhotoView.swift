@@ -6,7 +6,13 @@ import Nuke
 import NukeUI
 
 final class SimplePhotoView: NSView {
+  enum SizingMode: Equatable {
+    case constraints
+    case manualFrames
+  }
+
   private static let imageFadeDuration: TimeInterval = 0.22
+  private static let log = Log.scoped("SimplePhotoView")
 
   private let imageView: NSView = {
     let view = NSView()
@@ -50,21 +56,30 @@ final class SimplePhotoView: NSView {
   private var heightConstraint: NSLayoutConstraint?
   private var relatedMessage: Message?
   private var overlaySymbol: String?
+  private let sizingMode: SizingMode
   private var imageLoadGeneration = 0
+  private var imageResolutionTask: Task<Void, Never>?
 
   init(
     photoInfo: PhotoInfo,
     width: CGFloat,
     height: CGFloat,
     relatedMessage: Message? = nil,
-    overlaySymbol: String? = nil
+    overlaySymbol: String? = nil,
+    sizingMode: SizingMode = .constraints
   ) {
     self.photoInfo = photoInfo
     self.relatedMessage = relatedMessage
     self.overlaySymbol = overlaySymbol
+    self.sizingMode = sizingMode
     super.init(frame: .zero)
     setupView()
-    setSize(width: width, height: height)
+    switch sizingMode {
+    case .constraints:
+      updateSize(width: width, height: height)
+    case .manualFrames:
+      applyManualLayoutFrame(CGRect(x: 0, y: 0, width: width, height: height))
+    }
     updateImage()
   }
 
@@ -77,7 +92,7 @@ final class SimplePhotoView: NSView {
     wantsLayer = true
     layer?.cornerRadius = 4.0
     layer?.masksToBounds = true
-    translatesAutoresizingMaskIntoConstraints = false
+    translatesAutoresizingMaskIntoConstraints = sizingMode == .constraints ? false : true
 
     addSubview(tinyThumbnailBackgroundView)
     addSubview(backgroundView)
@@ -102,6 +117,8 @@ final class SimplePhotoView: NSView {
 
       overlayImageView.centerXAnchor.constraint(equalTo: centerXAnchor),
       overlayImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+      overlayImageView.widthAnchor.constraint(equalToConstant: 24),
+      overlayImageView.heightAnchor.constraint(equalToConstant: 24),
     ])
     tinyThumbnailBackgroundView.onVisibilityChange = { [weak self] isVisible in
       guard let self, imageLayer.contents == nil else { return }
@@ -114,31 +131,75 @@ final class SimplePhotoView: NSView {
     updateOverlayImage()
   }
 
-  private func setSize(width: CGFloat, height: CGFloat) {
-    widthConstraint?.isActive = false
-    heightConstraint?.isActive = false
-
+  func updateSize(width: CGFloat, height: CGFloat) {
+    guard sizingMode == .constraints else {
+      assertionFailure("Use applyManualLayoutFrame(_:) for a manually sized SimplePhotoView")
+      return
+    }
+    if let widthConstraint, let heightConstraint {
+      if widthConstraint.constant != width { widthConstraint.constant = width }
+      if heightConstraint.constant != height { heightConstraint.constant = height }
+      return
+    }
     widthConstraint = widthAnchor.constraint(equalToConstant: width)
     heightConstraint = heightAnchor.constraint(equalToConstant: height)
-
     widthConstraint?.isActive = true
     heightConstraint?.isActive = true
+  }
+
+  func applyManualLayoutFrame(_ frame: CGRect) {
+    guard sizingMode == .manualFrames else {
+      assertionFailure("Manual frames require SimplePhotoView.SizingMode.manualFrames")
+      return
+    }
+    precondition(
+      frame.minX.isFinite && frame.minY.isFinite
+        && frame.width.isFinite && frame.height.isFinite
+        && frame.width >= 0 && frame.height >= 0,
+      "SimplePhotoView received invalid manual geometry"
+    )
+    if self.frame != frame {
+      self.frame = frame
+    }
+    needsLayout = true
+    layoutSubtreeIfNeeded()
+    debugAssertUnambiguousLayout()
   }
 
   private func updateImage() {
     imageLoadGeneration += 1
     let generation = imageLoadGeneration
+    imageResolutionTask?.cancel()
 
-    guard let url = imageLocalUrl() else {
-      if let photoInfo {
-        Task.detached { [weak self] in
-          guard let self else { return }
-          await FileCache.shared.download(photo: photoInfo, reloadMessageOnFinish: relatedMessage)
-        }
-      }
+    if let url = imageLocalUrl() {
+      loadImage(from: url, generation: generation)
       return
     }
 
+    guard let photoInfo else {
+      Self.log.warning("Photo view has no photo metadata")
+      return
+    }
+    let relatedMessage = relatedMessage
+    imageResolutionTask = Task { [weak self] in
+      if let cachedURL = await FileCache.shared.cachedLocalURL(photo: photoInfo) {
+        guard !Task.isCancelled else { return }
+        self?.loadImage(from: cachedURL, generation: generation)
+        return
+      }
+      await FileCache.shared.download(photo: photoInfo, reloadMessageOnFinish: relatedMessage)
+      await FileCache.shared.waitForDownload(photoId: photoInfo.id)
+      guard !Task.isCancelled else { return }
+      guard let localURL = await FileCache.shared.cachedLocalURL(photo: photoInfo) else {
+        Self.log.warning("Photo cache did not produce a local file for photo \(photoInfo.id)")
+        return
+      }
+      self?.loadImage(from: localURL, generation: generation)
+    }
+  }
+
+  private func loadImage(from url: URL, generation: Int) {
+    guard imageLoadGeneration == generation else { return }
     let targetSize = preferredImageTargetSize()
     let scale = backingScale
     let isMemoryCached = ImageCacheManager.shared.cachedImage(
@@ -156,7 +217,8 @@ final class SimplePhotoView: NSView {
       guard let self else { return }
       guard self.imageLoadGeneration == generation else { return }
       guard let image else {
-        self.hideLoadingView()
+        Self.log.warning("Image decode failed for photo \(self.photoInfo?.id ?? 0)")
+        self.showLoadingView()
         return
       }
 
@@ -264,12 +326,21 @@ final class SimplePhotoView: NSView {
     updateImageLayerFrame()
   }
 
+  private func debugAssertUnambiguousLayout() {
+    #if DEBUG
+    assert(!hasAmbiguousLayout, "SimplePhotoView manual root layout is ambiguous")
+    for view in subviews {
+      assert(!view.hasAmbiguousLayout, "SimplePhotoView descendant layout is ambiguous: \(type(of: view))")
+    }
+    #endif
+  }
+
   private func imageLocalUrl() -> URL? {
     guard let photoSize = photoInfo?.bestPhotoSize() else { return nil }
 
     if let localPath = photoSize.localPath {
       let url = FileCache.getUrl(for: .photos, localPath: localPath)
-      return url
+      return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
     return nil
@@ -281,5 +352,9 @@ final class SimplePhotoView: NSView {
     updateTinyThumbnailBackground()
     updateOverlayImage()
     updateImage()
+  }
+
+  deinit {
+    imageResolutionTask?.cancel()
   }
 }

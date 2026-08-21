@@ -82,6 +82,7 @@ class MessageTableCell: NSView {
        wasTranslated == message.isTranslated,
        // different width and height (ie. window resized)
        currentContent.props.equalExceptSize(props),
+       currentContent.props.layout.hasSameRichBlockTopology(as: props.layout),
        currentContent.props.layout.hasSameConstraintTopology(as: props.layout)
     {
       self.currentContent = (message, props)

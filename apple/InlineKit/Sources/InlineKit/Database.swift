@@ -947,6 +947,12 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("message block content payload") { db in
+      try db.alter(table: "message") { table in
+        table.add(column: "blockContentPayload", .blob)
+      }
+    }
+
     migrator.registerMigration("dialog folders") { db in
       try db.create(table: "dialogFolder") { table in
         table.column("id", .integer).primaryKey()

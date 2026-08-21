@@ -77,6 +77,7 @@
 		E12407240000000100000001 /* InlineIntents in Frameworks */ = {isa = PBXBuildFile; productRef = E12407240000000100000000 /* InlineIntents */; };
 		E12407240000000100000003 /* InlineIntents in Frameworks */ = {isa = PBXBuildFile; productRef = E12407240000000100000002 /* InlineIntents */; };
 		E12407240000000100000005 /* InlineIntents in Frameworks */ = {isa = PBXBuildFile; productRef = E12407240000000100000004 /* InlineIntents */; };
+		E5A100032FA0000100000001 /* InlineSyntaxHighlighting in Frameworks */ = {isa = PBXBuildFile; productRef = E5A100022FA0000100000001 /* InlineSyntaxHighlighting */; };
 		E95DD2F1FC76F473B6D31EB6 /* InlineMacWindow in Frameworks */ = {isa = PBXBuildFile; productRef = 7BABF642C785B35DB0C34BF2 /* InlineMacWindow */; };
 		F17C11012F9A000100000001 /* InlineCLIInstaller in Frameworks */ = {isa = PBXBuildFile; productRef = F17C11002F9A000100000000 /* InlineCLIInstaller */; };
 /* End PBXBuildFile section */
@@ -126,6 +127,7 @@
 		CD5326842CE113CD00EC348D /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		CD5326862CE1149700EC348D /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		CD82F7F52F3618650012BA81 /* InlineIOSUI */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineIOSUI; sourceTree = "<group>"; };
+		E5A100012FA0000100000001 /* InlineSyntaxHighlighting */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineSyntaxHighlighting; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -290,6 +292,7 @@
 			files = (
 				A9E100042F50000100000001 /* MemojiKit in Frameworks */,
 				A9E100052F50000100000001 /* MemojiPickerUI in Frameworks */,
+				E5A100032FA0000100000001 /* InlineSyntaxHighlighting in Frameworks */,
 				D4B53A132F1C000100000001 /* InlineSearch in Frameworks */,
 				D7A0C0022F50000100000001 /* InlineRTC in Frameworks */,
 				F17C11012F9A000100000001 /* InlineCLIInstaller in Frameworks */,
@@ -341,6 +344,7 @@
 				C3CC99172CCE9A7E007F7F77 /* InlineUI */,
 				C3AA8E4E2CB942BF00800A03 /* InlineKit */,
 				CD092C4B2EDC6D8200E867E5 /* InlineMacUI */,
+				E5A100012FA0000100000001 /* InlineSyntaxHighlighting */,
 				CD82F7F52F3618650012BA81 /* InlineIOSUI */,
 				CD2661662CA01E3E00EB186F /* InlineMac */,
 				B7020C432DCE1534007099D9 /* InlineShareExtension */,
@@ -497,6 +501,7 @@
 			packageProductDependencies = (
 				A9E100022F50000100000001 /* MemojiKit */,
 				A9E100032F50000100000001 /* MemojiPickerUI */,
+				E5A100022FA0000100000001 /* InlineSyntaxHighlighting */,
 				D4B53A122F1C000100000001 /* InlineSearch */,
 				D7A0C0012F50000100000001 /* InlineRTC */,
 				C38C905F2CB9432200B78B8A /* InlineKit */,
@@ -2011,6 +2016,10 @@
 		E12407240000000100000004 /* InlineIntents */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineIntents;
+		};
+		E5A100022FA0000100000001 /* InlineSyntaxHighlighting */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineSyntaxHighlighting;
 		};
 		F17C11002F9A000100000000 /* InlineCLIInstaller */ = {
 			isa = XCSwiftPackageProductDependency;

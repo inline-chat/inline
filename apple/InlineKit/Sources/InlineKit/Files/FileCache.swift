@@ -84,6 +84,19 @@ public actor FileCache: Sendable {
     await downloadingPhotos[photoId]?.value
   }
 
+  /// Resolves the deterministic cache file used by `download(photo:)` without
+  /// requiring a new message snapshot to project the persisted local path.
+  public func cachedLocalURL(photo: PhotoInfo) -> URL? {
+    guard let size = photo.bestPhotoSize() else { return nil }
+    if let localPath = size.localPath {
+      let url = Self.getUrl(for: .photos, localPath: localPath)
+      if FileManager.default.fileExists(atPath: url.path) { return url }
+    }
+    let localPath = "IMG" + size.type + String(photo.id) + photo.photo.format.toExt()
+    let url = Self.getUrl(for: .photos, localPath: localPath)
+    return FileManager.default.fileExists(atPath: url.path) ? url : nil
+  }
+
   // MARK: -  Fetches
 
   public static func getUrl(for dir: FileLocalCacheDirectory, localPath: String) -> URL {
