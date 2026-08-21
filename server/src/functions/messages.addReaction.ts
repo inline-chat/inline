@@ -27,7 +27,7 @@ export const addReaction = async (input: Input, context: FunctionContext): Promi
   const chatId = chat.id
   const updateGroup = await getUpdateGroupFromInputPeer(input.peer, { currentUserId: context.currentUserId })
 
-  const result = await ReactionModel.insertReactionWithUpdate({
+  const reaction = await ReactionModel.insertReaction({
     messageId: Number(input.messageId),
     chatId: chatId,
     userId: context.currentUserId,
@@ -35,22 +35,20 @@ export const addReaction = async (input: Input, context: FunctionContext): Promi
     date: new Date(),
   })
 
-  if (!result) {
+  if (!reaction) {
     return { updates: [] }
   }
 
   const update: Update = {
-    seq: result.update.seq,
-    date: encodeDateStrict(result.update.date),
     update: {
       oneofKind: "updateReaction",
       updateReaction: {
         reaction: {
-          emoji: result.reaction.emoji,
-          messageId: BigInt(result.reaction.messageId),
-          chatId: BigInt(result.reaction.chatId),
-          userId: BigInt(result.reaction.userId),
-          date: encodeDateStrict(result.reaction.date),
+          emoji: reaction.emoji,
+          messageId: BigInt(reaction.messageId),
+          chatId: BigInt(reaction.chatId),
+          userId: BigInt(reaction.userId),
+          date: encodeDateStrict(reaction.date),
         },
       },
     },

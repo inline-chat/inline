@@ -612,6 +612,79 @@ describe("getUpdates", () => {
     expect(result.updates.map((update) => update.update.oneofKind)).toEqual(["chatSkipPts", "newMessage"])
   })
 
+  test("drains previously persisted reaction records as chatSkipPts", async () => {
+    const { users, space } = await testUtils.createSpaceWithMembers("Legacy Durable Reaction", [
+      "legacy-durable-reaction@example.com",
+    ])
+    const user = users[0]
+    if (!user || !space) throw new Error("Fixture creation failed")
+
+    const chat = await testUtils.createChat(space.id, "Legacy Durable Reaction Chat", "thread", true)
+    if (!chat) throw new Error("Chat creation failed")
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.Chat,
+      entityId: chat.id,
+      seq: 1,
+      payload: {
+        oneofKind: "reaction",
+        reaction: {
+          reaction: {
+            emoji: "👍",
+            chatId: BigInt(chat.id),
+            messageId: 1n,
+            userId: BigInt(user.id),
+            date: encodeDateStrict(new Date()),
+          },
+        },
+      },
+    })
+    await insertServerUpdate({
+      bucket: UpdateBucket.Chat,
+      entityId: chat.id,
+      seq: 2,
+      payload: {
+        oneofKind: "reactionDeleted",
+        reactionDeleted: {
+          emoji: "👍",
+          chatId: BigInt(chat.id),
+          messageId: 1n,
+          userId: BigInt(user.id),
+        },
+      },
+    })
+
+    const result = await getUpdates(
+      {
+        bucket: {
+          type: {
+            oneofKind: "chat",
+            chat: {
+              peerId: {
+                type: {
+                  oneofKind: "chat",
+                  chat: { chatId: BigInt(chat.id) },
+                },
+              },
+            },
+          },
+        },
+        startSeq: 0n,
+        seqEnd: 0n,
+        totalLimit: 1000,
+        limit: 0,
+      },
+      { currentUserId: user.id } as any,
+    )
+
+    expect(result.seq).toBe(2n)
+    expect(result.final).toBe(true)
+    expect(result.updates.map((update) => update.update.oneofKind)).toEqual([
+      "chatSkipPts",
+      "chatSkipPts",
+    ])
+  })
+
   test("advances over missing editMessage targets with chatSkipPts", async () => {
     const { users, space } = await testUtils.createSpaceWithMembers("Missing Edit Update", ["missing-edit@example.com"])
     const user = users[0]

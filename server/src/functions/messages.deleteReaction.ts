@@ -4,7 +4,6 @@ import type { FunctionContext } from "@in/server/functions/_types"
 import { Updates } from "@in/server/modules/updates/updates"
 import { ReactionModel } from "../db/models/reactions"
 import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
-import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { getUpdateGroupFromInputPeer } from "@in/server/modules/updates"
 
 type Input = {
@@ -22,22 +21,20 @@ export const deleteReaction = async (input: Input, context: FunctionContext): Pr
   const chatId = chat.id
   const updateGroup = await getUpdateGroupFromInputPeer(input.peer, { currentUserId: context.currentUserId })
 
-  const result = await ReactionModel.deleteReactionWithUpdate(input.messageId, chatId, input.emoji, context.currentUserId)
+  const [reaction] = await ReactionModel.deleteReaction(input.messageId, chatId, input.emoji, context.currentUserId)
 
-  if (!result) {
+  if (!reaction) {
     return { updates: [] }
   }
 
   const update: Update = {
-    seq: result.update.seq,
-    date: encodeDateStrict(result.update.date),
     update: {
       oneofKind: "deleteReaction",
       deleteReaction: {
-        emoji: input.emoji,
-        chatId: BigInt(chatId),
-        messageId: input.messageId,
-        userId: BigInt(context.currentUserId),
+        emoji: reaction.emoji,
+        chatId: BigInt(reaction.chatId),
+        messageId: BigInt(reaction.messageId),
+        userId: BigInt(reaction.userId),
       },
     },
   }

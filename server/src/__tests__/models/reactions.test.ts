@@ -1,8 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { and, asc, eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import { db } from "@in/server/db"
 import { ReactionModel } from "@in/server/db/models/reactions"
-import { UpdatesModel } from "@in/server/db/models/updates"
 import { UpdateBucket, updates } from "@in/server/db/schema"
 import { setupTestLifecycle, testUtils } from "../setup"
 
@@ -66,14 +65,14 @@ describe("ReactionModel", () => {
     ).resolves.toEqual([])
   })
 
-  test("replays concurrent delete/add in chat sequence order", async () => {
-    const user = await testUtils.createUser("reaction-order-user@example.com")
+  test("adding and deleting a reaction never creates durable chat updates", async () => {
+    const user = await testUtils.createUser("reaction-ephemeral-user@example.com")
     const chat = await testUtils.createTestChat()
     const message = await testUtils.createTestMessage({
       messageId: 1,
       fromId: user.id,
       chatId: chat.id,
-      text: "reaction ordering target",
+      text: "ephemeral reaction target",
     })
     const input = {
       messageId: message.messageId,
@@ -83,35 +82,13 @@ describe("ReactionModel", () => {
       date: new Date(),
     }
 
-    await ReactionModel.insertReactionWithUpdate(input)
-
-    const [deleted, added] = await Promise.all([
-      ReactionModel.deleteReactionWithUpdate(BigInt(message.messageId), chat.id, input.emoji, user.id),
-      ReactionModel.insertReactionWithUpdate(input),
-    ])
-
-    const stored = await ReactionModel.getReactions(BigInt(message.messageId), BigInt(chat.id))
+    await ReactionModel.insertReaction(input)
+    await ReactionModel.deleteReaction(BigInt(message.messageId), chat.id, input.emoji, user.id)
     const chatUpdates = await db
-      .select()
+      .select({ seq: updates.seq })
       .from(updates)
       .where(and(eq(updates.bucket, UpdateBucket.Chat), eq(updates.entityId, chat.id)))
-      .orderBy(asc(updates.seq))
 
-    const replayed = new Set<string>()
-    for (const row of chatUpdates) {
-      const payload = UpdatesModel.decrypt(row).payload.update
-      if (payload.oneofKind === "reaction") {
-        const reaction = payload.reaction.reaction
-        if (reaction) replayed.add(`${reaction.userId}:${reaction.messageId}:${reaction.emoji}`)
-      } else if (payload.oneofKind === "reactionDeleted") {
-        replayed.delete(`${payload.reactionDeleted.userId}:${payload.reactionDeleted.messageId}:${payload.reactionDeleted.emoji}`)
-      }
-    }
-
-    expect(chatUpdates.map((row) => row.seq)).toEqual(chatUpdates.map((_, index) => index + 1))
-    expect(replayed).toEqual(
-      new Set(stored.map((reaction) => `${reaction.userId}:${reaction.messageId}:${reaction.emoji}`)),
-    )
-    expect(Boolean(deleted) || Boolean(added)).toBe(true)
+    expect(chatUpdates).toEqual([])
   })
 })

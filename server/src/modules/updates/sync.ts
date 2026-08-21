@@ -578,41 +578,6 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
         })
         break
 
-      case "reaction": {
-        const reaction = serverUpdate.update.reaction.reaction
-        if (!reaction) {
-          log.warn("Skipping malformed reaction update", { chatId, seq: update.seq })
-          inflatedUpdates.push(chatSkipPts(update, chatId))
-          break
-        }
-
-        inflatedUpdates.push({
-          seq: update.seq,
-          date: encodeDateStrict(update.date),
-          update: {
-            oneofKind: "updateReaction",
-            updateReaction: { reaction },
-          },
-        })
-        break
-      }
-
-      case "reactionDeleted":
-        inflatedUpdates.push({
-          seq: update.seq,
-          date: encodeDateStrict(update.date),
-          update: {
-            oneofKind: "deleteReaction",
-            deleteReaction: {
-              emoji: serverUpdate.update.reactionDeleted.emoji,
-              chatId: serverUpdate.update.reactionDeleted.chatId,
-              messageId: serverUpdate.update.reactionDeleted.messageId,
-              userId: serverUpdate.update.reactionDeleted.userId,
-            },
-          },
-        })
-        break
-
       case "spaceRemoveMember":
       case "spaceMemberUpdate":
       case "spaceMemberAdd":
@@ -637,6 +602,8 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
       case "userChatPermissions":
       case "userSettings":
       case "userDialogFolder":
+      case "reaction":
+      case "reactionDeleted":
         inflatedUpdates.push(chatSkipPts(update, chatId))
         break
       case undefined:
