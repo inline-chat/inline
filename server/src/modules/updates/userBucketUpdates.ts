@@ -43,7 +43,7 @@ export const UserBucketUpdates = {
   },
 }
 
-const allocateNextSeq = async (tx: Transaction, userId: number, now: Date): Promise<number> => {
+const allocateNextSeq = async (tx: Transaction, userId: number): Promise<UpdateSeqAndDate> => {
   // Use the query builder so Postgres doesn't see a qualified SET target like `"users"."update_seq"`,
   // which is invalid syntax in UPDATE SET lists.
   // BAND-AID: We defensively reconcile against the latest persisted user-bucket seq in `updates`.
@@ -65,30 +65,38 @@ const allocateNextSeq = async (tx: Transaction, userId: number, now: Date): Prom
       )
     ) + 1
   `
-
+  // The application clock used to be sampled before this UPDATE acquired the
+  // user-row lock. A waiter could therefore receive the later seq with an
+  // earlier date. Derive and fence the date from the row being updated so seq,
+  // stored update date, and users.last_update_date stay monotonic together.
+  const nextDateExpr = sql<Date>`
+    GREATEST(
+      COALESCE(${users.lastUpdateDate}, '-infinity'::timestamp),
+      clock_timestamp()
+    )
+  `
   const [result] = await tx
     .update(users)
     .set({
       updateSeq: nextSeqExpr,
-      lastUpdateDate: now,
+      lastUpdateDate: nextDateExpr,
     })
     .where(eq(users.id, userId))
-    .returning({ seq: users.updateSeq })
+    .returning({ seq: users.updateSeq, date: users.lastUpdateDate })
 
-  if (result?.seq === null || result?.seq === undefined) {
+  if (result?.seq === null || result?.seq === undefined || !result.date) {
     throw new Error(`Failed to allocate user-bucket seq: ${userId}`)
   }
 
-  return result.seq
+  return { seq: result.seq, date: result.date }
 }
 
 const insertUserUpdate = async (tx: Transaction, input: EnqueueUserUpdateInput): Promise<UpdateSeqAndDate> => {
-  const now = new Date()
-  const nextSeq = await allocateNextSeq(tx, input.userId, now)
+  const { seq: nextSeq, date } = await allocateNextSeq(tx, input.userId)
 
   const serverUpdate: ServerUpdate = {
     seq: nextSeq,
-    date: encodeDateStrict(now),
+    date: encodeDateStrict(date),
     update: input.update,
   }
 
@@ -99,10 +107,10 @@ const insertUserUpdate = async (tx: Transaction, input: EnqueueUserUpdateInput):
     entityId: input.userId,
     seq: nextSeq,
     payload: updateRecord.encrypted,
-    date: now,
+    date,
   })
 
-  return { seq: nextSeq, date: now }
+  return { seq: nextSeq, date }
 }
 
 const insertUserUpdates = async (tx: Transaction, inputs: EnqueueUserUpdateInput[]): Promise<UpdateSeqAndDate[]> => {

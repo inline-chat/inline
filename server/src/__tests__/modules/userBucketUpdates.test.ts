@@ -162,6 +162,60 @@ describe("UserBucketUpdates", () => {
     expect(seqs).toEqual([1, 2])
   })
 
+  test("a user-row waiter cannot receive a later seq with an earlier date", async () => {
+    const user = await testUtils.createUser("user-bucket-date-order@example.com")
+    if (!user) throw new Error("Failed to create user")
+
+    let waitingEnqueue: Promise<{ seq: number; date: Date }> | undefined
+    const first = await db.transaction(async (tx) => {
+      await tx.select({ id: users.id }).from(users).where(eq(users.id, user.id)).for("update").limit(1)
+
+      // This enqueue samples its timestamp before waiting on our user lock in
+      // the regressed implementation. Keeping it queued while the lock owner
+      // writes seq 1 deterministically reproduces the timestamp inversion.
+      waitingEnqueue = UserBucketUpdates.enqueue({
+        userId: user.id,
+        update: {
+          oneofKind: "userDialogArchived",
+          userDialogArchived: {
+            peerId: { type: { oneofKind: "chat", chat: { chatId: 123n } } },
+            archived: false,
+          },
+        },
+      })
+
+      await Bun.sleep(25)
+      return await UserBucketUpdates.enqueue(
+        {
+          userId: user.id,
+          update: {
+            oneofKind: "userDialogArchived",
+            userDialogArchived: {
+              peerId: { type: { oneofKind: "chat", chat: { chatId: 123n } } },
+              archived: true,
+            },
+          },
+        },
+        { tx },
+      )
+    })
+
+    if (!waitingEnqueue) throw new Error("Failed to start waiting enqueue")
+    const second = await waitingEnqueue
+
+    expect(first.seq).toBe(1)
+    expect(second.seq).toBe(2)
+    expect(second.date.getTime()).toBeGreaterThanOrEqual(first.date.getTime())
+
+    const stored = await db
+      .select({ seq: updates.seq, date: updates.date })
+      .from(updates)
+      .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, user.id)))
+      .orderBy(updates.seq)
+    expect(stored.map((row) => row.seq)).toEqual([1, 2])
+    expect(stored[1]!.date.getTime()).toBeGreaterThanOrEqual(stored[0]!.date.getTime())
+  })
+
   test("enqueueMany preserves input order and same-user ordering", async () => {
     const userA = await testUtils.createUser("user-bucket-many-a@example.com")
     const userB = await testUtils.createUser("user-bucket-many-b@example.com")
