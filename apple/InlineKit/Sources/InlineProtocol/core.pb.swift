@@ -2991,6 +2991,647 @@ public nonisolated struct MessageServicePinnedMessage: Sendable {
   fileprivate var _messageID: Int64? = nil
 }
 
+/// Structural rich content projected alongside Message.message and
+/// Message.entities. Text-bearing blocks use UTF-16 ranges into Message.message;
+/// inline entities remain owned by Message.entities so there is one text/entity
+/// source of truth across legacy and rich renderers.
+public nonisolated struct BlockContent: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var blocks: [Block] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct BlockText: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var offset: Int64 = 0
+
+  public var length: Int64 = 0
+
+  /// Server-computed first-strong direction. Unset means the text contains no
+  /// strong character or that direction is owned by a containing block.
+  public var isRtl: Bool {
+    get {_isRtl ?? false}
+    set {_isRtl = newValue}
+  }
+  /// Returns true if `isRtl` has been explicitly set.
+  public var hasIsRtl: Bool {self._isRtl != nil}
+  /// Clears the value of `isRtl`. Subsequent reads from it will return its default value.
+  public mutating func clearIsRtl() {self._isRtl = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _isRtl: Bool? = nil
+}
+
+public nonisolated struct Block: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var kind: Block.OneOf_Kind? = nil
+
+  public var paragraph: BlockText {
+    get {
+      if case .paragraph(let v)? = kind {return v}
+      return BlockText()
+    }
+    set {kind = .paragraph(newValue)}
+  }
+
+  public var heading: BlockHeading {
+    get {
+      if case .heading(let v)? = kind {return v}
+      return BlockHeading()
+    }
+    set {kind = .heading(newValue)}
+  }
+
+  public var code: BlockCode {
+    get {
+      if case .code(let v)? = kind {return v}
+      return BlockCode()
+    }
+    set {kind = .code(newValue)}
+  }
+
+  public var list: BlockList {
+    get {
+      if case .list(let v)? = kind {return v}
+      return BlockList()
+    }
+    set {kind = .list(newValue)}
+  }
+
+  public var separator: BlockSeparator {
+    get {
+      if case .separator(let v)? = kind {return v}
+      return BlockSeparator()
+    }
+    set {kind = .separator(newValue)}
+  }
+
+  public var image: BlockImage {
+    get {
+      if case .image(let v)? = kind {return v}
+      return BlockImage()
+    }
+    set {kind = .image(newValue)}
+  }
+
+  public var album: BlockAlbum {
+    get {
+      if case .album(let v)? = kind {return v}
+      return BlockAlbum()
+    }
+    set {kind = .album(newValue)}
+  }
+
+  public var disclosure: BlockDisclosure {
+    get {
+      if case .disclosure(let v)? = kind {return v}
+      return BlockDisclosure()
+    }
+    set {kind = .disclosure(newValue)}
+  }
+
+  public var footer: BlockText {
+    get {
+      if case .footer(let v)? = kind {return v}
+      return BlockText()
+    }
+    set {kind = .footer(newValue)}
+  }
+
+  public var quote: BlockQuote {
+    get {
+      if case .quote(let v)? = kind {return v}
+      return BlockQuote()
+    }
+    set {kind = .quote(newValue)}
+  }
+
+  public var table: BlockTable {
+    get {
+      if case .table(let v)? = kind {return v}
+      return BlockTable()
+    }
+    set {kind = .table(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum OneOf_Kind: Equatable, Sendable {
+    case paragraph(BlockText)
+    case heading(BlockHeading)
+    case code(BlockCode)
+    case list(BlockList)
+    case separator(BlockSeparator)
+    case image(BlockImage)
+    case album(BlockAlbum)
+    case disclosure(BlockDisclosure)
+    case footer(BlockText)
+    case quote(BlockQuote)
+    case table(BlockTable)
+
+  }
+
+  public init() {}
+}
+
+public nonisolated struct BlockHeading: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var text: BlockText {
+    get {_text ?? BlockText()}
+    set {_text = newValue}
+  }
+  /// Returns true if `text` has been explicitly set.
+  public var hasText: Bool {self._text != nil}
+  /// Clears the value of `text`. Subsequent reads from it will return its default value.
+  public mutating func clearText() {self._text = nil}
+
+  public var level: UInt32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _text: BlockText? = nil
+}
+
+public nonisolated struct BlockCode: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Code direction is intentionally not encoded; clients always render it LTR.
+  public var text: BlockText {
+    get {_text ?? BlockText()}
+    set {_text = newValue}
+  }
+  /// Returns true if `text` has been explicitly set.
+  public var hasText: Bool {self._text != nil}
+  /// Clears the value of `text`. Subsequent reads from it will return its default value.
+  public mutating func clearText() {self._text = nil}
+
+  public var language: String {
+    get {_language ?? String()}
+    set {_language = newValue}
+  }
+  /// Returns true if `language` has been explicitly set.
+  public var hasLanguage: Bool {self._language != nil}
+  /// Clears the value of `language`. Subsequent reads from it will return its default value.
+  public mutating func clearLanguage() {self._language = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _text: BlockText? = nil
+  fileprivate var _language: String? = nil
+}
+
+public nonisolated struct BlockList: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var kind: BlockList.Kind = .unspecified
+
+  public var start: Int64 {
+    get {_start ?? 0}
+    set {_start = newValue}
+  }
+  /// Returns true if `start` has been explicitly set.
+  public var hasStart: Bool {self._start != nil}
+  /// Clears the value of `start`. Subsequent reads from it will return its default value.
+  public mutating func clearStart() {self._start = nil}
+
+  public var items: [BlockListItem] = []
+
+  /// Aggregate direction of the first strong text in the list. Items do not
+  /// carry an independent direction override.
+  public var isRtl: Bool {
+    get {_isRtl ?? false}
+    set {_isRtl = newValue}
+  }
+  /// Returns true if `isRtl` has been explicitly set.
+  public var hasIsRtl: Bool {self._isRtl != nil}
+  /// Clears the value of `isRtl`. Subsequent reads from it will return its default value.
+  public mutating func clearIsRtl() {self._isRtl = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum Kind: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case unspecified // = 0
+    case unordered // = 1
+    case ordered // = 2
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .unspecified
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .unspecified
+      case 1: self = .unordered
+      case 2: self = .ordered
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .unspecified: return 0
+      case .unordered: return 1
+      case .ordered: return 2
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [BlockList.Kind] = [
+      .unspecified,
+      .unordered,
+      .ordered,
+    ]
+
+  }
+
+  public init() {}
+
+  fileprivate var _start: Int64? = nil
+  fileprivate var _isRtl: Bool? = nil
+}
+
+public nonisolated struct BlockListItem: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var children: [Block] = []
+
+  /// Presence distinguishes a task-list item from an ordinary list item.
+  /// Older clients ignore this field and retain the ordinary list fallback.
+  public var checked: Bool {
+    get {_checked ?? false}
+    set {_checked = newValue}
+  }
+  /// Returns true if `checked` has been explicitly set.
+  public var hasChecked: Bool {self._checked != nil}
+  /// Clears the value of `checked`. Subsequent reads from it will return its default value.
+  public mutating func clearChecked() {self._checked = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _checked: Bool? = nil
+}
+
+public nonisolated struct BlockSeparator: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct BlockImageDimensions: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var width: UInt32 = 0
+
+  public var height: UInt32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct BlockImagePending: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var dimensions: BlockImageDimensions {
+    get {_dimensions ?? BlockImageDimensions()}
+    set {_dimensions = newValue}
+  }
+  /// Returns true if `dimensions` has been explicitly set.
+  public var hasDimensions: Bool {self._dimensions != nil}
+  /// Clears the value of `dimensions`. Subsequent reads from it will return its default value.
+  public mutating func clearDimensions() {self._dimensions = nil}
+
+  public var strippedThumbnail: Data {
+    get {_strippedThumbnail ?? Data()}
+    set {_strippedThumbnail = newValue}
+  }
+  /// Returns true if `strippedThumbnail` has been explicitly set.
+  public var hasStrippedThumbnail: Bool {self._strippedThumbnail != nil}
+  /// Clears the value of `strippedThumbnail`. Subsequent reads from it will return its default value.
+  public mutating func clearStrippedThumbnail() {self._strippedThumbnail = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _dimensions: BlockImageDimensions? = nil
+  fileprivate var _strippedThumbnail: Data? = nil
+}
+
+public nonisolated struct BlockImageUnavailable: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var dimensions: BlockImageDimensions {
+    get {_dimensions ?? BlockImageDimensions()}
+    set {_dimensions = newValue}
+  }
+  /// Returns true if `dimensions` has been explicitly set.
+  public var hasDimensions: Bool {self._dimensions != nil}
+  /// Clears the value of `dimensions`. Subsequent reads from it will return its default value.
+  public mutating func clearDimensions() {self._dimensions = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _dimensions: BlockImageDimensions? = nil
+}
+
+public nonisolated struct BlockImage: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var alt: BlockText {
+    get {_alt ?? BlockText()}
+    set {_alt = newValue}
+  }
+  /// Returns true if `alt` has been explicitly set.
+  public var hasAlt: Bool {self._alt != nil}
+  /// Clears the value of `alt`. Subsequent reads from it will return its default value.
+  public mutating func clearAlt() {self._alt = nil}
+
+  public var state: BlockImage.OneOf_State? = nil
+
+  public var pending: BlockImagePending {
+    get {
+      if case .pending(let v)? = state {return v}
+      return BlockImagePending()
+    }
+    set {state = .pending(newValue)}
+  }
+
+  public var ready: Photo {
+    get {
+      if case .ready(let v)? = state {return v}
+      return Photo()
+    }
+    set {state = .ready(newValue)}
+  }
+
+  public var unavailable: BlockImageUnavailable {
+    get {
+      if case .unavailable(let v)? = state {return v}
+      return BlockImageUnavailable()
+    }
+    set {state = .unavailable(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum OneOf_State: Equatable, Sendable {
+    case pending(BlockImagePending)
+    case ready(Photo)
+    case unavailable(BlockImageUnavailable)
+
+  }
+
+  public init() {}
+
+  fileprivate var _alt: BlockText? = nil
+}
+
+/// Albums intentionally have no album-specific presentation properties. The
+/// codec coalesces consecutive images into chunks of at most ten ordinary image
+/// children.
+public nonisolated struct BlockAlbum: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var images: [BlockImage] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct BlockDisclosure: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var summary: BlockText {
+    get {_summary ?? BlockText()}
+    set {_summary = newValue}
+  }
+  /// Returns true if `summary` has been explicitly set.
+  public var hasSummary: Bool {self._summary != nil}
+  /// Clears the value of `summary`. Subsequent reads from it will return its default value.
+  public mutating func clearSummary() {self._summary = nil}
+
+  public var kind: BlockDisclosure.Kind = .default
+
+  public var initiallyOpen: Bool {
+    get {_initiallyOpen ?? false}
+    set {_initiallyOpen = newValue}
+  }
+  /// Returns true if `initiallyOpen` has been explicitly set.
+  public var hasInitiallyOpen: Bool {self._initiallyOpen != nil}
+  /// Clears the value of `initiallyOpen`. Subsequent reads from it will return its default value.
+  public mutating func clearInitiallyOpen() {self._initiallyOpen = nil}
+
+  public var children: [Block] = []
+
+  public var isRtl: Bool {
+    get {_isRtl ?? false}
+    set {_isRtl = newValue}
+  }
+  /// Returns true if `isRtl` has been explicitly set.
+  public var hasIsRtl: Bool {self._isRtl != nil}
+  /// Clears the value of `isRtl`. Subsequent reads from it will return its default value.
+  public mutating func clearIsRtl() {self._isRtl = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum Kind: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case `default` // = 0
+    case progress // = 1
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .default
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .default
+      case 1: self = .progress
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .default: return 0
+      case .progress: return 1
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [BlockDisclosure.Kind] = [
+      .default,
+      .progress,
+    ]
+
+  }
+
+  public init() {}
+
+  fileprivate var _summary: BlockText? = nil
+  fileprivate var _initiallyOpen: Bool? = nil
+  fileprivate var _isRtl: Bool? = nil
+}
+
+public nonisolated struct BlockQuote: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var children: [Block] = []
+
+  public var isRtl: Bool {
+    get {_isRtl ?? false}
+    set {_isRtl = newValue}
+  }
+  /// Returns true if `isRtl` has been explicitly set.
+  public var hasIsRtl: Bool {self._isRtl != nil}
+  /// Clears the value of `isRtl`. Subsequent reads from it will return its default value.
+  public mutating func clearIsRtl() {self._isRtl = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _isRtl: Bool? = nil
+}
+
+public nonisolated struct BlockTable: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// The first row is the GFM header. All rows have exactly alignments.size
+  /// cells. Cells remain inline text ranges rather than nested block trees.
+  public var rows: [BlockTableRow] = []
+
+  public var alignments: [BlockTable.Alignment] = []
+
+  public var isRtl: Bool {
+    get {_isRtl ?? false}
+    set {_isRtl = newValue}
+  }
+  /// Returns true if `isRtl` has been explicitly set.
+  public var hasIsRtl: Bool {self._isRtl != nil}
+  /// Clears the value of `isRtl`. Subsequent reads from it will return its default value.
+  public mutating func clearIsRtl() {self._isRtl = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum Alignment: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case unspecified // = 0
+    case left // = 1
+    case center // = 2
+    case right // = 3
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .unspecified
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .unspecified
+      case 1: self = .left
+      case 2: self = .center
+      case 3: self = .right
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .unspecified: return 0
+      case .left: return 1
+      case .center: return 2
+      case .right: return 3
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [BlockTable.Alignment] = [
+      .unspecified,
+      .left,
+      .center,
+      .right,
+    ]
+
+  }
+
+  public init() {}
+
+  fileprivate var _isRtl: Bool? = nil
+}
+
+public nonisolated struct BlockTableRow: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var cells: [BlockText] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 public nonisolated struct Message: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -3205,6 +3846,17 @@ public nonisolated struct Message: @unchecked Sendable {
   public var hasServiceMessage: Bool {_storage._serviceMessage != nil}
   /// Clears the value of `serviceMessage`. Subsequent reads from it will return its default value.
   public mutating func clearServiceMessage() {_uniqueStorage()._serviceMessage = nil}
+
+  /// Optional structural projection of message/entities. Older clients ignore
+  /// this field and keep rendering the unchanged flat projection.
+  public var blockContent: BlockContent {
+    get {_storage._blockContent ?? BlockContent()}
+    set {_uniqueStorage()._blockContent = newValue}
+  }
+  /// Returns true if `blockContent` has been explicitly set.
+  public var hasBlockContent: Bool {_storage._blockContent != nil}
+  /// Clears the value of `blockContent`. Subsequent reads from it will return its default value.
+  public mutating func clearBlockContent() {_uniqueStorage()._blockContent = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -20478,9 +21130,894 @@ nonisolated extension MessageServicePinnedMessage: SwiftProtobuf.Message, SwiftP
   }
 }
 
+nonisolated extension BlockContent: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockContent"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}blocks\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.blocks) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.blocks.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.blocks, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockContent, rhs: BlockContent) -> Bool {
+    if lhs.blocks != rhs.blocks {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BlockText: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockText"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}offset\0\u{1}length\0\u{3}is_rtl\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.offset) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.length) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self._isRtl) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.offset != 0 {
+      try visitor.visitSingularInt64Field(value: self.offset, fieldNumber: 1)
+    }
+    if self.length != 0 {
+      try visitor.visitSingularInt64Field(value: self.length, fieldNumber: 2)
+    }
+    try { if let v = self._isRtl {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 3)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockText, rhs: BlockText) -> Bool {
+    if lhs.offset != rhs.offset {return false}
+    if lhs.length != rhs.length {return false}
+    if lhs._isRtl != rhs._isRtl {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Block: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "Block"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}paragraph\0\u{1}heading\0\u{1}code\0\u{1}list\0\u{1}separator\0\u{1}image\0\u{1}album\0\u{1}disclosure\0\u{1}footer\0\u{1}quote\0\u{1}table\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: BlockText?
+        var hadOneofValue = false
+        if let current = self.kind {
+          hadOneofValue = true
+          if case .paragraph(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.kind = .paragraph(v)
+        }
+      }()
+      case 2: try {
+        var v: BlockHeading?
+        var hadOneofValue = false
+        if let current = self.kind {
+          hadOneofValue = true
+          if case .heading(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.kind = .heading(v)
+        }
+      }()
+      case 3: try {
+        var v: BlockCode?
+        var hadOneofValue = false
+        if let current = self.kind {
+          hadOneofValue = true
+          if case .code(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.kind = .code(v)
+        }
+      }()
+      case 4: try {
+        var v: BlockList?
+        var hadOneofValue = false
+        if let current = self.kind {
+          hadOneofValue = true
+          if case .list(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.kind = .list(v)
+        }
+      }()
+      case 5: try {
+        var v: BlockSeparator?
+        var hadOneofValue = false
+        if let current = self.kind {
+          hadOneofValue = true
+          if case .separator(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.kind = .separator(v)
+        }
+      }()
+      case 6: try {
+        var v: BlockImage?
+        var hadOneofValue = false
+        if let current = self.kind {
+          hadOneofValue = true
+          if case .image(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.kind = .image(v)
+        }
+      }()
+      case 7: try {
+        var v: BlockAlbum?
+        var hadOneofValue = false
+        if let current = self.kind {
+          hadOneofValue = true
+          if case .album(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.kind = .album(v)
+        }
+      }()
+      case 8: try {
+        var v: BlockDisclosure?
+        var hadOneofValue = false
+        if let current = self.kind {
+          hadOneofValue = true
+          if case .disclosure(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.kind = .disclosure(v)
+        }
+      }()
+      case 9: try {
+        var v: BlockText?
+        var hadOneofValue = false
+        if let current = self.kind {
+          hadOneofValue = true
+          if case .footer(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.kind = .footer(v)
+        }
+      }()
+      case 10: try {
+        var v: BlockQuote?
+        var hadOneofValue = false
+        if let current = self.kind {
+          hadOneofValue = true
+          if case .quote(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.kind = .quote(v)
+        }
+      }()
+      case 11: try {
+        var v: BlockTable?
+        var hadOneofValue = false
+        if let current = self.kind {
+          hadOneofValue = true
+          if case .table(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.kind = .table(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    switch self.kind {
+    case .paragraph?: try {
+      guard case .paragraph(let v)? = self.kind else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    }()
+    case .heading?: try {
+      guard case .heading(let v)? = self.kind else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    }()
+    case .code?: try {
+      guard case .code(let v)? = self.kind else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    }()
+    case .list?: try {
+      guard case .list(let v)? = self.kind else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    }()
+    case .separator?: try {
+      guard case .separator(let v)? = self.kind else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+    }()
+    case .image?: try {
+      guard case .image(let v)? = self.kind else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+    }()
+    case .album?: try {
+      guard case .album(let v)? = self.kind else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+    }()
+    case .disclosure?: try {
+      guard case .disclosure(let v)? = self.kind else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
+    }()
+    case .footer?: try {
+      guard case .footer(let v)? = self.kind else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+    }()
+    case .quote?: try {
+      guard case .quote(let v)? = self.kind else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
+    }()
+    case .table?: try {
+      guard case .table(let v)? = self.kind else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 11)
+    }()
+    case nil: break
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Block, rhs: Block) -> Bool {
+    if lhs.kind != rhs.kind {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BlockHeading: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockHeading"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}text\0\u{1}level\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._text) }()
+      case 2: try { try decoder.decodeSingularUInt32Field(value: &self.level) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._text {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.level != 0 {
+      try visitor.visitSingularUInt32Field(value: self.level, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockHeading, rhs: BlockHeading) -> Bool {
+    if lhs._text != rhs._text {return false}
+    if lhs.level != rhs.level {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BlockCode: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockCode"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}text\0\u{1}language\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._text) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._language) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._text {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._language {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockCode, rhs: BlockCode) -> Bool {
+    if lhs._text != rhs._text {return false}
+    if lhs._language != rhs._language {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BlockList: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockList"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}kind\0\u{1}start\0\u{1}items\0\u{3}is_rtl\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularEnumField(value: &self.kind) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self._start) }()
+      case 3: try { try decoder.decodeRepeatedMessageField(value: &self.items) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self._isRtl) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.kind != .unspecified {
+      try visitor.visitSingularEnumField(value: self.kind, fieldNumber: 1)
+    }
+    try { if let v = self._start {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 2)
+    } }()
+    if !self.items.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.items, fieldNumber: 3)
+    }
+    try { if let v = self._isRtl {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 4)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockList, rhs: BlockList) -> Bool {
+    if lhs.kind != rhs.kind {return false}
+    if lhs._start != rhs._start {return false}
+    if lhs.items != rhs.items {return false}
+    if lhs._isRtl != rhs._isRtl {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BlockList.Kind: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0KIND_UNSPECIFIED\0\u{1}KIND_UNORDERED\0\u{1}KIND_ORDERED\0")
+}
+
+nonisolated extension BlockListItem: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockListItem"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}children\0\u{1}checked\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.children) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self._checked) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.children.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.children, fieldNumber: 1)
+    }
+    try { if let v = self._checked {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockListItem, rhs: BlockListItem) -> Bool {
+    if lhs.children != rhs.children {return false}
+    if lhs._checked != rhs._checked {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BlockSeparator: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockSeparator"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockSeparator, rhs: BlockSeparator) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BlockImageDimensions: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockImageDimensions"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}width\0\u{1}height\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt32Field(value: &self.width) }()
+      case 2: try { try decoder.decodeSingularUInt32Field(value: &self.height) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.width != 0 {
+      try visitor.visitSingularUInt32Field(value: self.width, fieldNumber: 1)
+    }
+    if self.height != 0 {
+      try visitor.visitSingularUInt32Field(value: self.height, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockImageDimensions, rhs: BlockImageDimensions) -> Bool {
+    if lhs.width != rhs.width {return false}
+    if lhs.height != rhs.height {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BlockImagePending: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockImagePending"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}dimensions\0\u{3}stripped_thumbnail\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._dimensions) }()
+      case 2: try { try decoder.decodeSingularBytesField(value: &self._strippedThumbnail) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._dimensions {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._strippedThumbnail {
+      try visitor.visitSingularBytesField(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockImagePending, rhs: BlockImagePending) -> Bool {
+    if lhs._dimensions != rhs._dimensions {return false}
+    if lhs._strippedThumbnail != rhs._strippedThumbnail {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BlockImageUnavailable: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockImageUnavailable"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}dimensions\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._dimensions) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._dimensions {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockImageUnavailable, rhs: BlockImageUnavailable) -> Bool {
+    if lhs._dimensions != rhs._dimensions {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BlockImage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockImage"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}alt\0\u{1}pending\0\u{1}ready\0\u{1}unavailable\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._alt) }()
+      case 2: try {
+        var v: BlockImagePending?
+        var hadOneofValue = false
+        if let current = self.state {
+          hadOneofValue = true
+          if case .pending(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.state = .pending(v)
+        }
+      }()
+      case 3: try {
+        var v: Photo?
+        var hadOneofValue = false
+        if let current = self.state {
+          hadOneofValue = true
+          if case .ready(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.state = .ready(v)
+        }
+      }()
+      case 4: try {
+        var v: BlockImageUnavailable?
+        var hadOneofValue = false
+        if let current = self.state {
+          hadOneofValue = true
+          if case .unavailable(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.state = .unavailable(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._alt {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    switch self.state {
+    case .pending?: try {
+      guard case .pending(let v)? = self.state else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    }()
+    case .ready?: try {
+      guard case .ready(let v)? = self.state else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    }()
+    case .unavailable?: try {
+      guard case .unavailable(let v)? = self.state else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    }()
+    case nil: break
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockImage, rhs: BlockImage) -> Bool {
+    if lhs._alt != rhs._alt {return false}
+    if lhs.state != rhs.state {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BlockAlbum: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockAlbum"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}images\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.images) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.images.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.images, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockAlbum, rhs: BlockAlbum) -> Bool {
+    if lhs.images != rhs.images {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BlockDisclosure: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockDisclosure"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}summary\0\u{1}kind\0\u{3}initially_open\0\u{1}children\0\u{3}is_rtl\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._summary) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.kind) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self._initiallyOpen) }()
+      case 4: try { try decoder.decodeRepeatedMessageField(value: &self.children) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self._isRtl) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._summary {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.kind != .default {
+      try visitor.visitSingularEnumField(value: self.kind, fieldNumber: 2)
+    }
+    try { if let v = self._initiallyOpen {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 3)
+    } }()
+    if !self.children.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.children, fieldNumber: 4)
+    }
+    try { if let v = self._isRtl {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 5)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockDisclosure, rhs: BlockDisclosure) -> Bool {
+    if lhs._summary != rhs._summary {return false}
+    if lhs.kind != rhs.kind {return false}
+    if lhs._initiallyOpen != rhs._initiallyOpen {return false}
+    if lhs.children != rhs.children {return false}
+    if lhs._isRtl != rhs._isRtl {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BlockDisclosure.Kind: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0KIND_DEFAULT\0\u{1}KIND_PROGRESS\0")
+}
+
+nonisolated extension BlockQuote: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockQuote"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}children\0\u{3}is_rtl\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.children) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self._isRtl) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.children.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.children, fieldNumber: 1)
+    }
+    try { if let v = self._isRtl {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockQuote, rhs: BlockQuote) -> Bool {
+    if lhs.children != rhs.children {return false}
+    if lhs._isRtl != rhs._isRtl {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BlockTable: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockTable"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}rows\0\u{1}alignments\0\u{3}is_rtl\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.rows) }()
+      case 2: try { try decoder.decodeRepeatedEnumField(value: &self.alignments) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self._isRtl) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.rows.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.rows, fieldNumber: 1)
+    }
+    if !self.alignments.isEmpty {
+      try visitor.visitPackedEnumField(value: self.alignments, fieldNumber: 2)
+    }
+    try { if let v = self._isRtl {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 3)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockTable, rhs: BlockTable) -> Bool {
+    if lhs.rows != rhs.rows {return false}
+    if lhs.alignments != rhs.alignments {return false}
+    if lhs._isRtl != rhs._isRtl {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BlockTable.Alignment: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0ALIGNMENT_UNSPECIFIED\0\u{1}ALIGNMENT_LEFT\0\u{1}ALIGNMENT_CENTER\0\u{1}ALIGNMENT_RIGHT\0")
+}
+
+nonisolated extension BlockTableRow: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockTableRow"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}cells\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.cells) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.cells.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.cells, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockTableRow, rhs: BlockTableRow) -> Bool {
+    if lhs.cells != rhs.cells {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
 nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Message"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}from_id\0\u{3}peer_id\0\u{3}chat_id\0\u{1}message\0\u{1}out\0\u{1}date\0\u{1}mentioned\0\u{3}reply_to_msg_id\0\u{1}media\0\u{3}edit_date\0\u{3}grouped_id\0\u{1}attachments\0\u{1}reactions\0\u{3}is_sticker\0\u{1}entities\0\u{3}send_mode\0\u{3}fwd_from\0\u{1}replies\0\u{1}actions\0\u{1}rev\0\u{3}service_message\0\u{4}Z]\u{1}has_link\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}from_id\0\u{3}peer_id\0\u{3}chat_id\0\u{1}message\0\u{1}out\0\u{1}date\0\u{1}mentioned\0\u{3}reply_to_msg_id\0\u{1}media\0\u{3}edit_date\0\u{3}grouped_id\0\u{1}attachments\0\u{1}reactions\0\u{3}is_sticker\0\u{1}entities\0\u{3}send_mode\0\u{3}fwd_from\0\u{1}replies\0\u{1}actions\0\u{1}rev\0\u{3}service_message\0\u{3}block_content\0\u{4}Y]\u{1}has_link\0")
 
   fileprivate class _StorageClass {
     var _id: Int64 = 0
@@ -20506,6 +22043,7 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
     var _actions: MessageActions? = nil
     var _rev: Int64? = nil
     var _serviceMessage: MessageService? = nil
+    var _blockContent: BlockContent? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -20539,6 +22077,7 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       _actions = source._actions
       _rev = source._rev
       _serviceMessage = source._serviceMessage
+      _blockContent = source._blockContent
     }
   }
 
@@ -20579,6 +22118,7 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
         case 20: try { try decoder.decodeSingularMessageField(value: &_storage._actions) }()
         case 21: try { try decoder.decodeSingularInt64Field(value: &_storage._rev) }()
         case 22: try { try decoder.decodeSingularMessageField(value: &_storage._serviceMessage) }()
+        case 23: try { try decoder.decodeSingularMessageField(value: &_storage._blockContent) }()
         case 6000: try { try decoder.decodeSingularBoolField(value: &_storage._hasLink_p) }()
         default: break
         }
@@ -20658,6 +22198,9 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       try { if let v = _storage._serviceMessage {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 22)
       } }()
+      try { if let v = _storage._blockContent {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 23)
+      } }()
       try { if let v = _storage._hasLink_p {
         try visitor.visitSingularBoolField(value: v, fieldNumber: 6000)
       } }()
@@ -20693,6 +22236,7 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
         if _storage._actions != rhs_storage._actions {return false}
         if _storage._rev != rhs_storage._rev {return false}
         if _storage._serviceMessage != rhs_storage._serviceMessage {return false}
+        if _storage._blockContent != rhs_storage._blockContent {return false}
         return true
       }
       if !storagesAreEqual {return false}

@@ -6,6 +6,7 @@ import { stopDatabaseHealthMonitor } from "@in/server/modules/monitoring/databas
 import { stopGridProviderEffectWorker } from "@in/server/modules/grid/providerEffects"
 import { shutdownBotChatSettingsBroker } from "@in/server/modules/botChatSettings/broker"
 import { stopBotWebhookDeliveryWorker } from "@in/server/modules/botUpdates/delivery"
+import { stopBlockContentImageWorker } from "@in/server/modules/message/blockContentImageWorker"
 import { Log } from "@in/server/utils/log"
 import { connectionManager } from "@in/server/ws/connections"
 import { presenceManager } from "@in/server/ws/presence"
@@ -25,6 +26,7 @@ export type GracefulShutdownDeps = {
   markShuttingDown: (signal: ShutdownSignal) => void
   stopDatabaseMonitor: Step
   stopBotWebhookDeliveryWorker: Step
+  stopBlockContentImageWorker: Step
   stopUserSettingsCleanup: Step
   stopGridProviderEffects: Step
   stopBotChatSettings: Step
@@ -68,6 +70,7 @@ const createDefaultDeps = (): GracefulShutdownDeps => ({
   markShuttingDown: markServerShuttingDown,
   stopDatabaseMonitor: () => stopDatabaseHealthMonitor(),
   stopBotWebhookDeliveryWorker: () => stopBotWebhookDeliveryWorker(),
+  stopBlockContentImageWorker: () => stopBlockContentImageWorker(),
   stopUserSettingsCleanup: () => stopUserSettingsCacheCleanup(),
   stopGridProviderEffects: () => stopGridProviderEffectWorker(),
   stopBotChatSettings: () => shutdownBotChatSettingsBroker(),
@@ -147,6 +150,7 @@ export const createGracefulShutdownManager = ({
 
       hasErrors = !(await runStep("stop_database_monitor", runtime.stopDatabaseMonitor)) || hasErrors
       hasErrors = !(await runStep("stop_bot_webhook_delivery_worker", runtime.stopBotWebhookDeliveryWorker)) || hasErrors
+      hasErrors = !(await runStep("stop_block_content_image_worker", runtime.stopBlockContentImageWorker)) || hasErrors
       hasErrors = !(await runStep("stop_user_settings_cleanup", runtime.stopUserSettingsCleanup)) || hasErrors
       hasErrors = !(await runStep("stop_grid_provider_effects", runtime.stopGridProviderEffects)) || hasErrors
       hasErrors = !(await runStep("stop_bot_chat_settings", runtime.stopBotChatSettings)) || hasErrors

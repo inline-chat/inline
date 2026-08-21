@@ -1,8 +1,9 @@
-import { MessageEntities, MessageEntity_Type, type MessageEntity } from "@inline-chat/protocol/core"
+import { MessageEntities, MessageEntity_Type, type BlockContent, type MessageEntity } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { botAgents, lower, userNotDeleted, users } from "@in/server/db/schema"
 import { processMessageText } from "@in/server/modules/message/processText"
 import { and, inArray } from "drizzle-orm"
+import { parseBlockContent, type BlockImageSource } from "@in/server/modules/message/blockContent"
 
 type ProcessOutgoingTextInput = {
   text: string
@@ -13,6 +14,8 @@ type ProcessOutgoingTextInput = {
 type ProcessOutgoingTextOutput = {
   text: string
   entities: MessageEntities | undefined
+  blockContent?: BlockContent
+  blockImageSources?: BlockImageSource[]
 }
 
 type MentionCandidate = {
@@ -723,6 +726,7 @@ export const processOutgoingText = async (
 ): Promise<ProcessOutgoingTextOutput> => {
   let text = input.text
   let entities = input.entities
+  const parsedBlocks = input.parseMarkdown ? parseBlockContent(input.text) : undefined
 
   if (input.parseMarkdown) {
     const processed = processMessageText({ text: input.text, entities: input.entities })
@@ -743,5 +747,10 @@ export const processOutgoingText = async (
     entities,
   })
 
-  return { text, entities }
+  return {
+    text,
+    entities,
+    blockContent: parsedBlocks?.blockContent,
+    blockImageSources: parsedBlocks?.imageSources,
+  }
 }

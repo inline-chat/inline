@@ -1,10 +1,14 @@
 import { getPhotoMetadataAndValidate } from "@in/server/modules/files/metadata"
 import { FileTypes, type UploadFileResult } from "@in/server/modules/files/types"
-import { photos, photoSizes } from "@in/server/db/schema"
+import { files, photos, photoSizes } from "@in/server/db/schema"
 import { db } from "@in/server/db"
 import { encryptBinary } from "@in/server/modules/encryption/encryption"
 import { generateStrippedThumbnail } from "@in/server/modules/files/strippedThumbnail"
-import { uploadFile } from "./uploadAFile"
+import {
+  createFileObjectIdentity,
+  type FileObjectIdentity,
+  uploadFileObject,
+} from "./uploadAFile"
 import { InlineError } from "@in/server/types/errors"
 import { toArrayBufferBackedBytes } from "@in/server/utils/arrayBuffer"
 import { Log } from "@in/server/utils/log"
@@ -12,7 +16,16 @@ import sharp from "sharp"
 
 const log = new Log("modules/files/uploadPhoto")
 
-export async function uploadPhoto(file: File, context: { userId: number }): Promise<UploadFileResult> {
+export type UploadPhotoOptions = {
+  identity?: FileObjectIdentity
+  onIdentityPrepared?: (identity: FileObjectIdentity) => Promise<void>
+}
+
+export async function uploadPhoto(
+  file: File,
+  context: { userId: number },
+  options: UploadPhotoOptions = {},
+): Promise<UploadFileResult> {
   try {
     log.info("Starting photo upload", { fileSize: file.size, userId: context.userId })
 
@@ -39,7 +52,17 @@ export async function uploadPhoto(file: File, context: { userId: number }): Prom
     }
 
     const normalized = await normalizePhotoUpload(file, metadata)
-    const { dbFile, fileUniqueId } = await uploadFile(normalized.file, FileTypes.PHOTO, normalized.metadata, context)
+    const identity = options.identity
+      ?? createFileObjectIdentity(FileTypes.PHOTO, normalized.metadata.extension)
+    await options.onIdentityPrepared?.(identity)
+    const prepared = await uploadFileObject(
+      normalized.file,
+      FileTypes.PHOTO,
+      normalized.metadata,
+      context,
+      identity,
+    )
+    const { fileUniqueId } = prepared
 
     const strippedThumbnail = await generateStrippedThumbnail(normalized.file).catch((error) => {
       log.warn("Failed to generate stripped thumbnail", {
@@ -53,13 +76,16 @@ export async function uploadPhoto(file: File, context: { userId: number }): Prom
 
     const encryptedStrippedThumbnail = strippedThumbnail ? encryptBinary(strippedThumbnail.bytes) : null
 
-    // Save photo metadata
+    // Persist the complete photo graph atomically. The object-store write is
+    // intentionally outside PostgreSQL; callers that need compensation must
+    // durably own `identity.path` before this function begins that write.
     const format = normalized.metadata.mimeType === "image/jpeg" ? "jpeg" : "png"
-    let photo
     try {
-      ;[photo] = await db
-        .insert(photos)
-        .values({
+      const photoId = await db.transaction(async (tx) => {
+        const [dbFile] = await tx.insert(files).values(prepared.dbFile).returning()
+        if (!dbFile) throw new Error("No file returned from database")
+
+        const [photo] = await tx.insert(photos).values({
           format,
           width: normalized.metadata.width,
           height: normalized.metadata.height,
@@ -67,46 +93,31 @@ export async function uploadPhoto(file: File, context: { userId: number }): Prom
           strippedIv: encryptedStrippedThumbnail?.iv ?? null,
           strippedTag: encryptedStrippedThumbnail?.authTag ?? null,
           date: new Date(),
-        })
-        .returning()
+        }).returning()
 
-      if (!photo) {
-        throw new Error("No photo returned from database")
-      }
-      log.info("Photo metadata saved successfully", { photoId: photo.id })
-    } catch (error) {
-      log.error("Failed to save photo metadata", { error, fileUniqueId })
-      throw new Error("Failed to save photo metadata", { cause: error as Error })
-    }
-
-    let photoSizes_
-    try {
-      photoSizes_ = await db
-        .insert(photoSizes)
-        .values({
+        if (!photo) throw new Error("No photo returned from database")
+        const insertedSizes = await tx.insert(photoSizes).values({
           fileId: dbFile.id,
           photoId: photo.id,
           size: "f",
           width: normalized.metadata.width,
           height: normalized.metadata.height,
-        })
-        .returning()
+        }).returning({ id: photoSizes.id })
 
-      if (photoSizes_.length === 0) {
-        throw new Error("No photo sizes returned from database")
-      }
-      log.info("Photo sizes saved successfully", { photoId: photo.id })
+        if (insertedSizes.length === 0) throw new Error("No photo sizes returned from database")
+        return photo.id
+      })
+      log.info("Photo graph saved successfully", { photoId, fileUniqueId })
+      log.info("Photo upload completed successfully", {
+        fileUniqueId,
+        photoId,
+        userId: context.userId,
+      })
+      return { fileUniqueId, photoId }
     } catch (error) {
-      log.error("Failed to save photo sizes", { error, photoId: photo.id })
-      throw new Error("Failed to save photo sizes", { cause: error as Error })
+      log.error("Failed to save photo graph", { error, fileUniqueId })
+      throw new Error("Failed to save photo graph", { cause: error as Error })
     }
-
-    log.info("Photo upload completed successfully", {
-      fileUniqueId,
-      photoId: photo.id,
-      userId: context.userId,
-    })
-    return { fileUniqueId, photoId: photo.id }
   } catch (error) {
     log.error("Photo upload failed", {
       error,

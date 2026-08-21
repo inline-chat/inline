@@ -323,6 +323,7 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
               },
             },
           },
+          blockContent: true,
           reactions: true,
         },
       },
@@ -350,8 +351,11 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
     dialogsList = [...dialogsList, ...createdDialogs]
   }
 
-  const lastMsgAttachmentsByGlobalId = await MessageModel.getAttachmentsByMessageGlobalIds(
-    chats.flatMap((chat) => (chat.lastMsg ? [chat.lastMsg.globalId] : [])),
+  const processedLastMessages = await MessageModel.processMessages(
+    chats.flatMap((chat) => (chat.lastMsg ? [chat.lastMsg] : [])),
+  )
+  const processedLastMessagesByGlobalId = new Map(
+    processedLastMessages.map((message) => [message.globalId, message]),
   )
 
   // Add chats to results
@@ -363,21 +367,21 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
 
     // last message
     if (chat.lastMsg) {
-      const lastMsg = {
-        ...chat.lastMsg,
-        messageAttachments: lastMsgAttachmentsByGlobalId.get(chat.lastMsg.globalId) ?? [],
+      const processedMsg = processedLastMessagesByGlobalId.get(chat.lastMsg.globalId)
+      if (processedMsg) {
+        const encodedMsg = Encoders.fullMessage({
+          message: processedMsg,
+          encodingForUserId: currentUserId,
+          encodingForPeer: { inputPeer: encodePeerFromChat(chat, { currentUserId }) },
+        })
+        messagesByKey.set(`${chat.id}:${processedMsg.messageId}`, encodedMsg)
+      } else if (chat.lastMsgId) {
+        missingLastMsgKeys.push({ chatId: chat.id, messageId: chat.lastMsgId })
       }
-      const processedMsg = MessageModel.processMessage(lastMsg)
-      const encodedMsg = Encoders.fullMessage({
-        message: processedMsg,
-        encodingForUserId: currentUserId,
-        encodingForPeer: { inputPeer: encodePeerFromChat(chat, { currentUserId }) },
-      })
-      messagesByKey.set(`${chat.id}:${processedMsg.messageId}`, encodedMsg)
 
       // sender
-      if (lastMsg.from) {
-        usersList.push(lastMsg.from)
+      if (chat.lastMsg.from) {
+        usersList.push(chat.lastMsg.from)
       }
     } else if (chat.lastMsgId) {
       // Should be rare (FK enforces validity), but keep the contract: if chat.lastMsgId is set,

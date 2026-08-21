@@ -39,6 +39,7 @@ import {
   EventEmitter,
 } from "node:events"
 import { startBotWebhookDeliveryWorker } from "@in/server/modules/botUpdates/delivery"
+import { startBlockContentImageWorker } from "@in/server/modules/message/blockContentImageWorker"
 
 const sentryRelease =
   buildServerSentryRelease(
@@ -143,6 +144,7 @@ export const runServer =
   async (): Promise<CoreProductionServerHandle> => {
     const handle = await startServer()
     startBotWebhookDeliveryWorker()
+    startBlockContentImageWorker()
     Log.shared.info(
       `Running on http://${handle.hostname}:${handle.port}`,
     )

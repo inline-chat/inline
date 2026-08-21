@@ -5,6 +5,7 @@ import {
   MessageEntities,
   MessageSendMode,
   Update,
+  type BlockContent,
 } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { FileModel, type DbFullPhoto, type DbFullVideo } from "@in/server/db/models/files"
@@ -44,6 +45,7 @@ import { unarchiveIfNeeded } from "@in/server/modules/message/unarchiveIfNeeded"
 import { desktopPushSuppressionTracker } from "@in/server/modules/notifications/desktopPushSuppression"
 import { messageNotificationBody } from "@in/server/modules/notifications/messagePreview"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
+import { prepareBlockContent, type PreparedBlockContent } from "@in/server/modules/message/blockContentStorage"
 import { getPreviewRoutesFromMessage, processUrlPreviews } from "@in/server/modules/urlPreview/processUrlPreview"
 import { normalizeAndValidateMessageActions } from "@in/server/modules/message/messageActions"
 import {
@@ -191,6 +193,26 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     ...groupMentionedUserIds,
   ])
 
+  let preparedBlockContent: PreparedBlockContent | undefined
+  if (text && outgoingText?.blockContent) {
+    try {
+      preparedBlockContent = prepareBlockContent({
+        text,
+        entities,
+        parsed: {
+          blockContent: outgoingText.blockContent,
+          imageSources: outgoingText.blockImageSources ?? [],
+        },
+      })
+    } catch (error) {
+      log.error("rich content preparation failed; sending the plain projection", {
+        chatId,
+        currentUserId,
+        errorType: error instanceof Error ? error.name : "UnknownError",
+      })
+    }
+  }
+
   const hasInputUrlPreview = input.messageAttachments?.some((attachment) => attachment.urlPreviewId != null) ?? false
   const previewRoutes = text && !input.skipLinkProcessing && !hasInputUrlPreview
     ? getPreviewRoutesFromMessage(text, entities)
@@ -261,7 +283,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     fwdFromSenderId = Number(input.forwardHeader.fromId)
   }
 
-  let newMessage: DbMessage
+  let newMessage: DbMessage & { blockContent?: BlockContent | null }
   let update: UpdateSeqAndDate
   try {
     // insert new msg with new ID
@@ -291,7 +313,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       actionsEncrypted: encryptedActions?.encrypted ?? null,
       actionsIv: encryptedActions?.iv ?? null,
       actionsTag: encryptedActions?.authTag ?? null,
-    }))
+    }, preparedBlockContent))
   } catch (error) {
     if (error instanceof Error && error.message.includes("random_id_per_sender_unique") && input.randomId) {
       log.debug("duplicate random id recovered from existing message", { currentUserId })

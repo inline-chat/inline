@@ -1073,6 +1073,389 @@ export interface MessageServicePinnedMessage {
     messageId?: bigint;
 }
 /**
+ * Structural rich content projected alongside Message.message and
+ * Message.entities. Text-bearing blocks use UTF-16 ranges into Message.message;
+ * inline entities remain owned by Message.entities so there is one text/entity
+ * source of truth across legacy and rich renderers.
+ *
+ * @generated from protobuf message BlockContent
+ */
+export interface BlockContent {
+    /**
+     * @generated from protobuf field: repeated Block blocks = 1;
+     */
+    blocks: Block[];
+}
+/**
+ * @generated from protobuf message BlockText
+ */
+export interface BlockText {
+    /**
+     * @generated from protobuf field: int64 offset = 1;
+     */
+    offset: bigint;
+    /**
+     * @generated from protobuf field: int64 length = 2;
+     */
+    length: bigint;
+    /**
+     * Server-computed first-strong direction. Unset means the text contains no
+     * strong character or that direction is owned by a containing block.
+     *
+     * @generated from protobuf field: optional bool is_rtl = 3;
+     */
+    isRtl?: boolean;
+}
+/**
+ * @generated from protobuf message Block
+ */
+export interface Block {
+    /**
+     * @generated from protobuf oneof: kind
+     */
+    kind: {
+        oneofKind: "paragraph";
+        /**
+         * @generated from protobuf field: BlockText paragraph = 1;
+         */
+        paragraph: BlockText;
+    } | {
+        oneofKind: "heading";
+        /**
+         * @generated from protobuf field: BlockHeading heading = 2;
+         */
+        heading: BlockHeading;
+    } | {
+        oneofKind: "code";
+        /**
+         * @generated from protobuf field: BlockCode code = 3;
+         */
+        code: BlockCode;
+    } | {
+        oneofKind: "list";
+        /**
+         * @generated from protobuf field: BlockList list = 4;
+         */
+        list: BlockList;
+    } | {
+        oneofKind: "separator";
+        /**
+         * @generated from protobuf field: BlockSeparator separator = 5;
+         */
+        separator: BlockSeparator;
+    } | {
+        oneofKind: "image";
+        /**
+         * @generated from protobuf field: BlockImage image = 6;
+         */
+        image: BlockImage;
+    } | {
+        oneofKind: "album";
+        /**
+         * @generated from protobuf field: BlockAlbum album = 7;
+         */
+        album: BlockAlbum;
+    } | {
+        oneofKind: "disclosure";
+        /**
+         * @generated from protobuf field: BlockDisclosure disclosure = 8;
+         */
+        disclosure: BlockDisclosure;
+    } | {
+        oneofKind: "footer";
+        /**
+         * @generated from protobuf field: BlockText footer = 9;
+         */
+        footer: BlockText;
+    } | {
+        oneofKind: "quote";
+        /**
+         * @generated from protobuf field: BlockQuote quote = 10;
+         */
+        quote: BlockQuote;
+    } | {
+        oneofKind: "table";
+        /**
+         * @generated from protobuf field: BlockTable table = 11;
+         */
+        table: BlockTable;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
+ * @generated from protobuf message BlockHeading
+ */
+export interface BlockHeading {
+    /**
+     * @generated from protobuf field: BlockText text = 1;
+     */
+    text?: BlockText;
+    /**
+     * @generated from protobuf field: uint32 level = 2;
+     */
+    level: number;
+}
+/**
+ * @generated from protobuf message BlockCode
+ */
+export interface BlockCode {
+    /**
+     * Code direction is intentionally not encoded; clients always render it LTR.
+     *
+     * @generated from protobuf field: BlockText text = 1;
+     */
+    text?: BlockText;
+    /**
+     * @generated from protobuf field: optional string language = 2;
+     */
+    language?: string;
+}
+/**
+ * @generated from protobuf message BlockList
+ */
+export interface BlockList {
+    /**
+     * @generated from protobuf field: BlockList.Kind kind = 1;
+     */
+    kind: BlockList_Kind;
+    /**
+     * @generated from protobuf field: optional int64 start = 2;
+     */
+    start?: bigint;
+    /**
+     * @generated from protobuf field: repeated BlockListItem items = 3;
+     */
+    items: BlockListItem[];
+    /**
+     * Aggregate direction of the first strong text in the list. Items do not
+     * carry an independent direction override.
+     *
+     * @generated from protobuf field: optional bool is_rtl = 4;
+     */
+    isRtl?: boolean;
+}
+/**
+ * @generated from protobuf enum BlockList.Kind
+ */
+export enum BlockList_Kind {
+    /**
+     * @generated from protobuf enum value: KIND_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: KIND_UNORDERED = 1;
+     */
+    UNORDERED = 1,
+    /**
+     * @generated from protobuf enum value: KIND_ORDERED = 2;
+     */
+    ORDERED = 2
+}
+/**
+ * @generated from protobuf message BlockListItem
+ */
+export interface BlockListItem {
+    /**
+     * @generated from protobuf field: repeated Block children = 1;
+     */
+    children: Block[];
+    /**
+     * Presence distinguishes a task-list item from an ordinary list item.
+     * Older clients ignore this field and retain the ordinary list fallback.
+     *
+     * @generated from protobuf field: optional bool checked = 2;
+     */
+    checked?: boolean;
+}
+/**
+ * @generated from protobuf message BlockSeparator
+ */
+export interface BlockSeparator {
+}
+/**
+ * @generated from protobuf message BlockImageDimensions
+ */
+export interface BlockImageDimensions {
+    /**
+     * @generated from protobuf field: uint32 width = 1;
+     */
+    width: number;
+    /**
+     * @generated from protobuf field: uint32 height = 2;
+     */
+    height: number;
+}
+/**
+ * @generated from protobuf message BlockImagePending
+ */
+export interface BlockImagePending {
+    /**
+     * @generated from protobuf field: optional BlockImageDimensions dimensions = 1;
+     */
+    dimensions?: BlockImageDimensions;
+    /**
+     * @generated from protobuf field: optional bytes stripped_thumbnail = 2;
+     */
+    strippedThumbnail?: Uint8Array;
+}
+/**
+ * @generated from protobuf message BlockImageUnavailable
+ */
+export interface BlockImageUnavailable {
+    /**
+     * @generated from protobuf field: optional BlockImageDimensions dimensions = 1;
+     */
+    dimensions?: BlockImageDimensions;
+}
+/**
+ * @generated from protobuf message BlockImage
+ */
+export interface BlockImage {
+    /**
+     * @generated from protobuf field: BlockText alt = 1;
+     */
+    alt?: BlockText;
+    /**
+     * @generated from protobuf oneof: state
+     */
+    state: {
+        oneofKind: "pending";
+        /**
+         * @generated from protobuf field: BlockImagePending pending = 2;
+         */
+        pending: BlockImagePending;
+    } | {
+        oneofKind: "ready";
+        /**
+         * @generated from protobuf field: Photo ready = 3;
+         */
+        ready: Photo;
+    } | {
+        oneofKind: "unavailable";
+        /**
+         * @generated from protobuf field: BlockImageUnavailable unavailable = 4;
+         */
+        unavailable: BlockImageUnavailable;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
+ * Albums intentionally have no album-specific presentation properties. The
+ * codec coalesces consecutive images into chunks of at most ten ordinary image
+ * children.
+ *
+ * @generated from protobuf message BlockAlbum
+ */
+export interface BlockAlbum {
+    /**
+     * @generated from protobuf field: repeated BlockImage images = 1;
+     */
+    images: BlockImage[];
+}
+/**
+ * @generated from protobuf message BlockDisclosure
+ */
+export interface BlockDisclosure {
+    /**
+     * @generated from protobuf field: BlockText summary = 1;
+     */
+    summary?: BlockText;
+    /**
+     * @generated from protobuf field: BlockDisclosure.Kind kind = 2;
+     */
+    kind: BlockDisclosure_Kind;
+    /**
+     * @generated from protobuf field: optional bool initially_open = 3;
+     */
+    initiallyOpen?: boolean;
+    /**
+     * @generated from protobuf field: repeated Block children = 4;
+     */
+    children: Block[];
+    /**
+     * @generated from protobuf field: optional bool is_rtl = 5;
+     */
+    isRtl?: boolean;
+}
+/**
+ * @generated from protobuf enum BlockDisclosure.Kind
+ */
+export enum BlockDisclosure_Kind {
+    /**
+     * @generated from protobuf enum value: KIND_DEFAULT = 0;
+     */
+    DEFAULT = 0,
+    /**
+     * @generated from protobuf enum value: KIND_PROGRESS = 1;
+     */
+    PROGRESS = 1
+}
+/**
+ * @generated from protobuf message BlockQuote
+ */
+export interface BlockQuote {
+    /**
+     * @generated from protobuf field: repeated Block children = 1;
+     */
+    children: Block[];
+    /**
+     * @generated from protobuf field: optional bool is_rtl = 2;
+     */
+    isRtl?: boolean;
+}
+/**
+ * @generated from protobuf message BlockTable
+ */
+export interface BlockTable {
+    /**
+     * The first row is the GFM header. All rows have exactly alignments.size
+     * cells. Cells remain inline text ranges rather than nested block trees.
+     *
+     * @generated from protobuf field: repeated BlockTableRow rows = 1;
+     */
+    rows: BlockTableRow[];
+    /**
+     * @generated from protobuf field: repeated BlockTable.Alignment alignments = 2;
+     */
+    alignments: BlockTable_Alignment[];
+    /**
+     * @generated from protobuf field: optional bool is_rtl = 3;
+     */
+    isRtl?: boolean;
+}
+/**
+ * @generated from protobuf enum BlockTable.Alignment
+ */
+export enum BlockTable_Alignment {
+    /**
+     * @generated from protobuf enum value: ALIGNMENT_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: ALIGNMENT_LEFT = 1;
+     */
+    LEFT = 1,
+    /**
+     * @generated from protobuf enum value: ALIGNMENT_CENTER = 2;
+     */
+    CENTER = 2,
+    /**
+     * @generated from protobuf enum value: ALIGNMENT_RIGHT = 3;
+     */
+    RIGHT = 3
+}
+/**
+ * @generated from protobuf message BlockTableRow
+ */
+export interface BlockTableRow {
+    /**
+     * @generated from protobuf field: repeated BlockText cells = 1;
+     */
+    cells: BlockText[];
+}
+/**
  * @generated from protobuf message Message
  */
 export interface Message {
@@ -1212,6 +1595,13 @@ export interface Message {
      * @generated from protobuf field: optional MessageService service_message = 22;
      */
     serviceMessage?: MessageService;
+    /**
+     * Optional structural projection of message/entities. Older clients ignore
+     * this field and keep rendering the unchanged flat projection.
+     *
+     * @generated from protobuf field: optional BlockContent block_content = 23;
+     */
+    blockContent?: BlockContent;
 }
 /**
  * @generated from protobuf message MessageFwdHeader
@@ -14749,6 +15139,1045 @@ class MessageServicePinnedMessage$Type extends MessageType<MessageServicePinnedM
  */
 export const MessageServicePinnedMessage = new MessageServicePinnedMessage$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class BlockContent$Type extends MessageType<BlockContent> {
+    constructor() {
+        super("BlockContent", [
+            { no: 1, name: "blocks", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Block }
+        ]);
+    }
+    create(value?: PartialMessage<BlockContent>): BlockContent {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.blocks = [];
+        if (value !== undefined)
+            reflectionMergePartial<BlockContent>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockContent): BlockContent {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Block blocks */ 1:
+                    message.blocks.push(Block.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockContent, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Block blocks = 1; */
+        for (let i = 0; i < message.blocks.length; i++)
+            Block.internalBinaryWrite(message.blocks[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockContent
+ */
+export const BlockContent = new BlockContent$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockText$Type extends MessageType<BlockText> {
+    constructor() {
+        super("BlockText", [
+            { no: 1, name: "offset", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "length", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "is_rtl", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockText>): BlockText {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.offset = 0n;
+        message.length = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<BlockText>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockText): BlockText {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 offset */ 1:
+                    message.offset = reader.int64().toBigInt();
+                    break;
+                case /* int64 length */ 2:
+                    message.length = reader.int64().toBigInt();
+                    break;
+                case /* optional bool is_rtl */ 3:
+                    message.isRtl = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockText, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 offset = 1; */
+        if (message.offset !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.offset);
+        /* int64 length = 2; */
+        if (message.length !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.length);
+        /* optional bool is_rtl = 3; */
+        if (message.isRtl !== undefined)
+            writer.tag(3, WireType.Varint).bool(message.isRtl);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockText
+ */
+export const BlockText = new BlockText$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class Block$Type extends MessageType<Block> {
+    constructor() {
+        super("Block", [
+            { no: 1, name: "paragraph", kind: "message", oneof: "kind", T: () => BlockText },
+            { no: 2, name: "heading", kind: "message", oneof: "kind", T: () => BlockHeading },
+            { no: 3, name: "code", kind: "message", oneof: "kind", T: () => BlockCode },
+            { no: 4, name: "list", kind: "message", oneof: "kind", T: () => BlockList },
+            { no: 5, name: "separator", kind: "message", oneof: "kind", T: () => BlockSeparator },
+            { no: 6, name: "image", kind: "message", oneof: "kind", T: () => BlockImage },
+            { no: 7, name: "album", kind: "message", oneof: "kind", T: () => BlockAlbum },
+            { no: 8, name: "disclosure", kind: "message", oneof: "kind", T: () => BlockDisclosure },
+            { no: 9, name: "footer", kind: "message", oneof: "kind", T: () => BlockText },
+            { no: 10, name: "quote", kind: "message", oneof: "kind", T: () => BlockQuote },
+            { no: 11, name: "table", kind: "message", oneof: "kind", T: () => BlockTable }
+        ]);
+    }
+    create(value?: PartialMessage<Block>): Block {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.kind = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<Block>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: Block): Block {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* BlockText paragraph */ 1:
+                    message.kind = {
+                        oneofKind: "paragraph",
+                        paragraph: BlockText.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).paragraph)
+                    };
+                    break;
+                case /* BlockHeading heading */ 2:
+                    message.kind = {
+                        oneofKind: "heading",
+                        heading: BlockHeading.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).heading)
+                    };
+                    break;
+                case /* BlockCode code */ 3:
+                    message.kind = {
+                        oneofKind: "code",
+                        code: BlockCode.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).code)
+                    };
+                    break;
+                case /* BlockList list */ 4:
+                    message.kind = {
+                        oneofKind: "list",
+                        list: BlockList.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).list)
+                    };
+                    break;
+                case /* BlockSeparator separator */ 5:
+                    message.kind = {
+                        oneofKind: "separator",
+                        separator: BlockSeparator.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).separator)
+                    };
+                    break;
+                case /* BlockImage image */ 6:
+                    message.kind = {
+                        oneofKind: "image",
+                        image: BlockImage.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).image)
+                    };
+                    break;
+                case /* BlockAlbum album */ 7:
+                    message.kind = {
+                        oneofKind: "album",
+                        album: BlockAlbum.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).album)
+                    };
+                    break;
+                case /* BlockDisclosure disclosure */ 8:
+                    message.kind = {
+                        oneofKind: "disclosure",
+                        disclosure: BlockDisclosure.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).disclosure)
+                    };
+                    break;
+                case /* BlockText footer */ 9:
+                    message.kind = {
+                        oneofKind: "footer",
+                        footer: BlockText.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).footer)
+                    };
+                    break;
+                case /* BlockQuote quote */ 10:
+                    message.kind = {
+                        oneofKind: "quote",
+                        quote: BlockQuote.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).quote)
+                    };
+                    break;
+                case /* BlockTable table */ 11:
+                    message.kind = {
+                        oneofKind: "table",
+                        table: BlockTable.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).table)
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: Block, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* BlockText paragraph = 1; */
+        if (message.kind.oneofKind === "paragraph")
+            BlockText.internalBinaryWrite(message.kind.paragraph, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* BlockHeading heading = 2; */
+        if (message.kind.oneofKind === "heading")
+            BlockHeading.internalBinaryWrite(message.kind.heading, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* BlockCode code = 3; */
+        if (message.kind.oneofKind === "code")
+            BlockCode.internalBinaryWrite(message.kind.code, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* BlockList list = 4; */
+        if (message.kind.oneofKind === "list")
+            BlockList.internalBinaryWrite(message.kind.list, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* BlockSeparator separator = 5; */
+        if (message.kind.oneofKind === "separator")
+            BlockSeparator.internalBinaryWrite(message.kind.separator, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        /* BlockImage image = 6; */
+        if (message.kind.oneofKind === "image")
+            BlockImage.internalBinaryWrite(message.kind.image, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        /* BlockAlbum album = 7; */
+        if (message.kind.oneofKind === "album")
+            BlockAlbum.internalBinaryWrite(message.kind.album, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
+        /* BlockDisclosure disclosure = 8; */
+        if (message.kind.oneofKind === "disclosure")
+            BlockDisclosure.internalBinaryWrite(message.kind.disclosure, writer.tag(8, WireType.LengthDelimited).fork(), options).join();
+        /* BlockText footer = 9; */
+        if (message.kind.oneofKind === "footer")
+            BlockText.internalBinaryWrite(message.kind.footer, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
+        /* BlockQuote quote = 10; */
+        if (message.kind.oneofKind === "quote")
+            BlockQuote.internalBinaryWrite(message.kind.quote, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
+        /* BlockTable table = 11; */
+        if (message.kind.oneofKind === "table")
+            BlockTable.internalBinaryWrite(message.kind.table, writer.tag(11, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message Block
+ */
+export const Block = new Block$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockHeading$Type extends MessageType<BlockHeading> {
+    constructor() {
+        super("BlockHeading", [
+            { no: 1, name: "text", kind: "message", T: () => BlockText },
+            { no: 2, name: "level", kind: "scalar", T: 13 /*ScalarType.UINT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockHeading>): BlockHeading {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.level = 0;
+        if (value !== undefined)
+            reflectionMergePartial<BlockHeading>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockHeading): BlockHeading {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* BlockText text */ 1:
+                    message.text = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.text);
+                    break;
+                case /* uint32 level */ 2:
+                    message.level = reader.uint32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockHeading, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* BlockText text = 1; */
+        if (message.text)
+            BlockText.internalBinaryWrite(message.text, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* uint32 level = 2; */
+        if (message.level !== 0)
+            writer.tag(2, WireType.Varint).uint32(message.level);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockHeading
+ */
+export const BlockHeading = new BlockHeading$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockCode$Type extends MessageType<BlockCode> {
+    constructor() {
+        super("BlockCode", [
+            { no: 1, name: "text", kind: "message", T: () => BlockText },
+            { no: 2, name: "language", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockCode>): BlockCode {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<BlockCode>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockCode): BlockCode {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* BlockText text */ 1:
+                    message.text = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.text);
+                    break;
+                case /* optional string language */ 2:
+                    message.language = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockCode, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* BlockText text = 1; */
+        if (message.text)
+            BlockText.internalBinaryWrite(message.text, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional string language = 2; */
+        if (message.language !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.language);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockCode
+ */
+export const BlockCode = new BlockCode$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockList$Type extends MessageType<BlockList> {
+    constructor() {
+        super("BlockList", [
+            { no: 1, name: "kind", kind: "enum", T: () => ["BlockList.Kind", BlockList_Kind, "KIND_"] },
+            { no: 2, name: "start", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "items", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => BlockListItem },
+            { no: 4, name: "is_rtl", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockList>): BlockList {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.kind = 0;
+        message.items = [];
+        if (value !== undefined)
+            reflectionMergePartial<BlockList>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockList): BlockList {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* BlockList.Kind kind */ 1:
+                    message.kind = reader.int32();
+                    break;
+                case /* optional int64 start */ 2:
+                    message.start = reader.int64().toBigInt();
+                    break;
+                case /* repeated BlockListItem items */ 3:
+                    message.items.push(BlockListItem.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional bool is_rtl */ 4:
+                    message.isRtl = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockList, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* BlockList.Kind kind = 1; */
+        if (message.kind !== 0)
+            writer.tag(1, WireType.Varint).int32(message.kind);
+        /* optional int64 start = 2; */
+        if (message.start !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.start);
+        /* repeated BlockListItem items = 3; */
+        for (let i = 0; i < message.items.length; i++)
+            BlockListItem.internalBinaryWrite(message.items[i], writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool is_rtl = 4; */
+        if (message.isRtl !== undefined)
+            writer.tag(4, WireType.Varint).bool(message.isRtl);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockList
+ */
+export const BlockList = new BlockList$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockListItem$Type extends MessageType<BlockListItem> {
+    constructor() {
+        super("BlockListItem", [
+            { no: 1, name: "children", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Block },
+            { no: 2, name: "checked", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockListItem>): BlockListItem {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.children = [];
+        if (value !== undefined)
+            reflectionMergePartial<BlockListItem>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockListItem): BlockListItem {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Block children */ 1:
+                    message.children.push(Block.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional bool checked */ 2:
+                    message.checked = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockListItem, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Block children = 1; */
+        for (let i = 0; i < message.children.length; i++)
+            Block.internalBinaryWrite(message.children[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool checked = 2; */
+        if (message.checked !== undefined)
+            writer.tag(2, WireType.Varint).bool(message.checked);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockListItem
+ */
+export const BlockListItem = new BlockListItem$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockSeparator$Type extends MessageType<BlockSeparator> {
+    constructor() {
+        super("BlockSeparator", []);
+    }
+    create(value?: PartialMessage<BlockSeparator>): BlockSeparator {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<BlockSeparator>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockSeparator): BlockSeparator {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: BlockSeparator, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockSeparator
+ */
+export const BlockSeparator = new BlockSeparator$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockImageDimensions$Type extends MessageType<BlockImageDimensions> {
+    constructor() {
+        super("BlockImageDimensions", [
+            { no: 1, name: "width", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
+            { no: 2, name: "height", kind: "scalar", T: 13 /*ScalarType.UINT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockImageDimensions>): BlockImageDimensions {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.width = 0;
+        message.height = 0;
+        if (value !== undefined)
+            reflectionMergePartial<BlockImageDimensions>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockImageDimensions): BlockImageDimensions {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* uint32 width */ 1:
+                    message.width = reader.uint32();
+                    break;
+                case /* uint32 height */ 2:
+                    message.height = reader.uint32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockImageDimensions, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* uint32 width = 1; */
+        if (message.width !== 0)
+            writer.tag(1, WireType.Varint).uint32(message.width);
+        /* uint32 height = 2; */
+        if (message.height !== 0)
+            writer.tag(2, WireType.Varint).uint32(message.height);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockImageDimensions
+ */
+export const BlockImageDimensions = new BlockImageDimensions$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockImagePending$Type extends MessageType<BlockImagePending> {
+    constructor() {
+        super("BlockImagePending", [
+            { no: 1, name: "dimensions", kind: "message", T: () => BlockImageDimensions },
+            { no: 2, name: "stripped_thumbnail", kind: "scalar", opt: true, T: 12 /*ScalarType.BYTES*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockImagePending>): BlockImagePending {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<BlockImagePending>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockImagePending): BlockImagePending {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional BlockImageDimensions dimensions */ 1:
+                    message.dimensions = BlockImageDimensions.internalBinaryRead(reader, reader.uint32(), options, message.dimensions);
+                    break;
+                case /* optional bytes stripped_thumbnail */ 2:
+                    message.strippedThumbnail = reader.bytes();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockImagePending, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional BlockImageDimensions dimensions = 1; */
+        if (message.dimensions)
+            BlockImageDimensions.internalBinaryWrite(message.dimensions, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional bytes stripped_thumbnail = 2; */
+        if (message.strippedThumbnail !== undefined)
+            writer.tag(2, WireType.LengthDelimited).bytes(message.strippedThumbnail);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockImagePending
+ */
+export const BlockImagePending = new BlockImagePending$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockImageUnavailable$Type extends MessageType<BlockImageUnavailable> {
+    constructor() {
+        super("BlockImageUnavailable", [
+            { no: 1, name: "dimensions", kind: "message", T: () => BlockImageDimensions }
+        ]);
+    }
+    create(value?: PartialMessage<BlockImageUnavailable>): BlockImageUnavailable {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<BlockImageUnavailable>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockImageUnavailable): BlockImageUnavailable {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional BlockImageDimensions dimensions */ 1:
+                    message.dimensions = BlockImageDimensions.internalBinaryRead(reader, reader.uint32(), options, message.dimensions);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockImageUnavailable, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional BlockImageDimensions dimensions = 1; */
+        if (message.dimensions)
+            BlockImageDimensions.internalBinaryWrite(message.dimensions, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockImageUnavailable
+ */
+export const BlockImageUnavailable = new BlockImageUnavailable$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockImage$Type extends MessageType<BlockImage> {
+    constructor() {
+        super("BlockImage", [
+            { no: 1, name: "alt", kind: "message", T: () => BlockText },
+            { no: 2, name: "pending", kind: "message", oneof: "state", T: () => BlockImagePending },
+            { no: 3, name: "ready", kind: "message", oneof: "state", T: () => Photo },
+            { no: 4, name: "unavailable", kind: "message", oneof: "state", T: () => BlockImageUnavailable }
+        ]);
+    }
+    create(value?: PartialMessage<BlockImage>): BlockImage {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.state = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<BlockImage>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockImage): BlockImage {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* BlockText alt */ 1:
+                    message.alt = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.alt);
+                    break;
+                case /* BlockImagePending pending */ 2:
+                    message.state = {
+                        oneofKind: "pending",
+                        pending: BlockImagePending.internalBinaryRead(reader, reader.uint32(), options, (message.state as any).pending)
+                    };
+                    break;
+                case /* Photo ready */ 3:
+                    message.state = {
+                        oneofKind: "ready",
+                        ready: Photo.internalBinaryRead(reader, reader.uint32(), options, (message.state as any).ready)
+                    };
+                    break;
+                case /* BlockImageUnavailable unavailable */ 4:
+                    message.state = {
+                        oneofKind: "unavailable",
+                        unavailable: BlockImageUnavailable.internalBinaryRead(reader, reader.uint32(), options, (message.state as any).unavailable)
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockImage, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* BlockText alt = 1; */
+        if (message.alt)
+            BlockText.internalBinaryWrite(message.alt, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* BlockImagePending pending = 2; */
+        if (message.state.oneofKind === "pending")
+            BlockImagePending.internalBinaryWrite(message.state.pending, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* Photo ready = 3; */
+        if (message.state.oneofKind === "ready")
+            Photo.internalBinaryWrite(message.state.ready, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* BlockImageUnavailable unavailable = 4; */
+        if (message.state.oneofKind === "unavailable")
+            BlockImageUnavailable.internalBinaryWrite(message.state.unavailable, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockImage
+ */
+export const BlockImage = new BlockImage$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockAlbum$Type extends MessageType<BlockAlbum> {
+    constructor() {
+        super("BlockAlbum", [
+            { no: 1, name: "images", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => BlockImage }
+        ]);
+    }
+    create(value?: PartialMessage<BlockAlbum>): BlockAlbum {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.images = [];
+        if (value !== undefined)
+            reflectionMergePartial<BlockAlbum>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockAlbum): BlockAlbum {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated BlockImage images */ 1:
+                    message.images.push(BlockImage.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockAlbum, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated BlockImage images = 1; */
+        for (let i = 0; i < message.images.length; i++)
+            BlockImage.internalBinaryWrite(message.images[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockAlbum
+ */
+export const BlockAlbum = new BlockAlbum$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockDisclosure$Type extends MessageType<BlockDisclosure> {
+    constructor() {
+        super("BlockDisclosure", [
+            { no: 1, name: "summary", kind: "message", T: () => BlockText },
+            { no: 2, name: "kind", kind: "enum", T: () => ["BlockDisclosure.Kind", BlockDisclosure_Kind, "KIND_"] },
+            { no: 3, name: "initially_open", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 4, name: "children", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Block },
+            { no: 5, name: "is_rtl", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockDisclosure>): BlockDisclosure {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.kind = 0;
+        message.children = [];
+        if (value !== undefined)
+            reflectionMergePartial<BlockDisclosure>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockDisclosure): BlockDisclosure {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* BlockText summary */ 1:
+                    message.summary = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.summary);
+                    break;
+                case /* BlockDisclosure.Kind kind */ 2:
+                    message.kind = reader.int32();
+                    break;
+                case /* optional bool initially_open */ 3:
+                    message.initiallyOpen = reader.bool();
+                    break;
+                case /* repeated Block children */ 4:
+                    message.children.push(Block.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional bool is_rtl */ 5:
+                    message.isRtl = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockDisclosure, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* BlockText summary = 1; */
+        if (message.summary)
+            BlockText.internalBinaryWrite(message.summary, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* BlockDisclosure.Kind kind = 2; */
+        if (message.kind !== 0)
+            writer.tag(2, WireType.Varint).int32(message.kind);
+        /* optional bool initially_open = 3; */
+        if (message.initiallyOpen !== undefined)
+            writer.tag(3, WireType.Varint).bool(message.initiallyOpen);
+        /* repeated Block children = 4; */
+        for (let i = 0; i < message.children.length; i++)
+            Block.internalBinaryWrite(message.children[i], writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool is_rtl = 5; */
+        if (message.isRtl !== undefined)
+            writer.tag(5, WireType.Varint).bool(message.isRtl);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockDisclosure
+ */
+export const BlockDisclosure = new BlockDisclosure$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockQuote$Type extends MessageType<BlockQuote> {
+    constructor() {
+        super("BlockQuote", [
+            { no: 1, name: "children", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Block },
+            { no: 2, name: "is_rtl", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockQuote>): BlockQuote {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.children = [];
+        if (value !== undefined)
+            reflectionMergePartial<BlockQuote>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockQuote): BlockQuote {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Block children */ 1:
+                    message.children.push(Block.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional bool is_rtl */ 2:
+                    message.isRtl = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockQuote, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Block children = 1; */
+        for (let i = 0; i < message.children.length; i++)
+            Block.internalBinaryWrite(message.children[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool is_rtl = 2; */
+        if (message.isRtl !== undefined)
+            writer.tag(2, WireType.Varint).bool(message.isRtl);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockQuote
+ */
+export const BlockQuote = new BlockQuote$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockTable$Type extends MessageType<BlockTable> {
+    constructor() {
+        super("BlockTable", [
+            { no: 1, name: "rows", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => BlockTableRow },
+            { no: 2, name: "alignments", kind: "enum", repeat: 1 /*RepeatType.PACKED*/, T: () => ["BlockTable.Alignment", BlockTable_Alignment, "ALIGNMENT_"] },
+            { no: 3, name: "is_rtl", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockTable>): BlockTable {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.rows = [];
+        message.alignments = [];
+        if (value !== undefined)
+            reflectionMergePartial<BlockTable>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockTable): BlockTable {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated BlockTableRow rows */ 1:
+                    message.rows.push(BlockTableRow.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated BlockTable.Alignment alignments */ 2:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.alignments.push(reader.int32());
+                    else
+                        message.alignments.push(reader.int32());
+                    break;
+                case /* optional bool is_rtl */ 3:
+                    message.isRtl = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockTable, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated BlockTableRow rows = 1; */
+        for (let i = 0; i < message.rows.length; i++)
+            BlockTableRow.internalBinaryWrite(message.rows[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated BlockTable.Alignment alignments = 2; */
+        if (message.alignments.length) {
+            writer.tag(2, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.alignments.length; i++)
+                writer.int32(message.alignments[i]);
+            writer.join();
+        }
+        /* optional bool is_rtl = 3; */
+        if (message.isRtl !== undefined)
+            writer.tag(3, WireType.Varint).bool(message.isRtl);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockTable
+ */
+export const BlockTable = new BlockTable$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockTableRow$Type extends MessageType<BlockTableRow> {
+    constructor() {
+        super("BlockTableRow", [
+            { no: 1, name: "cells", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => BlockText }
+        ]);
+    }
+    create(value?: PartialMessage<BlockTableRow>): BlockTableRow {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.cells = [];
+        if (value !== undefined)
+            reflectionMergePartial<BlockTableRow>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockTableRow): BlockTableRow {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated BlockText cells */ 1:
+                    message.cells.push(BlockText.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockTableRow, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated BlockText cells = 1; */
+        for (let i = 0; i < message.cells.length; i++)
+            BlockText.internalBinaryWrite(message.cells[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockTableRow
+ */
+export const BlockTableRow = new BlockTableRow$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class Message$Type extends MessageType<Message> {
     constructor() {
         super("Message", [
@@ -14774,7 +16203,8 @@ class Message$Type extends MessageType<Message> {
             { no: 19, name: "replies", kind: "message", T: () => MessageReplies },
             { no: 20, name: "actions", kind: "message", T: () => MessageActions },
             { no: 21, name: "rev", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 22, name: "service_message", kind: "message", T: () => MessageService }
+            { no: 22, name: "service_message", kind: "message", T: () => MessageService },
+            { no: 23, name: "block_content", kind: "message", T: () => BlockContent }
         ]);
     }
     create(value?: PartialMessage<Message>): Message {
@@ -14863,6 +16293,9 @@ class Message$Type extends MessageType<Message> {
                     message.serviceMessage = MessageService.internalBinaryRead(reader, reader.uint32(), options, message.serviceMessage);
                     break;
                 default:
+                case /* optional BlockContent block_content */ 23:
+                    message.blockContent = BlockContent.internalBinaryRead(reader, reader.uint32(), options, message.blockContent);
+                    break;
                     let u = options.readUnknownField;
                     if (u === "throw")
                         throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
@@ -14944,6 +16377,9 @@ class Message$Type extends MessageType<Message> {
         if (message.serviceMessage)
             MessageService.internalBinaryWrite(message.serviceMessage, writer.tag(22, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
+        /* optional BlockContent block_content = 23; */
+        if (message.blockContent)
+            BlockContent.internalBinaryWrite(message.blockContent, writer.tag(23, WireType.LengthDelimited).fork(), options).join();
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
         return writer;

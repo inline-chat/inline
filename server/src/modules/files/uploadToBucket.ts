@@ -27,3 +27,10 @@ export async function uploadToBucket(file: File, { path, type }: { path: string;
     type,
   })
 }
+
+/** Delete one exact, already-resolved object path. Callers own authorization and fencing. */
+export async function deleteFromBucket(path: string): Promise<void> {
+  const r2 = getR2()
+  if (!r2) throw new Error("R2 is not initialized")
+  await r2.file(path).delete()
+}

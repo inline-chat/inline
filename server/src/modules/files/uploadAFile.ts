@@ -24,6 +24,19 @@ export type FileObjectIdentity = {
   path: string
 }
 
+export function createFileObjectIdentity(
+  fileType: FileTypes,
+  extension: string,
+): FileObjectIdentity {
+  const fileUniqueId = generateFileUniqueId(fileType)
+  const normalizedExtension = extension.trim().toLowerCase()
+  const suffix = normalizedExtension ? `.${normalizedExtension}` : ""
+  return {
+    fileUniqueId,
+    path: `${fileUniqueId}/${nanoid(32)}${suffix}`,
+  }
+}
+
 export type UploadedFileObject = {
   dbFile: {
     fileUniqueId: string

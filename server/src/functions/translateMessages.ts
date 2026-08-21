@@ -241,6 +241,7 @@ async function getContextMessages(input: {
             )
           : null,
       systemMessage: null,
+      blockContent: null,
     }))
   } catch (error) {
     log.error("Failed to get context messages", {
@@ -298,6 +299,7 @@ async function getMessagesAndTranslations(input: {
               )
             : null,
         systemMessage: null,
+        blockContent: null,
 
         // Get translation in language
         translation: translation ? processMessageTranslation(translation) : null,

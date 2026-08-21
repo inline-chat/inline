@@ -4,6 +4,11 @@ import { db } from "../../db"
 import * as schema from "../../db/schema"
 import { eq, and } from "drizzle-orm"
 import { getChats } from "@in/server/functions/messages.getChats"
+import { MessageModel } from "@in/server/db/models/messages"
+import { encryptMessage } from "@in/server/modules/encryption/encryptMessage"
+import { parseBlockContent } from "@in/server/modules/message/blockContent"
+import { prepareBlockContent } from "@in/server/modules/message/blockContentStorage"
+import { parseMarkdown } from "@in/server/modules/message/parseMarkdown"
 
 // Helper to create a HandlerContext
 const makeHandlerContext = (userId: number): any => ({
@@ -143,6 +148,51 @@ describe("getChats", () => {
     const lastMsgId = Number(returnedChat!.lastMsgId!)
     const hasLastMsg = result.messages.some((m) => Number(m.chatId) === chat.id && Number(m.id) === lastMsgId)
     expect(hasLastMsg).toBe(true)
+  })
+
+  test("preserves equal-revision rich content when refreshing last messages", async () => {
+    const user = await testUtils.createUser("get-chats-rich-refresh@example.com")
+    const chat = await testUtils.createChat(null, "Rich refresh", "thread", false, user.id)
+    if (!chat) throw new Error("Chat not created")
+
+    await testUtils.addParticipant(chat.id, user.id)
+    await db.insert(schema.dialogs).values({ chatId: chat.id, userId: user.id })
+
+    const markdown = "# Result\n\nDurable rich content"
+    const flat = parseMarkdown(markdown)
+    const parsed = parseBlockContent(markdown)
+    const rich = prepareBlockContent({
+      text: flat.text,
+      entities: flat.entities.length > 0 ? { entities: flat.entities } : undefined,
+      parsed,
+    })
+    if (!rich) throw new Error("Rich content not prepared")
+
+    const encryptedText = encryptMessage(flat.text)
+    const inserted = await MessageModel.insertMessage({
+      chatId: chat.id,
+      fromId: user.id,
+      date: new Date(),
+      textEncrypted: encryptedText.encrypted,
+      textIv: encryptedText.iv,
+      textTag: encryptedText.authTag,
+    }, rich)
+
+    const first = await getChats({}, makeHandlerContext(user.id))
+    const firstMessage = first.messages.find((message) =>
+      Number(message.chatId) === chat.id && Number(message.id) === inserted.message.messageId
+    )
+    expect(firstMessage?.blockContent?.blocks.map((block) => block.kind.oneofKind)).toEqual([
+      "heading",
+      "paragraph",
+    ])
+
+    const refreshed = await getChats({}, makeHandlerContext(user.id))
+    const refreshedMessage = refreshed.messages.find((message) =>
+      Number(message.chatId) === chat.id && Number(message.id) === inserted.message.messageId
+    )
+    expect(refreshedMessage?.rev).toBe(firstMessage?.rev)
+    expect(refreshedMessage?.blockContent).toEqual(firstMessage?.blockContent)
   })
 
   test("includes authoritative chat and space sequences", async () => {

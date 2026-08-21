@@ -41,12 +41,20 @@ export type OptionalEncryptedData = EmptyEncryptedData | EncryptedData
  * Encrypts raw binary data (Buffer or Uint8Array)
  */
 export function encryptBinary(data: Buffer | Uint8Array): EncryptedData {
+  return encryptBinaryWithLimit(data, MAX_ENCRYPTED_DATA_LENGTH)
+}
+
+/**
+ * Encrypts a bounded binary payload without changing the conservative default
+ * used by ordinary messages, entities, actions, and system payloads.
+ */
+export function encryptBinaryWithLimit(data: Buffer | Uint8Array, maxLength: number): EncryptedData {
   // if (data.length === 0) {
   //   return null
   // }
 
   const ENCRYPTION_KEY = getEncryptionKey()
-  validateBinaryData(data)
+  validateBinaryData(data, maxLength)
   const startTime = process.hrtime()
   const key = new Uint8Array(Buffer.from(ENCRYPTION_KEY, "hex"))
   validateKey(key)
@@ -154,8 +162,11 @@ const validateText = (text: string): void => {
   }
 }
 
-const validateBinaryData = (data: Buffer | Uint8Array): void => {
-  if (data.length > MAX_ENCRYPTED_DATA_LENGTH) {
+const validateBinaryData = (data: Buffer | Uint8Array, maxLength = MAX_ENCRYPTED_DATA_LENGTH): void => {
+  if (!Number.isSafeInteger(maxLength) || maxLength < 1) {
+    throw new Error("Invalid binary data length limit")
+  }
+  if (data.length > maxLength) {
     throw new Error("Binary data exceeds maximum length")
   }
 }

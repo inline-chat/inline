@@ -395,6 +395,133 @@ message MessageServicePinnedMessage {
   optional int64 message_id = 1;
 }
 
+// Structural rich content projected alongside Message.message and
+// Message.entities. Text-bearing blocks use UTF-16 ranges into Message.message;
+// inline entities remain owned by Message.entities so there is one text/entity
+// source of truth across legacy and rich renderers.
+message BlockContent { repeated Block blocks = 1; }
+
+message BlockText {
+  int64 offset = 1;
+  int64 length = 2;
+  // Server-computed first-strong direction. Unset means the text contains no
+  // strong character or that direction is owned by a containing block.
+  optional bool is_rtl = 3;
+}
+
+message Block {
+  oneof kind {
+    BlockText paragraph = 1;
+    BlockHeading heading = 2;
+    BlockCode code = 3;
+    BlockList list = 4;
+    BlockSeparator separator = 5;
+    BlockImage image = 6;
+    BlockAlbum album = 7;
+    BlockDisclosure disclosure = 8;
+    BlockText footer = 9;
+    BlockQuote quote = 10;
+    BlockTable table = 11;
+  }
+}
+
+message BlockHeading {
+  BlockText text = 1;
+  uint32 level = 2;
+}
+
+message BlockCode {
+  // Code direction is intentionally not encoded; clients always render it LTR.
+  BlockText text = 1;
+  optional string language = 2;
+}
+
+message BlockList {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_UNORDERED = 1;
+    KIND_ORDERED = 2;
+  }
+
+  Kind kind = 1;
+  optional int64 start = 2;
+  repeated BlockListItem items = 3;
+  // Aggregate direction of the first strong text in the list. Items do not
+  // carry an independent direction override.
+  optional bool is_rtl = 4;
+}
+
+message BlockListItem {
+  repeated Block children = 1;
+  // Presence distinguishes a task-list item from an ordinary list item.
+  // Older clients ignore this field and retain the ordinary list fallback.
+  optional bool checked = 2;
+}
+
+message BlockSeparator {}
+
+message BlockImageDimensions {
+  uint32 width = 1;
+  uint32 height = 2;
+}
+
+message BlockImagePending {
+  optional BlockImageDimensions dimensions = 1;
+  optional bytes stripped_thumbnail = 2;
+}
+
+message BlockImageUnavailable { optional BlockImageDimensions dimensions = 1; }
+
+message BlockImage {
+  BlockText alt = 1;
+
+  oneof state {
+    BlockImagePending pending = 2;
+    Photo ready = 3;
+    BlockImageUnavailable unavailable = 4;
+  }
+}
+
+// Albums intentionally have no album-specific presentation properties. The
+// codec coalesces consecutive images into chunks of at most ten ordinary image
+// children.
+message BlockAlbum { repeated BlockImage images = 1; }
+
+message BlockDisclosure {
+  enum Kind {
+    KIND_DEFAULT = 0;
+    KIND_PROGRESS = 1;
+  }
+
+  BlockText summary = 1;
+  Kind kind = 2;
+  optional bool initially_open = 3;
+  repeated Block children = 4;
+  optional bool is_rtl = 5;
+}
+
+message BlockQuote {
+  repeated Block children = 1;
+  optional bool is_rtl = 2;
+}
+
+message BlockTable {
+  enum Alignment {
+    ALIGNMENT_UNSPECIFIED = 0;
+    ALIGNMENT_LEFT = 1;
+    ALIGNMENT_CENTER = 2;
+    ALIGNMENT_RIGHT = 3;
+  }
+
+  // The first row is the GFM header. All rows have exactly alignments.size
+  // cells. Cells remain inline text ranges rather than nested block trees.
+  repeated BlockTableRow rows = 1;
+  repeated Alignment alignments = 2;
+  optional bool is_rtl = 3;
+}
+
+message BlockTableRow { repeated BlockText cells = 1; }
+
 message Message {
   int64 id = 1;
 
@@ -463,6 +590,10 @@ message Message {
   // Typed service/system message metadata. Older clients ignore this and use
   // `message` as fallback text.
   optional MessageService service_message = 22;
+
+  // Optional structural projection of message/entities. Older clients ignore
+  // this field and keep rendering the unchanged flat projection.
+  optional BlockContent block_content = 23;
 }
 
 enum MessageSendMode {

@@ -1,9 +1,15 @@
 import { beforeEach, describe, expect, it } from "bun:test"
 import type { DbMessage, DbUser } from "@in/server/db/schema"
 import type { DbFullMessage } from "@in/server/db/models/messages"
-import type { DbFullVoice } from "@in/server/db/models/files"
+import type { DbFullPhoto, DbFullVoice } from "@in/server/db/models/files"
 import { encodeFullMessage, encodeMessage } from "@in/server/realtime/encoders/encodeMessage"
-import { MessageEntities, MessageEntity_Type, type Peer } from "@inline-chat/protocol/core"
+import {
+  BlockDisclosure_Kind,
+  MessageEntities,
+  MessageEntity_Type,
+  Photo_Format,
+  type Peer,
+} from "@inline-chat/protocol/core"
 import { encryptBinary } from "@in/server/modules/encryption/encryption"
 
 const peer: Peer = {
@@ -55,6 +61,7 @@ const baseMessage: DbMessage = {
   isSticker: false,
   pinnedAt: null,
   hasLink: null,
+  blockContentId: null,
 }
 
 const baseUser: DbUser = {
@@ -111,9 +118,11 @@ const baseFullMessage: DbFullMessage = {
   isSticker: false,
   pinnedAt: null,
   hasLink: null,
+  blockContentId: null,
   entities: null,
   actions: null,
   systemMessage: null,
+  blockContent: null,
   from: baseUser,
   reactions: [],
   photo: null,
@@ -158,6 +167,35 @@ const voice: DbFullVoice = {
   },
 }
 
+const currentBlockPhoto: DbFullPhoto = {
+  id: 42,
+  format: "png",
+  width: 640,
+  height: 480,
+  stripped: null,
+  strippedIv: null,
+  strippedTag: null,
+  date: new Date("2025-02-01T00:00:00Z"),
+  photoSizes: [{
+    id: 43,
+    fileId: 44,
+    photoId: 42,
+    size: "f",
+    width: 640,
+    height: 480,
+    file: {
+      ...voice.file,
+      id: 44,
+      fileUniqueId: "PHO_CURRENT_BLOCK",
+      fileSize: 777,
+      mimeType: "image/png",
+      fileType: "photo",
+      width: 640,
+      height: 480,
+    },
+  }],
+}
+
 describe("encodeMessage nudge", () => {
   it("encodes nudge media when mediaType is nudge", () => {
     const result = encodeMessage({
@@ -199,6 +237,71 @@ describe("encodeFullMessage nudge", () => {
     })
 
     expect(result.media?.media.oneofKind).not.toBe("nudge")
+  })
+})
+
+describe("encodeFullMessage block photos", () => {
+  it("projects current ready photos through nested blocks and preserves missing snapshots", () => {
+    const staleCurrent = {
+      id: 42n,
+      date: 1n,
+      format: Photo_Format.JPEG,
+      sizes: [{ type: "f", w: 1, h: 1, size: 1, cdnUrl: "https://expired.invalid/current" }],
+    }
+    const staleMissing = {
+      id: 404n,
+      date: 2n,
+      format: Photo_Format.JPEG,
+      sizes: [{ type: "f", w: 2, h: 2, size: 2, cdnUrl: "https://expired.invalid/missing" }],
+    }
+    const blockContent = {
+      blocks: [{
+        kind: {
+          oneofKind: "disclosure" as const,
+          disclosure: {
+            summary: { offset: 0n, length: 0n },
+            kind: BlockDisclosure_Kind.DEFAULT,
+            children: [{
+              kind: {
+                oneofKind: "album" as const,
+                album: {
+                  images: [
+                    { alt: { offset: 0n, length: 0n }, state: { oneofKind: "ready" as const, ready: staleCurrent } },
+                    { alt: { offset: 0n, length: 0n }, state: { oneofKind: "ready" as const, ready: staleMissing } },
+                  ],
+                },
+              },
+            }],
+          },
+        },
+      }],
+    }
+
+    const result = encodeFullMessage({
+      message: buildFullMessage({
+        text: "",
+        blockContent,
+        blockContentPhotos: new Map([[42n, currentBlockPhoto]]),
+      }),
+      encodingForUserId: 100,
+      encodingForPeer: { peer },
+    })
+
+    const disclosure = result.blockContent?.blocks[0]
+    expect(disclosure?.kind.oneofKind).toBe("disclosure")
+    if (disclosure?.kind.oneofKind !== "disclosure") throw new Error("Expected disclosure")
+    const album = disclosure.kind.disclosure.children[0]
+    if (album?.kind.oneofKind !== "album") throw new Error("Expected album")
+    const [projectedCurrent, projectedMissing] = album.kind.album.images
+    expect(projectedCurrent?.state.oneofKind).toBe("ready")
+    if (projectedCurrent?.state.oneofKind !== "ready") throw new Error("Expected ready photo")
+    expect(projectedCurrent.state.ready.format).toBe(Photo_Format.PNG)
+    expect(projectedCurrent.state.ready.sizes[0]?.size).toBe(777)
+    expect(projectedMissing?.state.oneofKind).toBe("ready")
+    if (projectedMissing?.state.oneofKind !== "ready") throw new Error("Expected ready fallback")
+    expect(projectedMissing.state.ready.sizes[0]?.cdnUrl).toBe("https://expired.invalid/missing")
+
+    expect(staleCurrent.sizes[0]?.cdnUrl).toBe("https://expired.invalid/current")
   })
 })
 

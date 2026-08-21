@@ -5,6 +5,7 @@ import {
   MessageActions,
   MessageEntities,
   MessageSendMode,
+  type BlockContent,
   type InputPeer,
   type Message,
   type MessageAttachment,
@@ -14,6 +15,7 @@ import {
   type MessageReplies,
   type MessageService,
   type Peer,
+  type Photo,
 } from "@inline-chat/protocol/core"
 import { encodePeer, encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
 import { encodePhoto, encodePhotoLegacy } from "@in/server/realtime/encoders/encodePhoto"
@@ -29,9 +31,11 @@ import { detectHasLink } from "@in/server/modules/message/linkDetection"
 import { isUserMentioned } from "@in/server/modules/message/helpers"
 import { encodeMessageAttachment } from "@in/server/realtime/encoders/encodeMessageAttachment"
 import type { SystemMessage } from "@in/server/modules/systemMessages"
+import { projectReadyBlockPhotos } from "@in/server/modules/message/blockContent"
 
 type EncodableMessage = DbMessage & {
   systemMessage?: SystemMessage | null
+  blockContent?: BlockContent | null
 }
 
 function encodeServiceMessage(systemMessage: SystemMessage | null | undefined): MessageService | undefined {
@@ -228,6 +232,7 @@ export const encodeMessage = ({
     replies,
     actions,
     serviceMessage: encodeServiceMessage(message.systemMessage),
+    blockContent: message.blockContent ?? undefined,
   }
 
   return messageProto
@@ -315,6 +320,15 @@ export const encodeFullMessage = ({
 
   const hasReactions = message.reactions.length > 0
 
+  let blockContent = message.blockContent
+  if (blockContent && message.blockContentPhotos) {
+    const currentPhotos = new Map<bigint, Photo>()
+    for (const [photoId, photo] of message.blockContentPhotos) {
+      currentPhotos.set(photoId, encodePhoto({ photo }))
+    }
+    blockContent = projectReadyBlockPhotos(blockContent, currentPhotos)
+  }
+
   let fwdFrom: MessageFwdHeader | undefined = undefined
   let fwdFromPeer: Peer | undefined = undefined
 
@@ -364,6 +378,7 @@ export const encodeFullMessage = ({
     replies,
     actions: message.actions ?? undefined,
     serviceMessage: encodeServiceMessage(message.systemMessage),
+    blockContent: blockContent ?? undefined,
   }
 
   return messageProto

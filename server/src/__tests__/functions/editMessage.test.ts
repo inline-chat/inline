@@ -169,6 +169,39 @@ describe("editMessage function", () => {
     expect(message?.entities).toBeUndefined()
   })
 
+  test("suppresses edit date for bot streaming edits without changing the user path", async () => {
+    const sent = await sendMessage(
+      {
+        peerId: privateChatPeerId,
+        message: "initial bot stream",
+      },
+      context,
+    )
+    const messageId = extractSentMessageId(sent)
+    expect(messageId).toBeTruthy()
+
+    const result = await editMessage(
+      {
+        messageId: messageId!,
+        peer: privateChatPeerId,
+        text: "streaming **answer**",
+        parseMarkdown: true,
+      },
+      { ...context, isBot: true },
+    )
+
+    const message = extractEditedMessage(result)
+    expect(message).toBeTruthy()
+    expect(message?.editDate).toBeUndefined()
+
+    const [stored] = await db
+      .select({ editDate: messages.editDate })
+      .from(messages)
+      .where(and(eq(messages.chatId, privateChat.id), eq(messages.messageId, Number(messageId))))
+      .limit(1)
+    expect(stored?.editDate).toBeNull()
+  })
+
   test("resolves @username mentions while parsing markdown edits", async () => {
     const mentionedUser = await testUtils.createUser(nextEmail("edit-mentioned"))
     await db.update(users).set({ username: "editmentioned" }).where(eq(users.id, mentionedUser!.id)).execute()

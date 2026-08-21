@@ -809,7 +809,7 @@ const botMethods = (authPlugin: any): any => {
             entities,
             parseMarkdown: parseMarkdown ?? true,
           },
-          ctxFromStore(store),
+          { ...ctxFromStore(store), isBot: true },
         )
 
         const updated = await MessageModel.getMessage(messageId, chat.id)

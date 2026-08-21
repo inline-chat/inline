@@ -1191,7 +1191,7 @@ const editMessageText = async (
       parseMarkdown: parseMarkdown ?? true,
       actions: toProtocolActions(input.actions),
     },
-    context,
+    { ...context, isBot: true },
   )
 
   const updated = await MessageModel.getMessage(

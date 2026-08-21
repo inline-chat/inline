@@ -1,4 +1,4 @@
-import { MessageActions, MessageEntities, type InputPeer } from "@inline-chat/protocol/core"
+import { MessageActions, MessageEntities, type BlockContent, type InputPeer } from "@inline-chat/protocol/core"
 import { cleanMultilinePreviewText, cleanPreviewText } from "@inline-chat/url-preview"
 import { db } from "@in/server/db"
 import { ModelError } from "@in/server/db/models/_errors"
@@ -16,7 +16,9 @@ import {
 } from "@in/server/db/models/files"
 import {
   chats,
+  blockContents,
   messages,
+  type DbBlockContent,
   type DbMessage,
   type DbNewMessage,
   type DbReaction,
@@ -36,6 +38,17 @@ import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/update
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
 import { persistChatMetadataUpdates, type ChatMetadataUpdate } from "@in/server/modules/chatMetadataUpdates"
 import { decryptSystemMessagePayload, type SystemMessage } from "@in/server/modules/systemMessages/payload"
+import {
+  insertPreparedBlockContent,
+  deleteUnreferencedBlockContents,
+  replacePreparedBlockContent,
+  type PreparedBlockContent,
+} from "@in/server/modules/message/blockContentStorage"
+import { decryptStoredBlockContent } from "@in/server/modules/message/blockContentPayload"
+import {
+  collectReadyBlockPhotoIds,
+  validateBlockContent,
+} from "@in/server/modules/message/blockContent"
 
 const log = new Log("MessageModel", LogLevel.INFO)
 
@@ -54,6 +67,7 @@ export const MessageModel = {
   getMessagesByIds: getMessagesByIds,
   getMessagesAroundTarget: getMessagesAroundTarget,
   getNonFullMessagesRange: getNonFullMessagesRange,
+  processMessages: processMessages,
   processMessage: processMessage,
   editMessage: editMessage,
   processAttachments: processAttachments,
@@ -80,6 +94,7 @@ export type DbInputFullMessage = DbMessage & {
   document: InputDbFullDocument | null
   voice?: InputDbFullVoice | null
   messageAttachments?: DbInputFullAttachment[]
+  blockContent?: DbBlockContent | null
 }
 
 export type MessageMediaFilter = "photos" | "videos" | "photo_video" | "documents" | "links" | "voice_memos"
@@ -103,6 +118,7 @@ export type ProcessedMessage = Omit<
   entities: MessageEntities | null
   actions?: MessageActions | null
   systemMessage: SystemMessage | null
+  blockContent: BlockContent | null
 }
 
 export type ProcessedMessageTranslation = Omit<
@@ -134,9 +150,12 @@ export type DbFullMessage = Omit<
   | "systemMessageIv"
   | "systemMessageTag"
 > & {
+  text: string | null
   entities: MessageEntities | null
   actions?: MessageActions | null
   systemMessage: SystemMessage | null
+  blockContent: BlockContent | null
+  blockContentPhotos?: ReadonlyMap<bigint, DbFullPhoto>
   from: DbUser
   reactions: DbReaction[]
   photo: DbFullPhoto | null
@@ -267,6 +286,7 @@ const fullMessageRelations = {
   video: fullVideoRelations,
   document: fullDocumentRelations,
   voice: fullVoiceRelations,
+  blockContent: true,
 } as const
 
 function getResolvedHistoryMode(input: GetMessagesInput): GetMessagesMode {
@@ -324,7 +344,25 @@ async function addMessageAttachments(messagesList: DbInputFullMessage[]): Promis
 
 async function processMessages(messagesList: DbInputFullMessage[]): Promise<DbFullMessage[]> {
   const hydrated = await addMessageAttachments(messagesList)
-  return hydrated.map(processMessage)
+  const processed = hydrated.map(processMessage)
+  const readyPhotoIdsByMessage = processed.map((message) =>
+    message.blockContent ? collectReadyBlockPhotoIds(message.blockContent) : []
+  )
+  const readyPhotoIds = readyPhotoIdsByMessage.flat()
+  if (readyPhotoIds.length === 0) return processed
+
+  const photos = await FileModel.getPhotosByIds(readyPhotoIds)
+  if (photos.length === 0) return processed
+
+  const photosById = new Map(photos.map((photo) => [BigInt(photo.id), photo]))
+  return processed.map((message, index) => {
+    const blockContentPhotos = new Map<bigint, DbFullPhoto>()
+    for (const photoId of readyPhotoIdsByMessage[index] ?? []) {
+      const photo = photosById.get(photoId)
+      if (photo) blockContentPhotos.set(photoId, photo)
+    }
+    return blockContentPhotos.size > 0 ? { ...message, blockContentPhotos } : message
+  })
 }
 
 async function getMessages(
@@ -479,26 +517,29 @@ function buildMediaFilterClause(filter: MessageMediaFilter) {
 }
 
 function processMessage(message: DbInputFullMessage): DbFullMessage {
+  const text =
+    message.textEncrypted && message.textIv && message.textTag
+      ? decryptMessage({
+          encrypted: message.textEncrypted,
+          iv: message.textIv,
+          authTag: message.textTag,
+        })
+      : message.text
+  const entities =
+    message.entitiesEncrypted && message.entitiesIv && message.entitiesTag
+      ? MessageEntities.fromBinary(
+          decryptBinary({
+            encrypted: message.entitiesEncrypted,
+            iv: message.entitiesIv,
+            authTag: message.entitiesTag,
+          }),
+        )
+      : null
+
   return {
     ...message,
-    text:
-      message.textEncrypted && message.textIv && message.textTag
-        ? decryptMessage({
-            encrypted: message.textEncrypted,
-            iv: message.textIv,
-            authTag: message.textTag,
-          })
-        : message.text,
-    entities:
-      message.entitiesEncrypted && message.entitiesIv && message.entitiesTag
-        ? MessageEntities.fromBinary(
-            decryptBinary({
-              encrypted: message.entitiesEncrypted,
-              iv: message.entitiesIv,
-              authTag: message.entitiesTag,
-            }),
-          )
-        : null,
+    text,
+    entities,
     actions:
       message.actionsEncrypted && message.actionsIv && message.actionsTag
         ? MessageActions.fromBinary(
@@ -517,6 +558,7 @@ function processMessage(message: DbInputFullMessage): DbFullMessage {
             authTag: message.systemMessageTag,
           })
         : null,
+    blockContent: decodeBlockContentProjection(message.blockContent, text, entities),
     photo: message.photo ? FileModel.processFullPhoto(message.photo) : null,
     video: message.video ? FileModel.processFullVideo(message.video) : null,
     document: message.document ? FileModel.processFullDocument(message.document) : null,
@@ -525,12 +567,51 @@ function processMessage(message: DbInputFullMessage): DbFullMessage {
   }
 }
 
+function decodeBlockContentProjection(
+  row: DbBlockContent | null | undefined,
+  text: string | null,
+  entities: MessageEntities | null,
+): BlockContent | null {
+  if (!row || text === null) return null
+
+  try {
+    const stored = decryptStoredBlockContent({
+      encrypted: row.payloadEncrypted,
+      iv: row.payloadIv,
+      authTag: row.payloadTag,
+    })
+
+    if (stored.text !== text || !equalMessageEntities(stored.entities, entities)) {
+      log.error("block content mirror mismatch", { contentId: row.id.toString() })
+      return null
+    }
+
+    validateBlockContent(text, stored.blockContent)
+    return stored.blockContent
+  } catch (error) {
+    log.error("invalid block content projection", {
+      contentId: row.id.toString(),
+      errorType: error instanceof Error ? error.name : "UnknownError",
+    })
+    return null
+  }
+}
+
+function equalMessageEntities(left: MessageEntities | undefined, right: MessageEntities | null): boolean {
+  const leftBytes = left ? MessageEntities.toBinary(left) : new Uint8Array()
+  const rightBytes = right ? MessageEntities.toBinary(right) : new Uint8Array()
+  return Buffer.from(leftBytes).equals(Buffer.from(rightBytes))
+}
+
 type InsertMessageOutput = {
-  message: DbMessage
+  message: DbMessage & { blockContent?: BlockContent | null }
   update: UpdateSeqAndDate
 }
 
-async function insertMessage(message: Omit<DbNewMessage, "messageId">): Promise<InsertMessageOutput> {
+async function insertMessage(
+  message: Omit<DbNewMessage, "messageId">,
+  preparedBlockContent?: PreparedBlockContent,
+): Promise<InsertMessageOutput> {
   let chatId = message.chatId
 
   // Insert new message with nested select for messageId sequence
@@ -548,6 +629,9 @@ async function insertMessage(message: Omit<DbNewMessage, "messageId">): Promise<
     }
 
     const nextId = ChatModel.nextMessageId(chat)
+    const blockContentId = preparedBlockContent
+      ? await insertPreparedBlockContent(tx, preparedBlockContent, 0)
+      : null
 
     // Insert the new message
     const [newDbMessage] = await tx
@@ -556,8 +640,13 @@ async function insertMessage(message: Omit<DbNewMessage, "messageId">): Promise<
         ...message,
         chatId: chatId,
         messageId: nextId,
+        blockContentId,
       })
       .returning()
+
+    if (!newDbMessage) {
+      throw ModelError.Failed
+    }
 
     // Insert update
     const update = await UpdatesModel.insertUpdate(tx, {
@@ -584,14 +673,13 @@ async function insertMessage(message: Omit<DbNewMessage, "messageId">): Promise<
       .where(eq(chats.id, chatId))
 
     return {
-      message: newDbMessage,
+      message: {
+        ...newDbMessage,
+        blockContent: preparedBlockContent?.blockContent ?? null,
+      },
       update,
     }
   })
-
-  if (!newMessage) {
-    throw ModelError.Failed
-  }
 
   return {
     message: newMessage,
@@ -657,6 +745,11 @@ async function deleteMessages(
       log.trace("messages not found", { messageIds, chatId })
       throw ModelError.MessageInvalid
     }
+
+    await deleteUnreferencedBlockContents(
+      tx,
+      deleted.flatMap((message) => message.blockContentId ? [message.blockContentId] : []),
+    )
 
     let [message] = await tx
       .select({ messageId: messages.messageId })
@@ -724,10 +817,13 @@ type EditMessageInput = {
   text: string
   entities?: MessageEntities
   actions?: MessageActions
+  blockContent?: PreparedBlockContent | null
+  /** Bot/agent streaming edits reuse this mutation without presenting as user edits. */
+  suppressEditDate?: boolean
 }
 
 async function editMessage(input: EditMessageInput): Promise<{
-  message: DbMessage
+  message: DbMessage & { blockContent?: BlockContent | null }
   update: UpdateSeqAndDate
 }> {
   let { messageId, chatId, text, entities, actions } = input
@@ -752,8 +848,45 @@ async function editMessage(input: EditMessageInput): Promise<{
       throw ModelError.ChatInvalid
     }
 
+    const [currentMessage] = await tx
+      .select({ blockContentId: messages.blockContentId })
+      .from(messages)
+      .where(and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)))
+      .for("update")
+      .limit(1)
+
+    if (!currentMessage) {
+      throw ModelError.MessageInvalid
+    }
+
+    let nextBlockContentId = currentMessage.blockContentId
+    if (input.blockContent) {
+      if (currentMessage.blockContentId) {
+        const [currentContent] = await tx
+          .select({ revision: blockContents.revision })
+          .from(blockContents)
+          .where(eq(blockContents.id, currentMessage.blockContentId))
+          .for("update")
+          .limit(1)
+        if (currentContent) {
+          await replacePreparedBlockContent({
+            tx,
+            contentId: currentMessage.blockContentId,
+            currentRevision: currentContent.revision,
+            prepared: input.blockContent,
+          })
+        } else {
+          nextBlockContentId = await insertPreparedBlockContent(tx, input.blockContent, 0)
+        }
+      } else {
+        nextBlockContentId = await insertPreparedBlockContent(tx, input.blockContent, 0)
+      }
+    } else if (input.blockContent === null) {
+      nextBlockContentId = null
+    }
+
     const updatePayload: Record<string, unknown> = {
-      editDate: new Date(),
+      editDate: input.suppressEditDate ? null : new Date(),
       rev: sql`${messages.rev} + 1`,
       // text
       textEncrypted: encryptedMessage?.encrypted,
@@ -764,6 +897,7 @@ async function editMessage(input: EditMessageInput): Promise<{
       entitiesIv: encryptedEntities?.iv,
       entitiesTag: encryptedEntities?.authTag,
       hasLink: hasLink,
+      blockContentId: nextBlockContentId,
     }
 
     // Optional action replacement semantics:
@@ -797,6 +931,15 @@ async function editMessage(input: EditMessageInput): Promise<{
       throw ModelError.MessageInvalid
     }
 
+    if (input.blockContent === null && currentMessage.blockContentId) {
+      await tx.delete(blockContents).where(
+        and(
+          eq(blockContents.id, currentMessage.blockContentId),
+          sql`not exists (select 1 from ${messages} where ${messages.blockContentId} = ${currentMessage.blockContentId})`,
+        ),
+      )
+    }
+
     const update = await UpdatesModel.insertUpdate(tx, {
       update: {
         oneofKind: "editMessage",
@@ -817,7 +960,16 @@ async function editMessage(input: EditMessageInput): Promise<{
       })
       .where(eq(chats.id, chatId))
 
-    return { message: editedMessage, update }
+    return {
+      message: {
+        ...editedMessage,
+        blockContent:
+          input.blockContent === undefined
+            ? undefined
+            : input.blockContent?.blockContent ?? null,
+      },
+      update,
+    }
   })
 
   return { message, update }
@@ -1039,6 +1191,7 @@ async function getNonFullMessagesRange(chatId: number, offsetId: number, limit: 
             authTag: msg.systemMessageTag,
           })
         : null,
+    blockContent: null,
   }))
 }
 
@@ -1086,6 +1239,7 @@ async function getNonFullMessagesFromNewToOld(input: {
             authTag: msg.systemMessageTag,
           })
         : null,
+    blockContent: null,
   }))
 }
 
@@ -1147,6 +1301,7 @@ async function getMessagesAroundTarget(
             authTag: msg.systemMessageTag,
           })
         : null,
+    blockContent: null,
   }))
 }
 

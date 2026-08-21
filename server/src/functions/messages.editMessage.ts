@@ -10,6 +10,7 @@ import { RealtimeUpdates } from "../realtime/message"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
+import { prepareBlockContent, type PreparedBlockContent } from "@in/server/modules/message/blockContentStorage"
 import { normalizeAndValidateMessageActions } from "@in/server/modules/message/messageActions"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { queueMessageThreadLinkMaterialization } from "@in/server/modules/threadGraph"
@@ -67,12 +68,34 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
     currentUserId,
   })
 
+  let preparedBlockContent: PreparedBlockContent | null = null
+  if (outgoingText.blockContent) {
+    try {
+      preparedBlockContent = prepareBlockContent({
+        text: outgoingText.text,
+        entities,
+        parsed: {
+          blockContent: outgoingText.blockContent,
+          imageSources: outgoingText.blockImageSources ?? [],
+        },
+      }) ?? null
+    } catch (error) {
+      Log.shared.error("rich content preparation failed; editing the plain projection", {
+        chatId,
+        currentUserId,
+        errorType: error instanceof Error ? error.name : "UnknownError",
+      })
+    }
+  }
+
   const { message, update } = await MessageModel.editMessage({
     messageId: Number(input.messageId),
     chatId,
     text: outgoingText.text,
     entities,
     actions: normalizedActions,
+    blockContent: preparedBlockContent,
+    suppressEditDate: context.isBot === true,
   })
 
   if (!message) {

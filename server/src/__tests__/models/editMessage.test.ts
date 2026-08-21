@@ -49,6 +49,30 @@ describe("editMessage", () => {
     expect(edited?.editDate).toBeDate()
   })
 
+  test("can suppress edit date for bot streaming edits", async () => {
+    await testUtils.createTestMessage({
+      messageId: 5,
+      fromId: userId,
+      chatId: chatId,
+      text: "streaming draft",
+    })
+
+    await MessageModel.editMessage({
+      messageId: 5,
+      chatId,
+      text: "first stream update",
+    })
+
+    const { message: edited } = await MessageModel.editMessage({
+      messageId: 5,
+      chatId,
+      text: "streaming answer",
+      suppressEditDate: true,
+    })
+
+    expect(edited.editDate).toBeNull()
+  })
+
   test("keeps the message update on the edit transaction handle", async () => {
     await testUtils.createTestMessage({
       messageId: 4,

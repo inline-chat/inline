@@ -13,6 +13,7 @@ import { documents, photos, videos, voices } from "@in/server/db/schema/media"
 import { messageAttachments } from "./attachments"
 import { translations } from "@in/server/db/schema/translations"
 import { reactions } from "@in/server/db/schema/reactions"
+import { blockContents } from "@in/server/db/schema/blockContents"
 
 export const messages = pgTable(
   "messages",
@@ -63,6 +64,11 @@ export const messages = pgTable(
     /** monotonic edit revision, increments on every edit */
     rev: integer("rev").notNull().default(0),
 
+    /** optional server-owned structural content; non-unique for future shared wrappers */
+    blockContentId: bigint("block_content_id", { mode: "bigint" }).references(() => blockContents.id, {
+      onDelete: "set null",
+    }),
+
     date: creationDate,
 
     /** when it was pinned; null means not pinned */
@@ -103,6 +109,7 @@ export const messages = pgTable(
     chatIdMessageIdDescIndex: index("messages_chat_id_message_id_desc_idx").on(table.chatId, table.messageId.desc()),
     randomIdPerSenderIndex: unique("random_id_per_sender_unique").on(table.randomId, table.fromId),
     unreadCountIndex: index("unread_count_index").on(table.chatId, table.messageId, table.fromId),
+    blockContentIdIndex: index("messages_block_content_id_idx").on(table.blockContentId),
   }),
 )
 
@@ -110,6 +117,7 @@ export const messageRelations = relations(messages, ({ one, many }) => ({
   from: one(users, { fields: [messages.fromId], references: [users.id] }),
   file: one(files, { fields: [messages.fileId], references: [files.id] }),
   reactions: many(reactions),
+  blockContent: one(blockContents, { fields: [messages.blockContentId], references: [blockContents.id] }),
 
   photo: one(photos, { fields: [messages.photoId], references: [photos.id] }),
   video: one(videos, { fields: [messages.videoId], references: [videos.id] }),

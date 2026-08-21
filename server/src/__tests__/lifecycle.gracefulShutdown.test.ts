@@ -21,6 +21,9 @@ describe("graceful shutdown lifecycle", () => {
         stopDatabaseMonitor: () => {
           calls.push("monitor.stop")
         },
+        stopBlockContentImageWorker: async () => {
+          calls.push("block-image-worker.stop")
+        },
         stopUserSettingsCleanup: () => {
           calls.push("cache.stop")
         },
@@ -67,6 +70,7 @@ describe("graceful shutdown lifecycle", () => {
       "mark:SIGTERM",
       "timer.start:5000",
       "monitor.stop",
+      "block-image-worker.stop",
       "cache.stop",
       "grid-provider.stop",
       "server.stop:false",
@@ -98,6 +102,9 @@ describe("graceful shutdown lifecycle", () => {
         markShuttingDown: (signal) => calls.push(`mark:${signal}`),
         stopDatabaseMonitor: () => {
           calls.push("monitor.stop")
+        },
+        stopBlockContentImageWorker: async () => {
+          calls.push("block-image-worker.stop")
         },
         stopUserSettingsCleanup: () => {
           calls.push("cache.stop")
@@ -135,6 +142,7 @@ describe("graceful shutdown lifecycle", () => {
     await manager.shutdown("SIGTERM")
 
     expect(calls).toContain("connections.close")
+    expect(calls).toContain("block-image-worker.stop")
     expect(calls).toContain("grid-provider.stop")
     expect(calls).toContain("presence.shutdown")
     expect(calls).toContain("db.close")

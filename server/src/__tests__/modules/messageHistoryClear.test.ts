@@ -64,6 +64,7 @@ async function msg(input: {
   fromId: number
   date?: Date
   text?: string
+  blockContentId?: bigint
 }) {
   await db.insert(schema.messages).values({
     chatId: input.chatId,
@@ -71,7 +72,21 @@ async function msg(input: {
     fromId: input.fromId,
     date: input.date ?? RECENT,
     text: input.text ?? `message-${input.messageId}`,
+    blockContentId: input.blockContentId,
   })
+}
+
+async function blockContent(): Promise<bigint> {
+  const [row] = await db
+    .insert(schema.blockContents)
+    .values({
+      payloadEncrypted: Buffer.from([1]),
+      payloadIv: Buffer.from([2]),
+      payloadTag: Buffer.from([3]),
+    })
+    .returning({ id: schema.blockContents.id })
+  if (!row) throw new Error("Failed to create block content")
+  return row.id
 }
 
 async function translation(chatId: number, messageId: number, language = `lang-${nextId++}`) {
@@ -255,6 +270,27 @@ const chatRetentionCases: TestCase[] = [
       expect(await messageIds(parent.id)).toEqual([])
       expect(await messageIds(other.id)).toEqual([1])
       expect(await lastMsgId(other.id)).toBe(1)
+    },
+  },
+  {
+    name: "chat clear deletes only exact unreferenced block-content candidates",
+    run: async () => {
+      const { owner, parent } = await baseChat()
+      const other = await chat({ createdBy: owner.id })
+      const exclusive = await blockContent()
+      const shared = await blockContent()
+      const unrelatedOrphan = await blockContent()
+      await msg({ chatId: parent.id, messageId: 1, fromId: owner.id, blockContentId: exclusive })
+      await msg({ chatId: parent.id, messageId: 2, fromId: owner.id, blockContentId: shared })
+      await msg({ chatId: other.id, messageId: 1, fromId: owner.id, blockContentId: shared })
+
+      await clearChat(parent.id)
+
+      const remaining = await db
+        .select({ id: schema.blockContents.id })
+        .from(schema.blockContents)
+        .where(inArray(schema.blockContents.id, [exclusive, shared, unrelatedOrphan]))
+      expect(remaining.map((row) => row.id).sort()).toEqual([shared, unrelatedOrphan].sort())
     },
   },
   {

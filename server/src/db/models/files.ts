@@ -17,11 +17,12 @@ import {
 import { decrypt } from "@in/server/modules/encryption/encryption"
 import { generateFileUniqueId } from "@in/server/modules/files/fileId"
 import { FileTypes } from "@in/server/modules/files/types"
-import { eq } from "drizzle-orm"
+import { eq, inArray } from "drizzle-orm"
 
 export const FileModel = {
   getFileByUniqueId: getFileByUniqueId,
   getPhotoById: getPhotoById,
+  getPhotosByIds: getPhotosByIds,
   getVideoById: getVideoById,
   getDocumentById: getDocumentById,
   getVoiceById: getVoiceById,
@@ -152,6 +153,28 @@ async function getPhotoById(photoId: bigint): Promise<DbFullPhoto | undefined> {
   }
 
   return processFullPhoto(result)
+}
+
+export async function getPhotosByIds(photoIds: bigint[]): Promise<DbFullPhoto[]> {
+  const ids = [...new Set(
+    photoIds
+      .map(Number)
+      .filter((id) => Number.isSafeInteger(id) && id > 0),
+  )]
+  if (ids.length === 0) return []
+
+  const results = await db._query.photos.findMany({
+    where: inArray(photos.id, ids),
+    with: {
+      photoSizes: {
+        with: {
+          file: true,
+        },
+      },
+    },
+  })
+
+  return results.map(processFullPhoto)
 }
 
 export async function clonePhotoById(photoId: number, newOwnerId: number): Promise<number> {

@@ -12,8 +12,11 @@ import type { PartialMessage } from "@protobuf-ts/runtime";
 import { reflectionMergePartial } from "@protobuf-ts/runtime";
 import { MessageType } from "@protobuf-ts/runtime";
 import { MessageActionResponseUi } from "@inline-chat/protocol/core";
-import { Dialog } from "@inline-chat/protocol/core";
 import { Chat } from "@inline-chat/protocol/core";
+import { BlockContent } from "@inline-chat/protocol/core";
+import { MessageEntities } from "@inline-chat/protocol/core";
+import { Dialog } from "@inline-chat/protocol/core";
+import { DialogFolder } from "@inline-chat/protocol/core";
 import { UserSettings } from "@inline-chat/protocol/core";
 import { DialogFollowMode } from "@inline-chat/protocol/core";
 import { DialogNotificationSettings } from "@inline-chat/protocol/core";
@@ -955,6 +958,26 @@ export interface StoredSpaceSettings {
      * @generated from protobuf field: optional bool grid_enabled = 2;
      */
     gridEnabled?: boolean;
+}
+/**
+ * Canonical encrypted server payload for a structural message. Markdown and
+ * remote image origins are deliberately not stored here.
+ *
+ * @generated from protobuf message server.StoredBlockContent
+ */
+export interface StoredBlockContent {
+    /**
+     * @generated from protobuf field: string text = 1;
+     */
+    text: string;
+    /**
+     * @generated from protobuf field: optional MessageEntities entities = 2;
+     */
+    entities?: MessageEntities;
+    /**
+     * @generated from protobuf field: BlockContent block_content = 3;
+     */
+    blockContent?: BlockContent;
 }
 /**
  * @generated from protobuf message server.SystemMessage
@@ -3775,6 +3798,67 @@ class StoredSpaceSettings$Type extends MessageType<StoredSpaceSettings> {
  * @generated MessageType for protobuf message server.StoredSpaceSettings
  */
 export const StoredSpaceSettings = new StoredSpaceSettings$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class StoredBlockContent$Type extends MessageType<StoredBlockContent> {
+    constructor() {
+        super("server.StoredBlockContent", [
+            { no: 1, name: "text", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "entities", kind: "message", T: () => MessageEntities },
+            { no: 3, name: "block_content", kind: "message", T: () => BlockContent }
+        ]);
+    }
+    create(value?: PartialMessage<StoredBlockContent>): StoredBlockContent {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.text = "";
+        if (value !== undefined)
+            reflectionMergePartial<StoredBlockContent>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: StoredBlockContent): StoredBlockContent {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string text */ 1:
+                    message.text = reader.string();
+                    break;
+                case /* optional MessageEntities entities */ 2:
+                    message.entities = MessageEntities.internalBinaryRead(reader, reader.uint32(), options, message.entities);
+                    break;
+                case /* BlockContent block_content */ 3:
+                    message.blockContent = BlockContent.internalBinaryRead(reader, reader.uint32(), options, message.blockContent);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: StoredBlockContent, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string text = 1; */
+        if (message.text !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.text);
+        /* optional MessageEntities entities = 2; */
+        if (message.entities)
+            MessageEntities.internalBinaryWrite(message.entities, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* BlockContent block_content = 3; */
+        if (message.blockContent)
+            BlockContent.internalBinaryWrite(message.blockContent, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.StoredBlockContent
+ */
+export const StoredBlockContent = new StoredBlockContent$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class SystemMessage$Type extends MessageType<SystemMessage> {
     constructor() {

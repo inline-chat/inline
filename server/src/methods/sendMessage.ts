@@ -26,12 +26,17 @@ import { isProd } from "@in/server/env"
 import { getFileByUniqueId } from "@in/server/db/models/files"
 import { debugDelay } from "@in/server/utils/helpers/time"
 import { RealtimeUpdates } from "@in/server/realtime/message"
-import { MessageEntities, Update } from "@inline-chat/protocol/core"
+import { MessageEntities, Update, type BlockContent } from "@inline-chat/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
 import { getAuthorizedChat } from "@in/server/modules/authorization/legacyAccessGuards"
 import { ChatModel } from "@in/server/db/models/chats"
+import {
+  insertPreparedBlockContent,
+  prepareBlockContent,
+  type PreparedBlockContent,
+} from "@in/server/modules/message/blockContentStorage"
 
 export const Input = Type.Object({
   peerId: Optional(TInputPeerInfo),
@@ -104,6 +109,26 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
   const text = outgoingText?.text
   const entities = outgoingText?.entities
 
+  let preparedBlockContent: PreparedBlockContent | undefined
+  if (text && outgoingText?.blockContent) {
+    try {
+      preparedBlockContent = prepareBlockContent({
+        text,
+        entities,
+        parsed: {
+          blockContent: outgoingText.blockContent,
+          imageSources: outgoingText.blockImageSources ?? [],
+        },
+      })
+    } catch (error) {
+      Log.shared.error("rich content preparation failed; sending the plain projection", {
+        chatId,
+        currentUserId: context.currentUserId,
+        errorType: error instanceof Error ? error.name : "UnknownError",
+      })
+    }
+  }
+
   // Encrypt
   const encryptedText = text ? encryptMessage(text) : undefined
   const binaryEntities = entities ? MessageEntities.toBinary(entities) : undefined
@@ -141,6 +166,9 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
     }
 
     const nextId = ChatModel.nextMessageId(chat)
+    const blockContentId = preparedBlockContent
+      ? await insertPreparedBlockContent(tx, preparedBlockContent, 0)
+      : null
 
     // Insert the new message
     const [message] = await tx
@@ -162,6 +190,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
         date: messageDate,
         isSticker: input.isSticker ?? false,
         hasLink,
+        blockContentId,
       })
       .returning()
 
@@ -172,6 +201,10 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
       .where(eq(chats.id, chatId))
 
     return message
+      ? ({ ...message, blockContent: preparedBlockContent?.blockContent ?? null } satisfies DbMessage & {
+          blockContent?: BlockContent | null
+        })
+      : undefined
   })
 
   if (!newMessage) {

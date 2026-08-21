@@ -328,6 +328,14 @@ message StoredSpaceSettings {
   optional bool grid_enabled = 2;
 }
 
+// Canonical encrypted server payload for a structural message. Markdown and
+// remote image origins are deliberately not stored here.
+message StoredBlockContent {
+  string text = 1;
+  optional MessageEntities entities = 2;
+  BlockContent block_content = 3;
+}
+
 message SystemMessage {
   oneof event {
     ThreadBacklinkSystemMessage thread_backlink = 1;

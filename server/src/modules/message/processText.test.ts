@@ -1,9 +1,89 @@
 import { describe, test, expect } from "bun:test"
 import { processMessageText } from "./processText"
-import { parseMarkdown } from "./parseMarkdown"
+import { parseMarkdown, parseMarkdownWithSourceMap } from "./parseMarkdown"
 import { MessageEntity_Type } from "@inline-chat/protocol/core"
 
 describe("parseMarkdown", () => {
+  test("source map preserves UTF-16 boundaries through nested markup", () => {
+    const input = "😀 **bold `code`** end"
+    const parsed = parseMarkdownWithSourceMap(input)
+    const sourceStart = input.indexOf("bold")
+    const sourceEnd = input.indexOf("** end")
+    const outputStart = parsed.sourceToOutput[sourceStart]!
+    const outputEnd = parsed.sourceToOutput[sourceEnd]!
+
+    expect(parsed.text.slice(outputStart, outputEnd)).toBe("bold code")
+    expect(parsed.text).toBe(parseMarkdown(input).text)
+    expect(parsed.entities).toEqual(parseMarkdown(input).entities)
+  })
+
+  test("source map follows trimmed fenced-code compatibility semantics", () => {
+    const input = "before\n```swift\n  let x = 1  \n```\nafter"
+    const parsed = parseMarkdownWithSourceMap(input)
+    const codeStart = input.indexOf("let x")
+    const codeEnd = codeStart + "let x = 1".length
+
+    expect(parsed.text.slice(parsed.sourceToOutput[codeStart], parsed.sourceToOutput[codeEnd])).toBe("let x = 1")
+    expect(parsed.text).toBe(parseMarkdown(input).text)
+    expect(parsed.entities).toEqual(parseMarkdown(input).entities)
+  })
+
+  test("decodes structural escapes without creating entities", () => {
+    const input = String.raw`\# heading \- item \*literal\* \[link\]\(target\) \\ path`
+    const parsed = parseMarkdownWithSourceMap(input)
+
+    expect(parsed.text).toBe("# heading - item *literal* [link](target) \\ path")
+    expect(parsed.entities).toEqual([])
+    expect(parsed.sourceToOutput).toHaveLength(input.length + 1)
+    expect(parsed.sourceToOutput[input.length]).toBe(parsed.text.length)
+  })
+
+  test("supports adaptive backtick and tilde fences with extended languages", () => {
+    const input = [
+      "````c++",
+      "const value = `inline`;",
+      "```",
+      "````",
+      "after",
+      "~~~objective-c",
+      "id value = nil;",
+      "~~~",
+    ].join("\r\n")
+    const parsed = parseMarkdown(input)
+
+    expect(parsed.text).toBe("const value = `inline`;\r\n```\r\nafter\r\nid value = nil;")
+    expect(parsed.entities.map((entity) => entity.type)).toEqual([
+      MessageEntity_Type.PRE,
+      MessageEntity_Type.PRE,
+    ])
+    expect(parsed.entities.map((entity) => entity.entity.oneofKind === "pre" ? entity.entity.pre.language : "")).toEqual([
+      "c++",
+      "objective-c",
+    ])
+  })
+
+  test("supports inline code delimiters longer than their contents", () => {
+    const parsed = parseMarkdown("before ``value with ` tick`` after")
+
+    expect(parsed.text).toBe("before value with ` tick after")
+    expect(parsed.entities).toHaveLength(1)
+    expect(parsed.entities[0]).toMatchObject({
+      offset: 7n,
+      length: 17n,
+      type: MessageEntity_Type.CODE,
+    })
+  })
+
+  test("leaves every incomplete adaptive fence prefix literal", () => {
+    const complete = "````swift\nlet value = 1\n````"
+    const closingStart = complete.lastIndexOf("````")
+    for (let length = 1; length < 4; length++) {
+      const prefix = complete.slice(0, closingStart + length)
+      expect(parseMarkdown(prefix)).toEqual({ text: prefix, entities: [] })
+    }
+    expect(parseMarkdown(complete).entities[0]?.type).toBe(MessageEntity_Type.PRE)
+  })
+
   describe("basic patterns", () => {
     test("bold with asterisks", () => {
       const result = parseMarkdown("Hello **world**")

@@ -2,6 +2,7 @@ import { chatParticipants, chats, dialogs, messages, translations } from "@in/se
 import type { DbChat } from "@in/server/db/schema"
 import type { Transaction } from "@in/server/db/types"
 import { and, desc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm"
+import { deleteUnreferencedBlockContents } from "@in/server/modules/message/blockContentStorage"
 
 export type ClearHistoryOptions = {
   beforeDate?: Date
@@ -61,6 +62,7 @@ type ChatRecipientRow = {
 type DeleteReplyThreadsResult = {
   chatIds: number[]
   chats: ClearHistoryDeletedChat[]
+  blockContentIds: bigint[]
 }
 
 type DeleteSpaceReplyThreadsResult = DeleteReplyThreadsResult & {
@@ -81,18 +83,21 @@ export async function clearChatHistoryData(
   let deletedChatIds: number[] = []
   let deletedChats: ClearHistoryDeletedChat[] = []
   let orphanedChatIds: number[] = []
+  const blockContentIds: bigint[] = []
 
   if (input.deleteReplyThreads) {
     const deleted = await deleteReplyThreadsForClearedChatMessages(tx, input.chatId, input.beforeDate, hooks)
     deletedChatIds = deleted.chatIds
     deletedChats = deleted.chats
+    blockContentIds.push(...deleted.blockContentIds)
   } else {
     orphanedChatIds = await orphanReplyThreadsForClearedChatMessages(tx, input.chatId, input.beforeDate)
   }
 
   await clearChatLastMsgId(tx, input.chatId)
   await deleteTranslationsForClearedChatMessages(tx, input.chatId, input.beforeDate)
-  await deleteMessagesForChat(tx, input.chatId, input.beforeDate)
+  blockContentIds.push(...await deleteMessagesForChat(tx, input.chatId, input.beforeDate))
+  await deleteUnreferencedBlockContents(tx, blockContentIds)
 
   return {
     lastMsgId: await refreshChatLastMsgId(tx, input.chatId),
@@ -119,11 +124,13 @@ export async function clearSpaceHistoryData(
   let deletedChatIds: number[] = []
   let deletedChats: ClearHistoryDeletedChat[] = []
   let orphanedChatIds: number[] = []
+  const blockContentIds: bigint[] = []
 
   if (input.deleteReplyThreads) {
     const deleted = await deleteReplyThreadsForClearedSpaceMessages(tx, input.spaceId, input.beforeDate, hooks)
     deletedChatIds = deleted.chatIds
     deletedChats = deleted.chats
+    blockContentIds.push(...deleted.blockContentIds)
     detachedChatIds = uniqueNumbers([...detachedChatIds, ...deleted.detachedChatIds])
     detachedAccessLosses = uniqueAccessLosses([...detachedAccessLosses, ...deleted.detachedAccessLosses])
   } else {
@@ -132,7 +139,8 @@ export async function clearSpaceHistoryData(
 
   await clearSpaceChatLastMsgIds(tx, input.spaceId)
   await deleteTranslationsForClearedSpaceMessages(tx, input.spaceId, input.beforeDate)
-  await deleteMessagesForSpace(tx, input.spaceId, input.beforeDate)
+  blockContentIds.push(...await deleteMessagesForSpace(tx, input.spaceId, input.beforeDate))
+  await deleteUnreferencedBlockContents(tx, blockContentIds)
   await refreshSpaceChatLastMsgIds(tx, input.spaceId)
 
   return {
@@ -165,12 +173,20 @@ async function refreshChatLastMsgId(tx: Transaction, chatId: number): Promise<nu
   return lastMsgId
 }
 
-async function deleteMessagesForChat(tx: Transaction, chatId: number, beforeDate: Date | undefined): Promise<void> {
+async function deleteMessagesForChat(
+  tx: Transaction,
+  chatId: number,
+  beforeDate: Date | undefined,
+): Promise<bigint[]> {
   const predicate = beforeDate
     ? and(eq(messages.chatId, chatId), lt(messages.date, beforeDate))
     : eq(messages.chatId, chatId)
 
-  await tx.delete(messages).where(predicate)
+  const deleted = await tx
+    .delete(messages)
+    .where(predicate)
+    .returning({ blockContentId: messages.blockContentId })
+  return compactBlockContentIds(deleted)
 }
 
 async function deleteTranslationsForClearedChatMessages(
@@ -201,15 +217,18 @@ async function deleteReplyThreadsForClearedChatMessages(
 ): Promise<DeleteReplyThreadsResult> {
   const depths = await getChatReplyThreadDepths(tx, chatId, beforeDate)
   if (depths.length === 0) {
-    return { chatIds: [], chats: [] }
+    return { chatIds: [], chats: [], blockContentIds: [] }
   }
 
-  const deletedChats = await getDeletedChats(tx, depths.map((row) => row.chatId))
+  const chatIds = depths.map((row) => row.chatId)
+  const deletedChats = await getDeletedChats(tx, chatIds)
+  const blockContentIds = await getBlockContentIdsForChats(tx, chatIds)
   await hooks?.beforeDeleteChats?.(deletedChats)
   await deleteChatsByDepth(tx, depths)
   return {
-    chatIds: depths.map((row) => row.chatId),
+    chatIds,
     chats: deletedChats,
+    blockContentIds,
   }
 }
 
@@ -259,17 +278,19 @@ async function deleteReplyThreadsForClearedSpaceMessages(
 ): Promise<DeleteSpaceReplyThreadsResult> {
   const depths = await getSpaceReplyThreadDepths(tx, spaceId, beforeDate)
   if (depths.length === 0) {
-    return { chatIds: [], chats: [], detachedChatIds: [], detachedAccessLosses: [] }
+    return { chatIds: [], chats: [], blockContentIds: [], detachedChatIds: [], detachedAccessLosses: [] }
   }
 
   const chatIds = depths.map((row) => row.chatId)
   const deletedChats = await getDeletedChats(tx, chatIds)
+  const blockContentIds = await getBlockContentIdsForChats(tx, chatIds)
   const detached = await detachExternalReplyThreadsForDeletedSpaceChats(tx, spaceId, chatIds)
   await hooks?.beforeDeleteChats?.(deletedChats)
   await deleteChatsByDepth(tx, depths)
   return {
     chatIds,
     chats: deletedChats,
+    blockContentIds,
     detachedChatIds: detached.chatIds,
     detachedAccessLosses: detached.accessLosses,
   }
@@ -367,6 +388,15 @@ async function getDeletedChats(tx: Transaction, chatIds: number[]): Promise<Clea
       }
     })
     .filter((row): row is ClearHistoryDeletedChat => Boolean(row))
+}
+
+async function getBlockContentIdsForChats(tx: Transaction, chatIds: number[]): Promise<bigint[]> {
+  if (chatIds.length === 0) return []
+  const rows = await tx
+    .select({ blockContentId: messages.blockContentId })
+    .from(messages)
+    .where(inArray(messages.chatId, chatIds))
+  return compactBlockContentIds(rows)
 }
 
 async function getChatRecipientRows(tx: Transaction, chatIds: number[]): Promise<ChatRecipientRow[]> {
@@ -710,16 +740,22 @@ async function deleteTranslationsForClearedSpaceMessages(
   `)
 }
 
-async function deleteMessagesForSpace(tx: Transaction, spaceId: number, beforeDate: Date | undefined): Promise<void> {
+async function deleteMessagesForSpace(
+  tx: Transaction,
+  spaceId: number,
+  beforeDate: Date | undefined,
+): Promise<bigint[]> {
   const dateClause = messageBeforeDateClause(beforeDate)
 
-  await tx.execute(sql`
+  const deleted = await tx.execute<{ blockContentId: bigint | null }>(sql`
     delete from messages m
     using chats c
     where m.chat_id = c.id
       and c.space_id = ${spaceId}
       ${dateClause}
+    returning m.block_content_id as "blockContentId"
   `)
+  return compactBlockContentIds(deleted)
 }
 
 async function refreshSpaceChatLastMsgIds(tx: Transaction, spaceId: number): Promise<void> {
@@ -738,4 +774,8 @@ async function refreshSpaceChatLastMsgIds(tx: Transaction, spaceId: number): Pro
 
 function messageBeforeDateClause(beforeDate: Date | undefined) {
   return beforeDate ? sql`and m."date" < ${beforeDate.toISOString()}` : sql``
+}
+
+function compactBlockContentIds(rows: Array<{ blockContentId: bigint | null }>): bigint[] {
+  return rows.flatMap((row) => row.blockContentId === null ? [] : [row.blockContentId])
 }

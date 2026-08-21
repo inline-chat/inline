@@ -10,6 +10,8 @@ export const relations = defineRelations(
     dialogs: schema.dialogs,
     dialogFolders: schema.dialogFolders,
     messages: schema.messages,
+    blockContents: schema.blockContents,
+    blockContentImageJobs: schema.blockContentImageJobs,
     users: schema.users,
     integrations: schema.integrations,
     spaces: schema.spaces,
@@ -225,6 +227,11 @@ export const relations = defineRelations(
       reactions: r.many.reactions(),
       messageAttachments: r.many.messageAttachments(),
       translations: r.many.translations(),
+      blockContent: r.one.blockContents({
+        from: r.messages.blockContentId,
+        to: r.blockContents.id,
+        optional: true,
+      }),
 
       // Media relations
       file: r.one.files({
@@ -250,6 +257,23 @@ export const relations = defineRelations(
       voice: r.one.voices({
         from: r.messages.voiceId,
         to: r.voices.id,
+        optional: true,
+      }),
+    },
+
+    blockContents: {
+      messages: r.many.messages(),
+      imageJobs: r.many.blockContentImageJobs(),
+    },
+
+    blockContentImageJobs: {
+      content: r.one.blockContents({
+        from: r.blockContentImageJobs.contentId,
+        to: r.blockContents.id,
+      }),
+      photo: r.one.photos({
+        from: r.blockContentImageJobs.photoId,
+        to: r.photos.id,
         optional: true,
       }),
     },
