@@ -15,9 +15,7 @@ describe("oauth authorize proxy", () => {
     vi.restoreAllMocks()
   })
 
-  it("forwards authorize GET with query string", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("<html>ok</html>", { status: 200 }))
-
+  it("redirects authorize GET to the canonical issuer origin", async () => {
     const app = createProxyApp()
     const res = await app.fetch(
       new Request(
@@ -25,14 +23,11 @@ describe("oauth authorize proxy", () => {
       ),
     )
 
-    expect(res.status).toBe(200)
-    expect(await res.text()).toContain("ok")
-
-    const [url, init] = fetchMock.mock.calls[0] ?? []
-    expect(String(url)).toBe(
+    expect(res.status).toBe(307)
+    expect(res.headers.get("location")).toBe(
       "https://api.inline.chat/oauth/authorize?response_type=code&client_id=c1&redirect_uri=https://example.com/callback&state=s&code_challenge=abc",
     )
-    expect((init as RequestInit).method).toBe("GET")
+    expect(res.headers.get("cache-control")).toBe("no-store")
   })
 
   it("forwards authorize form posts", async () => {

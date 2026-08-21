@@ -1,32 +1,12 @@
+import { MCP_RESOURCE_POLICY } from "./mcp-policy.js"
+import { normalizeScopesForPolicy } from "./resource-policy.js"
+export * from "./mcp-policy.js"
+export * from "./resource-policy.js"
+
 const LOCAL_DEV_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"])
 
-export const MCP_SUPPORTED_SCOPES = ["offline_access", "messages:read", "messages:write", "spaces:read"] as const
-export type McpSupportedScope = (typeof MCP_SUPPORTED_SCOPES)[number]
-
-export const MCP_RESOURCE_SCOPES = ["messages:read", "messages:write", "spaces:read"] as const
-
-const MCP_SUPPORTED_SCOPE_SET = new Set<string>(MCP_SUPPORTED_SCOPES)
-
-export const MCP_DEFAULT_SCOPE = "messages:read spaces:read"
-
 export function normalizeScopes(scope: string): string {
-  const out: string[] = []
-  const seen = new Set<string>()
-
-  for (const part of scope.split(/\s+/)) {
-    const value = part.trim()
-    if (!value || seen.has(value) || !MCP_SUPPORTED_SCOPE_SET.has(value)) {
-      continue
-    }
-    seen.add(value)
-    out.push(value)
-  }
-
-  if (out.length === 0) {
-    return MCP_DEFAULT_SCOPE
-  }
-
-  return out.join(" ")
+  return normalizeScopesForPolicy(scope, MCP_RESOURCE_POLICY)
 }
 
 export function hasScope(scope: string, needed: string): boolean {

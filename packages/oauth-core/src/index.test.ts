@@ -11,6 +11,7 @@ import {
   normalizeEmail,
   normalizeRateLimitKeyPart,
   normalizeScopes,
+  normalizeScopesForPolicy,
   sha256Base64Url,
   sha256Hex,
 } from "./index"
@@ -19,6 +20,15 @@ describe("oauth-core", () => {
   it("normalizes and filters scopes", () => {
     expect(normalizeScopes("messages:read messages:read unknown spaces:read")).toBe("messages:read spaces:read")
     expect(normalizeScopes("")).toBe(MCP_DEFAULT_SCOPE)
+  })
+
+  it("keeps generic scope normalization independent of MCP policy", () => {
+    expect(normalizeScopesForPolicy("notes:write unknown", {
+      resource: "https://api.example.test",
+      supportedScopes: ["notes:read", "notes:write"],
+      defaultScopes: ["notes:read"],
+      resourceScopes: ["notes:read", "notes:write"],
+    })).toBe("notes:write")
   })
 
   it("checks scope membership", () => {

@@ -9,6 +9,9 @@ const PROXIED_OAUTH_PATHS = new Set([
   "/authorize",
   "/oauth/authorize/send-email-code",
   "/oauth/authorize/verify-email-code",
+  "/oauth/authorize/send-sms-code",
+  "/oauth/authorize/verify-sms-code",
+  "/oauth/authorize/continue",
   "/oauth/authorize/consent",
   "/oauth/token",
   "/token",
@@ -85,6 +88,16 @@ export const OAuth = {
 
     if (!PROXIED_OAUTH_PATHS.has(url.pathname)) {
       return null
+    }
+
+    if (req.method === "GET" && (url.pathname === "/authorize" || url.pathname === "/oauth/authorize")) {
+      return new Response(null, {
+        status: 307,
+        headers: {
+          location: oauthEndpoint(config.oauthIssuer, `${url.pathname}${url.search}`),
+          "cache-control": "no-store",
+        },
+      })
     }
 
     try {
