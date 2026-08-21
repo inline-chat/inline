@@ -37,6 +37,9 @@ When running inside an Inline local-agent bridge, use the host's `inline` tool n
 - Use string IDs exactly as returned. Do not infer IDs from names.
 - Use `chatId` for every conversation-scoped tool, including DMs. Resolve a person's `dmChatId` with `people.search` or `conversations.list` before reading or writing.
 - Prefer canonical Inline URIs returned by tools when referring to people, chats, or messages.
+- Use ordinary Markdown tables for genuinely tabular output; never put a table in a fenced code block.
+- For collapsible work, use `<details open>`, then `<summary>Title</summary>`, body Markdown, and `</details>`. Add `kind="progress"` to the summary only while work is in progress.
+- Use `<footer>Attribution or brief metadata</footer>` for a short message footer.
 - Report partial coverage when limits, time windows, authorization, or search scope prevent a complete answer.
 
 ## Workflow map

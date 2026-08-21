@@ -274,6 +274,9 @@ from inline import tools as inline_tools
 
 base_extra = {"token": "fake", "context_history_limit": 0}
 assert "visible label is their first name, falling back to username" in inline_tools.INLINE_PLATFORM_GUIDANCE
+assert "never fenced-code tables" in inline_tools.INLINE_PLATFORM_GUIDANCE
+assert '<summary>Title</summary>' in inline_tools.INLINE_PLATFORM_GUIDANCE
+assert '<footer>Attribution or brief metadata</footer>' in inline_tools.INLINE_PLATFORM_GUIDANCE
 first_name_guidance = inline_tools.inline_sender_guidance(
     sender_user_id="1600",
     sender_name="Mo Jorjani",

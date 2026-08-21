@@ -22,7 +22,9 @@ describe("inline/message-formatting", () => {
     expect(buildInlineInboundFormattingHints()).toEqual({
       text_markup: "inline_markdown",
       rules: expect.arrayContaining([
-        "Prefer bullet lists over markdown tables.",
+        "Use ordinary Markdown tables for genuinely tabular data; never put a table in a fenced code block.",
+        'For collapsible work, use <details open> followed by <summary>Title</summary>, body Markdown, and </details>; add kind="progress" to summary only while work is in progress.',
+        "Use <footer>Attribution or brief metadata</footer> for a short message footer.",
         "Use plain URLs or markdown links; do not wrap bare URLs in inline code or backticks.",
         "Keep ordinary quoted prose, names, titles, statuses, and natural-language labels as plain text; quotation marks do not make text code.",
         "Mention Inline users as [@FirstName](inline://user?id=123), falling back to [@username](inline://user?id=123). Use inline://user?username=username only when the user id is unavailable, and never show user:<id> as the visible label.",

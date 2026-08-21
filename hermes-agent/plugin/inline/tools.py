@@ -58,7 +58,11 @@ INLINE_PLATFORM_GUIDANCE = (
     "while keeping the stable user ID in the link target. Link chats as "
     "[title](inline://chat?id=123), and link reply threads as "
     "[title](inline://thread?id=123). In Inline, reply threads are chat ids; "
-    "do not treat thread ids as reply/quote message ids."
+    "do not treat thread ids as reply/quote message ids. Use ordinary Markdown "
+    "tables for tabular data, never fenced-code tables. For collapsible work, "
+    "use <details open>, then <summary>Title</summary>, body Markdown, and "
+    "</details>; put kind=\"progress\" on summary only while work is in progress. "
+    "Use <footer>Attribution or brief metadata</footer> for a short footer."
 )
 
 _sidecar: Dict[str, Any] = {}
