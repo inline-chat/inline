@@ -1,13 +1,13 @@
 {
   "version": 1,
-  "count": 271,
+  "count": 283,
   "methodCounts": {
-    "GET": 144,
-    "POST": 125,
+    "GET": 150,
+    "POST": 131,
     "PUT": 1,
     "WS": 1
   },
-  "sha256": "cdc74c5ba1edbc053e6485eb04e8d99d39bf296e3610886080d44f9b3faf1228",
+  "sha256": "c319e1ea57268400e36b59543fd8a737b3a8c0b42d4af17e9cd20cd605583dbe",
   "routes": [
     {
       "method": "GET",
@@ -95,6 +95,10 @@
     },
     {
       "method": "GET",
+      "path": "/bot/getAgent"
+    },
+    {
+      "method": "GET",
       "path": "/bot/getChat"
     },
     {
@@ -119,6 +123,10 @@
     },
     {
       "method": "GET",
+      "path": "/bot/getMyAgents"
+    },
+    {
+      "method": "GET",
       "path": "/bot/getMyCommands"
     },
     {
@@ -128,6 +136,10 @@
     {
       "method": "GET",
       "path": "/bot/getWebhookInfo"
+    },
+    {
+      "method": "GET",
+      "path": "/bot{token}/getAgent"
     },
     {
       "method": "GET",
@@ -152,6 +164,10 @@
     {
       "method": "GET",
       "path": "/bot{token}/getMe"
+    },
+    {
+      "method": "GET",
+      "path": "/bot{token}/getMyAgents"
     },
     {
       "method": "GET",
@@ -219,6 +235,10 @@
     },
     {
       "method": "GET",
+      "path": "/oauth/authorize/continue"
+    },
+    {
+      "method": "GET",
       "path": "/readyz"
     },
     {
@@ -232,6 +252,10 @@
     {
       "method": "GET",
       "path": "/v1/addReaction"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/auth/login"
     },
     {
       "method": "GET",
@@ -667,6 +691,10 @@
     },
     {
       "method": "POST",
+      "path": "/bot/createAgent"
+    },
+    {
+      "method": "POST",
       "path": "/bot/createReplyThread"
     },
     {
@@ -744,6 +772,10 @@
     {
       "method": "POST",
       "path": "/bot{token}/answerMessageAction"
+    },
+    {
+      "method": "POST",
+      "path": "/bot{token}/createAgent"
     },
     {
       "method": "POST",
@@ -880,6 +912,22 @@
     {
       "method": "POST",
       "path": "/v1/addReaction"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/login/send-email-code"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/login/send-sms-code"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/login/verify-email-code"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/login/verify-phone-code"
     },
     {
       "method": "POST",
