@@ -238,6 +238,13 @@ public extension User {
     Date(timeIntervalSince1970: Double(from))
   }
 
+  /// Presence timestamps are protocol Unix seconds. Keep values inside the range that
+  /// Foundation and GRDB can round-trip through SQLite's four-digit-year date format.
+  static func lastOnlineDate(from timestamp: Int64) -> Date? {
+    guard (0 ... 253_402_300_799).contains(timestamp) else { return nil }
+    return Date(timeIntervalSince1970: TimeInterval(timestamp))
+  }
+
   func isCurrentUser() -> Bool {
     id == Auth.shared.getCurrentUserId()
   }
