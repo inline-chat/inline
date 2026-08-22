@@ -8,7 +8,7 @@ import { filterFalsy } from "@in/server/utils/filter"
 import { Log } from "@in/server/utils/log"
 import { presenceManager } from "@in/server/ws/presence"
 import { WebSocketTopic } from "@in/server/ws/topics"
-import { type Server } from "bun"
+import type { Server } from "bun"
 import type { ElysiaWS } from "elysia/ws"
 import invariant from "tiny-invariant"
 

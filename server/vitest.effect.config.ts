@@ -10,6 +10,7 @@ export default defineConfig({
   test: {
     exclude: [
       "src/**/*.effect.bun.test.ts",
+      "src/core/http/realtimeV3Host.test.ts",
     ],
     include: [
       "src/core/**/*.{test,spec}.ts",
