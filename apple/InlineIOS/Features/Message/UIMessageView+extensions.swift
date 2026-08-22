@@ -367,7 +367,10 @@ extension UIMessageView {
   }
 
   func createFloatingMetadataView() -> FloatingMetadataView {
-    let view = FloatingMetadataView(fullMessage: fullMessage)
+    let view = FloatingMetadataView(
+      fullMessage: fullMessage,
+      initiallyDisplaying: initialMetadataStatus
+    )
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }
@@ -408,7 +411,10 @@ extension UIMessageView {
   }
 
   func createMessageTimeAndStatus() -> MessageTimeAndStatus {
-    let view = MessageTimeAndStatus(fullMessage)
+    let view = MessageTimeAndStatus(
+      fullMessage,
+      initiallyDisplaying: initialMetadataStatus
+    )
     view.translatesAutoresizingMaskIntoConstraints = false
 
     return view

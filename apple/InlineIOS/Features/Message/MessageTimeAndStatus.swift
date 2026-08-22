@@ -8,6 +8,7 @@ private let dateFormatter: DateFormatter = {
 }()
 
 class MessageTimeAndStatus: UIView {
+  private static let statusTransitionDuration: CFTimeInterval = 0.25
   private let symbolSize: CGFloat = 11
 
   override var intrinsicContentSize: CGSize {
@@ -40,7 +41,8 @@ class MessageTimeAndStatus: UIView {
     return imageView
   }()
 
-  let fullMessage: FullMessage
+  private var fullMessage: FullMessage
+  private var displayedStatus: MessageSendingStatus?
 
   var message: Message {
     fullMessage.message
@@ -60,8 +62,12 @@ class MessageTimeAndStatus: UIView {
       : (outgoing ? UIColor.white.withAlphaComponent(0.7) : .gray)
   }
 
-  init(_ message: FullMessage) {
+  init(
+    _ message: FullMessage,
+    initiallyDisplaying status: MessageSendingStatus? = nil
+  ) {
     fullMessage = message
+    displayedStatus = status ?? message.message.status
     super.init(frame: .zero)
     setupViews()
   }
@@ -76,7 +82,7 @@ class MessageTimeAndStatus: UIView {
     addSubview(statusImageView)
 
     setupConstraints()
-    setupAppearance()
+    setupAppearance(animated: false)
   }
 
   func setupConstraints() {
@@ -101,15 +107,33 @@ class MessageTimeAndStatus: UIView {
     NSLayoutConstraint.activate(constraints)
   }
 
-  func setupAppearance() {
+  func updateMessage(_ fullMessage: FullMessage, animated: Bool) {
+    let previousStatus = displayedStatus
+    self.fullMessage = fullMessage
+    displayedStatus = message.status
+
+    dateLabel.text = dateFormatter.string(from: message.date)
+    dateLabel.textColor = textColor
+    statusImageView.tintColor = imageColor
+
+    guard previousStatus != displayedStatus else { return }
+    updateStatusImage(animated: animated)
+  }
+
+  private func setupAppearance(animated: Bool) {
     dateLabel.text = dateFormatter.string(from: message.date)
     dateLabel.textColor = textColor
 
+    updateStatusImage(animated: animated)
+    statusImageView.tintColor = imageColor
+  }
+
+  private func updateStatusImage(animated: Bool) {
     let imageName: String
     let symbolConfig = UIImage.SymbolConfiguration(pointSize: symbolSize)
       .applying(UIImage.SymbolConfiguration(weight: .medium))
 
-    switch message.status {
+    switch displayedStatus {
       case .sent:
         imageName = "checkmark"
         statusImageView.preferredSymbolConfiguration = symbolConfig
@@ -125,9 +149,18 @@ class MessageTimeAndStatus: UIView {
     }
 
     if let newImage = UIImage(systemName: imageName) {
-      statusImageView.setSymbolImage(newImage, contentTransition: .replace)
+      if animated, !UIAccessibility.isReduceMotionEnabled, statusImageView.image != nil {
+        let transition = CATransition()
+        transition.duration = Self.statusTransitionDuration
+        transition.timingFunction = CAMediaTimingFunction(name: .default)
+        transition.type = .fade
+        statusImageView.layer.add(transition, forKey: "contents")
+        statusImageView.image = newImage
+      } else {
+        statusImageView.image = newImage
+      }
+    } else {
+      statusImageView.image = nil
     }
-
-    statusImageView.tintColor = imageColor
   }
 }

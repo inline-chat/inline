@@ -120,7 +120,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     collectionWidth: CGFloat,
     displayMode: MessageDisplayMode = .normal,
     animateTail: Bool = true,
-    theme: IOSThemeSnapshot
+    theme: IOSThemeSnapshot,
+    initialMetadataStatus: MessageSendingStatus? = nil
   ) {
     let newOutgoing = message.message.out == true
     var animatedReactionEmoji: String?
@@ -132,6 +133,23 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
          self.theme == theme,
          abs(self.collectionWidth - collectionWidth) <= 0.5 {
         // skip only if everything is exact match including outgoing state and layout width
+        return
+      }
+
+      if isDeliveryAcknowledgementUpdate(from: currentMessage, to: message),
+         abs(self.collectionWidth - collectionWidth) <= 0.5,
+         firstInGroup == self.firstInGroup,
+         lastInGroup == self.lastInGroup,
+         spaceId == self.spaceId,
+         outgoing == newOutgoing,
+         displayMode == self.displayMode,
+         self.theme == theme,
+         let messageView {
+        prevText = message.displayText
+        self.message = message
+        canReply = message.canReply && displayMode != .threadAnchor
+        messageView.updateDeliveryAcknowledgement(to: message)
+        updateSwipeAvailability()
         return
       }
 
@@ -194,7 +212,10 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     nameLabel.text = message.from?.firstName ?? "USER"
 
     setupThreadHeaderViewsIfNeeded()
-    setupBaseMessageConstraints(animatedReactionEmoji: animatedReactionEmoji)
+    setupBaseMessageConstraints(
+      animatedReactionEmoji: animatedReactionEmoji,
+      initialMetadataStatus: initialMetadataStatus
+    )
 
     contentView.transform = Self.contentTransform
 
@@ -210,6 +231,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   }
 
   func animateInsertion() {
+    let insertingMessageView = messageView
     UIView.animate(
       withDuration: 0.2,
       delay: 0,
@@ -220,6 +242,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
       self.alpha = 1
       self.contentView.alpha = 1
       self.contentView.transform = Self.contentTransform
+    } completion: { _ in
+      insertingMessageView?.animateInitialDeliveryAcknowledgementIfNeeded()
     }
   }
 
@@ -229,6 +253,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
   func revealSendAnimationTarget() {
     setSendAnimationTargetPrepared(false)
+    messageView?.animateInitialDeliveryAcknowledgementIfNeeded()
   }
 
   private func setSendAnimationTargetPrepared(_ prepared: Bool) {
@@ -980,6 +1005,22 @@ extension MessageCollectionViewCell {
     return currentWithoutReactions == newWithoutReactions
   }
 
+  private func isDeliveryAcknowledgementUpdate(
+    from currentMessage: FullMessage,
+    to newMessage: FullMessage
+  ) -> Bool {
+    guard currentMessage.id == newMessage.id,
+          currentMessage.message.status == .sending,
+          newMessage.message.status == .sent
+    else { return false }
+
+    var acknowledgedCurrentMessage = currentMessage
+    acknowledgedCurrentMessage.message.status = newMessage.message.status
+    acknowledgedCurrentMessage.message.messageId = newMessage.message.messageId
+    acknowledgedCurrentMessage.message.randomId = newMessage.message.randomId
+    return acknowledgedCurrentMessage == newMessage
+  }
+
   private func changedReactionEmoji(from currentMessage: FullMessage, to newMessage: FullMessage) -> String? {
     let currentByEmoji = Dictionary(grouping: currentMessage.reactions) { $0.reaction.emoji }
     let newByEmoji = Dictionary(grouping: newMessage.reactions) { $0.reaction.emoji }
@@ -1025,7 +1066,10 @@ extension MessageCollectionViewCell {
     return contentView.convert(localFrame, to: view)
   }
 
-  func setupBaseMessageConstraints(animatedReactionEmoji: String? = nil) {
+  func setupBaseMessageConstraints(
+    animatedReactionEmoji: String? = nil,
+    initialMetadataStatus: MessageSendingStatus? = nil
+  ) {
     guard let theme else { return }
     let newMessageView = UIMessageView(
       fullMessage: message,
@@ -1034,7 +1078,8 @@ extension MessageCollectionViewCell {
       bubbleTailSide: bubbleTailSide,
       maximumBubbleContentWidth: maximumBubbleContentWidth,
       theme: theme,
-      animatedReactionEmoji: animatedReactionEmoji
+      animatedReactionEmoji: animatedReactionEmoji,
+      initialMetadataStatus: initialMetadataStatus
     )
     newMessageView.translatesAutoresizingMaskIntoConstraints = false
     newMessageView.onPhotoTap = { [weak self] message, sourceView, sourceImage, url in

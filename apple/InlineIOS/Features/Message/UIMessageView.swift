@@ -32,6 +32,7 @@ class UIMessageView: UIView {
   let spaceId: Int64?
   let displayMode: MessageDisplayMode
   private let maximumBubbleContentWidth: CGFloat
+  var initialMetadataStatus: MessageSendingStatus?
   private var bubbleTailSide: MessageBubbleTailSide
   private(set) var theme: IOSThemeSnapshot
   private var translationCancellable: AnyCancellable?
@@ -456,7 +457,8 @@ class UIMessageView: UIView {
     bubbleTailSide: MessageBubbleTailSide = .none,
     maximumBubbleContentWidth: CGFloat,
     theme: IOSThemeSnapshot,
-    animatedReactionEmoji: String? = nil
+    animatedReactionEmoji: String? = nil,
+    initialMetadataStatus: MessageSendingStatus? = nil
   ) {
     self.fullMessage = fullMessage
     self.spaceId = spaceId
@@ -465,6 +467,7 @@ class UIMessageView: UIView {
     self.maximumBubbleContentWidth = maximumBubbleContentWidth
     self.theme = theme
     self.pendingAnimatedReactionEmoji = animatedReactionEmoji
+    self.initialMetadataStatus = initialMetadataStatus
 
     super.init(frame: .zero)
 
@@ -880,6 +883,27 @@ class UIMessageView: UIView {
     reactionGroups = updatedMessage.groupedReactions
     reactionsFlowView.configure(with: reactionGroups, animatedEmoji: animatedEmoji)
     setNeedsLayout()
+  }
+
+  func updateDeliveryAcknowledgement(to updatedMessage: FullMessage) {
+    fullMessage = updatedMessage
+
+    if shouldShowFloatingMetadata {
+      floatingMetadataView.updateMessage(updatedMessage, animated: true)
+    } else {
+      metadataView.updateMessage(updatedMessage, animated: true)
+    }
+  }
+
+  func animateInitialDeliveryAcknowledgementIfNeeded() {
+    guard initialMetadataStatus != nil else { return }
+    initialMetadataStatus = nil
+
+    if shouldShowFloatingMetadata {
+      floatingMetadataView.updateMessage(fullMessage, animated: true)
+    } else {
+      metadataView.updateMessage(fullMessage, animated: true)
+    }
   }
 
   private func setupExternalReactionsIfNeeded() {

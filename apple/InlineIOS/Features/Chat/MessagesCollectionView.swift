@@ -2304,6 +2304,10 @@ private extension MessagesCollectionView {
         } ?? false
         let shouldPrepareSendAnimationTarget = isPendingAppearingItem && isPendingSendAnimationTarget
         let currentSpaceId = spaceId
+        // A fast acknowledgement can arrive before the hidden send-animation target is built.
+        // Preserve the clock until reveal so the same sending-to-sent transition remains visible.
+        let shouldStartFromSendingStatus = sendTargetIdentity != nil && message.message.status == .sent
+        let initialMetadataStatus: MessageSendingStatus? = shouldStartFromSendingStatus ? .sending : nil
 
         let configureCell = {
           cell.configure(
@@ -2314,7 +2318,8 @@ private extension MessagesCollectionView {
             collectionWidth: self.currentCollectionView?.bounds.width ?? 0,
             displayMode: displayMode,
             animateTail: true,
-            theme: self.theme
+            theme: self.theme,
+            initialMetadataStatus: initialMetadataStatus
           )
         }
 

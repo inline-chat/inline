@@ -5,8 +5,14 @@ class FloatingMetadataView: UIView {
   private let metadataView: MessageTimeAndStatus
   private let materialBackgroundView = UIView()
 
-  init(fullMessage: FullMessage) {
-    metadataView = MessageTimeAndStatus(fullMessage)
+  init(
+    fullMessage: FullMessage,
+    initiallyDisplaying status: MessageSendingStatus? = nil
+  ) {
+    metadataView = MessageTimeAndStatus(
+      fullMessage,
+      initiallyDisplaying: status
+    )
     super.init(frame: .zero)
 
     setupViews()
@@ -59,5 +65,10 @@ class FloatingMetadataView: UIView {
         imageView.tintColor = .white
       }
     }
+  }
+
+  func updateMessage(_ fullMessage: FullMessage, animated: Bool) {
+    metadataView.updateMessage(fullMessage, animated: animated)
+    forceWhiteText()
   }
 }
