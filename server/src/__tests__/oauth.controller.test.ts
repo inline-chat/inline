@@ -84,12 +84,15 @@ describe("OAuth controller", () => {
     authorizeUrl.searchParams.set("redirect_uri", "https://example.com/callback")
     authorizeUrl.searchParams.set("state", "state-1")
     authorizeUrl.searchParams.set("scope", "messages:read spaces:read offline_access")
+    authorizeUrl.searchParams.set("resource", "https://mcp.inline.chat/mcp/v2")
     authorizeUrl.searchParams.set("code_challenge", challenge)
     authorizeUrl.searchParams.set("code_challenge_method", "S256")
 
     const authorizeRes = await app.handle(new Request(authorizeUrl.toString(), { method: "GET" }))
     expect(authorizeRes.status).toBe(303)
     const oauthCookie = extractSetCookieValue(authorizeRes.headers.get("set-cookie"))
+    const authRequestId = oauthCookie.split("=", 2)[1]!
+    expect((await OauthModel.getAuthRequest(authRequestId, Date.now()))?.resource).toBe("https://mcp.inline.chat")
     expect(authorizeRes.headers.get("set-cookie")).toContain("Path=/;")
     const location = authorizeRes.headers.get("location")
     expect(location).toContain("/v1/auth/login?capability=")
@@ -163,7 +166,7 @@ describe("OAuth controller", () => {
     tokenForm.set("client_id", client.clientId)
     tokenForm.set("redirect_uri", "https://example.com/callback")
     tokenForm.set("code_verifier", verifier)
-    tokenForm.set("resource", "https://mcp.inline.chat")
+    tokenForm.set("resource", "https://mcp.inline.chat/mcp/v2")
 
     const tokenRes = await app.handle(new Request("http://localhost/oauth/token", { method: "POST", body: tokenForm }))
     expect(tokenRes.status).toBe(200)
@@ -248,7 +251,7 @@ describe("OAuth controller", () => {
       form.set("grant_type", "refresh_token")
       form.set("refresh_token", refreshToken)
       form.set("client_id", client.clientId)
-      form.set("resource", "https://mcp.inline.chat")
+      form.set("resource", "https://mcp.inline.chat/mcp/v2")
       return app.handle(new Request("http://localhost/oauth/token", { method: "POST", body: form }))
     }
     const refreshResponses = await Promise.all([refreshRequest(), refreshRequest()])

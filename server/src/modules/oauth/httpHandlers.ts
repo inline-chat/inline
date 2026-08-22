@@ -70,6 +70,7 @@ import {
   authRequestCookieHeader,
   authRequestCookieName,
 } from "./authRequestCookie"
+import { normalizeMcpResourceIndicator } from "./resourceIndicator"
 
 const config = oauthConfig()
 // TODO(effect-cutover): remove this oracle-only limiter with legacyServer.ts
@@ -668,7 +669,8 @@ export async function handleAuthorizeGet(url: URL): Promise<Response> {
   if (responseType !== "code") return json(400, { error: "invalid_response_type" })
   if (!clientId || !redirectUri || !state || !codeChallenge) return json(400, { error: "missing_params" })
   if (codeChallengeMethod !== "S256") return json(400, { error: "invalid_code_challenge_method" })
-  if (requestedResource != null && requestedResource !== config.resource) {
+  const resource = normalizeMcpResourceIndicator(requestedResource, config.resource)
+  if (!resource) {
     return json(400, { error: "invalid_target" })
   }
 
@@ -687,7 +689,7 @@ export async function handleAuthorizeGet(url: URL): Promise<Response> {
     redirectUri,
     state,
     scope: normalizeScopes(scopeRaw),
-    resource: requestedResource ?? config.resource,
+    resource,
     codeChallenge,
     csrfToken,
     deviceId,
@@ -1234,7 +1236,7 @@ export async function handleToken(
     if (!grant || grant.revokedAtMs != null) {
       return json(400, { error: "invalid_grant" })
     }
-    if (requestedResource != null && requestedResource !== grant.resource) {
+    if (!normalizeMcpResourceIndicator(requestedResource, grant.resource)) {
       return json(400, { error: "invalid_target" })
     }
 
@@ -1286,7 +1288,7 @@ export async function handleToken(
     if (result.grant.clientId !== clientId) {
       return json(400, { error: "invalid_grant" })
     }
-    if (requestedResource != null && requestedResource !== result.grant.resource) {
+    if (!normalizeMcpResourceIndicator(requestedResource, result.grant.resource)) {
       return json(400, { error: "invalid_target" })
     }
 
