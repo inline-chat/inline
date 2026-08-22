@@ -1,5 +1,5 @@
 import type { Chat, Dialog, DialogFolderDestination, InputPeer, User } from "@inline-chat/protocol/core"
-import { and, eq } from "drizzle-orm"
+import { and, eq, sql } from "drizzle-orm"
 import { db } from "@in/server/db"
 import { DialogsModel } from "@in/server/db/models/dialogs"
 import { ChatModel } from "@in/server/db/models/chats"
@@ -53,6 +53,11 @@ export async function updateDialogOrder(input: Input, context: FunctionContext):
   await AccessGuards.ensureChatAccess(chat, context.currentUserId)
 
   const mutation = await db.transaction(async (tx) => {
+    // Serialize concurrent order derivation independently of row-lock timing.
+    // The user row lock below remains the shared ordering point with other
+    // dialog-opening paths.
+    await tx.execute(sql`select pg_advisory_xact_lock(8432147, ${context.currentUserId})`)
+
     // Keep the dialog mutation and its subsequent user-bucket projection on
     // one deterministic owner path: users before dialogs.
     await tx.select({ id: users.id }).from(users).where(eq(users.id, context.currentUserId)).for("update").limit(1)
