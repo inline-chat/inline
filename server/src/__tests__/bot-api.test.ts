@@ -481,7 +481,7 @@ describe("Bot HTTP API", () => {
     expect(exactRes.status).toBe(200)
     const exactJson = await exactRes.json()
     expect(exactJson.result.messages.map((message: any) => message.message_id)).toEqual([messageId])
-    expect(exactJson.result.messages[0].edit_date).toBeNumber()
+    expect(exactJson.result.messages[0].edit_date).toBeUndefined()
     expect(exactJson.result.messages[0].chat.type).toBe("user")
 
     const searchRes = await app.handle(

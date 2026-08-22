@@ -95,6 +95,7 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
     entities,
     actions: normalizedActions,
     blockContent: preparedBlockContent,
+    suppressEditDate: context.isBot === true,
   })
 
   if (!message) {
