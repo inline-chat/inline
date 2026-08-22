@@ -13,6 +13,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@base-ui/react": "^1.6.0",
     "@inline/client": "workspace:*",
     "@inline/ids": "workspace:*",
     "@stylexjs/babel-plugin": "^0.16.0",

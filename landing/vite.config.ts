@@ -15,8 +15,8 @@ const securityHeaders = {
     "object-src 'none'",
     "frame-ancestors 'self'",
     "img-src 'self' data: blob: https:",
-    "font-src 'self' data: https://fonts.gstatic.com",
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' data:",
+    "style-src 'self' 'unsafe-inline'",
     "script-src 'self' 'unsafe-inline'",
     "connect-src 'self' https://api.inline.chat wss://api.inline.chat https://public-assets.inline.chat",
     "worker-src 'self' blob:",
@@ -86,6 +86,11 @@ const config = defineConfig({
   // @ts-ignore
   nitro: {
     preset: "bun",
+    // The isolated runner passes a cross-realm Request through httpxy, whose
+    // instanceof check fails and crashes every local route with "Invalid URL".
+    devServer: {
+      runner: "self",
+    },
     routeRules: {
       "/**": {
         headers: securityHeaders,

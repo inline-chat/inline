@@ -2,6 +2,7 @@
 
 import stylesheet from "../styles/tailwind.css?url"
 import stylesheet2 from "../styles/stylex.css?url"
+import fontsStylesheet from "../styles/fonts.css?url"
 import { type ReactNode, useState } from "react"
 import { createRootRoute, HeadContent, Outlet, Scripts, useRouterState } from "@tanstack/react-router"
 import {
@@ -13,6 +14,11 @@ import {
 } from "@inline/client"
 import { ClientRuntime } from "~/components/ClientRuntime"
 import { useImagePreload } from "~/lib/imageCache"
+import {
+  directionForLocale,
+  localeForLandingPath,
+  type Locale,
+} from "~/landing/public-beta/preferences"
 
 export const Route = createRootRoute({
   head: () => ({
@@ -25,12 +31,6 @@ export const Route = createRootRoute({
       { title: "Inline Chat" },
     ],
     links: [
-      { rel: "preconnect", href: "https://fonts.googleapis.com" },
-      {
-        rel: "preconnect",
-        href: "https://fonts.gstatic.com",
-        crossOrigin: "anonymous",
-      },
       // favicon
       {
         rel: "icon",
@@ -44,10 +44,7 @@ export const Route = createRootRoute({
         //href: "/favicon-colored-outline.png?v=2",
         media: "(prefers-color-scheme: light)",
       },
-      {
-        rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Days+One&family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=Red+Hat+Display:wght@700&family=Reddit+Mono:wght@400&display=swap",
-      },
+      { rel: "stylesheet", href: fontsStylesheet },
       { rel: "stylesheet", href: stylesheet, nonce: "1" },
       { rel: "stylesheet", href: stylesheet2, nonce: "2" },
     ],
@@ -58,9 +55,10 @@ export const Route = createRootRoute({
 function RootComponent() {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const isAppRoute = pathname === "/app" || pathname.startsWith("/app/")
+  const landingLocale = localeForLandingPath(pathname)
 
   return (
-    <RootDocument>
+    <RootDocument locale={landingLocale ?? "en"}>
       {isAppRoute ? <AppRoot /> : <Outlet />}
     </RootDocument>
   )
@@ -93,9 +91,9 @@ function AppRoot() {
   )
 }
 
-function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
+function RootDocument({ children, locale }: Readonly<{ children: ReactNode; locale: Locale }>) {
   return (
-    <html>
+    <html lang={locale} dir={directionForLocale(locale)}>
       <head>
         <HeadContent />
       </head>
