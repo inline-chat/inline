@@ -6,8 +6,8 @@ import {
 } from "effect"
 import {
   HttpServerRequest,
-  HttpServerResponse,
 } from "effect/unstable/http"
+import { webResponseToHttpServerResponse } from "../core/http/webResponse"
 import {
   HttpApiEndpoint,
   HttpApiSchema,
@@ -343,20 +343,6 @@ const mediaQueryFields = [
   { name: "sig", required: true },
 ] as const
 
-const webResponseToEffect = (
-  response: Response,
-): HttpServerResponse.HttpServerResponse => {
-  const options = {
-    status: response.status,
-    statusText: response.statusText,
-    headers: Object.fromEntries(response.headers),
-  }
-
-  return response.body === null
-    ? HttpServerResponse.empty(options)
-    : HttpServerResponse.raw(response.body, options)
-}
-
 export const executeMediaPhoto = (
   request: HttpServerRequest.HttpServerRequest,
 ) =>
@@ -385,5 +371,5 @@ export const executeMediaPhoto = (
         ifNoneMatch:
           webRequest.headers.get("if-none-match") ?? undefined,
       })
-    return webResponseToEffect(response)
+    return webResponseToHttpServerResponse(response)
   })

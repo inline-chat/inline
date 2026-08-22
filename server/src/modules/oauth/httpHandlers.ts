@@ -66,6 +66,10 @@ import {
 import { beginOAuthHostedLogin, completeHostedLogin } from "@in/server/modules/auth/hostedLogin/service"
 import { verifyEmailAccountProof } from "@in/server/modules/auth/contactProof"
 import { isValidAppCodeChallenge } from "@in/server/modules/auth/provider/appHandoff"
+import {
+  authRequestCookieHeader,
+  authRequestCookieName,
+} from "./authRequestCookie"
 
 const config = oauthConfig()
 // TODO(effect-cutover): remove this oracle-only limiter with legacyServer.ts
@@ -85,14 +89,6 @@ const PROVIDER_CLIENT_METADATA_LIMITS = [
 ] as const
 let nextProviderCleanupAtMs = 0
 let providerCleanupInFlight: Promise<void> | undefined
-
-// The same opaque authorization-request cookie starts email/phone consent under /oauth
-// and provider sign-in under /v1/auth/provider. It contains no session or provider token.
-const AUTH_REQUEST_COOKIE_PATH = "/"
-
-function authRequestCookieName(): string {
-  return `${config.cookiePrefix}_ar`
-}
 
 function escapeHtml(input: string): string {
   return input.replace(/[&<>"']/g, (char) => {
@@ -396,12 +392,6 @@ function parseCookie(req: Request, name: string): string | null {
   return null
 }
 
-function setCookieHeader(name: string, value: string, options?: { maxAgeSeconds?: number }): string {
-  const secure = config.issuer.startsWith("https://")
-  const maxAgePart = options?.maxAgeSeconds != null ? `; Max-Age=${options.maxAgeSeconds}` : ""
-  return `${name}=${value}${maxAgePart}; Path=${AUTH_REQUEST_COOKIE_PATH}; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`
-}
-
 function resolveClientIp(clientIp: string | undefined): string {
   return clientIp?.trim()
     ? normalizeRateLimitKeyPart(clientIp)
@@ -493,7 +483,7 @@ function verifyInternalSecret(req: Request): boolean {
 }
 
 async function getAuthRequestFromCookie(req: Request): Promise<Awaited<ReturnType<typeof OauthModel.getAuthRequest>>> {
-  const id = parseCookie(req, authRequestCookieName())
+  const id = parseCookie(req, authRequestCookieName(config))
   if (!id) return null
   return await OauthModel.getAuthRequest(id, Date.now())
 }
@@ -713,7 +703,7 @@ export async function handleAuthorizeGet(url: URL): Promise<Response> {
     status: 303,
     headers: {
       location: login.browserUrl,
-      "set-cookie": setCookieHeader(authRequestCookieName(), authRequestId),
+      "set-cookie": authRequestCookieHeader(config, authRequestId),
       "cache-control": "no-store",
     },
   })
@@ -1192,7 +1182,7 @@ export async function handleAuthorizeConsent(req: Request, body: unknown): Promi
     status: 302,
     headers: {
       location: redirect.toString(),
-      "set-cookie": setCookieHeader(authRequestCookieName(), "", { maxAgeSeconds: 0 }),
+      "set-cookie": authRequestCookieHeader(config, "", { maxAgeSeconds: 0 }),
     },
   })
 }

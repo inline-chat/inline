@@ -5,12 +5,15 @@ import { loginTransactions } from "@in/server/db/schema"
 import { handler as sendEmailCode } from "@in/server/methods/sendEmailCode"
 import { handler as sendSmsCode } from "@in/server/methods/sendSmsCode"
 import { verifyEmailAccountProof, verifyPhoneAccountProof } from "@in/server/modules/auth/contactProof"
+import { oauthConfig } from "@in/server/modules/oauth/config"
+import { authRequestCookieHeader } from "@in/server/modules/oauth/authRequestCookie"
 import {
   completeHostedLogin,
   getHostedLoginByCapability,
 } from "./service"
 
 const COOKIE_NAME = "inline_hl"
+const oauth = oauthConfig()
 
 const escapeHtml = (value: string): string => value.replace(/[&<>"']/g, (character) => ({
   "&": "&amp;",
@@ -90,6 +93,9 @@ export async function handleHostedLoginGet(request: Request): Promise<Response> 
     response.headers.set("referrer-policy", "no-referrer")
     response.headers.append("set-cookie", `${COOKIE_NAME}=${encodeURIComponent(capability)}; Path=/v1/auth; HttpOnly; Secure; SameSite=Lax; Max-Age=600`)
     response.headers.append("set-cookie", `inline_hl_csrf=${encodeURIComponent(csrf)}; Path=/v1/auth; Secure; SameSite=Lax; Max-Age=600`)
+    if (transaction.oauthAuthRequestId) {
+      response.headers.append("set-cookie", authRequestCookieHeader(oauth, transaction.oauthAuthRequestId))
+    }
     return response
   }
   const transaction = await requireHostedLoginTransaction(request)

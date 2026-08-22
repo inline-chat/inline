@@ -8,6 +8,7 @@ import {
   HttpServerRequest,
   HttpServerResponse,
 } from "effect/unstable/http"
+import { webResponseToHttpServerResponse } from "../core/http/webResponse"
 import {
   HttpApiEndpoint,
   HttpApiGroup,
@@ -1050,24 +1051,6 @@ export const validateOAuthResponse = (
     return response
   })
 
-const webResponseToEffect = (
-  response: Response,
-): HttpServerResponse.HttpServerResponse => {
-  const headers = new Headers(response.headers)
-  const cookies = HttpServerResponse.fromWeb(response).cookies
-  headers.delete("set-cookie")
-  const options = {
-    status: response.status,
-    statusText: response.statusText,
-    headers: Object.fromEntries(headers),
-    cookies,
-  }
-
-  return response.body === null
-    ? HttpServerResponse.empty(options)
-    : HttpServerResponse.raw(response.body, options)
-}
-
 const serverError = (): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.jsonUnsafe(
     {
@@ -1094,7 +1077,7 @@ export const executeOAuth = (
       request: webRequest,
       clientIp: context.clientIp,
     })
-    return webResponseToEffect(
+    return webResponseToHttpServerResponse(
       yield* validateOAuthResponse(
         operation,
         response,
@@ -1127,7 +1110,7 @@ export const executeOAuth = (
             Effect.catch(() => Effect.succeed(undefined)),
           )
           if (response !== undefined) {
-            return webResponseToEffect(response)
+            return webResponseToHttpServerResponse(response)
           }
         }
 

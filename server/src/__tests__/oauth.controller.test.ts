@@ -104,7 +104,8 @@ describe("OAuth controller", () => {
     expect(establishRes.status).toBe(200)
     expect(establishRes.headers.get("referrer-policy")).toBe("no-referrer")
     const hostedCookies = establishRes.headers.getSetCookie().map(extractSetCookieValue)
-    expect(hostedCookies).toHaveLength(2)
+    expect(hostedCookies).toHaveLength(3)
+    expect(hostedCookies).toContain(oauthCookie)
     const cookie = [oauthCookie, ...hostedCookies].join("; ")
 
     const chooserHtml = await establishRes.text()
