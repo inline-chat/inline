@@ -25,7 +25,7 @@
   --docs-type-ui: 14px;
   --docs-type-body: 16px;
   --docs-type-section: 18px;
-  --docs-type-title: clamp(1.75rem, 2.7vw, 2rem);
+  --docs-type-title: 24px;
 
   min-height: 100vh;
   display: flex;
@@ -214,6 +214,14 @@
   outline-offset: 2px;
 }
 
+.docs-sidebar-link-external::before {
+  content: "↗";
+  display: inline-block;
+  width: 14px;
+  color: var(--docs-muted);
+  font-size: 11px;
+}
+
 .docs-main {
   min-width: 0;
   max-width: 1050px;
@@ -390,6 +398,21 @@
   scroll-margin-top: 78px;
 }
 
+.docs-article-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -0.45rem 0 1.2rem;
+  color: var(--docs-muted);
+  font-size: var(--docs-type-small);
+  line-height: 1.4;
+}
+
+.docs-article-meta > span + span::before {
+  content: "·";
+  margin-right: 6px;
+}
+
 .docs-content.page-content h2 {
   font-size: var(--docs-type-section);
   line-height: 1.28;
@@ -487,41 +510,6 @@
   color: var(--docs-muted);
   font-size: inherit;
   line-height: inherit;
-}
-
-.docs-index-content.page-content > h2 + ul {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  padding: 0;
-  margin: 0.85rem 0 1.5rem;
-}
-
-.docs-index-content.page-content > h2 + ul > li {
-  min-height: 0;
-  padding: 14px 16px;
-  border: 1px solid var(--docs-faint);
-  border-radius: 10px;
-  background: transparent;
-  color: var(--docs-muted);
-  list-style: none;
-}
-
-.docs-index-content.page-content > h2 + ul > li strong {
-  display: block;
-  margin-bottom: 5px;
-  color: var(--docs-text);
-  font-size: inherit;
-  font-weight: 600;
-}
-
-.docs-index-content.page-content > h2 + ul > li p {
-  margin: 0;
-  line-height: 1.5;
-}
-
-.docs-index-content.page-content > h2 + ul > li p + p {
-  margin-top: 5px;
 }
 
 .changelog-content.page-content img,
@@ -1070,14 +1058,6 @@ html[data-theme="dark"] .hljs-property {
   .docs-content.page-content h2 {
     margin-top: 2.2rem;
     font-size: var(--docs-type-section);
-  }
-
-  .docs-index-content.page-content > h2 + ul {
-    grid-template-columns: 1fr;
-  }
-
-  .docs-index-content.page-content > h2 + ul > li {
-    min-height: 0;
   }
 
   .page-content pre code {

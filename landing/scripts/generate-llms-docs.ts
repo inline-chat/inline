@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { resolveDocsMarkdown, serializeDocsFrontMatter, type DocsFrontMatter } from "../src/docs/frontMatter"
 
 const landingRoot = fileURLToPath(new URL("..", import.meta.url))
 const docsSourceDir = join(landingRoot, "src/docs/content")
@@ -14,6 +15,7 @@ type DocPage = {
   route: string
   markdownPath: string
   summary: string
+  frontMatter?: DocsFrontMatter
 }
 
 const pages: DocPage[] = [
@@ -133,7 +135,16 @@ function withoutH1(markdown: string): string {
 }
 
 function pageMarkdown(page: DocPage, markdown: string): string {
-  return [`# ${page.title}`, "", `Source: ${origin}${page.route}`, "", withoutH1(absoluteLinks(markdown)), ""].join("\n")
+  const frontMatter = serializeDocsFrontMatter(page.frontMatter ?? {})
+  return [
+    ...(frontMatter ? [frontMatter, ""] : []),
+    `# ${page.title}`,
+    "",
+    `Source: ${origin}${page.route}`,
+    "",
+    withoutH1(absoluteLinks(markdown)),
+    "",
+  ].join("\n")
 }
 
 async function main() {
@@ -142,15 +153,18 @@ async function main() {
   const pageBodies = await Promise.all(
     pages.map(async (page) => {
       const source = await readFile(join(docsSourceDir, page.source), "utf8")
-      const markdown = pageMarkdown(page, source)
-      const outputPath = join(publicDir, page.markdownPath)
+      const resolved = resolveDocsMarkdown(source, page.title)
+      const resolvedPage = { ...page, title: resolved.title, frontMatter: resolved.frontMatter }
+      const markdown = pageMarkdown(resolvedPage, resolved.markdown)
+      const outputPath = join(publicDir, resolvedPage.markdownPath)
       await mkdir(dirname(outputPath), { recursive: true })
       await writeFile(outputPath, markdown)
-      return { page, markdown }
+      return { page: resolvedPage, markdown }
     }),
   )
 
-  const docsList = pages
+  const docsList = pageBodies
+    .map(({ page }) => page)
     .map((page) => `- [${page.title}](${origin}${page.markdownPath}): ${page.summary}`)
     .join("\n")
 

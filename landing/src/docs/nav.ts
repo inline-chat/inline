@@ -5,6 +5,7 @@ export type DocsNavGroup = {
   items: Array<{
     title: string
     to: string
+    external?: boolean
   }>
 }
 
@@ -18,7 +19,7 @@ export const DOCS_NAV: DocsNavGroup[] = DOCS_NAV_GROUPS.map((group) => ({
   group.title === "Policies"
     ? {
         ...group,
-        items: [...group.items, { title: "Legal", to: "/legal" }],
+        items: [...group.items, { title: "Legal", to: "/legal", external: true }],
       }
     : group,
 )

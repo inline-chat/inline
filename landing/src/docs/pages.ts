@@ -15,6 +15,7 @@ import rustSdk from "./content/rust-sdk.md?raw"
 import security from "./content/security.md?raw"
 import welcome from "./content/welcome.md?raw"
 import whatsInline from "./content/whats-inline.md?raw"
+import { resolveDocsMarkdown } from "./frontMatter"
 
 export const DOCS_NAV_GROUPS = [
   { id: "getting-started", title: "Getting Started" },
@@ -37,7 +38,7 @@ type DocsPageDefinition = {
   markdown: string
 }
 
-export const DOCS_PAGES = [
+const DOCS_PAGE_DEFINITIONS = [
   {
     slug: "index",
     title: "Get Started",
@@ -197,6 +198,18 @@ export const DOCS_PAGES = [
     markdown: security,
   },
 ] as const satisfies readonly DocsPageDefinition[]
+
+function resolveDocsPage<const T extends DocsPageDefinition>(page: T) {
+  const resolved = resolveDocsMarkdown(page.markdown, page.title)
+  return {
+    ...page,
+    title: resolved.title,
+    markdown: resolved.markdown,
+    frontMatter: resolved.frontMatter,
+  }
+}
+
+export const DOCS_PAGES = DOCS_PAGE_DEFINITIONS.map(resolveDocsPage)
 
 export type DocsPage = (typeof DOCS_PAGES)[number]
 export type DocsPageSlug = DocsPage["slug"]

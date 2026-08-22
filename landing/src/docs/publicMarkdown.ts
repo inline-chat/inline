@@ -1,4 +1,5 @@
 import { DOCS_PAGES, getDocsPage, type DocsPage, type DocsPageSlug } from "~/docs/pages"
+import { serializeDocsFrontMatter } from "~/docs/frontMatter"
 
 const origin = "https://inline.chat"
 
@@ -15,7 +16,16 @@ function withoutH1(markdown: string): string {
 }
 
 export function publicDocsPageMarkdown(page: DocsPage): string {
-  return [`# ${page.title}`, "", `Source: ${origin}${page.route}`, "", withoutH1(absoluteLinks(page.markdown)), ""].join("\n")
+  const frontMatter = serializeDocsFrontMatter(page.frontMatter)
+  return [
+    ...(frontMatter ? [frontMatter, ""] : []),
+    `# ${page.title}`,
+    "",
+    `Source: ${origin}${page.route}`,
+    "",
+    withoutH1(absoluteLinks(page.markdown)),
+    "",
+  ].join("\n")
 }
 
 function docsList(): string {

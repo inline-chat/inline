@@ -30,6 +30,10 @@ type DocsMarkdownProps = {
   markdown: string
   className?: string
   renderVideoLinks?: boolean
+  metadata?: {
+    author?: string
+    date?: string
+  }
 }
 
 type Slugger = {
@@ -291,7 +295,7 @@ function CodeTabs({ children, labelsJson }: { children?: ReactNode; labelsJson: 
   )
 }
 
-export function DocsMarkdown({ markdown, className, renderVideoLinks = false }: DocsMarkdownProps) {
+export function DocsMarkdown({ markdown, className, renderVideoLinks = false, metadata }: DocsMarkdownProps) {
   const slugger = createSlugger()
   const toc = extractToc(markdown)
   const showToc = toc.length >= 5 && markdown.split("\n").length >= 45
@@ -323,12 +327,25 @@ export function DocsMarkdown({ markdown, className, renderVideoLinks = false }: 
       )
     }
 
+  const renderH1 = heading("h1")
+  const hasMetadata = Boolean(metadata?.author || metadata?.date)
+
   const content = (
     <Markdown
       remarkPlugins={[remarkGfm, remarkCodeTabs]}
       className={className}
       components={{
-        h1: heading("h1"),
+        h1: (props) => (
+          <>
+            {renderH1(props)}
+            {hasMetadata ? (
+              <div className="docs-article-meta" aria-label="Article details">
+                {metadata?.author ? <span>{metadata.author}</span> : null}
+                {metadata?.date ? <span>{metadata.date}</span> : null}
+              </div>
+            ) : null}
+          </>
+        ),
         h2: heading("h2"),
         h3: heading("h3"),
         h4: heading("h4"),

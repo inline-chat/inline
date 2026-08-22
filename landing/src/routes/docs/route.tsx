@@ -17,7 +17,7 @@ function DocsNavLinks({ activePath, onNavigate }: { activePath: string; onNaviga
       <div className="docs-sidebar-title">{group.title}</div>
       {group.items.map((item) => {
         const isActive = activePath === normalizePath(item.to)
-        const className = `docs-sidebar-link${isActive ? " docs-sidebar-link-active" : ""}`
+        const className = `docs-sidebar-link${isActive ? " docs-sidebar-link-active" : ""}${item.external ? " docs-sidebar-link-external" : ""}`
         return (
           <Link
             key={item.to}
