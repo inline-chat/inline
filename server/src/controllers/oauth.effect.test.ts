@@ -166,6 +166,39 @@ const makeKernel = ({
 }
 
 describe("Effect OAuth routes", () => {
+  it("preserves multiple hosted-login cookies through the Web response boundary", async () => {
+    const kernel = makeKernel({
+      oauth: {
+        execute: () => {
+          const response = new Response("<!doctype html><title>Sign in</title>", {
+            status: 200,
+            headers: {
+              "cache-control": "no-store",
+              "content-type": "text/html; charset=utf-8",
+            },
+          })
+          response.headers.append("set-cookie", "inline_hl=capability; Path=/v1/auth; HttpOnly; Secure; SameSite=Lax")
+          response.headers.append("set-cookie", "inline_hl_csrf=csrf; Path=/v1/auth; Secure; SameSite=Lax")
+          return Effect.succeed(response)
+        },
+      },
+    })
+
+    try {
+      const response = await kernel.handler(
+        new Request("http://inline.test/v1/auth/login?capability=test"),
+      )
+
+      expect(response.status).toBe(200)
+      expect(response.headers.getSetCookie()).toEqual([
+        "inline_hl=capability; Path=/v1/auth; HttpOnly; Secure; SameSite=Lax",
+        "inline_hl_csrf=csrf; Path=/v1/auth; Secure; SameSite=Lax",
+      ])
+    } finally {
+      await kernel.dispose()
+    }
+  })
+
   it("preserves aliases, Web response metadata, and explicit client IP trust", async () => {
     let invocation:
       | {

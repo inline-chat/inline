@@ -1053,10 +1053,14 @@ export const validateOAuthResponse = (
 const webResponseToEffect = (
   response: Response,
 ): HttpServerResponse.HttpServerResponse => {
+  const headers = new Headers(response.headers)
+  const cookies = HttpServerResponse.fromWeb(response).cookies
+  headers.delete("set-cookie")
   const options = {
     status: response.status,
     statusText: response.statusText,
-    headers: Object.fromEntries(response.headers),
+    headers: Object.fromEntries(headers),
+    cookies,
   }
 
   return response.body === null

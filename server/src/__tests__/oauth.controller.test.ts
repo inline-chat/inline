@@ -62,7 +62,7 @@ describe("OAuth controller", () => {
     expect(remaining).toEqual([{ id: liveId }])
   })
 
-  it("redirects OAuth into the shared hosted login chooser", async () => {
+  it("renders the hosted login chooser without stranding a second user agent", async () => {
     const registerRes = await app.handle(
       new Request("http://localhost/oauth/register", {
         method: "POST",
@@ -93,19 +93,30 @@ describe("OAuth controller", () => {
     expect(authorizeRes.headers.get("set-cookie")).toContain("Path=/;")
     const location = authorizeRes.headers.get("location")
     expect(location).toContain("/v1/auth/login?capability=")
+
+    // Link resolvers and security preflights may visit the URL without sharing
+    // their cookies with the user's browser. The pending capability must remain
+    // sufficient for the real browser to establish its own session.
+    const preflightRes = await app.handle(new Request(location!))
+    expect(preflightRes.status).toBe(200)
+
     const establishRes = await app.handle(new Request(location!, { headers: { cookie: oauthCookie } }))
-    expect(establishRes.status).toBe(303)
+    expect(establishRes.status).toBe(200)
+    expect(establishRes.headers.get("referrer-policy")).toBe("no-referrer")
     const hostedCookies = establishRes.headers.getSetCookie().map(extractSetCookieValue)
+    expect(hostedCookies).toHaveLength(2)
     const cookie = [oauthCookie, ...hostedCookies].join("; ")
-    const chooserRes = await app.handle(new Request("http://localhost/v1/auth/login", { headers: { cookie } }))
-    expect(chooserRes.status).toBe(200)
-    const chooserHtml = await chooserRes.text()
+
+    const chooserHtml = await establishRes.text()
     expect(extractHidden(chooserHtml, "csrf").length).toBeGreaterThan(20)
     expect(chooserHtml).toContain('action="/v1/auth/login/send-email-code"')
     expect(chooserHtml).toContain('action="/v1/auth/login/send-sms-code"')
     expect(chooserHtml).toContain("provider=google&amp;purpose=hosted_login")
     expect(chooserHtml).toContain("provider=apple&amp;purpose=hosted_login")
     expect(chooserHtml).not.toContain("<script")
+
+    const chooserRes = await app.handle(new Request("http://localhost/v1/auth/login", { headers: { cookie } }))
+    expect(chooserRes.status).toBe(200)
   })
 
   it("issues two-hour access and 180-day refresh tokens without requiring offline_access", async () => {

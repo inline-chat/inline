@@ -86,14 +86,9 @@ export async function handleHostedLoginGet(request: Request): Promise<Response> 
       eq(loginTransactions.id, transaction.id),
       eq(loginTransactions.status, "pending"),
     ))
-    const response = new Response(null, {
-      status: 303,
-      headers: {
-        location: "/v1/auth/login",
-        "set-cookie": `${COOKIE_NAME}=${encodeURIComponent(capability)}; Path=/v1/auth; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
-        "cache-control": "no-store",
-      },
-    })
+    const response = loginForm(csrf, transaction.verificationCode)
+    response.headers.set("referrer-policy", "no-referrer")
+    response.headers.append("set-cookie", `${COOKIE_NAME}=${encodeURIComponent(capability)}; Path=/v1/auth; HttpOnly; Secure; SameSite=Lax; Max-Age=600`)
     response.headers.append("set-cookie", `inline_hl_csrf=${encodeURIComponent(csrf)}; Path=/v1/auth; Secure; SameSite=Lax; Max-Age=600`)
     return response
   }
