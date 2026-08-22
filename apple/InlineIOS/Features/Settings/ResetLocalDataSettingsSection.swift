@@ -91,7 +91,6 @@ private enum LocalDataResetPerformer {
       await FileDownloader.shared.resetSession()
       NotionTaskService.shared.resetSession()
       await Drafts2.shared.resetForAccountChange()
-      await QuickSearchUsageStore.shared.clearCurrentAccount()
       await Transactions.shared.clearAllAndWait()
       ObjectCache.shared.clear()
 
