@@ -7,6 +7,10 @@ import { sha256Base64Url, sha256Hex } from "@inline-chat/oauth-core"
 import { db } from "@in/server/db"
 import { oauthAuthRequests } from "@in/server/db/schema"
 import { inArray } from "drizzle-orm"
+import {
+  hostedLoginChooser,
+  hostedLoginVerificationForm,
+} from "@in/server/modules/auth/hostedLogin/httpHandlers"
 
 function extractSetCookieValue(setCookie: string | null): string {
   if (!setCookie) throw new Error("missing set-cookie")
@@ -112,15 +116,76 @@ describe("OAuth controller", () => {
     const cookie = [oauthCookie, ...hostedCookies].join("; ")
 
     const chooserHtml = await establishRes.text()
-    expect(extractHidden(chooserHtml, "csrf").length).toBeGreaterThan(20)
-    expect(chooserHtml).toContain('action="/v1/auth/login/send-email-code"')
-    expect(chooserHtml).toContain('action="/v1/auth/login/send-sms-code"')
+    expect(chooserHtml).toContain('href="/v1/auth/login?method=email"')
+    expect(chooserHtml).toContain('href="/v1/auth/login?method=phone"')
     expect(chooserHtml).toContain("provider=google&amp;purpose=hosted_login")
     expect(chooserHtml).toContain("provider=apple&amp;purpose=hosted_login")
+    expect(chooserHtml.match(/class="method-button"/g)).toHaveLength(4)
+    expect(chooserHtml).not.toContain("Confirm that this code matches")
+    expect(chooserHtml).not.toContain("CLI code")
+    expect(chooserHtml).not.toContain('name="email"')
+    expect(chooserHtml).not.toContain('name="phone_number"')
+    expect(chooserHtml).not.toContain('name="invite_code"')
     expect(chooserHtml).not.toContain("<script")
 
     const chooserRes = await app.handle(new Request("http://localhost/v1/auth/login", { headers: { cookie } }))
     expect(chooserRes.status).toBe(200)
+
+    const emailRes = await app.handle(new Request("http://localhost/v1/auth/login?method=email", {
+      headers: { cookie },
+    }))
+    expect(emailRes.status).toBe(200)
+    const emailHtml = await emailRes.text()
+    expect(extractHidden(emailHtml, "csrf").length).toBeGreaterThan(20)
+    expect(emailHtml).toContain('action="/v1/auth/login/send-email-code"')
+    expect(emailHtml).toContain('name="email"')
+    expect(emailHtml).not.toContain('name="phone_number"')
+    expect(emailHtml).not.toContain("CLI code")
+    expect(emailHtml).not.toContain('name="invite_code"')
+
+    const phoneRes = await app.handle(new Request("http://localhost/v1/auth/login?method=phone", {
+      headers: { cookie },
+    }))
+    expect(phoneRes.status).toBe(200)
+    const phoneHtml = await phoneRes.text()
+    expect(extractHidden(phoneHtml, "csrf").length).toBeGreaterThan(20)
+    expect(phoneHtml).toContain('action="/v1/auth/login/send-sms-code"')
+    expect(phoneHtml).toContain('name="phone_number"')
+    expect(phoneHtml).not.toContain('name="email"')
+    expect(phoneHtml).not.toContain("CLI code")
+    expect(phoneHtml).not.toContain('name="invite_code"')
+  })
+
+  it("shows client-bound proof only to the Inline CLI login target", async () => {
+    const oauthChooserHtml = await hostedLoginChooser("oauth_authorization", "123456").text()
+    expect(oauthChooserHtml).not.toContain("Confirm that this code matches")
+    expect(oauthChooserHtml).not.toContain("123456")
+
+    const cliChooserHtml = await hostedLoginChooser("inline_protocol_key", "654321").text()
+    expect(cliChooserHtml).toContain("Confirm that this code matches the one shown in your Inline CLI.")
+    expect(cliChooserHtml).toContain("654321")
+
+    const oauthHtml = await hostedLoginVerificationForm(
+      "oauth_authorization",
+      "123456",
+      "csrf-token",
+      "email",
+      "person@example.com",
+    ).text()
+    expect(oauthHtml).toContain("We sent a 6-digit code to person@example.com.")
+    expect(oauthHtml).not.toContain("CLI code")
+    expect(oauthHtml).not.toContain("123456")
+    expect(oauthHtml).not.toContain('name="invite_code"')
+
+    const cliHtml = await hostedLoginVerificationForm(
+      "inline_protocol_key",
+      "654321",
+      "csrf-token",
+      "email",
+      "person@example.com",
+    ).text()
+    expect(cliHtml).toContain("CLI code: <strong>654321</strong>")
+    expect(cliHtml).toContain('name="invite_code"')
   })
 
   it("issues two-hour access and 180-day refresh tokens without requiring offline_access", async () => {
