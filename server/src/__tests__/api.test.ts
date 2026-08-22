@@ -268,6 +268,8 @@ describe("API Endpoints", () => {
       })
       const loginAlertSpy = spyOn(BotAlerts, "login")
       const confirmationAlertSpy = spyOn(BotAlerts, "authContactConfirmed")
+      loginAlertSpy.mockClear()
+      confirmationAlertSpy.mockClear()
 
       const request = new Request("http://localhost/v1/verifyEmailCode", {
         method: "POST",
@@ -680,6 +682,8 @@ describe("API Endpoints", () => {
       })
       const loginAlertSpy = spyOn(BotAlerts, "login")
       const confirmationAlertSpy = spyOn(BotAlerts, "authContactConfirmed")
+      loginAlertSpy.mockClear()
+      confirmationAlertSpy.mockClear()
 
       const verifyRequest = new Request("http://localhost/v1/verifyEmailCode", {
         method: "POST",
@@ -950,6 +954,7 @@ describe("API Endpoints", () => {
         expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
       })
       const confirmationAlertSpy = spyOn(BotAlerts, "authContactConfirmed")
+      confirmationAlertSpy.mockClear()
 
       const request = new Request("http://localhost/v1/verifyEmailCode", {
         method: "POST",

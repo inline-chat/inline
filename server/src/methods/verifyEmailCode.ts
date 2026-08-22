@@ -52,7 +52,7 @@ export const handler = async (
 
   const proof = await verifyEmailAccountProof(input)
   const email = proof.identifier
-  const confirmedUser = proof.user
+  const confirmedUser = proof.created ? undefined : proof.user
   BotAlerts.authContactConfirmed({
     contact: { type: "email", value: email },
     user: confirmedUser,

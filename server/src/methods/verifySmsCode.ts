@@ -56,7 +56,7 @@ export const handler = async (
     const formattedPhoneNumber = proof.identifier
 
     // Record contact proof before account/session mutation so a missing later checkpoint locates where the flow stopped.
-    const confirmedUser = proof.user
+    const confirmedUser = proof.created ? undefined : proof.user
     BotAlerts.authContactConfirmed({
       contact: { type: "phone", value: formattedPhoneNumber },
       user: confirmedUser,
