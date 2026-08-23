@@ -141,8 +141,8 @@ struct ComposeAutocompleteViewModelTests {
     #expect(viewModel.loadState == .idle)
   }
 
-  @Test("bare thread opener shows recent thread items")
-  func bareThreadOpenerShowsRecentThreadItems() async throws {
+  @Test("direct-message thread insertion includes the destination space")
+  func directMessageThreadInsertionIncludesDestinationSpace() async throws {
     let db = AppDatabase.empty()
     try await db.dbWriter.write { sqlDb in
       try Space(id: 7, name: "Engineering", date: Date(timeIntervalSince1970: 1)).insert(sqlDb)
@@ -158,7 +158,45 @@ struct ComposeAutocompleteViewModelTests {
     }
     let viewModel = ComposeAutocompleteViewModel(
       db: db,
+      peer: .user(id: 99),
       recentThreadChatIds: { limit in Array([Int64(42)].prefix(limit)) }
+    )
+
+    viewModel.update(
+      match: ComposeAutocompleteMatch(
+        kind: .thread,
+        range: NSRange(location: 0, length: 6),
+        query: "road"
+      )
+    )
+
+    await waitForItems(viewModel, count: 1)
+    #expect(viewModel.items.first?.title == "Roadmap")
+    #expect(viewModel.items.first?.subtitle == "Engineering")
+    #expect(viewModel.items.first?.emoji == "🧭")
+    #expect(
+      viewModel.items.first?.payload
+        == .thread(chatId: 42, spaceId: 7, title: "Engineering / Roadmap")
+    )
+  }
+
+  @Test("direct-message thread insertion identifies Home as the destination scope")
+  func directMessageThreadInsertionIdentifiesHomeScope() async throws {
+    let db = AppDatabase.empty()
+    try await db.dbWriter.write { sqlDb in
+      let chat = Chat(
+        id: 42,
+        date: Date(timeIntervalSince1970: 1),
+        type: .thread,
+        title: "Roadmap",
+        spaceId: nil
+      )
+      try Self.insertCatalogChat(chat, in: sqlDb)
+    }
+    let viewModel = ComposeAutocompleteViewModel(
+      db: db,
+      peer: .user(id: 99),
+      recentThreadChatIds: { _ in [42] }
     )
 
     viewModel.update(
@@ -171,9 +209,10 @@ struct ComposeAutocompleteViewModelTests {
 
     await waitForItems(viewModel, count: 1)
     #expect(viewModel.items.first?.title == "Roadmap")
-    #expect(viewModel.items.first?.subtitle == "Engineering")
-    #expect(viewModel.items.first?.emoji == "🧭")
-    #expect(viewModel.items.first?.payload == .thread(chatId: 42, spaceId: 7, title: "Roadmap"))
+    #expect(
+      viewModel.items.first?.payload
+        == .thread(chatId: 42, spaceId: nil, title: "Home / Roadmap")
+    )
   }
 
   @Test("bare thread opener fills six visible catalog threads by navigation and recency")
@@ -303,6 +342,7 @@ struct ComposeAutocompleteViewModelTests {
 
     let viewModel = ComposeAutocompleteViewModel(
       db: db,
+      peer: .thread(id: 3_001),
       recentThreadChatIds: { _ in [3_002] }
     )
     viewModel.update(

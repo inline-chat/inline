@@ -148,6 +148,7 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
   private let commandItems: ComposeCommandAutocompleteItemsProvider
   private let emojiItems: ComposeEmojiAutocompleteItemsProvider
   private let externalResourceItems: ComposeExternalResourceItemsProvider
+  private let isDirectMessage: Bool
   private var spaceId: Int64?
   private var loadTask: Task<Void, Never>?
   private var loadToken = UUID()
@@ -162,6 +163,7 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
 
   public init(
     db: AppDatabase = .shared,
+    peer: Peer? = nil,
     spaceId: Int64? = nil,
     limit: Int = 8,
     recentThreadChatIds: @escaping ComposeThreadRecentChatIdsProvider = { _ in [] },
@@ -178,6 +180,7 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
     self.commandItems = commandItems
     self.emojiItems = emojiItems
     self.externalResourceItems = externalResourceItems
+    isDirectMessage = peer?.asUserId() != nil
   }
 
   deinit {
@@ -336,7 +339,7 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
     loadState = .loading
     let logger = log
 
-    loadTask = Task { [db, limit, searchedThreadLimit, externalResourceLimit, externalResourceItems, logger] in
+    loadTask = Task { [db, limit, searchedThreadLimit, externalResourceLimit, externalResourceItems, isDirectMessage, logger] in
       do {
         // Avoid issuing a local database search for every intermediate keystroke.
         // The presentation layer keeps the current menu stable during this short debounce.
@@ -350,7 +353,8 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
             preferredChatIds: preferredChatIds,
             query: referenceQuery.query,
             limit: min(searchedThreadLimit, limit),
-            kind: kind
+            kind: kind,
+            isDirectMessage: isDirectMessage
           )
         } else {
           threadItems = []
@@ -426,7 +430,7 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
     loadToken = token
     loadState = .loading
 
-    loadTask = Task { [db, limit, recentThreadLimit] in
+    loadTask = Task { [db, limit, recentThreadLimit, isDirectMessage] in
       do {
         let snapshots = try await db.fetchCommandBarChatCatalogSnapshots()
         let items = Self.threadItems(
@@ -434,7 +438,8 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
           preferredChatIds: preferredChatIds,
           query: nil,
           limit: min(recentThreadLimit, limit),
-          kind: .thread
+          kind: .thread,
+          isDirectMessage: isDirectMessage
         )
 
         await MainActor.run { [weak self] in
@@ -460,7 +465,8 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
     preferredChatIds: [Int64],
     query: String?,
     limit: Int,
-    kind: ComposeAutocompleteKind
+    kind: ComposeAutocompleteKind,
+    isDirectMessage: Bool
   ) -> [ComposeAutocompleteItem] {
     guard limit > 0 else { return [] }
 
@@ -531,6 +537,9 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
       let snapshot = candidate.snapshot
       let chat = candidate.chat
       let title = snapshot.title
+      let insertionTitle = isDirectMessage
+        ? "\(snapshot.spaceTitle ?? "Home") / \(title)"
+        : title
       let spaceId = snapshot.item.dialog.spaceId ?? chat.spaceId
       let subtitle = [
         snapshot.parentTitle ?? snapshot.spaceTitle ?? "Thread",
@@ -545,7 +554,7 @@ public final class ComposeAutocompleteViewModel: ObservableObject {
         subtitle: subtitle,
         emoji: chat.emoji,
         threadReference: chat.threadReference,
-        payload: .thread(chatId: candidate.chatId, spaceId: spaceId, title: title)
+        payload: .thread(chatId: candidate.chatId, spaceId: spaceId, title: insertionTitle)
       )
     }
   }

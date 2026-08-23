@@ -63,6 +63,7 @@ final class ComposeAutocompleteManager: NSObject {
     )
     viewModel = ComposeAutocompleteViewModel(
       db: database,
+      peer: peerId,
       spaceId: spaceId,
       recentThreadChatIds: { limit in
         Self.recentThreadChatIds(limit: limit)

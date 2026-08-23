@@ -118,6 +118,7 @@ class GlassComposeAppKit: NSView {
   private let emojiAutocompleteDetector = EmojiAutocompleteDetector()
   private lazy var autocompleteViewModel = ComposeAutocompleteViewModel(
     db: dependencies.database,
+    peer: peerId,
     spaceId: chat?.spaceId,
     limit: 24,
     recentThreadChatIds: { [weak self] limit in
