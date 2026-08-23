@@ -1,4 +1,5 @@
 import { BotAgentsModel } from "@in/server/db/models/botAgents"
+import { getServerConfig } from "@in/server/modules/serverConfig"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import type {
   CreateBotAgentInput,
@@ -24,10 +25,17 @@ const boundedOptionalText = (value: string | undefined, maxLength: number): stri
   return text
 }
 
+const requireAgentsEnabled = async (): Promise<void> => {
+  if ((await getServerConfig("agents.rollout")).value !== "enabled") {
+    throw RealtimeRpcError.BadRequest()
+  }
+}
+
 export const createBotAgent = async (
   input: CreateBotAgentInput,
   context: FunctionContext,
 ): Promise<CreateBotAgentResult> => {
+  await requireAgentsEnabled()
   const botUserId = parseBotUserId(input.botUserId)
   await requireManageableBot(botUserId, context)
   return {
@@ -47,6 +55,7 @@ export const getBotAgent = async (
   input: GetBotAgentInput,
   context: FunctionContext,
 ): Promise<GetBotAgentResult> => {
+  await requireAgentsEnabled()
   const agentId = Number(input.agentId)
   if (!Number.isSafeInteger(agentId) || agentId <= 0) throw RealtimeRpcError.BadRequest()
   const agent = await BotAgentsModel.get(agentId)
@@ -60,6 +69,7 @@ export const listBotAgents = async (
   input: ListBotAgentsInput,
   context: FunctionContext,
 ): Promise<ListBotAgentsResult> => {
+  await requireAgentsEnabled()
   const botUserId = parseBotUserId(input.botUserId)
   await requireManageableBot(botUserId, context)
   return { agents: await BotAgentsModel.list(botUserId) }

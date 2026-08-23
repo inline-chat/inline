@@ -1,6 +1,7 @@
 import { MessageEntities, MessageEntity_Type, type BlockContent, type MessageEntity } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { botAgents, lower, userNotDeleted, users } from "@in/server/db/schema"
+import { getServerConfig } from "@in/server/modules/serverConfig"
 import { processMessageText } from "@in/server/modules/message/processText"
 import { and, inArray } from "drizzle-orm"
 import { parseBlockContent, type BlockImageSource } from "@in/server/modules/message/blockContent"
@@ -512,6 +513,23 @@ const validateAgentMentions = async (
       : [],
   ))]
   if (agentIds.length === 0 || !entities) return entities
+
+  if ((await getServerConfig("agents.rollout")).value !== "enabled") {
+    return {
+      entities: entities.entities.map((entity) => {
+        if (entity.entity.oneofKind !== "mention" || entity.entity.mention.agentId === undefined) {
+          return entity
+        }
+        return {
+          ...entity,
+          entity: {
+            oneofKind: "mention" as const,
+            mention: { userId: entity.entity.mention.userId },
+          },
+        }
+      }),
+    }
+  }
 
   const rows = await db
     .select({ id: botAgents.id, botUserId: botAgents.botUserId })

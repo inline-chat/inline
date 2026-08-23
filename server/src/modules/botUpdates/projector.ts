@@ -14,6 +14,7 @@ import { BotUpdatesModel } from "@in/server/db/models/botUpdates"
 import { MessageModel, type DbFullMessage } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
 import { BotAgentsModel } from "@in/server/db/models/botAgents"
+import { getServerConfig } from "@in/server/modules/serverConfig"
 import type { DbChat, DbUser } from "@in/server/db/schema"
 import { encodeBotEntities, type BotUserJson } from "@in/server/controllers/bot/entityCodec"
 import type { UpdateGroup } from "@in/server/modules/updates"
@@ -221,7 +222,12 @@ async function messageCreated(input: {
       activationReason: reason,
     })
     const mentionedAgentId = agentMentionTarget(message.entities, stream.botUserId)
-    const mentionedAgent = mentionedAgentId ? await BotAgentsModel.get(mentionedAgentId) : undefined
+    const agentsEnabled = mentionedAgentId
+      ? (await getServerConfig("agents.rollout")).value === "enabled"
+      : false
+    const mentionedAgent = agentsEnabled && mentionedAgentId
+      ? await BotAgentsModel.get(mentionedAgentId)
+      : undefined
     const activatedAgent = mentionedAgent && Number(mentionedAgent.botUserId) === stream.botUserId
       ? toAgent(mentionedAgent)
       : undefined
