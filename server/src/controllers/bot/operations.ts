@@ -7,9 +7,6 @@ import type {
   BotPeer,
   BotTargetInput,
   BotUser,
-  BotAgent,
-  CreateAgentParams,
-  GetAgentParams,
   CreateReplyThreadParams,
   CreateThreadParams,
   AnswerMessageActionParams,
@@ -20,6 +17,8 @@ import type {
   GetChatHistoryParams,
   GetChatParticipantCountParams,
   GetChatParticipantParams,
+  AddThreadParticipantParams,
+  RemoveThreadParticipantParams,
   GetChatParams,
   GetFileParams,
   GetMessagesParams,
@@ -75,15 +74,15 @@ import { sendMessage as sendMessageFn } from "@in/server/functions/messages.send
 import { forwardMessages as forwardMessagesFn } from "@in/server/functions/messages.forwardMessages"
 import { pinMessage as pinMessageFn } from "@in/server/functions/messages.pinMessage"
 import { getChatParticipants as getChatParticipantsFn } from "@in/server/functions/messages.getChatParticipants"
+import { addChatParticipant as addChatParticipantFn } from "@in/server/functions/messages.addChatParticipant"
+import { removeChatParticipant as removeChatParticipantFn } from "@in/server/functions/messages.removeChatParticipant"
 import { updateChatInfo as updateChatInfoFn } from "@in/server/functions/messages.updateChatInfo"
 import { uploadFileOperation, type UploadFileOperationInput } from "@in/server/methods/uploadFileOperation"
 import { handler as getMeHandler } from "@in/server/methods/getMe"
-import { createBotAgent, getBotAgent, listBotAgents } from "@in/server/functions/bot.agents"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { InlineError } from "@in/server/types/errors"
-import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { chats, documents, photoSizes, videos, voices } from "@in/server/db/schema"
-import { eq } from "drizzle-orm"
+import { eq, inArray, sql } from "drizzle-orm"
 import { getSignedMediaFileProxyUrl } from "@in/server/modules/files/path"
 import { validateWebhookUrl } from "@in/server/modules/botUpdates/webhookSecurity"
 import { BotUpdateProjector, encodeBotActions, encodeBotMedia } from "@in/server/modules/botUpdates/projector"
@@ -745,8 +744,49 @@ const toProtocolActions = (
   })
 }
 
+export const ensureBotFileAccess = async (
+  file: NonNullable<Awaited<ReturnType<typeof FileModel.getFileByUniqueId>>>,
+  botUserId: number,
+): Promise<void> => {
+  if (file.userId === botUserId) return
+  const candidates = await db.execute<{ chatId: number }>(sql`
+    select distinct message.chat_id as "chatId"
+    from messages message
+    left join photo_sizes direct_photo on direct_photo.photo_id = message.photo_id
+    left join documents document on document.id = message.document_id
+    left join photo_sizes document_thumbnail on document_thumbnail.photo_id = document.photo_id
+    left join videos video on video.id = message.video_id
+    left join photo_sizes video_thumbnail on video_thumbnail.photo_id = video.photo_id
+    left join voices voice on voice.id = message.voice_id
+    where message.file_id = ${file.id}
+      or direct_photo.file_id = ${file.id}
+      or document.file_id = ${file.id}
+      or document_thumbnail.file_id = ${file.id}
+      or video.file_id = ${file.id}
+      or video_thumbnail.file_id = ${file.id}
+      or voice.file_id = ${file.id}
+    limit 1000
+  `)
+  if (candidates.length > 0) {
+    const chatRows = await db
+      .select()
+      .from(chats)
+      .where(inArray(chats.id, candidates.map((candidate) => candidate.chatId)))
+    for (const chat of chatRows) {
+      try {
+        await AccessGuards.ensureChatAccess(chat, botUserId)
+        return
+      } catch {
+        // Continue until one message containing the file is currently accessible.
+      }
+    }
+  }
+  throw new InlineError(InlineError.ApiError.FILE_NOT_FOUND)
+}
+
 const resolveBotMedia = async (
   media: SendMessageParams["media"],
+  botUserId: number,
 ): Promise<{
   photoId?: bigint
   videoId?: bigint
@@ -760,6 +800,7 @@ const resolveBotMedia = async (
   if (!file) {
     throw new InlineError(InlineError.ApiError.FILE_NOT_FOUND)
   }
+  await ensureBotFileAccess(file, botUserId)
   switch (media.type) {
     case "photo": {
       const [row] = await db.select({ id: photoSizes.photoId }).from(photoSizes).where(eq(photoSizes.fileId, file.id)).limit(1)
@@ -821,44 +862,6 @@ const getMe = async (context: BotOperationContext) => {
   }
 }
 
-const toBotAgent = (agent: import("@inline-chat/protocol/core").BotAgent): BotAgent => ({
-  id: Number(agent.id),
-  bot_user_id: Number(agent.botUserId),
-  name: agent.name,
-  handle: agent.handle,
-  emoji: agent.emoji,
-  description: agent.description,
-  skill_key: agent.skillKey,
-  instructions: agent.instructions,
-})
-
-const createAgent = async (input: CreateAgentParams, context: BotOperationContext) => {
-  const result = await createBotAgent({
-    botUserId: BigInt(context.currentUserId),
-    name: input.name,
-    handle: input.handle,
-    emoji: input.emoji,
-    description: input.description,
-    skillKey: input.skill_key,
-    instructions: input.instructions,
-  }, context)
-  if (!result.agent) throw RealtimeRpcError.InternalError()
-  return { agent: toBotAgent(result.agent) }
-}
-
-const getAgent = async (input: GetAgentParams, context: BotOperationContext) => {
-  const agentId = normalizeInputId(input.agent_id)
-  if (!agentId || agentId <= 0) throw new InlineError(InlineError.ApiError.BAD_REQUEST)
-  const result = await getBotAgent({ agentId: BigInt(agentId) }, context)
-  if (!result.bot || !result.agent) throw RealtimeRpcError.InternalError()
-  return { bot: toBotUser(result.bot, { isBot: true }), agent: toBotAgent(result.agent) }
-}
-
-const getMyAgents = async (context: BotOperationContext) => {
-  const result = await listBotAgents({ botUserId: BigInt(context.currentUserId) }, context)
-  return { agents: result.agents.map(toBotAgent) }
-}
-
 const sendMessage = async (
   input: SendMessageParams,
   context: BotOperationContext,
@@ -867,7 +870,7 @@ const sendMessage = async (
   if (raw["text"] !== undefined && typeof raw["text"] !== "string") {
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
-  const media = await resolveBotMedia(input.media)
+  const media = await resolveBotMedia(input.media, context.currentUserId)
   if ((typeof raw["text"] !== "string" || raw["text"].length === 0) && Object.keys(media).length === 0) {
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
@@ -1090,13 +1093,13 @@ const createThread = async (
 ) => {
   const spaceId = normalizeInputId(input.space_id)
   const isPublic = input.is_public ?? spaceId !== undefined
-  if (isPublic && (input.participant_ids?.length ?? 0) > 0) {
+  if (isPublic && (input.participants?.length ?? 0) > 0) {
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
   const participantIds = isPublic
     ? []
     : normalizeInputIds([
-        ...(input.participant_ids ?? []),
+        ...(input.participants ?? []),
         context.currentUserId,
       ])
   const result = await createChatFn(
@@ -1131,7 +1134,7 @@ const createReplyThread = async (
   if (!chatId || !messageId) {
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
-  const participantIds = normalizeInputIds(input.participant_ids ?? [])
+  const participantIds = normalizeInputIds(input.participants ?? [])
   const result = await createSubthreadFn(
     {
       parentChatId: BigInt(chatId),
@@ -1336,6 +1339,32 @@ const getChatParticipantCount = async (input: GetChatParticipantCountParams, con
   return { count: participants.users.length }
 }
 
+const addThreadParticipant = async (
+  input: AddThreadParticipantParams,
+  context: BotOperationContext,
+) => {
+  const chatId = normalizeInputId(input.chat_id)
+  const userId = normalizeInputId(input.user_id)
+  if (!chatId || !userId) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+  await addChatParticipantFn({ chatId, userId }, context)
+  return {}
+}
+
+const removeThreadParticipant = async (
+  input: RemoveThreadParticipantParams,
+  context: BotOperationContext,
+) => {
+  const chatId = normalizeInputId(input.chat_id)
+  const userId = normalizeInputId(input.user_id)
+  if (!chatId || !userId || userId === context.currentUserId) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+  await removeChatParticipantFn({ chatId, userId }, context)
+  return {}
+}
+
 const setThreadTitle = async (input: SetThreadTitleParams, context: BotOperationContext) => {
   const chatId = normalizeInputId(input.chat_id)
   if (!chatId || typeof input.title !== "string") {
@@ -1432,11 +1461,12 @@ const sendChatAction = async (
   return {}
 }
 
-const getFile = async (input: GetFileParams, _context: BotOperationContext) => {
+const getFile = async (input: GetFileParams, context: BotOperationContext) => {
   const file = await FileModel.getFileByUniqueId(input.file_id)
   if (!file) {
     throw new InlineError(InlineError.ApiError.FILE_NOT_FOUND)
   }
+  await ensureBotFileAccess(file, context.currentUserId)
   const expiresIn = 60 * 60
   return {
     file: {
@@ -1517,9 +1547,6 @@ const deleteMyCommands = async (
 
 export const botOperationHandlers: BotOperationHandlers = {
   getMe,
-  createAgent,
-  getAgent,
-  getMyAgents,
   sendMessage,
   getChat,
   getChatHistory,
@@ -1534,6 +1561,8 @@ export const botOperationHandlers: BotOperationHandlers = {
   unpinMessage,
   getChatParticipant,
   getChatParticipantCount,
+  addThreadParticipant,
+  removeThreadParticipant,
   setThreadTitle,
   sendReaction,
   deleteReaction,

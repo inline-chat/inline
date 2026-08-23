@@ -36,9 +36,6 @@ import {
 } from "../../core/schema/scalars"
 
 const OptionalString = Schema.optionalKey(Schema.String)
-const OptionalAgentHandle = Schema.optionalKey(Schema.String.check(Schema.isMaxLength(256)))
-const OptionalAgentEmoji = Schema.optionalKey(Schema.String.check(Schema.isMaxLength(64)))
-const OptionalAgentSkillKey = Schema.optionalKey(Schema.String.check(Schema.isMaxLength(256)))
 const OptionalWireInteger = Schema.optionalKey(WireSafeInteger)
 const OptionalUserId = Schema.optionalKey(UserId)
 const OptionalChatId = Schema.optionalKey(ChatId)
@@ -117,9 +114,6 @@ export const BotMessageEntityInput = Schema.Struct({
     description:
       "Referenced user for mention entities.",
   }),
-  agent_id: OptionalWireInteger.annotateKey({
-    description: "Optional Agent paired with the referenced bot user.",
-  }),
   url: OptionalString.annotateKey({
     description:
       "Destination URL for a text_link entity.",
@@ -176,9 +170,6 @@ export const BotMessageEntityOutput = Schema.Struct({
   user: Schema.optionalKey(BotUser).annotateKey({
     description:
       "Referenced user for mention entities.",
-  }),
-  agent_id: OptionalWireInteger.annotateKey({
-    description: "Agent selected beneath the mentioned bot user.",
   }),
   url: OptionalString.annotateKey({
     description:
@@ -249,33 +240,6 @@ export const BotCommand = Schema.Struct({
   identifier: "BotCommand",
   description: "A command advertised by the bot.",
 })
-
-export const BotAgent = Schema.Struct({
-  id: WirePositiveInteger,
-  bot_user_id: UserId,
-  name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
-  handle: OptionalAgentHandle,
-  emoji: OptionalAgentEmoji,
-  description: OptionalString,
-  skill_key: OptionalAgentSkillKey,
-  instructions: OptionalString,
-}).annotate({
-  identifier: "BotAgent",
-  description: "A named, mentionable specialization owned and executed by a bot.",
-})
-
-export const CreateAgentInput = Schema.Struct({
-  name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
-  handle: OptionalAgentHandle,
-  emoji: OptionalAgentEmoji,
-  description: OptionalString,
-  skill_key: OptionalAgentSkillKey,
-  instructions: OptionalString,
-}).annotate({ identifier: "CreateAgentInput" })
-
-export const GetAgentInput = Schema.Struct({
-  agent_id: WireSafeIntegerFromString,
-}).annotate({ identifier: "GetAgentInput" })
 
 export const BotChatType = Schema.Literals([
   "user",
@@ -573,7 +537,6 @@ export const BotActivationReason = Schema.Literals([
 export const BotUpdateKey = Schema.Literals([
   "message",
   "edited_message",
-  "deleted_messages",
   "message_reaction",
   "message_action",
   "bot_participation",
@@ -594,7 +557,6 @@ export const BotParticipationChange = Schema.Struct({
 const BotUpdateBaseFields = {
   update_id: WirePositiveInteger,
   activation_reason: Schema.optionalKey(BotActivationReason),
-  activated_agent: Schema.optionalKey(BotAgent),
 } as const
 
 const BotActionInvocation = Schema.Union([
@@ -618,15 +580,6 @@ const BotActionInvocation = Schema.Union([
 export const BotUpdate = Schema.Union([
   Schema.Struct({ ...BotUpdateBaseFields, message: BotEventMessage }),
   Schema.Struct({ ...BotUpdateBaseFields, edited_message: BotEventMessage }),
-  Schema.Struct({
-    ...BotUpdateBaseFields,
-    deleted_messages: Schema.Struct({
-      chat: BotEventChat,
-      message_ids: Schema.mutable(Schema.Array(MessageId)),
-      actor: Schema.optionalKey(BotUser),
-      date: WireNonNegativeInteger,
-    }),
-  }),
   Schema.Struct({
     ...BotUpdateBaseFields,
     message_reaction: Schema.Struct({
@@ -779,7 +732,7 @@ export const CreateThreadInput = Schema.Struct({
   emoji: OptionalString,
   space_id: OptionalSpaceId,
   is_public: Schema.optionalKey(Schema.Boolean),
-  participant_ids: OptionalParticipantIds,
+  participants: OptionalParticipantIds,
 }).annotate({
   identifier: "CreateThreadInput",
   description: "Creates a normal Inline thread using existing access rules.",
@@ -790,7 +743,7 @@ export const CreateReplyThreadInput = Schema.Struct({
   message_id: MessageId,
   title: OptionalString,
   emoji: OptionalString,
-  participant_ids: OptionalParticipantIds,
+  participants: OptionalParticipantIds,
 }).annotate({
   identifier: "CreateReplyThreadInput",
   description: "Creates or returns the reply thread anchored to a message.",
@@ -931,6 +884,11 @@ export const GetChatParticipantInput = Schema.Struct({
 export const GetChatParticipantCountInput = Schema.Struct({
   chat_id: ChatIdFromString,
 }).annotate({ identifier: "GetChatParticipantCountInput" })
+
+export const ThreadParticipantMutationInput = Schema.Struct({
+  chat_id: ChatId,
+  user_id: UserId,
+}).annotate({ identifier: "ThreadParticipantMutationInput" })
 
 export const SetThreadTitleInput = Schema.Struct({
   chat_id: ChatId,
@@ -1248,18 +1206,6 @@ export const BotEmptySuccess = botApiSuccess(
 export const BotEmptyRuntimeSuccess = botApiSuccess(
   BotEmptyRuntimeResult,
 )
-
-export const BotCreateAgentSuccess = botApiSuccess(Schema.Struct({ agent: BotAgent })).annotate({
-  identifier: "BotCreateAgentSuccess",
-})
-
-export const BotGetAgentSuccess = botApiSuccess(Schema.Struct({ bot: BotUser, agent: BotAgent })).annotate({
-  identifier: "BotGetAgentSuccess",
-})
-
-export const BotGetMyAgentsSuccess = botApiSuccess(
-  Schema.Struct({ agents: Schema.mutable(Schema.Array(BotAgent)) }),
-).annotate({ identifier: "BotGetMyAgentsSuccess" })
 
 export const botApiErrorAt = (
   status: number,

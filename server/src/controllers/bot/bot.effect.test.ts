@@ -74,13 +74,6 @@ const botChat = {
   title: "Effect chat",
 } as const
 
-const botAgent = {
-  id: 73,
-  bot_user_id: botUser.id,
-  name: "Data Analyst",
-  emoji: "📊",
-} as const
-
 const botMessage: BotMessage = {
   message_id: 101,
   chat_id: botChat.chat_id,
@@ -108,9 +101,6 @@ const makeOperations = (
   overrides: Partial<BotOperationsShape> = {},
 ): BotOperationsShape => ({
   getMe: () => unused("getMe"),
-  createAgent: () => unused("createAgent"),
-  getAgent: () => unused("getAgent"),
-  getMyAgents: () => unused("getMyAgents"),
   sendMessage: () => unused("sendMessage"),
   getChat: () => unused("getChat"),
   getChatHistory: () => unused("getChatHistory"),
@@ -137,6 +127,8 @@ const makeOperations = (
   unpinMessage: () => unused("unpinMessage"),
   getChatParticipant: () => unused("getChatParticipant"),
   getChatParticipantCount: () => unused("getChatParticipantCount"),
+  addThreadParticipant: () => unused("addThreadParticipant"),
+  removeThreadParticipant: () => unused("removeThreadParticipant"),
   setThreadTitle: () => unused("setThreadTitle"),
   uploadFile: () => unused("uploadFile"),
   ...overrides,
@@ -260,12 +252,6 @@ describe("Effect Bot routes", () => {
     const operations = makeOperations({
       getMe: () =>
         invoked("getMe", { user: botUser }),
-      createAgent: () =>
-        invoked("createAgent", { agent: botAgent }),
-      getAgent: () =>
-        invoked("getAgent", { bot: botUser, agent: botAgent }),
-      getMyAgents: () =>
-        invoked("getMyAgents", { agents: [botAgent] }),
       sendMessage: () =>
         invoked("sendMessage", { message: botMessage }),
       getChat: () =>
@@ -305,27 +291,14 @@ describe("Effect Bot routes", () => {
       unpinMessage: () => invoked("unpinMessage", {}),
       getChatParticipant: () => invoked("getChatParticipant", { participant: { user: botUser } }),
       getChatParticipantCount: () => invoked("getChatParticipantCount", { count: 2 }),
+      addThreadParticipant: () => invoked("addThreadParticipant", {}),
+      removeThreadParticipant: () => invoked("removeThreadParticipant", {}),
       setThreadTitle: () => invoked("setThreadTitle", {}),
     })
     const kernel = makeKernel({ operations })
     const methods = [
       {
         name: "getMe",
-        method: "GET",
-        input: undefined,
-      },
-      {
-        name: "createAgent",
-        method: "POST",
-        input: { name: "Data Analyst", emoji: "📊" },
-      },
-      {
-        name: "getAgent",
-        method: "GET",
-        input: { agent_id: "73" },
-      },
-      {
-        name: "getMyAgents",
         method: "GET",
         input: undefined,
       },
@@ -357,7 +330,7 @@ describe("Effect Bot routes", () => {
       {
         name: "createThread",
         method: "POST",
-        input: { title: "Deployments", participant_ids: [7] },
+        input: { title: "Deployments", participants: [7] },
       },
       {
         name: "createReplyThread",
@@ -414,6 +387,8 @@ describe("Effect Bot routes", () => {
       { name: "unpinMessage", method: "POST", input: { chat_id: 99, message_id: 101 } },
       { name: "getChatParticipant", method: "GET", input: { chat_id: "99", user_id: "42" } },
       { name: "getChatParticipantCount", method: "GET", input: { chat_id: "99" } },
+      { name: "addThreadParticipant", method: "POST", input: { chat_id: 99, user_id: 42 } },
+      { name: "removeThreadParticipant", method: "POST", input: { chat_id: 99, user_id: 42 } },
       { name: "setThreadTitle", method: "POST", input: { chat_id: 99, title: "Renamed" } },
     ] as const
 
@@ -468,7 +443,7 @@ describe("Effect Bot routes", () => {
         }
       }
 
-      expect(calls).toHaveLength(46)
+      expect(calls).toHaveLength(44)
       for (const method of methods) {
         expect(
           calls.filter((call) => call === method.name),
@@ -1096,13 +1071,10 @@ describe("Effect Bot routes", () => {
     expect(() =>
       assertValidOpenApiDocument(spec),
     ).not.toThrow()
-    expect(Object.keys(spec.paths)).toHaveLength(64)
+    expect(Object.keys(spec.paths)).toHaveLength(62)
 
     const expectedMethods = [
       "getMe",
-      "createAgent",
-      "getAgent",
-      "getMyAgents",
       "sendMessage",
       "getChat",
       "getChatHistory",
@@ -1117,6 +1089,8 @@ describe("Effect Bot routes", () => {
       "unpinMessage",
       "getChatParticipant",
       "getChatParticipantCount",
+      "addThreadParticipant",
+      "removeThreadParticipant",
       "setThreadTitle",
       "uploadFile",
     ]

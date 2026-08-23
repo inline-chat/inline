@@ -15,9 +15,6 @@ const handlers = (
   getMe: BotOperationHandlers["getMe"],
 ): BotOperationHandlers => ({
   getMe,
-  createAgent: unused,
-  getAgent: unused,
-  getMyAgents: unused,
   sendMessage: unused,
   getChat: unused,
   getChatHistory: unused,
@@ -44,6 +41,8 @@ const handlers = (
   unpinMessage: unused,
   getChatParticipant: unused,
   getChatParticipantCount: unused,
+  addThreadParticipant: unused,
+  removeThreadParticipant: unused,
   setThreadTitle: unused,
   uploadFile: unused,
 })

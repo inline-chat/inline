@@ -70,10 +70,23 @@ describe("BotUpdate", () => {
     ).toThrow()
   })
 
-  it("rejects ambiguous action payload encodings", () => {
+  it("rejects unsupported deleted-message updates", () => {
     expect(() =>
       decodeUpdate({
         update_id: 4,
+        deleted_messages: {
+          chat,
+          message_ids: [message.message_id],
+          date: 1_786_000_030,
+        },
+      }),
+    ).toThrow()
+  })
+
+  it("rejects ambiguous action payload encodings", () => {
+    expect(() =>
+      decodeUpdate({
+        update_id: 5,
         activation_reason: "action",
         message_action: {
           interaction_id: 20,

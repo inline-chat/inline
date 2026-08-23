@@ -176,52 +176,12 @@ describe("Bot HTTP API", () => {
     expect(json.result.user.username).toBe("pathbot")
   })
 
-  it("creates, globally gets, and lists a name-only Agent", async () => {
-    const { bot, token } = await createBotSession("agentapibot")
-    const headers = {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    }
-
-    const create = await app.handle(new Request("http://localhost/bot/createAgent", {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ name: "  Concierge  ", emoji: "👋" }),
+  it("keeps Agent methods outside the Bot HTTP API", async () => {
+    const { token } = await createBotSession("agentapibot")
+    const response = await app.handle(new Request("http://localhost/bot/getMyAgents", {
+      headers: { Authorization: `Bearer ${token}` },
     }))
-    expect(create.status).toBe(200)
-    const created = await create.json()
-    expect(created).toMatchObject({
-      ok: true,
-      result: {
-        agent: { bot_user_id: bot.id, name: "Concierge", emoji: "👋" },
-      },
-    })
-    expect(created.result.agent.skill_key).toBeUndefined()
-    expect(created.result.agent.instructions).toBeUndefined()
-
-    const agentId = created.result.agent.id
-    const get = await app.handle(new Request(
-      `http://localhost/bot/getAgent?agent_id=${agentId}`,
-      { headers },
-    ))
-    expect(get.status).toBe(200)
-    expect(await get.json()).toMatchObject({
-      ok: true,
-      result: {
-        bot: { id: bot.id, is_bot: true },
-        agent: { id: agentId, bot_user_id: bot.id, name: "Concierge" },
-      },
-    })
-
-    const list = await app.handle(new Request(
-      "http://localhost/bot/getMyAgents",
-      { headers },
-    ))
-    expect(list.status).toBe(200)
-    expect(await list.json()).toMatchObject({
-      ok: true,
-      result: { agents: [{ id: agentId, name: "Concierge" }] },
-    })
+    expect(response.status).toBe(404)
   })
 
   it("persists one update stream across polling and webhook settings", async () => {
@@ -337,6 +297,18 @@ describe("Bot HTTP API", () => {
       .values({
         firstName: "Human",
         username: "human",
+        bot: false,
+        emailVerified: false,
+        phoneVerified: false,
+        pendingSetup: false,
+      })
+      .returning()
+
+    const [additionalParticipant] = await db
+      .insert(users)
+      .values({
+        firstName: "Additional Participant",
+        username: "additionalparticipant",
         bot: false,
         emailVerified: false,
         phoneVerified: false,
@@ -531,13 +503,79 @@ describe("Bot HTTP API", () => {
         },
         body: JSON.stringify({
           title: "Bot context thread",
-          participant_ids: [human!.id],
+          participants: [human!.id],
         }),
       }),
     )
     expect(threadRes.status).toBe(200)
     const threadJson = await threadRes.json()
     expect(threadJson.result.chat.type).toBe("thread")
+    const threadChatId = threadJson.result.chat.chat_id as number
+
+    const firstThreadMessageRes = await app.handle(
+      new Request("http://localhost/bot/sendMessage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          chat_id: threadChatId,
+          text: `Hello [@Human](inline://user/${human!.id})`,
+        }),
+      }),
+    )
+    expect(firstThreadMessageRes.status).toBe(200)
+    const firstThreadMessageJson = await firstThreadMessageRes.json()
+    expect(firstThreadMessageJson.result.message.chat.chat_id).toBe(threadChatId)
+    expect(firstThreadMessageJson.result.message.entities).toEqual([
+      expect.objectContaining({ type: "mention", user: expect.objectContaining({ id: human!.id }) }),
+    ])
+
+    const addParticipantRes = await app.handle(
+      new Request("http://localhost/bot/addThreadParticipant", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ chat_id: threadChatId, user_id: additionalParticipant!.id }),
+      }),
+    )
+    expect(addParticipantRes.status).toBe(200)
+
+    const addedParticipantRes = await app.handle(
+      new Request(
+        `http://localhost/bot/getChatParticipant?chat_id=${threadChatId}&user_id=${additionalParticipant!.id}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      ),
+    )
+    expect(addedParticipantRes.status).toBe(200)
+    expect((await addedParticipantRes.json()).result.participant.user.id).toBe(additionalParticipant!.id)
+
+    const removeParticipantRes = await app.handle(
+      new Request("http://localhost/bot/removeThreadParticipant", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ chat_id: threadChatId, user_id: additionalParticipant!.id }),
+      }),
+    )
+    expect(removeParticipantRes.status).toBe(200)
+
+    const removeBotRes = await app.handle(
+      new Request("http://localhost/bot/removeThreadParticipant", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ chat_id: threadChatId, user_id: bot!.id }),
+      }),
+    )
+    expect(removeBotRes.status).toBe(400)
 
     // Delete the message (chat_id target)
     const delRes = await app.handle(

@@ -44,6 +44,7 @@ export const deleteMessage = async (input: Input, context: FunctionContext): Pro
   })
 
   let { update, metadataChatUpdates } = await MessageModel.deleteMessages(input.messageIds, chat.id)
+  BotUpdateProjector.messageRoutesDeleted({ chatId: chat.id, messageIds: input.messageIds })
   const backlinkSelfUpdates = await deleteBacklinkMessages(backlinkMessages, {
     currentUserId: context.currentUserId,
   })
@@ -54,8 +55,6 @@ export const deleteMessage = async (input: Input, context: FunctionContext): Pro
     currentUserId: context.currentUserId,
     update,
   })
-
-  BotUpdateProjector.messagesDeleted({ chat, messageIds: input.messageIds, actorUserId: context.currentUserId })
 
   const { selfUpdates: metadataSelfUpdates } = await pushChatMetadataUpdates({
     currentUserId: context.currentUserId,

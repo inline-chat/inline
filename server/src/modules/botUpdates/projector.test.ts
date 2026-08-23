@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { MessageEntity_Type, type MessageEntities } from "@inline-chat/protocol/core"
-import { activationReason, agentMentionTarget } from "./projector"
+import { activationReason } from "./projector"
 
-const entities = (userId?: number, agentId?: number): MessageEntities | undefined =>
+const entities = (userId?: number): MessageEntities | undefined =>
   userId === undefined
     ? undefined
     : {
@@ -12,10 +12,7 @@ const entities = (userId?: number, agentId?: number): MessageEntities | undefine
           length: 1n,
           entity: {
             oneofKind: "mention",
-            mention: {
-              userId: BigInt(userId),
-              ...(agentId === undefined ? {} : { agentId: BigInt(agentId) }),
-            },
+            mention: { userId: BigInt(userId) },
           },
         }],
       }
@@ -41,22 +38,17 @@ const reason = ({
   reply: null,
 })
 
-describe("Bot update Agent activation", () => {
+describe("Bot update activation", () => {
   test("keeps an undirected bot-authored message as context even for an all-message bot", () => {
     expect(reason({})).toBeUndefined()
   })
 
   test("activates a bot-authored message only through its explicit mention", () => {
-    expect(reason({ messageEntities: entities(20, 73) })).toBe("mention")
-    expect(reason({ messageEntities: entities(21, 73) })).toBeUndefined()
+    expect(reason({ messageEntities: entities(20) })).toBe("mention")
+    expect(reason({ messageEntities: entities(21) })).toBeUndefined()
   })
 
   test("never wakes a bot from its own authored message", () => {
-    expect(reason({ authorId: 20, messageEntities: entities(20, 73) })).toBeUndefined()
-  })
-
-  test("selects an Agent only under the paired bot user mention", () => {
-    expect(agentMentionTarget(entities(20, 73), 20)).toBe(73)
-    expect(agentMentionTarget(entities(21, 73), 20)).toBeUndefined()
+    expect(reason({ authorId: 20, messageEntities: entities(20) })).toBeUndefined()
   })
 })

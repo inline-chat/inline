@@ -47,6 +47,8 @@ Use `authMode: "path"` only when adapting a client that expects the token in the
 - `POST /bot/searchMessages`
 - `POST /bot/createThread`
 - `POST /bot/createReplyThread`
+- `POST /bot/addThreadParticipant`
+- `POST /bot/removeThreadParticipant`
 - `POST /bot/sendMessage`
 - `POST /bot/editMessageText`
 - `POST /bot/deleteMessage`
@@ -58,6 +60,28 @@ Use `authMode: "path"` only when adapting a client that expects the token in the
 
 Chats have `type: "user" | "thread"`. A reply thread may contain `parent_chat_id` and `parent_message`. The embedded parent is a normal message encoded once; its chat does not recursively include another parent message.
 
+## Create a Thread and Start the Conversation
+
+Thread creation is composable: create the thread, then send its first message. The complete creation contract is `title`, `emoji`, `space_id`, `is_public`, and `participants`. For a private thread, Inline automatically includes the authenticated bot alongside the requested user IDs. Public threads do not accept an explicit participant list.
+
+```ts
+const created = await bot.createThread({
+  title: "Support",
+  participants: [userId],
+})
+
+if (created.ok) {
+  const chatId = created.result.chat.chat_id
+  await bot.sendMessage({
+    chat_id: chatId,
+    text: `Hello [@Mo](inline://user/${userId})`,
+  })
+  await bot.addThreadParticipant({ chat_id: chatId, user_id: teammateId })
+}
+```
+
+Markdown user links become structured mentions. A bot may add or remove users when it can manage the thread, but it cannot remove itself.
+
 ## Targeting Chats
 
 - Use exactly one target per request: `chat_id` or `user_id`.
@@ -65,7 +89,7 @@ Chats have `type: "user" | "thread"`. A reply thread may contain `parent_chat_id
 
 ## Receiving Updates
 
-Use either long polling or a webhook for one ordered, durable update stream. Enabling a webhook disables polling until `deleteWebhook` is called.
+Use either long polling or a webhook for the same pending update queue. Enabling a webhook disables polling until `deleteWebhook` is called.
 
 ```ts
 await bot.setWebhook({
@@ -75,7 +99,13 @@ await bot.setWebhook({
 })
 ```
 
-The secret is optional. When set, verify the `x-inline-bot-api-secret-token` request header. Webhooks also include `x-inline-update-id` and `x-inline-attempt`. Delivery is at least once; use `update_id` to make processing safe to retry.
+Queued updates are retained for up to 24 hours. Their `update_id` values increase, but clients must tolerate gaps and slight reordering. With `getUpdates`, request 1–100 updates and pass an offset greater than the highest processed ID to confirm earlier updates. Only one long poll may be active per Bot; a newer poll replaces the older request.
+
+Each Bot may have at most 100,000 pending updates or 128 MiB of serialized pending payloads, and one update may be at most 512 KiB. A new update is dropped when a limit is reached; it never blocks later delivery, and `getWebhookInfo.dropped_update_count` reports the cumulative drops. A `getUpdates` response is capped near 4 MiB even when the requested item limit is higher.
+
+The secret is optional. When set, verify the `x-inline-bot-api-secret-token` request header. Webhooks also include `x-inline-update-id` and `x-inline-attempt`. Queued delivery is at least once; use `update_id` to make processing safe to retry. Pass `drop_pending_updates: true` to `setWebhook` or `deleteWebhook` when intentionally discarding the current backlog.
+
+`getFile` and reuse of a `file_id` are allowed only for files uploaded by the Bot or files contained in a message the Bot can currently access.
 
 Bots never receive their own messages. With the default `mentions` trigger, humans activate a bot through user chats, resolved mentions, replies, commands, and message actions. Other bots activate it only through an explicit resolved mention.
 

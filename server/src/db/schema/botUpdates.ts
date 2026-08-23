@@ -29,6 +29,10 @@ export const botUpdateStreams = pgTable("bot_update_streams", {
   webhookSecretEncrypted: bytea("webhook_secret_encrypted"),
   pollLeaseToken: varchar("poll_lease_token", { length: 64 }),
   pollLeaseExpiresAt: timestamp("poll_lease_expires_at", { mode: "date", precision: 3 }),
+  configGeneration: bigint("config_generation", { mode: "number" }).default(1).notNull(),
+  pendingUpdateCount: integer("pending_update_count").default(0).notNull(),
+  pendingPayloadBytes: bigint("pending_payload_bytes", { mode: "number" }).default(0).notNull(),
+  // Legacy stream-head delivery fields. New webhook delivery state is per update.
   nextAttemptAt: timestamp("next_attempt_at", { mode: "date", precision: 3 }),
   attemptCount: integer("attempt_count").default(0).notNull(),
   deliveryLockedAt: timestamp("delivery_locked_at", { mode: "date", precision: 3 }),
@@ -49,7 +53,13 @@ export const botUpdates = pgTable(
     updateId: bigint("update_id", { mode: "number" }).notNull(),
     updateType: varchar("update_type", { length: 32 }).notNull(),
     payloadEncrypted: bytea("payload_encrypted").notNull(),
+    payloadByteCount: integer("payload_byte_count").default(0).notNull(),
     sourceEventId: varchar("source_event_id", { length: 160 }),
+    claimToken: varchar("claim_token", { length: 64 }),
+    claimGeneration: bigint("claim_generation", { mode: "number" }),
+    claimExpiresAt: timestamp("claim_expires_at", { mode: "date", precision: 3 }),
+    nextAttemptAt: timestamp("next_attempt_at", { mode: "date", precision: 3 }).defaultNow().notNull(),
+    attemptCount: integer("attempt_count").default(0).notNull(),
     expiresAt: timestamp("expires_at", { mode: "date", precision: 3 }).notNull(),
     createdAt: createdAt(),
   },
@@ -68,6 +78,13 @@ export const botUpdates = pgTable(
       table.expiresAt,
     ),
     botUpdatesExpiryIdx: index("bot_updates_expiry_idx").on(table.expiresAt),
+    botUpdatesDeliveryIdx: index("bot_updates_delivery_idx").on(
+      table.nextAttemptAt,
+      table.claimExpiresAt,
+      table.expiresAt,
+      table.botUserId,
+      table.updateId,
+    ),
   }),
 )
 

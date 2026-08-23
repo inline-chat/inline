@@ -224,14 +224,11 @@ export const parseBotEntities = (
         userIdRaw,
         new InlineError(InlineError.ApiError.BAD_REQUEST),
       )
-      const agentId = item["agent_id"] === undefined
-        ? undefined
-        : toBigInt(item["agent_id"], new InlineError(InlineError.ApiError.BAD_REQUEST))
       return {
         ...base,
         entity: {
           oneofKind: "mention",
-          mention: { userId, ...(agentId ? { agentId } : {}) },
+          mention: { userId },
         },
       }
     }
@@ -344,9 +341,6 @@ export const encodeBotEntities = (
     if (entity.entity.oneofKind === "mention") {
       const userId = Number(entity.entity.mention.userId)
       out.user = options?.usersById?.get(userId)
-      if (entity.entity.mention.agentId !== undefined) {
-        out.agent_id = Number(entity.entity.mention.agentId)
-      }
     } else if (entity.entity.oneofKind === "textUrl") {
       out.url = entity.entity.textUrl.url
     } else if (entity.entity.oneofKind === "pre") {

@@ -54,36 +54,48 @@ async function deliver(claim: Awaited<ReturnType<typeof BotUpdatesModel.claimWeb
   const url = claim.stream.webhookUrl
   if (!url) return
   try {
+    if (!(await BotUpdatesModel.canBotAccessUpdate(claim.stream.botUserId, claim.update))) {
+      await BotUpdatesModel.discardWebhookDelivery(claim)
+      log.warn("Discarded Bot webhook update after access loss", {
+        botUserId: claim.stream.botUserId,
+        updateId: claim.update.update_id,
+      })
+      return
+    }
     const body = JSON.stringify(claim.update)
     const headers: Record<string, string> = {
       "content-type": "application/json",
       "user-agent": "InlineBotWebhook/1.0",
       "x-inline-update-id": String(claim.update.update_id),
-      "x-inline-attempt": String(claim.stream.attemptCount + 1),
+      "x-inline-attempt": String(claim.attemptCount + 1),
     }
     const secret = BotUpdatesModel.decryptWebhookSecret(claim.stream)
     if (secret) headers["x-inline-bot-api-secret-token"] = secret
     const response = await postPinned({ rawUrl: url, body, headers })
     if (response.status >= 200 && response.status < 300) {
-      await BotUpdatesModel.markWebhookDelivered(claim.stream.botUserId, claim.update.update_id)
+      await BotUpdatesModel.markWebhookDelivered(claim)
       return
     }
-    const delay = retryAfterMs(response.status, response.retryAfter) ?? webhookRetryDelayMs(claim.stream.attemptCount + 1)
+    const delay = retryAfterMs(response.status, response.retryAfter) ?? webhookRetryDelayMs(claim.attemptCount + 1)
     await BotUpdatesModel.markWebhookFailed({
-      botUserId: claim.stream.botUserId,
+      claim,
       error: `HTTP ${response.status}`,
       retryAt: new Date(Date.now() + delay),
     })
   } catch (error) {
     await BotUpdatesModel.markWebhookFailed({
-      botUserId: claim.stream.botUserId,
+      claim,
       error: error instanceof Error ? error.message : String(error),
-      retryAt: new Date(Date.now() + webhookRetryDelayMs(claim.stream.attemptCount + 1)),
+      retryAt: new Date(Date.now() + webhookRetryDelayMs(claim.attemptCount + 1)),
     })
   }
 }
 
 export async function runBotWebhookDeliveryOnce(limit = 25): Promise<number> {
+  await Promise.all([
+    BotUpdatesModel.cleanupBotUpdateRows(),
+    BotUpdatesModel.cleanupBotMessageRoutes(),
+  ])
   const claims = await BotUpdatesModel.claimWebhookDeliveries(limit)
   await Promise.all(claims.map(deliver))
   return claims.length

@@ -19,11 +19,6 @@ import type {
   GetFileParams,
   GetFileResult,
   GetMeResult,
-  CreateAgentParams,
-  CreateAgentResult,
-  GetAgentParams,
-  GetAgentResult,
-  GetMyAgentsResult,
   GetMessagesParams,
   GetMessagesResult,
   GetUpdatesParams,
@@ -34,6 +29,8 @@ import type {
   GetChatParticipantResult,
   GetChatParticipantCountParams,
   GetChatParticipantCountResult,
+  AddThreadParticipantParams,
+  RemoveThreadParticipantParams,
   PinMessageParams,
   SendMessageParams,
   SendMessageResult,
@@ -61,9 +58,6 @@ import { InlineError } from "@in/server/types/errors"
 
 export type BotOperation =
   | "getMe"
-  | "createAgent"
-  | "getAgent"
-  | "getMyAgents"
   | "sendMessage"
   | "getChat"
   | "getChatHistory"
@@ -90,6 +84,8 @@ export type BotOperation =
   | "unpinMessage"
   | "getChatParticipant"
   | "getChatParticipantCount"
+  | "addThreadParticipant"
+  | "removeThreadParticipant"
   | "setThreadTitle"
   | "uploadFile"
 
@@ -125,9 +121,6 @@ export interface BotOperationsShape {
   readonly getMe: (
     context: BotOperationContext,
   ) => Effect.Effect<GetMeResult, BotOperationError>
-  readonly createAgent: (input: CreateAgentParams, context: BotOperationContext) => Effect.Effect<CreateAgentResult, BotOperationError>
-  readonly getAgent: (input: GetAgentParams, context: BotOperationContext) => Effect.Effect<GetAgentResult, BotOperationError>
-  readonly getMyAgents: (context: BotOperationContext) => Effect.Effect<GetMyAgentsResult, BotOperationError>
   readonly sendMessage: (
     input: SendMessageParams,
     context: BotOperationContext,
@@ -191,6 +184,8 @@ export interface BotOperationsShape {
   readonly unpinMessage: (input: UnpinMessageParams, context: BotOperationContext) => Effect.Effect<EmptyResult, BotOperationError>
   readonly getChatParticipant: (input: GetChatParticipantParams, context: BotOperationContext) => Effect.Effect<GetChatParticipantResult, BotOperationError>
   readonly getChatParticipantCount: (input: GetChatParticipantCountParams, context: BotOperationContext) => Effect.Effect<GetChatParticipantCountResult, BotOperationError>
+  readonly addThreadParticipant: (input: AddThreadParticipantParams, context: BotOperationContext) => Effect.Effect<EmptyResult, BotOperationError>
+  readonly removeThreadParticipant: (input: RemoveThreadParticipantParams, context: BotOperationContext) => Effect.Effect<EmptyResult, BotOperationError>
   readonly setThreadTitle: (input: SetThreadTitleParams, context: BotOperationContext) => Effect.Effect<EmptyResult, BotOperationError>
   readonly uploadFile: (input: UploadFileOperationInput, context: BotOperationContext) => Effect.Effect<UploadFileResult, BotOperationError>
 }
@@ -204,9 +199,6 @@ export interface BotOperationHandlers {
   readonly getMe: (
     context: BotOperationContext,
   ) => Promise<GetMeResult>
-  readonly createAgent: (input: CreateAgentParams, context: BotOperationContext) => Promise<CreateAgentResult>
-  readonly getAgent: (input: GetAgentParams, context: BotOperationContext) => Promise<GetAgentResult>
-  readonly getMyAgents: (context: BotOperationContext) => Promise<GetMyAgentsResult>
   readonly sendMessage: (
     input: SendMessageParams,
     context: BotOperationContext,
@@ -270,6 +262,8 @@ export interface BotOperationHandlers {
   readonly unpinMessage: (input: UnpinMessageParams, context: BotOperationContext) => Promise<EmptyResult>
   readonly getChatParticipant: (input: GetChatParticipantParams, context: BotOperationContext) => Promise<GetChatParticipantResult>
   readonly getChatParticipantCount: (input: GetChatParticipantCountParams, context: BotOperationContext) => Promise<GetChatParticipantCountResult>
+  readonly addThreadParticipant: (input: AddThreadParticipantParams, context: BotOperationContext) => Promise<EmptyResult>
+  readonly removeThreadParticipant: (input: RemoveThreadParticipantParams, context: BotOperationContext) => Promise<EmptyResult>
   readonly setThreadTitle: (input: SetThreadTitleParams, context: BotOperationContext) => Promise<EmptyResult>
   readonly uploadFile: (input: UploadFileOperationInput, context: BotOperationContext) => Promise<UploadFileResult>
 }
@@ -367,9 +361,6 @@ export const makeBotOperations = (
 ): BotOperationsShape => ({
   getMe: (context) =>
     adapt("getMe", () => handlers.getMe(context)),
-  createAgent: (input, context) => adapt("createAgent", () => handlers.createAgent(input, context)),
-  getAgent: (input, context) => adapt("getAgent", () => handlers.getAgent(input, context)),
-  getMyAgents: (context) => adapt("getMyAgents", () => handlers.getMyAgents(context)),
   sendMessage: (input, context) =>
     adapt("sendMessage", () =>
       handlers.sendMessage(input, context),
@@ -427,6 +418,8 @@ export const makeBotOperations = (
   unpinMessage: (input, context) => adapt("unpinMessage", () => handlers.unpinMessage(input, context)),
   getChatParticipant: (input, context) => adapt("getChatParticipant", () => handlers.getChatParticipant(input, context)),
   getChatParticipantCount: (input, context) => adapt("getChatParticipantCount", () => handlers.getChatParticipantCount(input, context)),
+  addThreadParticipant: (input, context) => adapt("addThreadParticipant", () => handlers.addThreadParticipant(input, context)),
+  removeThreadParticipant: (input, context) => adapt("removeThreadParticipant", () => handlers.removeThreadParticipant(input, context)),
   setThreadTitle: (input, context) => adapt("setThreadTitle", () => handlers.setThreadTitle(input, context)),
   uploadFile: (input, context) => adapt("uploadFile", () => handlers.uploadFile(input, context)),
 })

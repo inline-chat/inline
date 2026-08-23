@@ -17,30 +17,6 @@ export const TBotUser = t.Object({
   last_name: t.Optional(t.String()),
 })
 
-export const TBotAgent = t.Object({
-  id: t.Number(),
-  bot_user_id: t.Number(),
-  name: t.String({ minLength: 1, maxLength: 256 }),
-  handle: t.Optional(t.String({ maxLength: 256 })),
-  emoji: t.Optional(t.String({ maxLength: 64 })),
-  description: t.Optional(t.String()),
-  skill_key: t.Optional(t.String({ maxLength: 256 })),
-  instructions: t.Optional(t.String()),
-})
-
-export const TCreateAgentInput = t.Object({
-  name: t.String({ minLength: 1, maxLength: 256 }),
-  handle: t.Optional(t.String({ maxLength: 256 })),
-  emoji: t.Optional(t.String({ maxLength: 64 })),
-  description: t.Optional(t.String()),
-  skill_key: t.Optional(t.String({ maxLength: 256 })),
-  instructions: t.Optional(t.String()),
-})
-
-export const TGetAgentInput = t.Object({
-  agent_id: TTargetId,
-})
-
 export const TBotPeer = t.Object({
   user_id: t.Optional(t.Number()),
 })
@@ -223,7 +199,7 @@ export const TCreateThreadInput = t.Object({
   emoji: t.Optional(t.String()),
   space_id: t.Optional(TTargetId),
   is_public: t.Optional(t.Boolean()),
-  participant_ids: t.Optional(t.Array(TTargetId, { maxItems: 50 })),
+  participants: t.Optional(t.Array(TTargetId, { maxItems: 50 })),
 })
 
 export const TCreateReplyThreadInput = t.Object({
@@ -231,7 +207,7 @@ export const TCreateReplyThreadInput = t.Object({
   message_id: TTargetId,
   title: t.Optional(t.String()),
   emoji: t.Optional(t.String()),
-  participant_ids: t.Optional(t.Array(TTargetId, { maxItems: 50 })),
+  participants: t.Optional(t.Array(TTargetId, { maxItems: 50 })),
 })
 
 export const TEditMessageTextInput = t.Object({
@@ -305,6 +281,11 @@ export const TGetChatParticipantInput = t.Object({
 })
 
 export const TGetChatParticipantCountInput = t.Object({ chat_id: TTargetId })
+
+export const TThreadParticipantMutationInput = t.Object({
+  chat_id: TTargetId,
+  user_id: TTargetId,
+})
 
 export const TSetThreadTitleInput = t.Object({
   chat_id: TTargetId,

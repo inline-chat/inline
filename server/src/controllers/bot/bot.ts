@@ -10,9 +10,6 @@ import {
   TBotFile,
   TBotMessage,
   TBotUser,
-  TBotAgent,
-  TCreateAgentInput,
-  TGetAgentInput,
   TDeleteMessageInput,
   TEditMessageTextInput,
   TGetChatHistoryInput,
@@ -26,6 +23,7 @@ import {
   TPinMessageInput,
   TGetChatParticipantInput,
   TGetChatParticipantCountInput,
+  TThreadParticipantMutationInput,
   TSetThreadTitleInput,
   TBotUploadFileInput,
   TSendMessageInput,
@@ -555,29 +553,6 @@ const botMethods = (authPlugin: any): any => {
     },
   )
 
-  app.post("/createAgent", async ({ body, query, store }: any) => ({
-    ok: true,
-    result: await botOperationHandlers.createAgent(mergePostInput(body, query) as any, ctxFromStore(store)),
-  }), {
-    detail: jsonBodyDoc(TCreateAgentInput),
-    response: TApiEnvelope(t.Object({ agent: TBotAgent })),
-  })
-
-  app.get("/getAgent", async ({ query, store }: any) => ({
-    ok: true,
-    result: await botOperationHandlers.getAgent(query as any, ctxFromStore(store)),
-  }), {
-    query: TGetAgentInput,
-    response: TApiEnvelope(t.Object({ bot: TBotUser, agent: TBotAgent })),
-  })
-
-  app.get("/getMyAgents", async ({ store }: any) => ({
-    ok: true,
-    result: await botOperationHandlers.getMyAgents(ctxFromStore(store)),
-  }), {
-    response: TApiEnvelope(t.Object({ agents: t.Array(TBotAgent) })),
-  })
-
   app.post(
     "/sendMessage",
     async ({ body, query, store }: any) => {
@@ -1042,6 +1017,16 @@ const botMethods = (authPlugin: any): any => {
     ok: true,
     result: await botOperationHandlers.getChatParticipantCount(query as any, ctxFromStore(store)),
   }), { query: TGetChatParticipantCountInput, response: TApiEnvelope(t.Object({ count: t.Number() })) })
+
+  app.post("/addThreadParticipant", async ({ body, query, store }: any) => ({
+    ok: true,
+    result: await botOperationHandlers.addThreadParticipant(mergePostInput(body, query) as any, ctxFromStore(store)),
+  }), { detail: jsonBodyDoc(TThreadParticipantMutationInput), response: TApiEnvelope(t.Object({})) })
+
+  app.post("/removeThreadParticipant", async ({ body, query, store }: any) => ({
+    ok: true,
+    result: await botOperationHandlers.removeThreadParticipant(mergePostInput(body, query) as any, ctxFromStore(store)),
+  }), { detail: jsonBodyDoc(TThreadParticipantMutationInput), response: TApiEnvelope(t.Object({})) })
 
   app.post("/setThreadTitle", async ({ body, query, store }: any) => ({
     ok: true,

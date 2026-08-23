@@ -7,14 +7,11 @@ import type {
   BotMessageAction,
   BotReaction,
   BotUser,
-  BotAgent,
 } from "@inline-chat/bot-api-types"
 import type { MessageActions, MessageEntities } from "@inline-chat/protocol/core"
 import { BotUpdatesModel } from "@in/server/db/models/botUpdates"
 import { MessageModel, type DbFullMessage } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
-import { BotAgentsModel } from "@in/server/db/models/botAgents"
-import { getServerConfig } from "@in/server/modules/serverConfig"
 import type { DbChat, DbUser } from "@in/server/db/schema"
 import { encodeBotEntities, type BotUserJson } from "@in/server/controllers/bot/entityCodec"
 import type { UpdateGroup } from "@in/server/modules/updates"
@@ -48,29 +45,6 @@ const mentionTargets = (entities: MessageEntities | null | undefined): number[] 
     if (entity.entity.oneofKind === "mention") return [Number(entity.entity.mention.userId)]
     return []
   })
-
-export const agentMentionTarget = (
-  entities: MessageEntities | null | undefined,
-  botUserId: number,
-): number | undefined => {
-  for (const entity of entities?.entities ?? []) {
-    if (entity.entity.oneofKind !== "mention") continue
-    if (Number(entity.entity.mention.userId) !== botUserId) continue
-    if (entity.entity.mention.agentId !== undefined) return Number(entity.entity.mention.agentId)
-  }
-  return undefined
-}
-
-const toAgent = (agent: import("@inline-chat/protocol/core").BotAgent): BotAgent => ({
-  id: Number(agent.id),
-  bot_user_id: Number(agent.botUserId),
-  name: agent.name,
-  handle: agent.handle,
-  emoji: agent.emoji,
-  description: agent.description,
-  skill_key: agent.skillKey,
-  instructions: agent.instructions,
-})
 
 const commandTargets = (entities: MessageEntities | null | undefined): number[] =>
   (entities?.entities ?? []).flatMap((entity) => {
@@ -221,20 +195,10 @@ async function messageCreated(input: {
       messageId: input.messageId,
       activationReason: reason,
     })
-    const mentionedAgentId = agentMentionTarget(message.entities, stream.botUserId)
-    const agentsEnabled = mentionedAgentId
-      ? (await getServerConfig("agents.rollout")).value === "enabled"
-      : false
-    const mentionedAgent = agentsEnabled && mentionedAgentId
-      ? await BotAgentsModel.get(mentionedAgentId)
-      : undefined
-    const activatedAgent = mentionedAgent && Number(mentionedAgent.botUserId) === stream.botUserId
-      ? toAgent(mentionedAgent)
-      : undefined
     await BotUpdatesModel.queue({
       botUserId: stream.botUserId,
       updateType: "message",
-      payload: { activation_reason: reason, ...(activatedAgent ? { activated_agent: activatedAgent } : {}), message: encoded },
+      payload: { activation_reason: reason, message: encoded },
       sourceEventId: `message:${input.chat.id}:${input.messageId}`,
     })
   }
@@ -255,28 +219,8 @@ async function messageEdited(input: { chat: DbChat; messageId: number }): Promis
   }
 }
 
-async function messagesDeleted(input: { chat: DbChat; messageIds: bigint[]; actorUserId: number }): Promise<void> {
-  const ids = input.messageIds.map(Number)
-  const [routes, actorRows] = await Promise.all([
-    BotUpdatesModel.getMessageRoutes(input.chat.id, ids),
-    UsersModel.getUsersWithPhotos([input.actorUserId]),
-  ])
-  const actor = actorRows[0]?.user
-  for (const route of routes) {
-    await BotUpdatesModel.queue({
-      botUserId: route.botUserId,
-      updateType: "deleted_messages",
-      payload: {
-        activation_reason: route.activationReason as BotActivationReason,
-        deleted_messages: {
-          chat: toEventChat(input.chat),
-          message_ids: ids,
-          actor: actor ? toUser(actor) : undefined,
-          date: Math.floor(Date.now() / 1_000),
-        },
-      },
-    })
-  }
+async function messageRoutesDeleted(input: { chatId: number; messageIds: bigint[] }): Promise<void> {
+  await BotUpdatesModel.deleteMessageRoutes(input.chatId, input.messageIds.map(Number))
 }
 
 async function reactionChanged(input: {
@@ -373,7 +317,7 @@ const safely = <T extends unknown[]>(name: string, fn: (...args: T) => Promise<v
 export const BotUpdateProjector = {
   messageCreated: safely("message", messageCreated),
   messageEdited: safely("edited message", messageEdited),
-  messagesDeleted: safely("deleted messages", messagesDeleted),
+  messageRoutesDeleted: safely("deleted message routes", messageRoutesDeleted),
   reactionChanged: safely("reaction", reactionChanged),
   actionInvoked: safely("message action", actionInvoked),
   participationChanged: safely("bot participation", participationChanged),
