@@ -85,7 +85,7 @@ struct InlineTooltipTests {
   @Test("Transparent rendering bleed does not increase the visible target gap")
   func renderingBleedPlacement() {
     let anchor = CGRect(x: 120, y: 100, width: 40, height: 28)
-    let tooltip = CGSize(width: 100, height: 46)
+    let tooltip = CGSize(width: 100, height: 48)
     let frame = InlineTooltipGeometry.frame(
       anchorFrame: anchor,
       tooltipSize: tooltip,
@@ -94,7 +94,7 @@ struct InlineTooltipTests {
       renderingInset: 12
     )
 
-    #expect(frame == CGRect(x: 90, y: 122, width: 100, height: 46))
+    #expect(frame == CGRect(x: 90, y: 122, width: 100, height: 48))
     #expect(frame.minY + 12 == anchor.maxY + InlineTooltipGeometry.targetSpacing)
   }
 
@@ -103,20 +103,20 @@ struct InlineTooltipTests {
     let anchor = CGRect(x: 120, y: 10, width: 40, height: 28)
     let frame = InlineTooltipGeometry.frame(
       anchorFrame: anchor,
-      tooltipSize: CGSize(width: 100, height: 46),
+      tooltipSize: CGSize(width: 100, height: 48),
       visibleFrame: CGRect(x: 0, y: 0, width: 400, height: 300),
       placement: .below,
       renderingInset: 12
     )
 
-    #expect(frame == CGRect(x: 90, y: 32, width: 100, height: 46))
+    #expect(frame == CGRect(x: 90, y: 32, width: 100, height: 48))
     #expect(frame.minY + 12 == anchor.maxY + InlineTooltipGeometry.targetSpacing)
   }
 
   @Test("Cursor placement keeps glass clear of the pointer and flips at screen edges")
   func cursorPlacement() {
     let screen = CGRect(x: 0, y: 0, width: 400, height: 300)
-    let tooltip = CGSize(width: 100, height: 46)
+    let tooltip = CGSize(width: 100, height: 48)
     let centered = InlineTooltipGeometry.frame(
       anchorFrame: CGRect(x: 150, y: 150, width: 0, height: 0),
       tooltipSize: tooltip,
@@ -132,10 +132,10 @@ struct InlineTooltipTests {
       renderingInset: 12
     )
 
-    #expect(centered == CGRect(x: 146, y: 108, width: 100, height: 46))
+    #expect(centered == CGRect(x: 146, y: 106, width: 100, height: 48))
     #expect(centered.minX + 12 == 150 + InlineTooltipGeometry.cursorSpacing)
     #expect(centered.maxY - 12 == 150 - InlineTooltipGeometry.cursorSpacing)
-    #expect(lowerRight == CGRect(x: 284, y: 16, width: 100, height: 46))
+    #expect(lowerRight == CGRect(x: 284, y: 16, width: 100, height: 48))
   }
 
   @Test("Pill content keeps full text, padding, and centered keycaps")
@@ -156,8 +156,8 @@ struct InlineTooltipTests {
     let commandKeycap = try #require(commandField.superview)
     let commandKeycapFrame = commandKeycap.convert(commandKeycap.bounds, to: bubble)
 
-    #expect(bubble.intrinsicContentSize.height == 46)
-    #expect(surfaceView.frame.height == 22)
+    #expect(bubble.intrinsicContentSize.height == 48)
+    #expect(surfaceView.frame.height == 24)
     #expect(surfaceView.frame.minX == 12)
     #expect(surfaceView.frame.maxX == bubble.bounds.maxX - 12)
     #expect(searchFrame.minX >= 19)
@@ -178,9 +178,9 @@ struct InlineTooltipTests {
 
     if #available(macOS 26.0, *) {
       let glassView = try #require(surfaceView as? NSGlassEffectView)
-      #expect(glassView.style == .clear)
+      #expect(glassView.style == .regular)
       #expect(glassView.tintColor == nil)
-      #expect(glassView.cornerRadius == 11)
+      #expect(glassView.cornerRadius == 12)
     }
     #expect(bubble.layer?.shadowOpacity == 0.14)
     #expect(bubble.layer?.shadowRadius == 7)

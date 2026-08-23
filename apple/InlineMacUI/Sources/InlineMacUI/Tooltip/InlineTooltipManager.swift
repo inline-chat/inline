@@ -393,7 +393,7 @@ final class InlineTooltipBubbleView: NSView {
     static let renderingInset: CGFloat = 12
     static let horizontalPadding: CGFloat = 7
     static let verticalPadding: CGFloat = 2
-    static let minimumSurfaceHeight: CGFloat = 22
+    static let minimumSurfaceHeight: CGFloat = 24
     static let cornerRadius: CGFloat = minimumSurfaceHeight / 2
     static let shadowOpacity: Float = 0.14
     static let shadowRadius: CGFloat = 7
@@ -410,7 +410,7 @@ final class InlineTooltipBubbleView: NSView {
   override init(frame frameRect: NSRect) {
     if #available(macOS 26.0, *) {
       let glassView = NSGlassEffectView()
-      glassView.style = .clear
+      glassView.style = .regular
       glassView.cornerRadius = Layout.cornerRadius
       glassView.contentView = surfaceContentView
       surfaceView = glassView
