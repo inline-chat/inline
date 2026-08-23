@@ -155,7 +155,6 @@ struct SidebarView: View {
     .contentMargins(.top, 0, for: .scrollContent)
     .background(sidebarTint)
     .animation(.easeInOut(duration: 0.18), value: settings.sidebarGlassAndTintEnabled)
-    .toolbar(removing: .sidebarToggle)
     .onChange(of: nav.currentRoute) { _, route in
       dependencies?.nav3ChatOpenPreloader?.cancelPendingOpenIfNeeded(for: route)
     }
