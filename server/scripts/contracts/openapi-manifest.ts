@@ -17,6 +17,20 @@ const documents = [
   { name: "effect-v1-openapi", path: "/v1/reference/json", source: "effect" },
   { name: "effect-bot-openapi", path: "/bot-api-reference/json", source: "effect" },
 ] as const
+const requestedDocumentNames = new Set(
+  process.argv
+    .filter((argument) => argument.startsWith("--only="))
+    .map((argument) => argument.slice("--only=".length)),
+)
+const selectedDocuments = requestedDocumentNames.size === 0
+  ? documents
+  : documents.filter((document) => requestedDocumentNames.has(document.name))
+
+if (selectedDocuments.length !== requestedDocumentNames.size) {
+  const knownNames = new Set<string>(documents.map((document) => document.name))
+  const unknownNames = [...requestedDocumentNames].filter((name) => !knownNames.has(name))
+  throw new Error(`Unknown OpenAPI document: ${unknownNames.join(", ")}`)
+}
 
 const compareStrings = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0)
 
@@ -48,7 +62,7 @@ const effectBaseUrl = async (): Promise<string> => {
 }
 
 try {
-  for (const document of documents) {
+  for (const document of selectedDocuments) {
     const response = document.source === "legacy"
       ? await app.handle(
           new Request(`http://inline.test${document.path}`),
