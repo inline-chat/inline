@@ -86,6 +86,47 @@ public struct SidebarUnreadViewportResolution<ID: Hashable>: Equatable {
 
 extension SidebarUnreadViewportResolution: Sendable where ID: Sendable {}
 
+/// Converts an unread row's layout bounds into one bounded programmatic scroll.
+/// Distant targets begin one viewport away so only the final approach animates,
+/// matching Telegram's long-distance list navigation without traversing every row.
+public struct SidebarUnreadScrollPlan: Equatable, Sendable {
+  public let targetOffset: Double
+  public let animatedStartOffset: Double
+  public let usesLongDistanceJump: Bool
+
+  public static func resolve(
+    currentOffset: Double,
+    targetMinimum: Double,
+    targetMaximum: Double,
+    viewportLength: Double,
+    contentLength: Double
+  ) -> Self {
+    let safeViewportLength = max(viewportLength, 0)
+    let maximumOffset = max(contentLength - safeViewportLength, 0)
+    let currentOffset = min(max(currentOffset, 0), maximumOffset)
+    let targetMiddle =
+      (min(targetMinimum, targetMaximum) + max(targetMinimum, targetMaximum)) / 2
+    let targetOffset = min(
+      max(targetMiddle - safeViewportLength / 2, 0),
+      maximumOffset
+    )
+    let delta = targetOffset - currentOffset
+    let usesLongDistanceJump =
+      safeViewportLength > 0
+      && abs(delta) > safeViewportLength
+    let animatedStartOffset =
+      usesLongDistanceJump
+      ? targetOffset - (delta > 0 ? safeViewportLength : -safeViewportLength)
+      : currentOffset
+
+    return Self(
+      targetOffset: targetOffset,
+      animatedStartOffset: min(max(animatedStartOffset, 0), maximumOffset),
+      usesLongDistanceJump: usesLongDistanceJump
+    )
+  }
+}
+
 /// Resolves only the two compact unread affordances needed by the viewport.
 /// Keeping this projection native prevents scroll position from invalidating
 /// the complete SwiftUI sidebar hierarchy.

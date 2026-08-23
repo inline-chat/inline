@@ -4,6 +4,7 @@ import InlineMacSidebarModel
 import InlineMacUI
 import Logger
 import OSLog
+import Observation
 import QuartzCore
 import SwiftUI
 
@@ -80,23 +81,40 @@ struct SidebarCollectionBody: NSViewControllerRepresentable {
 }
 
 private struct SidebarCollectionUnreadButtonHost: View {
-  let state: SidebarUnreadViewportDirection<SidebarCollectionNodeID>?
+  let model: SidebarCollectionUnreadButtonModel
   let direction: SidebarUnreadBelowButton.Direction
   let action: () -> Void
 
+  @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+
   var body: some View {
     ZStack {
-      if let state {
+      if let state = model.state {
         SidebarUnreadBelowButton(
           count: state.count,
           direction: direction,
           action: action
         )
-        .transition(SidebarUnreadBelowButton.transition(for: direction))
+        .transition(
+          accessibilityReduceMotion
+            ? .opacity
+            : SidebarUnreadBelowButton.transition(for: direction)
+        )
       }
     }
-    .animation(SidebarUnreadBelowButton.visibilityAnimation, value: state)
+    .animation(
+      accessibilityReduceMotion
+        ? .easeOut(duration: 0.12)
+        : SidebarUnreadBelowButton.visibilityAnimation,
+      value: model.state
+    )
   }
+}
+
+@MainActor
+@Observable
+private final class SidebarCollectionUnreadButtonModel {
+  var state: SidebarUnreadViewportDirection<SidebarCollectionNodeID>? = nil
 }
 
 private struct SidebarCollectionBodyInput {
@@ -376,8 +394,8 @@ final class SidebarCollectionBodyController: NSViewController {
   private let previewPanel = SidebarDragPreviewPanel()
   private let topScrollEdgeView = NSView()
   private let bottomScrollEdgeView = NSView()
-  private var unreadAboveHost: NSHostingView<SidebarCollectionUnreadButtonHost>?
-  private var unreadBelowHost: NSHostingView<SidebarCollectionUnreadButtonHost>?
+  private let unreadAboveButtonModel = SidebarCollectionUnreadButtonModel()
+  private let unreadBelowButtonModel = SidebarCollectionUnreadButtonModel()
   private let log = Log.scoped("SidebarCollectionBody")
   private static let diagnostics = OSLog(
     subsystem: Bundle.main.bundleIdentifier ?? "chat.inline.InlineMac",
@@ -536,8 +554,14 @@ final class SidebarCollectionBodyController: NSViewController {
     configureScrollEdgeView(bottomScrollEdgeView)
     root.addSubview(topScrollEdgeView, positioned: .above, relativeTo: scrollView)
     root.addSubview(bottomScrollEdgeView, positioned: .above, relativeTo: scrollView)
-    let unreadAboveHost = makeUnreadButtonHost(direction: .above)
-    let unreadBelowHost = makeUnreadButtonHost(direction: .below)
+    let unreadAboveHost = makeUnreadButtonHost(
+      model: unreadAboveButtonModel,
+      direction: .above
+    )
+    let unreadBelowHost = makeUnreadButtonHost(
+      model: unreadBelowButtonModel,
+      direction: .below
+    )
     root.addSubview(unreadAboveHost, positioned: .above, relativeTo: scrollView)
     root.addSubview(unreadBelowHost, positioned: .above, relativeTo: scrollView)
     NSLayoutConstraint.activate([
@@ -550,8 +574,6 @@ final class SidebarCollectionBodyController: NSViewController {
       unreadBelowHost.centerXAnchor.constraint(equalTo: root.centerXAnchor),
       unreadBelowHost.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -8),
     ])
-    self.unreadAboveHost = unreadAboveHost
-    self.unreadBelowHost = unreadBelowHost
     view = root
 
     dataSource = NSCollectionViewDiffableDataSource<Section, SidebarCollectionRow.ID>(
@@ -4487,12 +4509,20 @@ final class SidebarCollectionBodyController: NSViewController {
   }
 
   private func makeUnreadButtonHost(
+    model: SidebarCollectionUnreadButtonModel,
     direction: SidebarUnreadBelowButton.Direction
   ) -> NSHostingView<SidebarCollectionUnreadButtonHost> {
     let host = NSHostingView(rootView: SidebarCollectionUnreadButtonHost(
-      state: nil,
+      model: model,
       direction: direction,
-      action: {}
+      action: { [weak self] in
+        let target = switch direction {
+        case .above: self?.lastUnreadViewportState?.above
+        case .below: self?.lastUnreadViewportState?.below
+        }
+        guard let target else { return }
+        self?.scrollToUnread(target)
+      }
     ))
     host.translatesAutoresizingMaskIntoConstraints = false
     return host
@@ -4501,22 +4531,8 @@ final class SidebarCollectionBodyController: NSViewController {
   private func updateUnreadButtonHosts(
     _ state: SidebarUnreadViewportResolution<SidebarCollectionNodeID>
   ) {
-    unreadAboveHost?.rootView = SidebarCollectionUnreadButtonHost(
-      state: state.above,
-      direction: .above,
-      action: { [weak self] in
-        guard let target = self?.lastUnreadViewportState?.above else { return }
-        self?.scrollToUnread(target)
-      }
-    )
-    unreadBelowHost?.rootView = SidebarCollectionUnreadButtonHost(
-      state: state.below,
-      direction: .below,
-      action: { [weak self] in
-        guard let target = self?.lastUnreadViewportState?.below else { return }
-        self?.scrollToUnread(target)
-      }
-    )
+    unreadAboveButtonModel.state = state.above
+    unreadBelowButtonModel.state = state.below
   }
 
   private func scrollToUnread(
@@ -4526,10 +4542,47 @@ final class SidebarCollectionBodyController: NSViewController {
           let rowID = rowID(for: unread.targetID),
           let index = dataSource.snapshot().itemIdentifiers.firstIndex(of: rowID)
     else { return }
-    collectionView.scrollToItems(
-      at: [IndexPath(item: index, section: 0)],
-      scrollPosition: .centeredVertically
+
+    collectionView.layoutSubtreeIfNeeded()
+    guard let targetFrame = layout.layoutAttributesForItem(
+      at: IndexPath(item: index, section: 0)
+    )?.frame else { return }
+
+    let clipView = scrollView.contentView
+    let visibleBounds = clipView.bounds
+    let plan = SidebarUnreadScrollPlan.resolve(
+      currentOffset: Double(visibleBounds.minY),
+      targetMinimum: Double(targetFrame.minY),
+      targetMaximum: Double(targetFrame.maxY),
+      viewportLength: Double(visibleBounds.height),
+      contentLength: Double(layout.collectionViewContentSize.height)
     )
+    guard abs(plan.targetOffset - Double(visibleBounds.minY)) > 0.5 else { return }
+
+    let targetPoint = NSPoint(
+      x: visibleBounds.minX,
+      y: CGFloat(plan.targetOffset)
+    )
+    let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    if reduceMotion {
+      clipView.scroll(to: targetPoint)
+      scrollView.reflectScrolledClipView(clipView)
+      return
+    }
+
+    if plan.usesLongDistanceJump {
+      clipView.scroll(to: NSPoint(
+        x: visibleBounds.minX,
+        y: CGFloat(plan.animatedStartOffset)
+      ))
+      scrollView.reflectScrolledClipView(clipView)
+    }
+
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0.28
+      context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+      clipView.animator().setBoundsOrigin(targetPoint)
+    }
   }
 
   private func validatePresentationInvariants(context: String) {
