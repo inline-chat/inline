@@ -107,7 +107,7 @@ describe("notification decision", () => {
     expect(decision.needsExplicitMacNotification).toBe(true)
   })
 
-  test("urgent nudge bypasses none mode", () => {
+  test("urgent nudge bypasses none mode through the standard message update", () => {
     const decision = decideNotification({
       mode: UserSettingsNotificationsMode.None,
       isUrgentNudge: true,
@@ -118,6 +118,7 @@ describe("notification decision", () => {
     })
 
     expect(decision.shouldNotify).toBe(true)
+    expect(decision.needsExplicitMacNotification).toBe(false)
   })
 
   test("all mode sends standard notification without explicit mac reason", () => {

@@ -925,19 +925,51 @@ extension InlineProtocol.UpdateNewMessage {
     }
 
     #if os(macOS)
-    // Show notifications only for newly-inserted incoming messages, never for catch-up replays.
-    if !suppressNotifications, !hadMessage, msg.out == false {
-      let dialogSelection = (try? Dialog.get(peerId: msg.peerId).fetchOne(db)?.notificationSelection) ?? .global
-      Task { @MainActor in
-        let effectiveMode = dialogSelection.resolveEffectiveMode(
-          globalMode: INUserSettings.current.notification.mode
-        )
-        // Realtime newMessage notifications are the "all messages" path.
-        guard effectiveMode == .all else { return }
-        guard message.sendMode != .modeSilent else { return }
-        Task.detached {
-          // Handle notification
-          await MacNotifications.shared.handleNewMessage(protocolMsg: message)
+    // Keep sync catch-up suppressed until its durable payload preserves every
+    // notification-affecting input. The age gate also rejects delayed realtime delivery.
+    if !suppressNotifications,
+       !hadMessage,
+       msg.out == false,
+       MacNotifications.isFreshMessage(message, now: Date()),
+       let currentUserID = Auth.shared.getCurrentUserId() {
+      db.afterNextTransaction { committedDB in
+        do {
+          let replyToMessageID = message.hasReplyToMsgID ? message.replyToMsgID : nil
+          guard let context = try MacIncomingNotificationContext.fetch(
+            committedDB,
+            peerID: msg.peerId,
+            chatID: msg.chatId,
+            replyToMessageID: replyToMessageID
+          ) else { return }
+
+          let dialogSelection = context.dialog.notificationSelection
+          let isUnread = context.isUnread(messageID: msg.messageId)
+          let isPersonallyAddressed = context.isPersonallyAddressed(
+            message: message,
+            currentUserID: currentUserID
+          )
+
+          Task { @MainActor in
+            let effectiveMode = dialogSelection.resolveEffectiveMode(
+              globalMode: INUserSettings.current.notification.mode
+            )
+            guard MacNotifications.shouldScheduleMessageNotification(
+              for: message,
+              effectiveMode: effectiveMode,
+              source: .newMessage,
+              deliveryState: .init(
+                isNewlyInserted: true,
+                isUnread: isUnread,
+                isPersonallyAddressed: isPersonallyAddressed
+              ),
+              now: Date()
+            ) else { return }
+            Task.detached {
+              await MacNotifications.shared.handleNewMessage(protocolMsg: message)
+            }
+          }
+        } catch {
+          Log.shared.error("Failed to resolve macOS notification context", error: error)
         }
       }
     }
@@ -946,27 +978,9 @@ extension InlineProtocol.UpdateNewMessage {
 }
 
 extension InlineProtocol.UpdateNewMessageNotification {
-  func apply(_ db: Database) throws {
-    #if os(macOS)
-    // Show notification for incoming messages
-    if message.out == false {
-      let dialogSelection = (try? Dialog.get(peerId: message.peerID.toPeer()).fetchOne(db)?.notificationSelection)
-        ?? .global
-      Task { @MainActor in
-        let effectiveMode = dialogSelection.resolveEffectiveMode(
-          globalMode: INUserSettings.current.notification.mode
-        )
-        // Explicit notification updates are for mention/important style flows.
-        guard effectiveMode != .all && effectiveMode != .none else { return }
-        guard message.sendMode != .modeSilent else { return }
-        Task.detached {
-          // Handle notification
-          await MacNotifications.shared.handleNewMessage(protocolMsg: message)
-        }
-      }
-    }
-    #endif
-  }
+  // Compatibility event for older Mac clients. New clients derive all local
+  // notification work from the durable newMessage update.
+  func apply(_: Database) throws {}
 }
 
 extension InlineProtocol.UpdateMessageId {

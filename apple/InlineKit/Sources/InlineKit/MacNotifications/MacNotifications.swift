@@ -2,6 +2,7 @@
 import AppKit
 import CoreGraphics
 import Foundation
+import GRDB
 import ImageIO
 import InlineAvatarCore
 import InlineProtocol
@@ -17,10 +18,81 @@ public enum MacNotificationPlaygroundAvatarMode: String, CaseIterable, Sendable,
 }
 #endif
 
+struct MacIncomingNotificationContext: Sendable {
+  let dialog: Dialog
+  let directReplySenderID: Int64?
+  let replyThreadAnchorSenderID: Int64?
+
+  static func fetch(
+    _ db: Database,
+    peerID: Peer,
+    chatID: Int64,
+    replyToMessageID: Int64?
+  ) throws -> Self? {
+    guard let row = try Row.fetchOne(
+      db,
+      sql: """
+      SELECT dialog.*,
+             directReply.fromId AS directReplySenderID,
+             replyThreadAnchor.fromId AS replyThreadAnchorSenderID
+      FROM dialog
+      LEFT JOIN chat AS notificationChat
+        ON notificationChat.id = ?
+      LEFT JOIN message AS directReply
+        ON directReply.chatId = ? AND directReply.messageId = ?
+      LEFT JOIN message AS replyThreadAnchor
+        ON replyThreadAnchor.chatId = notificationChat.parentChatId
+       AND replyThreadAnchor.messageId = notificationChat.parentMessageId
+      WHERE dialog.id = ?
+      LIMIT 1
+      """,
+      arguments: [
+        chatID,
+        chatID,
+        replyToMessageID,
+        Dialog.getDialogId(peerId: peerID),
+      ]
+    ) else { return nil }
+
+    return try Self(
+      dialog: Dialog(row: row),
+      directReplySenderID: row["directReplySenderID"],
+      replyThreadAnchorSenderID: row["replyThreadAnchorSenderID"]
+    )
+  }
+
+  func isUnread(messageID: Int64) -> Bool {
+    let readMaxID = dialog.readInboxMaxId ?? 0
+    let collapsedMaxID = dialog.collapsedMaxId ?? 0
+    return messageID > readMaxID && messageID > collapsedMaxID
+  }
+
+  func isPersonallyAddressed(
+    message: InlineProtocol.Message,
+    currentUserID: Int64
+  ) -> Bool {
+    message.mentioned
+      || directReplySenderID == currentUserID
+      || replyThreadAnchorSenderID == currentUserID
+  }
+}
+
 public actor MacNotifications {
   public static let shared = MacNotifications()
 
   private static let urgentNudgeText = "\u{1F6A8}"
+  static let maximumMessageAge: TimeInterval = 30
+
+  enum MessageUpdateSource: Equatable, Sendable {
+    case newMessage
+    case explicitNotification
+  }
+
+  struct MessageDeliveryState: Equatable, Sendable {
+    let isNewlyInserted: Bool
+    let isUnread: Bool
+    let isPersonallyAddressed: Bool
+  }
 
   private var soundEnabled = true
   private let log = Log.scoped("MacNotifications")
@@ -42,7 +114,9 @@ public actor MacNotifications {
     userInfo: [AnyHashable: Any],
     imageURL: URL? = nil,
     forceSound: Bool = false,
-    soundOverride: Bool? = nil
+    soundOverride: Bool? = nil,
+    requestIdentifier: String? = nil,
+    threadIdentifier: String? = nil
   ) async -> Bool {
     guard Self.canPostSystemNotifications(bundleURL: Bundle.main.bundleURL) else { return false }
 
@@ -53,6 +127,9 @@ public actor MacNotifications {
       content.subtitle = subtitle
     }
     content.userInfo = userInfo
+    if let threadIdentifier {
+      content.threadIdentifier = threadIdentifier
+    }
     let isSoundEnabled = await isSoundEnabled()
     content.sound = (soundOverride ?? (forceSound || isSoundEnabled)) ? .default : nil
     if forceSound {
@@ -74,7 +151,7 @@ public actor MacNotifications {
     }
 
     let request = UNNotificationRequest(
-      identifier: UUID().uuidString,
+      identifier: requestIdentifier ?? UUID().uuidString,
       content: content,
       trigger: nil
     )
@@ -91,6 +168,64 @@ public actor MacNotifications {
 
   static func canPostSystemNotifications(bundleURL: URL) -> Bool {
     bundleURL.pathExtension == "app"
+  }
+
+  nonisolated static func shouldScheduleMessageNotification(
+    for message: InlineProtocol.Message,
+    effectiveMode: NotificationMode,
+    source: MessageUpdateSource,
+    deliveryState: MessageDeliveryState,
+    now: Date
+  ) -> Bool {
+    guard source == .newMessage else { return false }
+    guard deliveryState.isNewlyInserted, deliveryState.isUnread else { return false }
+    guard message.sendMode != .modeSilent else { return false }
+    guard isFreshMessage(message, now: now) else { return false }
+
+    if isUrgentNudge(message) {
+      return true
+    }
+
+    let isNudge: Bool = if case .nudge = message.media.media { true } else { false }
+    let isDirectMessage = message.peerID.toPeer().isPrivate
+    let isAddressedToCurrentUser = message.mentioned || deliveryState.isPersonallyAddressed
+
+    switch effectiveMode {
+    case .all:
+      return true
+    case .none:
+      return false
+    case .mentions, .importantOnly:
+      return isDirectMessage || isAddressedToCurrentUser || isNudge
+    case .onlyMentions:
+      return isAddressedToCurrentUser || isNudge
+    }
+  }
+
+  nonisolated static func isFreshMessage(
+    _ message: InlineProtocol.Message,
+    now: Date
+  ) -> Bool {
+    guard message.date > 0 else { return false }
+    let messageDate = Date(timeIntervalSince1970: TimeInterval(message.date))
+    return now.timeIntervalSince(messageDate) <= maximumMessageAge
+  }
+
+  nonisolated static func messageNotificationIdentifier(
+    chatID: Int64,
+    messageID: Int64
+  ) -> String {
+    "chat_\(chatID)_message_\(messageID)"
+  }
+
+  nonisolated static func notificationThreadIdentifier(chatID: Int64) -> String {
+    "chat_\(chatID)"
+  }
+
+  nonisolated static func isUrgentNudge(_ message: InlineProtocol.Message) -> Bool {
+    guard case .nudge = message.media.media else { return false }
+    guard message.hasMessage else { return false }
+    return message.message.trimmingCharacters(in: .whitespacesAndNewlines) == urgentNudgeText
   }
 }
 
@@ -190,14 +325,11 @@ extension MacNotifications {
     } else {
       await avatarBuilder.attachmentURL(for: user, fallbackUserID: protocolMsg.fromID)
     }
-    let trimmedText = protocolMsg.hasMessage ? protocolMsg.message.trimmingCharacters(in: .whitespacesAndNewlines) : nil
-    let isUrgentNudge = {
-      guard case .nudge = protocolMsg.media.media else { return false }
-      return trimmedText == Self.urgentNudgeText
-    }()
+    let isUrgentNudge = Self.isUrgentNudge(protocolMsg)
     var notificationUserInfo: [AnyHashable: Any] = [
       "userId": protocolMsg.fromID,
       "isThread": chat?.type == .thread,
+      "messageId": String(protocolMsg.id),
     ]
     if let chat, chat.type == .thread {
       notificationUserInfo["threadId"] = chat.id
@@ -213,7 +345,12 @@ extension MacNotifications {
       body: body,
       userInfo: notificationUserInfo,
       imageURL: imageURL,
-      forceSound: isUrgentNudge
+      forceSound: isUrgentNudge,
+      requestIdentifier: Self.messageNotificationIdentifier(
+        chatID: protocolMsg.chatID,
+        messageID: protocolMsg.id
+      ),
+      threadIdentifier: Self.notificationThreadIdentifier(chatID: protocolMsg.chatID)
     )
   }
 }

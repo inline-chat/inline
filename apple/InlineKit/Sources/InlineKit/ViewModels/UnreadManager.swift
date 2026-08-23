@@ -81,9 +81,7 @@ public final class UnreadManager: Sendable {
       await sendReadMessagesToServer(peerId: peerId, maxId: maxId)
     }
 
-#if os(iOS)
     NotificationCleanup.removeNotifications(threadId: "chat_\(chatId)", upToMessageId: maxId)
-#endif
   }
 
   // Useful in context menu to mark all messages as read
@@ -126,6 +124,12 @@ public final class UnreadManager: Sendable {
         } catch {
           log.error("Failed to update local DB with unread count", error: error)
         }
+
+        #if os(macOS)
+        // Message-list visibility can request read-all repeatedly. Reuse the
+        // existing local-write gate so notification-center enumeration is bounded.
+        NotificationCleanup.removeNotifications(threadId: "chat_\(chatId)", upToMessageId: nil)
+        #endif
       }
 
       if shouldSendRemote {
@@ -134,8 +138,8 @@ public final class UnreadManager: Sendable {
       }
     }
 
-#if os(iOS)
+    #if os(iOS)
     NotificationCleanup.removeNotifications(threadId: "chat_\(chatId)", upToMessageId: nil)
-#endif
+    #endif
   }
 }
