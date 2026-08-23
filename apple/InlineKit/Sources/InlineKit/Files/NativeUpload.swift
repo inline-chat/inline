@@ -5,6 +5,12 @@ import InlineProtocol
 import Logger
 import RealtimeV2
 
+let maximumUploadProcessingRetrySeconds: UInt32 = 30
+
+func boundedUploadProcessingRetrySeconds(_ seconds: UInt32) -> UInt32 {
+  min(maximumUploadProcessingRetrySeconds, max(1, seconds))
+}
+
 public struct NativeMediaUploadRequest: Sendable {
   public let logicalID: String
   public let fileURL: URL
@@ -146,6 +152,16 @@ extension RealtimeV2: NativeUploadRPCTransport {
   }
 }
 
+extension RealtimeDirectSession: NativeUploadRPCTransport {
+  public func callUploadRPC(
+    method: InlineProtocol.Method,
+    input: RpcCall.OneOf_Input?,
+    timeout: Duration?
+  ) async throws -> RpcResult.OneOf_Result? {
+    try await callRpcDirect(method: method, input: input, timeout: timeout)
+  }
+}
+
 public enum NativeMediaUploadError: Error, LocalizedError, Sendable {
   case emptySource
   case invalidGeometry
@@ -177,6 +193,11 @@ public actor DurableUploadCoordinator: MediaUploading {
   private static let hashReadSize = 1_048_576
   private static let maximumPartSize = 16 * 1_048_576
   private static let maximumConcurrentPartsPerUpload = 2
+  // These are individual RPC stall bounds, not a deadline for the complete upload.
+  // A large file can span any number of successful part requests.
+  private static let mutationTimeout: Duration = .seconds(60)
+  private static let stateProbeTimeout: Duration = .seconds(15)
+  private static let cancellationCleanupTimeout: Duration = .seconds(5)
 
   private enum FinishReconciliation {
     case complete(UploadComplete)
@@ -243,7 +264,7 @@ public actor DurableUploadCoordinator: MediaUploading {
     let createdResult = try await transport.callUploadRPC(
       method: .createUpload,
       input: .createUpload(create),
-      timeout: .seconds(60)
+      timeout: Self.mutationTimeout
     )
     guard case let .createUpload(created)? = createdResult else {
       throw NativeMediaUploadError.unexpectedResponse
@@ -333,7 +354,7 @@ public actor DurableUploadCoordinator: MediaUploading {
           let result = try await transport.callUploadRPC(
             method: .finishUpload,
             input: .finishUpload(finish),
-            timeout: .seconds(60)
+            timeout: Self.mutationTimeout
           )
           guard case let .finishUpload(value)? = result,
                 value.state != nil
@@ -398,7 +419,9 @@ public actor DurableUploadCoordinator: MediaUploading {
           }
           accepted.subtract(missing.partIndices)
         case let .processing(processing):
-          try await Task.sleep(for: .seconds(max(1, processing.retryAfterSeconds)))
+          try await Task.sleep(for: .seconds(boundedUploadProcessingRetrySeconds(
+            processing.retryAfterSeconds
+          )))
         case let .failed(failure):
           throw NativeMediaUploadError.rejected(
             code: failure.code,
@@ -410,11 +433,18 @@ public actor DurableUploadCoordinator: MediaUploading {
       if Task.isCancelled {
         var cancel = CancelUploadInput()
         cancel.uploadID = created.uploadID
-        _ = try? await transport.callUploadRPC(
-          method: .cancelUpload,
-          input: .cancelUpload(cancel),
-          timeout: .seconds(5)
-        )
+        let transport = transport
+        // The upload task is already cancelled, but cancellation has one terminal owner. Give
+        // that owner a short, awaited, non-cancelled window to release server staging before the
+        // caller tears down its transport. Failure remains best effort and server TTL is the
+        // safety net.
+        await Task.detached {
+          _ = try? await transport.callUploadRPC(
+            method: .cancelUpload,
+            input: .cancelUpload(cancel),
+            timeout: Self.cancellationCleanupTimeout
+          )
+        }.value
         await staging.discard(logicalID: ownerScopedLogicalID)
       }
       throw error
@@ -427,7 +457,7 @@ public actor DurableUploadCoordinator: MediaUploading {
     let result = try await transport.callUploadRPC(
       method: .getUploadState,
       input: .getUploadState(input),
-      timeout: .seconds(15)
+      timeout: Self.stateProbeTimeout
     )
     guard case let .getUploadState(state)? = result else {
       throw NativeMediaUploadError.unexpectedResponse
@@ -501,7 +531,7 @@ public actor DurableUploadCoordinator: MediaUploading {
       let result = try await transport.callUploadRPC(
         method: .saveUploadPart,
         input: .saveUploadPart(save),
-        timeout: .seconds(60)
+        timeout: Self.mutationTimeout
       )
       guard case .saveUploadPart? = result else {
         throw NativeMediaUploadError.unexpectedResponse

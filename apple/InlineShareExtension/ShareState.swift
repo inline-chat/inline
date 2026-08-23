@@ -138,27 +138,6 @@ private final class SharedContentAccumulator: @unchecked Sendable {
   }
 }
 
-/// Resolves a non-cancellable realtime invocation or its local deadline exactly once.
-private final class SendMessageInvocationGate: @unchecked Sendable {
-  private let lock = NSLock()
-  private var continuation: CheckedContinuation<RpcResult.OneOf_Result?, any Error>?
-
-  init(continuation: CheckedContinuation<RpcResult.OneOf_Result?, any Error>) {
-    self.continuation = continuation
-  }
-
-  func resume(with result: Result<RpcResult.OneOf_Result?, any Error>) {
-    lock.lock()
-    guard let continuation else {
-      lock.unlock()
-      return
-    }
-    self.continuation = nil
-    lock.unlock()
-    continuation.resume(with: result)
-  }
-}
-
 /// Manages the state and operations for the share extension
 /// Handles loading shared content, uploading files, and sending messages
 @MainActor
@@ -201,6 +180,11 @@ class ShareState: ObservableObject {
     let cleanupURLs: [URL]
   }
 
+  private struct RealtimeContext: Sendable {
+    let session: RealtimeDirectSession
+    let uploads: DurableUploadCoordinator
+  }
+
   @Published var sharedContent: SharedContent?
   @Published var sharedData: SharedData?
   @Published var isLoadingContent: Bool = false
@@ -213,10 +197,11 @@ class ShareState: ObservableObject {
 
   private nonisolated let log = Log.scoped("ShareState")
   private nonisolated let shareSessionId = UUID().uuidString
-  private nonisolated let realtimeConnectWarmupSeconds: TimeInterval = 2
-  private nonisolated let realtimeConnectRetrySeconds: TimeInterval = 8
   private nonisolated let sendTimeoutSeconds: TimeInterval = 12
-  @MainActor private var hasStartedRealtime: Bool = false
+  private nonisolated let connectionAdmissionTimeout: Duration = .seconds(15)
+  private var realtimeContext: RealtimeContext?
+  private var sendTask: Task<Void, Never>?
+  private var activeProgressUploadID: UUID?
 
   private nonisolated func tagged(_ message: String) -> String {
     "[share \(shareSessionId)] \(message)"
@@ -1618,8 +1603,10 @@ class ShareState: ObservableObject {
 
   private func uploadPreparedFile(
     _ file: PreparedSharedFile,
+    logicalID: String,
     progress: @escaping @Sendable (ApiClient.UploadTransferProgress) -> Void
   ) async throws -> InlineKit.UploadFileResult {
+    try Task.checkCancellation()
     guard file.fileType != .voice else {
       throw NSError(
         domain: "ShareError",
@@ -1627,6 +1614,7 @@ class ShareState: ObservableObject {
         userInfo: [NSLocalizedDescriptionKey: "Voice messages are not supported from the share extension."]
       )
     }
+    let realtime = try await realtimeContextIfNeeded()
 
     var thumbnailURL: URL?
     defer {
@@ -1668,9 +1656,9 @@ class ShareState: ObservableObject {
         .appendingPathComponent("inline-share-thumbnail-\(UUID().uuidString)")
       try thumbnailData.write(to: url, options: .atomic)
       thumbnailURL = url
-      let complete = try await DurableUploadCoordinator.shared.upload(
+      let complete = try await realtime.uploads.upload(
         NativeMediaUploadRequest(
-          logicalID: UUID().uuidString,
+          logicalID: "\(logicalID):thumbnail",
           fileURL: url,
           fileName: "thumbnail.jpg",
           mimeType: thumbnailMimeType,
@@ -1678,6 +1666,7 @@ class ShareState: ObservableObject {
         ),
         progress: { _, _ in }
       )
+      try Task.checkCancellation()
       thumbnailFileUniqueID = complete.fileUniqueID
     }
 
@@ -1687,9 +1676,9 @@ class ShareState: ObservableObject {
     case .document: .document
     case .voice: .voice
     }
-    let complete = try await DurableUploadCoordinator.shared.upload(
+    let complete = try await realtime.uploads.upload(
       NativeMediaUploadRequest(
-        logicalID: UUID().uuidString,
+        logicalID: logicalID,
         fileURL: file.url,
         fileName: file.fileName,
         mimeType: file.mimeType.text,
@@ -1707,6 +1696,7 @@ class ShareState: ObservableObject {
         )
       }
     )
+    try Task.checkCancellation()
     switch complete.media {
     case let .photo(photo):
       return InlineKit.UploadFileResult(fileUniqueId: complete.fileUniqueID, photoId: photo.id)
@@ -1721,92 +1711,16 @@ class ShareState: ObservableObject {
     }
   }
 
-  @MainActor
-  private func startRealtimeIfNeeded() async {
-    guard !hasStartedRealtime else { return }
-    hasStartedRealtime = true
+  private func realtimeContextIfNeeded() async throws -> RealtimeContext {
+    try Task.checkCancellation()
+    if let realtimeContext {
+      return realtimeContext
+    }
     if !Auth.shared.getIsLoggedIn() {
       await Auth.shared.refreshFromStorage()
     }
     guard Auth.shared.getIsLoggedIn() else {
       log.warning(tagged("Realtime start skipped (missing authentication)"))
-      hasStartedRealtime = false
-      return
-    }
-    await Api.realtime.connectIfNeeded()
-  }
-
-  private nonisolated func waitForRealtimeConnected(maxSeconds: TimeInterval) async -> Bool {
-    let start = Date()
-    var lastState: RealtimeConnectionState?
-
-    while Date().timeIntervalSince(start) < maxSeconds {
-      let state = await MainActor.run { Api.realtime.stateObject.connectionState }
-      if state != lastState {
-        log.debug(tagged("Realtime state: \(state)"))
-        lastState = state
-      }
-
-      if state == .connected || state == .updating {
-        return true
-      }
-
-      try? await Task.sleep(for: .milliseconds(150))
-    }
-
-    log.warning(tagged("Realtime still connecting after \(maxSeconds)s"))
-    return false
-  }
-
-  private nonisolated func invokeSendMessage(
-    _ input: SendMessageInput,
-    timeoutSeconds: TimeInterval
-  ) async throws -> RpcResult.OneOf_Result? {
-    try await withCheckedThrowingContinuation { continuation in
-      let gate = SendMessageInvocationGate(continuation: continuation)
-
-      // Realtime V1 stores a checked continuation and does not currently react to task
-      // cancellation. Use unstructured racers so the extension deadline can still resolve.
-      // The caller retries with the same random ID, so a late first invocation is deduplicated.
-      Task {
-        do {
-          let result = try await Api.realtime.callRpcDirect(
-            method: .sendMessage,
-            input: .sendMessage(input),
-            timeout: .seconds(timeoutSeconds)
-          )
-          gate.resume(with: .success(result))
-        } catch {
-          gate.resume(with: .failure(error))
-        }
-      }
-
-      Task {
-        do {
-          try await Task.sleep(for: .seconds(timeoutSeconds))
-        } catch {
-          return
-        }
-
-        gate.resume(with: .failure(NSError(
-          domain: "ShareError",
-          code: 15,
-          userInfo: [NSLocalizedDescriptionKey: "Inline couldn't reach the server."]
-        )))
-      }
-    }
-  }
-
-  private nonisolated func sendMessageToChat(
-    _ selectedChat: SharedChat,
-    text: String?,
-    media: InputMedia?
-  ) async throws {
-    if Auth.shared.getToken() == nil {
-      await Auth.shared.refreshFromStorage()
-    }
-
-    guard Auth.shared.getToken() != nil else {
       throw NSError(
         domain: "ShareError",
         code: 13,
@@ -1814,11 +1728,63 @@ class ShareState: ObservableObject {
       )
     }
 
-    await startRealtimeIfNeeded()
-    let didConnect = await waitForRealtimeConnected(maxSeconds: realtimeConnectWarmupSeconds)
-    if !didConnect {
-      log.warning(tagged("Realtime not connected yet; send will wait on queue"))
+    let session = RealtimeDirectSession(
+      transport: NegotiatingRealtimeTransport(
+        auth: Auth.shared.handle,
+        rsaPublicKeys: InlineProtocolTrustRoots.production
+      ),
+      auth: Auth.shared.handle,
+      connectionAdmissionTimeout: connectionAdmissionTimeout
+    )
+    let context = RealtimeContext(
+      session: session,
+      uploads: DurableUploadCoordinator(transport: session)
+    )
+    realtimeContext = context
+    await session.connectIfNeeded()
+    do {
+      try Task.checkCancellation()
+    } catch {
+      if realtimeContext?.session === session {
+        realtimeContext = nil
+      }
+      await session.finish()
+      throw error
     }
+    return context
+  }
+
+  private nonisolated func invokeSendMessage(
+    on session: RealtimeDirectSession,
+    _ input: SendMessageInput,
+    timeoutSeconds: TimeInterval
+  ) async throws -> RpcResult.OneOf_Result? {
+    try await session.callRpcDirect(
+      method: .sendMessage,
+      input: .sendMessage(input),
+      timeout: .seconds(timeoutSeconds)
+    )
+  }
+
+  private nonisolated func sendMessageToChat(
+    _ selectedChat: SharedChat,
+    text: String?,
+    media: InputMedia?
+  ) async throws {
+    try Task.checkCancellation()
+    if !Auth.shared.getIsLoggedIn() {
+      await Auth.shared.refreshFromStorage()
+    }
+
+    guard Auth.shared.getIsLoggedIn() else {
+      throw NSError(
+        domain: "ShareError",
+        code: 13,
+        userInfo: [NSLocalizedDescriptionKey: "Inline needs to be opened before you can share."]
+      )
+    }
+
+    let realtime = try await realtimeContextIfNeeded()
 
     let inputPeer = try inputPeer(for: selectedChat)
     let randomId = Int64.random(in: 0 ... Int64.max)
@@ -1832,11 +1798,17 @@ class ShareState: ObservableObject {
       if let media { $0.media = media }
     }
 
-    // Use Realtime V1 for share extension reliability until V2 direct RPC is stable here.
+    // Direct RPC is the extension-owned V2/V3 path. A stable random ID makes the
+    // one deliberate reconnect retry safe if the first result is lost.
     for attempt in 0 ..< 2 {
+      try Task.checkCancellation()
       do {
         log.debug(tagged("Send attempt \(attempt + 1)"))
-        let result = try await invokeSendMessage(input, timeoutSeconds: sendTimeoutSeconds)
+        let result = try await invokeSendMessage(
+          on: realtime.session,
+          input,
+          timeoutSeconds: sendTimeoutSeconds
+        )
         guard case .sendMessage = result else {
           throw NSError(
             domain: "ShareError",
@@ -1845,19 +1817,15 @@ class ShareState: ObservableObject {
           )
         }
         return
-      } catch let error as RealtimeAPIError {
-        if case .notConnected = error, attempt == 0 {
-          log.warning(tagged("Realtime not connected during send, retrying"))
-          await startRealtimeIfNeeded()
-          _ = await waitForRealtimeConnected(maxSeconds: realtimeConnectRetrySeconds)
+      } catch let error as RealtimeDirectRpcError {
+        switch error {
+        case .notConnected where attempt == 0:
+          log.warning(tagged("Realtime unavailable during send, retrying with stable random ID"))
+          await realtime.session.connectIfNeeded()
           continue
+        default:
+          throw error
         }
-        throw error
-      } catch let error as NSError where error.domain == "ShareError" && error.code == 15 && attempt == 0 {
-        log.warning(tagged("Realtime send timed out, retrying"))
-        await startRealtimeIfNeeded()
-        _ = await waitForRealtimeConnected(maxSeconds: realtimeConnectRetrySeconds)
-        continue
       }
     }
 
@@ -1913,9 +1881,32 @@ class ShareState: ObservableObject {
   }
 
   struct ShareProgressState: Equatable {
+    struct Transfer: Equatable {
+      let acceptedBytes: Int64
+      let totalBytes: Int64
+
+      var fractionCompleted: Double {
+        guard totalBytes > 0 else { return 0 }
+        return min(max(Double(acceptedBytes) / Double(totalBytes), 0), 1)
+      }
+    }
+
     var title: String
     var detail: String?
     var fractionCompleted: Double?
+    var transfer: Transfer?
+
+    init(
+      title: String,
+      detail: String?,
+      fractionCompleted: Double?,
+      transfer: Transfer? = nil
+    ) {
+      self.title = title
+      self.detail = detail
+      self.fractionCompleted = fractionCompleted
+      self.transfer = transfer
+    }
 
     static let idle = ShareProgressState(title: "", detail: nil, fractionCompleted: nil)
   }
@@ -1934,6 +1925,23 @@ class ShareState: ObservableObject {
     return totalItems > 1 ? "\(itemName) \(itemNumber) of \(totalItems)" : itemName
   }
 
+  /// Monotonic whole-share estimate for the extension's interleaved upload-then-send flow.
+  /// Exact server-accepted bytes remain separate in `Transfer`; preloading every provider-backed
+  /// file merely to byte-weight this ring would delay first progress and inflate extension storage.
+  private nonisolated static func mediaDeliveryFraction(
+    completedUploads: Int,
+    currentUploadFraction: Double = 0,
+    totalUploads: Int,
+    completedSends: Int,
+    totalSends: Int
+  ) -> Double {
+    let uploadFraction = (
+      Double(completedUploads) + min(max(currentUploadFraction, 0), 1)
+    ) / Double(max(totalUploads, 1))
+    let sendFraction = Double(completedSends) / Double(max(totalSends, 1))
+    return min(0.94, uploadFraction * 0.72 + sendFraction * 0.22)
+  }
+
   func loadSharedData() {
     sharedData = BridgeManager.shared.loadSharedData()
 
@@ -1950,9 +1958,25 @@ class ShareState: ObservableObject {
   }
 
   func finishSession() async {
-    guard hasStartedRealtime else { return }
-    hasStartedRealtime = false
-    await Api.realtime.prepareForTermination()
+    if isSending {
+      activeProgressUploadID = nil
+      sendProgress = ShareProgressState(
+        title: "Canceling",
+        detail: "Stopping upload",
+        fractionCompleted: uploadProgress
+      )
+    }
+    let task = sendTask
+    sendTask = nil
+    task?.cancel()
+    await task?.value
+    await finishRealtimeContext()
+  }
+
+  private func finishRealtimeContext() async {
+    guard let context = realtimeContext else { return }
+    realtimeContext = nil
+    await context.session.finish()
   }
 
   func loadSharedContent(from extensionItems: [NSExtensionItem]) {
@@ -2100,13 +2124,14 @@ class ShareState: ObservableObject {
       return
     }
 
-    if Auth.shared.getToken() == nil {
-      log.warning(tagged("Missing auth token for share; attempting refresh"))
+    if !Auth.shared.getIsLoggedIn() {
+      log.warning(tagged("Missing account authentication for share; attempting refresh"))
     }
 
     isSending = true
     isSent = false
     uploadProgress = 0
+    activeProgressUploadID = nil
     sendProgress = ShareProgressState(
       title: "Preparing",
       detail: destinationChats.count == 1 ? "Preparing share" : "Preparing share for \(destinationChats.count) chats",
@@ -2116,11 +2141,13 @@ class ShareState: ObservableObject {
     let messageText = combinedMessageText(caption: caption, content: sharedContent)
     let content = sharedContent
 
-    Task.detached(priority: .userInitiated) { [weak self] in
+    sendTask = Task.detached(priority: .userInitiated) { [weak self] in
       guard let self else { return }
       var didSendAnyMessage = false
       do {
+        try Task.checkCancellation()
         let sendStart = Date()
+        _ = try await self.realtimeContextIfNeeded()
         let totalMediaItems = content.mediaCount
         let totalUploadItems = max(totalMediaItems, 1)
         let totalSendOperations = max(totalMediaItems, 1) * destinationChats.count
@@ -2133,6 +2160,7 @@ class ShareState: ObservableObject {
         }
 
         for stagedFile in content.files {
+          try Task.checkCancellation()
           let preparingItemNumber = uploadedItems + 1
           let preparingTitle: String = switch stagedFile.fileType {
           case .photo: "Preparing photo"
@@ -2177,25 +2205,45 @@ class ShareState: ObservableObject {
           }
 
           let itemIndex = uploadedItems
+          let progressUploadID = stagedFile.id
+          let completedSendOperationsBeforeUpload = sentOperations
           let uploadDetail = progressDetail(
             for: preparedFile.fileType,
             itemNumber: itemIndex + 1,
             totalItems: totalUploadItems
           )
+          await MainActor.run {
+            self.activeProgressUploadID = progressUploadID
+          }
           let progressHandler: @Sendable (ApiClient.UploadTransferProgress) -> Void = { [weak self] progress in
-            let uploadFraction = (Double(itemIndex) + progress.fractionCompleted) / Double(totalUploadItems)
-            let overallFraction = min(0.72, uploadFraction * 0.72)
+            let overallFraction = Self.mediaDeliveryFraction(
+              completedUploads: itemIndex,
+              currentUploadFraction: progress.fractionCompleted,
+              totalUploads: totalUploadItems,
+              completedSends: completedSendOperationsBeforeUpload,
+              totalSends: totalSendOperations
+            )
             Task { @MainActor in
-              self?.uploadProgress = overallFraction
-              self?.sendProgress = ShareProgressState(
+              guard let self,
+                    self.isSending,
+                    self.activeProgressUploadID == progressUploadID
+              else { return }
+              let visibleFraction = max(self.uploadProgress, overallFraction)
+              self.uploadProgress = visibleFraction
+              self.sendProgress = ShareProgressState(
                 title: "Uploading \(itemIndex + 1) of \(totalUploadItems)",
                 detail: uploadDetail,
-                fractionCompleted: overallFraction
+                fractionCompleted: visibleFraction,
+                transfer: .init(
+                  acceptedBytes: progress.bytesSent,
+                  totalBytes: progress.totalBytes
+                )
               )
             }
           }
           let uploadResult = try await uploadPreparedFile(
             preparedFile,
+            logicalID: "share:\(stagedFile.id.uuidString)",
             progress: progressHandler
           )
 
@@ -2203,17 +2251,31 @@ class ShareState: ObservableObject {
             "Upload completed type=\(preparedFile.fileType) result=\(self.uploadResultLogValue(uploadResult))"
           ))
           uploadedItems += 1
-          let uploadCompletionFraction = Double(uploadedItems) / Double(totalUploadItems) * 0.72
+          let uploadCompletionFraction = Self.mediaDeliveryFraction(
+            completedUploads: uploadedItems,
+            totalUploads: totalUploadItems,
+            completedSends: sentOperations,
+            totalSends: totalSendOperations
+          )
           await MainActor.run {
+            if self.activeProgressUploadID == progressUploadID {
+              self.activeProgressUploadID = nil
+            }
             self.uploadProgress = max(self.uploadProgress, uploadCompletionFraction)
           }
 
           let fileText = (!didAttachTextToMedia && messageText != nil) ? messageText : nil
           let media = try inputMedia(for: preparedFile.fileType, uploadResult: uploadResult)
           for chat in destinationChats {
+            try Task.checkCancellation()
             let destinationName = await self.displayName(for: chat)
             let operationNumber = sentOperations + 1
-            let sendFraction = 0.72 + (Double(sentOperations) / Double(totalSendOperations) * 0.22)
+            let sendFraction = Self.mediaDeliveryFraction(
+              completedUploads: uploadedItems,
+              totalUploads: totalUploadItems,
+              completedSends: sentOperations,
+              totalSends: totalSendOperations
+            )
             await MainActor.run {
               self.uploadProgress = max(self.uploadProgress, sendFraction)
               self.sendProgress = ShareProgressState(
@@ -2232,7 +2294,12 @@ class ShareState: ObservableObject {
           }
 
           didAttachTextToMedia = didAttachTextToMedia || (messageText != nil)
-          let sendCompletionFraction = 0.72 + (Double(sentOperations) / Double(totalSendOperations) * 0.22)
+          let sendCompletionFraction = Self.mediaDeliveryFraction(
+            completedUploads: uploadedItems,
+            totalUploads: totalUploadItems,
+            completedSends: sentOperations,
+            totalSends: totalSendOperations
+          )
           await MainActor.run {
             self.uploadProgress = max(self.uploadProgress, sendCompletionFraction)
           }
@@ -2240,6 +2307,7 @@ class ShareState: ObservableObject {
 
         if totalMediaItems == 0, let messageText {
           for chat in destinationChats {
+            try Task.checkCancellation()
             let destinationName = await self.displayName(for: chat)
             let operationNumber = sentOperations + 1
             let sendFraction = 0.1 + (Double(sentOperations) / Double(totalSendOperations) * 0.84)
@@ -2275,6 +2343,8 @@ class ShareState: ObservableObject {
         }
 
         await MainActor.run {
+          self.sendTask = nil
+          self.activeProgressUploadID = nil
           self.isSending = false
           self.isSent = true
           self.uploadProgress = 1.0
@@ -2293,12 +2363,22 @@ class ShareState: ObservableObject {
           }
         }
         self.log.info(self.tagged("Share completed in \(Date().timeIntervalSince(sendStart))s"))
+      } catch is CancellationError {
+        await self.finishRealtimeContext()
+        await MainActor.run {
+          self.sendTask = nil
+          self.activeProgressUploadID = nil
+          self.isSending = false
+          self.sendProgress = .idle
+        }
       } catch {
         self.log.error(self.tagged("Failed to share content"), error: error)
         let didPartiallySend = didSendAnyMessage
-        await self.finishSession()
+        await self.finishRealtimeContext()
 
         await MainActor.run {
+          self.sendTask = nil
+          self.activeProgressUploadID = nil
           let errorMessage = self.errorPresentation(for: error, didPartiallySend: didPartiallySend)
 
           self.errorState = ErrorState(
@@ -2386,7 +2466,7 @@ class ShareState: ObservableObject {
       }
     }
 
-    if let realtimeError = error as? RealtimeAPIError {
+    if let realtimeError = error as? RealtimeDirectRpcError {
       switch realtimeError {
       case .notAuthorized:
         return ErrorPresentation(
@@ -2402,6 +2482,20 @@ class ShareState: ObservableObject {
           suggestion: "Check your internet connection and try again.",
           retryable: true
         )
+      case .timeout, .commitOutcomeUnknown:
+        return ErrorPresentation(
+          title: "Delivery Uncertain",
+          message: realtimeError.localizedDescription,
+          suggestion: "Open Inline to verify the chat before trying again.",
+          retryable: false
+        )
+      case .capacityExceeded:
+        return ErrorPresentation(
+          title: "Inline Is Busy",
+          message: realtimeError.localizedDescription,
+          suggestion: "Wait a moment and try again.",
+          retryable: true
+        )
       case let .rpcError(_, message, _):
         return ErrorPresentation(
           title: "Share Failed",
@@ -2409,10 +2503,10 @@ class ShareState: ObservableObject {
           suggestion: "Please try again.",
           retryable: true
         )
-      default:
+      case .unknown:
         return ErrorPresentation(
           title: "Share Failed",
-          message: "Could not share the content.",
+          message: realtimeError.localizedDescription,
           suggestion: "Please try again.",
           retryable: true
         )

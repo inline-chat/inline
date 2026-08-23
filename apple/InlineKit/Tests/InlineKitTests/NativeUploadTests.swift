@@ -235,6 +235,13 @@ private final class UploadProgressRecorder: @unchecked Sendable {
 
 @Suite("Native upload")
 struct NativeUploadTests {
+  @Test("bounds authenticated processing retry hints")
+  func boundsProcessingRetryHints() {
+    #expect(boundedUploadProcessingRetrySeconds(0) == 1)
+    #expect(boundedUploadProcessingRetrySeconds(2) == 2)
+    #expect(boundedUploadProcessingRetrySeconds(UInt32.max) == 30)
+  }
+
   @Test("reconciles a response lost after the server accepts a part")
   func reconcilesLostSaveResponse() async throws {
     let source = FileManager.default.temporaryDirectory

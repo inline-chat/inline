@@ -14,6 +14,7 @@ struct ShareView: View {
   @State private var selectedChatIDs = Set<Int64>()
   @State private var caption = ""
   @State private var didApplyPreselectedDestination = false
+  @State private var isCompletingRequest = false
   @State private var allChats: [SharedChat] = []
   @State private var filteredChats: [SharedChat] = []
 
@@ -51,7 +52,7 @@ struct ShareView: View {
                 .labelStyle(.iconOnly)
             }
             .accessibilityLabel("Cancel")
-            .disabled(state.isSending)
+            .disabled(isCompletingRequest)
           }
 
           ToolbarItem(placement: .principal) {
@@ -167,6 +168,8 @@ struct ShareView: View {
   }
 
   private func completeRequest() {
+    guard !isCompletingRequest else { return }
+    isCompletingRequest = true
     let extensionContext = extensionContext
     Task { @MainActor in
       await state.finishSession()
@@ -708,31 +711,54 @@ private struct ShareDeliveryStatusView: View {
     VStack(spacing: 16) {
       ShareProgressRing(
         progress: progress.fractionCompleted,
+        reportedProgress: progress.transfer?.fractionCompleted,
         isComplete: isComplete
       )
       .frame(width: 64, height: 64)
 
-      VStack(spacing: 5) {
-        Text(title)
-          .font(.subheadline.weight(.semibold))
-          .foregroundStyle(.primary)
-          .lineLimit(1)
-          .contentTransition(.opacity)
-
-        Text(progress.detailText)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-          .multilineTextAlignment(.center)
-          .opacity(progress.hasDetail ? 1 : 0)
-          .contentTransition(.opacity)
-      }
-      .frame(height: 38, alignment: .top)
+      ShareProgressLabels(
+        title: title,
+        detail: progress.detail,
+        transfer: progress.transfer
+      )
     }
     .padding(.horizontal, 32)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: progress)
     .animation(reduceMotion ? nil : .smooth(duration: 0.28), value: isComplete)
+  }
+}
+
+private struct ShareProgressLabels: View {
+  let title: String
+  let detail: String?
+  let transfer: ShareState.ShareProgressState.Transfer?
+
+  var body: some View {
+    VStack(spacing: 4) {
+      Text(title)
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(.primary)
+        .lineLimit(1)
+        .contentTransition(.opacity)
+
+      if let detail, !detail.isEmpty {
+        Text(detail)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .multilineTextAlignment(.center)
+          .contentTransition(.opacity)
+      }
+
+      if let transfer {
+        Text(transfer.description)
+          .font(.caption.monospacedDigit())
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .contentTransition(.numericText(value: transfer.fractionCompleted))
+      }
+    }
   }
 }
 
@@ -758,6 +784,7 @@ private struct ShareLoadingView: View {
 
 private struct ShareProgressRing: View {
   let progress: Double?
+  let reportedProgress: Double?
   let isComplete: Bool
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -847,6 +874,21 @@ private struct ShareProgressRing: View {
         }
       }
     }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(accessibilityProgressLabel)
+    .accessibilityValue(accessibilityProgressValue)
+  }
+
+  private var accessibilityProgressLabel: String {
+    if isComplete { return "Sent" }
+    return reportedProgress == nil ? "Share progress" : "Upload progress"
+  }
+
+  private var accessibilityProgressValue: String {
+    if isComplete { return "100 percent" }
+    if isIndeterminate { return "In progress" }
+    return (reportedProgress ?? clampedProgress)
+      .formatted(.percent.precision(.fractionLength(0)))
   }
 
   private func progressArc(trim: Double) -> some View {
@@ -879,15 +921,15 @@ private struct ShareIndeterminateProgressArc: View {
   }
 }
 
-private extension ShareState.ShareProgressState {
-  var hasDetail: Bool {
-    guard let detail else { return false }
-    return !detail.isEmpty
-  }
-
-  var detailText: String {
-    guard hasDetail, let detail else { return " " }
-    return detail
+private extension ShareState.ShareProgressState.Transfer {
+  var description: String {
+    let accepted = max(0, acceptedBytes).formatted(.byteCount(style: .file))
+    let total = max(0, totalBytes).formatted(.byteCount(style: .file))
+    let percent = fractionCompleted.formatted(.percent.precision(.fractionLength(0)))
+    return String(
+      localized: "\(percent) · \(accepted) of \(total)",
+      comment: "Upload progress; first value is the percentage, second is accepted bytes, and third is total bytes."
+    )
   }
 }
 
