@@ -2776,12 +2776,80 @@ final class SidebarCollectionBodyController: NSViewController {
           candidate.slot != session.proposal?.slot
     else { return false }
 
+    let hierarchyChanged = session.proposal?.slot.parentID != candidate.slot.parentID
     session.proposal = candidate
+    if hierarchyChanged {
+      updateDragPreview(for: session)
+    }
     log.debug(
       "drag[\(String(session.id.uuidString.prefix(6)))] proposal accepted "
         + "destination=\(String(describing: candidate.slot))"
     )
     return true
+  }
+
+  private func updateDragPreview(for session: ReorderSession) {
+    guard let proposal = session.proposal,
+          let dragPreviewContent,
+          let sourceRow = session.rowByID[session.source.rowID],
+          let sourceDepth = sourceRow.presentationDepth
+    else { return }
+
+    let destinationDepth: Int
+    if let parentID = proposal.slot.parentID {
+      guard let parentRowID = rowID(for: parentID),
+            let parentDepth = session.rowByID[parentRowID]?.presentationDepth
+      else { return }
+      destinationDepth = parentDepth + 1
+    } else {
+      destinationDepth = 0
+    }
+    let depthOffset = destinationDepth - sourceDepth
+    let rows = session.draggedBlockIDs.compactMap { rowID -> SidebarCollectionRow? in
+      guard let row = session.rowByID[rowID] else { return nil }
+      switch row.kind {
+      case let .chat(item):
+        let item = SidebarProjectedItem(
+          item: item.item,
+          depth: max(item.depth + depthOffset, 0),
+          semanticParentID: item.semanticParentID,
+          parentID: row.id == session.source.rowID ? proposal.slot.parentID : item.parentID,
+          orderLane: item.orderLane,
+          lane: proposal.targetLane,
+          childCount: item.childCount,
+          isExpanded: item.isExpanded
+        )
+        return SidebarCollectionRow(id: row.id, kind: .chat(item), height: row.height)
+      case let .folder(folder):
+        let folder = SidebarProjectedFolder(
+          folder: folder.folder,
+          depth: max(folder.depth + depthOffset, 0),
+          lane: proposal.targetLane,
+          childCount: folder.childCount,
+          unreadCount: folder.unreadCount,
+          prominentUnreadCount: folder.prominentUnreadCount,
+          isExpanded: folder.isExpanded
+        )
+        return SidebarCollectionRow(id: row.id, kind: .folder(folder), height: row.height)
+      default:
+        return nil
+      }
+    }
+    guard rows.count == session.draggedBlockIDs.count else { return }
+
+    let transitioningNativeContent: (
+      (SidebarCollectionRow) -> SidebarNativeRowConfiguration
+    )? = if renderer == .appKit, let nativeContent {
+      { row in nativeContent(row, .transitioningDragPreview) }
+    } else {
+      nil
+    }
+    previewPanel.update(
+      rows: rows,
+      content: dragPreviewContent,
+      nativeContent: transitioningNativeContent,
+      horizontalBleed: previewHorizontalBleed
+    )
   }
 
   private func finishReorder() {
@@ -3256,7 +3324,12 @@ final class SidebarCollectionBodyController: NSViewController {
       // two-step cancellation: destination closed, then source reappeared.
       if let originalProposal = session.originalProposal,
          session.proposal?.slot != originalProposal.slot {
+        let hierarchyChanged = session.proposal?.slot.parentID
+          != originalProposal.slot.parentID
         session.proposal = originalProposal
+        if hierarchyChanged {
+          updateDragPreview(for: session)
+        }
       }
       session.isSettling = true
       reorderSession = session

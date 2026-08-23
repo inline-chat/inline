@@ -1723,6 +1723,7 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
   private let disclosureView = SidebarNativeHostedVisualView()
   private var configuration: SidebarNativeRowConfiguration.Chat?
   private var displayedDisclosureExpanded: Bool?
+  private var hierarchyAnimationToken: UUID?
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -1752,6 +1753,29 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
   }
 
   func configure(_ configuration: SidebarNativeRowConfiguration.Chat) {
+    let previousConfiguration = self.configuration
+    let hierarchyChanged = previousConfiguration.map {
+      $0.presentation.peerID == configuration.presentation.peerID
+        && ($0.indentationLevel != configuration.indentationLevel
+          || $0.showsIcon != configuration.showsIcon)
+    } ?? false
+    let animatesHierarchyChange = hierarchyChanged
+      && allowsAnimations
+      && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    if animatesHierarchyChange {
+      layoutSubtreeIfNeeded()
+    }
+    let previousHierarchyFrames = animatesHierarchyChange
+      ? currentHierarchyFrames()
+      : nil
+    let previousIdentityOpacity = identityView.layer?.presentation()?.opacity
+      ?? identityView.layer?.opacity
+      ?? (identityView.isHidden ? 0 : 1)
+    if hierarchyChanged || previousConfiguration?.presentation.peerID
+      != configuration.presentation.peerID {
+      cancelHierarchyAnimations()
+    }
+
     self.configuration = configuration
     displayedDisclosureExpanded = configuration.disclosureExpanded
     primaryAction = configuration.actions.open
@@ -1774,14 +1798,18 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
       : titleFont
     titleField.textColor = configuration.titleDimmed ? .secondaryLabelColor : .labelColor
 
-    identityView.isHidden = !configuration.showsIcon
     if configuration.showsIcon {
+      identityView.isHidden = false
       identityView.configure(
         identity: presentation.identity,
         size: configuration.size.iconSize,
         hasBackgroundShape: configuration.size != .compact
       )
+    } else if animatesHierarchyChange, previousConfiguration?.showsIcon == true {
+      // Preserve the outgoing identity pixels until the hierarchy morph ends.
+      identityView.isHidden = false
     } else {
+      identityView.isHidden = true
       identityView.prepareForReuse()
     }
 
@@ -1834,6 +1862,14 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     updateBackground()
     updateAccessibility()
     needsLayout = true
+    if let previousHierarchyFrames {
+      layoutSubtreeIfNeeded()
+      animateHierarchyChange(
+        from: previousHierarchyFrames,
+        previousShowsIcon: previousConfiguration?.showsIcon == true,
+        previousIdentityOpacity: previousIdentityOpacity
+      )
+    }
     recomputePointerLocation()
   }
 
@@ -1845,7 +1881,11 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     backgroundLayer.frame = painted
     backgroundLayer.cornerRadius = Theme.sidebarItemRadius
 
-    let indentation = CGFloat(min(max(configuration.indentationLevel, 0), 3)) * 16
+    let indentation = SidebarChatRowLayout.contentIndentation(
+      level: min(configuration.indentationLevel, 3),
+      size: configuration.size,
+      showsIcon: configuration.showsIcon
+    )
     var leading = painted.minX + Theme.sidebarItemInnerSpacing + indentation
     if configuration.showsIcon {
       let iconSize = configuration.size.iconSize
@@ -1859,8 +1899,12 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     }
 
     if configuration.unreadBadgeStyle == .dot {
+      let unreadDotLeadingSpacing = SidebarChatRowLayout.unreadDotLeadingSpacing(
+        contentLeadingSpacing: Theme.sidebarItemInnerSpacing + indentation,
+        isNestedThread: configuration.indentationLevel > 0 && !configuration.showsIcon
+      )
       leadingUnreadBadge.frame = CGRect(
-        x: painted.minX + Theme.sidebarItemUnreadDotLeadingSpacing,
+        x: painted.minX + unreadDotLeadingSpacing,
         y: painted.midY - Theme.sidebarItemUnreadDotSize / 2,
         width: Theme.sidebarItemUnreadDotSize,
         height: Theme.sidebarItemUnreadDotSize
@@ -1937,6 +1981,105 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
       previewView.frame = .zero
       previewView.isHidden = true
     }
+  }
+
+  private var hierarchyViews: [NSView] {
+    [leadingUnreadBadge, identityView, titleField, previewView, titleActivityView]
+  }
+
+  private func currentHierarchyFrames() -> [CGRect] {
+    hierarchyViews.map { view in
+      view.layer?.presentation()?.frame ?? view.frame
+    }
+  }
+
+  private func animateHierarchyChange(
+    from previousFrames: [CGRect],
+    previousShowsIcon: Bool,
+    previousIdentityOpacity: Float
+  ) {
+    for (view, previousFrame) in zip(hierarchyViews, previousFrames) {
+      guard previousFrame.width > 0,
+            previousFrame.height > 0,
+            view.frame.width > 0,
+            view.frame.height > 0,
+            let layer = view.layer
+      else { continue }
+
+      let deltaX = previousFrame.minX - view.frame.minX
+      let deltaY = previousFrame.minY - view.frame.minY
+      guard abs(deltaX) > 0.5 || abs(deltaY) > 0.5 else { continue }
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      layer.transform = CATransform3DIdentity
+      CATransaction.commit()
+
+      let animation = CABasicAnimation(keyPath: "transform")
+      animation.fromValue = NSValue(
+        caTransform3D: CATransform3DMakeTranslation(deltaX, deltaY, 0)
+      )
+      animation.toValue = NSValue(caTransform3D: CATransform3DIdentity)
+      animation.duration = SidebarDisclosureMotion.duration
+      animation.timingFunction = CAMediaTimingFunction(
+        controlPoints: Float(SidebarDisclosureMotion.controlPoint1.x),
+        Float(SidebarDisclosureMotion.controlPoint1.y),
+        Float(SidebarDisclosureMotion.controlPoint2.x),
+        Float(SidebarDisclosureMotion.controlPoint2.y)
+      )
+      layer.add(animation, forKey: "sidebar-hierarchy-slide")
+    }
+
+    guard previousShowsIcon != configuration?.showsIcon,
+          let identityLayer = identityView.layer
+    else { return }
+    let token = UUID()
+    hierarchyAnimationToken = token
+    let targetOpacity: Float = configuration?.showsIcon == true ? 1 : 0
+    let sourceOpacity: Float = previousShowsIcon ? previousIdentityOpacity : 0
+    identityView.isHidden = false
+    CATransaction.begin()
+    CATransaction.setCompletionBlock { [weak self] in
+      Task { @MainActor in
+        guard let self, self.hierarchyAnimationToken == token else { return }
+        self.hierarchyAnimationToken = nil
+        if self.configuration?.showsIcon == true {
+          self.identityView.isHidden = false
+        } else {
+          self.identityView.isHidden = true
+          self.identityView.prepareForReuse()
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        self.identityView.layer?.opacity = 1
+        CATransaction.commit()
+      }
+    }
+    CATransaction.setDisableActions(true)
+    identityLayer.opacity = targetOpacity
+    let fade = CABasicAnimation(keyPath: "opacity")
+    fade.fromValue = sourceOpacity
+    fade.toValue = targetOpacity
+    fade.duration = SidebarDisclosureMotion.duration
+    fade.timingFunction = CAMediaTimingFunction(
+      controlPoints: Float(SidebarDisclosureMotion.controlPoint1.x),
+      Float(SidebarDisclosureMotion.controlPoint1.y),
+      Float(SidebarDisclosureMotion.controlPoint2.x),
+      Float(SidebarDisclosureMotion.controlPoint2.y)
+    )
+    identityLayer.add(fade, forKey: "sidebar-hierarchy-identity")
+    CATransaction.commit()
+  }
+
+  private func cancelHierarchyAnimations() {
+    hierarchyAnimationToken = nil
+    for view in hierarchyViews {
+      view.layer?.removeAnimation(forKey: "sidebar-hierarchy-slide")
+    }
+    identityView.layer?.removeAnimation(forKey: "sidebar-hierarchy-identity")
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    identityView.layer?.opacity = 1
+    CATransaction.commit()
   }
 
   override func hoverDidChange() {
@@ -2056,6 +2199,7 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
 
   override func prepareForReuse() {
     super.prepareForReuse()
+    cancelHierarchyAnimations()
     configuration = nil
     displayedDisclosureExpanded = nil
     primaryAction = nil

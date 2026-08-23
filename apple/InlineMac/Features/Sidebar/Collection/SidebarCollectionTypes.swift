@@ -275,6 +275,12 @@ struct SidebarCollectionRowRenderContext: Equatable {
     disclosureExpandedOverride: nil,
     suppressesAnimations: true
   )
+  static let transitioningDragPreview = Self(
+    dimsPinDropInstruction: false,
+    forceHoverAppearance: true,
+    disclosureExpandedOverride: nil,
+    suppressesAnimations: false
+  )
 }
 
 struct SidebarCollectionMove {

@@ -115,6 +115,35 @@ final class SidebarDragPreviewPanel {
     panel.setFrameOrigin(CGPoint(x: origin.x - horizontalBleed, y: origin.y))
   }
 
+  /// Retains the lifted preview's stable row views while its semantic target
+  /// changes between root and nested placement.
+  func update(
+    rows: [SidebarCollectionRow],
+    content: @escaping (SidebarCollectionRow) -> AnyView,
+    nativeContent: ((SidebarCollectionRow) -> SidebarNativeRowConfiguration)?,
+    horizontalBleed: CGFloat
+  ) {
+    let contentSize = CGSize(
+      width: max(panel.frame.width - horizontalBleed * 2, 0),
+      height: rows.reduce(CGFloat.zero) { $0 + $1.height }
+    )
+    let contentFrame = CGRect(origin: .zero, size: contentSize)
+    if let nativeView, let nativeContent {
+      nativeView.update(
+        rows: rows,
+        content: nativeContent,
+        horizontalBleed: horizontalBleed
+      )
+    } else if let hostingView {
+      hostingView.rootView = preview(
+        rows: rows,
+        content: content,
+        horizontalBleed: horizontalBleed,
+        frame: contentFrame
+      )
+    }
+  }
+
   func settle(
     to frame: CGRect,
     horizontalBleed: CGFloat,
@@ -195,6 +224,27 @@ private final class SidebarNativeDragPreviewView: NSView {
       view.setLayoutVisibility(true)
       addSubview(view)
       return view
+    }
+    needsLayout = true
+  }
+
+  func update(
+    rows: [SidebarCollectionRow],
+    content: (SidebarCollectionRow) -> SidebarNativeRowConfiguration,
+    horizontalBleed: CGFloat
+  ) {
+    guard rows.map(\.id) == self.rows.map(\.id),
+          rows.count == rowViews.count
+    else {
+      configure(rows: rows, content: content, horizontalBleed: horizontalBleed)
+      return
+    }
+
+    self.rows = rows
+    self.horizontalBleed = horizontalBleed
+    for (row, view) in zip(rows, rowViews) {
+      view.configure(content(row))
+      view.setLayoutVisibility(true)
     }
     needsLayout = true
   }

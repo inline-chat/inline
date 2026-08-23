@@ -47,6 +47,36 @@ enum SidebarItemSize: String, CaseIterable, Identifiable {
   }
 }
 
+/// Shared SwiftUI/AppKit geometry for chat hierarchy. Reply titles stop just
+/// short of their icon-bearing parent title, while deeper replies retain the
+/// existing compact 16-point hierarchy step.
+enum SidebarChatRowLayout {
+  static let hierarchyIndent: CGFloat = 16
+  static let nestedTitleOffsetFromParent: CGFloat = 6
+  static let unreadDotTextSpacing: CGFloat = 8
+
+  static func contentIndentation(
+    level: Int,
+    size: SidebarItemSize,
+    showsIcon: Bool
+  ) -> CGFloat {
+    let level = max(level, 0)
+    let base = CGFloat(level) * hierarchyIndent
+    guard level > 0, !showsIcon else { return base }
+
+    let parentTitleOffset = size.iconSize + 8
+    return base + parentTitleOffset - hierarchyIndent - nestedTitleOffsetFromParent
+  }
+
+  static func unreadDotLeadingSpacing(
+    contentLeadingSpacing: CGFloat,
+    isNestedThread: Bool
+  ) -> CGFloat {
+    guard isNestedThread else { return Theme.sidebarItemUnreadDotLeadingSpacing }
+    return contentLeadingSpacing - Theme.sidebarItemUnreadDotSize - unreadDotTextSpacing
+  }
+}
+
 struct SidebarChatFolderMenu {
   struct Destination: Identifiable {
     let id: Int64
@@ -141,6 +171,21 @@ struct SidebarChatItemView: Equatable, View {
     return item.parentTitle
   }
 
+  private var contentLeadingSpacing: CGFloat {
+    Theme.sidebarItemInnerSpacing + SidebarChatRowLayout.contentIndentation(
+      level: indentationLevel,
+      size: size,
+      showsIcon: showsIcon
+    )
+  }
+
+  private var unreadDotLeadingSpacing: CGFloat {
+    SidebarChatRowLayout.unreadDotLeadingSpacing(
+      contentLeadingSpacing: contentLeadingSpacing,
+      isNestedThread: indentationLevel > 0 && !showsIcon
+    )
+  }
+
   static func == (lhs: SidebarChatItemView, rhs: SidebarChatItemView) -> Bool {
     lhs.item == rhs.item
       && lhs.selected == rhs.selected
@@ -163,7 +208,7 @@ struct SidebarChatItemView: Equatable, View {
     ZStack(alignment: .leading) {
       if unreadBadgeStyle == .dot {
         unreadBadge
-          .padding(.leading, Theme.sidebarItemUnreadDotLeadingSpacing)
+          .padding(.leading, unreadDotLeadingSpacing)
           .opacity(showsDisclosureControl ? 0 : 1)
       }
 
@@ -172,6 +217,7 @@ struct SidebarChatItemView: Equatable, View {
           avatar
             .frame(width: iconSize, height: iconSize)
             .padding(.trailing, 8)
+            .transition(.opacity)
         }
 
         VStack(alignment: .leading, spacing: 2) {
@@ -194,7 +240,7 @@ struct SidebarChatItemView: Equatable, View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
       }
-      .padding(.leading, Theme.sidebarItemInnerSpacing + CGFloat(indentationLevel) * 16)
+      .padding(.leading, contentLeadingSpacing)
       .padding(.trailing, Theme.sidebarItemOuterSpacing)
 
       if disclosureExpanded != nil {
@@ -211,6 +257,8 @@ struct SidebarChatItemView: Equatable, View {
     }
     .frame(height: SidebarCollectionRow.paintedItemHeight(for: rowHeight))
     .animation(.smoothSnappy, value: size)
+    .animation(reduceMotion ? nil : SidebarDisclosureMotion.animation, value: indentationLevel)
+    .animation(reduceMotion ? nil : SidebarDisclosureMotion.animation, value: showsIcon)
     .animation(.smoothSnappy, value: item.unread)
     .animation(.smoothSnappy, value: item.unreadCount)
     .animation(.smoothSnappy, value: item.unreadMark)
