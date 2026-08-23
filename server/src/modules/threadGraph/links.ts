@@ -5,7 +5,7 @@ import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { chats, messages, threadGraphLinks, type DbChat, type DbThreadGraphLink } from "@in/server/db/schema"
 import { insertThreadBacklinkSystemMessage } from "@in/server/modules/systemMessages"
 import { MessageEntity_Type, type InputPeer, type MessageEntities, type Update } from "@inline-chat/protocol/core"
-import { and, eq, inArray, isNull, not, sql } from "drizzle-orm"
+import { and, eq, inArray, isNull, lte, not, or, sql } from "drizzle-orm"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { getUpdateGroupFromInputPeer } from "@in/server/modules/updates"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
@@ -62,11 +62,16 @@ export function graphScopeFromChat(chat: SourceChat) {
 }
 
 export async function replaceMessageThreadLinks(input: ReplaceMessageThreadLinksInput): Promise<DbThreadGraphLink[]> {
+  if (!(await isCurrentSourceMessageRevision(input.sourceMessageGlobalId, input.sourceMessageRevision))) {
+    return []
+  }
+
   const entities = resolvedThreadEntities(input.entities)
   if (entities.length === 0) {
     await deactivateRemovedThreadLinks({
       sourceMessageGlobalId: input.sourceMessageGlobalId,
       sourceMessageFromId: input.sourceMessageFromId,
+      sourceMessageRevision: input.sourceMessageRevision,
       keepDedupeKeys: [],
     })
     return []
@@ -81,16 +86,21 @@ export async function replaceMessageThreadLinks(input: ReplaceMessageThreadLinks
   if (actorUserId === null) {
     await deactivateRemovedThreadLinks({
       sourceMessageGlobalId: input.sourceMessageGlobalId,
+      sourceMessageRevision: input.sourceMessageRevision,
       keepDedupeKeys: [],
     })
     return []
   }
 
   const materializedEntities = await materializableThreadEntities({ entities, actorUserId })
+  if (!(await isCurrentSourceMessageRevision(input.sourceMessageGlobalId, input.sourceMessageRevision))) {
+    return []
+  }
 
   await deactivateRemovedThreadLinks({
     sourceMessageGlobalId: input.sourceMessageGlobalId,
     sourceMessageFromId: actorUserId ?? undefined,
+    sourceMessageRevision: input.sourceMessageRevision,
     keepDedupeKeys: materializedEntities.map((entity) =>
       threadLinkDedupeKey(input.sourceMessageGlobalId, entity.entityIndex, entity.targetChatId),
     ),
@@ -99,6 +109,9 @@ export async function replaceMessageThreadLinks(input: ReplaceMessageThreadLinks
   const rows: DbThreadGraphLink[] = []
 
   for (const entity of materializedEntities) {
+    if (!(await isCurrentSourceMessageRevision(input.sourceMessageGlobalId, input.sourceMessageRevision))) {
+      break
+    }
     const row = await materializeThreadLink({
       sourceChat,
       sourceMessageGlobalId: input.sourceMessageGlobalId,
@@ -299,6 +312,9 @@ export async function materializeReplyThreadLink(
 }
 
 export async function materializeThreadLink(input: MaterializeThreadLinkInput): Promise<DbThreadGraphLink | null> {
+  if (!(await isCurrentSourceMessageRevision(input.sourceMessageGlobalId, input.sourceMessageRevision))) {
+    return null
+  }
   const actorUserId = input.sourceMessageFromId ?? (await getMessageSenderId(input.sourceMessageGlobalId))
   if (!actorUserId) {
     return null
@@ -311,6 +327,9 @@ export async function materializeThreadLink(input: MaterializeThreadLinkInput): 
 
   const scope = graphScopeFromChat(input.sourceChat)
   if (!scope) {
+    return null
+  }
+  if (!(await isCurrentSourceMessageRevision(input.sourceMessageGlobalId, input.sourceMessageRevision))) {
     return null
   }
   const now = new Date()
@@ -336,6 +355,10 @@ export async function materializeThreadLink(input: MaterializeThreadLinkInput): 
     })
     .onConflictDoUpdate({
       target: threadGraphLinks.dedupeKey,
+      setWhere: or(
+        isNull(threadGraphLinks.fromMessageRevision),
+        lte(threadGraphLinks.fromMessageRevision, input.sourceMessageRevision),
+      ),
       set: {
         scopeType: scope.type,
         scopeId: scope.id,
@@ -357,21 +380,54 @@ export async function materializeThreadLink(input: MaterializeThreadLinkInput): 
     return null
   }
 
+  if (!(await isCurrentSourceMessageRevision(input.sourceMessageGlobalId, input.sourceMessageRevision))) {
+    await deactivateThreadLinkRowAtRevision({
+      row,
+      sourceMessageFromId: actorUserId,
+      sourceMessageRevision: input.sourceMessageRevision,
+    })
+    return null
+  }
+
   if (row.backlinkMessageGlobalId !== null) {
     return row
   }
 
-  return (await createBacklinkMessageForLink(row, { ...input, sourceMessageFromId: actorUserId })) ?? row
+  const linked = await createBacklinkMessageForLink(row, { ...input, sourceMessageFromId: actorUserId })
+  if (linked) {
+    return linked
+  }
+
+  if (!(await isCurrentSourceMessageRevision(input.sourceMessageGlobalId, input.sourceMessageRevision))) {
+    await deactivateThreadLinkRowAtRevision({
+      row,
+      sourceMessageFromId: actorUserId,
+      sourceMessageRevision: input.sourceMessageRevision,
+    })
+    return null
+  }
+
+  const [existing] = await db
+    .select()
+    .from(threadGraphLinks)
+    .where(and(eq(threadGraphLinks.id, row.id), isNull(threadGraphLinks.deletedAt)))
+    .limit(1)
+  return existing ?? null
 }
 
 async function deactivateRemovedThreadLinks(input: {
   sourceMessageGlobalId: bigint
   sourceMessageFromId?: number
+  sourceMessageRevision: number
   keepDedupeKeys: string[]
 }): Promise<void> {
   const filters = [
     eq(threadGraphLinks.kind, "thread_link"),
     eq(threadGraphLinks.fromMessageGlobalId, input.sourceMessageGlobalId),
+    or(
+      isNull(threadGraphLinks.fromMessageRevision),
+      lte(threadGraphLinks.fromMessageRevision, input.sourceMessageRevision),
+    ),
     isNull(threadGraphLinks.deletedAt),
   ]
 
@@ -393,18 +449,68 @@ async function deactivateRemovedThreadLinks(input: {
     return
   }
 
-  await deleteBacklinkMessages(backlinkRefsFromRows(rows), {
-    currentUserId: input.sourceMessageFromId,
-  })
-
-  await db
+  const deactivated = await db
     .update(threadGraphLinks)
     .set({
       deletedAt: new Date(),
       backlinkMessageGlobalId: null,
       updatedAt: new Date(),
     })
-    .where(inArray(threadGraphLinks.id, rows.map((row) => row.id)))
+    .where(and(
+      inArray(threadGraphLinks.id, rows.map((row) => row.id)),
+      or(
+        isNull(threadGraphLinks.fromMessageRevision),
+        lte(threadGraphLinks.fromMessageRevision, input.sourceMessageRevision),
+      ),
+      currentSourceMessageRevisionFilter(input.sourceMessageGlobalId, input.sourceMessageRevision),
+    ))
+    .returning({ id: threadGraphLinks.id })
+
+  const deactivatedIds = new Set(deactivated.map((row) => row.id))
+  await deleteBacklinkMessages(
+    backlinkRefsFromRows(rows.filter((row) => deactivatedIds.has(row.id))),
+    { currentUserId: input.sourceMessageFromId },
+  )
+}
+
+async function deactivateThreadLinkRowAtRevision(input: {
+  row: DbThreadGraphLink
+  sourceMessageFromId: number
+  sourceMessageRevision: number
+}): Promise<void> {
+  const [backlink] = await db
+    .select({
+      backlinkChatId: messages.chatId,
+      backlinkMessageId: messages.messageId,
+    })
+    .from(threadGraphLinks)
+    .leftJoin(messages, eq(threadGraphLinks.backlinkMessageGlobalId, messages.globalId))
+    .where(and(
+      eq(threadGraphLinks.id, input.row.id),
+      eq(threadGraphLinks.fromMessageRevision, input.sourceMessageRevision),
+      isNull(threadGraphLinks.deletedAt),
+    ))
+    .limit(1)
+
+  const deactivated = await db
+    .update(threadGraphLinks)
+    .set({
+      deletedAt: new Date(),
+      backlinkMessageGlobalId: null,
+      updatedAt: new Date(),
+    })
+    .where(and(
+      eq(threadGraphLinks.id, input.row.id),
+      eq(threadGraphLinks.fromMessageRevision, input.sourceMessageRevision),
+      isNull(threadGraphLinks.deletedAt),
+    ))
+    .returning({ id: threadGraphLinks.id })
+
+  if (deactivated.length > 0 && backlink) {
+    await deleteBacklinkMessages(backlinkRefsFromRows([backlink]), {
+      currentUserId: input.sourceMessageFromId,
+    })
+  }
 }
 
 export async function deleteBacklinkMessages(
@@ -474,6 +580,9 @@ async function createBacklinkMessageForLink(
   row: DbThreadGraphLink,
   input: MaterializeThreadLinkInput,
 ): Promise<DbThreadGraphLink | null> {
+  if (!(await isCurrentSourceMessageRevision(input.sourceMessageGlobalId, input.sourceMessageRevision))) {
+    return null
+  }
   const actorUserId = input.sourceMessageFromId ?? (await getMessageSenderId(input.sourceMessageGlobalId))
   if (actorUserId === null) {
     return null
@@ -493,7 +602,12 @@ async function createBacklinkMessageForLink(
       backlinkMessageGlobalId: backlinkMessage.globalId,
       updatedAt: new Date(),
     })
-    .where(and(eq(threadGraphLinks.id, row.id), isNull(threadGraphLinks.backlinkMessageGlobalId)))
+    .where(and(
+      eq(threadGraphLinks.id, row.id),
+      eq(threadGraphLinks.fromMessageRevision, input.sourceMessageRevision),
+      isNull(threadGraphLinks.backlinkMessageGlobalId),
+      currentSourceMessageRevisionFilter(input.sourceMessageGlobalId, input.sourceMessageRevision),
+    ))
     .returning()
 
   if (!updatedRow) {
@@ -633,6 +747,33 @@ async function canAccessGraphTarget(chat: DbChat, actorUserId: number): Promise<
   } catch {
     return false
   }
+}
+
+async function isCurrentSourceMessageRevision(
+  sourceMessageGlobalId: bigint,
+  sourceMessageRevision: number,
+): Promise<boolean> {
+  const [message] = await db
+    .select({ rev: messages.rev })
+    .from(messages)
+    .where(and(
+      eq(messages.globalId, sourceMessageGlobalId),
+      eq(messages.rev, sourceMessageRevision),
+    ))
+    .limit(1)
+  return message !== undefined
+}
+
+function currentSourceMessageRevisionFilter(
+  sourceMessageGlobalId: bigint,
+  sourceMessageRevision: number,
+) {
+  return sql`exists (
+    select 1
+    from ${messages}
+    where ${messages.globalId} = ${sourceMessageGlobalId}
+      and ${messages.rev} = ${sourceMessageRevision}
+  )`
 }
 
 async function getMessageGlobalId(input: { chatId: number; messageId: number }): Promise<bigint | null> {

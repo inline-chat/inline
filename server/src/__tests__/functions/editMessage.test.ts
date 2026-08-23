@@ -11,8 +11,10 @@ import { editMessage } from "@in/server/functions/messages.editMessage"
 import type { DbChat, DbUser } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { db } from "@in/server/db"
-import { files, messages, threadGraphLinks, users, voices } from "@in/server/db/schema"
+import { blockContentImageJobs, files, messages, threadGraphLinks, users, voices } from "@in/server/db/schema"
 import { and, eq, isNull } from "drizzle-orm"
+import { replaceMessageThreadLinks } from "@in/server/modules/threadGraph/links"
+import { getOutlinks } from "@in/server/modules/threadGraph/queries"
 
 let currentUser: DbUser
 let privateChat: DbChat
@@ -200,6 +202,52 @@ describe("editMessage function", () => {
       .where(and(eq(messages.chatId, privateChat.id), eq(messages.messageId, Number(messageId))))
       .limit(1)
     expect(stored?.editDate).toBeNull()
+  })
+
+  test("reuses a stable Markdown image job across streaming edits", async () => {
+    const imageUrl = "https://example.com/live-stream-image.png"
+    const sent = await sendMessage(
+      {
+        peerId: privateChatPeerId,
+        message: `# Draft\n\n![Preview](${imageUrl})`,
+        parseMarkdown: true,
+      },
+      context,
+    )
+    const messageId = extractSentMessageId(sent)
+    expect(messageId).toBeTruthy()
+
+    const [beforeMessage] = await db
+      .select({ blockContentId: messages.blockContentId })
+      .from(messages)
+      .where(and(eq(messages.chatId, privateChat.id), eq(messages.messageId, Number(messageId))))
+      .limit(1)
+    expect(beforeMessage?.blockContentId).toBeTruthy()
+
+    const beforeJobs = await db
+      .select()
+      .from(blockContentImageJobs)
+      .where(eq(blockContentImageJobs.contentId, beforeMessage!.blockContentId!))
+    expect(beforeJobs).toHaveLength(1)
+
+    await editMessage(
+      {
+        messageId: messageId!,
+        peer: privateChatPeerId,
+        text: `# Final answer\n\n![Updated preview](${imageUrl})`,
+        parseMarkdown: true,
+      },
+      { ...context, isBot: true },
+    )
+
+    const afterJobs = await db
+      .select()
+      .from(blockContentImageJobs)
+      .where(eq(blockContentImageJobs.contentId, beforeMessage!.blockContentId!))
+    expect(afterJobs).toHaveLength(1)
+    expect(afterJobs[0]?.id).toBe(beforeJobs[0]?.id)
+    expect(afterJobs[0]?.expectedRevision).toBe(1)
+    expect(afterJobs[0]?.state).toBe("pending")
   })
 
   test("resolves @username mentions while parsing markdown edits", async () => {
@@ -439,6 +487,7 @@ describe("editMessage function", () => {
       fromMessageId: Number(sentMessageId),
       count: 0,
     })
+    await waitForMessageDeletion(backlinkMessageGlobalId!)
 
     const inactiveLinks = await db
       .select()
@@ -460,7 +509,112 @@ describe("editMessage function", () => {
       .where(eq(messages.globalId, backlinkMessageGlobalId!))
     expect(deletedBacklinkMessages).toHaveLength(0)
   })
+
+  test("ignores stale thread graph materialization after a newer edit revision", async () => {
+    const source = await testUtils.createChat(null, "Stale graph source", "thread", false, currentUser.id)
+    const currentTarget = await testUtils.createChat(null, "Current graph target", "thread", false, currentUser.id)
+    const staleTarget = await testUtils.createChat(null, "Stale graph target", "thread", false, currentUser.id)
+    if (!source || !currentTarget || !staleTarget) {
+      throw new Error("Failed to create stale graph test chats")
+    }
+
+    await testUtils.addParticipant(source.id, currentUser.id)
+    await testUtils.addParticipant(currentTarget.id, currentUser.id)
+    await testUtils.addParticipant(staleTarget.id, currentUser.id)
+
+    const peer: InputPeer = {
+      type: { oneofKind: "chat", chat: { chatId: BigInt(source.id) } },
+    }
+    const sent = await sendMessage({ peerId: peer, message: "draft" }, context)
+    const messageId = extractSentMessageId(sent)
+    expect(messageId).toBeTruthy()
+
+    await editMessage(
+      {
+        messageId: messageId!,
+        peer,
+        text: "current target",
+        entities: threadEntities(currentTarget.id),
+      },
+      context,
+    )
+
+    const currentLinks = await waitForThreadGraphLinks({
+      fromChatId: source.id,
+      fromMessageId: Number(messageId),
+      count: 1,
+      withBacklink: true,
+    })
+    expect(currentLinks[0]?.fromMessageRevision).toBe(1)
+
+    const [sourceMessage] = await db
+      .select()
+      .from(messages)
+      .where(and(eq(messages.chatId, source.id), eq(messages.messageId, Number(messageId))))
+      .limit(1)
+    if (!sourceMessage) throw new Error("Expected source message")
+
+    expect(await replaceMessageThreadLinks({
+      sourceChat: source,
+      sourceChatId: source.id,
+      sourceMessageGlobalId: sourceMessage.globalId,
+      sourceMessageId: sourceMessage.messageId,
+      sourceMessageFromId: sourceMessage.fromId,
+      sourceMessageRevision: 0,
+      entities: undefined,
+    })).toEqual([])
+
+    expect(await replaceMessageThreadLinks({
+      sourceChat: source,
+      sourceChatId: source.id,
+      sourceMessageGlobalId: sourceMessage.globalId,
+      sourceMessageId: sourceMessage.messageId,
+      sourceMessageFromId: sourceMessage.fromId,
+      sourceMessageRevision: 0,
+      entities: threadEntities(staleTarget.id),
+    })).toEqual([])
+
+    const activeLinks = await waitForThreadGraphLinks({
+      fromChatId: source.id,
+      fromMessageId: Number(messageId),
+      count: 1,
+      withBacklink: true,
+    })
+    expect(activeLinks[0]).toMatchObject({
+      fromMessageRevision: 1,
+      toChatId: currentTarget.id,
+      deletedAt: null,
+    })
+
+    await db
+      .update(threadGraphLinks)
+      .set({ fromMessageRevision: 0 })
+      .where(eq(threadGraphLinks.id, activeLinks[0]!.id))
+
+    const projectedOutlinks = await getOutlinks({
+      chatId: source.id,
+      currentUserId: currentUser.id,
+      kind: "thread_link",
+    })
+    expect(projectedOutlinks.links.some((link) => link.id === activeLinks[0]!.id)).toBe(false)
+  })
 })
+
+function threadEntities(chatId: number) {
+  return {
+    entities: [
+      {
+        type: MessageEntity_Type.THREAD,
+        offset: 0n,
+        length: 6n,
+        entity: {
+          oneofKind: "thread" as const,
+          thread: { chatId: BigInt(chatId) },
+        },
+      },
+    ],
+  }
+}
 
 async function waitForThreadGraphLinks(input: {
   fromChatId: number
@@ -489,6 +643,21 @@ async function waitForThreadGraphLinks(input: {
   }
 
   throw new Error(`Expected ${input.count} graph links for message ${input.fromChatId}:${input.fromMessageId}`)
+}
+
+async function waitForMessageDeletion(globalId: bigint): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const [message] = await db
+      .select({ globalId: messages.globalId })
+      .from(messages)
+      .where(eq(messages.globalId, globalId))
+      .limit(1)
+
+    if (!message) return
+    await sleep(10)
+  }
+
+  throw new Error(`Expected message ${globalId} to be deleted`)
 }
 
 function sleep(ms: number): Promise<void> {

@@ -1,8 +1,8 @@
 import { db } from "@in/server/db"
-import { chats, threadGraphLinks, type DbChat, type DbThreadGraphLink } from "@in/server/db/schema"
+import { chats, messages, threadGraphLinks, type DbChat, type DbThreadGraphLink } from "@in/server/db/schema"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
-import { and, desc, eq, inArray, isNull, lt } from "drizzle-orm"
+import { and, desc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm"
 
 const DEFAULT_LIMIT = 50
 const MAX_LIMIT = 100
@@ -127,7 +127,11 @@ async function fetchLinkBatch(input: {
   limit: number
 }): Promise<DbThreadGraphLink[]> {
   const endpointColumn = input.direction === "backlinks" ? threadGraphLinks.toChatId : threadGraphLinks.fromChatId
-  const filters = [eq(endpointColumn, input.chatId), isNull(threadGraphLinks.deletedAt)]
+  const filters = [
+    eq(endpointColumn, input.chatId),
+    isNull(threadGraphLinks.deletedAt),
+    currentThreadLinkRevisionFilter(),
+  ]
 
   if (Array.isArray(input.kind)) {
     filters.push(inArray(threadGraphLinks.kind, input.kind))
@@ -145,6 +149,19 @@ async function fetchLinkBatch(input: {
     .where(and(...filters))
     .orderBy(desc(threadGraphLinks.id))
     .limit(input.limit)
+}
+
+function currentThreadLinkRevisionFilter() {
+  return or(
+    ne(threadGraphLinks.kind, "thread_link"),
+    isNull(threadGraphLinks.fromMessageRevision),
+    sql`exists (
+      select 1
+      from ${messages}
+      where ${messages.globalId} = ${threadGraphLinks.fromMessageGlobalId}
+        and ${messages.rev} = ${threadGraphLinks.fromMessageRevision}
+    )`,
+  )!
 }
 
 async function getChat(chatId: number): Promise<DbChat | null> {

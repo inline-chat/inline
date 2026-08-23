@@ -1,4 +1,4 @@
-import type { InputPeer, MessageActions, MessageEntities, Update } from "@inline-chat/protocol/core"
+import { MessageEntity_Type, type InputPeer, type MessageActions, type MessageEntities, type Update } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { MessageModel } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
@@ -103,14 +103,16 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
     throw new Error("Message not found")
   }
 
-  queueMessageThreadLinkMaterialization({
-    sourceChatId: chatId,
-    sourceMessageGlobalId: message.globalId,
-    sourceMessageId: message.messageId,
-    sourceMessageFromId: message.fromId,
-    sourceMessageRevision: message.rev,
-    entities,
-  })
+  if (hasThreadEntity(fullMessage.entities) || hasThreadEntity(entities)) {
+    queueMessageThreadLinkMaterialization({
+      sourceChatId: chatId,
+      sourceMessageGlobalId: message.globalId,
+      sourceMessageId: message.messageId,
+      sourceMessageFromId: message.fromId,
+      sourceMessageRevision: message.rev,
+      entities,
+    })
+  }
 
   const messageInfo: MessageInfo = {
     message: message,
@@ -138,6 +140,10 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
 
 type EncodeMessageInput = Parameters<typeof Encoders.message>[0]
 type MessageInfo = Omit<EncodeMessageInput, "encodingForUserId" | "encodingForPeer">
+
+function hasThreadEntity(entities: MessageEntities | null | undefined): boolean {
+  return entities?.entities.some((entity) => entity.type === MessageEntity_Type.THREAD) ?? false
+}
 
 // ------------------------------------------------------------
 // Updates
