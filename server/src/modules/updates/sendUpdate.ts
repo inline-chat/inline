@@ -13,6 +13,7 @@ import { Update, UpdateComposeAction_ComposeAction, UserStatus_Status } from "@i
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { getUpdateGroup } from "@in/server/modules/updates"
+import { encodeDate } from "@in/server/realtime/encoders/helpers"
 
 const log = new Log("Updates.sendUpdate", LogLevel.INFO)
 
@@ -94,7 +95,11 @@ const getNewUpdatesForComposeAction = (
   return updateComposeAction
 }
 
-const getNewUpdatesForUserPresenceUpdate = (userId: number, online: boolean, lastOnline: Date | null): Update => {
+export const getNewUpdatesForUserPresenceUpdate = (
+  userId: number,
+  online: boolean,
+  lastOnline: Date | null,
+): Update => {
   return {
     update: {
       oneofKind: "updateUserStatus",
@@ -103,7 +108,7 @@ const getNewUpdatesForUserPresenceUpdate = (userId: number, online: boolean, las
         status: {
           online: online ? UserStatus_Status.ONLINE : UserStatus_Status.OFFLINE,
           lastOnline: {
-            date: lastOnline ? BigInt(lastOnline.getTime()) : undefined,
+            date: lastOnline ? encodeDate(lastOnline) : undefined,
           },
         },
       },
