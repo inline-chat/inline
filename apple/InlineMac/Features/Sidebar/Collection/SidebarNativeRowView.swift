@@ -804,7 +804,7 @@ private final class SidebarNativeNavigationRowView: SidebarNativeInteractiveCont
 
   override func layout() {
     super.layout()
-    guard configuration != nil else { return }
+    guard let configuration else { return }
     let painted = bounds.insetBy(dx: 8, dy: SidebarCollectionRow.itemVisualEdgeInset)
     backgroundLayer.frame = painted
     backgroundLayer.cornerRadius = Theme.sidebarItemRadius
@@ -1014,7 +1014,7 @@ private final class SidebarNativeHeaderRowView: SidebarNativeInteractiveContentV
 
   override func layout() {
     super.layout()
-    guard configuration != nil else { return }
+    guard let configuration else { return }
     let top = configuration.topSpacing
     switch configuration.style {
     case .archive:
@@ -1167,7 +1167,7 @@ private final class SidebarNativeHeaderRowView: SidebarNativeInteractiveContentV
   }
 
   private func updateDisclosureAccessibility() {
-    guard configuration != nil else { return }
+    guard let configuration else { return }
     guard let displayedIsExpanded else {
       setAccessibilityLabel(configuration.title)
       setAccessibilityValue(nil)
