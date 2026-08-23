@@ -21,6 +21,7 @@ final class ForwardMessagesSheetModel {
   var selectedPeers: Set<Peer> = []
   private(set) var destinations: [ForwardMessagesDestination] = []
   private(set) var filteredDestinations: [ForwardMessagesDestination] = []
+  private(set) var hasLoadedDestinations = false
 
   #if os(macOS)
   var isSearchFocused = false
@@ -142,7 +143,8 @@ final class ForwardMessagesSheetModel {
   }
   #endif
 
-  private func applySnapshots(_ snapshots: [HomeChatListItemSnapshot]) {
+  func applySnapshots(_ snapshots: [HomeChatListItemSnapshot]) {
+    hasLoadedDestinations = true
     let destinations = snapshots.map(ForwardMessagesDestination.init(snapshot:))
     var byPeer: [Peer: ForwardMessagesDestination] = [:]
     for destination in destinations where byPeer[destination.peerId] == nil {

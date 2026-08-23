@@ -11,7 +11,12 @@ struct IOSForwardMessagesSheetView: View {
   var body: some View {
     NavigationStack {
       List {
-        if model.filteredDestinations.isEmpty {
+        if !model.hasLoadedDestinations {
+          ProgressView()
+            .accessibilityLabel("Loading chats")
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+        } else if model.filteredDestinations.isEmpty {
           emptyState
         } else {
           ForEach(model.filteredDestinations) { destination in

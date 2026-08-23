@@ -7,6 +7,20 @@ import Testing
 @MainActor
 @Suite("ForwardMessagesSheetModel")
 struct ForwardMessagesSheetModelTests {
+  @Test("empty state is not shown before the first database projection")
+  func waitsForInitialDatabaseProjection() {
+    let model = ForwardMessagesSheetModel(
+      messages: [],
+      database: .empty(),
+      supportsMultiSelect: true
+    )
+
+    #expect(model.hasLoadedDestinations == false)
+    model.applySnapshots([])
+    #expect(model.hasLoadedDestinations == true)
+    #expect(model.filteredDestinations.isEmpty)
+  }
+
   @Test("selection uses message peer metadata without a database lookup")
   func selectionUsesMessagePeerMetadata() {
     let messages = [

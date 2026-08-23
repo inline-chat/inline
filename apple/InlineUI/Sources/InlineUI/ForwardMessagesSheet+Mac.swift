@@ -23,7 +23,14 @@ struct MacForwardMessagesSheetView: View {
       ScrollViewReader { proxy in
         ScrollView {
           LazyVStack(spacing: 2) {
-            if model.filteredDestinations.isEmpty {
+            if !model.hasLoadedDestinations {
+              ProgressView()
+                .accessibilityLabel("Loading chats")
+                .controlSize(.small)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 8)
+            } else if model.filteredDestinations.isEmpty {
               emptyState
             } else {
               ForEach(model.filteredDestinations) { destination in
