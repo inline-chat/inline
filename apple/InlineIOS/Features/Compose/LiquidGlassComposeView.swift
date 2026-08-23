@@ -298,7 +298,7 @@ class LiquidGlassComposeView: UIView {
     }
 
     // Send message logic would go here
-    print("Send message: \(textView.text ?? "")")
+    Log.shared.debug("Send message: \(textView.text ?? "")")
 
     // Clear text and hide send button
     textView.text = ""
@@ -312,7 +312,7 @@ class LiquidGlassComposeView: UIView {
     impactFeedback.impactOccurred()
 
     // Show attachment options
-    print("Plus button tapped - show attachment options")
+    Log.shared.debug("Plus button tapped - show attachment options")
   }
 
   @objc private func handleTouchDown() {

@@ -36,7 +36,7 @@ extension ChatInfoView {
               .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
               .asRequest(of: UserInfo.self)
               .fetchAll(db)
-          print("searchResults: \(searchResults)")
+          Log.shared.debug("searchResults: \(searchResults)")
         }
 
         await MainActor.run {
