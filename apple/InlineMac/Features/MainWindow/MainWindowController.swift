@@ -217,6 +217,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
       window?.invalidateRestorableState()
     }
     configureWindow(window)
+    prepareRestoredReplyThreadWindowIfNeeded()
     bindToolbarStyle(window)
     installContent()
     applyWindowAppearance()
@@ -281,6 +282,22 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     window.restorationClass = MainWindowRestoration.self
     window.identifier = NSUserInterfaceItemIdentifier(MainWindowRestoration.identifier)
     window.delegate = self
+  }
+
+  private func prepareRestoredReplyThreadWindowIfNeeded() {
+    guard AppSettings.shared.swiftUIReplyThreadInspectorEnabled,
+          nav3.currentReplyThreadPeer != nil
+    else { return }
+
+    var size = Self.minSizeWithSidebar
+    size.width = max(
+      size.width,
+      ReplyThreadPaneMetrics.minimumWindowWidth(
+        isSidebarCollapsed: false,
+        replyPaneMinimumWidth: ReplyThreadPaneMetrics.nativeInspectorMinimumWidth
+      )
+    )
+    appBridge.setWindowMinSize(size, display: false)
   }
 
   private func bindToolbarStyle(_ window: NSWindow) {

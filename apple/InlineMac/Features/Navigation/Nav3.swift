@@ -252,13 +252,18 @@ class Nav3 {
   }
 
   @discardableResult
-  func openReplyThread(parentPeer: Peer, threadPeer: Peer) -> Bool {
+  func openReplyThread(
+    parentPeer: Peer,
+    threadPeer: Peer,
+    preparePresentation: (() -> Void)? = nil
+  ) -> Bool {
     guard threadPeer.isThread else { return false }
     guard case .chat = currentRoute else { return false }
     let opensFromPrimaryChat = currentRoute.selectedPeer == parentPeer
     let opensFromCurrentPane = currentReplyThreadPeer == parentPeer
     guard opensFromPrimaryChat || opensFromCurrentPane else { return false }
 
+    preparePresentation?()
     open(
       Nav3RouteState(
         route: currentRoute,

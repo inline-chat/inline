@@ -3,6 +3,8 @@ import InlineKit
 import SwiftUI
 
 struct MainContentView: View {
+  let showsCustomReplyThreadPane: Bool
+
   @Environment(\.dependencies) private var dependencies
   @Environment(\.nav) private var nav
   @AppStorage(ReplyThreadPaneMetrics.preferredWidthDefaultsKey)
@@ -11,7 +13,9 @@ struct MainContentView: View {
 
   var body: some View {
     GeometryReader { geometry in
-      let hasReplyThread = nav.currentReplyThreadPeer != nil && dependencies != nil
+      let hasReplyThread = showsCustomReplyThreadPane
+        && nav.currentReplyThreadPeer != nil
+        && dependencies != nil
       let restingContentWidth = ReplyThreadPaneMetrics.contentWidth(
         for: geometry.size.width,
         preferredWidth: CGFloat(preferredReplyThreadPaneWidth)
@@ -34,7 +38,8 @@ struct MainContentView: View {
           )
           .contentScrollEdgeEffect()
 
-        if let replyThreadPeer = nav.currentReplyThreadPeer,
+        if showsCustomReplyThreadPane,
+           let replyThreadPeer = nav.currentReplyThreadPeer,
            let dependencies {
           ReplyThreadPaneColumn(
             peer: replyThreadPeer,
@@ -179,6 +184,8 @@ private struct ReplyThreadPaneColumn: View {
       ReplyThreadPaneView(
         peer: peer,
         dependencies: dependencies,
+        chrome: .floating,
+        showsNativeToolbar: false,
         onExpand: onExpand,
         onClose: onClose
       )
@@ -219,7 +226,7 @@ private extension View {
 }
 
 #Preview {
-  MainContentView()
+  MainContentView(showsCustomReplyThreadPane: true)
     .environment(\.nav, {
       let nav = Nav3()
       let parentPeer = Peer.thread(id: 1)

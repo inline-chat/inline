@@ -171,6 +171,8 @@ final class AppSettings: ObservableObject {
   static let sidebarCleanupIntervalKey = "sidebarCleanupInterval"
   static let sidebarItemSizeKey = "sidebarItemSize"
   static let sidebarModeKey = "sidebarMode"
+  static let swiftUIReplyThreadInspectorEnabledKey =
+    "experimental.swiftUIReplyThreadInspectorEnabled"
   static let richContentRendererEnabledKey = "experimental.richContentRendererEnabled"
   static let sidebarSortKey = "sidebarSort"
   static let messageDoubleClickActionKey = "messageDoubleClickAction"
@@ -379,6 +381,15 @@ final class AppSettings: ObservableObject {
 
   // MARK: - Experimental Settings
 
+  @Published var swiftUIReplyThreadInspectorEnabled: Bool {
+    didSet {
+      UserDefaults.standard.set(
+        swiftUIReplyThreadInspectorEnabled,
+        forKey: Self.swiftUIReplyThreadInspectorEnabledKey
+      )
+    }
+  }
+
   @Published var richContentRendererEnabled: Bool {
     didSet {
       UserDefaults.standard.set(
@@ -481,6 +492,9 @@ final class AppSettings: ObservableObject {
       unreadBadgeStyle = .defaultValue
     }
     showMainTabStrip = UserDefaults.standard.object(forKey: "showMainTabStrip") as? Bool ?? false
+    swiftUIReplyThreadInspectorEnabled = UserDefaults.standard.object(
+      forKey: Self.swiftUIReplyThreadInspectorEnabledKey
+    ) as? Bool ?? false
     richContentRendererEnabled = UserDefaults.standard.object(
       forKey: Self.richContentRendererEnabledKey
     ) as? Bool ?? false
