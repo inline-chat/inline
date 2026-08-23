@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import {
   FinishUploadResult,
   GetUploadStateResult,
@@ -23,6 +23,7 @@ class MemoryUploadTransport implements NativeUploadRpcTransport {
   failFinishOnce = false
   acceptedPartsOverride: number[] | undefined
   stateResponses: GetUploadStateResult[] = []
+  finishResponses: FinishUploadResult[] = []
   stateCalls = 0
   finishCalls = 0
   partSize = 4
@@ -73,6 +74,8 @@ class MemoryUploadTransport implements NativeUploadRpcTransport {
       this.failFinishOnce = false
       throw new Error("finish response lost")
     }
+    const response = this.finishResponses.shift()
+    if (response) return response
     const id = Buffer.from(input.uploadId).toString("hex")
     return {
       state: {
@@ -108,6 +111,46 @@ const virtualInput = (seed: number, byteCount: number) => ({
 })
 
 describe("native upload coordinator", () => {
+  test("bounds authenticated processing retry hints", async () => {
+    const transport = new MemoryUploadTransport()
+    transport.partSize = 12
+    transport.finishResponses.push(
+      ...[0, 2.9, 4_294_967_295, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]
+        .map((retryAfterSeconds) => ({
+          state: { oneofKind: "processing" as const, processing: { retryAfterSeconds } },
+        })),
+    )
+    const delays: number[] = []
+    const timeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation((callback, milliseconds) => {
+      delays.push(milliseconds ?? 0)
+      if (typeof callback === "function") callback()
+      return 0 as unknown as ReturnType<typeof setTimeout>
+    })
+
+    try {
+      await new NativeUploadClient(transport).upload(input(20))
+    } finally {
+      timeoutSpy.mockRestore()
+    }
+
+    expect(delays).toEqual([1, 1_000, 2_000, 30_000, 1_000, 30_000, 1_000])
+  })
+
+  test("cancellation interrupts a bounded processing wait", async () => {
+    const transport = new MemoryUploadTransport()
+    transport.finishResponses.push({
+      state: { oneofKind: "processing", processing: { retryAfterSeconds: 4_294_967_295 } },
+    })
+    const controller = new AbortController()
+    const upload = new NativeUploadClient(transport).upload({ ...input(21), signal: controller.signal })
+
+    while (transport.finishCalls === 0) await new Promise((resolve) => setTimeout(resolve, 1))
+    controller.abort()
+
+    await expect(upload).rejects.toThrow("Upload was canceled")
+    expect(transport.canceled).toHaveLength(1)
+  })
+
   test("bounds global work and fairly completes ten concurrent files", async () => {
     const transport = new MemoryUploadTransport()
     const uploads = new NativeUploadClient(transport)
