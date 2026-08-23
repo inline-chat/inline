@@ -3,7 +3,6 @@ import Foundation
 import GRDB
 import InlineKit
 import InlineUI
-import Logger
 import SwiftUI
 import Translation
 
@@ -37,7 +36,6 @@ final class ExperimentalHomeListStore: ObservableObject {
     label: "chat.inline.ios-home-list",
     qos: .userInitiated
   )
-  private let log = Log.scoped("ExperimentalHomeListStore")
   private var observation: AnyCancellable?
   private var pipeline: ExperimentalHomeListPipeline?
   private var configuration: ExperimentalHomeListConfiguration?
@@ -156,7 +154,15 @@ final class ExperimentalHomeListStore: ObservableObject {
         revision: state.revision + 1
       )
     } catch {
-      log.error("Home-list initial database read failed", error: error)
+      ExperimentalHomeLoadDiagnostics.reportFailure(
+        stage: .localInitialRead,
+        error: error,
+        taskIsCancelled: false,
+        context: diagnosticContext(
+          configuration: configuration,
+          cachedChatCount: 0
+        )
+      )
       return ExperimentalHomeListState(
         presentation: .empty,
         isLoading: false,
@@ -245,12 +251,32 @@ final class ExperimentalHomeListStore: ObservableObject {
 
   private func apply(_ error: any Error, generation observationGeneration: Int) {
     guard generation == observationGeneration else { return }
-    log.error("Home-list database observation failed", error: error)
+    ExperimentalHomeLoadDiagnostics.reportFailure(
+      stage: .localObservation,
+      error: error,
+      taskIsCancelled: false,
+      context: diagnosticContext(
+        configuration: configuration,
+        cachedChatCount: state.presentation.allChatCount
+      )
+    )
     state = ExperimentalHomeListState(
       presentation: state.presentation,
       isLoading: false,
       errorDescription: String(describing: error),
       revision: state.revision + 1
+    )
+  }
+
+  private func diagnosticContext(
+    configuration: ExperimentalHomeListConfiguration?,
+    cachedChatCount: Int
+  ) -> ExperimentalHomeLoadDiagnosticContext {
+    ExperimentalHomeLoadDiagnosticContext(
+      surface: configuration?.spaceID == nil ? .home : .space,
+      cachedChatCount: cachedChatCount,
+      authAvailable: nil,
+      realtimeState: nil
     )
   }
 }

@@ -14,7 +14,6 @@ final class ExperimentalNavigationModel {
   private var didRunHomeBootstrap = false
   private var fetchedDialogSpaceIds = Set<Int64>()
   private var fetchingDialogSpaceIds = Set<Int64>()
-  private var failedHomeRefreshRequestIDs = Set<String>()
 
   private(set) var homeRefreshRevision = 0
 
@@ -22,12 +21,7 @@ final class ExperimentalNavigationModel {
     didSet {
       guard oldValue != activeSpaceId else { return }
       homeRefreshRevision += 1
-      failedHomeRefreshRequestIDs.removeAll()
     }
-  }
-
-  var homeRefreshErrorDescription: String? {
-    failedHomeRefreshRequestIDs.isEmpty ? nil : "Some chats could not be refreshed."
   }
 
   init(activeSpaceId: Int64? = nil) {
@@ -47,38 +41,12 @@ final class ExperimentalNavigationModel {
 
   func completeDialogsFetch(
     spaceId: Int64,
-    succeeded: Bool,
-    revision: Int,
-    reportFailure: Bool = true
+    succeeded: Bool
   ) {
     fetchingDialogSpaceIds.remove(spaceId)
     if succeeded {
       fetchedDialogSpaceIds.insert(spaceId)
     }
-    recordHomeRefreshResult(
-      requestID: "dialogs:\(spaceId)",
-      succeeded: succeeded,
-      revision: revision,
-      reportFailure: reportFailure
-    )
-  }
-
-  func recordHomeRefreshResult(
-    requestID: String,
-    succeeded: Bool,
-    revision: Int,
-    reportFailure: Bool = true
-  ) {
-    guard revision == homeRefreshRevision else { return }
-    if succeeded {
-      failedHomeRefreshRequestIDs.remove(requestID)
-    } else if reportFailure {
-      failedHomeRefreshRequestIDs.insert(requestID)
-    }
-  }
-
-  func clearHomeRefreshFailures() {
-    failedHomeRefreshRequestIDs.removeAll()
   }
 
   func pruneDialogFetchState(validSpaceIds: Set<Int64>) {
@@ -90,7 +58,6 @@ final class ExperimentalNavigationModel {
     didRunHomeBootstrap = false
     fetchedDialogSpaceIds.removeAll()
     fetchingDialogSpaceIds.removeAll()
-    failedHomeRefreshRequestIDs.removeAll()
     homeRefreshRevision += 1
   }
 
@@ -193,7 +160,6 @@ struct ExperimentalDestinationView: View {
   let destination: Destination
   let onSelectSpace: (Int64) -> Void
   let onMigrateLegacySpaceDestination: (Int64) -> Void
-  var onRetryHome: () -> Void = {}
 
   var body: some View {
     content
@@ -203,9 +169,9 @@ struct ExperimentalDestinationView: View {
   private var content: some View {
     switch destination {
     case .chats:
-      ExperimentalHomeView(nav: nav, initialTab: .inbox, onRetry: onRetryHome)
+      ExperimentalHomeView(initialTab: .inbox)
     case .archived:
-      ExperimentalHomeView(nav: nav, initialTab: .archived, onRetry: onRetryHome)
+      ExperimentalHomeView(initialTab: .archived)
     case .spaces:
       SpacesView()
     case let .space(id):
@@ -315,10 +281,8 @@ enum ExperimentalHomeTab: Hashable {
 }
 
 struct ExperimentalHomeView: View {
-  @Bindable var nav: ExperimentalNavigationModel
   let initialTab: ExperimentalHomeTab
   var allChatsFilter: ChatListFilter = .all
-  var onRetry: () -> Void = {}
 
   @AppStorage private var pinnedExpanded: Bool
 
@@ -332,15 +296,11 @@ struct ExperimentalHomeView: View {
   private var unreadBadgeStyleRawValue = ExperimentalHomeUnreadBadgeStyle.defaultValue.rawValue
 
   init(
-    nav: ExperimentalNavigationModel,
     initialTab: ExperimentalHomeTab,
-    allChatsFilter: ChatListFilter = .all,
-    onRetry: @escaping () -> Void = {}
+    allChatsFilter: ChatListFilter = .all
   ) {
-    self.nav = nav
     self.initialTab = initialTab
     self.allChatsFilter = allChatsFilter
-    self.onRetry = onRetry
     let surface: ExperimentalHomePinnedSurface = initialTab == .allChats ? .allChats : .inbox
     _pinnedExpanded = AppStorage(
       wrappedValue: true,
@@ -368,8 +328,7 @@ struct ExperimentalHomeView: View {
           unreadBadgeStyle: unreadBadgeStyle,
           isLoading: homeListStore.state.isLoading,
           status: homeStatus,
-          pinnedExpanded: $pinnedExpanded,
-          onRetry: onRetry
+          pinnedExpanded: $pinnedExpanded
         )
       case .allChats:
         ExperimentalChatListView(
@@ -387,8 +346,7 @@ struct ExperimentalHomeView: View {
           unreadBadgeStyle: unreadBadgeStyle,
           isLoading: homeListStore.state.isLoading,
           status: homeStatus,
-          pinnedExpanded: $pinnedExpanded,
-          onRetry: onRetry
+          pinnedExpanded: $pinnedExpanded
         )
       case .archived:
         ExperimentalChatListView(
@@ -404,8 +362,7 @@ struct ExperimentalHomeView: View {
           unreadBadgeStyle: unreadBadgeStyle,
           isLoading: homeListStore.state.isLoading,
           status: homeStatus,
-          pinnedExpanded: $pinnedExpanded,
-          onRetry: onRetry
+          pinnedExpanded: $pinnedExpanded
         )
       }
     }
@@ -428,11 +385,10 @@ struct ExperimentalHomeView: View {
   }
 
   private var homeStatus: ExperimentalHomeStatus? {
+    // A valid local snapshot includes zero rows. Remote refresh health is reported
+    // separately and must never replace that snapshot with cache-failure UI.
     if homeListStore.state.errorDescription != nil {
-      return .error("Chats could not be loaded from this device.")
-    }
-    if let message = nav.homeRefreshErrorDescription {
-      return .error(message)
+      return .error("Chats stored on this device could not be read.")
     }
     return nil
   }
@@ -470,7 +426,6 @@ private struct ExperimentalChatListView: View {
   let isLoading: Bool
   let status: ExperimentalHomeStatus?
   @Binding var pinnedExpanded: Bool
-  let onRetry: () -> Void
 
   @EnvironmentObject private var data: DataManager
   @EnvironmentObject private var realtimeState: RealtimeState
@@ -485,8 +440,8 @@ private struct ExperimentalChatListView: View {
     Group {
       if isLoading && isEmpty {
         ExperimentalLoadingStateView()
-      } else if isEmpty, case .error = status {
-        ExperimentalHomeFailureStateView(onRetry: onRetry)
+      } else if isEmpty, case let .error(message) = status {
+        ExperimentalHomeFailureStateView(message: message)
       } else if isEmpty {
         emptyContent
       } else {
@@ -1164,16 +1119,13 @@ private struct ExperimentalChatListView: View {
 }
 
 private struct ExperimentalHomeFailureStateView: View {
-  let onRetry: () -> Void
+  let message: String
 
   var body: some View {
     ContentUnavailableView {
       Label("Chats unavailable", systemImage: "exclamationmark.bubble")
     } description: {
-      Text("Your cached chats could not be shown. Try loading them again.")
-    } actions: {
-      Button("Retry", action: onRetry)
-        .buttonStyle(.borderedProminent)
+      Text(message)
     }
   }
 }

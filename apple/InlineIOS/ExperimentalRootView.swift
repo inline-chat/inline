@@ -248,8 +248,7 @@ private struct ExperimentalAuthedRootView: View {
             nav: bindableNav,
             destination: destination,
             onSelectSpace: selectSpaceInHome,
-            onMigrateLegacySpaceDestination: migrateLegacySpaceDestination,
-            onRetryHome: retryHomeData
+            onMigrateLegacySpaceDestination: migrateLegacySpaceDestination
           )
         }
     }
@@ -398,13 +397,13 @@ private struct ExperimentalAuthedRootView: View {
   private func rootTabs(nav: ExperimentalNavigationModel) -> some View {
     TabView(selection: rootTabSelection) {
       Tab("All Chats", systemImage: "bubble.left.and.bubble.right.fill", value: .allChats) {
-        chatsRoot(nav: nav, rootTab: .allChats)
+        chatsRoot(rootTab: .allChats)
       }
 
       // TODO: Decide the badge color before bridging UIKit's global
       // `UITabBarItem.badgeColor`; SwiftUI's native tab badge has no tint API.
       Tab("Open", systemImage: openChatsTabSystemImage, value: .inbox) {
-        chatsRoot(nav: nav, rootTab: .inbox)
+        chatsRoot(rootTab: .inbox)
       }
       .badge(homeListStore.state.presentation.inboxUnreadCount)
 
@@ -571,17 +570,10 @@ private struct ExperimentalAuthedRootView: View {
     ))
   }
 
-  private func chatsRoot(
-    nav: ExperimentalNavigationModel,
-    rootTab: RootTab
-  ) -> some View {
-    @Bindable var bindableNav = nav
-
+  private func chatsRoot(rootTab: RootTab) -> some View {
     return ExperimentalHomeView(
-      nav: bindableNav,
       initialTab: rootTab == .inbox ? .inbox : .allChats,
-      allChatsFilter: ChatListFilter(rawValue: allChatsFilterRaw) ?? .all,
-      onRetry: retryHomeData
+      allChatsFilter: ChatListFilter(rawValue: allChatsFilterRaw) ?? .all
     )
   }
 
@@ -696,45 +688,21 @@ private struct ExperimentalAuthedRootView: View {
     if includeBootstrapData {
       notificationHandler.setAuthenticated(value: true)
 
-      do {
-        _ = try await realtimeV2.send(.getMe())
-        nav.recordHomeRefreshResult(requestID: "me", succeeded: true, revision: refreshRevision)
-      } catch {
-        nav.recordHomeRefreshResult(
-          requestID: "me",
-          succeeded: false,
-          revision: refreshRevision,
-          reportFailure: !Task.isCancelled
-        )
-        Log.shared.error("Failed to getMe", error: error)
+      _ = await performHomeLoadRequest(stage: .getMe) {
+        try await realtimeV2.send(.getMe())
       }
 
-      do {
-        _ = try await realtimeV2.send(.getChats())
-        nav.recordHomeRefreshResult(requestID: "chats", succeeded: true, revision: refreshRevision)
-      } catch {
-        nav.recordHomeRefreshResult(
-          requestID: "chats",
-          succeeded: false,
-          revision: refreshRevision,
-          reportFailure: !Task.isCancelled
-        )
-        Log.shared.error("Failed to getChats", error: error)
+      _ = await performHomeLoadRequest(stage: .getChats) {
+        try await realtimeV2.send(.getChats())
       }
 
-      do {
-        availableSpaces = try await data.getSpaces()
+      if let spaces = await performHomeLoadRequest(
+        stage: .getSpaces,
+        operation: { try await data.getSpaces() }
+      ) {
+        availableSpaces = spaces
         nav.pruneDialogFetchState(validSpaceIds: Set(availableSpaces.map(\.id)))
         reconcileActiveSpace(with: availableSpaces)
-        nav.recordHomeRefreshResult(requestID: "spaces", succeeded: true, revision: refreshRevision)
-      } catch {
-        nav.recordHomeRefreshResult(
-          requestID: "spaces",
-          succeeded: false,
-          revision: refreshRevision,
-          reportFailure: !Task.isCancelled
-        )
-        Log.shared.error("Failed to getSpaces", error: error)
       }
     }
 
@@ -760,7 +728,7 @@ private struct ExperimentalAuthedRootView: View {
   ) async {
     let revision = refreshRevision ?? nav.homeRefreshRevision
     if let spaceID = nav.activeSpaceId {
-      await fetchDialogsIfNeeded(spaceID: spaceID, force: force, refreshRevision: revision)
+      await fetchDialogsIfNeeded(spaceID: spaceID, force: force)
     } else {
       // Cached rows remain interactive while remote reconciliation continues.
       let spaceIDs = (availableSpaces ?? compactSpaceList.spaces).map(\.id)
@@ -773,8 +741,7 @@ private struct ExperimentalAuthedRootView: View {
             group.addTask { @MainActor in
               await fetchDialogsIfNeeded(
                 spaceID: spaceID,
-                force: force,
-                refreshRevision: revision
+                force: force
               )
             }
           }
@@ -785,30 +752,47 @@ private struct ExperimentalAuthedRootView: View {
 
   private func fetchDialogsIfNeeded(
     spaceID: Int64,
-    force: Bool = false,
-    refreshRevision: Int
+    force: Bool = false
   ) async {
     guard nav.beginDialogsFetchIfNeeded(spaceId: spaceID, force: force) else { return }
     do {
       try await data.getDialogs(spaceId: spaceID)
-      nav.completeDialogsFetch(spaceId: spaceID, succeeded: true, revision: refreshRevision)
+      nav.completeDialogsFetch(spaceId: spaceID, succeeded: true)
     } catch {
-      nav.completeDialogsFetch(
-        spaceId: spaceID,
-        succeeded: false,
-        revision: refreshRevision,
-        reportFailure: !Task.isCancelled
+      nav.completeDialogsFetch(spaceId: spaceID, succeeded: false)
+      ExperimentalHomeLoadDiagnostics.reportFailure(
+        stage: .getDialogs,
+        error: error,
+        taskIsCancelled: Task.isCancelled,
+        context: homeLoadDiagnosticContext()
       )
-      Log.shared.error("Failed to get dialogs", error: error)
     }
   }
 
-  private func retryHomeData() {
-    nav.clearHomeRefreshFailures()
-    homeListStore.refresh()
-    Task {
-      await reloadHomeData(includeBootstrapData: true, forceDialogs: true)
+  private func performHomeLoadRequest<Value>(
+    stage: ExperimentalHomeLoadStage,
+    operation: () async throws -> Value
+  ) async -> Value? {
+    do {
+      return try await operation()
+    } catch {
+      ExperimentalHomeLoadDiagnostics.reportFailure(
+        stage: stage,
+        error: error,
+        taskIsCancelled: Task.isCancelled,
+        context: homeLoadDiagnosticContext()
+      )
+      return nil
     }
+  }
+
+  private func homeLoadDiagnosticContext() -> ExperimentalHomeLoadDiagnosticContext {
+    ExperimentalHomeLoadDiagnosticContext(
+      surface: nav.activeSpaceId == nil ? .home : .space,
+      cachedChatCount: homeListStore.state.presentation.allChatCount,
+      authAvailable: auth.currentUserId != nil,
+      realtimeState: realtimeState.connectionState
+    )
   }
 
   private func createThreadInstantly(spaceId: Int64?) {
@@ -1016,23 +1000,19 @@ private struct ExperimentalAuthedRootView: View {
   }
 
   private func refetchCoreDataAfterLocalDataCleared() async {
-    do {
-      _ = try await realtimeV2.send(.getMe())
-    } catch {
-      Log.shared.error("Failed to reload current user after clearing local data", error: error)
+    _ = await performHomeLoadRequest(stage: .getMe) {
+      try await realtimeV2.send(.getMe())
     }
 
-    do {
-      _ = try await realtimeV2.send(.getChats())
-    } catch {
-      Log.shared.error("Failed to reload chats after clearing local data", error: error)
+    _ = await performHomeLoadRequest(stage: .getChats) {
+      try await realtimeV2.send(.getChats())
     }
 
-    do {
-      let spaces = try await data.getSpaces()
+    if let spaces = await performHomeLoadRequest(
+      stage: .getSpaces,
+      operation: { try await data.getSpaces() }
+    ) {
       reconcileActiveSpace(with: spaces)
-    } catch {
-      Log.shared.error("Failed to reload spaces after clearing local data", error: error)
     }
   }
 }
