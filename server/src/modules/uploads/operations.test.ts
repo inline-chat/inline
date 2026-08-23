@@ -1,14 +1,17 @@
 import { createHash } from "node:crypto"
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
+import { eq } from "drizzle-orm"
 import { RpcError_Code, UploadKind, UploadStatus, type UploadComplete } from "@inline-chat/protocol/core"
 import { authKeyId } from "@inline-chat/protocol/secure"
 import { setupTestLifecycle, testUtils } from "@in/server/__tests__/setup"
+import { db } from "@in/server/db"
 import { PermanentAuthorizationKeyRepository } from "@in/server/db/models/inlineProtocol"
 import {
   InlineUploadRepository,
   inlineUploadFileUniqueId,
   inlineUploadPublicationPath,
 } from "@in/server/db/models/inlineUploads"
+import { inlineUploads } from "@in/server/db/schema"
 import { encrypt } from "@in/server/modules/encryption/encryption"
 import { makeAuthorizationKeyCipher } from "@in/server/modules/inlineProtocol/keyCipher"
 import type { HandlerContext } from "@in/server/realtime/types"
@@ -214,6 +217,49 @@ describe("native upload operations", () => {
     const upload = await repository.get(create.uploadId, owner)
     expect(upload).toBeDefined()
     expect(await repository.getPart(upload!.id, 0)).toBeUndefined()
+  })
+
+  test("rejects existing and new parts after the upload hard expiry", async () => {
+    const user = await testUtils.createUser("native-upload-hard-expiry@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const permanentKey = new Uint8Array(256).fill(0x56)
+    const permanentKeyId = authKeyId(permanentKey)
+    const keys = authorizationKeys()
+    await keys.create({ key: permanentKey, keyId: permanentKeyId, serverSalt: 6n, temporary: false })
+    await keys.authorize(permanentKeyId, user.id, account.session.id)
+    const repository = new InlineUploadRepository()
+    const store = new MemoryPartStore()
+    const operations = new NativeUploadOperations(repository, store, finalizer)
+    const requestContext = context(user.id, account.session.id, permanentKeyId)
+    const body = new TextEncoder().encode("hard-expiry")
+
+    const createUpload = (clientByte: number) => operations.create({
+      clientUploadId: new Uint8Array(16).fill(clientByte),
+      fileName: `hard-expiry-${clientByte}.bin`,
+      mimeType: "application/octet-stream",
+      byteCount: BigInt(body.length),
+      sha256: createHash("sha256").update(body).digest(),
+      kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined },
+    }, requestContext)
+
+    const existing = await createUpload(6)
+    await operations.savePart({ uploadId: existing.uploadId, partIndex: 0, data: body }, requestContext)
+    const fresh = await createUpload(7)
+    await db.update(inlineUploads).set({ hardExpiresAt: new Date(0) })
+      .where(eq(inlineUploads.accountSessionId, account.session.id))
+
+    await expect(operations.savePart({
+      uploadId: existing.uploadId,
+      partIndex: 0,
+      data: body,
+    }, requestContext)).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
+    await expect(operations.savePart({
+      uploadId: fresh.uploadId,
+      partIndex: 0,
+      data: body,
+    }, requestContext)).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
+    expect(store.objects.size).toBe(1)
   })
 
   test("rejects new uploads above the per-session reserved-byte budget", async () => {

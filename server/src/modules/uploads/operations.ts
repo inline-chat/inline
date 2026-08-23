@@ -187,6 +187,7 @@ export class NativeUploadOperations {
     const upload = requireValue(await this.repository.get(input.uploadId, owner))
     const uploadLookupDoneAt = Date.now()
     if (upload.status !== "uploading" || upload.expiresAt <= new Date() ||
+        upload.hardExpiresAt <= new Date() ||
         input.partIndex >= upload.partCount) return badRequest()
     const expected = input.partIndex === upload.partCount - 1
       ? Number(upload.byteCount - BigInt(upload.partSize) * BigInt(upload.partCount - 1))
