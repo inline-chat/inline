@@ -11,6 +11,8 @@ Use this as the last step after implementation. Act like a lead engineer and QA 
 
 This skill is not mainly about running every automated check. It is about tightening the change: reducing accidental scope, complexity, risk, and maintenance cost while preserving the intended behavior.
 
+Calibrate this checklist to the change's risk. Most checks are optional for simple work or work that has already gone through several tightening passes. Avoid loading an entire massive diff when targeted files, hunks, and dependency seams establish the commit boundary. The user usually invokes this skill when the result is already close to done, so focus on concrete remaining risk. Give core flows and hot paths a focused technical review and surface suspicious changes explicitly.
+
 ## Workflow
 
 1. Establish the scope.
@@ -29,6 +31,7 @@ This skill is not mainly about running every automated check. It is about tighte
    - Tests and typing: are there focused regression tests or a clear reason none are needed? Are types precise enough to prevent misuse? Avoid unsafe casts, force unwraps, `Any`/`any`, and untyped data shapes where better options exist.
    - Simplicity: is the change over-engineered, too broad, or split into unnecessary concepts? Can logic be shorter, clearer, or more local without losing safety?
    - Architecture: does the solution follow the codebase's established patterns and platform idioms? Is it a durable design rather than a short-term workaround?
+   - Design: for Apple UI work, check the Apple HIG and established patterns in native Apple apps when relevant to the change.
    - Duplication: does duplicated logic create a consistency risk? Extract shared behavior only when the abstraction removes real maintenance cost. If duplication is truly necessary, add a comment explaining why it must stay duplicated and name the source it mirrors.
    - Performance: check scroll/fps responsiveness, synchronous work on UI hot paths, DB or network calls during rendering/menu presentation, repeated layout work, unbounded memory growth, and avoidable main-thread work.
    - Error handling and observability: ensure failures have appropriate handling, user fallback, logging, or capture. Remove temporary debug logs/traces unless they are intentional diagnostics.
@@ -51,7 +54,7 @@ This skill is not mainly about running every automated check. It is about tighte
 6. Verify commit readiness.
    - Run focused checks that match the touched area when practical. Prefer targeted tests/typechecks/builds over broad expensive validation unless release risk justifies it.
    - Re-run code generation when contracts changed, and verify generated files are included or intentionally absent.
-   - Inspect final `git diff --stat`, targeted diffs, and `git status --short`.
+   - Inspect the final targeted diff, `git diff --stat`, and `git status --short`; for a large mixed tree, inspect the exact staged allowlist instead of reloading unrelated diffs.
    - Confirm no accidental `.env` access, destructive cleanup, unrelated file churn, stale debug output, or untracked required files are left behind.
    - Do not commit unless the user explicitly asked for a commit.
 

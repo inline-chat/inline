@@ -160,6 +160,9 @@ packages/openclaw-inline/*.tgz
 .superpowers/
 docs/superpowers
 .references/
+**/graphify-out/
+.committing
+.running
 
 .build-macos
 
