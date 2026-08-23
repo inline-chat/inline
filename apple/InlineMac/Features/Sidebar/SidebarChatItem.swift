@@ -47,12 +47,11 @@ enum SidebarItemSize: String, CaseIterable, Identifiable {
   }
 }
 
-/// Shared SwiftUI/AppKit geometry for chat hierarchy. Reply titles stop just
-/// short of their icon-bearing parent title, while deeper replies retain the
+/// Shared SwiftUI/AppKit geometry for chat hierarchy. Direct reply titles align
+/// with their icon-bearing parent title, while deeper replies retain the
 /// existing compact 16-point hierarchy step.
 enum SidebarChatRowLayout {
   static let hierarchyIndent: CGFloat = 16
-  static let nestedTitleOffsetFromParent: CGFloat = 6
   static let unreadDotTextSpacing: CGFloat = 8
 
   static func contentIndentation(
@@ -65,7 +64,7 @@ enum SidebarChatRowLayout {
     guard level > 0, !showsIcon else { return base }
 
     let parentTitleOffset = size.iconSize + 8
-    return base + parentTitleOffset - hierarchyIndent - nestedTitleOffsetFromParent
+    return base + parentTitleOffset - hierarchyIndent
   }
 
   static func unreadDotLeadingSpacing(
