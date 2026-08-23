@@ -29,6 +29,7 @@ public enum Path: String {
   case sendMessage20250509
 }
 
+@available(*, unavailable, message: "Use RealtimeDirectSession or InlineRPCClient; authenticated bearer REST is unsupported.")
 public final class SharedApiClient: ObservableObject, @unchecked Sendable {
   public static let shared = SharedApiClient()
   public init() {}
